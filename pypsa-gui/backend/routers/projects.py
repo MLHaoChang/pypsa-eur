@@ -1384,11 +1384,22 @@ def get_compare_state(name: str) -> CompareState:
     peak_demand_mw = 0.0
     total_energy_mwh = 0.0
     if not temp_n.loads.empty:
-        # Prefer the time-series demand. Typical real workflow uploads
-        # profiles into `loads_t.p_set` and leaves the static column at 0;
-        # without this branch the compare view's demand KPI would be ~zero
-        # for nearly every realistic project.
-        loads_t_p = temp_n.loads_t.p_set
+        # Demand as the LP saw it — prefer loads_t.p (already LP-scaled solver
+        # output) and apply cfg.load_scalers to p_set otherwise, via the SAME
+        # `lp_scaled_load_frame` helper the Results `/results/loads` endpoint
+        # uses. Previously Compare read raw `loads_t.p_set`, ignoring
+        # `load_scalers` (2027×1.1, 2028×1.2…) → it under-reported demand vs the
+        # Results tab. `from_state=False` so the helper reads temp_n's OWN frame,
+        # not the live network's cached result snapshot.
+        try:
+            from routers.simulation import _state as _sim_state2
+            from routers.simulation import lp_scaled_load_frame as _lp_scaled
+            _cfg2 = _sim_state2.get("solver_config")
+            loads_t_p = _lp_scaled(temp_n, _cfg2, from_state=False)
+            if loads_t_p is None:
+                loads_t_p = temp_n.loads_t.p_set
+        except Exception:
+            loads_t_p = temp_n.loads_t.p_set
         if not loads_t_p.empty:
             per_snap_total = loads_t_p.abs().sum(axis=1)
             if not per_snap_total.empty:
@@ -1400,7 +1411,12 @@ def get_compare_state(name: str) -> CompareState:
                 # "Total energy" undercount on multi-period bundles — e.g. a
                 # 3-period horizon reported one year's demand instead of three.
                 try:
-                    weights = temp_n.snapshot_weightings["objective"]
+                    # Energy basis = `generators` weighting column (matches the
+                    # Results-tab demand KPI); `objective` is the cost column.
+                    try:
+                        weights = temp_n.snapshot_weightings["generators"]
+                    except (KeyError, AttributeError):
+                        weights = temp_n.snapshot_weightings["objective"]
                     # Reindex defensively — weightings should already match
                     # snapshots but a malformed netcdf could desync them.
                     w = weights.reindex(per_snap_total.index).fillna(1.0)
@@ -1637,11 +1653,18 @@ def _classify_build_year(value) -> int | None:
     return y
 
 
-def _build_snapshot_weights(n) -> pd.Series:
+def _build_snapshot_weights(n, column: str = "objective") -> pd.Series:
     """
-    Return Σ-weight per snapshot = ``snapshot_weightings.objective`` ×
-    ``investment_period_weightings.years``. Mirrors solver_service /
-    cost_breakdown so €/GWh accounting matches the rest of the GUI.
+    Return Σ-weight per snapshot = ``snapshot_weightings[column]`` ×
+    ``investment_period_weightings.years``.
+
+    ``column`` selects the PyPSA weighting basis:
+      * ``"objective"`` — COST quantities (OPEX, revenue, CAPEX commitment).
+      * ``"generators"`` — ENERGY quantities (dispatch GWh, served load,
+        emissions). This is the column PyPSA's ``n.statistics()`` and the
+        Results-tab energy KPIs use; summing energy with the ``objective``
+        column diverges from the Results tab whenever the two columns differ
+        (e.g. representative-week runs).
 
     Falls back to 1.0 per snapshot if either weight series is missing or
     misshapen — a malformed netcdf shouldn't take the comparison view down.
@@ -1649,7 +1672,7 @@ def _build_snapshot_weights(n) -> pd.Series:
     import pandas as pd
     sns = n.snapshots
     try:
-        sw = n.snapshot_weightings.loc[sns, "objective"].astype(float)
+        sw = n.snapshot_weightings.loc[sns, column].astype(float)
     except Exception:
         sw = pd.Series(1.0, index=sns, dtype=float)
     if not isinstance(sns, pd.MultiIndex):
@@ -2073,7 +2096,14 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchCompar
         # flag rather than missing fields.
         return DispatchComparison()
 
-    weights = _build_snapshot_weights(n)
+    # ENERGY quantities (dispatch GWh, served load) use the `generators`
+    # weighting column — the basis PyPSA's n.statistics() and the Results-tab
+    # energy KPIs use. COST quantities (OPEX) use `objective`. Previously both
+    # used `objective`, so Compare dispatch GWh diverged from the Results tab
+    # whenever the two columns differed (representative-week runs). Identical
+    # when the columns are equal (the common single-weight case).
+    weights = _build_snapshot_weights(n, "generators")
+    cost_weights = _build_snapshot_weights(n, "objective")
     sns = n.snapshots
 
     dispatch_by_carrier: dict = {}
@@ -2112,7 +2142,7 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchCompar
             except (TypeError, ValueError):
                 mc = 0.0
             if _math.isfinite(mc) and mc > 0:
-                opex_t = series * mc * weights
+                opex_t = series * mc * cost_weights
                 opex_bucket["total"] += float(opex_t.sum()) / 1e6
                 for p, v in _per_period_groupby(opex_t, sns, is_multi).items():
                     opex_bucket["by_period"][p] = opex_bucket["by_period"].get(p, 0.0) + v / 1e6
@@ -2226,7 +2256,19 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchCompar
     # Load aggregation — magnitude only (load convention is positive
     # consumption on `p_set`; serving means dispatch matches load).
     loads = n.loads
-    p_set_t = getattr(n.loads_t, "p_set", None) if hasattr(n, "loads_t") else None
+    # Scaled demand (loads_t.p when present, else load_scalers×p_set) via the
+    # shared helper, so this matches /results/loads and the compare-state
+    # total_energy. `from_state=False` reads n's OWN frame (n is the loaded
+    # bundle here), never the live network's cached snapshot.
+    p_set_t = None
+    try:
+        from routers.simulation import _state as _sim_state3
+        from routers.simulation import lp_scaled_load_frame as _lp_scaled3
+        p_set_t = _lp_scaled3(n, _sim_state3.get("solver_config"), from_state=False)
+    except Exception:
+        p_set_t = None
+    if p_set_t is None:
+        p_set_t = getattr(n.loads_t, "p_set", None) if hasattr(n, "loads_t") else None
     if p_set_t is not None and not p_set_t.empty:
         try:
             row_total = p_set_t.abs().sum(axis=1).reindex(sns).fillna(0.0).astype(float)
@@ -2426,7 +2468,14 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
 
     if not has_solve:
         return PricesComparison()
-    p_t = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
+    # Curtailment-cost-corrected duals (same merit-order correction the Results
+    # Prices tab applies), so the duration curve / mean / max / min match.
+    # from_state=False → read this bundle's own buses_t, not the live snapshot.
+    try:
+        from routers.simulation import corrected_marginal_prices
+        p_t = corrected_marginal_prices(n, from_state=False)
+    except Exception:
+        p_t = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
     if p_t is None or p_t.empty:
         return PricesComparison()
 
@@ -2752,7 +2801,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve) -> EconomicsComp
     # 153 EUR/MWh). Lazy import avoids the simulation<->projects import cycle.
     try:
         from routers.simulation import corrected_marginal_prices
-        bus_prices = corrected_marginal_prices(n)
+        bus_prices = corrected_marginal_prices(n, from_state=False)
     except Exception:
         bus_prices = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
 

@@ -3633,6 +3633,90 @@ def get_lost_load():
     })
 
 
+def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = True):
+    """
+    Load power as the LP saw it — the single source of truth for "scaled
+    demand", used by both ``/results/loads`` (Results tab) and the Compare
+    tab's demand totals so the two never diverge.
+
+    Prefers ``loads_t.p`` (the solver OUTPUT, which already carries the LP-time
+    ``load_scalers`` growth) when present; otherwise falls back to
+    ``loads_t.p_set`` (the BASE input profile) and re-applies the per-carrier /
+    per-period scalers from ``cfg``. Returns a DataFrame (snapshots × loads) or
+    ``None``. Never mutates the source frame.
+
+    ``from_state``: when True (default, live network) the LP-stage `_state`
+    result snapshot takes priority via ``_result_df``. When False (e.g. a
+    freshly-loaded Compare bundle ``temp_n``) read ``n.loads_t.p`` DIRECTLY —
+    ``_result_df`` would otherwise return the LIVE network's cached
+    `_state['lopf_results']` and cross-contaminate the comparison.
+    """
+    import pandas as _pd
+    if from_state:
+        try:
+            df = _result_df(n, "loads_t", "p", source)
+        except Exception:
+            df = None
+    else:
+        df = getattr(getattr(n, "loads_t", None), "p", None)
+    already_scaled = df is not None and not df.empty
+    if not already_scaled:
+        df = getattr(getattr(n, "loads_t", None), "p_set", None)
+    if df is None or df.empty:
+        return None
+    load_scalers = getattr(cfg, "load_scalers", {}) if cfg is not None else {}
+    by_carrier = getattr(cfg, "load_scalers_by_carrier", {}) if cfg is not None else {}
+    multi_periods = isinstance(df.index, _pd.MultiIndex)
+    has_any_scaling = bool(load_scalers) or bool(by_carrier)
+    if not already_scaled and multi_periods and has_any_scaling:
+        from services.solver_service import _canonical_load_carrier_key
+        df = df.copy(deep=True)
+        carrier_by_col: dict = {}
+        try:
+            loads_df = n.loads
+            if "carrier" in loads_df.columns:
+                for col in df.columns:
+                    carrier_by_col[col] = (
+                        _canonical_load_carrier_key(loads_df.at[col, "carrier"])
+                        if col in loads_df.index else "electrical"
+                    )
+            else:
+                for col in df.columns:
+                    carrier_by_col[col] = "electrical"
+        except Exception:
+            carrier_by_col = {col: "electrical" for col in df.columns}
+        period_level = df.index.get_level_values(0)
+        for period in sorted(set(period_level)):
+            mask = period_level == period
+            p_str = str(period)
+            for col in df.columns:
+                carrier_key = carrier_by_col.get(col, "electrical")
+                factor = None
+                car_block = by_carrier.get(carrier_key) if isinstance(by_carrier, dict) else None
+                if isinstance(car_block, dict):
+                    raw = car_block.get(p_str)
+                    if raw is not None:
+                        try:
+                            f = float(raw)
+                            if f == f:
+                                factor = f
+                        except (TypeError, ValueError):
+                            pass
+                if factor is None and load_scalers:
+                    raw = load_scalers.get(p_str)
+                    if raw is not None:
+                        try:
+                            f = float(raw)
+                            if f == f:
+                                factor = f
+                        except (TypeError, ValueError):
+                            pass
+                if factor is None or factor == 1.0:
+                    continue
+                df.loc[mask, col] = df.loc[mask, col] * factor
+    return df
+
+
 @results_router.get("/loads")
 def get_load_results(source: str = "lopf"):
     """
@@ -3655,108 +3739,21 @@ def get_load_results(source: str = "lopf"):
     when AC PF later overwrites it), then live ``loads_t.p``, then live
     ``p_set``. Scaling is applied to every branch.
     """
-    import pandas as _pd
-
     n = PyPSAService.get_network()
     # Same dispatch-freshness gate as cost_breakdown — refuse to return p_set
     # masquerading as a result on an unsolved or stale-dispatch network.
     if not _dispatch_ready(n):
         return _not_solved()
     try:
-        # Source-aware loading: `loads_t.p` (snapshot or live) is the SOLVER
-        # OUTPUT and already contains LP-scaled values (the solver wrote them
-        # at LP completion using the scaled p_set). `loads_t.p_set` was
-        # reverted to the BASE profile by _apply_modelling_assumptions's undo,
-        # so it needs scaling re-applied to recover "what the LP saw".
-        #
-        # The previous code unconditionally re-scaled whatever df it found,
-        # which DOUBLE-applied scaling whenever loads_t.p was non-empty
-        # (the common post-solve path). Symptom: exact-square ratios
-        # (1.21 = 1.1², 4.00 = 2.0², …). Three QA agents flagged.
-        df = _result_df(n, "loads_t", "p", source)
-        already_scaled = df is not None and not df.empty
-        if not already_scaled:
-            df = n.loads_t.p_set  # input profile — needs scaling applied below
+        df = lp_scaled_load_frame(n, _state.get("solver_config"), source)
         if df is None or df.empty:
             return _not_solved()
-
-        # Apply per-carrier per-period load scaling when the network is
-        # multi-period AND the user configured non-trivial scaling, ONLY
-        # when we're reading the un-scaled `p_set` source. Skipping when
-        # `loads_t.p` already carries LP-scaled values is the fix for the
-        # double-scale bug.
-        # Resolution priority per (load, period):
-        #   1. load_scalers_by_carrier[canonical_carrier][period_str]
-        #   2. load_scalers[period_str]    (legacy, all carriers)
-        #   3. 1.0
-        # Skipped silently for single-period / no-scaling projects so they
-        # pay zero overhead.
-        cfg = _state.get("solver_config")
-        load_scalers = getattr(cfg, "load_scalers", {}) if cfg is not None else {}
-        by_carrier = getattr(cfg, "load_scalers_by_carrier", {}) if cfg is not None else {}
-        multi_periods = isinstance(df.index, _pd.MultiIndex)
-        has_any_scaling = bool(load_scalers) or bool(by_carrier)
-        if not already_scaled and multi_periods and has_any_scaling:
-            from services.solver_service import _canonical_load_carrier_key
-            # Don't mutate the live DataFrame — copy first. Multiplying the
-            # underlying frame would persist scaling between requests and
-            # double-scale on the next /results/loads call.
-            df = df.copy(deep=True)
-            # Per-column canonical carrier — used to pick the right
-            # scaler bucket. Missing column / missing carrier field
-            # defaults to 'electrical' to match PyPSA's "AC bus" default.
-            carrier_by_col: dict = {}
-            try:
-                loads_df = n.loads
-                if "carrier" in loads_df.columns:
-                    for col in df.columns:
-                        if col in loads_df.index:
-                            carrier_by_col[col] = _canonical_load_carrier_key(loads_df.at[col, "carrier"])
-                        else:
-                            carrier_by_col[col] = "electrical"
-                else:
-                    for col in df.columns:
-                        carrier_by_col[col] = "electrical"
-            except Exception:
-                carrier_by_col = {col: "electrical" for col in df.columns}
-
-            period_level = df.index.get_level_values(0)
-            for period in sorted(set(period_level)):
-                mask = period_level == period
-                p_str = str(period)
-                for col in df.columns:
-                    carrier_key = carrier_by_col.get(col, "electrical")
-                    factor = None
-                    # 1) per-carrier per-period
-                    car_block = by_carrier.get(carrier_key) if isinstance(by_carrier, dict) else None
-                    if isinstance(car_block, dict):
-                        raw = car_block.get(p_str)
-                        if raw is not None:
-                            try:
-                                f = float(raw)
-                                if f == f:  # not NaN
-                                    factor = f
-                            except (TypeError, ValueError):
-                                pass
-                    # 2) legacy global
-                    if factor is None and load_scalers:
-                        raw = load_scalers.get(p_str)
-                        if raw is not None:
-                            try:
-                                f = float(raw)
-                                if f == f:
-                                    factor = f
-                            except (TypeError, ValueError):
-                                pass
-                    if factor is None or factor == 1.0:
-                        continue
-                    df.loc[mask, col] = df.loc[mask, col] * factor
         return _ts_payload(df)
     except Exception:
         return _not_solved()
 
 
-def corrected_marginal_prices(n):
+def corrected_marginal_prices(n, from_state: bool = True):
     """
     Bus marginal prices with the curtailment-cost subsidy distortion removed.
 
@@ -3770,15 +3767,24 @@ def corrected_marginal_prices(n):
 
     Single source of truth for the merit-order correction: used by
     ``get_asset_economics`` (per-asset) AND by ``projects._compute_economics_summary``
-    (per-carrier Compare tab) so both price storage charging/revenue against the
-    SAME corrected dual. Returns a DataFrame indexed by snapshots, columns by
+    / ``_compute_prices_summary`` (per-carrier Compare tab) so all price the
+    same corrected dual. Returns a DataFrame indexed by snapshots, columns by
     bus; falls back to raw (or zero) duals if anything goes wrong.
+
+    ``from_state``: True (default, live network) reads the LP-stage `_state`
+    snapshot via ``_result_df``. False (a loaded Compare bundle ``temp_n``)
+    reads ``n.buses_t.marginal_price`` DIRECTLY — ``_result_df`` would otherwise
+    return the LIVE network's cached `_state['lopf_results']` and contaminate
+    the comparison.
     """
     import pandas as _pd
-    try:
-        prices = _result_df(n, "buses_t", "marginal_price", "lopf")
-    except Exception:
-        prices = None
+    if from_state:
+        try:
+            prices = _result_df(n, "buses_t", "marginal_price", "lopf")
+        except Exception:
+            prices = None
+    else:
+        prices = getattr(getattr(n, "buses_t", None), "marginal_price", None)
     if prices is None or prices.empty:
         return _pd.DataFrame(0.0, index=n.snapshots, columns=n.buses.index)
     prices = prices.fillna(0.0)
