@@ -852,9 +852,22 @@ function ProjectSectionContent({
     const auto = !!opts?.auto
     const setAsCurrent = opts?.setAsCurrent !== false
     try {
+      // Identity assertion: when this save targets the ACTIVE project (autosave
+      // or explicit Ctrl+S — name === currentProject), pass `expect` so the
+      // backend refuses (409) if its in-memory network was swapped to a
+      // different project. Saving under a DIFFERENT name on purpose (Save a
+      // Copy, or the first save of a brand-new project where currentProject is
+      // still null) omits `expect` so the write is allowed. Read currentProject
+      // fresh — a switch may have completed since this callback was created.
+      const cur = useUIStore.getState().currentProject
+      const expect = name === cur ? name : undefined
+      // Rebind when this save makes `name` the active project (setAsCurrent).
+      // First-save of a new project and Save (current) both rebind/claim; Save
+      // a Copy passes setAsCurrent:false so the binding stays on the original.
+      const rebind = setAsCurrent
       // Explicit user saves drop the undo stack (act as a checkpoint).
       // Autosave preserves it so the user can still revert recent edits.
-      const result = await projectsApi.save(name, false, !auto)
+      const result = await projectsApi.save(name, false, !auto, expect, rebind)
       // Flush the diagram layout (node positions + edge waypoints) to
       // layout.json AFTER the project save creates the directory. Without
       // this, the Sidebar Save path persists network.nc but never updates
@@ -922,8 +935,21 @@ function ProjectSectionContent({
     } catch (e: unknown) {
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 409) {
-        if (auto) appLog('WARN', `Autosave skipped: network is empty, refusing to overwrite '${name}'`)
-        else toast.error('Cannot save: network is empty but project has data. Load the project first.')
+        const detail = String(
+          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? '',
+        )
+        // Two distinct 409s from save_project: (a) identity mismatch — the
+        // backend's in-memory network is a DIFFERENT project than `name` (it
+        // was swapped by another tab / external client); (b) empty-network
+        // refusal. Both mean "don't save", but the user-facing guidance
+        // differs. Detail text disambiguates.
+        if (/bound to project/i.test(detail)) {
+          if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
+          else toast.error(`Can't save '${name}': the backend is on a different project. Reload '${name}' to resync.`)
+        } else {
+          if (auto) appLog('WARN', `Autosave skipped: network is empty, refusing to overwrite '${name}'`)
+          else toast.error('Cannot save: network is empty but project has data. Load the project first.')
+        }
         return
       }
       if (!auto) toast.error('Save failed')
@@ -945,7 +971,7 @@ function ProjectSectionContent({
   // resume once the worker exits.
   useEffect(() => {
     if (!autosaveEnabled || !currentProject) return
-    const id = setInterval(() => {
+    const id = setInterval(async () => {
       // Read sim status fresh on every tick — keeping it out of the deps
       // array means the interval isn't torn down + recreated on every
       // status flip (idle → running → completed). Cheap snapshot read.
@@ -954,8 +980,34 @@ function ProjectSectionContent({
         appLog('INFO', 'Autosave paused — simulation running. Will resume after solve completes.')
         return
       }
-      if (networkHasBuses) saveAndExportBundle(currentProject, { auto: true })
-      else appLog('WARN', 'Autosave skipped: network is empty — load project or add components first')
+      // Skip if a project switch/load is mid-flight. During the window between
+      // the backend swapping the in-memory network and `currentProject` being
+      // updated, this closure's `currentProject` (and even a fresh read) can
+      // disagree with the network actually in memory — autosaving then would
+      // serialise the newly-loaded network under the OLD project's folder, a
+      // silent cross-project overwrite. The flag is set/cleared around the
+      // switch sequence, so we just bail this tick and catch the next one.
+      if (useUIStore.getState().projectSwitchInProgress) {
+        appLog('INFO', 'Autosave skipped — project switch in progress.')
+        return
+      }
+      // Save under the CURRENT project read fresh from the store (not the
+      // closure), so a switch that completed since this interval was created
+      // can't autosave under a stale name.
+      const cur = useUIStore.getState().currentProject
+      if (!cur) return
+      if (!networkHasBuses) {
+        appLog('WARN', 'Autosave skipped: network is empty — load project or add components first')
+        return
+      }
+      // Identity is enforced atomically server-side now: saveAndExportBundle
+      // passes expect=cur, and save_project refuses (409) under the PyPSA lock
+      // if its in-memory network is bound to a DIFFERENT project — the
+      // cross-project overwrite that destroyed a project on 2026-05-28. This
+      // replaces the old client-side getMeta probe, which had a TOCTOU gap (the
+      // network could swap between the probe and the POST) and only protected
+      // this one caller. The 409 is handled in saveAndExportBundle's catch.
+      saveAndExportBundle(cur, { auto: true })
     }, 5 * 60 * 1000)
     return () => clearInterval(id)
   }, [autosaveEnabled, currentProject, networkHasBuses, saveAndExportBundle])

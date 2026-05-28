@@ -1039,14 +1039,19 @@ def update_snapshot_weightings(body: dict):
         raise HTTPException(400, "Network has no snapshots. Set the snapshot index first via POST /snapshots.")
     with PyPSAService.get_lock():
         df = n.snapshot_weightings
+        # Two-pass validate-then-apply: resolve + parse EVERYTHING first
+        # (mutating nothing), raise on the first bad value, then write. The old
+        # code wrote `df.at[idx,col]=float(raw)` mid-loop and raised 400 on a
+        # bad cell at row N, leaving rows 0..N-1 already mutated with no
+        # rollback — the user retries and the table is half-applied. Same
+        # pattern as upload_snapshot_weightings_csv.
         all_val = body.get("all")
+        all_float: float | None = None
         if all_val is not None:
             try:
-                v = float(all_val)
+                all_float = float(all_val)
             except (TypeError, ValueError):
                 raise HTTPException(400, f"`all` must be a number, got {all_val!r}")
-            for col in df.columns:
-                df[col] = v
         updates = body.get("updates") or {}
         if not isinstance(updates, dict):
             raise HTTPException(400, "`updates` must be a dict keyed by snapshot.")
@@ -1077,7 +1082,9 @@ def update_snapshot_weightings(body: dict):
                 iso_to_idx[ts_iso] = s
             else:
                 iso_to_idx[s.isoformat() if hasattr(s, "isoformat") else str(s)] = s
-        applied = 0
+        # Pass 1 — resolve + parse every cell into `pending`, raising before
+        # any write.
+        pending: list[tuple[object, str, float]] = []
         for key, vals in updates.items():
             if not isinstance(vals, dict):
                 continue
@@ -1093,10 +1100,17 @@ def update_snapshot_weightings(body: dict):
                 if col not in df.columns:
                     continue
                 try:
-                    df.at[idx, col] = float(raw)
-                    applied += 1
+                    pending.append((idx, col, float(raw)))
                 except (TypeError, ValueError):
                     raise HTTPException(400, f"Bad weight value for {key}/{col}: {raw!r}")
+        # Pass 2 — everything validated; apply atomically (the `all` broadcast
+        # first, then per-row overrides on top).
+        if all_float is not None:
+            for col in df.columns:
+                df[col] = all_float
+        for idx, col, val in pending:
+            df.at[idx, col] = val
+        applied = len(pending)
         change_log_service.log(
             "update", "Network", "snapshot_weightings",
             f"Updated snapshot weightings: all={all_val}, per-row updates={applied}",
@@ -1714,7 +1728,16 @@ def delete_global_constraint(name: str):
 @router.get("/meta")
 def get_meta():
     n = PyPSAService.get_network()
-    return {"name": n.name, "snapshot_count": len(n.snapshots), "bus_count": len(n.buses)}
+    # `name` is the (mutable) display title; `loaded_project` is the
+    # authoritative on-disk binding the save path enforces — None when the
+    # network is unbound (fresh / never loaded). Clients comparing identity
+    # should use `loaded_project`, not `name`.
+    return {
+        "name": n.name,
+        "loaded_project": PyPSAService.get_loaded_project(),
+        "snapshot_count": len(n.snapshots),
+        "bus_count": len(n.buses),
+    }
 
 
 @router.put("/meta")
@@ -1939,10 +1962,23 @@ def undo_last():
         f.write(netcdf_bytes)
     try:
         with PyPSAService.get_lock():
+            # Undo is an in-place edit of the CURRENT project (not a project
+            # switch), so identity must survive it. `reset_network()` clears
+            # the binding to None; capture it first and restore it after the
+            # re-import, all inside the lock, so a concurrent save never sees
+            # the current project momentarily unbound (which would let its
+            # `expect` guard fall through and its claim rebind wrongly).
+            prev_loaded = PyPSAService.get_loaded_project()
             PyPSAService.reset_network()
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
                 n.import_from_netcdf(str(tmp))
+            PyPSAService.set_loaded_project(prev_loaded)
+            if prev_loaded:
+                try:
+                    n.name = prev_loaded
+                except Exception:
+                    pass
     finally:
         tmp.unlink(missing_ok=True)
 

@@ -144,6 +144,9 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'issues':     return <IssuesPanel />
     case 'overview':   return <OverviewPanel />
     case 'scenarios':  return <ScenariosPanel />
+    // Superseded by the docked comparison rail inside Results (the Compare
+    // triggers now open Results + the rail). Kept so the SlidePanel union /
+    // PANEL_META stay exhaustive; don't re-point the triggers back here.
     case 'compare':    return <CompareView />
     case 'capacityBounds': return <CapacityBoundsEditor />
     default:           return null
@@ -182,7 +185,7 @@ export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastSavedByProject, markProjectSaved, pruneRecents, recents,
-    theme, density,
+    theme, density, compareRailOpen, setCompareRailOpen,
   } = useUIStore()
 
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
@@ -401,7 +404,13 @@ export default function App() {
   // based on focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && activeSlidePanel) setSlidePanel(null)
+      // Esc closes the docked comparison rail FIRST (if open), so users can
+      // dismiss the comparison without also closing the Results view; a
+      // second Esc then closes the panel as before.
+      if (e.key === 'Escape') {
+        if (compareRailOpen) { setCompareRailOpen(false); return }
+        if (activeSlidePanel) setSlidePanel(null)
+      }
       const modifier = e.ctrlKey || e.metaKey
       if (!modifier) return
       const isPaletteKey =
@@ -425,7 +434,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activeSlidePanel, setSlidePanel])
+  }, [activeSlidePanel, setSlidePanel, compareRailOpen, setCompareRailOpen])
 
   // Click-outside-to-close for slide panels. Mounts a document `mousedown`
   // listener only while a panel is open. Closes the panel unless the click

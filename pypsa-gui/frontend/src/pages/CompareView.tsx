@@ -4,7 +4,7 @@ import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { ArrowRight, Loader, AlertTriangle } from 'lucide-react'
+import { ArrowRight, Loader, AlertTriangle, Layers } from 'lucide-react'
 import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
 import type {
@@ -23,7 +23,7 @@ import { useCarrierFilter, CarrierFilter, bindCarrierFilter } from './results/Ca
 // touched, so the user can compare scenarios without disturbing in-memory
 // state.
 
-type Tab =
+export type Tab =
   | 'overview'        // existing high-level network/solver/capacity tables
   | 'capacity'        // Phase 1
   | 'dispatch'        // Phase 1
@@ -48,7 +48,34 @@ const TABS: { id: Tab; label: string; description?: string }[] = [
   { id: 'storage_cycling', label: 'Storage cycling',    description: 'Per-storage-unit equivalent full cycles. One cycle = a full charge + discharge of total energy capacity.' },
 ]
 
-export default function CompareView() {
+// Persisted A/B/tab selection. Shared by the standalone full-page route AND
+// the embedded rail (Results), so a comparison the user set in one surfaces in
+// the other and survives the rail being closed + reopened. Mirroring is
+// intentional — it keeps a single "current comparison" mental model.
+const CMP_A_KEY = 'compare:a'
+const CMP_B_KEY = 'compare:b'
+const CMP_TAB_KEY = 'compare:tab'
+const VALID_COMPARE_TABS: ReadonlySet<Tab> = new Set<Tab>(TABS.map(t => t.id))
+function storedCmp(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+function persistCmp(key: string, v: string) {
+  try { localStorage.setItem(key, v) } catch { /* noop */ }
+}
+
+interface CompareViewProps {
+  // When true, render the compact embedded chrome (close button, tighter
+  // padding) for the docked rail inside Results. Standalone route omits it.
+  embedded?: boolean
+  onClose?: () => void
+  // First-use hint for the active tab (e.g. seeded from the Results tab the
+  // user is on). Only applied when there's no persisted tab — never overrides
+  // the user's last rail tab, which would be surprising since the rail
+  // remounts on every open.
+  initialTab?: Tab
+}
+
+export default function CompareView({ embedded = false, onClose, initialTab }: CompareViewProps = {}) {
   const currentProject = useUIStore(s => s.currentProject)
 
   const { data: projects = [] } = useQuery({
@@ -58,10 +85,25 @@ export default function CompareView() {
   })
 
   // Default side A to the active project. Side B left empty until the user
-  // picks something distinct.
-  const [a, setA] = useState<string>(() => currentProject ?? '')
-  const [b, setB] = useState<string>('')
-  const [tab, setTab] = useState<Tab>('overview')
+  // picks something distinct. Selections persist (and the delete-reset effect
+  // below self-heals a stale persisted name once the project list loads).
+  const [a, setAState] = useState<string>(() => storedCmp(CMP_A_KEY) ?? currentProject ?? '')
+  const [b, setBState] = useState<string>(() => storedCmp(CMP_B_KEY) ?? '')
+  const [tab, setTabState] = useState<Tab>(() => {
+    // Embedded rail: it remounts on every open, so honour `initialTab` (the
+    // live Results tab the user is on) FIRST — the rail opens on the matching
+    // metric each time. While it stays open the user can switch it freely
+    // (persisted below), but reopening re-seeds to the current Results tab.
+    // The standalone route passes no `initialTab` and falls through to its own
+    // persisted tab, preserving cross-session memory there.
+    if (initialTab && VALID_COMPARE_TABS.has(initialTab)) return initialTab
+    const p = storedCmp(CMP_TAB_KEY)
+    if (p && VALID_COMPARE_TABS.has(p as Tab)) return p as Tab
+    return 'overview'
+  })
+  const setA = (v: string) => { setAState(v); persistCmp(CMP_A_KEY, v) }
+  const setB = (v: string) => { setBState(v); persistCmp(CMP_B_KEY, v) }
+  const setTab = (t: Tab) => { setTabState(t); persistCmp(CMP_TAB_KEY, t) }
 
   // Reset selection if a project is deleted under us.
   useEffect(() => {
@@ -76,10 +118,25 @@ export default function CompareView() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="p-4 pb-2 space-y-3 shrink-0 border-b border-border/40 bg-bg">
+      <div className={`${embedded ? 'p-3 pb-2 space-y-2' : 'p-4 pb-2 space-y-3'} shrink-0 border-b border-border/40 bg-bg`}>
+        {embedded && (
+          <div className="flex items-center gap-2">
+            <Layers size={13} className="text-accent shrink-0" />
+            <span className="text-[12px] font-semibold text-text">Scenario comparison</span>
+            <span className="flex-1" />
+            <button
+              onClick={onClose}
+              title="Close comparison (Esc)"
+              className="flex items-center gap-1 text-[11px] text-muted hover:text-text px-1.5 py-0.5 rounded hover:bg-panel transition-colors"
+            >
+              Close <span className="text-[14px] leading-none">×</span>
+            </button>
+          </div>
+        )}
         <p className="text-[11px] text-muted">
-          Side-by-side comparison of two projects. Figures are read from each
-          project's last saved state — they don't reflect unsaved in-memory edits.
+          {embedded
+            ? "A vs B from each project's last saved state — not unsaved in-memory edits."
+            : "Side-by-side comparison of two projects. Figures are read from each project's last saved state — they don't reflect unsaved in-memory edits."}
         </p>
         <div className="flex items-center gap-3">
           <ScenarioPicker label="Scenario A" value={a} exclude={b} projects={projects as ProjectInfo[]} onChange={setA} />
@@ -1252,20 +1309,33 @@ function EconomicsTab({ a, b }: { a: string; b: string }) {
     const canon = (
       side: Record<string, CarrierEconomics>,
     ): Record<string, CarrierEconomics> => {
+      // Clone a (possibly absent) per-period value bucket. The split buckets
+      // are optional on the backend type but always present in practice; the
+      // ?? guards keep canon total when a scenario omits one.
+      const clonePV = (pv?: CarrierPeriodValue): CarrierPeriodValue =>
+        ({ total: pv?.total ?? 0, by_period: { ...(pv?.by_period ?? {}) } })
       const out: Record<string, CarrierEconomics> = {}
       for (const [c, e] of Object.entries(side)) {
         const key = canonicaliseCarrier('Generator', c)
         const existing = out[key]
         if (!existing) {
           out[key] = {
-            revenue_meur: { total: e.revenue_meur.total, by_period: { ...e.revenue_meur.by_period } },
-            opex_meur:    { total: e.opex_meur.total,    by_period: { ...e.opex_meur.by_period } },
-            capex_meur:   { total: e.capex_meur.total,   by_period: { ...e.capex_meur.by_period } },
-            dispatch_gwh: { total: e.dispatch_gwh.total, by_period: { ...e.dispatch_gwh.by_period } },
-            lcoe_eur_per_mwh: { total: e.lcoe_eur_per_mwh.total, by_period: { ...e.lcoe_eur_per_mwh.by_period } },
+            revenue_meur: clonePV(e.revenue_meur),
+            opex_meur:    clonePV(e.opex_meur),
+            // Carry the OPEX split buckets through the merge — the table renders
+            // them as sub-rows AND the LCOE re-derivation below needs the
+            // curtailment / lost-load penalties to subtract them out.
+            gen_cost_meur:            clonePV(e.gen_cost_meur),
+            storage_charge_cost_meur: clonePV(e.storage_charge_cost_meur),
+            curtailment_cost_meur:    clonePV(e.curtailment_cost_meur),
+            lost_load_cost_meur:      clonePV(e.lost_load_cost_meur),
+            capex_meur:   clonePV(e.capex_meur),
+            dispatch_gwh: clonePV(e.dispatch_gwh),
+            lcoe_eur_per_mwh: clonePV(e.lcoe_eur_per_mwh),
           }
         } else {
-          const sum = (acc: CarrierPeriodValue, add: CarrierPeriodValue) => {
+          const sum = (acc?: CarrierPeriodValue, add?: CarrierPeriodValue) => {
+            if (!acc || !add) return
             acc.total += add.total
             for (const [p, v] of Object.entries(add.by_period)) {
               acc.by_period[p] = (acc.by_period[p] ?? 0) + v
@@ -1273,18 +1343,28 @@ function EconomicsTab({ a, b }: { a: string; b: string }) {
           }
           sum(existing.revenue_meur, e.revenue_meur)
           sum(existing.opex_meur, e.opex_meur)
+          sum(existing.gen_cost_meur, e.gen_cost_meur)
+          sum(existing.storage_charge_cost_meur, e.storage_charge_cost_meur)
+          sum(existing.curtailment_cost_meur, e.curtailment_cost_meur)
+          sum(existing.lost_load_cost_meur, e.lost_load_cost_meur)
           sum(existing.capex_meur, e.capex_meur)
           sum(existing.dispatch_gwh, e.dispatch_gwh)
-          // LCOE doesn't sum across spellings — re-derive after the cost +
-          // dispatch sums are known. existing.lcoe_eur_per_mwh stays for
-          // now; we recompute below.
+          // LCOE doesn't sum across spellings — re-derived below from the
+          // merged cost + dispatch sums.
         }
       }
-      // Re-derive LCOE = (capex + opex) / dispatch after merging.
+      // Re-derive LCOE = (capex + CASH opex) / dispatch after merging, where
+      // CASH opex EXCLUDES the curtailment + lost-load penalties (non-cash
+      // modelling soft-constraints). Matches the backend's _compute_economics_summary
+      // and the per-asset Results LCOE so the same carrier reads identically on
+      // both tabs. The penalties remain visible in the OPEX (total) row + their
+      // own split sub-rows — just not inside the LCOE ratio.
       for (const e of Object.values(out)) {
+        const cashOpexTotal =
+          e.opex_meur.total - (e.curtailment_cost_meur?.total ?? 0) - (e.lost_load_cost_meur?.total ?? 0)
         const denomTotal = e.dispatch_gwh.total * 1000  // GWh → MWh
         e.lcoe_eur_per_mwh.total =
-          denomTotal > 0 ? (e.capex_meur.total + e.opex_meur.total) * 1e6 / denomTotal : 0
+          denomTotal > 0 ? (e.capex_meur.total + cashOpexTotal) * 1e6 / denomTotal : 0
         const periods = new Set<string>([
           ...Object.keys(e.capex_meur.by_period),
           ...Object.keys(e.opex_meur.by_period),
@@ -1293,8 +1373,12 @@ function EconomicsTab({ a, b }: { a: string; b: string }) {
         const recomputed: Record<string, number> = {}
         for (const p of periods) {
           const denom = (e.dispatch_gwh.by_period[p] ?? 0) * 1000
+          const cashOpexP =
+            (e.opex_meur.by_period[p] ?? 0)
+            - (e.curtailment_cost_meur?.by_period[p] ?? 0)
+            - (e.lost_load_cost_meur?.by_period[p] ?? 0)
           recomputed[p] = denom > 0
-            ? ((e.capex_meur.by_period[p] ?? 0) + (e.opex_meur.by_period[p] ?? 0)) * 1e6 / denom
+            ? ((e.capex_meur.by_period[p] ?? 0) + cashOpexP) * 1e6 / denom
             : 0
         }
         e.lcoe_eur_per_mwh.by_period = recomputed
@@ -1351,7 +1435,7 @@ function EconomicsTab({ a, b }: { a: string; b: string }) {
         <CarrierFilter {...bindCarrierFilter(filter, availableCarriers)} label="Carrier" />
       </div>
 
-      <Section title="Levelised cost of energy (LCOE) by carrier" subtitle={periodLabel(period) + ' — (annuitised CAPEX + OPEX) ÷ dispatch'}>
+      <Section title="Levelised cost of energy (LCOE) by carrier" subtitle={periodLabel(period) + ' — (annuitised CAPEX + cash OPEX) ÷ dispatch. Excludes the curtailment & lost-load penalties (non-cash modelling terms, shown separately below) so this matches the per-asset LCOE/LCOS in Results → Economics.'}>
         <ABBarChart
           aName={sa.project}
           bName={sb.project}
@@ -1363,7 +1447,10 @@ function EconomicsTab({ a, b }: { a: string; b: string }) {
         />
       </Section>
 
-      <Section title="Per-carrier economic summary" subtitle={periodLabel(period)}>
+      <Section
+        title="Per-carrier economic summary"
+        subtitle={periodLabel(period) + ' — each carrier merges ALL its components (e.g. “H2” = electrolyser Link + H₂ storage + stores). Dispatch is the Link’s electricity input, so a carrier LCOE is not an LCOH — see the per-asset section below and the Results → Economics → LCOH panel for electrolyser-only figures. LCOE uses cash OPEX only: the curtailment & lost-load sub-rows are shown but excluded from the ratio.'}
+      >
         <EconomicsTable
           aName={sa.project}
           bName={sb.project}

@@ -22,6 +22,20 @@ class PyPSAService:
     # active-network load/save paths take pypsa_lock first, then this one.
     _netcdf_io_lock: threading.Lock = threading.Lock()
 
+    # Authoritative identity of the project the in-memory network was loaded
+    # from / belongs to on disk — the single source of truth that the save
+    # path enforces. DECOUPLED from `n.name`: that attribute is a mutable
+    # *display* title (it's settable via PUT /network/meta and is what the
+    # StatusBar shows), so it can't be trusted as an on-disk binding. This
+    # field is set ONLY by the load-class operations (load/import/template/
+    # restore/rename) and the first-save "claim"; it is `None` for a fresh /
+    # unbound network. `save_project(expect=…)` compares the caller's asserted
+    # identity against this under `_lock`, atomically with the network swap
+    # that loads perform — closing the cross-project-overwrite race that
+    # destroyed a project on 2026-05-28 (a stale-name autosave serialised a
+    # freshly-loaded network under the previous project's folder).
+    _loaded_project: str | None = None
+
     @classmethod
     def initialize(cls) -> None:
         with cls._lock:
@@ -43,6 +57,13 @@ class PyPSAService:
     def reset_network(cls) -> None:
         cls._network = pypsa.Network()
         cls._network.name = "Untitled Project"
+        # The fresh network is unbound — no on-disk project owns it yet.
+        # reset_network runs at the START of every load/import/restore (which
+        # then re-binds via set_loaded_project at the end), and on explicit
+        # "New"/reset. Clearing here means a load that fails mid-import leaves
+        # identity at None (unbound) rather than dangling on the previous
+        # project, so a subsequent autosave can't misdirect.
+        cls._loaded_project = None
         # Any transient-row entries pointed at the old network — drop them.
         cls.clear_transient()
 
@@ -66,6 +87,23 @@ class PyPSAService:
     @classmethod
     def get_netcdf_io_lock(cls) -> threading.Lock:
         return cls._netcdf_io_lock
+
+    # ── Loaded-project identity ──────────────────────────────────────────────
+    @classmethod
+    def get_loaded_project(cls) -> str | None:
+        """Project the in-memory network belongs to on disk, or None if unbound."""
+        return cls._loaded_project
+
+    @classmethod
+    def set_loaded_project(cls, name: str | None) -> None:
+        """
+        Bind the in-memory network to an on-disk project. Called by every
+        load-class op (load/import/template/restore), by rename (the folder
+        moved), and by save_project's first-save claim. Must be invoked under
+        `get_lock()` by callers that also swap the network, so the binding is
+        atomic with respect to the swap.
+        """
+        cls._loaded_project = name
 
     # ── Transient-row registry ──────────────────────────────────────────────
     # Rows that the solver's `_apply_modelling_assumptions` adds to a

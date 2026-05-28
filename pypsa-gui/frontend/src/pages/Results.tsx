@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging } from 'lucide-react'
+import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
+import { useUIStore } from '../store/uiStore'
 import { ResultsFilterProvider } from './results/filterContext'
 import { type TSPayload, type WeightCtx } from './results/shared'
+import CompareView, { type Tab as CompareTab } from './CompareView'
 import CapacityExpansion from './results/CapacityExpansion'
 import Dispatch from './results/Dispatch'
 import LoadFlow from './results/LoadFlow'
@@ -60,12 +62,78 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup' },
 ]
 
+// Maps the Results tab the user is viewing → the equivalent CompareView tab,
+// so opening the docked comparison rail starts on the same metric. Most IDs
+// match; only the four below differ between the two tab vocabularies.
+const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
+  overview: 'overview',
+  capex: 'capacity',
+  dispatch: 'dispatch',
+  loadflow: 'loading',
+  prices: 'prices',
+  economics: 'economics',
+  emissions: 'emissions',
+  curtailment: 'curtailment',
+  lostload: 'lost_load',
+  storage: 'storage_cycling',
+}
+
+// Min px kept for BOTH the live Results pane and the comparison rail when the
+// splitter is dragged. The store's setCompareRailWidth enforces the same floor.
+const RAIL_MIN_W = 360
+
 export default function Results() {
   const [tab, setTabState] = useState<ResultsTab>(loadInitialTab)
   const setTab = (t: ResultsTab) => {
     setTabState(t)
     try { localStorage.setItem(RESULTS_TAB_KEY, t) } catch { /* ignore */ }
   }
+
+  // ── Docked comparison rail ─────────────────────────────────────────────
+  // The A-vs-B CompareView coexists on the right; the live Results tabs stay
+  // fully interactive on the left. State lives in the store so the rail
+  // survives result-tab switches and page reloads until explicitly closed.
+  const compareRailOpen   = useUIStore(s => s.compareRailOpen)
+  const compareRailWidth  = useUIStore(s => s.compareRailWidth)
+  const toggleCompareRail = useUIStore(s => s.toggleCompareRail)
+  const setCompareRailOpen  = useUIStore(s => s.setCompareRailOpen)
+  const setCompareRailWidth = useUIStore(s => s.setCompareRailWidth)
+  const splitWrapRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ startX: number; startW: number } | null>(null)
+
+  // Vertical splitter — transpose of BottomPanel's row-resize. The handle sits
+  // on the rail's LEFT edge, so dragging left grows the rail. Clamp against the
+  // wrapper's measured width (NOT window width — it's offset by sidebar/panel).
+  const onSplitMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const wrapW = splitWrapRef.current?.getBoundingClientRect().width ?? window.innerWidth
+    dragRef.current = { startX: e.clientX, startW: useUIStore.getState().compareRailWidth }
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return
+      const delta = dragRef.current.startX - ev.clientX
+      const next = Math.max(RAIL_MIN_W, Math.min(wrapW - RAIL_MIN_W, dragRef.current.startW + delta))
+      setCompareRailWidth(next)
+    }
+    const onUp = () => {
+      dragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [setCompareRailWidth])
+
+  // When the rail opens, clamp a stale-wide persisted width against the current
+  // wrapper so the left pane never drops below its floor (e.g. after the window
+  // was resized narrower while the rail was closed).
+  useEffect(() => {
+    if (!compareRailOpen) return
+    const wrapW = splitWrapRef.current?.getBoundingClientRect().width
+    if (wrapW && compareRailWidth > wrapW - RAIL_MIN_W) {
+      setCompareRailWidth(Math.max(RAIL_MIN_W, wrapW - RAIL_MIN_W))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compareRailOpen])
   // Used by every tab — fetched once here, propagated via props so they don't
   // each issue their own poll.
   const { data: status } = useQuery({
@@ -205,6 +273,19 @@ export default function Results() {
           )
         })}
         <div className="flex-1" />
+        {/* Docked comparison rail toggle — keeps the live results visible while
+            an A-vs-B scenario comparison sits alongside on the right. */}
+        <button
+          onClick={toggleCompareRail}
+          title="Compare with another saved project, side-by-side"
+          className={`h-7 px-2.5 ml-1 mr-1 flex items-center gap-1.5 text-[11px] font-medium rounded transition-colors
+            ${compareRailOpen
+              ? 'bg-accent text-white'
+              : 'text-muted hover:text-text border border-border'}`}
+        >
+          {compareRailOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
+          Compare
+        </button>
       </div>
 
       {/* ── Horizon filter (expandable) ──────────────────────────── */}
@@ -319,29 +400,57 @@ export default function Results() {
           itself. The cross-period consolidated view lives in its own
           "Overview" tab (multi-period only), not as an override that hijacks
           whichever tab the user clicked. */}
-      <ResultsFilterProvider value={filterValue}>
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {(() => {
-            // Overview is multi-period-only; if it's somehow the active tab on
-            // a single-period run, fall back to Dispatch.
-            const t = (tab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : tab
-            return (
-              <>
-                {t === 'overview'    && <AggregatedResultsBody />}
-                {t === 'capex'       && <CapacityExpansion />}
-                {t === 'dispatch'    && <Dispatch />}
-                {t === 'loadflow'    && <LoadFlow />}
-                {t === 'prices'      && <Prices />}
-                {t === 'economics'   && <Economics />}
-                {t === 'emissions'   && <Emissions />}
-                {t === 'curtailment' && <Curtailment />}
-                {t === 'lostload'    && <LostLoadTab />}
-                {t === 'storage'     && <StorageCycling />}
-              </>
-            )
-          })()}
-        </div>
-      </ResultsFilterProvider>
+      <div ref={splitWrapRef} className="flex flex-1 min-h-0 overflow-hidden">
+        <ResultsFilterProvider value={filterValue}>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            {(() => {
+              // Overview is multi-period-only; if it's somehow the active tab on
+              // a single-period run, fall back to Dispatch.
+              const t = (tab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : tab
+              return (
+                <>
+                  {t === 'overview'    && <AggregatedResultsBody />}
+                  {t === 'capex'       && <CapacityExpansion />}
+                  {t === 'dispatch'    && <Dispatch />}
+                  {t === 'loadflow'    && <LoadFlow />}
+                  {t === 'prices'      && <Prices />}
+                  {t === 'economics'   && <Economics />}
+                  {t === 'emissions'   && <Emissions />}
+                  {t === 'curtailment' && <Curtailment />}
+                  {t === 'lostload'    && <LostLoadTab />}
+                  {t === 'storage'     && <StorageCycling />}
+                </>
+              )
+            })()}
+          </div>
+        </ResultsFilterProvider>
+
+        {/* Comparison rail — embeds the A-vs-B CompareView. data-no-panel-close
+            is REQUIRED: native <select> dropdowns dismiss via a document
+            mousedown whose target is outside the panel, which would otherwise
+            trip App's click-outside handler and close Results out from under
+            the rail. */}
+        {compareRailOpen && (
+          <>
+            <div
+              className="w-1 shrink-0 cursor-col-resize bg-border/60 hover:bg-accent/50 transition-colors"
+              onMouseDown={onSplitMouseDown}
+              title="Drag to resize"
+            />
+            <div
+              data-no-panel-close
+              style={{ width: compareRailWidth }}
+              className="shrink-0 min-w-0 overflow-hidden border-l border-border bg-bg"
+            >
+              <CompareView
+                embedded
+                onClose={() => setCompareRailOpen(false)}
+                initialTab={RESULTS_TO_COMPARE_TAB[tab]}
+              />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

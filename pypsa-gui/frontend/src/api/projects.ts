@@ -84,11 +84,26 @@ export const projectsApi = {
   // `clearUndo` defaults to true (matches the backend default) so explicit
   // user saves drop the undo stack. Autosave passes clearUndo=false to keep
   // recent revert history available across background snapshots.
-  save: (name: string, force = false, clearUndo = true) =>
+  //
+  // `expect` is the project the caller believes is the ACTIVE/loaded one. When
+  // provided, the backend refuses (409) if its in-memory network is actually
+  // bound to a different project — the atomic, server-side guard against the
+  // cross-project overwrite that destroyed a project on 2026-05-28. Callers
+  // saving the active project (autosave, explicit Ctrl+S) pass it; callers
+  // that intentionally write under a different name (Save a Copy, first save
+  // of a new project) omit it.
+  // `rebind=true` makes the backend treat `name` as the loaded project after
+  // the save — for flows that save under a NEW name and then make it active
+  // (Save-As, clone, first save). Without it, the backend stays bound to the
+  // prior project and every subsequent save of the new name 409s until reload.
+  // Save-a-Copy leaves it false so the original stays the active binding.
+  save: (name: string, force = false, clearUndo = true, expect?: string, rebind = false) =>
     client.post<SaveResult>(`/projects/${encodeURIComponent(name)}`, null, {
       params: {
         ...(force ? { force: true } : {}),
         ...(clearUndo ? {} : { clear_undo: false }),
+        ...(expect ? { expect } : {}),
+        ...(rebind ? { rebind: true } : {}),
       },
     }).then(r => r.data),
   load: (name: string) => client.get<ImportSummary>(`/projects/${encodeURIComponent(name)}`).then(r => r.data),

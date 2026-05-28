@@ -8,6 +8,7 @@ import { Download, Flame, Wind, BatteryCharging, Zap, ChevronDown, ChevronRight,
 import toast from 'react-hot-toast'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
 import type { Generator, Load, StorageUnit, Store, Link as LinkT } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, type ResultsViewMode, type Season,
@@ -233,26 +234,35 @@ function isElectrolyzerCarrier(c: string | undefined | null): boolean {
 }
 
 export default function Dispatch() {
+  // Result source (LOPF vs AC PF) — the same global toggle LoadFlow exposes.
+  // Put it in EVERY dispatch query key AND pass it to the getter so flipping
+  // the source on Load Flow also re-fetches the Dispatch tab against the
+  // chosen solution (was previously hardcoded LOPF here, so the toggle silently
+  // had no effect on Dispatch). The backend coerces unknown sources to lopf
+  // and falls back when a given table has no ac_pf variant, so this is safe
+  // for the LP-only quantities too.
+  const resultSource = useUIStore(s => s.resultSource)
   // Cost breakdown: used by the OPEX KPI strip + per-class table below. Same
   // endpoint Capacity Expansion uses, cached under the shared queryKey so we
-  // don't double-fetch when both tabs are mounted.
+  // don't double-fetch when both tabs are mounted. (LP-only — no source.)
   const { data: cost } = useQuery({ queryKey: ['results', 'cost_breakdown'], queryFn: resultsApi.getCostBreakdown })
-  const { data: gensTS } = useQuery({ queryKey: ['results', 'generators'], queryFn: () => resultsApi.getGeneratorResults() })
+  const { data: gensTS } = useQuery({ queryKey: ['results', 'generators', resultSource], queryFn: () => resultsApi.getGeneratorResults(resultSource) })
   // Curtailment = max(p_max_pu * p_nom_opt − p, 0). Computed server-side.
   // Used for the renewables KPI + the toggleable per-section plot below.
+  // (LP-only — AC PF doesn't produce curtailment.)
   const { data: curtailTS } = useQuery({ queryKey: ['results', 'curtailment'], queryFn: resultsApi.getCurtailment })
   // Storage gets BOTH SoC (MWh) AND signed power (MW). The power view is what
   // the user means by "production / consumption" — positive = discharging,
   // negative = charging. SoC is the energy reservoir level.
-  const { data: storTS }     = useQuery({ queryKey: ['results', 'storage'],          queryFn: () => resultsApi.getStorageResults() })
-  const { data: storPowerTS }= useQuery({ queryKey: ['results', 'storage_dispatch'], queryFn: () => resultsApi.getStorageDispatchResults() })
-  const { data: storeTS }    = useQuery({ queryKey: ['results', 'store_dispatch'],   queryFn: () => resultsApi.getStoreDispatchResults() })
-  const { data: storeETS }   = useQuery({ queryKey: ['results', 'store_energy'],     queryFn: () => resultsApi.getStoreEnergyResults() })
-  const { data: loadTS } = useQuery({ queryKey: ['results', 'loads'],      queryFn: () => resultsApi.getLoadResults() })
+  const { data: storTS }     = useQuery({ queryKey: ['results', 'storage', resultSource],          queryFn: () => resultsApi.getStorageResults(resultSource) })
+  const { data: storPowerTS }= useQuery({ queryKey: ['results', 'storage_dispatch', resultSource], queryFn: () => resultsApi.getStorageDispatchResults(resultSource) })
+  const { data: storeTS }    = useQuery({ queryKey: ['results', 'store_dispatch', resultSource],   queryFn: () => resultsApi.getStoreDispatchResults(resultSource) })
+  const { data: storeETS }   = useQuery({ queryKey: ['results', 'store_energy', resultSource],     queryFn: () => resultsApi.getStoreEnergyResults(resultSource) })
+  const { data: loadTS } = useQuery({ queryKey: ['results', 'loads', resultSource],      queryFn: () => resultsApi.getLoadResults(resultSource) })
   // Per-link p0 (signed MW; positive = bus0→bus1). Rendered as one section
   // per link carrier so the user can compare e.g. HVDC interconnect vs
   // electrolyser dispatch separately.
-  const { data: linkTS } = useQuery({ queryKey: ['results', 'links'], queryFn: () => resultsApi.getLinkResults() })
+  const { data: linkTS } = useQuery({ queryKey: ['results', 'links', resultSource], queryFn: () => resultsApi.getLinkResults(resultSource) })
   // VOLL slack dispatch — non-null only when last solve ran with voll > 0
   // and the LP actually shed load. Drives the Lost Load KPI + chart below.
   const { data: lostLoad } = useQuery({ queryKey: ['results', 'lost_load'], queryFn: resultsApi.getLostLoad })

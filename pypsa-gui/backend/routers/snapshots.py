@@ -43,7 +43,9 @@ from routers.projects import (
     _atomic_write_with,
     _force_rmtree,
     _read_meta,
+    _restore_results_state,
     _safe_project_dir,
+    _solver_config_from_dict,
 )
 
 router = APIRouter()
@@ -421,20 +423,18 @@ def restore_snapshot(name: str, snapshot_id: str):
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             n.import_from_netcdf(str(project_dir / "network.nc"))
+        # Bind identity atomically with the swap — inside the SAME lock that
+        # reset it to None — so a concurrent save can't observe the transient
+        # unbound state and wrongly claim/overwrite (see load_project).
+        PyPSAService.set_loaded_project(name)
 
     cfg_path = project_dir / "solver_config.json"
     if cfg_path.exists():
-        from dataclasses import fields as _dc_fields
-
-        from services.solver_service import SolverConfig
-
         from routers.simulation import _state
-        data = json.loads(cfg_path.read_text())
-        valid_keys = {f.name for f in _dc_fields(SolverConfig)}
-        clean = {k: v for k, v in data.items() if k in valid_keys}
-        if clean.get("mode") == "lpf":
-            clean["mode"] = "lopf"
-        _state["solver_config"] = SolverConfig(**clean)
+        # Shared legacy-tolerant loader — same path load_project / import_bundle
+        # use, so a snapshot taken by an older GUI version restores instead of
+        # 500-ing on an unknown solver_config key.
+        _state["solver_config"] = _solver_config_from_dict(json.loads(cfg_path.read_text()))
 
     # Hydrate simulation state from the restored project's metadata. Without
     # this, restoring a previously-solved snapshot leaves the header status
@@ -452,7 +452,10 @@ def restore_snapshot(name: str, snapshot_id: str):
     # poll can't observe a half-applied tuple (status="completed" while
     # objective is still stale `None`). See F11 / G2 rationale.
     from routers.simulation import _state_update as _sim_state_update
-    if has_dispatch and proj_meta.get("has_results"):
+    # Gate on `has_dispatch` ALONE (computed from the loaded network), not the
+    # cached `meta["has_results"]` flag which can drift stale — same fix as
+    # load_project. A stale/absent flag must not hide genuinely-present dispatch.
+    if has_dispatch:
         _sim_state_update(
             status="completed",
             condition=proj_meta.get("condition") or "optimal",
@@ -461,6 +464,13 @@ def restore_snapshot(name: str, snapshot_id: str):
         )
     else:
         _sim_state_update(status="idle", condition=None, objective=None, solve_time=None)
+
+    # Restore the solve-time _state side-results (lopf_results / ac_pf_results /
+    # last_lost_load) from the snapshot's results_state.pkl — same as
+    # load_project / import_bundle. Without this, restoring a solved snapshot
+    # left the LP/PF result-source toggle and the Lost-Load panel blank even
+    # though the netcdf dispatch loaded.
+    _restore_results_state(project_dir, name)
 
     from routers.network import (
         _ensure_snapshots_cover_user_ts,
@@ -475,6 +485,7 @@ def restore_snapshot(name: str, snapshot_id: str):
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         _ensure_snapshots_cover_user_ts(n)
+    # The authoritative loaded-project binding was set inside the swap lock above.
     n.name = name
     _reapply_user_ts_to_network(n)
 

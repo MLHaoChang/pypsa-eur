@@ -33,6 +33,7 @@ export default function SnapshotsPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const markProjectSaved = useUIStore(s => s.markProjectSaved)
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const setCompareRailOpen = useUIStore(s => s.setCompareRailOpen)
   const [showCreate, setShowCreate] = useState(false)
   // Restore-confirm modal state. We capture the project name AT THE TIME the
   // user clicked the row, so a project switch while the modal is open can't
@@ -159,7 +160,7 @@ export default function SnapshotsPanel() {
                   key={snap.id}
                   snap={snap}
                   isNewest={i === 0}
-                  onCompare={() => setSlidePanel('compare')}
+                  onCompare={() => { setSlidePanel('results'); setCompareRailOpen(true) }}
                   onRestore={() => setRestoreConfirm({ snapshot: snap, projectName: currentProject })}
                   onDelete={() => {
                     // Inline confirm toast — non-blocking, styled, replaces native

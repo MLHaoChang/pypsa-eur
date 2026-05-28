@@ -406,8 +406,13 @@ function CloneTab({ existingProjects, onClose }: {
     mutationFn: async ({ src, dest }: { src: string; dest: string }) => {
       // Load source into memory then save under destination. Two-step is
       // simpler than a backend clone endpoint and uses existing primitives.
+      // After load(src) the backend is bound to `src`; save(dest, rebind=true)
+      // writes the in-memory (src) network under `dest` AND rebinds the backend
+      // to `dest` so the post-clone setCurrentProject(dest) below stays in sync
+      // — otherwise saving the clone would 409 against the stale `src` binding.
+      // expect is omitted: this is a deliberate save-under-a-new-name.
       await projectsApi.load(src)
-      const res = await projectsApi.save(dest, false, true)
+      const res = await projectsApi.save(dest, false, true, undefined, true)
       return res
     },
     onSuccess: (res) => {

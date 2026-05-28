@@ -620,7 +620,7 @@ export default function Economics() {
       {lcoeChartData.length > 0 && (
         <ChartCard
           title="Per-asset LCOE / LCOS"
-          hint="Ranked low → high. Storage shows LCOS (includes the cost of charging electricity)."
+          hint="Ranked low → high. Storage shows LCOS (includes charging electricity cost). Electrolysers are Link components — their LCOH lives in the Hydrogen panel below, so an H₂ storage bar here is a different asset, not the electrolyser."
           right={<ChartActions chartRef={lcoeChartRef} onExportCSV={onExportCSV} filename={`asset_lcoe_lcos${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />}
         >
           <div ref={lcoeChartRef}>
@@ -1009,7 +1009,10 @@ function LcohSection() {
       </div>
       <p className="text-[11px] text-muted mb-2.5">
         LCOH = (annuitised CAPEX + variable OPEX + electricity input cost) ÷ H₂ produced.
-        €/kg uses LHV-based 33.33 kWh/kg conversion.
+        €/kg uses LHV-based 33.33 kWh/kg conversion. Covers electrolyser
+        <span className="font-mono"> Link</span> components only — H₂ <em>storage</em> shows up as
+        LCOS in the per-asset chart above (a different asset), and the Compare tab's
+        “H2” carrier merges electrolyser + storage, so neither will match this number.
       </p>
       {fleet && (
         <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-3">
@@ -1027,8 +1030,8 @@ function LcohSection() {
                hint="Σ capital_cost × p_nom_opt scaled by ipw.years for the selected scope" />
           <KPI label="Electricity input cost"
                value={fmtCurrency(fleetElec)}
-               sub="bus0 marginal price × consume"
-               hint="What the LP paid the grid for electrons fed into the electrolysers" />
+               sub="corrected bus0 price × consume"
+               hint="Cost of electrons fed into the electrolysers, priced at merit-order (curtailment-subsidy-removed) bus duals — same correction the per-asset economics use" />
         </div>
       )}
       <div className="rounded-[10px] border border-border bg-bg overflow-hidden">

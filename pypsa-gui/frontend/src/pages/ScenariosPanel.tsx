@@ -101,6 +101,8 @@ export default function ScenariosPanel() {
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
   const setSlidePanel     = useUIStore(s => s.setSlidePanel)
+  const setCompareRailOpen = useUIStore(s => s.setCompareRailOpen)
+  const setProjectSwitchInProgress = useUIStore(s => s.setProjectSwitchInProgress)
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -140,6 +142,11 @@ export default function ScenariosPanel() {
     }
     if (switching) return  // drop concurrent clicks while a switch is in flight
     setSwitching(name)
+    // Fence autosave for the whole switch: from here until currentProject is
+    // updated below, the in-memory network gets swapped to `name` while the
+    // store still points at the outgoing project — an autosave tick in that
+    // window would write the new network under the old project's folder.
+    setProjectSwitchInProgress(true)
     const tId = toast.loading(`Switching to '${name}'…`)
     try {
       // Auto-save the outgoing project so unsaved edits aren't lost.
@@ -177,6 +184,7 @@ export default function ScenariosPanel() {
       appLog('ERROR', `Switch to '${name}': ${String((e as Error).message ?? e)}`)
     } finally {
       setSwitching(null)
+      setProjectSwitchInProgress(false)
     }
   }
 
@@ -278,7 +286,7 @@ export default function ScenariosPanel() {
           count={projectList.length}
           hint="variants linked by a parent pointer — switching auto-saves the outgoing"
           right={
-            <Btn onClick={() => setSlidePanel('compare')} title="Compare two scenarios side-by-side">
+            <Btn onClick={() => { setSlidePanel('results'); setCompareRailOpen(true) }} title="Open Results with the comparison rail docked alongside">
               <Layers size={12} /> Compare
             </Btn>
           }

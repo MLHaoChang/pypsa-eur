@@ -225,6 +225,7 @@ function useCommands(mode: PaletteMode): Command[] {
   const setHighlightedComponent = useUIStore(s => s.setHighlightedComponent)
   const openRightPanel       = useUIStore(s => s.openRightPanel)
   const setSlidePanel        = useUIStore(s => s.setSlidePanel)
+  const setCompareRailOpen   = useUIStore(s => s.setCompareRailOpen)
   const markProjectSaved     = useUIStore(s => s.markProjectSaved)
   const theme                = useUIStore(s => s.theme)
   const density              = useUIStore(s => s.density)
@@ -307,7 +308,7 @@ function useCommands(mode: PaletteMode): Command[] {
           title: 'Compare scenarios',
           subtitle: 'Side-by-side KPI / dispatch / objective diff',
           icon: <Layers size={14} />,
-          run: () => setSlidePanel('compare'),
+          run: () => { setSlidePanel('results'); setCompareRailOpen(true) },
         },
         {
           id: 'act-snapshots',
@@ -511,7 +512,7 @@ function useCommands(mode: PaletteMode): Command[] {
     // Setters are stable references from zustand so they don't trigger
     // re-runs in practice, but listing them documents the closure's surface.
     setCurrentProject, setProjectName, setSelectedComponent,
-    setHighlightedComponent, openRightPanel, setSlidePanel, markProjectSaved,
+    setHighlightedComponent, openRightPanel, setSlidePanel, setCompareRailOpen, markProjectSaved,
     theme, density, toggleTheme, toggleDensity,
   ])
 }

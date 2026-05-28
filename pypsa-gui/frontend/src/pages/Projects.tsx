@@ -73,7 +73,14 @@ export default function Projects() {
 
   const saveMut = useMutation({
     mutationFn: async (name: string) => {
-      const res = await projectsApi.save(name)
+      // Assert identity only when re-saving the ACTIVE project (the in-memory
+      // network is bound to it); a Save-As under a new name omits expect so the
+      // backend allows the write. This page always makes `name` the active
+      // project on success (setCurrentProject below), so rebind=true so the
+      // backend follows — otherwise a Save-As would leave the backend bound to
+      // the old project and the next save would 409 until reload.
+      const expect = name === currentProject ? name : undefined
+      const res = await projectsApi.save(name, false, true, expect, true)
       // Flush the diagram layout AFTER the project directory exists on disk.
       // Without this, a freshly-dragged bus position saved through the
       // Projects-page Save button would be silently dropped because the

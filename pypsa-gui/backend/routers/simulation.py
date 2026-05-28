@@ -120,7 +120,13 @@ def _solver_in_flight() -> bool:
     mutate or read DataFrames must gate on this — checking ``status``
     alone is not enough.
     """
-    t = _state.get("thread")
+    # Read the thread handle under `_state_lock` — it's written by the /run
+    # and /run_ac_pf claim (now also under the lock) and cleared by
+    # force_reset. Reading under the same lock guarantees a coherent value
+    # rather than racing a concurrent claim/clear. `Thread.is_alive()` is
+    # itself thread-safe, so it's fine to call after releasing the lock.
+    with _state_lock:
+        t = _state.get("thread")
     return t is not None and t.is_alive()
 
 
@@ -291,50 +297,11 @@ def preflight():
 
 @router.post("/run")
 def run():
-    if _state["status"] == "running":
-        # Recover from stale state: if the worker thread died without
-        # resetting status (uncaught exception in run_simulation, segfault,
-        # process restart with frozen flag, etc.), allow the new run to
-        # proceed. Only reject if a live thread is still solving.
-        t = _state.get("thread")
-        if t is not None and t.is_alive():
-            from fastapi import HTTPException
-            raise HTTPException(409, "Simulation already running")
-        _state_update(status="failed", condition="stale_state_recovered")
+    from fastapi import HTTPException
+    import time as _time
 
     stop_event = threading.Event()
     log_queue = BufferedLogQueue()
-
-    # Atomic multi-key apply via `_state_update` so a concurrent
-    # /api/simulation/status poll doesn't observe a half-applied dict
-    # (e.g. status="running" with stale `objective` from the previous
-    # run, or stale `lopf_results` after the wipe started but before
-    # all 14 keys reset). Bare `_state.update(dict)` is two-bytecode-pair
-    # per key under the GIL — same race vector F11 / G2 fixed elsewhere.
-    _state_update(
-        status="running",
-        condition=None,
-        objective=None,
-        solve_time=None,
-        stop_event=stop_event,
-        log_queue=log_queue,
-        # Wipe last run's lost-load capture so a fresh solve with VOLL=0
-        # doesn't accidentally show the previous run's slack dispatch.
-        last_lost_load=None,
-        # Wipe Stage 2 state. The auto-chain inside run_simulation will
-        # repopulate when run_ac_pf_after_lopf=True; otherwise these stay
-        # None and the /results/ac_pf/status endpoint reports unavailable.
-        lopf_results=None,
-        ac_pf_results=None,
-        ac_pf_convergence=None,
-        ac_pf_convergence_list=None,
-        ac_pf_slack_bus_used=None,
-        ac_pf_stripped_voll_slacks=None,
-        ac_pf_converged_count=None,
-        ac_pf_total_snapshots=None,
-    )
-
-    import time as _time
 
     def _worker():
         t0 = _time.time()
@@ -399,14 +366,51 @@ def run():
         )
 
     t = threading.Thread(target=_worker, daemon=True)
-    # Atomic thread-register via `_state_update` so the brief window
-    # between the running-state apply above and the thread-handle write
-    # no longer exists. The stale-state recovery gate at the top of
-    # /run + /run_ac_pf checks `_state.get("thread")` — without this,
-    # a second request arriving in that window could observe
-    # status="running" with thread=None and slip past _solver_in_flight().
-    _state_update(thread=t)
-    t.start()
+
+    # Gate + claim + start under a SINGLE _state_lock hold so two concurrent
+    # /run requests cannot both pass the "not running" check and spawn racing
+    # workers that mutate the shared network via n.add/n.remove. The previous
+    # code checked status at the top and registered the thread separately at
+    # the bottom — the check and the claim weren't atomic, so two requests
+    # arriving close together both observed "not running" and both started.
+    # The thread is started INSIDE the lock so a competing request observes
+    # thread.is_alive()==True; a not-yet-started thread reports is_alive()==
+    # False and would be mistaken for stale state, re-opening the race.
+    # _state_lock is an RLock, so the nested _state_update is safe.
+    with _state_lock:
+        if _state["status"] == "running":
+            # Recover from stale state: if the worker thread died without
+            # resetting status (uncaught exception, segfault, process restart
+            # with frozen flag), allow the new run to proceed. Only reject if
+            # a live thread is still solving.
+            existing = _state.get("thread")
+            if existing is not None and existing.is_alive():
+                from fastapi import HTTPException
+                raise HTTPException(409, "Simulation already running")
+        # Atomic multi-key claim. A concurrent /status poll sees all of these
+        # applied or none. Wipes the previous run's results so a fresh solve
+        # doesn't surface stale objective / lost-load / Stage-2 state. The
+        # thread handle is registered in the SAME apply so there's no window
+        # where status="running" but thread is unset.
+        _state_update(
+            status="running",
+            condition=None,
+            objective=None,
+            solve_time=None,
+            stop_event=stop_event,
+            log_queue=log_queue,
+            last_lost_load=None,
+            lopf_results=None,
+            ac_pf_results=None,
+            ac_pf_convergence=None,
+            ac_pf_convergence_list=None,
+            ac_pf_slack_bus_used=None,
+            ac_pf_stripped_voll_slacks=None,
+            ac_pf_converged_count=None,
+            ac_pf_total_snapshots=None,
+            thread=t,
+        )
+        t.start()
     return {"status": "started"}
 
 
@@ -546,57 +550,10 @@ def run_ac_pf():
 
     from fastapi import HTTPException
 
-    if _state["status"] == "running":
-        t = _state.get("thread")
-        if t is not None and t.is_alive():
-            raise HTTPException(409, "Simulation already running")
-        _state_update(status="failed", condition="stale_state_recovered")
-
     n = PyPSAService.get_network()
-    if not getattr(n, "is_solved", False):
-        raise HTTPException(
-            400, "No LOPF solution to fix dispatch from. Run /run first."
-        )
-    # Reject stale dispatch BEFORE spawning the worker thread. The deeper
-    # gate in `run_ac_pf_stage` would also catch this and surface via the
-    # SSE log, but rejecting here avoids the spawn + lock-acquire round
-    # trip and gives the user a synchronous error response. `dispatch_status`
-    # returns 'fresh'/'stale'/'none'; only 'fresh' is acceptable here.
-    from services.dispatch_status import dispatch_status as _disp_status
-    _s = _disp_status(n)
-    if _s == "none":
-        raise HTTPException(
-            400, "n.generators_t.p is empty — re-run LOPF to populate dispatch."
-        )
-    if _s == "stale":
-        raise HTTPException(
-            400,
-            "Dispatch tables exist but their column-set doesn't match the "
-            "current topology (rows added/removed since the last solve). "
-            "Re-run LOPF to regenerate consistent dispatch before Stage 2.",
-        )
-
     stop_event = threading.Event()
     log_queue = BufferedLogQueue()
-    # Atomic apply via `_state_update` (see H8 / F11 / G2). Bare
-    # `_state.update(dict)` was a race window for concurrent /status polls.
-    _state_update(
-        status="running",
-        condition=None,
-        stop_event=stop_event,
-        log_queue=log_queue,
-        # Wipe previous Stage 2 state. Successful run repopulates;
-        # failure leaves these empty so the status endpoint reports
-        # `available: false` until the next try.
-        lopf_results=None,
-        ac_pf_results=None,
-        ac_pf_convergence=None,
-        ac_pf_convergence_list=None,
-        ac_pf_slack_bus_used=None,
-        ac_pf_stripped_voll_slacks=None,
-        ac_pf_converged_count=None,
-        ac_pf_total_snapshots=None,
-    )
+    from services.dispatch_status import dispatch_status as _disp_status
 
     def _worker():
         t0 = _time.time()
@@ -620,14 +577,56 @@ def run_ac_pf():
             _state_update(status="failed", condition=str(exc))
 
     t = threading.Thread(target=_worker, daemon=True)
-    # Atomic thread-register via `_state_update` so the brief window
-    # between the running-state apply above and the thread-handle write
-    # no longer exists. The stale-state recovery gate at the top of
-    # /run + /run_ac_pf checks `_state.get("thread")` — without this,
-    # a second request arriving in that window could observe
-    # status="running" with thread=None and slip past _solver_in_flight().
-    _state_update(thread=t)
-    t.start()
+
+    # Gate + pre-checks + claim + start under a SINGLE _state_lock hold so two
+    # concurrent triggers can't both pass the "not running" check and spawn
+    # racing workers (same TOCTOU fix as /run). dispatch_status reads only the
+    # network (no lock of its own) so holding _state_lock across it is safe and
+    # brief. The thread is started inside the lock so a competing request
+    # observes is_alive()==True. _state_lock is an RLock → nested _state_update
+    # is safe; raising inside the block releases the lock via the context manager.
+    with _state_lock:
+        if _state["status"] == "running":
+            existing = _state.get("thread")
+            if existing is not None and existing.is_alive():
+                raise HTTPException(409, "Simulation already running")
+            # stale state (worker died) → fall through and claim
+        if not getattr(n, "is_solved", False):
+            raise HTTPException(
+                400, "No LOPF solution to fix dispatch from. Run /run first."
+            )
+        # Reject stale dispatch BEFORE claiming. `dispatch_status` returns
+        # 'fresh'/'stale'/'none'; only 'fresh' is acceptable here.
+        _s = _disp_status(n)
+        if _s == "none":
+            raise HTTPException(
+                400, "n.generators_t.p is empty — re-run LOPF to populate dispatch."
+            )
+        if _s == "stale":
+            raise HTTPException(
+                400,
+                "Dispatch tables exist but their column-set doesn't match the "
+                "current topology (rows added/removed since the last solve). "
+                "Re-run LOPF to regenerate consistent dispatch before Stage 2.",
+            )
+        # Atomic claim — lifecycle reset + thread handle in one apply, so no
+        # window where status="running" but thread is unset.
+        _state_update(
+            status="running",
+            condition=None,
+            stop_event=stop_event,
+            log_queue=log_queue,
+            lopf_results=None,
+            ac_pf_results=None,
+            ac_pf_convergence=None,
+            ac_pf_convergence_list=None,
+            ac_pf_slack_bus_used=None,
+            ac_pf_stripped_voll_slacks=None,
+            ac_pf_converged_count=None,
+            ac_pf_total_snapshots=None,
+            thread=t,
+        )
+        t.start()
     return {"status": "started"}
 
 
@@ -1792,6 +1791,16 @@ def get_lcoh():
     else:
         weights = sw
 
+    # ENERGY weighting for the H₂-produced denominator follows the `generators`
+    # column (matching PyPSA n.statistics() and the Dispatch tab); the cost
+    # terms (VOM, electricity input) keep the `objective` weighting above.
+    # Identical when the two columns coincide (the common case); they diverge
+    # only under representative-week weighting. Lazy import avoids the
+    # projects<->simulation import cycle; the helper applies the same
+    # generators→objective→1.0 fallback + investment-period years scaling.
+    from routers.projects import _build_snapshot_weights as _bsw
+    energy_weights = _bsw(n, "generators")
+
     # Effective capital_cost via the same fill PyPSA uses for n.statistics().
     cfg = _state.get("solver_config") or SolverConfig()
     try:
@@ -1802,11 +1811,21 @@ def get_lcoh():
     except Exception:
         cap_costs = links_df.get("capital_cost", _pd.Series(0.0, index=links_df.index))
 
-    # bus0 marginal prices for electricity-cost computation.
+    # bus0 marginal prices for the electricity-cost term. Use the merit-order
+    # SUBSIDY-REMOVED duals (the same correction asset_economics and the Compare
+    # per-carrier economics apply via the shared helper) — NOT raw
+    # n.buses_t.marginal_price. Under a curtailment_cost subsidy the raw bus
+    # dual goes negative wherever a subsidised renewable sets the price, which
+    # makes the electrolyser's electricity input cost negative (unphysical — no
+    # money flows; it's an LP-accounting artefact) and understates LCOH.
+    # corrected_marginal_prices restores the real price at those buses/snapshots.
     try:
-        bus_prices = n.buses_t.marginal_price
+        bus_prices = corrected_marginal_prices(n)
     except Exception:
-        bus_prices = None
+        try:
+            bus_prices = n.buses_t.marginal_price
+        except Exception:
+            bus_prices = None
 
     p0 = getattr(n.links_t, "p0", None)
     if p0 is None or p0.empty:
@@ -1900,7 +1919,7 @@ def get_lcoh():
         # snapshot represents the link running in fuel-cell mode and isn't
         # part of H2 production cost.
         consume = disp.clip(lower=0)
-        weighted_consume = consume * weights
+        weighted_consume = consume * energy_weights
         consume_mwh = float(weighted_consume.sum())
         if consume_mwh <= 0:
             # Link wasn't dispatched as a consumer during this run.
@@ -1962,9 +1981,11 @@ def get_lcoh():
                 try:
                     consume_p = consume[mask]
                     weights_p = weights[mask]
+                    energy_weights_p = energy_weights[mask]
                 except Exception:
                     continue
-                weighted_consume_p = consume_p * weights_p
+                # H₂ (energy) on the generators basis; VOM/elec (cost) on objective.
+                weighted_consume_p = consume_p * energy_weights_p
                 h2_p_mwh = float(weighted_consume_p.sum()) * eff
                 vom_p = float((disp[mask].abs() * mc * weights_p).sum()) if mc > 0 else 0.0
                 elec_p = 0.0
@@ -2112,18 +2133,25 @@ def get_losses_summary(source: str = "lopf"):
     transmission_losses was off during Stage 1.
 
     Per-snapshot loss for a line/transformer is in MW; weighted by the
-    network's snapshot_weightings.objective to get MWh (matches how PyPSA
-    annualises energy quantities in n.statistics()).
+    network's snapshot_weightings.generators to get MWh — PyPSA's ENERGY
+    weighting basis (what n.statistics() uses), falling back to objective on
+    older netcdf. Losses are an energy quantity, so this matches the
+    Dispatch/statistics basis under representative-week weighting (identical
+    when the two columns coincide).
     """
     import math
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    # snapshot weights: hour-equivalent per row. Default 1 h.
+    # snapshot weights: hour-equivalent per row (ENERGY basis = generators).
+    # Default 1 h. Fall back generators → objective → None on older netcdf.
     try:
-        weights = n.snapshot_weightings.objective
+        weights = n.snapshot_weightings.generators
     except Exception:
-        weights = None
+        try:
+            weights = n.snapshot_weightings.objective
+        except Exception:
+            weights = None
 
     def _branch_loss(df_t, df_static, comp_name: str):
         """Returns (per_branch_rows, snapshot_total_mw, total_mwh, peak_mw)."""
@@ -2483,13 +2511,18 @@ def get_emissions(source: str = "lopf"):
     if p is None or p.empty:
         return _not_solved()
 
-    # Snapshot weighting (snapshot_weightings.objective is the per-snapshot
-    # multiplier used by PyPSA for the LP's energy-balance objective). Falls
-    # back to 1.0 per snapshot when missing.
+    # Snapshot weighting for ENERGY: emissions = Σ dispatch × weight × factor,
+    # so use the `generators` column — PyPSA's energy basis, matching
+    # n.statistics() and the primary-energy CO2 constraint. Falls back
+    # generators → objective → None on older netcdf (identical when the two
+    # columns coincide).
     try:
-        weights = n.snapshot_weightings.objective
+        weights = n.snapshot_weightings.generators
     except Exception:
-        weights = None
+        try:
+            weights = n.snapshot_weightings.objective
+        except Exception:
+            weights = None
 
     # ── Per-period weighting setup ───────────────────────────────────────
     # PyPSA multi-period scaling = snapshot_weight × investment_period_years.
@@ -2518,7 +2551,7 @@ def get_emissions(source: str = "lopf"):
             return period_years.get(p_val, 1.0)
 
     def _weight_series_for(snapshots) -> _pd.Series:
-        """Per-row effective weight = snapshot.objective × period.years."""
+        """Per-row effective weight = snapshot weight (generators) × period.years."""
         w = _pd.Series(1.0, index=snapshots, dtype=float)
         if weights is not None:
             try:
@@ -2867,10 +2900,18 @@ def get_unit_commitment():
     shut_down = _result_df(n, "generators_t", "shut_down", "lopf")
     p = _result_df(n, "generators_t", "p", "lopf")
 
+    # ENERGY basis (energy_mwh + weighted on-hours): use the `generators`
+    # column — PyPSA's energy weighting (matches n.statistics() and the Dispatch
+    # tab), falling back generators → objective → None on older netcdf. The UC
+    # start/shut COSTS below are count-based (not snapshot-weighted), so this
+    # only affects the energy figures. Identical when the columns coincide.
     try:
-        weights = n.snapshot_weightings.objective
+        weights = n.snapshot_weightings.generators
     except Exception:
-        weights = None
+        try:
+            weights = n.snapshot_weightings.objective
+        except Exception:
+            weights = None
 
     # Restrict to actually-committable generators. PyPSA writes the status grid
     # only for those — non-committable units have NaN here and we skip them.
@@ -3898,6 +3939,15 @@ def get_asset_economics():
         sw_obj = n.snapshot_weightings["objective"]
     except (KeyError, AttributeError):
         sw_obj = None
+    # Energy basis: the `generators` column — PyPSA's n.statistics() energy
+    # weight, the same basis the Dispatch tab uses. Cost terms (revenue, VOM,
+    # charge cost) keep `objective`; ENERGY denominators (energy_mwh,
+    # discharge/charge_mwh, capacity-factor hours) use this. Falls back to the
+    # objective column when absent (older netcdf) — identical to prior behaviour.
+    try:
+        sw_gen = n.snapshot_weightings["generators"]
+    except (KeyError, AttributeError):
+        sw_gen = sw_obj
     try:
         ipw = n.investment_period_weightings
         period_years_lookup = (
@@ -3937,12 +3987,12 @@ def get_asset_economics():
         except (TypeError, ValueError):
             return period_years_lookup.get(p, 1.0)
 
-    def _weight_series_for(snapshots) -> _pd.Series:
-        """Per-row effective weight = snapshot.objective × period.years."""
+    def _weight_series_for(snapshots, sw) -> _pd.Series:
+        """Per-row effective weight = sw × period.years (sw column: objective=cost, generators=energy)."""
         w = _pd.Series(1.0, index=snapshots, dtype=float)
-        if sw_obj is not None:
+        if sw is not None:
             try:
-                w = w.multiply(sw_obj.reindex(snapshots).fillna(1.0), axis=0)
+                w = w.multiply(sw.reindex(snapshots).fillna(1.0), axis=0)
             except Exception:
                 pass
         if period_lvl is not None and period_years_lookup:
@@ -3957,9 +4007,15 @@ def get_asset_economics():
         return w
 
     # ── Per-row weights for the network's current snapshots ──────────────
+    # Two bases: w_vals (objective) for COST quantities (revenue, VOM, charge
+    # cost); w_vals_energy (generators) for ENERGY quantities (energy_mwh,
+    # discharge/charge_mwh, capacity-factor hours). Equal when the columns
+    # coincide; LCOE/LCOS = cost[objective] / energy[generators].
     snapshots = n.snapshots
-    w_series = _weight_series_for(snapshots)
+    w_series = _weight_series_for(snapshots, sw_obj)
     w_vals = w_series.values
+    w_series_energy = _weight_series_for(snapshots, sw_gen)
+    w_vals_energy = w_series_energy.values
     # Period vector (same length as snapshots) for grouping later.
     if is_multi_period and period_lvl is not None:
         period_keys = [
@@ -4150,7 +4206,8 @@ def get_asset_economics():
             # asset (e.g. a Link-like generator) doesn't book negative VOM.
             vom_series = p_series.abs() * mc_series
             vom_total, vom_per_p = _accumulate_per_period(vom_series, w_vals)
-            energy_total, energy_per_p = _accumulate_per_period(p_series, w_vals)
+            # ENERGY (LCOE denominator) on the generators basis; revenue/VOM above on objective.
+            energy_total, energy_per_p = _accumulate_per_period(p_series, w_vals_energy)
 
             # Fixed cost: capital_cost (annualised) × p_nom_opt, scaled to
             # horizon by total_years_factor so the LCOE denominator (horizon-
@@ -4183,7 +4240,9 @@ def get_asset_economics():
             # Capacity factor: energy / (8760 × p_nom_opt × Σ years). Useful
             # for thermal vs renewable comparisons. Skip if p_nom_opt = 0.
             if p_nom_g > 1e-6:
-                total_hours_modelled = float(w_vals.sum())
+                # Hours on the same (generators) basis as energy_total so the
+                # capacity factor = energy / (p_nom × represented_hours) is consistent.
+                total_hours_modelled = float(w_vals_energy.sum())
                 cap_factor = energy_total / (p_nom_g * total_hours_modelled) if total_hours_modelled > 0 else None
             else:
                 cap_factor = None
@@ -4274,8 +4333,8 @@ def get_asset_economics():
             charge_cost_total, charge_cost_pp = _accumulate_per_period(
                 charge_series * price_series, w_vals,
             )
-            discharge_mwh, discharge_mwh_pp = _accumulate_per_period(discharge_series, w_vals)
-            charge_mwh, charge_mwh_pp = _accumulate_per_period(charge_series, w_vals)
+            discharge_mwh, discharge_mwh_pp = _accumulate_per_period(discharge_series, w_vals_energy)
+            charge_mwh, charge_mwh_pp = _accumulate_per_period(charge_series, w_vals_energy)
             # PyPSA convention: marginal_cost applies to discharge dispatch.
             # Charge has no explicit cost in standard formulation. Keep VOM
             # restricted to discharge to match the LP objective contribution.
@@ -4428,8 +4487,8 @@ def get_asset_economics():
             charge_cost_total, charge_cost_pp = _accumulate_per_period(
                 charge_series * price_series, w_vals,
             )
-            discharge_mwh, discharge_mwh_pp = _accumulate_per_period(discharge_series, w_vals)
-            charge_mwh, charge_mwh_pp = _accumulate_per_period(charge_series, w_vals)
+            discharge_mwh, discharge_mwh_pp = _accumulate_per_period(discharge_series, w_vals_energy)
+            charge_mwh, charge_mwh_pp = _accumulate_per_period(charge_series, w_vals_energy)
             vom_total_st, vom_pp_st = _accumulate_per_period(
                 discharge_series * float(mc_static_st.get(s, 0.0)), w_vals,
             )

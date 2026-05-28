@@ -423,14 +423,18 @@ async def import_bundle(file: UploadFile = File(...), name: str | None = None):
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             n.import_from_netcdf(str(nc_path))
+        # Bind identity atomically with the swap (see load_project for the
+        # rationale on why this must be inside the lock, not after).
+        PyPSAService.set_loaded_project(target_name)
 
     cfg_path = dest / "solver_config.json"
     if cfg_path.exists():
-        from services.solver_service import SolverConfig
-
         from routers.simulation import _state
         cfg_data = json.loads(cfg_path.read_text())
-        _state["solver_config"] = SolverConfig(**cfg_data)
+        # Shared legacy-tolerant loader (filter unknown keys + coerce removed
+        # enum values) — same path load_project uses, so a bundle from an older
+        # GUI version imports instead of 500-ing on an unexpected key.
+        _state["solver_config"] = _solver_config_from_dict(cfg_data)
 
     from routers.network import (
         _ensure_snapshots_cover_user_ts,
@@ -450,7 +454,8 @@ async def import_bundle(file: UploadFile = File(...), name: str | None = None):
     with PyPSAService.get_lock():
         _ensure_snapshots_cover_user_ts(n)
     # Set n.name so the StatusBar / meta endpoint reflect the project name
-    # rather than PyPSA's "Unnamed Network" default.
+    # rather than PyPSA's "Unnamed Network" default. The authoritative
+    # loaded-project binding was already set inside the swap lock above.
     n.name = target_name
     _reapply_user_ts_to_network(n)
 
@@ -525,6 +530,29 @@ _TEMPLATE_DEFAULT_NAMES = {
 }
 
 
+def _solver_config_from_dict(data: dict):
+    """
+    Build a SolverConfig from a (possibly legacy/foreign) solver_config.json dict.
+
+    Older or externally-produced bundles may carry keys that no longer exist on
+    the dataclass — `SolverConfig(**data)` raises TypeError on those — or omit
+    keys added since they were saved, which should fall back to the current
+    default rather than error. Filter to the live field set and coerce removed
+    enum values, so the project-load AND bundle-import paths accept legacy files
+    identically (import_bundle previously did the raw `SolverConfig(**data)` and
+    500'd on any non-current bundle).
+    """
+    from dataclasses import fields as _dc_fields
+
+    from services.solver_service import SolverConfig
+    valid_keys = {f.name for f in _dc_fields(SolverConfig)}
+    clean = {k: v for k, v in (data or {}).items() if k in valid_keys}
+    # The 'lpf' mode was removed in v1.x — coerce any legacy value to 'lopf'.
+    if clean.get("mode") == "lpf":
+        clean["mode"] = "lopf"
+    return SolverConfig(**clean)
+
+
 def _unique_project_name(base: str) -> str:
     """
     Return `base`, or `base 2` / `base 3` / … if a non-empty project of
@@ -538,7 +566,14 @@ def _unique_project_name(base: str) -> str:
         d = PROJECTS_DIR / candidate
         if not d.is_dir() or not (d / "network.nc").exists():
             return candidate
-        if _read_meta(d).get("bus_count", 0) == 0:
+        # Reuse the dir ONLY when its metadata PARSED and explicitly reports an
+        # empty network. `_read_meta` returns {} when metadata.json is missing
+        # or corrupt — the old `.get("bus_count", 0) == 0` treated that as
+        # "empty" and silently overwrote a real project whose metadata merely
+        # failed to parse (a data-loss path). Requiring a truthy `meta` makes a
+        # corrupt-metadata project fall through to a suffixed name instead.
+        meta = _read_meta(d)
+        if meta and meta.get("bus_count", None) == 0:
             return candidate
         candidate = f"{base} {suffix}"
         suffix += 1
@@ -587,6 +622,8 @@ def create_from_template(template_id: str, name: str | None = None):
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             n.import_from_netcdf(str(dest / "network.nc"))
+        # Bind identity atomically with the swap (see load_project rationale).
+        PyPSAService.set_loaded_project(target_name)
 
     # Templates ship without user_ts / solver_config — reset both to defaults
     # so no stale state from a previously-open project leaks into the new one.
@@ -602,6 +639,7 @@ def create_from_template(template_id: str, name: str | None = None):
 
     n = PyPSAService.get_network()
     n.name = target_name
+    # The authoritative loaded-project binding was set inside the swap lock above.
     _reapply_user_ts_to_network(n)
 
     _write_meta(dest, {
@@ -645,6 +683,8 @@ def save_project(
     objective: float | None = None,
     force: bool = False,
     clear_undo: bool = True,
+    expect: str | None = None,
+    rebind: bool = False,
     *,
     parent_project_override: str | None = None,
     scenario_description_override: str | None = None,
@@ -652,6 +692,28 @@ def save_project(
 ):
     """
     Persist the in-memory network to ``projects/<name>/``.
+
+    Identity guard (``expect``): a caller that is saving what it believes is
+    the *active* project (autosave, explicit Ctrl+S) passes ``expect=<that
+    project>``. If the backend's in-memory network is actually bound to a
+    DIFFERENT project (it was swapped by a load in another browser tab, an
+    external client, or any flow the caller didn't account for), the save is
+    refused with 409 rather than serialising the wrong network under ``name``
+    — the cross-project overwrite that destroyed a project on 2026-05-28.
+    The check reads the binding under ``get_lock()``, atomically with respect
+    to the network swap that loads perform. Callers that intentionally write
+    under a different name (Save a Copy, first save of a new project,
+    ``create_scenario``) simply omit ``expect``.
+
+    Rebind (``rebind``): set True when this save should make ``name`` the
+    backend's loaded project going forward — i.e. the caller will treat
+    ``name`` as the active project after the save (Save-As to a new name,
+    cloning a project, first save of a new network). The in-memory network has
+    just been written to ``name``'s folder, so binding to ``name`` is always
+    consistent with disk. Save-a-Copy leaves ``rebind`` False so the live
+    network stays bound to the ORIGINAL project (the only valid autosave
+    target); without this the post-Save-As autosave/Ctrl+S would 409 forever
+    against the stale old binding until the user reloaded.
 
     Scenario-tree fields: when ``apply_overrides=True`` the two `*_override`
     kwargs replace the values that would otherwise round-trip from existing
@@ -682,43 +744,86 @@ def save_project(
 
     dest = _safe_project_dir(name)
     dest.mkdir(parents=True, exist_ok=True)
-    n = PyPSAService.get_network()
-
-    # Safety: never silently overwrite a project that had data with an empty
-    # network.  This prevents autosave from corrupting a project after a server
-    # restart, when the in-memory network is blank but currentProject is still
-    # set in the browser's localStorage.  Pass ?force=true to bypass (used by
-    # the "New Project" flow when the user explicitly chooses to overwrite).
     nc_path = dest / "network.nc"
-    if not force and nc_path.exists() and n.buses.empty:
-        existing_meta = _read_meta(dest)
-        if existing_meta.get("bus_count", 0) > 0:
-            raise HTTPException(
-                409,
-                f"Refusing to overwrite project '{name}' "
-                f"({existing_meta['bus_count']} buses) with an empty network. "
-                "Load the project first or reset it explicitly.",
-            )
-
-    # Ensure time series round-trip correctly:
-    # 1. Backup any imported-network ts into _user_ts (skips all-NaN and existing good entries)
-    # 2. Reapply _user_ts to the network so the .nc captures current profiles
-    # 3. THEN export — the .nc now contains correct data
     from routers.network import (
         _backup_network_ts_to_user_ts,
         _reapply_user_ts_to_network,
         _serialize_user_ts,
     )
-    _backup_network_ts_to_user_ts(n)
-    _reapply_user_ts_to_network(n)
 
-    # All three writes use atomic replace so a crash mid-save leaves the
-    # previous version of the file intact instead of a half-written one.
-    # Hold the netcdf I/O lock for the export — concurrent compare-state /
-    # results-summary reads on other projects share HDF5 global state and
-    # would race ("NetCDF: HDF error") without serialization.
-    with PyPSAService.get_netcdf_io_lock():
-        _atomic_write_with(nc_path, lambda p: n.export_to_netcdf(str(p)))
+    # Identity guard + atomic export. The identity check, the network capture,
+    # the empty-network safety check, the time-series reapply, the netcdf
+    # export, and the first-save claim ALL run under ONE `get_lock()`
+    # acquisition. This guarantees the bytes written under `name` are the very
+    # network whose identity the guard approved: a concurrent load swaps the
+    # network AND re-binds `_loaded_project` under the same lock, so it cannot
+    # interleave between the guard passing and the export — closing the
+    # cross-project overwrite race (2026-05-28 incident) even against a second
+    # client/tab. The netcdf I/O lock nests INSIDE (pypsa_lock OUTER,
+    # netcdf_io_lock INNER — the documented order) to keep the HDF5 write
+    # serialised against concurrent compare-state / results-summary reads.
+    with PyPSAService.get_lock():
+        # `expect` lets a caller assert which project it believes is active
+        # (autosave, explicit Ctrl+S). Refuse only when it asserted an identity
+        # AND the backend is bound to a genuinely DIFFERENT project. `loaded is
+        # None` (fresh / unbound network) falls through — the claim at the end
+        # of this block establishes the binding.
+        loaded = PyPSAService.get_loaded_project()
+        if expect is not None and loaded is not None and expect != loaded:
+            raise HTTPException(
+                409,
+                f"Backend network is bound to project '{loaded}', not "
+                f"'{expect}'. It was loaded/swapped out from under this client "
+                f"(another tab, an external client, or a load that bypassed "
+                f"this save's caller). Refusing to overwrite '{name}' with the "
+                f"wrong network. Reload '{expect}' to resync, then retry.",
+            )
+        n = PyPSAService.get_network()
+
+        # Safety: never silently overwrite a project that had data with an
+        # empty network. Guards autosave after a server restart, when the
+        # in-memory network is blank but currentProject is still set in the
+        # browser's localStorage. ?force=true bypasses (the "New Project"
+        # overwrite flow).
+        if not force and nc_path.exists() and n.buses.empty:
+            existing_meta = _read_meta(dest)
+            if existing_meta.get("bus_count", 0) > 0:
+                raise HTTPException(
+                    409,
+                    f"Refusing to overwrite project '{name}' "
+                    f"({existing_meta['bus_count']} buses) with an empty network. "
+                    "Load the project first or reset it explicitly.",
+                )
+
+        # Ensure time series round-trip correctly:
+        # 1. Backup any imported-network ts into _user_ts (skips all-NaN/existing)
+        # 2. Reapply _user_ts so the .nc captures current profiles
+        # 3. THEN export — the .nc now contains correct data
+        _backup_network_ts_to_user_ts(n)
+        _reapply_user_ts_to_network(n)
+
+        # Atomic replace so a crash mid-save leaves the previous file intact.
+        with PyPSAService.get_netcdf_io_lock():
+            _atomic_write_with(nc_path, lambda p: n.export_to_netcdf(str(p)))
+
+        # Bind/claim — atomic with the export, keyed off the binding read at the
+        # top of THIS lock block (it can't have changed; we hold the lock
+        # throughout). Two cases bind the network to `name`:
+        #   • `loaded is None` — first-save CLAIM of a fresh/unbound network.
+        #   • `rebind` — the caller is making `name` the active project under a
+        #     possibly-different prior binding (Save-As, clone). We just wrote
+        #     the in-memory network to `name`'s folder, so binding to `name` is
+        #     consistent with disk.
+        # A save under `name` while ALREADY bound elsewhere WITHOUT rebind
+        # (Save a Copy, create_scenario writing the base network under a new
+        # scenario name) leaves the binding untouched — the live network still
+        # belongs to its original project, the only valid autosave target.
+        if loaded is None or rebind:
+            PyPSAService.set_loaded_project(name)
+            try:
+                n.name = name
+            except Exception:
+                pass
 
     # Save solver config if present
     from routers.simulation import _state
@@ -898,26 +1003,22 @@ def load_project(name: str) -> ImportSummary:
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             n.import_from_netcdf(str(nc_path))
+        # Bind identity atomically with the swap — inside the SAME lock that
+        # `reset_network()` just set to None. Otherwise a concurrent save could
+        # observe the transient unbound state (loaded is None) and wrongly
+        # claim/overwrite. `n.name` (display) is set below; this binding is the
+        # authoritative signal the save-time `expect` guard enforces against.
+        PyPSAService.set_loaded_project(name)
 
     cfg_path = src / "solver_config.json"
     if cfg_path.exists():
-        from services.solver_service import SolverConfig
-
         from routers.simulation import _state
         data = json.loads(cfg_path.read_text())
-        # Older `solver_config.json` files don't contain fields added after
-        # they were saved. Build by filtering against the live dataclass spec
-        # AND merging over defaults, so a missing key picks up the current
-        # default rather than erroring (unknown keys would otherwise be
-        # silently dropped by Pydantic but raise TypeError on the dataclass).
-        from dataclasses import fields as _dc_fields
-        valid_keys = {f.name for f in _dc_fields(SolverConfig)}
-        clean = {k: v for k, v in data.items() if k in valid_keys}
-        # The 'lpf' mode was removed in v1.x — coerce any legacy value to
-        # 'lopf' so old project files still load. Same defaults otherwise.
-        if clean.get("mode") == "lpf":
-            clean["mode"] = "lopf"
-        _state["solver_config"] = SolverConfig(**clean)
+        # Shared legacy-tolerant loader: filter to the live dataclass field set
+        # (a missing key picks up the current default; unknown keys would
+        # otherwise raise TypeError) and coerce removed enum values. Same path
+        # import_bundle uses, so both routes accept old files identically.
+        _state["solver_config"] = _solver_config_from_dict(data)
 
     # Hydrate simulation state from metadata when the saved network has
     # dispatch tables. Without this, even though `n.generators_t.p` etc. are
@@ -936,7 +1037,14 @@ def load_project(name: str) -> ImportSummary:
     # (see F11 / G2). Without this, header could briefly display
     # "Completed €n/a" or "Idle €123M" at the load instant.
     from routers.simulation import _state_update as _sim_state_update
-    if has_dispatch and meta.get("has_results"):
+    # Gate on `has_dispatch` ALONE — it's computed from the actual loaded
+    # network DataFrames (authoritative), whereas `meta["has_results"]` is a
+    # cached flag that can drift stale (e.g. a hand-edited / older bundle, or a
+    # save that didn't refresh it). The old `and meta.get("has_results")`
+    # AND-gate let a stale/absent flag suppress genuinely-present dispatch,
+    # leaving the GUI showing "idle" on a solved project. Metadata is still
+    # used for the display-only objective/condition/solve_time values.
+    if has_dispatch:
         _sim_state_update(
             status="completed",
             condition=meta.get("condition") or "optimal",
@@ -973,7 +1081,8 @@ def load_project(name: str) -> ImportSummary:
     with PyPSAService.get_lock():
         _ensure_snapshots_cover_user_ts(n)
     # Surface the project name to the GUI's StatusBar (which reads n.name via
-    # /network/meta).
+    # /network/meta). The authoritative loaded-project binding was already set
+    # atomically inside the swap lock above.
     n.name = name
     # Re-apply restored profiles to the network's _t tables (aligned to current
     # snapshots) so that simulation picks up the correct time series.
@@ -1251,18 +1360,28 @@ def rename_project(name: str, req: RenameProjectRequest) -> ProjectInfo:
                 f"next save will rewrite it.",
             )
 
-    # 3) Sync the in-memory n.name if the renamed project is active. Without
-    # this, the next autosave would persist into a project DIRECTORY named
+    # 3) Sync the in-memory n.name AND the authoritative loaded-project
+    # identity if the renamed project is the active one. Without the n.name
+    # sync, the next autosave would persist into a project DIRECTORY named
     # `new_name` but with `n.name == old_name` baked into the netcdf — an
     # inconsistency that surfaces months later when `load_project` stamps
     # `n.name = <dir_name>` and the user wonders why exports show "old_name".
+    # Re-binding `_loaded_project` keeps the save-time `expect` guard accepting
+    # the new name (the on-disk folder moved); without it, an autosave under
+    # `new_name` would 409 against the stale `old_name` binding.
     with PyPSAService.get_lock():
         n = PyPSAService.get_network()
-        if getattr(n, "name", None) == name:
+        # Key off the AUTHORITATIVE binding, not the mutable display `n.name`.
+        # If the renamed project is the loaded one, follow both the binding and
+        # the display title to the new name. Gating on `n.name == name` too
+        # would wrongly rebind an UNBOUND network (e.g. a raw netcdf import)
+        # whose display title happened to match the renamed folder.
+        if PyPSAService.get_loaded_project() == name:
             try:
                 n.name = new_name
             except Exception:
                 pass
+            PyPSAService.set_loaded_project(new_name)
 
     # 4) Reparent direct children. We only touch direct children because
     # `parent_project` is a single-level pointer — descendants reference
@@ -1666,8 +1785,10 @@ def _build_snapshot_weights(n, column: str = "objective") -> pd.Series:
         column diverges from the Results tab whenever the two columns differ
         (e.g. representative-week runs).
 
-    Falls back to 1.0 per snapshot if either weight series is missing or
-    misshapen — a malformed netcdf shouldn't take the comparison view down.
+    Falls back to the ``objective`` column, then to 1.0 per snapshot, if the
+    requested column is missing or misshapen — so an older netcdf without a
+    ``generators`` column behaves exactly as before, and a malformed netcdf
+    still can't take the comparison view down.
     """
     import pandas as pd
     sns = n.snapshots
@@ -2685,7 +2806,11 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
     import math as _math
     if not has_solve:
         return EmissionsComparison()
-    weights = _build_snapshot_weights(n)
+    # ENERGY basis (generators): emissions = dispatch × factor, and the dispatch
+    # denominator must match _compute_dispatch_summary (also generators) so the
+    # two Compare views — and the Results /emissions endpoint — reconcile. The
+    # whole function is energy; there is no cost term here.
+    weights = _build_snapshot_weights(n, "generators")
     sns = n.snapshots
     co2_map = _co2_intensity_map(n)
     if not co2_map:
@@ -2768,10 +2893,15 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     For each generator/storage_unit in the network, accumulate four
     quantities into a per-carrier bucket:
 
-      * dispatch (MWh)    — Σ p × snapshot_weight × period_year
-      * revenue (€)       — Σ p × bus_marginal_price × weight
-      * opex   (€)        — Σ p × marginal_cost × weight
+      * dispatch (MWh)    — Σ p × generators_weight × period_year (ENERGY basis)
+      * revenue (€)       — Σ p × bus_marginal_price × objective_weight
+      * opex   (€)        — Σ p × marginal_cost × objective_weight
       * capex  (€/yr)     — p_nom_opt × annuitised_capital_cost
+
+    Energy (dispatch_mwh) is weighted by ``snapshot_weightings.generators``;
+    cost quantities by ``snapshot_weightings.objective``. See the weight setup
+    below — this keeps the per-carrier GWh equal to the Compare Dispatch tab and
+    n.statistics(), while LCOE's numerator stays on the cost basis.
 
     LCOE per carrier is then computed POST-roll-up:
       ``LCOE = (Σ capex + Σ opex) / Σ dispatch_MWh``
@@ -2795,7 +2925,16 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     if not has_solve:
         return EconomicsComparison()
 
-    weights = _build_snapshot_weights(n)
+    # COST quantities (opex, revenue, curtailment, lost-load, storage charge
+    # cost) use the `objective` weighting column; ENERGY quantities
+    # (dispatch_mwh — the LCOE denominator) use `generators`, matching PyPSA's
+    # n.statistics() and the Compare Dispatch tab (_compute_dispatch_summary).
+    # When the two columns are equal (the common single-weight case) these are
+    # identical; they diverge only under representative-week weighting, where
+    # energy must follow `generators` or the Economics-tab GWh disagree with the
+    # Dispatch tab for the same carrier.
+    weights = _build_snapshot_weights(n)                       # objective → COST
+    energy_weights = _build_snapshot_weights(n, "generators")  # generators → ENERGY
     sns = n.snapshots
     # Per-snapshot bus marginal price — needed for revenue. Average across
     # buses is wrong for locational pricing; use each generator's home bus.
@@ -3015,11 +3154,11 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             if is_storage_carrier:
                 discharge_series = series.clip(lower=0)
                 charge_series = (-series).clip(lower=0)
-                weighted = discharge_series * weights
+                weighted = discharge_series * energy_weights
             else:
                 discharge_series = series
                 charge_series = None
-                weighted = series * weights
+                weighted = series * energy_weights
             mwh_total = float(weighted.sum())
             if not _math.isfinite(mwh_total):
                 continue
@@ -3180,15 +3319,28 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         storage_charge_m = _to_meur(agg.get("storage_charge_cost_eur") or {"total": 0.0, "by_period": {}})
         curtailment_m = _to_meur(agg.get("curtailment_cost_eur") or {"total": 0.0, "by_period": {}})
         lost_load_m = _to_meur(agg.get("lost_load_cost_eur") or {"total": 0.0, "by_period": {}})
-        # LCOE €/MWh = (capex_eur + opex_eur) / dispatch_MWh.
+        # LCOE €/MWh = (capex_eur + CASH opex_eur) / dispatch_MWh, where CASH
+        # opex EXCLUDES the curtailment + lost-load PENALTIES. Those are
+        # non-cash modelling soft-constraints (curtailment_cost discourages
+        # spilling renewables; VOLL prices unserved demand) — not real operating
+        # expenses — so they don't belong in a levelised generation cost. This
+        # matches the per-asset Results LCOE/LCOS (asset_economics uses
+        # fixed + vom [+ charge] only), so e.g. "solar LCOE" reads identically
+        # on the Results and Compare tabs. The penalties stay visible in
+        # opex_meur (total) and their own split buckets — just not in the ratio.
         def _lcoe(capex_eur: float, opex_eur: float, dispatch_mwh: float) -> float:
             return (capex_eur + opex_eur) / dispatch_mwh if dispatch_mwh > 1e-9 else 0.0
-        lcoe_total = _lcoe(agg["capex_eur"]["total"], agg["opex_eur"]["total"], agg["dispatch_mwh"]["total"])
+        _curt_b = agg.get("curtailment_cost_eur") or {"total": 0.0, "by_period": {}}
+        _ll_b = agg.get("lost_load_cost_eur") or {"total": 0.0, "by_period": {}}
+        cash_opex_total = agg["opex_eur"]["total"] - _curt_b["total"] - _ll_b["total"]
+        lcoe_total = _lcoe(agg["capex_eur"]["total"], cash_opex_total, agg["dispatch_mwh"]["total"])
         lcoe_pp: dict[str, float] = {}
         for p, mwh in agg["dispatch_mwh"]["by_period"].items():
             capex_pp = agg["capex_eur"]["by_period"].get(p, 0.0)
-            opex_pp  = agg["opex_eur"]["by_period"].get(p, 0.0)
-            lcoe_pp[p] = _lcoe(capex_pp, opex_pp, mwh)
+            cash_opex_pp = (agg["opex_eur"]["by_period"].get(p, 0.0)
+                            - _curt_b["by_period"].get(p, 0.0)
+                            - _ll_b["by_period"].get(p, 0.0))
+            lcoe_pp[p] = _lcoe(capex_pp, cash_opex_pp, mwh)
 
         out[c] = CarrierEconomics(
             revenue_meur=CarrierPeriodValue(**rev_m),
@@ -3376,7 +3528,12 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
     if not has_solve:
         return CurtailmentComparison()
 
-    weights = _build_snapshot_weights(n)
+    # ENERGY basis (generators): curtailment and available energy are MWh, so
+    # they must use the same basis as the Compare Dispatch tab
+    # (_compute_dispatch_summary, also generators) — otherwise curtailment GWh
+    # disagrees with dispatch GWh under representative-week weighting. Whole
+    # function is energy; no cost term.
+    weights = _build_snapshot_weights(n, "generators")
     sns = n.snapshots
 
     curt_by_carrier: dict = {}
@@ -3566,7 +3723,10 @@ def _compute_lost_load_summary(
     # set, reindex drops orphans and inserts zeros for missing — defensively
     # consistent rather than crashing.
     import math as _math
-    weights = _build_snapshot_weights(n)
+    # ENERGY basis (generators): lost-load is shed energy (MWh), so weight it on
+    # the same basis as dispatch/served-load rather than the cost column. Whole
+    # function is energy (× VOLL only for the derived € cost, applied after).
+    weights = _build_snapshot_weights(n, "generators")
     sns = n.snapshots
     try:
         df_aligned = df.reindex(sns).fillna(0.0).astype(float)

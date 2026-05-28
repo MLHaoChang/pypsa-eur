@@ -156,7 +156,14 @@ export async function saveProjectQuietly(name: string, clearUndo = false): Promi
     return false
   }
   try {
-    const res = await projectsApi.save(name, false, clearUndo)
+    // Assert identity when saving what we believe is the ACTIVE project: the
+    // backend refuses (409) if its in-memory network is actually bound to a
+    // different project. Both callers of this helper save `currentProject`, so
+    // name === currentProject here — but derive it defensively rather than
+    // assume. Omit `expect` when saving under a different name (no caller does
+    // today, but keeps the helper honest).
+    const expect = name === useUIStore.getState().currentProject ? name : undefined
+    const res = await projectsApi.save(name, false, clearUndo, expect)
     appLog('INFO', `Auto-saved '${name}' (${res.ts_columns_saved} ts cols)`)
     // Flush the diagram layout (node positions + edge waypoints) to
     // layout.json AFTER the network save — the project directory must

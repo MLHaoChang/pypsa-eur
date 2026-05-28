@@ -298,7 +298,14 @@ export default function AppHeader() {
   }, [])
   const saveMut = useMutation({
     mutationFn: async (name: string) => {
-      const result = await projectsApi.save(name, false, true)
+      // Assert identity when re-saving the ACTIVE project so the backend
+      // refuses (409) if its in-memory network was swapped to a different
+      // project. A "Save As" (name !== currentProject) omits expect so the
+      // write under the new name is allowed. rebind=true because onSuccess
+      // promotes the saved name to the active project (first-save / Save-As) —
+      // the backend must follow so subsequent saves don't 409 on a stale bind.
+      const expect = name === currentProject ? name : undefined
+      const result = await projectsApi.save(name, false, true, expect, true)
       // Flush the diagram layout (node positions + edge waypoints) to
       // layout.json AFTER the network save. Order matters: the project
       // directory must exist on disk before PUT /projects/{name}/layout

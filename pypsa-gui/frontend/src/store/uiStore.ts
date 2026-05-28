@@ -47,8 +47,13 @@ const LAST_SAVED_KEY = 'network-diagram:last-saved'
 const RECENTS_KEY = 'network-diagram:recents'
 const THEME_KEY = 'network-diagram:theme'
 const DENSITY_KEY = 'network-diagram:density'
+const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
+const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 
 const RECENTS_MAX = 5
+// Floor for the docked comparison rail width — keeps both the rail and the
+// live Results pane usable when the splitter is dragged to an extreme.
+const COMPARE_RAIL_MIN_W = 360
 
 function storedSidebarMode(): SidebarMode {
   try {
@@ -111,6 +116,18 @@ function storedDensity(): Density {
     if (v === 'comfortable' || v === 'compact') return v
   } catch { /* noop */ }
   return 'comfortable'
+}
+
+function storedCompareRailOpen(): boolean {
+  try { return localStorage.getItem(COMPARE_RAIL_KEY) === 'true' } catch { return false }
+}
+
+function storedCompareRailWidth(): number {
+  try {
+    const v = Number(localStorage.getItem(COMPARE_RAIL_WIDTH_KEY))
+    if (Number.isFinite(v) && v >= COMPARE_RAIL_MIN_W) return v
+  } catch { /* noop */ }
+  return 560
 }
 
 function persistOpenTabs(tabs: string[]) {
@@ -186,6 +203,19 @@ interface UIStore {
   canvasMode: CanvasMode
   canvasView: CanvasView
   activeSlidePanel: SlidePanel | null
+  // True while a project switch/load is mid-flight (between the moment the
+  // backend starts swapping the in-memory network and the moment
+  // currentProject is updated to the new project). Autosave checks this and
+  // skips, so a periodic tick landing in that window can't serialise the
+  // newly-loaded network under the OLD project's name (silent cross-project
+  // overwrite). In-memory only; defaults false.
+  projectSwitchInProgress: boolean
+  // Docked comparison rail (lives inside the Results view). Independent of
+  // activeSlidePanel so the A-vs-B CompareView can coexist with the live
+  // Results tabs and persist across result-tab switches until explicitly
+  // closed. Both flags are localStorage-backed so the rail survives reloads.
+  compareRailOpen: boolean
+  compareRailWidth: number
   bottomTabRequest: string | null
   currentProject: string | null
   autosaveEnabled: boolean
@@ -228,6 +258,10 @@ interface UIStore {
   setCanvasMode: (mode: CanvasMode) => void
   setCanvasView: (view: CanvasView) => void
   setSlidePanel: (p: SlidePanel | null) => void
+  setProjectSwitchInProgress: (v: boolean) => void
+  setCompareRailOpen: (v: boolean) => void
+  toggleCompareRail: () => void
+  setCompareRailWidth: (px: number) => void
   requestBottomTab: (tab: string) => void
   clearBottomTabRequest: () => void
   setCurrentProject: (name: string | null) => void
@@ -263,6 +297,9 @@ export const useUIStore = create<UIStore>((set) => ({
   canvasMode: 'select',
   canvasView: storedCanvasView(),
   activeSlidePanel: null,
+  projectSwitchInProgress: false,
+  compareRailOpen: storedCompareRailOpen(),
+  compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   currentProject: storedCurrentProject(),
   autosaveEnabled: storedAutosave(),
@@ -338,6 +375,21 @@ export const useUIStore = create<UIStore>((set) => ({
     set({ canvasView: view })
   },
   setSlidePanel: (p) => set({ activeSlidePanel: p }),
+  setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
+  setCompareRailOpen: (v) => {
+    try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
+    set({ compareRailOpen: v })
+  },
+  toggleCompareRail: () => set(s => {
+    const next = !s.compareRailOpen
+    try { localStorage.setItem(COMPARE_RAIL_KEY, next ? 'true' : 'false') } catch { /* noop */ }
+    return { compareRailOpen: next }
+  }),
+  setCompareRailWidth: (px) => {
+    const w = Math.max(COMPARE_RAIL_MIN_W, Math.round(px))
+    try { localStorage.setItem(COMPARE_RAIL_WIDTH_KEY, String(w)) } catch { /* noop */ }
+    set({ compareRailWidth: w })
+  },
   requestBottomTab: (tab) => set({ bottomTabRequest: tab }),
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
   setCurrentProject: (name) => {

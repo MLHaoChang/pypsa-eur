@@ -389,6 +389,12 @@ def run_simulation(
     tmp_log = pathlib.Path(tempfile.mktemp(suffix=".log"))
     tail_stop = threading.Event()
     tail_thread: threading.Thread | None = None
+    # Always-bound so the outer except handlers can revert the modelling
+    # transforms even when an exception fires in the window between
+    # `_apply_modelling_assumptions` and the solve try/finally (an abort at the
+    # pre-LP checkpoint, or presolve/MIP option resolution). Reassigned to a
+    # once-guarded wrapper after the apply; stays None on the PF path / pre-apply.
+    restore_modelling = None
     try:
         # Compile user code + curtailment wrapper INSIDE the try so a
         # ValueError (e.g. user-code disabled gate) or SyntaxError gets
@@ -531,7 +537,24 @@ def run_simulation(
                 # writes originals and re-solves don't double-apply.
                 # `captured` collects solve-only data (VOLL slack dispatch)
                 # that the restore step would otherwise wipe.
-                restore_modelling, captured = _apply_modelling_assumptions(network, config, phase)
+                _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
+                # Once-guarded restore wrapper. The network now carries the LP
+                # transforms; restore MUST run exactly once before the network
+                # can be serialised. The solve try/finally below calls this on
+                # the normal/solve-error path, and the outer except handlers
+                # call it too — the guard makes a double-call a no-op and (more
+                # importantly) guarantees restore even if the window between
+                # here and that try raises (abort checkpoint, presolve/MIP
+                # resolution) and skips the inner finally entirely.
+                _restore_done = {"v": False}
+
+                def _guarded_restore() -> None:
+                    if _restore_done["v"]:
+                        return
+                    _restore_done["v"] = True
+                    _real_restore()
+
+                restore_modelling = _guarded_restore
                 # Clear any stale loss DataFrames from a previous solve. PyPSA
                 # only writes `lines_t.loss` / `transformers_t.loss` when the LP
                 # is built with transmission_losses=True; toggling the kwarg
@@ -886,13 +909,30 @@ def run_simulation(
                         log_queue.put(f"TRACEBACK: {line}")
                     condition = f"{condition}; ac_pf_failed: {exc}"
     except SolveAborted as exc:
-        # Clean user-requested abort. The finally chain of the inner `with
-        # lock:` block already ran restore_modelling(), so the network is
-        # back to its pre-LP state. Don't dump a traceback — abort is
-        # intentional control flow, not an error.
+        # Clean user-requested abort. Revert the modelling transforms here too:
+        # if the abort fired at the pre-LP checkpoint (before the solve
+        # try/finally was entered) the inner finally never ran, so call the
+        # once-guarded restore to guarantee the network is back to its pre-LP
+        # state before any autosave can persist vintage rows / VOLL slacks /
+        # rebased build-years. Idempotent — a no-op if the inner finally
+        # already restored. Don't dump a traceback — abort is intentional.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after abort failed: {_rexc}")
         log_queue.put(f"[PHASE] Aborted by user at: {exc}. Modelling assumptions reverted.")
         status, condition = "aborted", f"user_aborted:{exc}"
     except Exception as exc:
+        # Revert modelling transforms FIRST — a failure in the window between
+        # _apply_modelling_assumptions and the solve try/finally skips the
+        # inner finally, and the network must not be autosaved carrying
+        # transient LP transforms. Once-guarded → no-op if already restored.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after error failed: {_rexc}")
         import traceback as _tb
         tb_str = _tb.format_exc()
         log_queue.put(f"[PHASE] Failed: {exc}")

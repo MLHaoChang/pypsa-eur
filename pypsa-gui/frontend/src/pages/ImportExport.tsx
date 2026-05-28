@@ -123,6 +123,16 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
       if (name && name !== currentProject) {
         setCurrentProject(name)
         setProjectName(name)
+      } else if (!name && currentProject) {
+        // Raw network import (.nc / .xlsx / .csv / .m): the in-memory network
+        // was REPLACED with content that belongs to no saved project — the
+        // backend leaves its loaded-project binding unbound (None). Clear the
+        // active project so the 5-min autosave (which bails when currentProject
+        // is null) can't CLAIM and overwrite the previously-active project's
+        // folder with this freshly-imported network. The user must explicitly
+        // Save (As) to bind it to a project — that first-save claims it
+        // intentionally, not silently.
+        setCurrentProject(null)
       }
       onSuccess(s, pendingFileRef.current)
     },
