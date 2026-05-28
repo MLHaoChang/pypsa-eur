@@ -946,31 +946,51 @@ function DurationCurveChart({
       [bName]: b[i] ?? null,
     }))
   }, [a, b, aName, bName])
-  // Y-axis clipping: when the top sample (percentile 0) exceeds the second
-  // sample by > 5× AND > €1000, treat it as a scarcity spike outlier. Clip
-  // the visible band to the second sample so the rest of the curve isn't
-  // visually compressed. The absolute max stays visible in the side badge.
+  // Y-axis clipping to the [p1, p99] band (as the subtitle promises). LP duals
+  // at binding constraints / VOLL can spike to millions or hundreds of millions
+  // €/MWh, and there can be MORE THAN ONE such spike — so the old "clip to the
+  // 2nd-highest sample" rule failed (top2 was itself a spike, leaving the axis
+  // spanning hundreds of millions and the real curve invisible). Percentile
+  // clipping is robust to any number of tail outliers. The absolute extremes
+  // stay visible in the side badges.
   // `domain` returned as a Recharts-compatible [number|'auto', number|'auto'].
   const yDomain = useMemo((): [number | 'auto', number | 'auto'] => {
     const samples: number[] = []
     for (const arr of [a, b]) {
       for (const v of arr) if (Number.isFinite(v)) samples.push(v)
     }
-    if (samples.length < 3) return ['auto', 'auto']
-    // Sort descending and check spike condition.
-    const sortedDesc = [...samples].sort((x, y) => y - x)
-    const top1 = sortedDesc[0]
-    const top2 = sortedDesc[Math.min(1, sortedDesc.length - 1)]
-    const isSpike = top1 > 1000 && top2 > 0 && top1 > top2 * 5
-    if (!isSpike) return ['auto', 'auto']
-    const minVal = sortedDesc[sortedDesc.length - 1]
-    // 10 % headroom above the clipped top so the highest non-outlier line
-    // doesn't graze the chart edge.
-    const high = top2 * 1.1
-    const low = Math.min(0, minVal * 1.1)
+    if (samples.length < 5) return ['auto', 'auto']
+    const asc = [...samples].sort((x, y) => x - y)
+    const quantile = (p: number): number => {
+      const idx = (asc.length - 1) * p
+      const lo = Math.floor(idx), hi = Math.ceil(idx)
+      return lo === hi ? asc[lo] : asc[lo] + (asc[hi] - asc[lo]) * (idx - lo)
+    }
+    const p99 = quantile(0.99)
+    const p01 = quantile(0.01)
+    const top = asc[asc.length - 1]
+    const bot = asc[0]
+    const band = Math.max(p99 - p01, 1)
+    // Only clip when an extreme sits FAR outside the central band (a genuine
+    // spike) — otherwise let recharts auto-fit so normal price ranges fill
+    // the chart.
+    const spikeHigh = (top - p99) > band
+    const spikeLow = (p01 - bot) > band
+    if (!spikeHigh && !spikeLow) return ['auto', 'auto']
+    const high = spikeHigh ? p99 + 0.1 * band : top
+    const low = spikeLow ? p01 - 0.1 * band : Math.min(0, bot)
     return [low, high]
   }, [a, b])
   const isClipped = yDomain[0] !== 'auto'
+  // Compact €/MWh tick labels — k/M suffixes keep the axis readable and
+  // prevent raw 9-digit numbers when a (clipped-out) spike widens the domain.
+  const yTickFmt = (v: number): string => {
+    if (!Number.isFinite(v)) return ''
+    const a = Math.abs(v)
+    if (a >= 1e6) return `${(v / 1e6).toFixed(1)}M`
+    if (a >= 1e3) return `${(v / 1e3).toFixed(1)}k`
+    return v.toFixed(0)
+  }
   // Annotation strip — show A's and B's absolute extremes as small badges.
   const fmt = (v: number | undefined) =>
     typeof v === 'number' && Number.isFinite(v)
@@ -987,6 +1007,7 @@ function DurationCurveChart({
             <YAxis tick={{ fontSize: 11 }}
                    domain={yDomain}
                    allowDataOverflow={isClipped}
+                   tickFormatter={yTickFmt}
                    label={{ value: '€/MWh', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: '#888' } }} />
             <Tooltip
               contentStyle={{ fontSize: 11 }}
