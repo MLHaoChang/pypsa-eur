@@ -3,6 +3,62 @@ SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pyps
 SPDX-License-Identifier: CC-BY-4.0
 -->
 
+# PyPSA GUI — an interactive workbench for PyPSA
+
+> This repository is a fork of **PyPSA-Eur** that adds **PyPSA GUI**, a
+> graphical web application for building, solving and analysing
+> [PyPSA](https://pypsa.org) energy-system networks **without writing Python**.
+> The original PyPSA-Eur model and documentation are preserved in full
+> [below](#pypsa-eur-a-sector-coupled-open-optimisation-model-of-the-european-energy-system).
+
+**What it is.** A complete graphical front end on top of the PyPSA optimisation
+stack. Draw a grid on a schematic canvas or a geographic map, attach
+generators / storage / sector-coupling links, set up a multi-year investment
+problem, press **Run**, and explore the results — capacity expansion, hourly
+dispatch, economics, emissions, prices and load flow — all in the browser.
+Every action drives a live `pypsa.Network` on the server, so what you build is
+exactly what gets optimised, and the result views read straight back from
+PyPSA's solved data.
+
+**Highlights**
+
+- **Visual network builder** — schematic (React Flow) canvas *and* a geographic
+  (Leaflet) map; full CRUD for buses, lines, transformers, generators,
+  storage, stores, loads and **multi-port conversion links** (electrolysers,
+  heat pumps, CHP, power-to-X). Line lengths auto-update from coordinates.
+- **Spreadsheet-style editing** — per-component tables with inline + **bulk
+  edit**, search, sort, column toggles and CSV export.
+- **Time, snapshots & investment periods** — custom snapshot weightings,
+  representative-week sampling, per-asset time-series upload, and **multi-year
+  capacity expansion with per-vintage capacity bounds**.
+- **One-click optimisation** — solver/VOLL/CO₂/curtailment config, **pre-flight
+  validation**, **LOPF + optional AC power-flow**, and a **live streaming
+  solver log** with phase markers.
+- **Rich result explorer** — capacity (built vs brownfield), carrier-stacked
+  **dispatch** with cross-carrier link flows and weekly/monthly views,
+  **economics** (LCOE/LCOS/LCOH, OPEX/CAPEX, profit), emissions, nodal prices,
+  curtailment, lost load, storage cycling and load flow — all filterable by
+  carrier and investment period, exportable to SVG/CSV.
+- **Scenario compare** — two saved projects side by side across every metric.
+- **Projects & I/O** — save/load bundles; import/export NetCDF, CSV, MATPOWER.
+
+**Stack.** FastAPI backend wrapping a live `pypsa.Network` (PyPSA / linopy /
+HiGHS-Gurobi from the pixi env, with SSE log streaming) + a React 19 +
+TypeScript + Vite single-page app (React Query, Zustand, React Flow, Leaflet,
+recharts).
+
+**Run it** (Windows): `pypsa-gui/start.bat` → open http://localhost:5173.
+Or manually: `uvicorn main:app` in `pypsa-gui/backend` (:8000) and
+`npm run dev` in `pypsa-gui/frontend` (:5173).
+
+➡️ **Full GUI documentation — features, architecture, setup, workflow —**
+see [**`pypsa-gui/README.md`**](pypsa-gui/README.md).
+
+---
+
+*The remainder of this README is the upstream PyPSA-Eur documentation — the
+open model that PyPSA GUI sits on top of.*
+
 [![GitHub release (latest by date including pre-releases)](https://img.shields.io/github/v/release/pypsa/pypsa-eur?include_prereleases)](https://github.com/PyPSA/pypsa-eur/releases)
 [![Documentation](https://readthedocs.org/projects/pypsa-eur/badge/?version=latest)](https://pypsa-eur.readthedocs.io/en/latest/?badge=latest)
 [![Test workflows](https://github.com/pypsa/pypsa-eur/actions/workflows/test.yaml/badge.svg)](https://github.com/pypsa/pypsa-eur/actions/workflows/test.yaml)
