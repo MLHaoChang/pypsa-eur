@@ -2744,7 +2744,17 @@ def _compute_economics_summary(n, periods, is_multi, has_solve) -> EconomicsComp
     sns = n.snapshots
     # Per-snapshot bus marginal price — needed for revenue. Average across
     # buses is wrong for locational pricing; use each generator's home bus.
-    bus_prices = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
+    # Curtailment-cost-corrected bus marginal prices — the SAME merit-order
+    # correction the per-asset Results tab (asset_economics) applies, via a
+    # shared helper. Without it, storage charge-cost / revenue here priced
+    # against the raw (subsidy-distorted) dual, so the per-carrier LCOE diverged
+    # from the per-asset LCOS by the curtailment-subsidy term (battery 148 vs
+    # 153 EUR/MWh). Lazy import avoids the simulation<->projects import cycle.
+    try:
+        from routers.simulation import corrected_marginal_prices
+        bus_prices = corrected_marginal_prices(n)
+    except Exception:
+        bus_prices = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
 
     try:
         from routers.simulation import _state as _sim_state

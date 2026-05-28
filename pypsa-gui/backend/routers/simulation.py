@@ -3756,6 +3756,86 @@ def get_load_results(source: str = "lopf"):
         return _not_solved()
 
 
+def corrected_marginal_prices(n):
+    """
+    Bus marginal prices with the curtailment-cost subsidy distortion removed.
+
+    The curtailment_cost extra-functionality term adds ``-cost x p`` to the LP
+    objective for subsidised renewables, dragging the bus dual negative when
+    such a renewable sets the price. That's an LP-accounting artefact, not a
+    real price — anything trading against the bus (storage charging, revenue)
+    would otherwise see phantom negative prices. This restores the real price
+    (``marginal_cost``) at exactly the buses/snapshots where a subsidised
+    renewable is the dual-setting unit.
+
+    Single source of truth for the merit-order correction: used by
+    ``get_asset_economics`` (per-asset) AND by ``projects._compute_economics_summary``
+    (per-carrier Compare tab) so both price storage charging/revenue against the
+    SAME corrected dual. Returns a DataFrame indexed by snapshots, columns by
+    bus; falls back to raw (or zero) duals if anything goes wrong.
+    """
+    import pandas as _pd
+    try:
+        prices = _result_df(n, "buses_t", "marginal_price", "lopf")
+    except Exception:
+        prices = None
+    if prices is None or prices.empty:
+        return _pd.DataFrame(0.0, index=n.snapshots, columns=n.buses.index)
+    prices = prices.fillna(0.0)
+    try:
+        gens = n.generators
+        if (not gens.empty
+                and "curtailment_cost" in gens.columns
+                and not n.generators_t.p.empty):
+            subsidised = gens.index[gens["curtailment_cost"].fillna(0) > 0]
+            if len(subsidised) > 0:
+                p_gens = n.generators_t.p
+                p_max_pu_full = n.get_switchable_as_dense("Generator", "p_max_pu")
+                p_nom_opt = (gens["p_nom_opt"]
+                             if "p_nom_opt" in gens.columns
+                             else gens["p_nom"])
+                eps = 1e-6
+                dual_tol = 1.0  # EUR/MWh — LP duals are exact to numerical eps
+                by_bus: dict[str, list[tuple[str, float, float]]] = {}
+                for g in subsidised:
+                    if g not in p_gens.columns:
+                        continue
+                    bus = str(gens.at[g, "bus"])
+                    cost = float(gens.at[g, "curtailment_cost"])
+                    real_mc = float(gens.at[g, "marginal_cost"]) if "marginal_cost" in gens.columns else 0.0
+                    by_bus.setdefault(bus, []).append((g, cost, real_mc))
+                if by_bus:
+                    prices = prices.copy()
+                    for bus, members in by_bus.items():
+                        if bus not in prices.columns:
+                            continue
+                        for i in range(len(p_gens.index)):
+                            t = p_gens.index[i]
+                            raw_dual = float(prices.at[t, bus])
+                            for g, cost, real_mc in members:
+                                pv = float(p_gens.at[t, g])
+                                if pv <= eps:
+                                    continue
+                                effective_lp_mc = real_mc - cost
+                                if abs(raw_dual - effective_lp_mc) <= dual_tol:
+                                    prices.at[t, bus] = real_mc
+                                    break
+                                if raw_dual < effective_lp_mc - dual_tol:
+                                    try:
+                                        pmp = float(p_max_pu_full.at[t, g])
+                                        nom = float(p_nom_opt.get(g, 0.0))
+                                        ceiling = pmp * nom
+                                    except Exception:
+                                        ceiling = None
+                                    if ceiling is not None and ceiling > eps and abs(pv - ceiling) <= 1e-3 * max(ceiling, 1.0):
+                                        prices.at[t, bus] = real_mc
+                                        break
+                    prices = prices.fillna(0.0)
+    except Exception:
+        pass  # defensive — keep raw LP duals if adjustment fails
+    return prices
+
+
 @results_router.get("/asset_economics")
 def get_asset_economics():
     """
