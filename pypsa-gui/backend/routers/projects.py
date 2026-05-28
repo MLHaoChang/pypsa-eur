@@ -1472,10 +1472,28 @@ def get_compare_state(name: str) -> CompareState:
             lp_total = None
     except Exception:
         lp_total = None
-    # Prefer the live LP-side total over the cached meta value — meta was
-    # often saved with a partial (variable-only) objective, while the live
-    # network attributes have BOTH parts available.
-    display_objective = lp_total if lp_total is not None else meta.get("objective")
+    # Objective resolution. Two sources, each incomplete in a different mode:
+    #   • `lp_total` (= temp_n._objective + _objective_constant) recomputed from
+    #     the netcdf. For OVERNIGHT/PERFECT foresight this is the full objective;
+    #     for MYOPIC it's the LAST PERIOD ONLY (the horizon accumulator isn't
+    #     persisted in the netcdf), so it understates the true total.
+    #   • `meta["objective"]` saved at solve time from the live status — the
+    #     full-horizon value for myopic, but OLD bundles sometimes stored a
+    #     partial (variable-only, occasionally negative) value.
+    # Pick the LARGER of the two positive/finite candidates: for myopic this
+    # recovers the full horizon (meta 12.57 B vs lp_total 2.97 B); for the
+    # legacy partial-meta case the full lp_total wins. Falls back gracefully
+    # when only one is available.
+    import math as _math_obj
+    _meta_obj = meta.get("objective")
+    _obj_candidates = [
+        v for v in (lp_total, _meta_obj)
+        if isinstance(v, (int, float)) and _math_obj.isfinite(v) and v > 0
+    ]
+    if _obj_candidates:
+        display_objective = max(_obj_candidates)
+    else:
+        display_objective = lp_total if lp_total is not None else _meta_obj
 
     return CompareState(
         name=name,
@@ -2789,18 +2807,25 @@ def _compute_economics_summary(n, periods, is_multi, has_solve) -> EconomicsComp
     def _capex_commitment(cc_per_mw_yr: float, p_nom: float,
                           build_year, lifetime) -> tuple[float, dict[str, float]]:
         """
-        Annuitised CAPEX commitment across the horizon.
+        Annuitised CAPEX commitment across the horizon — FULL-HORIZON basis.
 
-        Returns ``(total_horizon_eur, by_period_eur)``.
+        Returns ``(total_horizon_eur, by_period_eur)`` where:
 
-          * ``total`` = annual_cost × Σ years_in_horizon_when_active
-          * ``by_period[P]`` = annual_cost × years_in_P  (when asset active in P)
+          * ``total``       = annual_cost × Σ ipw.years over ALL horizon periods
+          * ``by_period[P]`` = annual_cost × ipw.years[P]  (every period)
 
-        "Active in P" = ``build_year ≤ P < build_year + lifetime``. Assets
-        with no usable build_year (pre-existing, or older than the planning
-        horizon) count as always-active — the user's view is "what does it
-        cost to KEEP this fleet running?", so pre-existing assets still
-        contribute their annuity.
+        This matches PyPSA's ``n.statistics()`` / ``/results/cost_breakdown``,
+        the per-asset ``/results/asset_economics`` tab, and the Compare
+        Capacity tab (``_compute_total_annuitised_capex``) — so the Economics
+        comparison reconciles with all of them.
+
+        Previously this gated each period on build-year "active" years
+        (``build_year ≤ P < build_year + lifetime``), which UNDER-counted capex
+        for capacity built in later vintages: a battery whose 477 MW is mostly
+        built in 2027-28 accrued only ~1.2 years of annuity (€49.5 M) instead
+        of the authoritative full-horizon €122.9 M reported everywhere else.
+        ``build_year`` / ``lifetime`` are kept as parameters (the vintage walk
+        passes them) but no longer reduce the commitment.
 
         Flat (single-period) networks short-circuit to one annual cost on
         the total bucket; ``by_period`` is empty (matches every other
@@ -2811,19 +2836,9 @@ def _compute_economics_summary(n, periods, is_multi, has_solve) -> EconomicsComp
         annual = cc_per_mw_yr * p_nom  # €/yr
         if not is_multi or not periods:
             return annual, {}
-        by = _classify_build_year(build_year)
-        try:
-            lt = float(lifetime) if lifetime is not None else float("inf")
-        except (TypeError, ValueError):
-            lt = float("inf")
-        if not _math.isfinite(lt) or lt <= 0:
-            lt = float("inf")
         total = 0.0
         pp: dict[str, float] = {}
         for P in periods:
-            active = (by is None) or (by <= P < by + lt)
-            if not active:
-                continue
             years_in_P = ipw_years.get(P, 1.0)
             commitment = annual * years_in_P
             pp[str(P)] = commitment
