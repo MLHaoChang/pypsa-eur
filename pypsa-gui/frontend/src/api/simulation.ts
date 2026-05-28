@@ -1,0 +1,551 @@
+import client from './client'
+import type { SolverConfig, SimulationStatus, PreflightResult } from './types'
+
+export const simulationApi = {
+  getSolverConfig: () => client.get<SolverConfig>('/simulation/solver_config').then(r => r.data),
+  updateSolverConfig: (cfg: Partial<SolverConfig>) => client.put<SolverConfig>('/simulation/solver_config', cfg).then(r => r.data),
+  checkSolvers: () => client.get<Record<string,boolean>>('/simulation/check_solvers').then(r => r.data),
+  // Operator-controlled feature flags. Currently exposes `user_code_enabled`
+  // which the UI uses to disable the `extra_functionality_code` textarea
+  // unless the operator has set PYPSA_GUI_ALLOW_USER_CODE=1 server-side.
+  getCapabilities: () => client.get<{ user_code_enabled: boolean }>('/simulation/capabilities').then(r => r.data),
+  preflight: () => client.post<PreflightResult>('/simulation/preflight').then(r => r.data),
+  // Periodized per-asset capital cost (PyPSA's annuity applied where the
+  // user typed overnight_cost). Keyed as {component_attr: {asset_name: value}}.
+  // Use this in capacity-expansion CAPEX views to avoid €0 rows on assets
+  // that have overnight_cost set but capital_cost=0.
+  getAssetCosts: () => client.get<AssetCostMap>('/simulation/asset_costs').then(r => r.data),
+  run: () => client.post('/simulation/run'),
+  // Stage 2 standalone trigger. Requires that a LOPF (or SCLOPF) run has
+  // already populated n.generators_t.p. Returns immediately ({status:
+  // 'started'}); progress streams via the existing /log_stream SSE, and
+  // the new convergence info appears in /results/ac_pf/status.
+  runAcPf: () => client.post('/simulation/run_ac_pf'),
+  abort: () => client.post('/simulation/abort'),
+  // Disown a stuck "running" state when the worker thread is still alive but
+  // we want to give up on it (e.g. the user lost the SSE log and decides the
+  // solve is genuinely hung). Backend marks the old worker as orphaned so its
+  // final state write is suppressed, and a new /run can start. The old solver
+  // still holds the PyPSA lock until it finishes natively — if the new /run
+  // blocks on that lock, only a backend restart frees it.
+  forceReset: () => client.post('/simulation/force_reset'),
+  getStatus: () => client.get<SimulationStatus>('/simulation/status').then(r => r.data),
+  // Timeout-aware variants for `abortRunningSim` in projectActions, which
+  // needs to bail out fast when the backend is hung in solver native code —
+  // axios' default 30 s timeout would otherwise turn every probe in the
+  // poll loop into a 30 s wait. Separate methods (rather than an optional
+  // arg on the existing ones) so React Query queryFn signatures stay
+  // unchanged.
+  abortFast: (timeoutMs: number) =>
+    client.post('/simulation/abort', undefined, { timeout: timeoutMs }),
+  getStatusFast: (timeoutMs: number) =>
+    client.get<SimulationStatus>('/simulation/status', { timeout: timeoutMs }).then(r => r.data),
+  // Authoritative lock-released check — the `/status.running` flag flips
+  // to `false` the moment `/abort` is called (just a flag set), but the
+  // PyPSA lock isn't released until the solver's HiGHS/Gurobi native
+  // code finishes the current iteration. Project-switch flows MUST wait
+  // for this to return `lock_held: false` before attempting load.
+  // Returns instantly thanks to non-blocking `lock.acquire(blocking=False)`
+  // — safe to poll every 500 ms without measurable backend load.
+  getLockStatus: (timeoutMs: number) =>
+    client.get<{ lock_held: boolean; worker_alive: boolean }>(
+      '/simulation/lock_status', { timeout: timeoutMs },
+    ).then(r => r.data),
+  // Replay buffer of solver log lines. Backend keeps a ring of ~5k lines per
+  // solve so the frontend can reconstruct the log after a page reload or SSE
+  // reconnect (the in-memory Zustand log store doesn't persist across page
+  // refreshes). `running` mirrors /status.running for a single round-trip.
+  getLogHistory: () =>
+    client.get<{ lines: string[]; running: boolean }>('/simulation/log_history').then(r => r.data),
+}
+
+export interface CostBreakdown {
+  // capex           — annualised cost of ALL installed capacity
+  // capex_expansion — annualised cost of NEW capacity built this run
+  // capex_lifetime  — same as capex but × per-asset lifetime (sum over assets)
+  // capex_expansion_lifetime — same as capex_expansion × per-asset lifetime
+  // The "_lifetime" fields back the "Total over lifetime" toggle on the
+  // CapacityExpansion tab. OPEX stays per-year — multiplying it by lifetime
+  // would mix construction cost with operating cost and break LCOE intuition.
+  capex: number
+  capex_lifetime: number
+  capex_expansion: number
+  capex_expansion_lifetime: number
+  opex: number
+  total: number
+  // Σ curtailment_t × curtailment_cost over renewables that opted in.
+  // Already weighting-aware (snapshot × period years). Zero unless the
+  // user set curtailment_cost > 0 on a renewable generator.
+  curtailment_cost: number
+  // CAPEX-expansion bucket for StorageUnit + Store only — quick "how much
+  // of the new investment goes into storage" KPI for the cost overview.
+  storage_capex_expansion: number
+  storage_capex_expansion_lifetime: number
+  by_component: Array<{
+    component: string
+    capex: number
+    capex_lifetime: number
+    capex_expansion: number
+    capex_expansion_lifetime: number
+    opex: number
+    total: number
+  }>
+  by_carrier:   Array<{ component: string; carrier: string; capex: number; opex: number; total: number }>
+  // Multi-period only: per-period roll-up of capex + opex with the per-period
+  // investment_period_weightings.years multiplier baked in. Sum across this
+  // list equals the top-level `capex` / `opex` numbers. Single-period
+  // networks emit an empty list.
+  by_period: Array<{
+    period: number | string
+    capex: number
+    opex: number
+    total: number
+    by_component: Array<{ component: string; capex: number; opex: number }>
+    // Per-carrier breakdown WITHIN the period. Lets the Dispatch tab's
+    // "OPEX by carrier" section respect the period selector (when a
+    // specific period is picked, use this; otherwise fall back to the
+    // horizon-wide `by_carrier` at the root).
+    by_carrier?: Array<{ carrier: string; capex: number; opex: number }>
+  }>
+}
+
+// Per-asset CAPEX inputs.
+//   capital_cost     — annualised cost per unit (LP-objective value).
+//   overnight_cost   — nominal upfront lump-sum per unit (PyPSA's
+//                       `comp.overnight_cost`, either as-typed or back-
+//                       calculated). Same value for every asset
+//                       regardless of when it's built.
+//   overnight_cost_pv — present value of overnight_cost, discounted from
+//                       the asset's build_year back to the model's
+//                       reference year (= min build_year across assets)
+//                       at the per-asset discount_rate. For year-0 builds
+//                       this equals overnight_cost. The "Total investment"
+//                       toggle uses this so future-year capex is shown
+//                       in today's money — e.g. a 2035 build at 7% looks
+//                       smaller than a 2025 build of the same nominal €/MW.
+//   lifetime         — years, kept for tooltips / CSV.
+//   build_year       — optional; only present when the asset carries one.
+export type AssetCostMap = Record<string, Record<string, {
+  capital_cost: number
+  overnight_cost: number
+  overnight_cost_pv: number
+  lifetime: number
+  build_year?: number
+}>>
+
+// Result-source: which result set to read for time-series endpoints.
+// Forwarded as `?source=lopf|ac_pf` so the backend's helper `_result_df`
+// picks the right snapshot. Defaults to 'lopf' so calls without an explicit
+// arg keep current behaviour.
+type ResultSource = 'lopf' | 'ac_pf'
+const srcParam = (s?: ResultSource) => s ? { params: { source: s } } : undefined
+
+// Per-period entry in the LCOH payload. One per investment period in
+// multi-period runs (flat runs return `by_period: undefined`).
+export interface LcohPeriodEntry {
+  period: number
+  h2_produced_mwh: number
+  capex_eur: number
+  vom_cost_eur: number
+  electricity_cost_eur: number
+  lcoh_eur_per_mwh_h2: number | null
+  lcoh_eur_per_kg_h2: number | null
+}
+
+export const resultsApi = {
+  getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
+  getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
+  getGeneratorResults: (source?: ResultSource) => client.get('/results/generators', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getStorageResults: (source?: ResultSource) => client.get('/results/storage', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  // StorageUnit / Store power-flow time series (signed MW; positive = discharge,
+  // negative = charge). Frontend splits these into "production" and "consumption"
+  // for display, mirroring how generators/loads are visualised in the Dispatch tab.
+  getStorageDispatchResults: (source?: ResultSource) => client.get('/results/storage_dispatch', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getStoreDispatchResults:   (source?: ResultSource) => client.get('/results/store_dispatch',   srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getStoreEnergyResults:     (source?: ResultSource) => client.get('/results/store_energy',     srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getLineResults: (source?: ResultSource) => client.get('/results/lines', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  // Per-link p0 (signed MW): positive = bus0 → bus1. Drives the Links
+  // section of the Dispatch tab, grouped by link carrier (DC, H2, electrolyser, …).
+  getLinkResults: (source?: ResultSource) => client.get('/results/links', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  // Per-electrolyser LCOH (€/MWh_H2 and €/kg_H2). One row per electrolyser-
+  // like link plus a fleet-aggregated `total`. 204 / empty rows when no
+  // qualifying links exist or the run isn't solved.
+  getLcoh: () => client.get<{
+    rows: Array<{
+      name: string
+      carrier: string
+      p_nom_opt_mw: number
+      efficiency: number
+      capex_eur_per_year: number
+      vom_cost_eur: number
+      electricity_cost_eur: number
+      h2_produced_mwh: number
+      lcoh_eur_per_mwh_h2: number | null
+      lcoh_eur_per_kg_h2: number | null
+      by_period?: Array<LcohPeriodEntry>
+    }>
+    total: null | {
+      h2_produced_mwh: number
+      capex_eur_per_year: number
+      vom_cost_eur: number
+      electricity_cost_eur: number
+      lcoh_eur_per_mwh_h2: number
+      lcoh_eur_per_kg_h2: number
+      by_period?: Array<LcohPeriodEntry>
+    }
+    currency: string
+  }>('/results/lcoh').then(r => r.status === 204 ? null : r.data),
+  getTransformerResults: (source?: ResultSource) => client.get('/results/transformers', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getPrices: (source?: ResultSource) => client.get('/results/prices', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  // Per-generator unit-commitment results (status, start/shut counts, on-hours,
+  // capacity factor when on, UC costs). Populated only when committable=True
+  // on at least one generator; otherwise n_committable=0 and the panel hides.
+  // status_grid is the binary on/off matrix (snapshot × committable_gen) used
+  // by the heatmap visualisation.
+  getUnitCommitment: () =>
+    client.get<{
+      generators: Array<{
+        name: string; carrier: string; p_nom_MW: number
+        n_starts: number; n_shuts: number
+        hours_on: number; energy_mwh: number
+        capacity_factor_when_on_pct: number
+        total_uc_cost_eur: number
+      }>
+      status_grid: { index: string[]; columns: string[]; data: number[][] } | null
+      n_committable: number
+      note?: string
+    }>('/results/unit_commitment').then(r => r.status === 204 ? null : r.data),
+  // Per-line congestion shadow prices (€/MWh) from the LP duals. Captures
+  // binding_hours / max_mu / mean_mu_when_binding / congestion_rent_eur.
+  // Requires assign_all_duals=True at solve time (backend default).
+  getLineDuals: () =>
+    client.get<{
+      rows: Array<{
+        name: string
+        s_nom_MW: number
+        binding_hours: number
+        // Subset of binding_hours where |mu| ≥ 10,000 €/MWh — typically
+        // VOLL-priced load shedding, not physical congestion. UI surfaces
+        // separately so users don't mistake it for transmission scarcity.
+        voll_bound_hours: number
+        max_mu_eur_per_MWh: number
+        mean_mu_when_binding_eur_per_MWh: number
+        congestion_rent_eur: number
+      }>
+      total_congestion_rent_eur: number
+      n_snapshots: number
+      note?: string
+    }>('/results/line_duals').then(r => r.status === 204 ? null : r.data),
+  // Per-carrier KPIs (capacity factor / curtailment / market value / revenue /
+  // energy / capacity) for Generator + StorageUnit + Store + Link. Wraps
+  // PyPSA's n.statistics helpers groupby='carrier'. Decimal CF returned as
+  // percent (× 100). curtailment_pct is computed against (energy + curtailment).
+  getCarrierKpis: () =>
+    client.get<{
+      rows: Array<{
+        component: string
+        carrier: string
+        capacity_mw: number
+        energy_mwh: number
+        capacity_factor_pct: number
+        curtailment_mwh: number
+        curtailment_pct: number
+        market_value_eur_per_mwh: number
+        revenue_eur: number
+      }>
+    }>('/results/carrier_kpis').then(r => r.status === 204 ? null : r.data),
+  // Per-carrier + per-generator CO₂ emissions over the solved horizon, plus
+  // the shadow price of any active primary-energy CO₂ cap. See backend
+  // docstring for the computation (Σ p·weight × co2/efficiency).
+  getEmissions: () =>
+    client.get<{
+      total_tCO2: number
+      by_carrier: Array<{ carrier: string; tCO2: number; share_pct: number }>
+      by_generator: Array<{
+        name: string; carrier: string; energy_mwh: number; tCO2: number
+        intensity_tCO2_per_MWh_out: number
+        component?: string  // present for StorageUnit / Store contributors
+      }>
+      // Legacy single-cap field — first active cap. Kept for older
+      // consumers; new code should iterate `caps[]` to handle per-period
+      // caps and horizon-wide caps in one pass.
+      cap: {
+        active: boolean
+        name?: string
+        cap_tCO2?: number | null
+        shadow_price_eur_per_tCO2?: number
+        slack_tCO2?: number | null
+      }
+      // All active primary_energy + co2_emissions constraints. `scope` =
+      // 'period' when investment_period is set on the constraint, 'horizon'
+      // otherwise. `binding` is true when slack ~= 0 (the cap is tight).
+      caps: Array<{
+        active: true
+        name: string
+        investment_period: number | null
+        scope: 'period' | 'horizon'
+        cap_tCO2: number | null
+        used_tCO2: number
+        shadow_price_eur_per_tCO2: number
+        slack_tCO2: number | null
+        binding: boolean
+      }>
+      is_multi_period: boolean
+      // Per-investment-period breakdown. Empty on flat (single-period)
+      // networks. Each entry mirrors the top-level shape but scoped to
+      // one period.
+      by_period: Array<{
+        period: number | string
+        total_tCO2: number
+        by_carrier: Array<{ carrier: string; tCO2: number; share_pct: number }>
+        by_generator: Array<{
+          name: string; carrier: string; energy_mwh: number; tCO2: number
+          intensity_tCO2_per_MWh_out: number; component?: string
+        }>
+      }>
+    }>('/results/emissions').then(r => r.status === 204 ? null : r.data),
+  // AC-PF-only result series. The LP stage doesn't compute v_mag_pu or q —
+  // these endpoints return null (204) when no Stage 2 snapshot is available.
+  // Frontend uses the null to hide the corresponding LoadFlow sections.
+  getVoltages: (source?: ResultSource) =>
+    client.get('/results/voltages', srcParam(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
+  getLineReactive: (source?: ResultSource) =>
+    client.get('/results/line_reactive', srcParam(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
+  getTransformerReactive: (source?: ResultSource) =>
+    client.get('/results/transformer_reactive', srcParam(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
+  // Per-cell diagnosis for prices above a threshold — used by the Load Flow
+  // "Price drivers" panel to answer "why is the price 3000 at hour X?".
+  // Returns the most-likely marginal generator + a one-word category
+  // (load_shedding / thermal_peaker / transmission / unattributed).
+  getPriceDrivers: (threshold = 2000, limit = 200) =>
+    client.get<{
+      threshold: number; total_above_threshold: number; truncated: boolean
+      rows: Array<{
+        snapshot: string; bus: string; price: number
+        marginal_gen: string | null; marginal_cost: number; carrier: string
+        dispatch: number; voll_slack_active: boolean; voll_dispatch: number
+        diagnosis: 'load_shedding' | 'thermal_peaker' | 'transmission' | 'unattributed'
+      }>
+    }>(`/results/price_drivers`, { params: { threshold, limit } })
+      .then(r => r.status === 204 ? null : r.data),
+  getCurtailment: () => client.get('/results/curtailment').then(r => r.status === 204 ? null : r.data),
+  // Per-carrier economic roll-up on the LIVE in-memory network. Powers the
+  // per-carrier KPI strips in the Results / Dispatch tab. Shape mirrors
+  // `CarrierEconomics` in Compare View (revenue_meur, opex_meur split into
+  // gen_cost / storage_charge_cost / curtailment_cost / lost_load_cost,
+  // capex_meur, dispatch_gwh, lcoe_eur_per_mwh).
+  getEconomicsByCarrier: () => client.get<{
+    by_carrier?: Record<string, {
+      revenue_meur: { total: number; by_period: Record<string, number> }
+      opex_meur:    { total: number; by_period: Record<string, number> }
+      gen_cost_meur?: { total: number; by_period: Record<string, number> }
+      storage_charge_cost_meur?: { total: number; by_period: Record<string, number> }
+      curtailment_cost_meur?:    { total: number; by_period: Record<string, number> }
+      lost_load_cost_meur?:      { total: number; by_period: Record<string, number> }
+      capex_meur:   { total: number; by_period: Record<string, number> }
+      dispatch_gwh: { total: number; by_period: Record<string, number> }
+      lcoe_eur_per_mwh: { total: number; by_period: Record<string, number> }
+    }>
+    error?: string
+  }>('/results/economics_by_carrier').then(r => r.status === 204 ? null : r.data),
+  getLoadResults: (source?: ResultSource) => client.get('/results/loads', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  // VOLL slack-generator dispatch — only populated when the solver ran with
+  // voll > 0 AND the LP shed any load. Returns TSPayload + totals or null.
+  // `voll_eur_per_mwh` is the per-MWh VOLL the solver used; consumers
+  // should prefer this over re-deriving it via cost/mwh division (which
+  // breaks at zero MWh).
+  getLostLoad: () => client.get<{
+    index: string[]; columns: string[]; data: number[][];
+    total_mwh: number; total_cost_eur: number;
+    voll_eur_per_mwh: number;
+    // Per-bus carrier ("AC" / "H2" / "heat" / …). Solver adds VOLL slacks on
+    // every bus, so lost load is captured for ALL energy carriers; this map
+    // lets the frontend split the total per carrier.
+    bus_carriers?: Record<string, string>
+    // Multi-period: parallel array of period years for each `index` entry.
+    periods?: number[]
+  }>('/results/lost_load').then(r => r.status === 204 ? null : r.data),
+  // Transmission-losses summary. `enabled=false` ⇒ the solve didn't model
+  // losses, in which case totals/peak are 0 (intentional: the LoadFlow tab
+  // renders "0 MWh" instead of a not-solved placeholder). For source='ac_pf',
+  // losses are computed post-hoc from p0+p1 (real losses) — meaningful even
+  // when transmission_losses was off during Stage 1.
+  getLosses: (source?: ResultSource) => client.get<{
+    enabled: boolean
+    total_mwh: number
+    peak_mw: number
+    total_demand_mwh: number
+    loss_pct_of_demand: number
+    by_branch: Array<{ component: string; name: string; loss_mwh: number; peak_mw: number; share_pct: number }>
+  }>('/results/losses', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  // Stage 2 (AC PF) status. `available=false` when no AC PF has run since
+  // the last solve — the frontend hides the result-source toggle in that
+  // case. When available, the convergence map drives per-snapshot UI
+  // (badges in the picker, banner on the canvas for non-converged hours).
+  getAcPfStatus: () => client.get<{
+    available: boolean
+    slack_bus_used?: string | null
+    stripped_voll_slacks?: string[]
+    // Legacy `{iso: bool}` dict — ambiguous on multi-period (same iso under
+    // different periods collapses). Kept for backward compatibility.
+    converged_per_snapshot?: Record<string, boolean>
+    // Period-aware list — preferred. Each entry carries the original tuple
+    // info so the frontend can match snapshot+period unambiguously.
+    converged_list?: Array<{ snapshot: string; period?: number | string | null; ok: boolean }>
+    converged_count?: number
+    total_snapshots?: number
+  }>('/results/ac_pf/status').then(r => r.status === 204 ? null : r.data),
+  // Per-asset economics: revenue, fixed/variable cost, net profit, LCOE/LCOS.
+  // Computed at the asset level so users can compare profitability across
+  // individual generators / storage units / stores. The `by_period` arrays
+  // are populated only on multi-period runs (empty list otherwise) — flat
+  // single-period horizons collapse to the row's top-level totals.
+  getAssetEconomics: () =>
+    client.get<AssetEconomicsPayload>('/results/asset_economics')
+      .then(r => r.status === 204 ? null : r.data),
+}
+
+// ── Asset economics types ──────────────────────────────────────────────
+export interface GeneratorEconomicsRow {
+  name: string
+  bus: string
+  carrier: string
+  p_nom_opt_mw: number
+  energy_mwh: number
+  capacity_factor: number | null
+  revenue_eur: number
+  vom_cost_eur: number
+  fixed_cost_eur: number       // capital_cost × p_nom_opt (annualised)
+  fom_cost_eur: number         // user-typed fom_cost × p_nom_opt (informational)
+  net_profit_eur: number       // revenue − fixed − vom
+  lcoe_eur_per_mwh: number | null
+  avg_price_eur_per_mwh: number | null
+  by_period: Array<{
+    period: number | string
+    energy_mwh: number
+    revenue_eur: number
+    fixed_cost_eur: number
+    fom_cost_eur: number
+    vom_cost_eur: number
+    net_profit_eur: number
+    lcoe_eur_per_mwh: number | null
+    avg_price_eur_per_mwh: number | null
+  }>
+}
+export interface StorageUnitEconomicsRow {
+  name: string
+  bus: string
+  carrier: string
+  p_nom_opt_mw: number
+  max_hours: number
+  energy_capacity_mwh: number
+  round_trip_efficiency: number | null
+  discharge_mwh: number
+  charge_mwh: number
+  discharge_revenue_eur: number
+  charge_cost_eur: number
+  vom_cost_eur: number
+  fixed_cost_eur: number
+  fom_cost_eur: number
+  net_profit_eur: number       // discharge_revenue − charge_cost − vom − fixed
+  lcos_eur_per_mwh: number | null
+  spread_eur_per_mwh: number | null
+  avg_discharge_price_eur_per_mwh: number | null
+  avg_charge_price_eur_per_mwh: number | null
+  by_period: Array<{
+    period: number | string
+    discharge_mwh: number
+    charge_mwh: number
+    discharge_revenue_eur: number
+    charge_cost_eur: number
+    fixed_cost_eur: number
+    fom_cost_eur: number
+    vom_cost_eur: number
+    net_profit_eur: number
+    lcos_eur_per_mwh: number | null
+    spread_eur_per_mwh: number | null
+  }>
+}
+export interface StoreEconomicsRow {
+  name: string
+  bus: string
+  carrier: string
+  e_nom_opt_mwh: number
+  discharge_mwh: number
+  charge_mwh: number
+  discharge_revenue_eur: number
+  charge_cost_eur: number
+  vom_cost_eur: number
+  fixed_cost_eur: number
+  fom_cost_eur: number
+  net_profit_eur: number
+  lcos_eur_per_mwh: number | null
+  spread_eur_per_mwh: number | null
+  avg_discharge_price_eur_per_mwh: number | null
+  avg_charge_price_eur_per_mwh: number | null
+  by_period: StorageUnitEconomicsRow['by_period']
+}
+export interface AssetEconomicsPayload {
+  currency: string
+  is_multi_period: boolean
+  periods: Array<number | string>
+  generators: GeneratorEconomicsRow[]
+  storage_units: StorageUnitEconomicsRow[]
+  stores: StoreEconomicsRow[]
+}
+
+export function createLogStream(
+  onMessage: (line: string) => void,
+  onDone: (data: Record<string,unknown>) => void,
+  onError?: (reason: string) => void,
+): () => void {
+  const es = new EventSource('/api/simulation/log_stream')
+  let doneReceived = false
+  let lastEventAt = Date.now()
+  // EventSource fires `error` for any transient disconnect — browser sleep,
+  // brief network blip, server hiccup. Closing on the first error (the old
+  // behaviour) silently stranded the UI in "running" forever. Now: only
+  // declare failure if no event has arrived for STALE_MS AND we never got a
+  // `done` event. Otherwise let the browser's built-in auto-reconnect work.
+  const STALE_MS = 30_000
+
+  es.onmessage = (e) => { lastEventAt = Date.now(); onMessage(e.data) }
+  es.addEventListener('done', (e) => {
+    doneReceived = true
+    lastEventAt = Date.now()
+    try { onDone(JSON.parse((e as MessageEvent).data)) } catch { onDone({}) }
+    es.close()
+  })
+  es.onerror = () => {
+    if (doneReceived) {
+      es.close()
+      return
+    }
+    if (es.readyState === EventSource.CLOSED) {
+      onError?.('Log stream lost before solve completed')
+      return
+    }
+    // STALE_MS elapsed with no event. Before declaring the solve dead,
+    // verify with /status — long native-code phases (HiGHS solving, AC PF
+    // iteration) emit NO log lines and look identical to a hung backend
+    // over SSE. Only flip to "failed" if the backend agrees the solve is
+    // over. Otherwise reset the stale timer and let EventSource keep
+    // auto-reconnecting.
+    if (Date.now() - lastEventAt > STALE_MS) {
+      simulationApi.getStatus()
+        .then(s => {
+          if (!s.running) {
+            es.close()
+            onError?.(`Log stream silent for ${Math.round((Date.now() - lastEventAt) / 1000)}s — solve is no longer running`)
+          } else {
+            lastEventAt = Date.now()
+          }
+        })
+        .catch(() => {
+          es.close()
+          onError?.('Log stream silent and /status unreachable — connection lost')
+        })
+    }
+  }
+  return () => es.close()
+}

@@ -1,0 +1,517 @@
+"""
+Project-level snapshot router.
+
+A snapshot is a frozen copy of a project's bundle files (`network.nc`,
+`user_ts.json`, `solver_config.json`, `metadata.json`, `layout.json` — the
+full `_BUNDLE_FILES` set) plus a small `snapshot.json` describing it.
+Snapshots live under
+``projects/<name>/snapshots/<snapshot_id>/`` where ``snapshot_id`` is
+``<iso-ts>-<slug>`` so they list newest-first on lexicographic sort.
+
+Operations:
+
+  POST   /api/projects/{name}/snapshots                  create
+  GET    /api/projects/{name}/snapshots                  list (newest first)
+  POST   /api/projects/{name}/snapshots/{sid}/restore    restore + load
+  DELETE /api/projects/{name}/snapshots/{sid}            delete one
+
+Cap is :data:`_MAX_SNAPSHOTS_PER_PROJECT`. When the cap is reached, the
+oldest snapshot is pruned before creating the new one. This is the same
+"FIFO history" model VS Code and Figma use; users always get the most
+recent N restore points without the dir growing unbounded.
+"""
+from __future__ import annotations
+
+import json
+import pathlib
+import re
+import shutil
+from datetime import datetime, timezone
+
+import pypsa
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from services import change_log_service
+from services.dispatch_status import dispatch_status as _classify_dispatch
+from services.pypsa_service import PyPSAService
+
+# Reuse the same path-validation pattern as projects.py — snapshots inherit the
+# project-name safety check by going through `_safe_project_dir`.
+from routers.projects import (
+    _BUNDLE_FILES,
+    _atomic_write_text,
+    _atomic_write_with,
+    _force_rmtree,
+    _read_meta,
+    _safe_project_dir,
+)
+
+router = APIRouter()
+
+_MAX_SNAPSHOTS_PER_PROJECT = 50
+
+# Same-shape regex as project names but allows the iso-timestamp prefix
+# (`2026-05-13T14-30-00-mylabel`). Snapshot ids are generated server-side from
+# a sanitized timestamp + label so the only attack surface is the path-traversal
+# check below, but we still validate the form for defence in depth. The `T`
+# separator and `-` digit-group dividers are the only non-alphanumerics that
+# leak out of strftime + slugify.
+_SNAPSHOT_ID_RE = re.compile(r"^[A-Za-z0-9_\-.T]{1,128}$")
+_LABEL_RE = re.compile(r"[^A-Za-z0-9_\-]+")
+
+
+class CreateSnapshotRequest(BaseModel):
+    label: str = ""
+    message: str | None = ""
+
+
+class SnapshotInfo(BaseModel):
+    id: str
+    label: str
+    message: str
+    created_at: str
+    # Compact summary of the project state at snapshot time. Lets the UI render
+    # "14 buses · 168 snapshots · Obj €1.234B" without re-opening the .nc.
+    bus_count: int
+    snapshot_count: int
+    objective: float | None = None
+    has_results: bool = False
+    # Internal consistency of the snapshot's own dispatch tables. 'fresh' =
+    # dispatch column-set matches the snapshot's topology (true SOLVED).
+    # 'stale' = the snapshot was saved after a topology edit without a re-run
+    # — dispatch is for a different generator/bus set than the snapshot
+    # contains. 'none' = no dispatch in the snapshot at all (truly unsolved).
+    # See services/dispatch_status.py for the classification rules.
+    dispatch_status: str = "none"
+
+
+def _snapshots_dir(project_dir: pathlib.Path) -> pathlib.Path:
+    return project_dir / "snapshots"
+
+
+def _safe_snapshot_dir(project_dir: pathlib.Path, snapshot_id: str) -> pathlib.Path:
+    """
+    Validate snapshot_id and return its directory under the project.
+
+    Mirrors :func:`_safe_project_dir`'s defence-in-depth pattern: regex on the
+    id plus a `is_relative_to` check on the resolved path.
+    """
+    if not isinstance(snapshot_id, str) or not _SNAPSHOT_ID_RE.match(snapshot_id):
+        raise HTTPException(400, f"Invalid snapshot id: {snapshot_id!r}")
+    if snapshot_id.startswith(".") or snapshot_id in ("..", "."):
+        raise HTTPException(400, "Snapshot id may not start with '.'")
+    root = _snapshots_dir(project_dir).resolve()
+    dest = (_snapshots_dir(project_dir) / snapshot_id).resolve()
+    try:
+        if not dest.is_relative_to(root):
+            raise HTTPException(400, "Path traversal rejected.")
+    except ValueError:
+        raise HTTPException(400, "Path traversal rejected.")
+    return dest
+
+
+def _slugify_label(label: str) -> str:
+    """
+    Convert a free-form label to a filename-safe slug.
+
+    Empty / whitespace-only labels collapse to ``"snapshot"`` so the id always
+    has a meaningful suffix. Anything outside ``[A-Za-z0-9_-]`` is replaced
+    with ``-`` and leading/trailing dashes are trimmed. Capped to 32 chars so
+    the full ``<iso>-<slug>`` id stays under the Windows 260-char path limit.
+    """
+    slug = _LABEL_RE.sub("-", (label or "").strip())[:32].strip("-_.")
+    return slug or "snapshot"
+
+
+def _read_snapshot_meta(snap_dir: pathlib.Path) -> dict:
+    p = snap_dir / "snapshot.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        # Mirror _read_meta in projects.py — a binary-garbage snapshot.json
+        # must degrade to {} rather than 500-ing list_snapshots.
+        return {}
+
+
+def _list_snapshot_dirs(project_dir: pathlib.Path) -> list[pathlib.Path]:
+    """
+    Return existing snapshot subdirs, sorted by id descending (newest first).
+
+    Lexicographic descending order on the ISO-prefixed id IS newest-first since
+    the prefix is sortable.
+    """
+    snaps = _snapshots_dir(project_dir)
+    if not snaps.exists():
+        return []
+    return sorted(
+        (d for d in snaps.iterdir() if d.is_dir()),
+        key=lambda d: d.name, reverse=True,
+    )
+
+
+def _to_info(snap_dir: pathlib.Path) -> SnapshotInfo:
+    meta = _read_snapshot_meta(snap_dir)
+    # Backwards compat: older snapshots (created before Phase 4) don't have
+    # `dispatch_status`. Derive from `has_results`: True → 'fresh' (best
+    # guess; the staleness check wasn't possible then), False → 'none'.
+    # Honest defaults — we don't re-open the .nc on every list call because
+    # that would scan every snapshot's network.nc on each /snapshots GET.
+    if "dispatch_status" in meta:
+        status = str(meta["dispatch_status"])
+    else:
+        status = "fresh" if meta.get("has_results") else "none"
+    return SnapshotInfo(
+        id=snap_dir.name,
+        label=meta.get("label", ""),
+        message=meta.get("message", ""),
+        created_at=meta.get("created_at", ""),
+        bus_count=int(meta.get("bus_count", 0)),
+        snapshot_count=int(meta.get("snapshot_count", 0)),
+        objective=meta.get("objective"),
+        has_results=bool(meta.get("has_results", False)),
+        dispatch_status=status,
+    )
+
+
+def _prune_oldest(
+    project_dir: pathlib.Path,
+    protect: frozenset[str] | None = None,
+) -> int:
+    """
+    Delete oldest snapshots beyond the cap. Returns number pruned.
+
+    ``protect`` is a set of snapshot ids that must never be pruned, even if
+    they are the oldest. This is used by ``restore_snapshot`` to exempt the
+    source snapshot it's about to read from — otherwise restoring an
+    at-cap project's oldest snapshot would trigger a pre-restore prune that
+    deletes the very dir we're about to copy from, resulting in a silent
+    no-op restore.
+
+    Called before each create so the cap is enforced just-in-time without a
+    background sweeper. Lexicographic-ascending order on the id gives oldest
+    first; we keep the newest ``_MAX_SNAPSHOTS_PER_PROJECT - 1`` so the about-
+    to-be-created snapshot fits under the cap.
+    """
+    protect = protect or frozenset()
+    snaps = _list_snapshot_dirs(project_dir)
+    # snaps is newest-first; reverse to get oldest-first for pruning
+    oldest_first = [d for d in reversed(snaps) if d.name not in protect]
+    # Cap calculation accounts for protected entries — they count toward the
+    # cap but are not eligible for deletion. If protection blocks pruning
+    # enough to keep us over the limit, we just stay over until the next
+    # create with a different protect set; better than corrupting a restore.
+    keep_n = _MAX_SNAPSHOTS_PER_PROJECT - 1
+    to_delete = max(0, len(snaps) - keep_n)
+    if to_delete <= 0 or not oldest_first:
+        return 0
+    pruned = 0
+    for d in oldest_first[:to_delete]:
+        try:
+            _force_rmtree(d)
+            pruned += 1
+        except OSError:
+            pass
+    return pruned
+
+
+def _create_snapshot_internal(
+    name: str, label: str, message: str,
+    protect: frozenset[str] | None = None,
+) -> SnapshotInfo:
+    """
+    Shared snapshot-creation core used by both the public endpoint and the
+    restore safety net. Splits out so callers can pass a ``protect`` set for
+    the at-cap-restore edge case.
+    """
+    project_dir = _safe_project_dir(name)
+    if not (project_dir / "network.nc").exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+
+    snaps = _snapshots_dir(project_dir)
+    snaps.mkdir(parents=True, exist_ok=True)
+
+    _prune_oldest(project_dir, protect=protect)
+
+    # Snapshot id: filesystem-safe ISO timestamp (no colons — Windows refuses
+    # them in file names — and no `+00:00` tz suffix; we're always UTC) plus a
+    # slugified label. Lexicographic order on this id is newest-first when
+    # reversed, which the list/prune helpers rely on.
+    iso = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    sid = f"{iso}-{_slugify_label(label)}"
+    snap_dir = _safe_snapshot_dir(project_dir, sid)
+
+    if snap_dir.exists():
+        # Extremely unlikely collision on second-resolution timestamps, but
+        # the id must be unique — append a 4-char nonce.
+        from secrets import token_hex
+        sid = f"{sid}-{token_hex(2)}"
+        snap_dir = _safe_snapshot_dir(project_dir, sid)
+    try:
+        snap_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        # TOCTOU: another concurrent POST won the race for this sid between
+        # our `.exists()` check and `mkdir`. Surface a 409 (conflict) rather
+        # than letting a raw FileExistsError surface as a 500.
+        raise HTTPException(
+            409, f"Snapshot id '{sid}' already exists — retry to generate a fresh id."
+        ) from exc
+
+    # Copy each bundle file if present, then classify dispatch freshness by
+    # reading the snapshot's own network.nc. Both happen INSIDE the PyPSA
+    # lock so:
+    #   1. A concurrent save's atomic-write can't produce a snapshot with
+    #      files from two different save points (network.nc from save N +
+    #      user_ts from save N+1).
+    #   2. The freshness read can't race with a concurrent project-level
+    #      delete or another snapshot create that prunes this same dir
+    #      (the snapshot dir is reachable from outside this function via
+    #      shutil.rmtree paths).
+    # The freshness read itself is judged against the snapshot's OWN files
+    # (not the live in-memory state), because the user may have edited the
+    # network since the last save — those edits are NOT in this snapshot.
+    # Cost: one pypsa.Network() construction per snapshot create (~100 ms
+    # on typical networks; the user is already paying for a multi-file copy).
+    snap_dispatch_status = "none"
+    with PyPSAService.get_lock():
+        for fname in _BUNDLE_FILES:
+            src = project_dir / fname
+            if src.exists():
+                shutil.copy2(src, snap_dir / fname)
+
+        snap_nc = snap_dir / "network.nc"
+        if snap_nc.exists():
+            try:
+                snap_n = pypsa.Network(str(snap_nc))
+                snap_dispatch_status = _classify_dispatch(snap_n)
+            except Exception:
+                # Broad except is intentional: PyPSA / xarray / pandas can
+                # raise OSError, ValueError, AttributeError, KeyError,
+                # xarray.MergeError, or PyPSA-specific exceptions on
+                # malformed netcdfs. The narrow `(OSError, ValueError)`
+                # catch leaked some of these as 500s. Falling through to
+                # 'none' here means the user sees a non-SOLVED badge and
+                # can investigate; the snapshot file is still on disk.
+                snap_dispatch_status = "none"
+
+    # Compact summary from the project's metadata.json. Cached values are fine
+    # — they describe what was on disk at copy time, which is exactly what
+    # we're snapshotting.
+    proj_meta = _read_meta(project_dir)
+    snap_meta = {
+        "id": sid,
+        "label": (label or "").strip()[:80],
+        "message": (message or "").strip()[:2000],
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "bus_count": proj_meta.get("bus_count", 0),
+        "snapshot_count": proj_meta.get("snapshot_count", 0),
+        "objective": proj_meta.get("objective"),
+        # has_results stays for backward compatibility — true when the
+        # snapshot contains any dispatch tables, regardless of staleness.
+        "has_results": snap_dispatch_status != "none",
+        "dispatch_status": snap_dispatch_status,
+    }
+    _atomic_write_text(snap_dir / "snapshot.json", json.dumps(snap_meta, indent=2))
+
+    change_log_service.log(
+        "snapshot", "Project", name,
+        f"Created snapshot '{snap_meta['label'] or sid}' of '{name}' "
+        f"({snap_meta['bus_count']} buses, {snap_meta['snapshot_count']} snapshots)",
+    )
+    return _to_info(snap_dir)
+
+
+@router.post("/{name}/snapshots")
+def create_snapshot(name: str, req: CreateSnapshotRequest):
+    """
+    Snapshot the current on-disk project bundle.
+
+    Operates on the FILES, not the in-memory network — so the user is
+    snapshotting whatever the last Save persisted, not their unsaved edits.
+    This is the same semantics as git: you snapshot what's committed.
+    Callers that want to capture in-memory state should Save first.
+    """
+    return _create_snapshot_internal(name, req.label, req.message or "")
+
+
+@router.get("/{name}/snapshots")
+def list_snapshots(name: str) -> list[SnapshotInfo]:
+    project_dir = _safe_project_dir(name)
+    if not (project_dir / "network.nc").exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    return [_to_info(d) for d in _list_snapshot_dirs(project_dir)]
+
+
+@router.post("/{name}/snapshots/{snapshot_id}/restore")
+def restore_snapshot(name: str, snapshot_id: str):
+    """
+    Restore a snapshot: overwrite the project files + reload in-memory.
+
+    Order of operations matters:
+    1. Validate the snapshot exists and is complete (network.nc present)
+    2. Create a "pre-restore" auto-snapshot so the user can undo the restore
+    3. Copy snapshot's bundle files over the project's (atomic per-file)
+    4. Reset + reload the in-memory PyPSA network from the restored files
+    5. Clear the undo stack (the in-memory state is now the new baseline)
+
+    Step 2 is the safety net: a careless restore can't lose work because the
+    pre-restore state is itself saved as a snapshot named "before-restore-...".
+    """
+    project_dir = _safe_project_dir(name)
+    if not (project_dir / "network.nc").exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+
+    snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
+    if not snap_dir.exists() or not (snap_dir / "network.nc").exists():
+        raise HTTPException(404, f"Snapshot '{snapshot_id}' not found (or incomplete)")
+
+    # Safety net: create an auto-snapshot of the current state before we
+    # overwrite it. Pass `protect={snapshot_id}` so the cap-driven prune that
+    # runs inside the safety-snapshot create cannot delete the source we're
+    # about to restore from — restoring an at-cap project's oldest snapshot
+    # would otherwise silently no-op (prune deletes source, copy loop skips
+    # missing files, reload re-imports the unchanged-because-overwritten-by-
+    # auto-snapshot project, user sees nothing change).
+    try:
+        _create_snapshot_internal(
+            name,
+            label="before-restore",
+            message=f"Auto-saved before restoring snapshot '{snapshot_id}'",
+            protect=frozenset({snapshot_id}),
+        )
+    except HTTPException as exc:
+        # If the pre-restore snapshot fails, refuse the restore — losing work
+        # is worse than a confusing error.
+        raise HTTPException(
+            500, f"Could not auto-snapshot before restore: {exc.detail}",
+        ) from exc
+
+    # Re-verify the source snapshot still has network.nc after the pre-restore
+    # safety snap ran (in case _prune_oldest somehow took it despite protect=).
+    if not (snap_dir / "network.nc").exists():
+        raise HTTPException(
+            500,
+            f"Source snapshot '{snapshot_id}' was lost during pre-restore. "
+            f"The auto-saved 'before-restore' snapshot is your previous state.",
+        )
+
+    # Hold the PyPSA lock for the entire restore — copy phase AND reload —
+    # so a concurrent autosave can't race with our `network.nc` rewrite.
+    # `_atomic_write_with` (write to .tmp + rename) makes each individual
+    # file safe against crashes, but a concurrent writer to the same path
+    # (e.g. autosave triggering during restore) could lose updates without
+    # the lock.
+    from services import undo_service
+    undo_service.clear()
+    with PyPSAService.get_lock():
+        # Copy snapshot's files over the project's. Use atomic-write per file
+        # so a crash mid-restore leaves either the pre-restore file or the
+        # snapshot file in place — never a half-written one.
+        for fname in _BUNDLE_FILES:
+            src = snap_dir / fname
+            if not src.exists():
+                continue
+            _atomic_write_with(project_dir / fname, lambda p, src=src: shutil.copy2(src, p))
+
+        # Reload in-memory network from the restored files. Lock is already
+        # held — `reset_network()` and `import_from_netcdf()` are safe to
+        # call inside the same `with` block.
+        PyPSAService.reset_network()
+        n = PyPSAService.get_network()
+        with PyPSAService.get_netcdf_io_lock():
+            n.import_from_netcdf(str(project_dir / "network.nc"))
+
+    cfg_path = project_dir / "solver_config.json"
+    if cfg_path.exists():
+        from dataclasses import fields as _dc_fields
+
+        from services.solver_service import SolverConfig
+
+        from routers.simulation import _state
+        data = json.loads(cfg_path.read_text())
+        valid_keys = {f.name for f in _dc_fields(SolverConfig)}
+        clean = {k: v for k, v in data.items() if k in valid_keys}
+        if clean.get("mode") == "lpf":
+            clean["mode"] = "lopf"
+        _state["solver_config"] = SolverConfig(**clean)
+
+    # Hydrate simulation state from the restored project's metadata. Without
+    # this, restoring a previously-solved snapshot leaves the header status
+    # indicator showing "Idle" while the Results panel quietly serves dispatch
+    # numbers from the imported netcdf — the exact inconsistency that
+    # `load_project` was extended to fix. Mirror the same logic here.
+    n_loaded = PyPSAService.get_network()
+    has_dispatch = (
+        (not n_loaded.generators.empty   and not n_loaded.generators_t.p.empty) or
+        (not n_loaded.lines.empty        and not n_loaded.lines_t.p0.empty)     or
+        (not n_loaded.storage_units.empty and not n_loaded.storage_units_t.state_of_charge.empty)
+    )
+    proj_meta = _read_meta(project_dir)
+    # Atomic lifecycle hydration via `_state_update` so a concurrent status
+    # poll can't observe a half-applied tuple (status="completed" while
+    # objective is still stale `None`). See F11 / G2 rationale.
+    from routers.simulation import _state_update as _sim_state_update
+    if has_dispatch and proj_meta.get("has_results"):
+        _sim_state_update(
+            status="completed",
+            condition=proj_meta.get("condition") or "optimal",
+            objective=proj_meta.get("objective"),
+            solve_time=proj_meta.get("solve_time"),
+        )
+    else:
+        _sim_state_update(status="idle", condition=None, objective=None, solve_time=None)
+
+    from routers.network import (
+        _ensure_snapshots_cover_user_ts,
+        _reapply_user_ts_to_network,
+        _restore_user_ts,
+    )
+    user_ts_path = project_dir / "user_ts.json"
+    if user_ts_path.exists():
+        _restore_user_ts(json.loads(user_ts_path.read_text()))
+    else:
+        _restore_user_ts({})
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        _ensure_snapshots_cover_user_ts(n)
+    n.name = name
+    _reapply_user_ts_to_network(n)
+
+    snap_meta = _read_snapshot_meta(snap_dir)
+    change_log_service.log(
+        "restore", "Project", name,
+        f"Restored snapshot '{snap_meta.get('label') or snapshot_id}' of '{name}' "
+        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)",
+    )
+    return {
+        "restored": snapshot_id,
+        "label": snap_meta.get("label", ""),
+        "bus_count": len(n.buses),
+        "snapshot_count": len(n.snapshots),
+    }
+
+
+@router.delete("/{name}/snapshots/{snapshot_id}", status_code=204)
+def delete_snapshot(name: str, snapshot_id: str):
+    project_dir = _safe_project_dir(name)
+    if not (project_dir / "network.nc").exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
+    if not snap_dir.exists():
+        raise HTTPException(404, f"Snapshot '{snapshot_id}' not found")
+    label = _read_snapshot_meta(snap_dir).get("label", snapshot_id)
+    # `_force_rmtree` clears read-only attributes and retries with a backoff —
+    # a plain `shutil.rmtree` raises WinError 5 on OneDrive-synced paths.
+    try:
+        _force_rmtree(snap_dir)
+    except OSError as exc:
+        raise HTTPException(
+            500,
+            f"Could not delete snapshot '{label}': {exc}. The folder is "
+            f"locked (OneDrive sync / AV scan?) — retry, or remove it manually.",
+        ) from exc
+    change_log_service.log(
+        "delete_snapshot", "Project", name,
+        f"Deleted snapshot '{label}' of '{name}'",
+    )

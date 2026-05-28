@@ -326,6 +326,18 @@ def distribute_n_clusters_to_countries(
         f"Country weights L must sum up to 1.0 when distributing clusters. Is {L.sum()}."
     )
 
+    def _largest_remainder(weights, n_total, lower, upper):
+        """Proportional allocation with largest-remainder rounding (no solver needed)."""
+        ideal = weights * n_total
+        result = ideal.clip(lower=lower).apply(np.floor).astype(int)
+        remainder = n_total - result.sum()
+        if remainder != 0:
+            fracs = ideal - result
+            order = fracs.sort_values(ascending=False).index
+            for idx in order[: int(abs(remainder))]:
+                result[idx] += int(np.sign(remainder))
+        return result.clip(lower=lower, upper=upper)
+
     m = linopy.Model()
     clusters = m.add_variables(
         lower=1, upper=N, coords=[L.index], name="n", integer=True
@@ -337,11 +349,18 @@ def distribute_n_clusters_to_countries(
         logging.getLogger("gurobipy").propagate = False
     elif solver_name not in ["scip", "cplex", "xpress", "copt", "mosek"]:
         logger.info(
-            f"The configured solver `{solver_name}` does not support quadratic objectives. Falling back to `scip`."
+            f"The configured solver `{solver_name}` does not support quadratic objectives for MIQP. "
+            "Falling back to largest-remainder proportional allocation."
         )
-        solver_name = "scip"
+        return _largest_remainder(L, n_clusters, lower=1, upper=N)
     m.solve(solver_name=solver_name)
-    return m.solution["n"].to_series().astype(int)
+    result = m.solution["n"].to_series().astype(int)
+    if (result <= 0).any() or result.sum() != n_clusters:
+        logger.warning(
+            "MIQP solution invalid; falling back to largest-remainder proportional allocation."
+        )
+        return _largest_remainder(L, n_clusters, lower=1, upper=N)
+    return result
 
 
 def busmap_for_n_clusters(

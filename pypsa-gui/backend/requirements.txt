@@ -1,0 +1,6 @@
+# Web-tier dependencies — all other packages (pypsa, pandas, linopy, etc.) are in the pixi environment
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sse-starlette>=2.1
+aiofiles>=24.0
+python-multipart>=0.0.12

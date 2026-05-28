@@ -57,3 +57,10 @@ ignore = [
 
 # The order of imports matters in this file, so we stop ruff from re-ordering them.
 "scripts/lib/validation/config_updates.py"= ["I001", "F401"]
+
+# pypsa-gui subproject: a separate React+FastAPI web GUI with its own deliberate
+# style — aligned single-line guard clauses / lookup tables (E701/E702),
+# intentional mid-file "section" imports placed under a comment header and used
+# to break router/service import cycles (E402), and load-bearing test-bootstrap
+# import order (I001). Every substantive check (pyflakes F-codes, etc.) stays on.
+"pypsa-gui/**" = ["E402", "E701", "E702", "I001"]

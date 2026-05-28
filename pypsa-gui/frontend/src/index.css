@@ -1,0 +1,265 @@
+@import "tailwindcss";
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Design tokens — "Portfolio Optimizer / PyPSA Studio" design system.
+   Hitachi-inspired industrial red on warm-white surfaces, engineering-clean
+   (Linear / Vercel / Figma lineage), mono numerics.
+
+   Light theme is the @theme default; the dark theme overrides under
+   :root[data-theme="dark"]. Tailwind v4 emits every --color-* both as a
+   utility class (bg-bg-2, text-ink-700, border-border-2, …) AND as a real
+   CSS custom property, so component code can also use var(--color-ink-700).
+   ══════════════════════════════════════════════════════════════════════════ */
+@theme {
+  /* Surfaces */
+  --color-bg: #fdfdfe;
+  --color-bg-2: #f9fafb;
+  --color-panel: #f5f6f8;
+  --color-panel-2: #eef0f3;
+  --color-canvas: #f8f9fb;
+  --color-canvas-dot: #dde0e5;
+
+  /* Borders / hairlines — fine to strong */
+  --color-border: #e6e8ec;
+  --color-border-2: #d4d8de;
+  --color-border-3: #b9bec7;
+  --color-grid: #e6e8ec;
+
+  /* Ink scale (text) */
+  --color-ink-900: #0a0e14;
+  --color-ink-800: #1a202b;
+  --color-ink-700: #303843;
+  --color-ink-600: #475061;
+  --color-ink-500: #6a7384;
+  --color-ink-400: #97a0ae;
+  --color-ink-300: #c2c8d2;
+  --color-ink-200: #dde1e7;
+  /* Aliases — keep existing `text-text` / `text-muted` working, now on the
+     design ink scale. */
+  --color-text: #0a0e14;
+  --color-muted: #6a7384;
+  --color-axis: #97a0ae;
+  --color-legend: #475061;
+
+  /* Industrial-red accent */
+  --color-accent: #e60012;
+  --color-accent-700: #b8000e;
+  --color-accent-100: #fde7e9;
+  --color-accent-50: #fef3f4;
+
+  /* State colours */
+  --color-success: #16a34a;
+  --color-warn: #d97706;
+  --color-danger: #dc2626;
+  --color-purple: #7c3aed;
+
+  /* Voltage bands (>300 / 200–300 / 100–200 / <100 kV) */
+  --color-v-red: #ef4444;
+  --color-v-green: #16a34a;
+  --color-v-blue: #2563eb;
+  --color-v-gray: #6b7280;
+
+  /* Energy-carrier coding */
+  --color-carrier-h2: #7c3aed;
+  --color-carrier-dc: #d97706;
+  --color-carrier-heat: #ea580c;
+  --color-carrier-gas: #0369a1;
+
+  /* Asset-category coding */
+  --color-cat-thermal: #dc2626;
+  --color-cat-renew: #16a34a;
+  --color-cat-storage: #7c3aed;
+  --color-cat-load: #d97706;
+
+  /* Left sidebar — now a light warm-white surface (was a dark navy rail).
+     nav-hover is the row-hover tint; nav-active stays the industrial red. */
+  --color-nav: #f9fafb;
+  --color-nav-hover: #f5f6f8;
+  --color-nav-active: #e60012;
+
+  /* Typography */
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+  --font-family-mono: 'JetBrains Mono', monospace;
+
+  /* Density vars — tuned for "comfortable" (default). Compact overrides below.
+     Comfortable values mirror the Tailwind utility classes rows used before
+     density was introduced (`py-1` = 4px). Compact halves the vertical
+     padding for a visibly tighter grid. */
+  --row-padding-y: 4px;
+  --row-padding-y-lg: 6px;
+  --panel-padding: 12px;
+}
+
+/* Raw (non-utility) design tokens — shadows, focus ring, ambient gradient.
+   Emitted on :root so component styles can reference them via var(). */
+:root {
+  --shadow-xs: 0 1px 0 rgba(10, 14, 20, 0.04);
+  --shadow-sm: 0 1px 2px rgba(10, 14, 20, 0.04), 0 1px 1px rgba(10, 14, 20, 0.02);
+  --shadow: 0 2px 4px rgba(10, 14, 20, 0.04), 0 1px 2px rgba(10, 14, 20, 0.03);
+  --shadow-md: 0 6px 16px rgba(10, 14, 20, 0.07), 0 2px 5px rgba(10, 14, 20, 0.04);
+  --shadow-lg: 0 18px 40px rgba(10, 14, 20, 0.12), 0 4px 12px rgba(10, 14, 20, 0.06);
+  --ring-accent: 0 0 0 3px var(--color-accent-100);
+  /* Canvas signature — soft ambient red/purple radial gradients. */
+  --ambient:
+    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(230, 0, 18, 0.04), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(124, 58, 237, 0.035), transparent 55%);
+}
+
+/* ── Dark theme overrides ──────────────────────────────────────────────────
+   Activated by `<html data-theme="dark">`. Mirrors the design's dark palette;
+   the accent shifts to a slightly hotter red, neutrals invert, and the
+   sidebar collapses back into the dark surface family. */
+:root[data-theme="dark"] {
+  --color-bg: #0a0d12;
+  --color-bg-2: #0f131a;
+  --color-panel: #141821;
+  --color-panel-2: #1b212b;
+  --color-canvas: #0c1016;
+  --color-canvas-dot: #1d2129;
+
+  --color-border: #232831;
+  --color-border-2: #2c3340;
+  --color-border-3: #3a4253;
+  --color-grid: #232831;
+
+  --color-ink-900: #f3f4f6;
+  --color-ink-800: #d6dae0;
+  --color-ink-700: #c4c9d0;
+  --color-ink-600: #a4abb4;
+  --color-ink-500: #7e8691;
+  --color-ink-400: #5d6470;
+  --color-ink-300: #3d434c;
+  --color-ink-200: #2b3038;
+  --color-text: #f3f4f6;
+  --color-muted: #7e8691;
+  --color-axis: #5d6470;
+  --color-legend: #a4abb4;
+
+  --color-accent: #ef4458;
+  --color-accent-700: #dc1730;
+  --color-accent-100: #3a1119;
+  --color-accent-50: #1f0a0d;
+
+  --color-nav: #0f131a;
+  --color-nav-hover: #141821;
+
+  --ambient:
+    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(239, 68, 88, 0.06), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(124, 58, 237, 0.05), transparent 55%);
+
+  /* Tell the browser to render native form controls (date pickers, scrollbar
+     thumbs, autofill rendering) in dark variants. */
+  color-scheme: dark;
+}
+
+/* ── Compact density overrides ─────────────────────────────────────────────
+   Activated by `<html data-density="compact">`. ~50% reduction in row
+   padding gives a clearly denser grid without sacrificing legibility. */
+:root[data-density="compact"] {
+  --row-padding-y: 2px;
+  --row-padding-y-lg: 3px;
+  --panel-padding: 8px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family-sans);
+  margin: 0;
+  overflow: hidden;
+  /* Design system: subtle negative tracking on body text. */
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Mono numerics — tabular figures + slashed zero everywhere the mono face
+   is used (IDs, kV, MW, currencies, timestamps, table cells, kbd). */
+.font-mono { font-feature-settings: 'tnum', 'zero'; letter-spacing: 0.005em; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-2);
+  border-radius: 4px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-ink-400); }
+
+/* Transparent — the canvas base colour + the design's ambient red/purple
+   wash now live on the .react-flow root (viewport-anchored, see
+   TopologyCanvas). This element carries only the dot pattern, faded out
+   toward the edges with a radial mask per the design spec. */
+.react-flow__background {
+  background: transparent !important;
+  -webkit-mask-image: radial-gradient(ellipse 78% 78% at 50% 47%, #000 45%, transparent 92%);
+  mask-image: radial-gradient(ellipse 78% 78% at 50% 47%, #000 45%, transparent 92%);
+}
+.react-flow__controls button {
+  background: var(--color-bg) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text) !important;
+}
+.react-flow__minimap {
+  background: var(--color-bg) !important;
+  border: 1px solid var(--color-border) !important;
+}
+
+/* React Flow node and edge labels use computed CSS colors that don't auto-flip
+   on theme change. Force the dark text-on-light-chip → light-text-on-dark-chip
+   transition via the data-theme attr. */
+:root[data-theme="dark"] .react-flow__node {
+  color: var(--color-text);
+}
+
+/* Leaflet bus labels — match the chip-style appearance of React Flow nodes
+   so the two canvases feel like the same network. */
+.leaflet-tooltip.map-bus-label {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+  /* Override Leaflet's default `white-space: nowrap` so the per-carrier
+     breakdown line (added for multi-carrier networks during playback)
+     can wrap rather than overflowing horizontally past neighbouring
+     markers on dense maps. QA-flagged tooltip overflow. */
+  white-space: normal;
+  max-width: 280px;
+  line-height: 1.35;
+}
+.leaflet-tooltip.map-bus-label::before { display: none; }
+
+/* Permanent edge labels — small chip pinned to the polyline centre showing
+   flow magnitude + loading %. Sized smaller than bus labels so the line
+   labels read as secondary data; pointer-events: none so they don't steal
+   clicks intended for the polyline beneath. */
+.leaflet-tooltip.map-edge-label {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: var(--font-family-mono);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.4;
+  box-shadow: var(--shadow-sm);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.leaflet-tooltip.map-edge-label::before { display: none; }
+
+/* Suppress the browser's default focus outline that appears on clicked
+   Leaflet polylines / markers (renders as a black bounding-box around the
+   path's SVG, which looks like a selection frame). Leaflet manages its own
+   selection cues; the default outline is just visual noise. */
+.leaflet-interactive:focus,
+.leaflet-interactive:focus-visible,
+.leaflet-container svg path:focus { outline: none; }
