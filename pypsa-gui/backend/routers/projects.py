@@ -1674,7 +1674,13 @@ def _build_snapshot_weights(n, column: str = "objective") -> pd.Series:
     try:
         sw = n.snapshot_weightings.loc[sns, column].astype(float)
     except Exception:
-        sw = pd.Series(1.0, index=sns, dtype=float)
+        # Requested column missing (e.g. older netcdf without "generators") —
+        # fall back to "objective" before the all-1.0 last resort, so a
+        # representative-week weighting isn't silently dropped.
+        try:
+            sw = n.snapshot_weightings.loc[sns, "objective"].astype(float)
+        except Exception:
+            sw = pd.Series(1.0, index=sns, dtype=float)
     if not isinstance(sns, pd.MultiIndex):
         return sw
     try:
@@ -2755,7 +2761,7 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
     )
 
 
-def _compute_economics_summary(n, periods, is_multi, has_solve) -> EconomicsComparison:
+def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True) -> EconomicsComparison:
     """
     Per-carrier economic summary for the Economics comparison tab.
 
@@ -2799,9 +2805,12 @@ def _compute_economics_summary(n, periods, is_multi, has_solve) -> EconomicsComp
     # against the raw (subsidy-distorted) dual, so the per-carrier LCOE diverged
     # from the per-asset LCOS by the curtailment-subsidy term (battery 148 vs
     # 153 EUR/MWh). Lazy import avoids the simulation<->projects import cycle.
+    # `prices_from_state`: True for the LIVE Results endpoint (read the LP-stage
+    # `_state` snapshot, matching asset_economics); False for a loaded Compare
+    # bundle (read temp_n's own duals, never the live network's cached snapshot).
     try:
         from routers.simulation import corrected_marginal_prices
-        bus_prices = corrected_marginal_prices(n, from_state=False)
+        bus_prices = corrected_marginal_prices(n, from_state=prices_from_state)
     except Exception:
         bus_prices = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
 
@@ -3901,7 +3910,7 @@ def get_results_summary(name: str) -> ResultsSummary:
     loading = _compute_loading_summary(temp_n, periods, is_multi, has_solve)
     prices = _compute_prices_summary(temp_n, periods, is_multi, has_solve)
     emissions = _compute_emissions_summary(temp_n, periods, is_multi, has_solve)
-    economics = _compute_economics_summary(temp_n, periods, is_multi, has_solve)
+    economics = _compute_economics_summary(temp_n, periods, is_multi, has_solve, prices_from_state=False)
     curtailment = _compute_curtailment_summary(temp_n, periods, is_multi, has_solve)
     lost_load = _compute_lost_load_summary(src, temp_n, periods, is_multi, has_solve)
     storage_cycling = _compute_storage_cycling_summary(temp_n, periods, is_multi, has_solve)
