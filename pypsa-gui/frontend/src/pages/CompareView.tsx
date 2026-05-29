@@ -7,6 +7,7 @@ import {
 import { ArrowRight, Loader, AlertTriangle, Layers } from 'lucide-react'
 import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import type {
   CompareState, ProjectInfo, ResultsSummary, CarrierPeriodValue,
   LineLoadingEntry, CarrierEconomics, StorageUnitCycles, LostLoadBus,
@@ -152,16 +153,25 @@ export default function CompareView({ embedded = false, onClose, initialTab }: C
             Pick two projects to compare.
           </div>
         )}
-        {bothPicked && tab === 'overview'        && <OverviewTab       a={a} b={b} />}
-        {bothPicked && tab === 'capacity'        && <CapacityTab       a={a} b={b} />}
-        {bothPicked && tab === 'dispatch'        && <DispatchTab       a={a} b={b} />}
-        {bothPicked && tab === 'loading'         && <LoadingTab        a={a} b={b} />}
-        {bothPicked && tab === 'prices'          && <PricesTab         a={a} b={b} />}
-        {bothPicked && tab === 'emissions'       && <EmissionsTab      a={a} b={b} />}
-        {bothPicked && tab === 'economics'       && <EconomicsTab      a={a} b={b} />}
-        {bothPicked && tab === 'curtailment'     && <CurtailmentTab    a={a} b={b} />}
-        {bothPicked && tab === 'lost_load'       && <LostLoadTab       a={a} b={b} />}
-        {bothPicked && tab === 'storage_cycling' && <StorageCyclingTab a={a} b={b} />}
+        {/* Boundary around ONLY the tab body, keyed on the A/B/tab selection,
+            so a crash in one comparison shows an inline fallback here while the
+            pickers + tab bar above stay interactive — changing A/B/tab remounts
+            this (clearing the error) so a bad comparison is recoverable without
+            a page reload. */}
+        {bothPicked && (
+          <ErrorBoundary key={`${a}|${b}|${tab}`} label="This comparison failed to render">
+            {tab === 'overview'        && <OverviewTab       a={a} b={b} />}
+            {tab === 'capacity'        && <CapacityTab       a={a} b={b} />}
+            {tab === 'dispatch'        && <DispatchTab       a={a} b={b} />}
+            {tab === 'loading'         && <LoadingTab        a={a} b={b} />}
+            {tab === 'prices'          && <PricesTab         a={a} b={b} />}
+            {tab === 'emissions'       && <EmissionsTab      a={a} b={b} />}
+            {tab === 'economics'       && <EconomicsTab      a={a} b={b} />}
+            {tab === 'curtailment'     && <CurtailmentTab    a={a} b={b} />}
+            {tab === 'lost_load'       && <LostLoadTab       a={a} b={b} />}
+            {tab === 'storage_cycling' && <StorageCyclingTab a={a} b={b} />}
+          </ErrorBoundary>
+        )}
       </div>
     </div>
   )

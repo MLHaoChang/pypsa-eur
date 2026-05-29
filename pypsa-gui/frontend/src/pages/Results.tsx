@@ -7,6 +7,7 @@ import { useUIStore } from '../store/uiStore'
 import { ResultsFilterProvider } from './results/filterContext'
 import { type TSPayload, type WeightCtx } from './results/shared'
 import CompareView, { type Tab as CompareTab } from './CompareView'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import CapacityExpansion from './results/CapacityExpansion'
 import Dispatch from './results/Dispatch'
 import LoadFlow from './results/LoadFlow'
@@ -442,11 +443,16 @@ export default function Results() {
               style={{ width: compareRailWidth }}
               className="shrink-0 min-w-0 overflow-hidden border-l border-border bg-bg"
             >
-              <CompareView
-                embedded
-                onClose={() => setCompareRailOpen(false)}
-                initialTab={RESULTS_TO_COMPARE_TAB[tab]}
-              />
+              {/* Own boundary so a crash inside the comparison rail shows an
+                  inline fallback there instead of taking down the live Results
+                  pane on the left (and vice-versa). */}
+              <ErrorBoundary label="Comparison failed to render">
+                <CompareView
+                  embedded
+                  onClose={() => setCompareRailOpen(false)}
+                  initialTab={RESULTS_TO_COMPARE_TAB[tab]}
+                />
+              </ErrorBoundary>
             </div>
           </>
         )}

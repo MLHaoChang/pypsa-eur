@@ -23,44 +23,13 @@ import ScenariosPanel from './pages/ScenariosPanel'
 import CompareView from './pages/CompareView'
 import CommandPalette from './components/CommandPalette'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useUIStore, type SlidePanel } from './store/uiStore'
 import { networkApi } from './api/network'
 import { projectsApi } from './api/projects'
 import { simulationApi, createLogStream } from './api/simulation'
 import { invalidateNetworkQueries } from './utils/projectActions'
 import { appLog, useSimulationStore } from './store/simulationStore'
-
-class PageErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { error: Error | null }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props)
-    this.state = { error: null }
-  }
-  static getDerivedStateFromError(error: Error) {
-    return { error }
-  }
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full gap-3 text-sm">
-          <p className="text-danger font-semibold">Canvas crashed</p>
-          <p className="text-muted max-w-sm text-center font-mono text-xs">
-            {this.state.error.message}
-          </p>
-          <button
-            onClick={() => this.setState({ error: null })}
-            className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-accent hover:border-accent transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      )
-    }
-    return this.props.children
-  }
-}
 
 // Top-level boundary so any render error in the header/tabs/sidebar/etc. shows
 // a visible error screen instead of whitescreening the entire app.
@@ -503,11 +472,11 @@ export default function App() {
             }`}
           >
             <div className="relative flex-1 min-h-0 overflow-hidden">
-              <PageErrorBoundary>
+              <ErrorBoundary label="Canvas crashed">
                 {canvasView === 'blank'
                   ? <TopologyCanvas />
                   : <MapCanvas mode={canvasView} />}
-              </PageErrorBoundary>
+              </ErrorBoundary>
               {/* Mode switcher floats over whichever canvas is active */}
               <MapModeSwitcher />
               {/* Snapshot picker / playback bar for the results overlay —
@@ -526,7 +495,13 @@ export default function App() {
                 fullScreenTab ? 'flex-1' : 'w-1/2 border-l border-border'
               }`}
             >
-              <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+              {/* Boundary keyed on panel + project so a crash in any full-page
+                  tab (Results/Compare/Economics/…) shows an inline fallback
+                  instead of whitescreening the app, and navigating to another
+                  tab or switching project remounts it (clearing the error). */}
+              <ErrorBoundary key={`${activeSlidePanel}-${currentProject ?? ''}`} label="This panel crashed">
+                <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+              </ErrorBoundary>
             </div>
           )}
         </div>
