@@ -1,4 +1,4 @@
-import { Play, Zap, Search, Loader, PanelRightClose, PanelRightOpen, Undo2, Save, Check } from 'lucide-react'
+import { Play, Zap, Search, Loader, PanelRightClose, PanelRightOpen, Undo2, Save, Check, Command } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSimulationStore, appLog } from '../store/simulationStore'
 import { networkApi } from '../api/network'
@@ -85,8 +85,17 @@ export default function AppHeader() {
     requestBottomTab,
     currentProject, setCurrentProject, addTab, markProjectSaved,
     renameProject: renameProjectInStore,
+    setPaletteMode,
   } = useUIStore()
   const queryClient = useQueryClient()
+
+  // Platform-correct modifier label for the command-palette hint chip.
+  // App.tsx binds both Ctrl+K and Cmd+K; we just display the right one.
+  const cmdKey = useMemo(
+    () => (typeof navigator !== 'undefined'
+      && /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘' : 'Ctrl'),
+    [],
+  )
 
   // ── Project name editing ───────────────────────────────────────────────────
   const [editingName, setEditingName] = useState(false)
@@ -458,6 +467,14 @@ export default function AppHeader() {
     lpf:  'Load Flow',    // DC linear power flow
     pf:   'AC Power Flow',// non-linear Newton-Raphson
   }
+  // Plain-language description of what the current Run mode actually does, so a
+  // non-expert hovering the button understands LOPF vs power-flow without
+  // opening Solver Settings.
+  const MODE_DESC: Record<string, string> = {
+    lopf: 'optimise capacity expansion, unit commitment & dispatch to minimise cost',
+    lpf:  'solve a linear (DC) power flow on the current dispatch',
+    pf:   'solve a non-linear (AC) Newton-Raphson power flow on the current dispatch',
+  }
   const runLabel = `Run ${MODE_LABEL[mode] ?? mode.toUpperCase()}`
 
   // SSE cleanup ref — close the stream on Abort / unmount so a long-lived
@@ -667,6 +684,19 @@ export default function AppHeader() {
         )}
       </div>
 
+      {/* Command palette launcher — the palette (project switch, jump to any
+          panel/asset, theme/density) was previously keyboard-only (Ctrl/Cmd+K),
+          so non-power-users never found it. This visible affordance teaches the
+          shortcut via the kbd chip. */}
+      <button
+        onClick={() => setPaletteMode('all')}
+        title={`Command palette — switch projects, open panels, jump to assets (${cmdKey}+K)`}
+        className="flex items-center gap-1.5 px-2 py-1.5 rounded text-[11px] font-medium border border-border text-muted hover:text-text hover:bg-border/30 transition-colors shrink-0"
+      >
+        <Command size={12} />
+        <kbd className="text-[9px] font-mono bg-bg-2 border border-border rounded px-1 py-px leading-none">{cmdKey} K</kbd>
+      </button>
+
       {/* Undo */}
       <button
         onClick={handleUndo}
@@ -692,7 +722,7 @@ export default function AppHeader() {
         onClick={handleQuickSave}
         disabled={saveMut.isPending || isRunning}
         title={currentProject
-          ? `Save '${currentProject}' (Ctrl+S) — clears revert history`
+          ? `Save '${currentProject}' (Ctrl+S) — overwrites the saved project & clears revert history`
           : 'Save (Ctrl+S) — you will be prompted to name the project'}
         className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium border border-border text-text hover:bg-border/30 transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
       >
@@ -710,7 +740,9 @@ export default function AppHeader() {
           Run AC Power Flow). Mode is configured in Sidebar → Solver Settings. */}
       <button
         onClick={handleRun}
-        title={isRunning ? 'Abort the running simulation' : `${runLabel} — change mode in Solver Settings`}
+        title={isRunning
+          ? 'Abort the running simulation'
+          : `${runLabel}: ${MODE_DESC[mode] ?? ''} — change mode in Solver Settings`}
         className="flex items-center gap-1.5 px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px"
         style={{
           // Design system: 3-stop green gradient with layered + inset shadows;

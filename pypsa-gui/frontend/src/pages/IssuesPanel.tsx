@@ -125,11 +125,15 @@ export default function IssuesPanel() {
                   {data.deferred_reason ?? 'Solver was aborted but is still running in native solver code. The PyPSA lock will not release on its own.'}
                 </span>
                 <div className="text-[11px] text-text">
-                  <span className="font-semibold">To recover:</span>
+                  <span className="font-semibold">To recover, the backend server needs a restart:</span>
                   <ol className="list-decimal pl-5 mt-1 space-y-0.5 text-muted">
-                    <li>Stop the backend process (the uvicorn window, or kill its PID).</li>
-                    <li>Restart it: <code className="px-1 bg-bg-2 rounded">.pixi/envs/default/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir pypsa-gui/backend</code></li>
-                    <li>Reload your project from the file picker — the pre-run snapshot is on disk.</li>
+                    <li>Your work is safe — a snapshot was saved to disk just before the run started.</li>
+                    <li>Restart the backend, then reload your project from the file picker to pick that snapshot back up.</li>
+                    <li>
+                      If someone set this up for you, ask them to restart it. If you started it yourself, stop the
+                      server window and run:
+                      <code className="block mt-1 px-1.5 py-1 bg-bg-2 rounded break-all">.pixi/envs/default/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir pypsa-gui/backend</code>
+                    </li>
                   </ol>
                 </div>
               </div>

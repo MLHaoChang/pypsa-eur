@@ -2099,10 +2099,19 @@ export default function TopologyCanvas() {
       // would wipe everything else. Same pattern as PropertiesPanel.BusPanel.
       const cachedBuses = queryClient.getQueryData<Bus[]>(['buses']) ?? []
       const current = cachedBuses.find(b => b.name === name)
-      const body: Partial<Bus> = current ? { ...current, ...fields } : fields
+      if (!current) {
+        // Refuse the partial PUT on a cache miss — degrading to `fields` alone
+        // would let the backend's remove+add reset every omitted bus field to
+        // its schema default. The BusEditor only opens on a rendered (loaded)
+        // bus, so this is near-unreachable; throw rather than corrupt, matching
+        // MapCanvas's drag handler.
+        throw new Error(`Bus '${name}' not loaded yet — try the edit again in a moment.`)
+      }
+      const body: Partial<Bus> = { ...current, ...fields }
       return networkApi.updateBus(name, body)
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['buses'] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update bus'),
   })
 
   // Cache of user-dragged positions — updated in onNodesChange, never triggers re-renders

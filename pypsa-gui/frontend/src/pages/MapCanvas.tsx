@@ -174,12 +174,14 @@ function assetGroupDivIcon(
 }
 
 // ── Tile-provider config ───────────────────────────────────────────────────────
-// Satellite = Esri World Imagery + two transparent Esri reference overlays
-// (roads + place/facility labels) so it renders as a true "hybrid" — imagery
-// with street and POI names on top, like Google's Hybrid mode. Hybrid =
-// CartoDB Voyager raster tiles — a Google-Maps-style street map (roads, place
-// labels, POIs, light theme). All free, no API key. Switch to Mapbox/MapTiler
-// with a token if traffic outgrows the free tiers.
+// Two map base layers, matching the standard satellite/hybrid mental model:
+//   • Satellite — Esri World Imagery only (pure imagery, no labels).
+//   • Hybrid    — Esri World Imagery + two transparent Esri reference overlays
+//                 (roads + place/facility labels), i.e. imagery WITH street and
+//                 POI names on top, like Google's "Hybrid" mode.
+// (The third mode, "Blank", is the schematic TopologyCanvas — it never reaches
+// MapCanvas.) All tiles are free, no API key. Switch to Mapbox/MapTiler with a
+// token if traffic outgrows the free Esri tiers.
 const ESRI_IMAGERY_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const ESRI_ATTRIBUTION =
@@ -191,10 +193,6 @@ const ESRI_TRANSPORTATION_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}'
 const ESRI_PLACES_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
-const CARTO_VOYAGER_URL =
-  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
-const CARTO_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
 
 // Voltage → colour, mirrors the existing TopologyCanvas legend so the two
 // canvases feel like the same network.
@@ -206,7 +204,7 @@ function lineColor(vNom: number): string {
 }
 
 interface MapCanvasProps {
-  // 'satellite' = Esri imagery, 'hybrid' = CartoDB Voyager street map.
+  // 'satellite' = Esri imagery only; 'hybrid' = Esri imagery + street/place labels.
   mode: Exclude<CanvasView, 'blank'>
 }
 
@@ -630,21 +628,17 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       const payload: Partial<Bus> = { ...cached, x: lng, y: lat }
       return networkApi.updateBus(name, payload)
     },
-    onSuccess: async (_data, vars) => {
+    onSuccess: (_data, vars) => {
+      // The backend's update_bus already recomputed the lengths of THIS bus's
+      // connected lines (_recompute_lengths_for_bus, scoped to the moved bus)
+      // and logged a changelog entry. We previously also called the global
+      // recalculateLineLengths() here, which rewrote EVERY line in the network
+      // (O(all lines) per drag) and produced a SECOND changelog entry per drag.
+      // Drop that redundant whole-fleet pass — just refresh the two affected
+      // caches so the connected lines re-render with their new lengths.
       qc.invalidateQueries({ queryKey: ['buses'] })
-      // After every map drag, refresh line lengths to match the new geometry.
-      // Calls the haversine bulk endpoint, which already writes a backend
-      // changelog entry — we mirror that into the GUI log + toast so the
-      // user sees the side-effect.
-      try {
-        const r = await networkApi.recalculateLineLengths()
-        qc.invalidateQueries({ queryKey: ['lines'] })
-        const msg = `Bus '${vars.name}' moved · line lengths recalculated (${r.updated} updated, ${r.skipped} skipped)`
-        appLog('INFO', msg)
-        toast.success(`Lengths recalculated · ${r.updated} updated`)
-      } catch (e) {
-        appLog('WARN', `Bus '${vars.name}' moved but length recalc failed: ${(e as Error)?.message ?? e}`)
-      }
+      qc.invalidateQueries({ queryKey: ['lines'] })
+      appLog('INFO', `Bus '${vars.name}' moved · connected line lengths recalculated.`)
     },
     onError: (e: Error) => toast.error(`Move failed: ${e.message}`),
   })
@@ -762,17 +756,18 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         style={{ height: '100%', width: '100%' }}
       >
         {mode === 'satellite' ? (
+          // Pure satellite imagery — no labels.
+          <TileLayer url={ESRI_IMAGERY_URL} attribution={ESRI_ATTRIBUTION} maxZoom={19} />
+        ) : (
+          // Hybrid — imagery with transparent street + place/POI label overlays
+          // drawn ON TOP (like Google's "Hybrid"). Order matters: roads first,
+          // labels last (labels win). All three carry the Esri attribution
+          // (Leaflet dedupes identical strings) for ToS compliance.
           <>
             <TileLayer url={ESRI_IMAGERY_URL} attribution={ESRI_ATTRIBUTION} maxZoom={19} />
-            {/* Transparent reference overlays drawn ON TOP of the imagery so
-                the satellite view shows street names and place / facility
-                labels. Order matters: roads first, labels last (labels win). */}
-            <TileLayer url={ESRI_TRANSPORTATION_URL} maxZoom={19} />
-            <TileLayer url={ESRI_PLACES_URL} maxZoom={19} />
+            <TileLayer url={ESRI_TRANSPORTATION_URL} attribution={ESRI_ATTRIBUTION} maxZoom={19} />
+            <TileLayer url={ESRI_PLACES_URL} attribution={ESRI_ATTRIBUTION} maxZoom={19} />
           </>
-        ) : (
-          <TileLayer url={CARTO_VOYAGER_URL} attribution={CARTO_ATTRIBUTION} maxZoom={20}
-            subdomains={['a', 'b', 'c', 'd']} />
         )}
 
         <FitToNetwork buses={buses as Bus[]} />

@@ -62,10 +62,19 @@ function GeneratorsTab() {
       // back to Pydantic defaults. Same pattern as PropertiesPanel cards.
       const cached = qc.getQueryData<Generator[]>(['generators']) ?? []
       const current = cached.find(g => g.name === name)
-      const body = { ...(current ?? { name }), [field]: value } as Partial<Generator>
+      if (!current) {
+        // Refuse the partial PUT on a cache miss — without the full cached row,
+        // the backend's remove+add would reset every omitted field to its
+        // schema default. The grid only renders after the query resolves, so
+        // this is near-unreachable, but match MapCanvas's throw-don't-degrade
+        // policy rather than silently corrupt the generator.
+        throw new Error(`Generator '${name}' not loaded yet — try the edit again in a moment.`)
+      }
+      const body = { ...current, [field]: value } as Partial<Generator>
       return networkApi.updateGenerator(name, body)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['generators'] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update generator'),
   })
 
   return (

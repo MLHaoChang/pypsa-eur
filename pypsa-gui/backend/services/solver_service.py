@@ -670,6 +670,24 @@ def run_simulation(
                 # the exception and the network keeps stale extendable=False
                 # / p_nom=p_nom_opt rows from completed periods.
                 myopic_undo: list = []
+                # Re-normalise dynamic indexes AFTER `_apply_modelling_assumptions`.
+                # The up-front pass at run_simulation's entry runs BEFORE the
+                # modelling step, but step 4 (`set_investment_periods` cfg-only
+                # flat→MultiIndex promotion) and step 7 (transient vintage
+                # expansion via `n.add()`) can leave `_t` frames with a stale
+                # shape / a dropped `.name='snapshot'`. Without this second pass
+                # the full-horizon, SCLOPF, and rolling `n.optimize()` branches
+                # below crash with cryptic `dim_0` / `'snapshot' is not a valid
+                # dimension` errors. The myopic driver re-normalises per
+                # iteration (so it's already covered); the call is idempotent
+                # and cheap (shape + index comparison), so running it here for
+                # every branch is the structural fix.
+                fixed_idx = _normalise_dynamic_indexes(network, phase)
+                if fixed_idx:
+                    phase(
+                        f"Normalised {fixed_idx} stale dynamic index/indexes "
+                        "after modelling assumptions, pre-LP."
+                    )
                 # Last checkpoint before kicking off the LP. Once n.optimize()
                 # starts, the solver is in native code and stop_event becomes
                 # a placebo until either the LP finishes (single-shot) or the

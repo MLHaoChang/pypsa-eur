@@ -19,6 +19,10 @@ export const ALL_NETWORK_KEYS = [
   'stores', 'transformers', 'meta', 'load_profiles', 'generator_profiles',
   'link_profiles', 'timeseries', 'carriers', 'snapshots', 'undoInfo',
   'results', 'solverConfig', 'investmentPeriods',
+  // Status query shared by App/AppHeader/SnapshotPicker/Results/OverviewPanel/
+  // SolverSettings — invalidate on network swap so the StatusBar / picker
+  // don't lag behind a project load by up to their staleTime.
+  'simulationStatus',
 ] as const
 
 export const DIAGRAM_STATE_KEY = 'network-diagram:default:state'
@@ -239,6 +243,32 @@ export function nextUntitledName(taken: readonly string[]): string {
 // Slugify a free-form project title into a backend-friendly name.
 export function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/, '') || 'network'
+}
+
+// Resolve a collision-free on-disk project id for a NEW-project flow.
+//
+// The quick "+" create path seeds an EMPTY network under `name` with
+// force=true, which BYPASSES the backend's empty-network-overwrite guard
+// (projects.py save_project). Without this check, creating a project whose
+// slug matches an existing-but-unopened project silently wipes that project's
+// network.nc to a 0-bus shell. We compare against the full on-disk project
+// list — not just open tabs — and suffix (-2, -3, …) on collision, the same
+// way the backend uniquifies template names. `name` must already be slugified
+// by the caller; the backend stores project ids verbatim (the ProjectTabs "+"
+// path always passes a slug, so its ids ARE slugs), so the comparison is
+// apples-to-apples and a slug can only collide with another slug-named project.
+//
+// THROWS if the project list can't be read: the caller cannot prove the name
+// is free, so it MUST abort the destructive seed rather than risk an overwrite.
+export async function uniqueProjectName(name: string): Promise<string> {
+  const existing = await projectsApi.list()
+  const taken = new Set(existing.map(p => p.name))
+  if (!taken.has(name)) return name
+  for (let i = 2; i < 10_000; i++) {
+    const candidate = `${name}-${i}`
+    if (!taken.has(candidate)) return candidate
+  }
+  return `${name}-${Date.now()}`
 }
 
 // Per-project cache of FileSystemFileHandle returned by showSaveFilePicker.

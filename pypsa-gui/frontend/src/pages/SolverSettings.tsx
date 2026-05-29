@@ -1935,7 +1935,11 @@ function Stage2Panel({
 }) {
   const { data: buses = [] } = useQuery({ queryKey: ['buses'], queryFn: networkApi.getBuses })
   const { data: simStatus } = useQuery({
-    queryKey: ['simulation_status'],
+    // Use the SAME key as every other status consumer (App, AppHeader,
+    // SnapshotPicker, Results, OverviewPanel). The previous 'simulation_status'
+    // was a separate cache entry, so a standalone AC-PF trigger from here
+    // refreshed only this panel and left the picker/overlay status stale.
+    queryKey: ['simulationStatus'],
     queryFn: simulationApi.getStatus,
     refetchInterval: 2000,
   })
@@ -1948,6 +1952,21 @@ function Stage2Panel({
   const isRunning = simStatus?.running === true
   const canRunAcPf = !isRunning
 
+  // Refresh result queries when a standalone AC-PF run finishes. The success
+  // handler flips resultSource→'ac_pf' (which refetches the ac_pf-keyed
+  // queries), but the lopf-keyed result queries wouldn't refetch if the user
+  // flips back to 'lopf'. Watch the running→idle edge and invalidate ['results']
+  // (+ status) so every view reflects the post-AC-PF state. prevRunningRef
+  // starts false so a fresh mount with no run in flight never fires.
+  const prevRunningRef = useRef(false)
+  useEffect(() => {
+    if (prevRunningRef.current && !isRunning) {
+      qc.invalidateQueries({ queryKey: ['results'] })
+      qc.invalidateQueries({ queryKey: ['simulationStatus'] })
+    }
+    prevRunningRef.current = isRunning
+  }, [isRunning, qc])
+
   const runAcPf = useMutation({
     mutationFn: () => simulationApi.runAcPf(),
     onSuccess: () => {
@@ -1957,7 +1976,7 @@ function Stage2Panel({
       setResultSource('ac_pf')
       // Invalidate the simulation status query so the polling cycle picks up
       // the new "running" state immediately rather than waiting 2s.
-      qc.invalidateQueries({ queryKey: ['simulation_status'] })
+      qc.invalidateQueries({ queryKey: ['simulationStatus'] })
     },
     onError: (e: unknown) => {
       const code = (e as { response?: { status?: number } })?.response?.status

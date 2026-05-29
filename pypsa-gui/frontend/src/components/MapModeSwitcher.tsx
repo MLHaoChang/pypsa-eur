@@ -5,8 +5,8 @@ import { useUIStore, type CanvasView } from '../store/uiStore'
 // localStorage via the uiStore setter.
 const MODES: Array<{ id: CanvasView; label: string; Icon: typeof Square; tip: string }> = [
   { id: 'blank',     label: 'Blank',     Icon: Square, tip: 'Schematic canvas (full edit)' },
-  { id: 'satellite', label: 'Satellite', Icon: Globe,  tip: 'Esri satellite imagery' },
-  { id: 'hybrid',    label: 'Hybrid',    Icon: MapPin, tip: 'Street map with roads, places & POIs' },
+  { id: 'satellite', label: 'Satellite', Icon: Globe,  tip: 'Esri satellite imagery (no labels)' },
+  { id: 'hybrid',    label: 'Hybrid',    Icon: MapPin, tip: 'Satellite imagery with street & place labels' },
 ]
 
 export default function MapModeSwitcher() {

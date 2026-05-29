@@ -176,14 +176,15 @@ const EXAMPLES = [
 
 // ── Shared sidebar item row ────────────────────────────────────────────────────
 function SItem({
-  icon, label, hint, rightEl, onClick, active,
+  icon, label, hint, rightEl, onClick, active, title,
 }: {
   icon: React.ReactNode; label: string; hint?: string; rightEl?: React.ReactNode
-  onClick?: () => void; active?: boolean
+  onClick?: () => void; active?: boolean; title?: string
 }) {
   return (
     <button
       onClick={onClick}
+      title={title}
       className="flex items-center gap-3 w-full pl-6 pr-3 transition-colors text-left"
       style={{
         height: 36,
@@ -1288,14 +1289,17 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   return (
     <div>
       <SItem icon={<Settings2 size={15} />} label="Solver Settings"
+        title="Choose the solver, foresight mode (overnight / myopic / perfect), CO₂ price, discount rate and value-of-lost-load."
         active={activeSlidePanel === 'simparams'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'simparams' ? null : 'simparams'); onCloseModal?.() }}
       />
       <SItem icon={<Clock size={15} />} label="Model Horizon"
+        title="Define the snapshots (time steps) and investment periods/years the optimisation plans over."
         active={activeSlidePanel === 'horizon'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'horizon' ? null : 'horizon'); onCloseModal?.() }}
       />
       <SItem icon={<Layers size={15} />} label="Capacity Bounds"
+        title="Set per-technology minimum/maximum build limits, optionally different for each investment period (vintages)."
         active={activeSlidePanel === 'capacityBounds'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'capacityBounds' ? null : 'capacityBounds'); onCloseModal?.() }}
       />

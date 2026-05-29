@@ -1080,6 +1080,23 @@ def load_project(name: str) -> ImportSummary:
         (not n_loaded.storage_units.empty and not n_loaded.storage_units_t.state_of_charge.empty)
     )
     meta = _read_meta(src)
+    # Corruption signal: the cached metadata.json bus_count is what the project
+    # LIST shows (it never opens network.nc); load reads the actual file. A
+    # mismatch means the cached metadata drifted from disk — interrupted save,
+    # external edit, or a partial write — so the list may have advertised a
+    # count the file doesn't back. Surface it via the changelog (same channel as
+    # the orphan-.tmp warning) so a UI banner can flag possible corruption
+    # rather than silently trusting either number. Only compare when metadata
+    # actually recorded a count (a missing/corrupt metadata.json returns {}).
+    cached_bus_count = meta.get("bus_count")
+    actual_bus_count = len(n_loaded.buses)
+    if cached_bus_count is not None and cached_bus_count != actual_bus_count:
+        change_log_service.log(
+            "warn", "Project", name,
+            f"Metadata mismatch: project list cached bus_count={cached_bus_count} "
+            f"but network.nc has {actual_bus_count} buses. Possible interrupted "
+            f"save or external edit — verify the project is intact.",
+        )
     # Atomic lifecycle hydration via `_state_update` so a concurrent
     # `GET /api/simulation/status` poll can't read a half-applied tuple
     # (see F11 / G2). Without this, header could briefly display

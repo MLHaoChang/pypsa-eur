@@ -7,7 +7,7 @@ import { projectsApi } from '../api/projects'
 import { appLog } from '../store/simulationStore'
 import {
   invalidateNetworkQueries, saveProjectQuietly, nextUntitledName,
-  resetBackendNetwork, slugify, abortRunningSim,
+  resetBackendNetwork, slugify, abortRunningSim, uniqueProjectName,
 } from '../utils/projectActions'
 
 // Small name-input modal for the "+ new tab" flow. Lives here rather than in
@@ -119,6 +119,23 @@ export default function ProjectTabs() {
     if (busy) return
     setBusy('__new__')
     try {
+      // Resolve a collision-free name BEFORE any destructive step. This flow
+      // seeds an empty network under `name` with force=true, which bypasses
+      // the backend's empty-network-overwrite guard — so a slug matching an
+      // existing-but-unopened project would silently wipe its network.nc. The
+      // "+" quick-create has no overwrite-consent UI (unlike the sidebar
+      // wizard's Blank tab), so we uniquify rather than clobber. If the project
+      // list can't be read we can't prove the name is free → abort the create.
+      let target: string
+      try {
+        target = await uniqueProjectName(name)
+      } catch (e) {
+        appLog('ERROR', `Could not verify project-name availability for '${name}': ${String((e as Error)?.message ?? e)}`)
+        toast.error('Could not verify project-name availability. Try again in a moment.')
+        return
+      }
+      if (target !== name) toast(`'${name}' already exists — created '${target}' instead`, { icon: 'ℹ️' })
+
       const stopped = await abortRunningSim()
       if (!stopped) {
         toast.error('Could not abort the running simulation. Try again in a moment.')
@@ -126,14 +143,14 @@ export default function ProjectTabs() {
       }
       if (currentProject) await saveProjectQuietly(currentProject)
       await resetBackendNetwork()
-      try { await projectsApi.save(name, true) }
-      catch (e) { appLog('WARN', `Could not seed empty project '${name}': ${String((e as Error)?.message ?? e)}`) }
+      try { await projectsApi.save(target, true) }
+      catch (e) { appLog('WARN', `Could not seed empty project '${target}': ${String((e as Error)?.message ?? e)}`) }
       invalidateNetworkQueries(qc)
-      addTab(name)
-      setCurrentProject(name)
-      setProjectName(name)
-      appLog('INFO', `New project tab created: ${name}`)
-      toast.success(`Created '${name}'`)
+      addTab(target)
+      setCurrentProject(target)
+      setProjectName(target)
+      appLog('INFO', `New project tab created: ${target}`)
+      toast.success(`Created '${target}'`)
     } catch (e) {
       toast.error(`Could not create new project: ${(e as Error)?.message ?? e}`)
     } finally {

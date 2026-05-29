@@ -6,6 +6,7 @@ import { projectsApi } from '../api/projects'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, saveProjectQuietly } from '../utils/projectActions'
+import { confirmToast } from '../utils/toasts'
 import { appLog } from '../store/simulationStore'
 import type { ProjectInfo } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn, Tag } from '../components/PageKit'
@@ -226,9 +227,11 @@ export default function ScenariosPanel() {
       // 409 on a cascade=true call would otherwise loop the prompt.
       if (e.response?.status === 409 && !params.cascade) {
         const detail = e.response.data?.detail ?? 'has child scenarios'
-        if (window.confirm(`${detail}\n\nDelete recursively?`)) {
-          deleteMut.mutate({ name: params.name, cascade: true })
-        }
+        confirmToast(
+          `${detail} — delete it and all its child scenarios?`,
+          () => deleteMut.mutate({ name: params.name, cascade: true }),
+          { confirmLabel: 'Delete all', danger: true },
+        )
         return
       }
       toast.error(`Delete failed: ${e.response?.data?.detail ?? (err as Error).message}`)

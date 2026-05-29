@@ -1848,7 +1848,21 @@ def bulk_update(body: dict) -> dict:
             continue
         if pd.api.types.is_numeric_dtype(col_dtype):
             if value is None or value == "":
-                coerced[col] = float("nan")  # pandas treats this as missing
+                # Blank-to-clear a bound should produce PyPSA's "no bound"
+                # sentinel (±inf), matching how the per-row PUT path clears the
+                # capacity/economic bounds via the schema aliases (_NoneToPosInf
+                # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
+                # endswith("_max") predicate is intentionally a superset: it also
+                # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
+                # v_ang_max) — clearing those to inf is likewise their PyPSA
+                # default, so the resulting network is valid. Everything else
+                # keeps NaN ("missing"), as before.
+                if col.endswith("_max") or col == "lifetime":
+                    coerced[col] = float("inf")
+                elif col == "e_sum_min":
+                    coerced[col] = float("-inf")
+                else:
+                    coerced[col] = float("nan")  # pandas treats this as missing
                 continue
             try:
                 coerced[col] = float(value)
