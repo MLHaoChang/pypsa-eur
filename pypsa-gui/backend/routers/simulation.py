@@ -3,10 +3,20 @@ from __future__ import annotations
 import asyncio
 import collections
 import json
+import logging
 import queue
 import threading
 from dataclasses import asdict
 from typing import Any
+
+# Module logger for /results endpoints. The catch-all `except Exception:
+# return _not_solved()` arms below convert ANY failure into a 204 ("no
+# results") so the UI degrades gracefully — but that also hides genuine bugs
+# (KeyError, dtype, NaN-render) as if the network simply wasn't solved. Log
+# the traceback before the 204 so the cause is visible in the backend log;
+# `logger.exception(...)` captures the active exception (works from a helper
+# called inside the except block too).
+logger = logging.getLogger("pypsa_gui.results")
 
 
 class BufferedLogQueue:
@@ -968,6 +978,7 @@ def get_cost_breakdown():
                 capex_lifetime_by_class[comp_class] = capex_lifetime_sum
                 capex_expansion_lifetime_by_class[comp_class] = exp_lifetime_sum
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
     if stats is None or stats.empty:
         return _not_solved()
@@ -1586,6 +1597,7 @@ def get_statistics():
             # was added to fix. Single code path; pass `stats` straight in.
             return df_to_json(stats)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -1600,6 +1612,7 @@ def get_generator_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -1622,6 +1635,7 @@ def get_storage_dispatch_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -1641,6 +1655,7 @@ def get_store_dispatch_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -1659,6 +1674,7 @@ def get_store_energy_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -1673,6 +1689,7 @@ def get_storage_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -1687,6 +1704,7 @@ def get_line_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -1709,6 +1727,7 @@ def get_link_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -2132,26 +2151,24 @@ def get_losses_summary(source: str = "lopf"):
     instead of read from the LP's loss variables — meaningful even when
     transmission_losses was off during Stage 1.
 
-    Per-snapshot loss for a line/transformer is in MW; weighted by the
-    network's snapshot_weightings.generators to get MWh — PyPSA's ENERGY
-    weighting basis (what n.statistics() uses), falling back to objective on
-    older netcdf. Losses are an energy quantity, so this matches the
-    Dispatch/statistics basis under representative-week weighting (identical
-    when the two columns coincide).
+    Per-snapshot loss for a line/transformer is in MW; weighted by
+    ``snapshot_weightings.generators × investment_period_weightings.years`` to
+    get horizon MWh — PyPSA's ENERGY weighting basis (what n.statistics() uses).
+    The years factor matters on MULTI-PERIOD runs: without it, loss energy was
+    under-reported by ~1/Σyears (a [2030(years=5), 2040(years=10)] horizon
+    reported ~1/15 of the true loss MWh).
     """
     import math
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    # snapshot weights: hour-equivalent per row (ENERGY basis = generators).
-    # Default 1 h. Fall back generators → objective → None on older netcdf.
-    try:
-        weights = n.snapshot_weightings.generators
-    except Exception:
-        try:
-            weights = n.snapshot_weightings.objective
-        except Exception:
-            weights = None
+    # Per-snapshot ENERGY weight = generators column × investment-period years.
+    # The shared helper applies the generators→objective→1.0 fallback AND the
+    # multi-period years scaling (the raw-column read used before omitted years).
+    # Returns a Series indexed by n.snapshots, aligned with the _t loss tables
+    # below. Lazy import avoids the projects<->simulation import cycle.
+    from routers.projects import _build_snapshot_weights as _bsw
+    weights = _bsw(n, "generators")
 
     def _branch_loss(df_t, df_static, comp_name: str):
         """Returns (per_branch_rows, snapshot_total_mw, total_mwh, peak_mw)."""
@@ -2865,6 +2882,7 @@ def get_transformer_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -3141,6 +3159,7 @@ def get_voltages(source: str = "ac_pf"):
             return _not_solved()
         return _ts_payload(df, extra={"source": source})
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -3162,6 +3181,7 @@ def get_line_reactive(source: str = "ac_pf"):
             return _not_solved()
         return _ts_payload(df, extra={"source": source})
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -3177,6 +3197,7 @@ def get_transformer_reactive(source: str = "ac_pf"):
             return _not_solved()
         return _ts_payload(df, extra={"source": source})
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -3347,6 +3368,7 @@ def get_prices(source: str = "lopf"):
             ),
         })
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -3503,6 +3525,7 @@ def get_price_drivers(threshold: float = 2000.0, limit: int = 200):
             "rows": rows[:limit],
         }
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -3624,6 +3647,7 @@ def get_curtailment():
             curtailment = curtailment.iloc[:, 0:0]
         return _ts_payload(curtailment)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
@@ -3791,6 +3815,7 @@ def get_load_results(source: str = "lopf"):
             return _not_solved()
         return _ts_payload(df)
     except Exception:
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 

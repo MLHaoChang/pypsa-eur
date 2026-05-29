@@ -193,6 +193,38 @@ _RESULTS_STATE_KEYS = (
 )
 
 
+# Schema version for the results_state.pkl payload. Bump when the shape of the
+# persisted side-results changes incompatibly; readers reject unknown versions
+# (skip + warn) rather than misread a newer layout. v1 = the first versioned
+# envelope `{"__schema__": 1, "data": {<_RESULTS_STATE_KEYS>}}`. Bundles saved
+# BEFORE versioning are a bare dict (no "__schema__") and still load via the
+# legacy branch in `_unwrap_results_state`.
+_RESULTS_STATE_SCHEMA = 1
+
+
+def _unwrap_results_state(raw: object) -> dict | None:
+    """
+    Return the side-results dict from a loaded results_state.pkl payload,
+    accepting BOTH the versioned envelope (`{"__schema__": N, "data": {...}}`)
+    and the legacy bare dict (pre-versioning saves). Returns None when the
+    payload isn't a dict, or carries a schema version this build doesn't
+    understand (forward-incompat) — callers skip rather than misread.
+    """
+    if not isinstance(raw, dict):
+        return None
+    if "__schema__" in raw:
+        try:
+            ver = int(raw["__schema__"])
+        except (TypeError, ValueError):
+            return None
+        if ver != _RESULTS_STATE_SCHEMA:
+            return None  # unknown / newer version — skip, don't guess
+        data = raw.get("data")
+        return data if isinstance(data, dict) else None
+    # Legacy bare dict (pre-versioning): the result keys ARE the top level.
+    return raw
+
+
 def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None:
     """
     Reset and (if present) restore `_state` side-results from
@@ -215,10 +247,23 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
     try:
         import pickle
         restored = pickle.loads(results_path.read_bytes())
-        if isinstance(restored, dict):
-            applied = {k: v for k, v in restored.items() if k in _RESULTS_STATE_KEYS}
-            if applied:
-                _sim_state_update(**applied)
+        data = _unwrap_results_state(restored)
+        if data is None:
+            # Not a dict, or a schema version this build doesn't understand.
+            # Warn only when it LOOKED like a versioned payload we can't read
+            # (a corrupt/legacy non-dict is already covered by the except).
+            if isinstance(restored, dict) and "__schema__" in restored:
+                change_log_service.log(
+                    "warn", "Project", project_name,
+                    f"results_state.pkl uses unsupported schema "
+                    f"{restored.get('__schema__')!r} (this build expects "
+                    f"{_RESULTS_STATE_SCHEMA}); skipped. Re-run the solve to "
+                    f"repopulate side results (cost / dispatch unaffected).",
+                )
+            return
+        applied = {k: v for k, v in data.items() if k in _RESULTS_STATE_KEYS}
+        if applied:
+            _sim_state_update(**applied)
     except Exception as exc:
         change_log_service.log(
             "warn", "Project", project_name,
@@ -849,7 +894,10 @@ def save_project(
     results_state = {k: _state.get(k) for k in _RESULTS_STATE_KEYS}
     results_path = dest / "results_state.pkl"
     if any(v is not None for v in results_state.values()):
-        _atomic_write_with(results_path, lambda p: p.write_bytes(pickle.dumps(results_state)))
+        # Versioned envelope so a future shape change can be detected on load
+        # (see `_unwrap_results_state`). Legacy bare-dict bundles still load.
+        payload = {"__schema__": _RESULTS_STATE_SCHEMA, "data": results_state}
+        _atomic_write_with(results_path, lambda p: p.write_bytes(pickle.dumps(payload)))
     elif results_path.exists():
         # A run that produced no result-side data (e.g. a fresh import
         # before any solve, or a save after Reset) shouldn't leave a stale
@@ -3704,9 +3752,11 @@ def _compute_lost_load_summary(
         return LostLoadComparison()
     try:
         import pickle as _pickle
-        data = _pickle.loads(results_path.read_bytes())
+        raw = _pickle.loads(results_path.read_bytes())
     except Exception:
         return LostLoadComparison()
+    # Accept both the versioned envelope and the legacy bare dict.
+    data = _unwrap_results_state(raw)
     cap = data.get("last_lost_load") if isinstance(data, dict) else None
     if not cap or cap.get("lost_load_t") is None:
         return LostLoadComparison()
