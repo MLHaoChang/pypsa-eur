@@ -14,6 +14,7 @@ version = "2025.07.0"
 gui-backend  = { cmd = "uvicorn main:app --reload --port 8000", cwd = "pypsa-gui/backend" }
 gui-frontend = { cmd = "npm run dev", cwd = "pypsa-gui/frontend" }
 gui          = { depends-on = ["gui-backend", "gui-frontend"] }
+gui-tests    = { cmd = "python -m pytest", cwd = "pypsa-gui/backend" }
 setup-ssl-bypass = "python scripts/install_ssl_bypass.py"
 
 reset = """bash -c '
