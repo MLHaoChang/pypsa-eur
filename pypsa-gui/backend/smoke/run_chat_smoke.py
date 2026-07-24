@@ -17,7 +17,7 @@ USAGE
    the smoke's project create/delete - per ``feedback_no_live_backend_project_io``
    memory rule).
 3. Run from the repo root:
-       .pixi/envs/default/python.exe pypsa-gui/backend/smoke/run_chat_smoke.py
+       pixi run python pypsa-gui/backend/smoke/run_chat_smoke.py
 
 OPTIONS
 -------

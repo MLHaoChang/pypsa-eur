@@ -2,7 +2,7 @@
 Pytest harness for the pypsa-gui FastAPI backend.
 
 Run with (from the repo root, using the pixi env's python):
-    .pixi/envs/default/python.exe -m pytest pypsa-gui/backend/tests
+    pixi run python -m pytest pypsa-gui/backend/tests
 or from the backend dir:
     cd pypsa-gui/backend && <pixi-python> -m pytest
 

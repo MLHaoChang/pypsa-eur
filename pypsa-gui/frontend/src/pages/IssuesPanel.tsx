@@ -176,7 +176,7 @@ export default function IssuesPanel() {
                     <li>
                       If someone set this up for you, ask them to restart it. If you started it yourself, stop the
                       server window and run:
-                      <code className="block mt-1 px-1.5 py-1 bg-bg-2 rounded break-all">.pixi/envs/default/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir pypsa-gui/backend</code>
+                      <code className="block mt-1 px-1.5 py-1 bg-bg-2 rounded break-all">pixi run python -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir pypsa-gui/backend</code>
                     </li>
                   </ol>
                 </div>

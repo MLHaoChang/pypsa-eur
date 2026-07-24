@@ -433,16 +433,32 @@ class TestUploadsEndpoints:
         assert r.json()["detail"]["error_kind"] == "invalid_filename"
 
     def test_post_unsupported_mime_rejected(self, app_client, demo_project):
-        # python-magic will sniff this as text/plain for a script, application/x-executable
-        # for a real binary. Either way: not in our allowlist for video/mp4.
-        # Use an unambiguous non-allowed type
+        # Payload must be a binary libmagic recognises as NON-text on every
+        # platform. The previous `b"MZ" + b"\x00" * 100` stub was too degenerate:
+        # libmagic 5.47 (macOS/conda-forge) declines to call two bytes a DOS
+        # executable and falls back to `text/plain` — which IS allowlisted for
+        # CSV/txt uploads, so the upload was accepted and this test failed. It
+        # only passed on Windows because the older bundled libmagic there
+        # classified the same stub as `application/x-dosexec`.
+        #
+        # A 64-bit ELF header is the portable choice: libmagic identifies it
+        # identically across platforms and it never degrades to a text type.
+        elf_header = (
+            b"\x7fELF\x02\x01\x01\x00"      # magic + 64-bit + little-endian + SysV
+            + b"\x00" * 8                     # padding
+            + b"\x02\x00"                     # e_type  = ET_EXEC
+            + b"\x3e\x00"                     # e_machine = x86-64
+            + b"\x01\x00\x00\x00"             # e_version
+            + b"\x00" * 64
+        )
         r = app_client.post(
             f"/api/projects/{demo_project}/uploads",
-            files={"file": ("malware.exe", b"MZ" + b"\x00" * 100, "application/octet-stream")},
+            files={"file": ("malware.exe", elf_header, "application/octet-stream")},
         )
         assert r.status_code == 400
         # Either unsupported_mime or mime_type_mismatch is acceptable here —
-        # MZ magic is typically application/x-dosexec
+        # the sniff lands on application/octet-stream or an x-executable variant
+        # depending on libmagic version; neither is in ALLOWED_MIME_TYPES.
         assert r.json()["detail"]["error_kind"] in {"unsupported_mime", "mime_type_mismatch"}
 
     def test_get_list_after_post(self, app_client, demo_project):

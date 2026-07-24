@@ -10,7 +10,9 @@
 
 set +e
 BACKEND="http://127.0.0.1:8000"
-PROJ_ROOT="c:/Users/HC9289/OneDrive - Hitachi Energy/Desktop/Privat/Code/Test/pypsa-eur/pypsa-gui/backend/projects"
+# Resolved from this script's own location so the walkthrough runs from any
+# checkout on any platform. Was previously a hardcoded Windows path.
+PROJ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/projects"
 PASS=0
 FAIL=0
 SKIP=0

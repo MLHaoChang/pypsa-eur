@@ -10,7 +10,7 @@ foreground). The abort test blocks the first job in `load_project` so the
 second is deterministically still queued, then cancels it.
 
 Run with the pixi env python:
-    .pixi/envs/default/python.exe -m pytest pypsa-gui/backend/tests/test_solve_queue.py
+    pixi run python -m pytest pypsa-gui/backend/tests/test_solve_queue.py
 """
 from __future__ import annotations
 

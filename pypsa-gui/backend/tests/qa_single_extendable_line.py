@@ -4,7 +4,7 @@ vintage_service, while Generator/StorageUnit still get per-period vintage
 rows. Synthetic 3-bus 3-period network — no LP solve, just inspect the
 post-apply network state.
 
-Run: cd backend && ../../.pixi/envs/default/python.exe tests/qa_single_extendable_line.py
+Run: cd backend && pixi run python tests/qa_single_extendable_line.py
 """
 import math
 import os
