@@ -5,9 +5,11 @@ import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
+import { isRenewableCarrier } from '../utils/carriers'
 import { Ruler, Flame, Wind, BatteryCharging, Zap } from 'lucide-react'
 import ReactDOMServer from 'react-dom/server'
 import { useUIStore, type CanvasView } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
 import { appLog } from '../store/simulationStore'
 import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, Store, Transformer } from '../api/types'
@@ -44,13 +46,7 @@ function transformerDivIcon(color: string): L.DivIcon {
 // ── Asset-group categorisation (mirror of TopologyCanvas) ─────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
 
-const RENEWABLE_KEYWORDS = ['wind', 'solar', 'pv', 'ror', 'run-of-river', 'geothermal',
-  'offwind', 'onwind', 'wave', 'tidal', 'rooftop']
-function isRenewableCarrier(carrier: string): boolean {
-  const c = (carrier ?? '').toLowerCase()
-  if (c.includes('hydro') && !c.includes('pump') && !c.includes('storage')) return true
-  return RENEWABLE_KEYWORDS.some(k => c.includes(k))
-}
+// isRenewableCarrier imported from utils/carriers (single null-safe source).
 
 interface CategoryStyle {
   Icon: typeof Flame; color: string
@@ -562,14 +558,14 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // Per-snapshot results overlay (LOPF / AC PF dispatch + line loading).
   // `enabled` is false unless the user turns the overlay on in SnapshotPicker.
   const results = useCanvasResults()
-  const { data: buses = [] }        = useQuery({ queryKey: ['buses'],        queryFn: networkApi.getBuses })
-  const { data: lines = [] }        = useQuery({ queryKey: ['lines'],        queryFn: networkApi.getLines })
-  const { data: links = [] }        = useQuery({ queryKey: ['links'],        queryFn: networkApi.getLinks })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'], queryFn: networkApi.getTransformers })
-  const { data: generators = [] }   = useQuery({ queryKey: ['generators'],   queryFn: networkApi.getGenerators })
-  const { data: loads = [] }        = useQuery({ queryKey: ['loads'],        queryFn: networkApi.getLoads })
-  const { data: sus = [] }          = useQuery({ queryKey: ['storage_units'],queryFn: networkApi.getStorageUnits })
-  const { data: stores = [] }       = useQuery({ queryKey: ['stores'],       queryFn: networkApi.getStores })
+  const { data: buses = [] }        = useQuery({ queryKey: nk(currentProject, 'buses'),        queryFn: networkApi.getBuses })
+  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),        queryFn: networkApi.getLines })
+  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),        queryFn: networkApi.getLinks })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers })
+  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),   queryFn: networkApi.getGenerators })
+  const { data: loads = [] }        = useQuery({ queryKey: nk(currentProject, 'loads'),        queryFn: networkApi.getLoads })
+  const { data: sus = [] }          = useQuery({ queryKey: nk(currentProject, 'storage_units'),queryFn: networkApi.getStorageUnits })
+  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),       queryFn: networkApi.getStores })
 
   // O(1) bus lookup for line endpoints — the alternative would be a linear
   // scan per line render, which gets noticeable on networks with hundreds of
@@ -597,7 +593,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   const recalcMut = useMutation({
     mutationFn: () => networkApi.recalculateLineLengths(),
     onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['lines'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       toast.success(`Line lengths recalculated · ${r.updated} updated, ${r.skipped} skipped`)
     },
     onError: () => toast.error('Could not recalculate line lengths'),
@@ -612,7 +608,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // changes here for any bus the user has already laid out there.
   const updateBusPosMut = useMutation({
     mutationFn: ({ name, lat, lng }: { name: string; lat: number; lng: number }) => {
-      const cached = (qc.getQueryData<Bus[]>(['buses']) ?? []).find(b => b.name === name)
+      const cached = (qc.getQueryData<Bus[]>(nk(useUIStore.getState().currentProject, 'buses')) ?? []).find(b => b.name === name)
       if (!cached) {
         // Refuse the partial PUT — without the cached row's full fields,
         // the backend's _update_component (remove + add) would reset
@@ -636,8 +632,8 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       // (O(all lines) per drag) and produced a SECOND changelog entry per drag.
       // Drop that redundant whole-fleet pass — just refresh the two affected
       // caches so the connected lines re-render with their new lengths.
-      qc.invalidateQueries({ queryKey: ['buses'] })
-      qc.invalidateQueries({ queryKey: ['lines'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       appLog('INFO', `Bus '${vars.name}' moved · connected line lengths recalculated.`)
     },
     onError: (e: Error) => toast.error(`Move failed: ${e.message}`),

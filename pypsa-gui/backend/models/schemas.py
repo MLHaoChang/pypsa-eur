@@ -418,6 +418,10 @@ class SolverConfigSchema(BaseModel):
     # it only shifts the solver's internal magnitude. Useful when costs
     # span many orders of magnitude. 1.0 = identity.
     user_objective_scale: float = 1.0
+    # When True, the solver auto-picks the objective scale (a power of 10) from
+    # the model's cost-coefficient spread, overriding user_objective_scale. Only
+    # engages for ill-conditioned models; a no-op otherwise. Default OFF.
+    auto_objective_scale: bool = False
     # Solve strategy. Three modes:
     #   "full"    — single-shot LP (default).
     #   "rolling" — PyPSA's optimize_with_rolling_horizon (operational

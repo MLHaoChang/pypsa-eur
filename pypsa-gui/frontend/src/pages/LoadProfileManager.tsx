@@ -5,6 +5,8 @@ import {
 } from 'recharts'
 import { Download, Upload, FileSpreadsheet, CheckCircle2, Circle, AlertCircle } from 'lucide-react'
 import { networkApi } from '../api/network'
+import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import type { Load, LoadProfileMeta } from '../api/types'
 import { appLog } from '../store/simulationStore'
 import toast from 'react-hot-toast'
@@ -93,8 +95,9 @@ function UploadZone({ onFile }: { onFile: (f: File) => void }) {
 // ── Profile chart ──────────────────────────────────────────────────────────────
 
 function ProfileChart({ loadName }: { loadName: string }) {
+  const currentProject = useUIStore(s => s.currentProject)
   const { data: tsData, isLoading } = useQuery({
-    queryKey: ['timeseries', 'loads', 'p_set', loadName],
+    queryKey: nk(currentProject, 'timeseries', 'loads', 'p_set', loadName),
     queryFn: () => networkApi.getTimeseries('loads', 'p_set', [loadName]),
   })
 
@@ -185,23 +188,24 @@ function ProfileChart({ loadName }: { loadName: string }) {
 
 export default function LoadProfileManager() {
   const qc = useQueryClient()
+  const currentProject = useUIStore(s => s.currentProject)
   const [selectedLoad, setSelectedLoad] = useState<string | null>(null)
 
   const { data: loads = [] } = useQuery({
-    queryKey: ['loads'],
+    queryKey: nk(currentProject, 'loads'),
     queryFn: networkApi.getLoads,
   })
 
   const { data: profiles = {} } = useQuery({
-    queryKey: ['load_profiles'],
+    queryKey: nk(currentProject, 'load_profiles'),
     queryFn: networkApi.getLoadProfiles,
   })
 
   const uploadMut = useMutation({
     mutationFn: (file: File) => networkApi.uploadLoadProfile(file),
     onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['load_profiles'] })
-      qc.invalidateQueries({ queryKey: ['timeseries', 'loads', 'p_set'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'load_profiles') })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'timeseries', 'loads', 'p_set') })
       const n = result.matched.length
       const u = result.unmatched.length
       const msg = `Load profile uploaded: ${result.rows} rows for ${n} load${n !== 1 ? 's' : ''}` +

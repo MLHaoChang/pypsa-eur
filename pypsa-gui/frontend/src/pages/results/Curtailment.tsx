@@ -5,10 +5,12 @@ import {
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import type { Generator } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, weightedSum, aggregateTS,
-  isRenewableCarrier, shortStamp,
+  isRenewableCarrier, shortStamp, useWeightCtx,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
@@ -23,24 +25,14 @@ import { resolveRange, useResultsFilter } from './filterContext'
 const ACCENT = '#d97706'    // amber — matches the curtailment toggle in Dispatch
 
 export default function Curtailment() {
+  const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
-  const { data: curtailTS } = useQuery({ queryKey: ['results', 'curtailment'], queryFn: resultsApi.getCurtailment })
-  const { data: generators = [] } = useQuery({ queryKey: ['generators'], queryFn: networkApi.getGenerators })
-  const { data: snap } = useQuery({ queryKey: ['snapshots'], queryFn: networkApi.getSnapshots })
-  const { data: inv  } = useQuery({ queryKey: ['investmentPeriods'], queryFn: networkApi.getInvestmentPeriods })
-
-  // WeightCtx assembled from /snapshots + /investmentPeriods — same recipe as
-  // AggregatedResultsBody in Results.tsx so the per-period × snapshot-weight
-  // scaling matches the Dispatch tab's curtailment KPI.
-  const weightCtx: WeightCtx = useMemo(() => ({
-    snapshots: snap?.snapshots ?? (curtailTS as TSPayload | null)?.index,
-    snapshotPeriods: (curtailTS as TSPayload | null)?.periods ?? snap?.periods,
-    snapshotWeights: (snap?.weightings as unknown) as WeightCtx['snapshotWeights'],
-    periodWeights: inv?.weightings as unknown as WeightCtx['periodWeights'],
-  }), [snap, inv, curtailTS])
-
-  const refIndex: string[] = (curtailTS as TSPayload | null)?.index ?? snap?.snapshots ?? []
-  const refPeriods = (curtailTS as TSPayload | null)?.periods ?? snap?.periods
+  const { data: curtailTS } = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'), queryFn: resultsApi.getCurtailment })
+  const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
+  // WeightCtx + timeline assembled by the shared hook (fetches /snapshots +
+  // /investmentPeriods) — same recipe as the Dispatch tab so the per-period ×
+  // snapshot-weight scaling of the curtailment KPI matches.
+  const { weightCtx, refIndex, refPeriods } = useWeightCtx(curtailTS as TSPayload | null)
   const range = resolveRange(refIndex, filter, refPeriods)
 
   // Per-carrier curtailment energy: each renewable generator's curtailment
@@ -79,7 +71,7 @@ export default function Curtailment() {
   // Totals: curtailment energy + percent vs (curtailed + delivered) using
   // the renewable generators' supply for the denominator. Comes from the
   // Dispatch tab's same formula so the two views stay reconciled.
-  const { data: gensTS } = useQuery({ queryKey: ['results', 'generators'], queryFn: () => resultsApi.getGeneratorResults() })
+  const { data: gensTS } = useQuery({ queryKey: nk(currentProject, 'results', 'generators'), queryFn: () => resultsApi.getGeneratorResults() })
   const totals = useMemo(() => {
     const curt = weightedSum(curtailTS as TSPayload | null, renewableNames, weightCtx, range, 'generators') ?? 0
     const delivered = weightedSum(gensTS as TSPayload | null, renewableNames, weightCtx, range, 'generators') ?? 0

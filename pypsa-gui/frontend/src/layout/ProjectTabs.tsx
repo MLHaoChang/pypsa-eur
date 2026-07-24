@@ -8,7 +8,10 @@ import { appLog } from '../store/simulationStore'
 import {
   invalidateNetworkQueries, saveProjectQuietly, nextUntitledName,
   resetBackendNetwork, slugify, abortRunningSim, uniqueProjectName,
+  switchToProject,
 } from '../utils/projectActions'
+import { useSolveQueue, activeJobForProject } from '../hooks/useSolveQueue'
+import { isActive } from '../api/solveQueue'
 
 // Small name-input modal for the "+ new tab" flow. Lives here rather than in
 // a shared module because it's only used by ProjectTabs; the Sidebar has its
@@ -78,41 +81,88 @@ export default function ProjectTabs() {
   const qc = useQueryClient()
   const {
     openTabs, currentProject, addTab, closeTab,
-    setCurrentProject, setProjectName,
+    setCurrentProject, setProjectName, setProjectSwitchInProgress,
   } = useUIStore()
+  // openTabs is now Array<{name, lastInteractedAt}> (B8). Most of this
+  // component cares only about the names + their order, so derive a flat name
+  // list once and use it for the modal `taken` / nextUntitled / render map.
+  const tabNames = openTabs.map(t => t.name)
   const [busy, setBusy] = useState<string | null>(null)
   const [showNameModal, setShowNameModal] = useState(false)
+  // Per-tab solve-queue indicator (shared ['solveQueue'] query — polls only
+  // while jobs are active). Marks tabs whose project is queued or solving.
+  const { data: solveQueue } = useSolveQueue()
+
+  // Resync the foreground after a batch drains. The swap-based queue solves
+  // through the SHARED active slot, so once the last job finishes the backend's
+  // in-memory network is the LAST-SOLVED project, not `currentProject` — the
+  // editor would be desynced (edits would land on the wrong network until the
+  // autosave identity guard 409s). When the active-job count falls to zero,
+  // reload currentProject to rebind the slot + surface its fresh on-disk
+  // results. Guarded so it fires once per drain and never fights a manual switch.
+  const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
+  const prevActiveRef = useRef(0)
+  useEffect(() => {
+    const prev = prevActiveRef.current
+    const wantResync = prev > 0 && activeQueueCount === 0
+    // If a manual switch/create is mid-flight (busy) at the exact drain tick,
+    // DON'T consume the >0→0 edge — leave prevActiveRef untouched so the effect
+    // retries once `busy` clears, rather than silently missing the resync.
+    if (wantResync && busy) return
+    prevActiveRef.current = activeQueueCount
+    if (wantResync && currentProject) {
+      setBusy(currentProject)
+      projectsApi.load(currentProject)
+        .then(() => {
+          invalidateNetworkQueries(qc, currentProject)
+          setProjectName(currentProject)
+          appLog('INFO', `Solve queue finished — resynced '${currentProject}'`)
+        })
+        .catch(e => {
+          appLog('WARN', `Resync after solve queue failed: ${String((e as Error)?.message ?? e)}`)
+          toast.error(`Couldn't resync '${currentProject}' — it may have been deleted. Pick another tab.`)
+        })
+        .finally(() => setBusy(null))
+    }
+  }, [activeQueueCount, currentProject, busy, qc, setProjectName])
 
   const switchTo = useCallback(async (target: string) => {
     if (target === currentProject || busy) return
     setBusy(target)
+    // Fence autosave across the swap (see ScenariosPanel for the rationale).
+    setProjectSwitchInProgress(true)
     try {
-      // Mid-solve, the PyPSA lock is held by the worker thread — every
-      // mutating endpoint (save_project, load_project, reset_network)
-      // blocks until it's released. abortRunningSim() requests a stop and
-      // polls status until the worker actually exits. Without this, the
-      // following save+load both hit axios' 30s timeout and the user sees
-      // "Could not save 'X': timeout of 30000ms exceeded".
-      const stopped = await abortRunningSim()
-      if (!stopped) {
-        toast.error('Could not abort the running simulation. Try again in a moment.')
-        return
+      // B8 instant switch: abort foreground solve → save outgoing → activate
+      // (pointer swap) → re-key reactive queries to the target's RETAINED
+      // cache (no component-table refetch). switchToProject owns that core;
+      // we own the busy-state, fence, and toasts.
+      const r = await switchToProject(target, qc)
+      switch (r.status) {
+        case 'switched':
+          appLog('INFO', `Switched to project '${target}'`)
+          toast.success(`Switched to '${target}'`)
+          break
+        case 'noop':
+          break
+        case 'abort-failed':
+          toast.error('Could not abort the running simulation. Try again in a moment.')
+          break
+        case 'busy-solve':
+          toast.error(`Finish or abort the running solve on '${currentProject}' before switching.`)
+          break
+        case 'not-found':
+          toast.error(`'${target}' no longer exists`)
+          break
+        case 'error':
+          appLog('ERROR', `Switch to '${target}' failed: ${r.message}`)
+          toast.error(`Could not load '${target}'`)
+          break
       }
-      if (currentProject) await saveProjectQuietly(currentProject)
-      await projectsApi.load(target)
-      invalidateNetworkQueries(qc)
-      setCurrentProject(target)
-      setProjectName(target)
-      appLog('INFO', `Switched to project '${target}'`)
-      toast.success(`Switched to '${target}'`)
-    } catch (e) {
-      const msg = (e as Error)?.message ?? String(e)
-      appLog('ERROR', `Switch to '${target}' failed: ${msg}`)
-      toast.error(`Could not load '${target}'`)
     } finally {
+      setProjectSwitchInProgress(false)
       setBusy(null)
     }
-  }, [currentProject, busy, qc, setCurrentProject, setProjectName])
+  }, [currentProject, busy, qc, setProjectSwitchInProgress])
 
   // The actual create — invoked from the modal once the user has picked a name.
   const createProject = useCallback(async (name: string) => {
@@ -145,7 +195,7 @@ export default function ProjectTabs() {
       await resetBackendNetwork()
       try { await projectsApi.save(target, true) }
       catch (e) { appLog('WARN', `Could not seed empty project '${target}': ${String((e as Error)?.message ?? e)}`) }
-      invalidateNetworkQueries(qc)
+      invalidateNetworkQueries(qc, target)
       addTab(target)
       setCurrentProject(target)
       setProjectName(target)
@@ -185,14 +235,14 @@ export default function ProjectTabs() {
     if (name === currentProject) {
       // Auto-save the active project before closing it, then move to a neighbour.
       await saveProjectQuietly(name)
-      const idx = openTabs.indexOf(name)
-      const neighbour = openTabs[idx + 1] ?? openTabs[idx - 1]
+      const idx = tabNames.indexOf(name)
+      const neighbour = tabNames[idx + 1] ?? tabNames[idx - 1]
       closeTab(name)
       if (neighbour) await switchTo(neighbour)
     } else {
       closeTab(name)
     }
-  }, [openTabs, currentProject, busy, closeTab, switchTo])
+  }, [tabNames, openTabs, currentProject, busy, closeTab, switchTo])
 
   if (openTabs.length === 0) {
     // No tabs yet — show only the "+" so the user can start a first project.
@@ -210,8 +260,8 @@ export default function ProjectTabs() {
         </div>
         {showNameModal && (
           <NewTabNameModal
-            initial={nextUntitledName(openTabs)}
-            taken={openTabs}
+            initial={nextUntitledName(tabNames)}
+            taken={tabNames}
             onCreate={handleNameConfirm}
             onClose={() => setShowNameModal(false)}
           />
@@ -224,15 +274,16 @@ export default function ProjectTabs() {
     <div data-no-panel-close className="flex items-center gap-0.5 px-2 h-9 bg-bg border-b border-border shrink-0 overflow-x-auto">
       {showNameModal && (
         <NewTabNameModal
-          initial={nextUntitledName(openTabs)}
-          taken={openTabs}
+          initial={nextUntitledName(tabNames)}
+          taken={tabNames}
           onCreate={handleNameConfirm}
           onClose={() => setShowNameModal(false)}
         />
       )}
-      {openTabs.map(name => {
+      {tabNames.map(name => {
         const active = name === currentProject
         const loading = busy === name
+        const qJob = activeJobForProject(solveQueue, name)
         return (
           <div
             key={name}
@@ -255,6 +306,16 @@ export default function ProjectTabs() {
               ? <Loader size={11} className="animate-spin text-accent" />
               : <FolderOpen size={11} className={active ? 'text-accent' : 'text-muted'} />}
             <span className="truncate max-w-[160px]">{name}</span>
+            {qJob && (
+              <span
+                className="shrink-0"
+                title={qJob.status === 'running' ? 'Solving in the queue' : `Queued to solve (#${qJob.position ?? '?'})`}
+              >
+                {qJob.status === 'running'
+                  ? <Loader size={9} className="animate-spin text-amber-500" />
+                  : <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />}
+              </span>
+            )}
             <button
               type="button"
               onClick={e => handleClose(e, name)}

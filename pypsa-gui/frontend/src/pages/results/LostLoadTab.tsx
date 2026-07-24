@@ -5,9 +5,11 @@ import {
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import {
   type TSPayload, type WeightCtx, weightedSumSplit, aggregateTS,
-  shortStamp,
+  shortStamp, useWeightCtx,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
@@ -41,20 +43,12 @@ function carrierLabel(k: string): string {
 }
 
 export default function LostLoadTab() {
+  const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
-  const { data: lostLoad } = useQuery({ queryKey: ['results', 'lost_load'], queryFn: resultsApi.getLostLoad })
-  const { data: snap } = useQuery({ queryKey: ['snapshots'], queryFn: networkApi.getSnapshots })
-  const { data: inv  } = useQuery({ queryKey: ['investmentPeriods'], queryFn: networkApi.getInvestmentPeriods })
-
-  const weightCtx: WeightCtx = useMemo(() => ({
-    snapshots: snap?.snapshots ?? (lostLoad as TSPayload | null)?.index,
-    snapshotPeriods: (lostLoad as TSPayload | null)?.periods ?? snap?.periods,
-    snapshotWeights: (snap?.weightings as unknown) as WeightCtx['snapshotWeights'],
-    periodWeights: inv?.weightings as unknown as WeightCtx['periodWeights'],
-  }), [snap, inv, lostLoad])
-
-  const refIndex: string[] = (lostLoad as TSPayload | null)?.index ?? snap?.snapshots ?? []
-  const refPeriods = (lostLoad as TSPayload | null)?.periods ?? snap?.periods
+  const { data: lostLoad } = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'), queryFn: resultsApi.getLostLoad })
+  // WeightCtx + timeline from the shared hook (fetches /snapshots +
+  // /investmentPeriods); refTs = the lost-load series.
+  const { weightCtx, refIndex, refPeriods } = useWeightCtx(lostLoad as TSPayload | null)
   const range = resolveRange(refIndex, filter, refPeriods)
 
   const llMeta = lostLoad as unknown as {

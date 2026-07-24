@@ -122,6 +122,10 @@ natsort = ">=8.4.0"
 snakemake-logger-plugin-pypsa = ">=0.1.0"
 pydeflate = ">=2.3.4"
 grpcio = "<1.78"
+# Chatbot uploads (Phase A) — MIME sniff, .docx parsing, PDF page count.
+python-magic = ">=0.4.27"
+python-docx = ">=0.8.11"
+pypdf = ">=4.0"
 snakemake-logger-plugin-snkmt = "==0.1.6" # For better pypsa-app integration
 streamlit = ">=1.36"
 

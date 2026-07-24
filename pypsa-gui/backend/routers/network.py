@@ -27,59 +27,48 @@ from models.schemas import (
 from services import change_log_service, vintage_service
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
+from services.serialization import df_to_json
+from services.upload_guard import read_capped
 
 router = APIRouter()
 
-# ── Serialisation helper ────────────────────────────────────────────────────
-
-def _clean(v: Any) -> Any:
-    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-        return None
-    if hasattr(v, "isoformat"):
-        return v.isoformat()
-    if isinstance(v, bool):
-        return v
-    return v
-
-
-def df_to_json(df: pd.DataFrame) -> list[dict]:
-    out = df.reset_index()
-    # PyPSA's runtime state can lose a static DataFrame's `index.name`
-    # during n.add / n.remove cycles (observed on Links after a vintage
-    # expansion + restore round). `df.reset_index()` then produces an
-    # unnamed column called "index" instead of the expected "name",
-    # which makes every frontend that keys off `row.name` (canvas edge
-    # IDs, query-cache lookups, asset tables) silently break — duplicate
-    # `undefined` IDs across rows, React Flow only renders one. Normalise
-    # at the API boundary so a transient PyPSA state quirk never leaks
-    # into the JSON contract.
-    if "index" in out.columns and "name" not in out.columns:
-        out = out.rename(columns={"index": "name"})
-    # Multi-period `n.statistics()` returns columns as a MultiIndex of
-    # `(metric, period)` tuples (e.g. `('Operational Expenditure', 2026)`).
-    # `to_dict(orient="records")` produces tuple-keyed dicts, which FastAPI's
-    # `jsonable_encoder` then converts tuples → lists for JSON output. The
-    # list-keyed dict is unhashable → 500 ("unhashable type: 'list'").
-    # Flatten the MultiIndex to ' | '-joined strings here so callers receive
-    # JSON-friendly keys. Plain-column DataFrames (component tables,
-    # weightings, etc.) are unaffected — `isinstance` check is False there.
-    if isinstance(out.columns, pd.MultiIndex):
-        out = out.copy()
-        out.columns = [
-            ' | '.join(str(x) for x in col if str(x))
-            for col in out.columns
-        ]
-    records = out.to_dict(orient="records")
-    return [{k: _clean(vv) for k, vv in row.items()} for row in records]
-
+# `df_to_json` (static-DataFrame → NaN-safe row dicts) now lives in
+# `services/serialization.py` — the single JSON-boundary scrub home. Imported
+# above; still called ~7× in this module. The separate *vectorised* time-series
+# serialiser for the perf-critical `/timeseries` path stays inline below.
 
 # ── Generic CRUD factory ────────────────────────────────────────────────────
 
+def _serialize_component(
+    n: Any, attr: str, transient: set[str]
+) -> list[dict]:
+    """
+    Serialise a PyPSA component DataFrame for the frontend, hiding the
+    solver-only transient rows named in `transient` (vintage clones, VOLL
+    slacks) so the user never sees them in the asset tables.
+
+    Network-agnostic core shared by the active-network shim (`_get_component`,
+    which passes the active/solving ctx's transient set) and the B6
+    path-scoped route (which passes the INJECTED ctx's set, so a resident
+    project's solver internals are hidden per-project). The caller owns
+    resolving `transient` from the right context — this fn only filters.
+    """
+    df = getattr(n, attr)
+    if not df.empty and transient:
+        # Drop rows whose index name is in the transient set. Use
+        # difference() rather than `~isin(...)` for stability when
+        # the DataFrame has a small number of transients and a
+        # large number of real rows.
+        keep_idx = df.index.difference(pd.Index(list(transient)))
+        df = df.loc[keep_idx]
+    return df_to_json(df)
+
+
 def _get_component(component_class: str, attr: str) -> list[dict]:
     """
-    Serialise a PyPSA component DataFrame for the frontend, filtering
-    out solver-only transient rows (vintage clones, VOLL slacks) so the
-    user never sees them in the asset tables.
+    Serialise the ACTIVE network's component DataFrame for the frontend,
+    filtering out solver-only transient rows (vintage clones, VOLL slacks)
+    so the user never sees them in the asset tables.
 
     Reads never acquire the PyPSA lock (per the project's read-never-locks
     policy), so during a solve the worker thread has already populated
@@ -92,20 +81,35 @@ def _get_component(component_class: str, attr: str) -> list[dict]:
     apply_vintage_bounds + the VOLL slack code mark each added row, and
     the restore() callbacks unmark on removal. We short-circuit on the
     common case (empty registry) so the healthy path costs one dict
-    lookup.
+    lookup. The actual serialise + filter is delegated to
+    `_serialize_component` so the B6 path-scoped route can reuse it against
+    a non-active context's network + transient set.
     """
     n = PyPSAService.get_network()
-    df = getattr(n, attr)
-    if not df.empty and PyPSAService.has_any_transient_rows():
+    transient: set[str] = set()
+    if PyPSAService.has_any_transient_rows():
         transient = PyPSAService.get_transient_rows(component_class)
-        if transient:
-            # Drop rows whose index name is in the transient set. Use
-            # difference() rather than `~isin(...)` for stability when
-            # the DataFrame has a small number of transients and a
-            # large number of real rows.
-            keep_idx = df.index.difference(pd.Index(list(transient)))
-            df = df.loc[keep_idx]
-    return df_to_json(df)
+    return _serialize_component(n, attr, transient)
+
+
+def _meta_payload(n: Any, loaded_project: str | None) -> dict:
+    """
+    The /network/meta response shape for a given network + its on-disk
+    binding. `name` is the (mutable) display title; `loaded_project` is the
+    authoritative on-disk binding the save path enforces — None when the
+    network is unbound (fresh / never loaded). Clients comparing identity
+    should use `loaded_project`, not `name`.
+
+    Shared by the active-network shim (`GET /api/network/meta`) and the B6
+    path-scoped `GET /api/projects/{id}/network/meta`, so the two payloads
+    can't drift.
+    """
+    return {
+        "name": n.name,
+        "loaded_project": loaded_project,
+        "snapshot_count": len(n.snapshots),
+        "bus_count": len(n.buses),
+    }
 
 
 # Map PyPSA's lowercase-plural DataFrame attribute names to the singular
@@ -162,6 +166,31 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     return {"name": name}
 
 
+def _merge_partial_update(n, attr: str, name: str, submitted: dict) -> dict:
+    """
+    Merge a partial PUT onto the existing row for a remove+add update.
+
+    Reads the current INPUT-column values from `n.{attr}.loc[name]` (PyPSA
+    distinguishes input vs output cols via `components.<attr>.defaults["status"]`;
+    fall back to all columns), drops non-finite floats (n.add fills its own
+    defaults; passing NaN upcasts to object dtype), and overlays `submitted`
+    (the user's `model_dump(exclude_unset=True)`). Fields the user didn't send
+    keep their current value instead of resetting to schema defaults — the
+    partial-PUT footgun. Caller holds the PyPSA lock and has validated `name`.
+    """
+    df = getattr(n, attr)
+    try:
+        defaults = getattr(n.components, attr).defaults
+        mask = defaults["status"].str.startswith("Input", na=False)
+        input_cols = list(defaults.index[mask])
+    except Exception:
+        input_cols = list(df.columns)
+    current = {c: df.at[name, c] for c in input_cols if c in df.columns}
+    current = {k: v for k, v in current.items()
+               if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))}
+    return {**current, **submitted}
+
+
 def _update_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
     """
     Update by remove+add. `kwargs` should be the user's *partial* dict
@@ -177,25 +206,8 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         df = getattr(n, attr)
         if name not in df.index:
             raise HTTPException(404, f"{component_class} '{name}' not found")
-        # Snapshot the existing row (input cols only — PyPSA's component
-        # defaults distinguish input/output and reject unknown kwargs in n.add).
-        # PyPSA 1.x exposes the spec via `n.components.<plural>.defaults`. The
-        # `status` column contains "Input (optional)", "Input (required)",
-        # "Output" — match on the "Input" prefix.
-        try:
-            defaults = getattr(n.components, attr).defaults
-            mask = defaults["status"].str.startswith("Input", na=False)
-            input_cols = list(defaults.index[mask])
-        except Exception:
-            # Fallback: best-effort, accept whatever's in the DataFrame.
-            input_cols = list(df.columns)
-        current = {c: df.at[name, c] for c in input_cols if c in df.columns}
-        # Drop NaN values — PyPSA's n.add fills them with its own defaults
-        # anyway, and passing NaN explicitly upcasts columns to object dtype.
-        current = {k: v for k, v in current.items()
-                   if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))}
-        # User-provided overrides win.
-        merged = {**current, **kwargs}
+        # Read current row + overlay the user's partial dict (shared helper).
+        merged = _merge_partial_update(n, attr, name, kwargs)
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
         n.remove(component_class, name)
@@ -308,6 +320,45 @@ def _recompute_lengths_for_bus(n, bus_name: str) -> int:
         n.lines.at[line_name, "length"] = float(d)
         updated += 1
     return updated
+
+
+def _xlsx_response(df: pd.DataFrame, fname: str) -> StreamingResponse:
+    """
+    Serialise `df` to an .xlsx StreamingResponse with a quoted attachment
+    filename. Shared tail of the load/generator/link profile-template download
+    endpoints (filename is quoted per RFC 6266 — all template names are
+    space-free so this is byte-equivalent for browsers).
+    """
+    buf = io.BytesIO()
+    df.to_excel(buf, engine="openpyxl")
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+def _build_period_multiindex(periods, blocks) -> pd.MultiIndex:
+    """
+    Build the `(period, timestep)` snapshot MultiIndex from parallel `periods`
+    (year keys) + per-period `blocks` (each a DatetimeIndex of that period's
+    operational timesteps). To replicate ONE operational range under every
+    period, pass `[idx] * len(periods)`.
+
+    ALWAYS sets `mi.name = "snapshot"`. PyPSA's `set_snapshots(MultiIndex)` only
+    inherits the name on flat→multi transitions; on multi→multi REBUILDS the new
+    MultiIndex's name=None wins and propagates to every `_t` table — xarray then
+    emits dim `dim_0` and the next LP fails on `.sel(snapshot=sns)`. Centralising
+    the builder makes that footgun impossible to forget.
+    """
+    period_level = np.concatenate([np.full(len(blk), p) for p, blk in zip(periods, blocks)])
+    timestep_level = pd.DatetimeIndex(np.concatenate([blk.values for blk in blocks]))
+    mi = pd.MultiIndex.from_arrays(
+        [period_level, timestep_level], names=["period", "timestep"],
+    )
+    mi.name = "snapshot"
+    return mi
 
 
 # ── Buses ────────────────────────────────────────────────────────────────────
@@ -506,38 +557,16 @@ def recalculate_line_lengths():
     if n.lines.empty:
         return {"updated": 0, "skipped": 0, "total": 0}
 
-    EARTH_KM = 6371.0
-    bus_coords: dict[str, tuple[float, float] | None] = {}
-    for name in n.buses.index:
-        try:
-            x = float(n.buses.at[name, "x"]) if "x" in n.buses.columns else float("nan")
-            y = float(n.buses.at[name, "y"]) if "y" in n.buses.columns else float("nan")
-            if math.isfinite(x) and math.isfinite(y):
-                bus_coords[name] = (x, y)
-            else:
-                bus_coords[name] = None
-        except Exception:
-            bus_coords[name] = None
-
     updated = 0
     skipped = 0
     with PyPSAService.get_lock():
         for line_name in n.lines.index:
             b0 = str(n.lines.at[line_name, "bus0"]) if "bus0" in n.lines.columns else ""
             b1 = str(n.lines.at[line_name, "bus1"]) if "bus1" in n.lines.columns else ""
-            c0 = bus_coords.get(b0)
-            c1 = bus_coords.get(b1)
-            if c0 is None or c1 is None:
+            d_km = _line_haversine_km(n, b0, b1)
+            if d_km is None:
                 skipped += 1
                 continue
-            lon1, lat1 = c0
-            lon2, lat2 = c1
-            phi1 = math.radians(lat1)
-            phi2 = math.radians(lat2)
-            dphi = math.radians(lat2 - lat1)
-            dlam = math.radians(lon2 - lon1)
-            a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-            d_km = 2 * EARTH_KM * math.asin(min(1.0, math.sqrt(a)))
             n.lines.at[line_name, "length"] = float(d_km)
             updated += 1
 
@@ -927,7 +956,7 @@ async def upload_snapshot_weightings_csv(file: UploadFile = File(...)):
 
     import pandas as pd
 
-    content = await file.read()
+    content = await read_capped(file)
     try:
         text = content.decode("utf-8-sig")  # handles Excel-saved UTF-8 BOM
     except UnicodeDecodeError:
@@ -1172,7 +1201,6 @@ def set_multi_period_snapshots(body: dict):
       • PyPSA initialises `investment_period_weightings` rows (years=1.0,
         objective=1.0) — the user can then tune via /investment_period_weightings.
     """
-    import numpy as np
     import pandas as pd
     n = PyPSAService.get_network()
 
@@ -1223,20 +1251,7 @@ def set_multi_period_snapshots(body: dict):
             raise HTTPException(400, "Date range produced an empty index.")
         timestep_blocks = [base_idx for _ in periods_sorted]
 
-    period_level = np.concatenate([
-        np.full(len(blk), p) for p, blk in zip(periods_sorted, timestep_blocks)
-    ])
-    timestep_level = pd.DatetimeIndex(
-        np.concatenate([blk.values for blk in timestep_blocks])
-    )
-    mi = pd.MultiIndex.from_arrays(
-        [period_level, timestep_level], names=["period", "timestep"],
-    )
-    # PyPSA's set_snapshots(MultiIndex) only inherits .name when the previous
-    # snapshots had one AND the new MultiIndex doesn't — multi→multi rebuilds
-    # therefore drop the snapshot name. xarray then converts _t DataArrays
-    # with dim 'dim_0' and the LP fails on .sel(snapshot=sns).
-    mi.name = "snapshot"
+    mi = _build_period_multiindex(periods_sorted, timestep_blocks)
 
     # Preserve existing time series BEFORE reindex.
     _backup_network_ts_to_user_ts(n)
@@ -1399,16 +1414,7 @@ def sample_representative_weeks(config: SampleWeeksConfig):
                 raise HTTPException(
                     400, "Multi-period network has no investment periods.",
                 )
-            period_level = _np.concatenate(
-                [_np.full(len(sampled_idx), p) for p in periods]
-            )
-            timestep_level = pd.DatetimeIndex(
-                _np.concatenate([sampled_idx.values for _ in periods])
-            )
-            mi = pd.MultiIndex.from_arrays(
-                [period_level, timestep_level], names=["period", "timestep"],
-            )
-            mi.name = "snapshot"
+            mi = _build_period_multiindex(periods, [sampled_idx] * len(periods))
             n.set_snapshots(mi)
             n.investment_periods = periods
             full_weights = _np.concatenate([weights for _ in periods])
@@ -1476,7 +1482,6 @@ def set_investment_periods(body: InvestmentPeriods):
       3) Empty `periods` on a MultiIndex: demote back to flat using the first
          period's operational range.
     """
-    import numpy as np
     import pandas as pd
     n = PyPSAService.get_network()
 
@@ -1515,16 +1520,7 @@ def set_investment_periods(body: InvestmentPeriods):
         if existing_periods != new_periods:
             _backup_network_ts_to_user_ts(n)
             captured_weights = _capture_snapshot_weights_per_timestep(n)
-            period_level = np.concatenate(
-                [np.full(len(base_idx), p) for p in new_periods]
-            )
-            timestep_level = pd.DatetimeIndex(
-                np.concatenate([base_idx.values for _ in new_periods])
-            )
-            mi = pd.MultiIndex.from_arrays(
-                [period_level, timestep_level], names=["period", "timestep"],
-            )
-            mi.name = "snapshot"
+            mi = _build_period_multiindex(new_periods, [base_idx] * len(new_periods))
             n.set_snapshots(mi)
             _reapply_snapshot_weights(n, captured_weights)
             _reapply_user_ts_to_network(n)
@@ -1683,23 +1679,11 @@ def update_global_constraint(name: str, body: GlobalConstraintCreate):
         # on top, so a body of `{"constant": 100}` ONLY changes constant
         # instead of resetting `type`/`sense`/`carrier_attribute`/period to
         # the Pydantic schema defaults (which was the B2 footgun before).
-        try:
-            defaults = n.components.global_constraints.defaults
-            mask = defaults["status"].str.startswith("Input", na=False)
-            input_cols = list(defaults.index[mask])
-        except Exception:
-            input_cols = list(n.global_constraints.columns)
-        current_row = {
-            c: n.global_constraints.at[name, c]
-            for c in input_cols if c in n.global_constraints.columns
-        }
-        # Drop NaN / inf — PyPSA's n.add fills defaults from its own schema.
-        current_row = {
-            k: v for k, v in current_row.items()
-            if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))
-        }
-        submitted = body.model_dump(exclude_unset=True)
-        merged = {**current_row, **submitted}
+        # NOTE: deliberately NOT routed through _update_component — that injects
+        # ensure_carrier (wrong for a GlobalConstraint). Shared MERGE only.
+        merged = _merge_partial_update(
+            n, "global_constraints", name, body.model_dump(exclude_unset=True)
+        )
         new_name = merged.pop("name", name)
         n.remove("GlobalConstraint", name)
         n.add("GlobalConstraint", new_name, **merged)
@@ -1728,16 +1712,7 @@ def delete_global_constraint(name: str):
 @router.get("/meta")
 def get_meta():
     n = PyPSAService.get_network()
-    # `name` is the (mutable) display title; `loaded_project` is the
-    # authoritative on-disk binding the save path enforces — None when the
-    # network is unbound (fresh / never loaded). Clients comparing identity
-    # should use `loaded_project`, not `name`.
-    return {
-        "name": n.name,
-        "loaded_project": PyPSAService.get_loaded_project(),
-        "snapshot_count": len(n.snapshots),
-        "bus_count": len(n.buses),
-    }
+    return _meta_payload(n, PyPSAService.get_loaded_project())
 
 
 @router.put("/meta")
@@ -2411,7 +2386,6 @@ def _ensure_snapshots_cover_user_ts(n=None) -> bool:
     responsible for calling _reapply_user_ts_to_network afterwards to
     populate the freshly sized _t tables.
     """
-    import numpy as _np
     if n is None:
         n = PyPSAService.get_network()
     if not _user_ts:
@@ -2446,14 +2420,7 @@ def _ensure_snapshots_cover_user_ts(n=None) -> bool:
         # leave the non-uploaded columns stranded in the old year (→ all-NaN
         # → silently dropped by _reapply). See _rebase_flat_user_ts.
         _rebase_flat_user_ts(new_idx)
-        period_level = _np.concatenate([_np.full(len(new_idx), p) for p in periods])
-        timestep_level = pd.DatetimeIndex(
-            _np.concatenate([new_idx.values for _ in periods]),
-        )
-        mi = pd.MultiIndex.from_arrays(
-            [period_level, timestep_level], names=["period", "timestep"],
-        )
-        mi.name = "snapshot"
+        mi = _build_period_multiindex(periods, [new_idx] * len(periods))
         n.set_snapshots(mi)
         return True
 
@@ -3038,7 +3005,7 @@ async def upload_timeseries(
 
     import numpy as _np
     import pandas as pd
-    content = await file.read()
+    content = await read_capped(file)
     df = pd.read_csv(io.BytesIO(content), index_col=0, parse_dates=True)
     n = PyPSAService.get_network()
     ts_store = getattr(n, f"{component}_t", None)
@@ -3426,21 +3393,13 @@ def download_load_profile_template(
     df = pd.DataFrame(data, index=snapshots)
     df.index.name = "timestamp"
 
-    buf = io.BytesIO()
-    df.to_excel(buf, engine="openpyxl")
-    buf.seek(0)
-
     if load_name:
         fname = f"load_{load_name.replace(' ', '_')}_template.xlsx"
     elif section:
         fname = f"load_{section}_template.xlsx"
     else:
         fname = "load_profiles_template.xlsx"
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
-    )
+    return _xlsx_response(df, fname)
 
 
 @router.get("/loads/aggregate")
@@ -3499,6 +3458,47 @@ def aggregate_load_profile(
     }
 
 
+def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str, df) -> dict:
+    """
+    Shared body of the load/generator/link profile-upload endpoints.
+
+    Matches uploaded `df` columns to the component's names, stores each matched
+    column in `_user_ts[(comp_attr, attribute, col)]` (under `_user_ts_lock`,
+    since autosave's `_serialize_user_ts` iterates concurrently), then reapplies
+    to the network under the PyPSA lock — `_ensure_snapshots_cover_user_ts`
+    auto-expands `n.snapshots` so a longer-than-current upload isn't truncated,
+    and `_reapply_user_ts_to_network` aligns everything to the (possibly grown)
+    index. Returns `{matched, unmatched, rows, snapshot_count}` where
+    snapshot_count reflects the post-expansion `n.snapshots` so the frontend can
+    refresh its counter.
+    """
+    valid = set(getattr(n, comp_attr).index)
+    matched   = [c for c in df.columns if c in valid]
+    unmatched = [c for c in df.columns if c not in valid]
+    if not matched:
+        raise HTTPException(
+            400,
+            f"No column names matched any {display_class.lower()}. "
+            f"{display_class}s in network: {list(valid)[:10]}",
+        )
+    with _user_ts_lock:
+        for col in matched:
+            _user_ts[(comp_attr, attribute, col)] = df[col].astype(float)
+    with PyPSAService.get_lock():
+        _ensure_snapshots_cover_user_ts(n)
+        _reapply_user_ts_to_network(n)
+    names_preview = ", ".join(matched[:3]) + ("…" if len(matched) > 3 else "")
+    cls_lower = display_class.lower()
+    change_log_service.log(
+        "timeseries", display_class, names_preview,
+        f"Uploaded {cls_lower} {attribute} profiles: {len(matched)} {cls_lower}(s), {len(df)} rows",
+    )
+    return {
+        "matched": matched, "unmatched": unmatched, "rows": len(df),
+        "snapshot_count": len(n.snapshots),
+    }
+
+
 @router.post("/loads/upload_profile")
 async def upload_load_profile(file: UploadFile = File(...)):
     """
@@ -3506,50 +3506,9 @@ async def upload_load_profile(file: UploadFile = File(...)):
     timestamps.  Matched columns are written into the user profile store and
     also into n.loads_t.p_set for simulation.
     """
-    content = await file.read()
+    content = await read_capped(file)
     df = _parse_upload(content, file.filename or "")
-
-    n = PyPSAService.get_network()
-    valid_loads = set(n.loads.index)
-    matched   = [c for c in df.columns if c in valid_loads]
-    unmatched = [c for c in df.columns if c not in valid_loads]
-
-    if not matched:
-        raise HTTPException(
-            400,
-            f"No column names matched any load. Loads in network: {list(valid_loads)[:10]}",
-        )
-
-    # Store each column independently with its original (full-resolution)
-    # index. Hold _user_ts_lock for the loop — autosave's
-    # _serialize_user_ts iterates the dict concurrently and would crash
-    # with "dictionary changed size during iteration" without serialization.
-    with _user_ts_lock:
-        for col in matched:
-            _user_ts[('loads', 'p_set', col)] = df[col].astype(float)
-
-    # Push into PyPSA's loads_t aligned to current snapshots.
-    # If the uploaded file has more timestamps than the current snapshot index,
-    # auto-expand n.snapshots so the user's data isn't silently truncated.
-    # _reapply then aligns the rest of _user_ts to the new index.
-    with PyPSAService.get_lock():
-        _ensure_snapshots_cover_user_ts(n)
-        _reapply_user_ts_to_network(n)
-
-    names_preview = ", ".join(matched[:3]) + ("…" if len(matched) > 3 else "")
-    change_log_service.log(
-        "timeseries", "Load", names_preview,
-        f"Uploaded load p_set profiles: {len(matched)} load(s), {len(df)} rows",
-    )
-    # `snapshot_count` reflects n.snapshots AFTER _ensure_snapshots_cover_user_ts
-    # may have grown the operational range to cover the upload (e.g. a 168 h
-    # network expands to 8760 when a full-year profile is uploaded). The
-    # frontend uses this to refresh its snapshot counter and confirm the
-    # expansion to the user.
-    return {
-        "matched": matched, "unmatched": unmatched, "rows": len(df),
-        "snapshot_count": len(n.snapshots),
-    }
+    return _apply_profile_upload(PyPSAService.get_network(), "loads", "p_set", "Load", df)
 
 
 # ── Generator profile helpers ──────────────────────────────────────────────────
@@ -3812,19 +3771,12 @@ def download_generator_profile_template(
     df = pd.DataFrame(data, index=snapshots)
     df.index.name = "timestamp"
 
-    buf = io.BytesIO()
-    df.to_excel(buf, engine="openpyxl")
-    buf.seek(0)
     if name:
         safe = name.replace(' ', '_')
         fname = f"generator_{safe}_{attribute}_template.xlsx"
     else:
         fname = f"generator_{attribute}_{category}_template.xlsx"
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
-    )
+    return _xlsx_response(df, fname)
 
 
 @router.post("/generators/upload_profile")
@@ -3833,45 +3785,9 @@ async def upload_generator_profile(
     file: UploadFile = File(...),
 ):
     """Upload an Excel or CSV file whose columns are generator names."""
-    content = await file.read()
+    content = await read_capped(file)
     df = _parse_upload(content, file.filename or "")
-
-    n = PyPSAService.get_network()
-    valid_gens = set(n.generators.index)
-    matched   = [c for c in df.columns if c in valid_gens]
-    unmatched = [c for c in df.columns if c not in valid_gens]
-
-    if not matched:
-        raise HTTPException(
-            400,
-            f"No column names matched any generator. Generators: {list(valid_gens)[:10]}",
-        )
-
-    # Hold _user_ts_lock for the loop — autosave's _serialize_user_ts
-    # iterates the dict concurrently. Same pattern as upload_load_profile
-    # above and upload_timeseries below.
-    with _user_ts_lock:
-        for col in matched:
-            _user_ts[('generators', attribute, col)] = df[col].astype(float)
-
-    with PyPSAService.get_lock():
-        _ensure_snapshots_cover_user_ts(n)
-        _reapply_user_ts_to_network(n)
-
-    names_preview = ", ".join(matched[:3]) + ("…" if len(matched) > 3 else "")
-    change_log_service.log(
-        "timeseries", "Generator", names_preview,
-        f"Uploaded generator {attribute} profiles: {len(matched)} generator(s), {len(df)} rows",
-    )
-    # `snapshot_count` reflects n.snapshots AFTER _ensure_snapshots_cover_user_ts
-    # may have grown the operational range to cover the upload (e.g. a 168 h
-    # network expands to 8760 when a full-year profile is uploaded). The
-    # frontend uses this to refresh its snapshot counter and confirm the
-    # expansion to the user.
-    return {
-        "matched": matched, "unmatched": unmatched, "rows": len(df),
-        "snapshot_count": len(n.snapshots),
-    }
+    return _apply_profile_upload(PyPSAService.get_network(), "generators", attribute, "Generator", df)
 
 
 # ── Link profile helpers ───────────────────────────────────────────────────────
@@ -3968,19 +3884,12 @@ def download_link_profile_template(
     data = {lname: np.ones(len(snapshots)) for lname in target_links}
     df = pd.DataFrame(data, index=snapshots)
 
-    buf = io.BytesIO()
-    df.to_excel(buf, engine="openpyxl")
-    buf.seek(0)
     if name:
         safe = name.replace(' ', '_')
         fname = f"link_{safe}_{attribute}_template.xlsx"
     else:
         fname = f"links_{attribute}_template.xlsx"
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
-    )
+    return _xlsx_response(df, fname)
 
 
 @router.post("/links/upload_profile")
@@ -3989,45 +3898,9 @@ async def upload_link_profile(
     file: UploadFile = File(...),
 ):
     """Upload an Excel or CSV file whose columns are link names."""
-    content = await file.read()
+    content = await read_capped(file)
     df = _parse_upload(content, file.filename or "")
-
-    n = PyPSAService.get_network()
-    valid_links = set(n.links.index)
-    matched   = [c for c in df.columns if c in valid_links]
-    unmatched = [c for c in df.columns if c not in valid_links]
-
-    if not matched:
-        raise HTTPException(
-            400,
-            f"No column names matched any link. Links: {list(valid_links)[:10]}",
-        )
-
-    # Hold _user_ts_lock for the loop — autosave's _serialize_user_ts
-    # iterates the dict concurrently. Same pattern as upload_load_profile
-    # and upload_generator_profile.
-    with _user_ts_lock:
-        for col in matched:
-            _user_ts[('links', attribute, col)] = df[col].astype(float)
-
-    with PyPSAService.get_lock():
-        _ensure_snapshots_cover_user_ts(n)
-        _reapply_user_ts_to_network(n)
-
-    names_preview = ", ".join(matched[:3]) + ("…" if len(matched) > 3 else "")
-    change_log_service.log(
-        "timeseries", "Link", names_preview,
-        f"Uploaded link {attribute} profiles: {len(matched)} link(s), {len(df)} rows",
-    )
-    # `snapshot_count` reflects n.snapshots AFTER _ensure_snapshots_cover_user_ts
-    # may have grown the operational range to cover the upload (e.g. a 168 h
-    # network expands to 8760 when a full-year profile is uploaded). The
-    # frontend uses this to refresh its snapshot counter and confirm the
-    # expansion to the user.
-    return {
-        "matched": matched, "unmatched": unmatched, "rows": len(df),
-        "snapshot_count": len(n.snapshots),
-    }
+    return _apply_profile_upload(PyPSAService.get_network(), "links", attribute, "Link", df)
 
 
 # ── User-uploaded time-series delete ─────────────────────────────────────────

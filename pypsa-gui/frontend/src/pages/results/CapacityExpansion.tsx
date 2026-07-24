@@ -8,9 +8,12 @@ import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { resultsApi, simulationApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import type { Generator, Line as LineT, Link as LinkT, StorageUnit, Store, Transformer } from '../../api/types'
 import { fmtCurrency, fmtPower, fmtEnergy, downloadCSV, KPI, isRenewableCarrier, ChartActions,
   ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel } from './shared'
+import { useResultsFilter } from './filterContext'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
@@ -79,20 +82,23 @@ interface RetiredLineRow extends RetiredRowBase { length: number }
 interface RetiredStorageRow extends RetiredRowBase { max_hours: number; retired_energy: number }
 
 export default function CapacityExpansion() {
+  const currentProject = useUIStore(s => s.currentProject)
+  const filter = useResultsFilter()
   const capexChartRef = useRef<HTMLDivElement | null>(null)
+  const waterfallChartRef = useRef<HTMLDivElement | null>(null)
   const perPeriodCapRef = useRef<HTMLDivElement | null>(null)
   const perPeriodClassRef = useRef<HTMLDivElement | null>(null)
   const { data: cost, isLoading } = useQuery({
-    queryKey: ['results', 'cost_breakdown'],
+    queryKey: nk(currentProject, 'results', 'cost_breakdown'),
     queryFn: resultsApi.getCostBreakdown,
   })
 
-  const { data: generators = [] }   = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators })
-  const { data: storageUnits = [] } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
-  const { data: stores = [] }       = useQuery({ queryKey: ['stores'],        queryFn: networkApi.getStores })
-  const { data: links = [] }        = useQuery({ queryKey: ['links'],         queryFn: networkApi.getLinks })
-  const { data: lines = [] }        = useQuery({ queryKey: ['lines'],         queryFn: networkApi.getLines })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'],  queryFn: networkApi.getTransformers })
+  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
+  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
+  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers })
 
   // Per-vintage breakdown — populated by the backend when an asset's
   // per-period bounds were applied at the last solve. Lets the table emit one
@@ -100,7 +106,7 @@ export default function CapacityExpansion() {
   // 2028 reports those three rows individually instead of collapsing to the
   // parent's single (pre-expansion) build_year.
   const { data: vintageResults } = useQuery({
-    queryKey: ['vintage_results'],
+    queryKey: nk(currentProject, 'vintage_results'),
     queryFn: networkApi.listVintageResults,
   })
   const vintagesFor = (componentClass: string, name: string) => {
@@ -702,6 +708,32 @@ export default function CapacityExpansion() {
       .sort((a, b) => b.capex - a.capex)
   }, [visibleGens, visibleLines, visibleTransformers, visibleStorage, visibleStores, visibleLinks])
 
+  // System-cost waterfall: how the annual system cost builds up from existing-
+  // capacity CAPEX → new-build CAPEX → OPEX, ending at the optimised Total. The
+  // step bars sum EXACTLY to Total (Total = capex + opex; existing = capex −
+  // capex_expansion). Annual terms only — OPEX has no lifetime variant, so a
+  // lifetime waterfall would mix construction with operating cost.
+  const costWaterfall = useMemo(() => {
+    type Row = { name: string; base: number; value: number; abs: number; color: string }
+    if (!cost) return [] as Row[]
+    const capex = cost.capex ?? 0
+    const expansion = cost.capex_expansion ?? 0
+    const existing = Math.max(capex - expansion, 0)
+    const opex = cost.opex ?? 0
+    const total = cost.total ?? (capex + opex)
+    const steps = [
+      { name: 'Existing CAPEX', value: existing, color: '#0369a1' },
+      { name: 'New-build CAPEX', value: expansion, color: '#16a34a' },
+      { name: 'OPEX', value: opex, color: '#d97706' },
+    ]
+    let cum = 0
+    const rows: Row[] = steps
+      .filter(s => Math.abs(s.value) > 1e-6)
+      .map(s => { const base = cum; cum += s.value; return { name: s.name, base, value: s.value, abs: s.value, color: s.color } })
+    rows.push({ name: 'Total', base: 0, value: total, abs: total, color: '#334155' })
+    return rows
+  }, [cost])
+
   const totalExpansionCapex = useMemo(
     () => capexByClass.reduce((a, b) => a + b.capex, 0),
     [capexByClass],
@@ -760,6 +792,26 @@ export default function CapacityExpansion() {
     </div>
   )
 
+  // Respect the shared period selector so the cost KPIs line up with the
+  // Dispatch tab. With a period picked we show THAT period's totals
+  // (annualised, single-period); aggregated we show the years-weighted
+  // horizon SUM (`cost.opex` / `cost.capex`) — same contract as Dispatch's
+  // `periodEntry?.opex ?? cost.opex`.
+  //
+  // Period-awareness ONLY applies in annualised mode: `cost.by_period` carries
+  // annualised per-period capex/opex, but the lifetime (PV) CAPEX is a single
+  // horizon-wide present value with no per-period breakdown. Mixing a horizon
+  // PV CAPEX with a single-period OPEX under a "period N" header would be a
+  // mixed-scope number, so in lifetime mode the whole strip stays horizon-wide.
+  const periodEntry = (costMode === 'annual' && filter.selectedPeriod != null && cost.by_period)
+    ? cost.by_period.find(p => p.period === filter.selectedPeriod)
+    : null
+  const displayOpex = periodEntry?.opex ?? cost.opex
+  const displayCapex = costMode === 'lifetime'
+    ? (cost.capex_lifetime ?? 0)
+    : (periodEntry?.capex ?? cost.capex)
+  const scopeLabel = periodEntry ? `period ${filter.selectedPeriod}` : 'horizon (all periods)'
+
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full [&>*]:shrink-0">
 
@@ -769,7 +821,7 @@ export default function CapacityExpansion() {
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
             Total system cost
             <span className="ml-2 text-[10px] font-normal text-muted">
-              horizon (all periods)
+              {scopeLabel}
             </span>
           </h3>
           <div className="flex items-center gap-2">
@@ -811,20 +863,24 @@ export default function CapacityExpansion() {
               : 'PyPSA n.statistics.expanded_capex() — capital_cost × Δp_nom for new capacity built this run. Includes every vintage row for assets with per-period bounds.'} />
           <KPI
             label={costMode === 'lifetime' ? 'CAPEX (installed, PV)' : 'CAPEX (installed)'}
-            value={fmtCurrency(costMode === 'lifetime' ? cost.capex_lifetime ?? 0 : cost.capex)}
+            value={fmtCurrency(displayCapex)}
             hint={costMode === 'lifetime'
               ? 'Present value of upfront overnight investment for ALL installed capacity. Future-year builds are discounted at each asset\'s discount_rate from build_year back to the model reference year.'
-              : 'Annualised cost of ALL installed capacity — existing + new (PyPSA n.statistics()).'} />
-          <KPI label="OPEX (annual)" value={fmtCurrency(cost.opex)}
-            hint="Σ marginal_cost × dispatch over horizon. Stays per-year regardless of the toggle." />
+              : periodEntry
+                ? `Annualised cost of ALL installed capacity in period ${filter.selectedPeriod} (existing + new).`
+                : 'Annualised cost of ALL installed capacity — existing + new, summed across periods (PyPSA n.statistics()).'} />
+          <KPI label={periodEntry ? 'OPEX (period)' : 'OPEX (horizon)'} value={fmtCurrency(displayOpex)}
+            hint={periodEntry
+              ? `Σ marginal_cost × dispatch in period ${filter.selectedPeriod}. Matches the Dispatch tab for this period.`
+              : 'Σ marginal_cost × dispatch, weighted and summed across all investment periods. Matches the Dispatch tab when aggregated.'} />
           <KPI
             label="Total system cost"
-            value={fmtCurrency(
-              (costMode === 'lifetime' ? cost.capex_lifetime ?? 0 : cost.capex) + cost.opex
-            )}
+            value={fmtCurrency(displayCapex + displayOpex)}
             hint={costMode === 'lifetime'
-              ? 'PV of upfront investment + OPEX (one year). Mixed-horizon by design — toggle to Annualised for an apples-to-apples comparison.'
-              : 'Annualised CAPEX (installed) + OPEX.'} />
+              ? 'PV of upfront investment + OPEX. Mixed-horizon by design — toggle to Annualised for an apples-to-apples comparison.'
+              : periodEntry
+                ? `Annualised CAPEX (installed) + OPEX for period ${filter.selectedPeriod}.`
+                : 'Annualised CAPEX (installed) + OPEX, summed across periods.'} />
           {/* Curtailment penalty and storage-investment slice — these surface
               two numbers the user always wants to see at a glance: the cost
               the LP is paying for spilled renewables, and how much of the
@@ -841,6 +897,61 @@ export default function CapacityExpansion() {
             hint="CAPEX-expansion across StorageUnit + Store assets only — the storage slice of total new investment. Multi-vintage assets contribute one term per build year." />
         </div>
       </section>
+
+      {/* ── System-cost waterfall ──────────────────────────────── */}
+      {costWaterfall.length > 1 && (
+        <ChartCard
+          title="System-cost waterfall"
+          hint="annualised, horizon (all periods) — how the Total system cost builds up. Ignores the period selector."
+          right={
+            <ChartActions
+              chartRef={waterfallChartRef}
+              onExportCSV={() => {
+                downloadCSV('system_cost_waterfall.csv', ['component', 'EUR_per_year'],
+                  costWaterfall.map(d => [d.name, d.abs]))
+                toast.success('Exported')
+              }}
+              filename="system_cost_waterfall" />
+          }
+          bodyClassName="p-3"
+        >
+          <p className="text-[11px] text-muted mb-3">
+            Existing-capacity CAPEX, new-build CAPEX and OPEX stack up to the optimised
+            Total annual system cost.{cost && cost.curtailment_cost > 0 && (
+              <> A curtailment penalty of <span className="font-medium text-text">{fmtCurrency(cost.curtailment_cost)}</span>{' '}
+              is a separate objective term, not part of Total.</>
+            )}
+          </p>
+          <div ref={waterfallChartRef}>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={costWaterfall} margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+                <CartesianGrid {...CHART_GRID} />
+                <XAxis dataKey="name" {...CHART_AXIS} />
+                <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                  label={yAxisLabel('EUR (annualised)')} />
+                <RTooltip
+                  cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                  content={(props: { active?: boolean; payload?: Array<{ payload?: { name: string; abs: number } }> }) => {
+                    const row = props.active ? props.payload?.[0]?.payload : undefined
+                    if (!row) return null
+                    return (
+                      <div className="rounded border border-border bg-bg px-2 py-1 text-[11px] shadow">
+                        <div className="text-text font-medium">{row.name}</div>
+                        <div className="text-muted font-mono">{fmtCurrency(row.abs)}</div>
+                      </div>
+                    )
+                  }}
+                />
+                {/* Transparent offset bar lifts each step to its cumulative base. */}
+                <Bar dataKey="base" stackId="wf" fill="transparent" isAnimationActive={false} />
+                <Bar dataKey="value" stackId="wf" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                  {costWaterfall.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
+      )}
 
       {/* ── Expansion CAPEX by component class ─────────────────── */}
       <ChartCard

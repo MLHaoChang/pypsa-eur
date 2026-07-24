@@ -1,0 +1,236 @@
+"""
+Per-project in-memory state container.
+
+Today the backend holds exactly ONE active project's network (the single
+foreground project). `ProjectContext` encapsulates everything that is logically
+*per project* so that the multi-project work (see
+`~/.claude/plans/multi-project-architecture-v5.md`) can later hold a registry of
+these keyed by `project_id` without touching the ~110
+`PyPSAService.get_network()` call sites — those keep calling the same classmethod
+API, which delegates to the active context.
+
+Phase 0 scope: introduce this container and have `PyPSAService` delegate to a
+single `_active` instance. Behaviour is byte-identical to the previous loose
+class attributes — only the internal layout changes. The multi-entry registry
+and per-project locks are deferred to Phase A/B (where retained concurrent
+contexts make them earn their keep); per-project locking without concurrent
+contexts would be premature.
+
+What is per-context vs global:
+  * Per-context (here): the network, its on-disk identity, and its transient-row
+    registry — all meaningless across projects.
+  * Global (stays on PyPSAService): the mutation lock and the netCDF I/O lock.
+    The latter guards process-global, thread-unsafe HDF5 library state and MUST
+    remain a single shared instance even once multiple contexts are resident.
+"""
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass, field
+from dataclasses import fields as _dc_fields
+from typing import Any
+
+import pypsa
+
+# Module-level import is cycle-safe: undo_service imports nothing from services
+# at module load (its PyPSAService reach is lazy, inside _active()).
+from services.undo_service import _UndoState
+
+
+@dataclass
+class ChatState:
+    """
+    Per-project chatbot conversation state (Phase 0 stub).
+
+    The chatbot integration v6 plan keeps conversation history per project,
+    stored on disk at ``projects/<loaded_project>/chat.jsonl`` and held in
+    memory on the project's ProjectContext. Phase 0 lands the SHAPE only:
+    the `session` field carries a `chat_service.ChatSession` at runtime
+    (typed `Any` to avoid a `project_context -> chat_service` import cycle),
+    `persist_path` caches the resolved chat.jsonl absolute path, and `lock`
+    guards append + rotation under one critical section.
+
+    Lifecycle invariants (Phase 0 QA Gate A verifies):
+      * Carried forward by `reset_network` / `set_network` (same project,
+        network swap) — same shape as `solver_state` / `undo` / `mutation_lock`
+        so single-project autosave + chat history surviving every swap is
+        byte-identical to those globals' carry semantics.
+      * NOT carried by `build_context` (background work for B4.3 dispatcher
+        gets its own fresh chat state — the foreground's session must not
+        be visible to background-solve agents).
+      * Flushed via `chat_service.flush_to_disk(ctx)` by `_save_evicted_ctx`
+        AFTER `_save_context` succeeds (inside the same try/except so a flush
+        failure is logged and the eviction still completes).
+
+    Locking:
+      * `lock` is acquired by `chat_service.append_turn` for the entire
+        write + rotation cycle (M9 + v4-MINOR-2 — rotation cannot race a
+        concurrent append). Distinct from `ChatSession._lock` (which guards
+        in-memory session mutations like usage accumulators, pending
+        confirmations) so a long-running disk write does not block a
+        memory-only session update.
+    """
+
+    session: Any = None
+    persist_path: str | None = None
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+def _default_solver_state() -> dict[str, Any]:
+    """
+    Fresh solver-state dict with a default SolverConfig — the per-context
+    equivalent of the old module-init
+    ``_state = ProjectSolverState(solver_config=SolverConfig()).as_dict()``.
+
+    SolverConfig is imported lazily (at instance-creation time, never at module
+    load) so this module stays free of a
+    project_context -> solver_service -> pypsa_service -> project_context import
+    cycle. ``ProjectSolverState`` is defined later in this module; the forward
+    reference resolves at call time.
+    """
+    from services.solver_service import SolverConfig  # noqa: PLC0415
+
+    return ProjectSolverState(solver_config=SolverConfig()).as_dict()
+
+
+@dataclass
+class ProjectContext:
+    """All per-project in-memory state for ONE project's network."""
+
+    # The in-memory PyPSA network this context owns.
+    network: pypsa.Network
+
+    # Authoritative on-disk identity of the project this network belongs to, or
+    # None when fresh/unbound. DECOUPLED from the mutable `network.name` display
+    # title — the save path's `expect`/`rebind` identity guard trusts this, not
+    # the title. Set only by load-class ops + the first-save claim.
+    loaded_project: str | None = None
+
+    # Transient LP-scaffolding rows the solver adds for the duration of one solve
+    # (vintage clones `parent@<year>`, VOLL slacks `__voll_<bus>`) and reverts in
+    # restore(). Keyed `{component_class: {name, …}}`. Hidden from GET reads so a
+    # user never sees solver internals as asset rows. Per-network by construction
+    # — each context's expansion is its own.
+    transient_rows: dict[str, set[str]] = field(default_factory=dict)
+    transient_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    # Solver lifecycle + result state for THIS project — the per-context form of
+    # the old module-global `routers.simulation._state`. The `_state` proxy in
+    # simulation.py forwards every access to the ACTIVE context's dict here.
+    # reset_network/set_network carry this (and its lock) forward, so single-
+    # project behaviour is byte-identical to the pre-split module global (which
+    # survived every network swap). B2's registry gives each resident project
+    # its own; B4's dispatcher writes a background project's state directly.
+    solver_state: dict[str, Any] = field(default_factory=_default_solver_state)
+    # Guards multi-key reads/writes of `solver_state` (the old `_state_lock`).
+    # RLock: the /run claim holds it while calling helpers that re-acquire it.
+    solver_state_lock: threading.RLock = field(default_factory=threading.RLock)
+
+    # Per-project undo stack + byte accounting + coalesce timestamp (B3). The
+    # old module-global undo deque, now per-context; undo_service operates on the
+    # ACTIVE context's instance. Carried forward across reset_network/set_network
+    # (byte-identical to the old global, which survived every swap); B8 stops
+    # carrying it so each resident project keeps its own undo history.
+    undo: _UndoState = field(default_factory=_UndoState)
+
+    # LRU recency stamp (B9). `time.monotonic()` of the last time this context
+    # became active, was activated, was registered, or was returned as a
+    # resident path-scoped read. The eviction policy (PyPSAService._evict_if_
+    # over_cap) treats the SMALLEST stamp as least-recently-interacted. Monotonic
+    # (not wall-clock) because it's purely an ordering key — never displayed and
+    # immune to clock adjustments. Defaults 0.0 so a never-touched ctx sorts as
+    # oldest. The frontend `touchTab` is the UI mirror; THIS stamp is the
+    # authority for eviction.
+    last_interacted_at: float = 0.0
+
+    # Per-context network-mutation lock (B4). What PyPSAService.get_lock() returns
+    # (= the active ctx's) once Increment 2 wires it. Guards this ctx's in-memory
+    # network mutations + its loaded_project bind + dispatch writes. NOT carried
+    # forward across reset/set — each resident ctx owns its lock so a background
+    # solve (B4.3) holds ITS lock while the foreground edits a DIFFERENT ctx under
+    # that ctx's lock. RLock: save_project / the /run claim nest helpers that
+    # re-acquire it. Unused until B4 Increment 2.
+    mutation_lock: threading.RLock = field(default_factory=threading.RLock)
+
+    # Per-project chatbot conversation state (chatbot integration v6 Phase 0).
+    # Lifecycle mirrors `solver_state` / `undo` — carried forward by
+    # reset_network / set_network so a same-project network swap preserves the
+    # active chat session, NOT carried by build_context so background-solve
+    # contexts (B4.3) get their own clean chat. Flushed to disk via
+    # `chat_service.flush_to_disk` from `_save_evicted_ctx` (B9 eviction)
+    # before the context is dropped. See ChatState above for field details.
+    chat_state: ChatState = field(default_factory=ChatState)
+
+
+# ── Solver lifecycle + result state ──────────────────────────────────────────
+# Canonical key groups for the simulation state (today's module-global
+# `routers.simulation._state`). Defined here as the single source of truth so
+# the dispatcher (Phase A) can instantiate one solver-state per project and the
+# persistence layer (`routers.projects._RESULTS_STATE_KEYS`) derives from the
+# same list rather than maintaining a parallel copy that can drift.
+#
+# LIFECYCLE — reset on every solve (status + the worker handles).
+LIFECYCLE_KEYS = (
+    "status", "condition", "objective", "solve_time",
+    "thread", "stop_event", "log_queue", "last_failure",
+)
+# RESULT_STATE — the side-results persisted to `results_state.pkl`. Order matches
+# the historical `_RESULTS_STATE_KEYS` tuple (the save/restore paths iterate it).
+RESULT_STATE_KEYS = (
+    "lopf_results", "ac_pf_results",
+    "last_lost_load",
+    "ac_pf_convergence", "ac_pf_convergence_list",
+    "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
+    "ac_pf_converged_count", "ac_pf_total_snapshots",
+)
+
+
+@dataclass
+class ProjectSolverState:
+    """
+    Per-project solver lifecycle + result state — the typed shape of today's
+    module-global `routers.simulation._state`.
+
+    Phase A1 scope: this is the canonical SHAPE + factory only. `simulation._state`
+    is still a plain dict, built via `ProjectSolverState(...).as_dict()`, so the
+    ~120 existing `_state[...]` access sites are unchanged and behaviour is
+    byte-identical. Later A-steps thread a per-project INSTANCE through the solver
+    (so a background solve writes its own state, not the foreground's) and migrate
+    the dict accesses to attribute access. Keeping the field list here now means
+    the dispatcher can `ProjectSolverState(...)` per project without re-deriving it.
+
+    Non-network types are annotated `Any` so this module stays free of imports
+    from `solver_service` (SolverConfig) / `simulation` (BufferedLogQueue) and
+    cannot create an import cycle.
+    """
+
+    # Lifecycle (reset each solve)
+    status: str = "idle"          # idle | running | completed | failed | aborted
+    condition: Any = None
+    objective: Any = None
+    solve_time: Any = None
+    thread: Any = None            # the worker threading.Thread
+    stop_event: Any = None        # threading.Event for abort
+    log_queue: Any = None         # BufferedLogQueue (SSE source)
+    # Actionable failure card from the last finished solve (None on success /
+    # abort). Declared here so it's part of the canonical state shape — written
+    # via `_state_update(last_failure=…)` in run_simulation's finally, reset
+    # each solve, and cleared per-project on switch (not an orphan key).
+    last_failure: Any = None
+    # Config (project-scoped; injected by the caller — defaults None to avoid a
+    # SolverConfig import here. simulation.py passes a real SolverConfig()).
+    solver_config: Any = None
+    # Result-state (persisted to results_state.pkl)
+    last_lost_load: Any = None
+    lopf_results: Any = None
+    ac_pf_results: Any = None
+    ac_pf_convergence: Any = None        # dict[snapshot_iso, bool] (legacy)
+    ac_pf_convergence_list: Any = None   # list[{snapshot, period?, ok}]
+    ac_pf_slack_bus_used: Any = None
+    ac_pf_stripped_voll_slacks: Any = None
+    ac_pf_converged_count: Any = None
+    ac_pf_total_snapshots: Any = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """A plain dict with the same keys/values — the legacy `_state` shape."""
+        return {f.name: getattr(self, f.name) for f in _dc_fields(self)}

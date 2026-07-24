@@ -9,7 +9,7 @@ import pandas as pd
 import pypsa
 
 from conftest import build_network
-from routers.projects import _build_snapshot_weights
+from routers.compare import _build_snapshot_weights
 
 
 def test_economics_dispatch_gwh_uses_generators_basis(client, install_network):

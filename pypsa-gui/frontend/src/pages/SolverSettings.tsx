@@ -6,6 +6,8 @@ import { simulationApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
+import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
 import CarrierSelect from '../components/CarrierSelect'
 
@@ -116,7 +118,8 @@ function coerceValue(raw: string, kind: ParamSpec['kind']): number | string | bo
 
 export default function SolverSettings() {
   const qc = useQueryClient()
-  const { data: cfg } = useQuery({ queryKey: ['solverConfig'], queryFn: simulationApi.getSolverConfig })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: cfg } = useQuery({ queryKey: nk(currentProject, 'solverConfig'), queryFn: simulationApi.getSolverConfig })
   const { data: solvers } = useQuery({ queryKey: ['checkSolvers'], queryFn: simulationApi.checkSolvers })
   const [draft, setDraft] = useState<SolverConfig | null>(null)
   // Snapshot of `cfg` at the moment `draft` was hydrated. Used at Save
@@ -198,7 +201,7 @@ export default function SolverSettings() {
       // Advance baseline so the next Save's diff is computed against
       // what we just persisted (or, on no-op, the same snapshot).
       baselineRef.current = JSON.parse(JSON.stringify(savedNext))
-      qc.invalidateQueries({ queryKey: ['solverConfig'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') })
       if (noOp) {
         toast('No changes to save', { icon: 'ℹ️' })
       } else {
@@ -647,6 +650,27 @@ export default function SolverSettings() {
           Reported <code>n.objective</code> and LP duals are divided back
           by this factor post-solve so user-facing € stays unchanged.
         </p>
+        {/* Auto-scale toggle — lets the solver pick the scale itself from the
+            cost-coefficient spread. Overrides the manual value below; a no-op
+            for well-conditioned models. */}
+        <label className="flex items-start gap-2 mb-2.5 p-2 rounded border border-border bg-bg-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!draft.auto_objective_scale}
+            onChange={e => patch({ auto_objective_scale: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span className="text-[11px] leading-relaxed">
+            <span className="font-medium text-text">Auto-scale objective</span>
+            <span className="text-muted">
+              {' '}— let the solver choose the scale (a power of 10) from the model's
+              cost-coefficient spread. Engages only for ill-conditioned models and
+              overrides the manual value below. The pre-solve{' '}
+              <code className="text-accent">[NUMERICS]</code> log line reports the
+              chosen factor.
+            </span>
+          </span>
+        </label>
         {solver === 'highs' && (
           <p className="text-[10.5px] text-muted mb-2 leading-relaxed bg-bg-2 border border-border rounded px-2 py-1.5">
             <span className="font-medium text-text">Two same-named options exist.</span>
@@ -658,48 +682,54 @@ export default function SolverSettings() {
             since the effects compound.
           </p>
         )}
-        <div className="flex flex-wrap items-center gap-2 mb-1.5">
-          {[
-            { value: 1e-6, label: '×10⁻⁶' },
-            { value: 1e-3, label: '×10⁻³' },
-            { value: 1,    label: '×1 (default)' },
-            { value: 1e3,  label: '×10³' },
-            { value: 1e6,  label: '×10⁶' },
-          ].map(opt => {
-            const active = Math.abs((draft.user_objective_scale ?? 1) - opt.value) < 1e-12
-            return (
-              <button
-                key={opt.value}
-                onClick={() => patch({ user_objective_scale: opt.value })}
-                className={`px-2 py-1 rounded text-[11px] border transition-colors ${
-                  active
-                    ? 'border-accent bg-accent/10 text-accent font-medium'
-                    : 'border-border text-muted hover:text-text hover:border-text/30'
-                }`}
-              >
-                {opt.label}
-              </button>
-            )
-          })}
-        </div>
-        <div className="flex items-center gap-2 mt-2">
-          <label className="text-[11px] text-muted">Custom</label>
-          <input
-            type="number"
-            step="any"
-            min={0}
-            value={draft.user_objective_scale ?? 1}
-            onChange={e => {
-              const v = parseFloat(e.target.value)
-              patch({ user_objective_scale: Number.isFinite(v) && v > 0 ? v : 1 })
-            }}
-            className="px-2 py-1 border border-border rounded text-xs bg-bg font-mono w-32"
-          />
-          {(draft.user_objective_scale ?? 1) !== 1 && (
-            <span className="text-[10px] text-warn font-mono">
-              non-identity scaling active
-            </span>
-          )}
+        {/* Manual controls — dimmed + disabled while Auto-scale is on, since
+            auto overrides them. */}
+        <div className={draft.auto_objective_scale ? 'opacity-40 pointer-events-none select-none' : ''}>
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+            {[
+              { value: 1e-6, label: '×10⁻⁶' },
+              { value: 1e-3, label: '×10⁻³' },
+              { value: 1,    label: '×1 (default)' },
+              { value: 1e3,  label: '×10³' },
+              { value: 1e6,  label: '×10⁶' },
+            ].map(opt => {
+              const active = Math.abs((draft.user_objective_scale ?? 1) - opt.value) < 1e-12
+              return (
+                <button
+                  key={opt.value}
+                  disabled={!!draft.auto_objective_scale}
+                  onClick={() => patch({ user_objective_scale: opt.value })}
+                  className={`px-2 py-1 rounded text-[11px] border transition-colors ${
+                    active
+                      ? 'border-accent bg-accent/10 text-accent font-medium'
+                      : 'border-border text-muted hover:text-text hover:border-text/30'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <label className="text-[11px] text-muted">Custom</label>
+            <input
+              type="number"
+              step="any"
+              min={0}
+              disabled={!!draft.auto_objective_scale}
+              value={draft.user_objective_scale ?? 1}
+              onChange={e => {
+                const v = parseFloat(e.target.value)
+                patch({ user_objective_scale: Number.isFinite(v) && v > 0 ? v : 1 })
+              }}
+              className="px-2 py-1 border border-border rounded text-xs bg-bg font-mono w-32"
+            />
+            {!draft.auto_objective_scale && (draft.user_objective_scale ?? 1) !== 1 && (
+              <span className="text-[10px] text-warn font-mono">
+                non-identity scaling active
+              </span>
+            )}
+          </div>
         </div>
         <details className="mt-2 text-[10.5px] text-muted">
           <summary className="cursor-pointer hover:text-text">When to use this</summary>
@@ -928,6 +958,7 @@ const CONSTRAINT_TYPES: Array<{ value: string; label: string; needs: ('carrier_a
 
 function GlobalConstraints() {
   const qc = useQueryClient()
+  const currentProject = useUIStore(s => s.currentProject)
   const { data: rawRows = [] } = useQuery({
     queryKey: ['global_constraints'],
     queryFn: networkApi.getGlobalConstraints,
@@ -936,7 +967,7 @@ function GlobalConstraints() {
   // Investment periods drive the "Period" dropdown — empty list ⇒ flat
   // network, where the dropdown collapses to "Horizon-wide" only.
   const { data: invPeriods } = useQuery({
-    queryKey: ['investmentPeriods'],
+    queryKey: nk(currentProject, 'investmentPeriods'),
     queryFn: networkApi.getInvestmentPeriods,
   })
   const periods = useMemo<number[]>(() => {
@@ -1209,12 +1240,13 @@ function GlobalConstraints() {
 // always reflects what's actually applied to the LP.
 function FuelLimitsPerPeriod({ existingRows }: { existingRows: GlobalConstraint[] }) {
   const qc = useQueryClient()
+  const currentProject = useUIStore(s => s.currentProject)
   const { data: carriers = [] } = useQuery({
-    queryKey: ['carriers'],
+    queryKey: nk(currentProject, 'carriers'),
     queryFn: networkApi.getCarriers,
   })
   const { data: invPeriods } = useQuery({
-    queryKey: ['investmentPeriods'],
+    queryKey: nk(currentProject, 'investmentPeriods'),
     queryFn: networkApi.getInvestmentPeriods,
   })
 
@@ -1505,8 +1537,9 @@ function Co2PricePerPeriod({
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
 }) {
+  const currentProject = useUIStore(s => s.currentProject)
   const { data: invPeriods } = useQuery({
-    queryKey: ['investmentPeriods'],
+    queryKey: nk(currentProject, 'investmentPeriods'),
     queryFn: networkApi.getInvestmentPeriods,
   })
   const periods = useMemo<number[]>(() => {
@@ -1658,9 +1691,10 @@ function SclopfPanel({
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
 }) {
-  const { data: lines = [] }        = useQuery({ queryKey: ['lines'],        queryFn: networkApi.getLines })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'], queryFn: networkApi.getTransformers })
-  const { data: buses = [] }        = useQuery({ queryKey: ['buses'],        queryFn: networkApi.getBuses })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),        queryFn: networkApi.getLines })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers })
+  const { data: buses = [] }        = useQuery({ queryKey: nk(currentProject, 'buses'),        queryFn: networkApi.getBuses })
   const [searchLines, setSearchLines]   = useState('')
   const [searchTrafos, setSearchTrafos] = useState('')
 
@@ -1933,13 +1967,14 @@ function Stage2Panel({
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
 }) {
-  const { data: buses = [] } = useQuery({ queryKey: ['buses'], queryFn: networkApi.getBuses })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
   const { data: simStatus } = useQuery({
     // Use the SAME key as every other status consumer (App, AppHeader,
     // SnapshotPicker, Results, OverviewPanel). The previous 'simulation_status'
     // was a separate cache entry, so a standalone AC-PF trigger from here
     // refreshed only this panel and left the picker/overlay status stale.
-    queryKey: ['simulationStatus'],
+    queryKey: nk(currentProject, 'simulationStatus'),
     queryFn: simulationApi.getStatus,
     refetchInterval: 2000,
   })
@@ -1961,8 +1996,9 @@ function Stage2Panel({
   const prevRunningRef = useRef(false)
   useEffect(() => {
     if (prevRunningRef.current && !isRunning) {
-      qc.invalidateQueries({ queryKey: ['results'] })
-      qc.invalidateQueries({ queryKey: ['simulationStatus'] })
+      const proj = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(proj, 'results') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'simulationStatus') })
     }
     prevRunningRef.current = isRunning
   }, [isRunning, qc])
@@ -1976,7 +2012,7 @@ function Stage2Panel({
       setResultSource('ac_pf')
       // Invalidate the simulation status query so the polling cycle picks up
       // the new "running" state immediately rather than waiting 2s.
-      qc.invalidateQueries({ queryKey: ['simulationStatus'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'simulationStatus') })
     },
     onError: (e: unknown) => {
       const code = (e as { response?: { status?: number } })?.response?.status
@@ -2190,7 +2226,8 @@ const DEFAULT_CLUSTER_REQ: ClusterRequest = {
 
 function ClusteringSection() {
   const qc = useQueryClient()
-  const { data: buses = [] } = useQuery({ queryKey: ['buses'], queryFn: networkApi.getBuses })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
   const [req, setReq] = useState<ClusterRequest>(DEFAULT_CLUSTER_REQ)
 
   // Context counts surfaced above the form: tells the user what they're
@@ -2209,8 +2246,11 @@ function ClusteringSection() {
   const apply = useMutation({
     mutationFn: () => networkApi.applyClustering(req),
     onSuccess: (res: { bus_count: number; line_count: number; message: string }) => {
-      // Full invalidation — every component table is stale after a cluster.
-      qc.invalidateQueries()
+      // Clustering reshapes the CURRENT project's network — every component
+      // table + result is stale. Scope to this project's network roots (which
+      // include `results`) rather than a bare `invalidateQueries()` that nuked
+      // every resident project's cache; other open projects survive for B8.
+      invalidateNetworkQueries(qc, useUIStore.getState().currentProject)
       toast.success(res.message ?? `Clustered to ${res.bus_count} buses`)
     },
     onError: (e: { response?: { data?: { detail?: string } } } | Error) => {

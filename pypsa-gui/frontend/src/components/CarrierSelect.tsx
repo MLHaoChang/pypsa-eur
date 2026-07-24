@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { networkApi } from '../api/network'
+import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import type { Carrier } from '../api/types'
 import { CARRIER_CATALOG_NAMES } from '../utils/carrierCatalog'
 
@@ -102,8 +104,9 @@ export default function CarrierSelect({
   value, onChange, label, placeholder, className, wrapperClassName,
   allowEmpty, categoryFilter, title, id,
 }: CarrierSelectProps) {
+  const currentProject = useUIStore(s => s.currentProject)
   const { data: carriers = [] } = useQuery({
-    queryKey: ['carriers'],
+    queryKey: nk(currentProject, 'carriers'),
     queryFn: networkApi.getCarriers,
     staleTime: 60_000,
   })

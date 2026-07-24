@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Eye, EyeOff, ChevronLeft, ChevronRight, Play, Pause, Layers } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
 import { simulationApi, resultsApi } from '../api/simulation'
 
@@ -39,21 +40,21 @@ export default function SnapshotPicker() {
   const {
     resultsOverlayEnabled, setResultsOverlay,
     resultsSnapshotIdx, setResultsSnapshotIdx, activeSlidePanel,
-    resultSource, paletteMode,
+    resultSource, paletteMode, currentProject,
   } = useUIStore()
   const { data: snap } = useQuery({
-    queryKey: ['snapshots'], queryFn: networkApi.getSnapshots,
+    queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots,
     staleTime: 5_000,
   })
   const { data: status } = useQuery({
-    queryKey: ['simulationStatus'], queryFn: simulationApi.getStatus,
+    queryKey: nk(currentProject, 'simulationStatus'), queryFn: simulationApi.getStatus,
     staleTime: 5_000,
   })
   // AC PF status — when available, decorate the timestamp with a ✓ / ✗
   // glyph reflecting the current snapshot's convergence so users see
   // mismatches in the playback bar without leaving the canvas.
   const { data: acPfStatus } = useQuery({
-    queryKey: ['results', 'ac_pf', 'status'], queryFn: resultsApi.getAcPfStatus,
+    queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus,
   })
 
   const count = snap?.count ?? 0

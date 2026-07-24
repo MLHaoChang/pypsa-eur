@@ -4,6 +4,7 @@ import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { appLog, useSimulationStore } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
+import { nk } from './queryKeys'
 
 // Query keys invalidated by any operation that swaps the underlying PyPSA
 // network in memory (load, restore, import). Includes:
@@ -11,31 +12,80 @@ import { useUIStore } from '../store/uiStore'
 //   - Meta + carriers + snapshots
 //   - Solver-state queries (`results`, `solverConfig`, `investmentPeriods`)
 //     because restore / load can change which solution is in memory
-//   - `undoInfo` because the undo stack is cleared on swap
+// Each of these roots is PROJECT-NAMESPACED via `nk` (see queryKeys.ts), so
+// invalidateNetworkQueries scopes them to one project's namespace.
 // Update this list when adding any feature that caches network-derived data —
 // otherwise a restore will silently keep serving pre-restore values.
 export const ALL_NETWORK_KEYS = [
   'buses', 'lines', 'links', 'generators', 'loads', 'storage_units',
   'stores', 'transformers', 'meta', 'load_profiles', 'generator_profiles',
-  'link_profiles', 'timeseries', 'carriers', 'snapshots', 'undoInfo',
+  'link_profiles', 'timeseries', 'timeseries-multi', 'load_aggregate',
+  'carriers', 'snapshots',
   'results', 'solverConfig', 'investmentPeriods',
+  // Vintage per-period bounds + the solved vintage capacities, and the
+  // standalone result roots used by ResultsViewer / SolveQueuePanel — all
+  // network-derived, so a load/restore/import must drop them too. (The
+  // legacy prefix-only `['results']` invalidation never reached these
+  // sibling roots; now that every root is project-namespaced via `nk`, list
+  // them explicitly so a network swap clears the lot.)
+  'vintageBounds', 'vintage_results', 'preflight',
+  'results_generators', 'results_lines', 'results_loads', 'results_prices',
+  'results_storage', 'results_statistics', 'resultsBundle',
   // Status query shared by App/AppHeader/SnapshotPicker/Results/OverviewPanel/
   // SolverSettings — invalidate on network swap so the StatusBar / picker
   // don't lag behind a project load by up to their staleTime.
   'simulationStatus',
+  // Undo depth (unsaved-edit badge). B7 inc2 rekeyed every `undoInfo` query to
+  // `nk(currentProject, 'undoInfo')`, so it's now per-project and invalidated
+  // here alongside the rest — a load/restore/import must refetch the new
+  // project's depth (it carries its own undo stack server-side, B3).
+  'undoInfo',
 ] as const
 
-export const DIAGRAM_STATE_KEY = 'network-diagram:default:state'
+// Matches every per-project diagram-state localStorage key written by
+// TopologyCanvas (`network-diagram:<project|__local__>:state`). Kept as an
+// exported const for stability; `resetBackendNetwork` sweeps ALL matching keys.
+export const DIAGRAM_STATE_KEY_RE = /^network-diagram:.*:state$/
 
-export function invalidateNetworkQueries(qc: QueryClient): void {
-  ALL_NETWORK_KEYS.forEach(k => qc.invalidateQueries({ queryKey: [k] }))
+/**
+ * Drop ALL of one project's retained React Query cache entries (B9).
+ *
+ * When the backend evicts a project from its resident registry (LRU, over
+ * RESIDENT_CAP), its in-memory network is gone server-side; the client should
+ * release the matching RETAINED cache so its RAM mirrors the server. Unlike
+ * `invalidateNetworkQueries` (which marks entries stale → refetch), this
+ * `removeQueries` PURGES them — the project re-hydrates cold (fetch on mount +
+ * a backend re-resolve via the path-scoped dependency) if the user revisits it.
+ *
+ * Every per-project root is namespaced via `nk(projectId, root)`, so removing
+ * `[root, projectId]` scopes the purge to exactly this project — other resident
+ * projects' caches are untouched. We sweep `ALL_NETWORK_KEYS` plus the
+ * project-keyed compare-state family. The open tab is deliberately LEFT in
+ * place: eviction is a memory concern, not a UX one — the tab stays and the
+ * project re-hydrates if clicked.
+ */
+export function dropProjectCache(qc: QueryClient, projectId: string): void {
+  ALL_NETWORK_KEYS.forEach(k => qc.removeQueries({ queryKey: nk(projectId, k) }))
+  qc.removeQueries({ queryKey: ['compare-state', projectId] })
+}
+
+export function invalidateNetworkQueries(qc: QueryClient, projectId: string | null): void {
+  // Project-scoped: each cache entry is namespaced by project (see `nk`), so
+  // invalidate ONLY the named project's network roots. A prefix-only
+  // `invalidateQueries({ queryKey: [k] })` would also nuke every OTHER
+  // resident project's cache — fine while single-active, but it would defeat
+  // the multi-project cache-retention benefit B7/B8 exists to enable.
+  ALL_NETWORK_KEYS.forEach(k => qc.invalidateQueries({ queryKey: nk(projectId, k) }))
+  // `projects` is a GLOBAL list (not per-project) — keep it flat.
   qc.invalidateQueries({ queryKey: ['projects'] })
   // Any network-swapping op (load / restore / import) changes a project's
   // on-disk state, so an open Compare panel's cached `['compare-state', *]`
-  // is now stale. Invalidate the whole family — every switch flow
-  // (ProjectTabs, Sidebar, CommandPalette, snapshot restore) routes through
-  // this helper, so one line here closes the gap for all of them.
-  qc.invalidateQueries({ queryKey: ['compare-state'] })
+  // is now stale. `compare-state` is keyed `['compare-state', <project>]`, so
+  // invalidate this project's entry; the whole family invalidation isn't
+  // needed because each project's compare-state is independent. Every switch
+  // flow (ProjectTabs, Sidebar, CommandPalette, snapshot restore) routes
+  // through this helper, so one line here closes the gap for all of them.
+  qc.invalidateQueries({ queryKey: ['compare-state', projectId] })
 }
 
 /**
@@ -139,6 +189,118 @@ export async function abortRunningSim(): Promise<boolean> {
     + 'It may still be in a long iteration — wait a moment and retry, '
     + 'or restart the backend.')
   return false
+}
+
+// Result of the shared instant-switch flow. Callers map this to their own
+// toast / appLog conventions (which differ across the four entry points).
+//   'switched'  — `target` is now the active project (instant if its cache was
+//                 warm; cold projects fetch on mount, which is expected).
+//   'noop'      — `target` was already the current project; nothing happened.
+//   'abort-failed' — couldn't stop an in-flight FOREGROUND solve; the active
+//                 project is unchanged.
+//   'busy-solve' — a FOREGROUND solve is in flight (backend returned 409);
+//                 the user must finish/abort it before switching.
+//   'not-found' — `target` no longer exists on disk (backend 404).
+//   'error'     — any other failure (network, unexpected status); message in
+//                 `.message`.
+export type SwitchResult =
+  | { status: 'switched' }
+  | { status: 'noop' }
+  | { status: 'abort-failed' }
+  | { status: 'busy-solve' }
+  | { status: 'not-found' }
+  | { status: 'error'; message: string }
+
+/**
+ * B8 — INSTANT in-memory project switch (the C2 payoff).
+ *
+ * Replaces the old destructive abort→save→load→invalidateNetworkQueries
+ * round-trip. The backend `POST /api/projects/{target}/activate` makes `target`
+ * the active context with a pure pointer swap when it's already resident; the
+ * frontend then re-keys every reactive `useQuery` to `nk(target,…)` (via
+ * `setCurrentProject`), so React Query serves `target`'s RETAINED cache with NO
+ * refetch. First-ever visit to a project still fetches on mount (cold cache) —
+ * that's expected and fine.
+ *
+ * CRITICAL — this must NOT call `invalidateNetworkQueries`: that would drop
+ * `target`'s retained component tables and force a full refetch, defeating the
+ * instant switch. Only the small meta/status/snapshots roots are invalidated so
+ * the StatusBar / window title / snapshot picker reflect the activated backend.
+ *
+ * Durability: the OUTGOING project is still saved to disk (its in-memory ctx is
+ * retained either way, but the save protects against a crash) before activate.
+ *
+ * The shared helper does NOT manage the caller's busy-flag or
+ * `projectSwitchInProgress` fence — each of the four entry points keeps owning
+ * those (set before / clear in `finally`) plus their own toasts. This helper is
+ * the network + store core they all share.
+ */
+export async function switchToProject(target: string, qc: QueryClient): Promise<SwitchResult> {
+  const ui = useUIStore.getState()
+  const currentProject = ui.currentProject
+  if (target === currentProject) return { status: 'noop' }
+
+  // Is the CURRENT project mid-solve via the QUEUE dispatcher? If so, switching
+  // away is SAFE and must NOT abort it: the dispatcher solves the active project
+  // in place on a CAPTURED ctx (its own network/lock/state sink), so moving the
+  // active pointer leaves it solving in the background and saving itself on
+  // completion (B4.3). Read the queue list from the React Query cache (the
+  // useSolveQueue hook keeps ['solveQueue'] fresh while a job is active).
+  const queue = qc.getQueryData<{ jobs: Array<{ project_id: string; status: string }> }>(['solveQueue'])
+  const currentSolvingInQueue = !!currentProject && !!queue?.jobs?.some(
+    j => j.project_id === currentProject && j.status === 'running',
+  )
+
+  if (!currentSolvingInQueue) {
+    // 1. Abort any LEGACY foreground /run solve on the current project (a queue
+    //    solve is handled above — left running in the background).
+    const stopped = await abortRunningSim()
+    if (!stopped) return { status: 'abort-failed' }
+
+    // 2. Durability: persist the outgoing project's edits. The in-memory ctx is
+    //    retained regardless, but the save guards against a process crash.
+    //    SKIPPED when a queue solve is in flight — the network carries transient
+    //    LP transforms mid-solve and the backend would 409 the save anyway; the
+    //    dispatcher saves the project itself when the solve completes.
+    if (currentProject) await saveProjectQuietly(currentProject)
+  }
+
+  // 3. Activate the target backend-side (instant pointer swap when resident).
+  //    A cold activate may EVICT the LRU resident project(s) to stay under the
+  //    server's RESIDENT_CAP (B9); the response lists those ids.
+  let evicted: string[] = []
+  try {
+    const res = await projectsApi.activate(target)
+    evicted = res.evicted ?? []
+  } catch (e) {
+    const status = (e as { response?: { status?: number } })?.response?.status
+    if (status === 409) return { status: 'busy-solve' }
+    if (status === 404) return { status: 'not-found' }
+    return { status: 'error', message: String((e as Error)?.message ?? e) }
+  }
+
+  // 3b. Drop the evicted projects' retained caches so client RAM mirrors the
+  //     server-side eviction. The TARGET is never in `evicted` (it's the newly
+  //     active id, protected from its own registration), so this can't purge
+  //     the cache we're about to serve. Tabs stay open — eviction is RAM, not UX.
+  evicted.forEach(id => dropProjectCache(qc, id))
+
+  // 4. Re-key all reactive queries to nk(target,…). React Query serves the
+  //    target's retained cache — instant, no refetch when warm.
+  useUIStore.getState().setCurrentProject(target)
+  useUIStore.getState().setProjectName(target)
+
+  // 5. Refresh ONLY the small lifecycle roots so the StatusBar / title /
+  //    snapshot picker reflect the activated backend state. DELIBERATELY not
+  //    invalidateNetworkQueries — that would nuke the retained component cache.
+  qc.invalidateQueries({ queryKey: nk(target, 'meta') })
+  qc.invalidateQueries({ queryKey: nk(target, 'simulationStatus') })
+  qc.invalidateQueries({ queryKey: nk(target, 'snapshots') })
+
+  // 6. LRU signal for B9 eviction.
+  useUIStore.getState().touchTab(target)
+
+  return { status: 'switched' }
 }
 
 // Best-effort save of the current project. Returns true on success, false on
@@ -424,7 +586,19 @@ export async function saveBlobToDisk(
 }
 
 // Reset the in-memory backend network and clear the cached diagram layout.
+// The diagram state is now keyed per-project (`network-diagram:<project>:state`);
+// a reset unbinds the network (→ the `__local__` slot), so sweep EVERY matching
+// key rather than a single one — that way a reset can't leave any stale
+// per-project diagram state (waypoints/positions) behind to bleed into a
+// freshly created/loaded network.
 export async function resetBackendNetwork(): Promise<void> {
   await networkApi.resetNetwork()
-  try { localStorage.removeItem(DIAGRAM_STATE_KEY) } catch { /* noop */ }
+  try {
+    const keys: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && DIAGRAM_STATE_KEY_RE.test(k)) keys.push(k)
+    }
+    keys.forEach(k => localStorage.removeItem(k))
+  } catch { /* noop */ }
 }

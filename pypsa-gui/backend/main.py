@@ -1,19 +1,42 @@
 import asyncio
-import threading
-import time
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# Load `pypsa-gui/backend/.env` (gitignored) before any module reads
+# `os.environ` — this is what keeps `ANTHROPIC_API_KEY` (and any other
+# operator-supplied env vars) alive across backend restarts initiated
+# outside the original launching shell. `python-dotenv` ships in the pixi
+# env; the import is soft so a missing package degrades to "env-only" mode
+# rather than crashing startup.
+try:
+    from dotenv import load_dotenv
+    _ENV_PATH = Path(__file__).parent / ".env"
+    if _ENV_PATH.exists():
+        # override=False so an env var set in the launching shell wins over
+        # the .env file value (matches python-dotenv's documented contract
+        # and avoids surprising the operator who set a key inline).
+        load_dotenv(dotenv_path=_ENV_PATH, override=False)
+except ImportError:
+    pass
 
 import pypsa
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from routers import (
     changelog,
+    chat,
     clustering,
+    compare,
     io,
     network,
+    project_network,
     projects,
+    results,
     simulation,
     snapshots,
+    solve_queue,
+    uploads,
     vintage,
 )
 from services.pypsa_service import PyPSAService
@@ -56,6 +79,15 @@ _SOLVER_BLOCKING_PREFIXES = ("/api/network/", "/api/io/", "/api/projects/")
 # segments that don't fit a flat-set match, so it'd need a regex
 # variant if we ever add it).
 _SOLVER_BLOCKING_EXEMPT: set[str] = set()
+# Suffix-exempt routes (dynamic `{id}` path segment, so they can't be listed as
+# exact paths). `POST /api/projects/{id}/activate` is the B8 instant switch — a
+# pure active-pointer swap that does NOT mutate the in-memory network, so it is
+# SAFE during a solve. It carries its OWN, smarter guard (allow switching away
+# from a queue-dispatcher solve, which keeps solving its captured ctx in the
+# background; refuse only a legacy /run). Without this exemption the blanket
+# middleware 409 fires first and the user can't leave a solving project — the
+# whole point of the resident multi-project work.
+_SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
 
 # Prefixes whose mutations should auto-invalidate solver dispatch. Narrower
 # than _UNDO_PREFIXES: importing a bundle (/api/io/*) replaces the network
@@ -65,18 +97,10 @@ _SOLVER_BLOCKING_EXEMPT: set[str] = set()
 _DISPATCH_INVALIDATE_PREFIXES = ("/api/network/",)
 _DISPATCH_INVALIDATE_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 
-# Coalescing window for undo snapshots. Every canvas drag-end is a separate
-# PUT, and each was triggering a full `n.export_to_netcdf` round-trip that
-# could take 100 ms+ on non-trivial networks. With a sub-second window most
-# drag bursts collapse to a single snapshot.
-#
-# Trade-off: undo granularity is reduced — clicking through 5 edits in 250 ms
-# now collapses to one undo step instead of five. In practice users batch
-# rapid edits anyway and want them grouped; explicit `Ctrl+Z` per keystroke
-# was never the intent.
-_UNDO_COALESCE_MS = 500
-_undo_coalesce_lock = threading.Lock()
-_last_undo_push_at = 0.0  # epoch seconds; read+written under _undo_coalesce_lock
+# Undo-snapshot push coalescing now lives in services.undo_service
+# (claim_push_slot) so the timer travels with the undo subsystem — the
+# rationale (drag-burst collapse, granularity trade-off) is documented there.
+# The middleware calls it below, before the expensive netcdf export.
 
 
 @asynccontextmanager
@@ -121,7 +145,8 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # catch-all for everything else.
     if (is_write
             and any(path.startswith(p) for p in _SOLVER_BLOCKING_PREFIXES)
-            and path not in _SOLVER_BLOCKING_EXEMPT):
+            and path not in _SOLVER_BLOCKING_EXEMPT
+            and not any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES)):
         from routers.simulation import _solver_in_flight
         if _solver_in_flight():
             from fastapi.responses import JSONResponse
@@ -150,18 +175,12 @@ async def undo_snapshot_middleware(request: Request, call_next):
 
     pushed = False
     if should_snapshot:
-        # Coalesce: skip the snapshot if another one was pushed within the
-        # last _UNDO_COALESCE_MS. Crucial for canvas drag-events which fire
-        # rapid sequential PUT /buses/{name} calls — without this every drag
-        # tick pays the 100ms+ netcdf export.
-        now = time.monotonic()
-        global _last_undo_push_at
-        with _undo_coalesce_lock:
-            elapsed_ms = (now - _last_undo_push_at) * 1000
-            do_push = elapsed_ms >= _UNDO_COALESCE_MS
-            if do_push:
-                _last_undo_push_at = now
-        if do_push:
+        # Coalesce rapid bursts (a canvas drag fires many sequential PUTs) into
+        # one snapshot — claim_push_slot() returns False inside the coalesce
+        # window so we skip the (100ms+) export. The timer state lives in
+        # undo_service so it travels with the undo subsystem.
+        from services import undo_service
+        if undo_service.claim_push_slot():
             try:
                 from routers.network import _push_undo_snapshot
                 # _push_undo_snapshot does an n.export_to_netcdf() round-trip which
@@ -263,10 +282,54 @@ app.include_router(clustering.router, prefix="/api/network", tags=["clustering"]
 app.include_router(vintage.router, prefix="/api/network", tags=["vintage"])
 app.include_router(changelog.router, prefix="/api/changelog", tags=["changelog"])
 app.include_router(simulation.router, prefix="/api/simulation", tags=["simulation"])
-app.include_router(simulation.results_router, prefix="/api/results", tags=["results"])
+app.include_router(results.results_router, prefix="/api/results", tags=["results"])
+# Sequential multi-project solve queue (Phase A / C1). Sits under /api/simulation
+# so it's adjacent to the foreground solve lifecycle it shares (_state, log_stream).
+app.include_router(solve_queue.router, prefix="/api/simulation/queue", tags=["solve-queue"])
 app.include_router(io.router, prefix="/api/io", tags=["io"])
+# Path-scoped per-project READ endpoints (B6). Mounted BEFORE projects/snapshots
+# so its `{project_id}/network/...` routes (static `network` segment) resolve
+# first — they don't collide with projects.py's `{name}/<static>` routes, but
+# registering ahead keeps the more-specific path templates unambiguous. These
+# reads resolve a SPECIFIC project's context via ProjectDep WITHOUT moving the
+# active foreground; GETs aren't gated by the write-middleware.
+app.include_router(project_network.router, prefix="/api/projects", tags=["project-network"])
+# Compare/results-summary analytics (specific `/{name}/compare-state` +
+# `/{name}/results-summary` paths) — registered before projects.router for
+# clarity; the extra path segment means the `/{name}` catch-all never shadows it.
+app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(snapshots.router, prefix="/api/projects", tags=["snapshots"])
+# Chatbot file uploads (Phase A) — per-project file storage at
+# `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
+# so its routes (`/{name}/uploads`, `/{name}/uploads/{file_id}/...`) follow
+# the existing project-scoped URL pattern. Phase B adds chat tools that
+# consume these uploads; Phase C wires them into the Anthropic multimodal API.
+app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
+# Chatbot integration v6 (Phase 2 stub — no Anthropic SDK yet). SSE stream +
+# confirmation card lifecycle + abort endpoint. The router is mounted under
+# /api/chat; Phase 3 wires the real LLM call without changing route shapes.
+app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+
+
+@app.on_event("startup")
+def _chatbot_startup_check() -> None:
+    """
+    Soft probe — log whether ANTHROPIC_API_KEY is set so operators see a
+    clear message at startup. NEVER fail boot for a missing key; the
+    chatbot panel renders disabled on the frontend if the key is absent
+    (chat_health() reports `anthropic_api_key_present`).
+    """
+    import logging, os
+    log = logging.getLogger("pypsa_gui.chat")
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        log.info("chatbot: ANTHROPIC_API_KEY present — chat panel enabled.")
+    else:
+        log.warning(
+            "chatbot: ANTHROPIC_API_KEY not set. The chat panel will render "
+            "disabled until the env var is configured. Set it in the "
+            "backend process environment to enable the assistant.",
+        )
 
 
 @app.get("/api/health")

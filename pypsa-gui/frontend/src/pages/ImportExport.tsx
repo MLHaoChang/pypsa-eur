@@ -6,6 +6,8 @@ import { networkApi } from '../api/network'
 import { projectsApi } from '../api/projects'
 import type { ImportSummary } from '../api/types'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
+import { invalidateNetworkQueries } from '../utils/projectActions'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 
@@ -211,7 +213,12 @@ export default function ImportExport() {
   const resetMut = useMutation({
     mutationFn: () => networkApi.resetNetwork(),
     onSuccess: () => {
-      qc.invalidateQueries()
+      // Reset/import swap the CURRENT project's in-memory network. Scope to its
+      // network + result roots instead of a bare `invalidateQueries()` that
+      // nuked every resident project's cache (B8 keeps other projects warm).
+      const proj = useUIStore.getState().currentProject
+      invalidateNetworkQueries(qc, proj)
+      qc.invalidateQueries({ queryKey: nk(proj, 'results') })
       setImportResult(null)
       toast.success('Network reset')
     },
@@ -219,7 +226,9 @@ export default function ImportExport() {
 
   const handleImportSuccess = useCallback((summary: ImportSummary) => {
     setImportResult(summary)
-    qc.invalidateQueries()
+    const proj = useUIStore.getState().currentProject
+    invalidateNetworkQueries(qc, proj)
+    qc.invalidateQueries({ queryKey: nk(proj, 'results') })
     toast.success(`Imported: ${summary.buses} buses, ${summary.generators} generators, ${summary.snapshots} snapshots`)
   }, [qc])
 

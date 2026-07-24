@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, AlertTriangle } from 'lucide-react'
 import { networkApi } from '../api/network'
 import { useUIStore, type CreationRequest } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import BusAutocomplete from '../components/BusAutocomplete'
 import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
@@ -355,6 +356,7 @@ const DEPENDENT_DEFAULTS: Record<string, (key: string, value: string) => Partial
 
 export default function CreationForm({ item }: { item: CreationRequest }) {
   const { setCreationItem, setSelectedComponent, setPendingNodePosition } = useUIStore()
+  const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
 
   const fields = FIELD_MAP[item.id] ?? []
@@ -362,8 +364,8 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
   const prefix = AUTO_PREFIX[item.id] ?? 'Asset'
 
   const allBuses = useMemo(
-    () => qc.getQueryData<Array<{ name: string; carrier?: string }>>(['buses']) ?? [],
-    [qc],
+    () => qc.getQueryData<Array<{ name: string; carrier?: string }>>(nk(currentProject, 'buses')) ?? [],
+    [qc, currentProject],
   )
   const busNames = useMemo(() => allBuses.map(b => b.name).sort(), [allBuses])
 
@@ -376,7 +378,7 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
   }
 
   const [form, setForm] = useState<Record<string, string>>(() => {
-    const existingCount = (qc.getQueryData<unknown[]>([qKey]) ?? []).length
+    const existingCount = (qc.getQueryData<unknown[]>(nk(useUIStore.getState().currentProject, qKey)) ?? []).length
     const init: Record<string, string> = {}
     fields.forEach(f => { init[f.key] = f.defaultValue ?? '' })
     init.name = `${prefix} ${existingCount + 1}`
@@ -435,8 +437,9 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       return fn(transform ? transform(payload) : payload)
     },
     onSuccess: () => {
+      const proj = useUIStore.getState().currentProject
       const invalidateKeys = [qKey, 'buses']
-      invalidateKeys.forEach(k => qc.invalidateQueries({ queryKey: [k] }))
+      invalidateKeys.forEach(k => qc.invalidateQueries({ queryKey: nk(proj, k) }))
       const name = form.name.trim()
       // Drop-position handoff. Only Bus drops carry a meaningful position —
       // generators / loads / etc. are positioned on the canvas relative to

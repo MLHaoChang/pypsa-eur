@@ -571,18 +571,21 @@ def apply_vintage_bounds(
                     # Prefer the freeze-time snapshot stored in the solver
                     # module's side-store over the live DataFrame's
                     # p_nom_opt — PyPSA's `n.optimize()` resets `n.meta`
-                    # between myopic iterations, so the stash lives on
-                    # `solver_service._FROZEN_VINTAGE_CAPACITIES`
-                    # (module state, lock-protected by the solver). The
-                    # live read remains as a fallback for codepaths that
+                    # between myopic iterations, so the stash lives on the
+                    # solver's per-thread freeze store
+                    # (`solver_service._frozen_vintage_store()`). This
+                    # closure runs inside `restore_modelling`, synchronously
+                    # on the SAME solve worker thread that wrote the store,
+                    # so the thread-local resolves to the writer's dict (B4's
+                    # per-context locks allow concurrent solves on other
+                    # threads — those get separate stores, no collision).
+                    # The live read remains as a fallback for codepaths that
                     # bypass the freeze (e.g. non-myopic single-LP runs).
                     # Imported lazily inside the closure to avoid a
                     # solver_service ↔ vintage_service circular import.
                     try:
-                        from services.solver_service import (
-                            _FROZEN_VINTAGE_CAPACITIES as _frozen,
-                        )
-                        frozen_store: dict[tuple[str, str], float] = _frozen
+                        from services.solver_service import _frozen_vintage_store
+                        frozen_store: dict[tuple[str, str], float] = _frozen_vintage_store()
                     except Exception:
                         frozen_store = {}
                     if opt_col in cur_df.columns and parent in cur_df.index:

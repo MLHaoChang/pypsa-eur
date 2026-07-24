@@ -10,6 +10,7 @@ import { projectsApi } from '../api/projects'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, formatRelativeTime } from '../utils/projectActions'
+import { nk } from '../utils/queryKeys'
 import { appLog } from '../store/simulationStore'
 
 // NewProjectWizard — replaces the single-input NewProjectModal with a 4-tab
@@ -217,7 +218,7 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
   const importMut = useMutation({
     mutationFn: (templateId: string) => projectsApi.createFromTemplate(templateId),
     onSuccess: (res) => {
-      invalidateNetworkQueries(qc)
+      invalidateNetworkQueries(qc, res.imported)
       qc.invalidateQueries({ queryKey: ['projects'] })
       setCurrentProject(res.imported)
       setProjectName(res.imported)
@@ -307,7 +308,7 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
   const importMut = useMutation({
     mutationFn: (file: File) => projectsApi.importBundle(file),
     onSuccess: (res) => {
-      invalidateNetworkQueries(qc)
+      invalidateNetworkQueries(qc, res.imported)
       setCurrentProject(res.imported)
       setProjectName(res.imported)
       appLog('INFO', `Imported '${res.imported}' via wizard (${res.summary.buses} buses)`)
@@ -395,7 +396,7 @@ function CloneTab({ existingProjects, onClose }: {
   // codebase per CLAUDE.md ("POST /api/projects/{name} is a **destructive
   // save**, not a load"). Polling at 3 s matches the AppHeader's badge cadence.
   const { data: undoInfo } = useQuery({
-    queryKey: ['undoInfo'],
+    queryKey: nk(currentProject, 'undoInfo'),
     queryFn: networkApi.undoInfo,
     refetchInterval: 3000,
     staleTime: 0,
@@ -416,7 +417,7 @@ function CloneTab({ existingProjects, onClose }: {
       return res
     },
     onSuccess: (res) => {
-      invalidateNetworkQueries(qc)
+      invalidateNetworkQueries(qc, res.saved)
       setCurrentProject(res.saved)
       setProjectName(res.saved)
       qc.invalidateQueries({ queryKey: ['projects'] })

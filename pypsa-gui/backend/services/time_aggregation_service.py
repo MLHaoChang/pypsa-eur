@@ -25,6 +25,7 @@ records the originals in the shared undo list.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 
 import pandas as pd
@@ -60,10 +61,22 @@ class AggregationResult:
     typical_periods: int
 
 
-# Cache keyed by (period, fingerprint). Cleared automatically when the cfg
-# fingerprint changes — so swapping clustering methods or k transparently
-# invalidates everything.
+# Cache keyed by (network-identity, period, fingerprint). The network-identity
+# token (id(n)) namespaces entries PER NETWORK OBJECT — so two concurrent solves
+# (a B4.3 background solve + a foreground /run, each on its OWN ProjectContext's
+# network) can't collide on each other's representative-period clusters when they
+# share the same (period, cfg_fingerprint). Without it the cache was keyed only
+# `(period, fingerprint)` — network-identity-free — and the AggregationResult is
+# DERIVED from the network's snapshots/profiles, so a same-period+same-cfg
+# collision served the wrong network's clusters (C2 end-to-end QA finding).
+# `_cache_lock` guards the dict against concurrent get/set from the two solve
+# threads (plain dict ops are GIL-atomic, but the check-then-set in
+# aggregate_period_snapshots is not). id(n) is safe as a key because a live
+# network object is reachable for the whole solve (the solving ctx holds it);
+# stale entries from GC'd networks are dropped by `_clear_swap_caches` on every
+# network swap and are bounded by the resident cap regardless.
 _cache: dict[tuple, AggregationResult] = {}
+_cache_lock = threading.Lock()
 
 
 def _cfg_fingerprint(cfg) -> tuple:
@@ -80,13 +93,21 @@ def _cfg_fingerprint(cfg) -> tuple:
     )
 
 
+def _store(cache_key: tuple, result: AggregationResult) -> AggregationResult:
+    """Cache the result under `_cache_lock` and return it, for tail-return use."""
+    with _cache_lock:
+        _cache[cache_key] = result
+    return result
+
+
 def clear_cache() -> None:
     """
     Drop every cached aggregation. Call after a network mutation that
     invalidates the load / renewable profiles — e.g. a fresh import or
     snapshot reshape. Cheap (just frees the dict).
     """
-    _cache.clear()
+    with _cache_lock:
+        _cache.clear()
 
 
 def aggregate_period_snapshots(
@@ -104,9 +125,13 @@ def aggregate_period_snapshots(
     Caller should treat the fallback as a no-op aggregation: full weights
     (1.0 everywhere), full snapshot set returned.
     """
-    cache_key = (period, _cfg_fingerprint(cfg))
-    if cache_key in _cache:
-        return _cache[cache_key]
+    # Network-identity in the key so concurrent solves on different network
+    # objects (background vs foreground) never collide on a shared (period, cfg).
+    cache_key = (id(n), period, _cfg_fingerprint(cfg))
+    with _cache_lock:
+        cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     period_mask = n.snapshots.get_level_values(0) == period
     period_snapshots = n.snapshots[period_mask]
@@ -117,8 +142,7 @@ def aggregate_period_snapshots(
             weights=pd.Series(dtype=float),
             typical_periods=0,
         )
-        _cache[cache_key] = result
-        return result
+        return _store(cache_key, result)
 
     k = int(getattr(cfg, "lf_k_periods", 8))
     hours_per_period = int(getattr(cfg, "lf_period_length_h", 168))
@@ -140,8 +164,7 @@ def aggregate_period_snapshots(
             weights=pd.Series(1.0, index=period_snapshots),
             typical_periods=n_periods_in_data,
         )
-        _cache[cache_key] = result
-        return result
+        return _store(cache_key, result)
 
     try:
         from tsam.timeseriesaggregation import TimeSeriesAggregation
@@ -152,8 +175,7 @@ def aggregate_period_snapshots(
             weights=pd.Series(1.0, index=period_snapshots),
             typical_periods=n_periods_in_data,
         )
-        _cache[cache_key] = result
-        return result
+        return _store(cache_key, result)
 
     # Build the feature matrix tsam clusters on. The two signals that
     # actually drive multi-period capacity decisions in PyPSA networks are
@@ -194,8 +216,7 @@ def aggregate_period_snapshots(
             weights=pd.Series(1.0, index=period_snapshots),
             typical_periods=n_periods_in_data,
         )
-        _cache[cache_key] = result
-        return result
+        return _store(cache_key, result)
 
     # tsam needs either a DatetimeIndex or an explicit `resolution` (hours)
     # to slice the input into periods. Extract the timestep level off the
@@ -219,8 +240,7 @@ def aggregate_period_snapshots(
             weights=pd.Series(1.0, index=period_snapshots),
             typical_periods=n_periods_in_data,
         )
-        _cache[cache_key] = result
-        return result
+        return _store(cache_key, result)
 
     # Extreme-period configuration: include the highest-load period and the
     # lowest-renewable period as their own clusters. Without these, the
@@ -267,8 +287,7 @@ def aggregate_period_snapshots(
             weights=pd.Series(1.0, index=period_snapshots),
             typical_periods=n_periods_in_data,
         )
-        _cache[cache_key] = result
-        return result
+        return _store(cache_key, result)
 
     # `clusterCenterIndices` are integer period indices in 0..n_periods_in_data−1
     # identifying which ORIGINAL periods serve as the cluster medoids. Each
@@ -294,8 +313,7 @@ def aggregate_period_snapshots(
             weights=pd.Series(1.0, index=period_snapshots),
             typical_periods=n_periods_in_data,
         )
-        _cache[cache_key] = result
-        return result
+        return _store(cache_key, result)
 
     # Map positional indices back into the original MultiIndex so the slice
     # composes with the un-aggregated current-period slice via append().
@@ -319,7 +337,7 @@ def aggregate_period_snapshots(
         weights=weights_series,
         typical_periods=len(center_indices),
     )
-    _cache[cache_key] = result
+    _store(cache_key, result)  # locked write (every cache write goes through _store)
     logger.info(
         "limited_foresight: period %s → %d representative period(s) × %d h "
         "= %d snapshots (was %d), avg weight %.2f.",

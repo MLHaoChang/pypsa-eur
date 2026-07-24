@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, AlertCircle, CheckCircle2, RefreshCw, ArrowRight } from 'lucide-react'
+import { AlertTriangle, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, XCircle, X, Lightbulb } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { simulationApi } from '../api/simulation'
+import { useSimulationStore } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import type { ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
 
@@ -20,12 +22,19 @@ export default function IssuesPanel() {
   const setHighlightedComponent = useUIStore(s => s.setHighlightedComponent)
   const openRightPanel = useUIStore(s => s.openRightPanel)
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const currentProject = useUIStore(s => s.currentProject)
+  // Last-solve failure card (from the SSE `done` payload via simulationStore).
+  // Shown as a prominent banner above the live preflight findings — preflight
+  // covers pre-solve checks; this covers what went wrong DURING the solve
+  // (infeasible / unbounded / numerical / build error).
+  const lastFailure = useSimulationStore(s => s.lastFailure)
+  const setLastFailure = useSimulationStore(s => s.setLastFailure)
 
   // Refetch on mount + every 15 s. The model may change between solves
   // (user edits buses, costs, etc.), so polling keeps the panel honest
   // without the user having to remember to refresh.
   const { data, isFetching, refetch } = useQuery({
-    queryKey: ['preflight'],
+    queryKey: nk(currentProject, 'preflight'),
     queryFn: simulationApi.preflight,
     refetchOnMount: 'always',
     refetchInterval: 15_000,
@@ -78,6 +87,41 @@ export default function IssuesPanel() {
   return (
     <div className="flex flex-col h-full">
       <PageBody>
+        {/* Last-solve failure banner — the actionable "why it failed + what to
+            try" card. Sits above preflight: preflight is pre-solve, this is
+            post-solve. Dismissible; also auto-cleared on the next run. */}
+        {lastFailure && (
+          <div className="rounded-lg border-l-4 border-danger bg-danger/5 px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <XCircle className="text-danger shrink-0 mt-0.5" size={18} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold text-text">{lastFailure.title}</span>
+                  <span className="text-[9px] font-mono uppercase tracking-wide text-danger/80 bg-danger/10 rounded px-1.5 py-0.5">
+                    {lastFailure.category}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-ink-700 leading-relaxed">
+                  <Lightbulb size={13} className="text-warn shrink-0 mt-0.5" />
+                  <span>{lastFailure.hint}</span>
+                </div>
+                {lastFailure.detail && (
+                  <div className="mt-2 text-[10px] font-mono text-muted break-all">
+                    solver: {lastFailure.detail}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setLastFailure(null)}
+                title="Dismiss"
+                className="shrink-0 p-1 rounded text-muted hover:text-text hover:bg-bg-2 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* StatCard strip — Errors leads as the accent metric. */}
         <RowGrid cols={2}>
           <StatCard

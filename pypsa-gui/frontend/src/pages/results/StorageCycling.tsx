@@ -5,6 +5,8 @@ import {
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import type { StorageUnit } from '../../api/types'
 import {
   type TSPayload,
@@ -82,11 +84,12 @@ function vintageCapAtPeriod(
 }
 
 export default function StorageCycling() {
+  const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
-  const { data: storPowerTS } = useQuery({ queryKey: ['results', 'storage_dispatch'], queryFn: () => resultsApi.getStorageDispatchResults() })
-  const { data: storageUnits = [] } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
-  const { data: snap } = useQuery({ queryKey: ['snapshots'], queryFn: networkApi.getSnapshots })
-  const { data: vintageResults } = useQuery({ queryKey: ['vintage_results'], queryFn: networkApi.listVintageResults })
+  const { data: storPowerTS } = useQuery({ queryKey: nk(currentProject, 'results', 'storage_dispatch'), queryFn: () => resultsApi.getStorageDispatchResults() })
+  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: snap } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots })
+  const { data: vintageResults } = useQuery({ queryKey: nk(currentProject, 'vintage_results'), queryFn: networkApi.listVintageResults })
 
   // Resolve the row range using the same snapshot timeline the dispatch
   // chart uses. Defaults to the full series when no horizon filter / period

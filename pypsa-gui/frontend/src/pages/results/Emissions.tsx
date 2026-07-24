@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import { KPI } from './shared'
 import { useResultsFilter } from './filterContext'
 
@@ -21,8 +23,9 @@ import { useResultsFilter } from './filterContext'
 // at the top; per-period caps render in a dedicated table beneath.
 
 export default function Emissions() {
+  const currentProject = useUIStore(s => s.currentProject)
   const { data: emissions } = useQuery({
-    queryKey: ['results', 'emissions'],
+    queryKey: nk(currentProject, 'results', 'emissions'),
     queryFn: resultsApi.getEmissions,
   })
 

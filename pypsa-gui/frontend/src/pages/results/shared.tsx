@@ -8,19 +8,32 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
+import { isRenewableCarrier } from '../../utils/carriers'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
+import { networkApi } from '../../api/network'
 
 // ── Asset-group categorisation (mirrors TopologyCanvas / MapCanvas) ──────────
 export type Group = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
 
-const RENEWABLE_KEYWORDS = ['wind', 'solar', 'pv', 'ror', 'run-of-river', 'geothermal',
-  'offwind', 'onwind', 'wave', 'tidal', 'rooftop']
-export function isRenewableCarrier(carrier: string): boolean {
-  const c = (carrier ?? '').toLowerCase()
-  if (c.includes('hydro') && !c.includes('pump') && !c.includes('storage')) return true
-  return RENEWABLE_KEYWORDS.some(k => c.includes(k))
-}
+// `isRenewableCarrier` now lives in utils/carriers.ts (single null-safe source);
+// re-exported so existing `import { isRenewableCarrier } from './shared'`
+// consumers keep working unchanged.
+export { isRenewableCarrier }
 export function generatorGroup(carrier: string | undefined): 'Thermal' | 'Renewables' {
   return isRenewableCarrier(carrier ?? '') ? 'Renewables' : 'Thermal'
+}
+
+// Descending duration curve: sort values high→low, x = "% of hours" (0..100).
+// `(i / max(n-1, 1)) * 100` puts the first point at 0% and the last at 100%;
+// the `max(…, 1)` guards the single-element case. Shared by the price- and
+// load-duration curves (CompareView builds its own from backend-pre-sorted
+// arrays, so it doesn't use this).
+export function durationCurvePoints(values: number[]): { pct: number; value: number }[] {
+  const arr = [...values].sort((a, b) => b - a)
+  const n = arr.length
+  return arr.map((v, i) => ({ pct: (i / Math.max(n - 1, 1)) * 100, value: v }))
 }
 
 // ── Time-series payload returned by /api/results/* endpoints ─────────────────
@@ -126,6 +139,38 @@ export interface WeightCtx {
   /** Per-period weights (rows keyed by `period`). Pulled from
    *  /network/investment_periods `.weightings`. */
   periodWeights?: InvestmentPeriodWeightRow[]
+}
+
+// Assemble the WeightCtx every results tab needs: fetch /network/snapshots +
+// /network/investment_periods (project-keyed) and fold them — together with a
+// reference TS payload (the tab's primary result series) — into the standard
+// WeightCtx shape. Previously this exact recipe (including the fragile
+// `as unknown as` casts) was copy-pasted across Dispatch / Curtailment /
+// LostLoadTab with per-tab var-name drift. Pass the already-resolved `refTs`
+// (each tab picks its own primary series / fallback chain). Returns the
+// weightCtx plus the derived `refIndex` / `refPeriods` (timeline for
+// resolveRange) so a tab can destructure only what it uses.
+export function useWeightCtx(refTs: TSPayload | null): {
+  weightCtx: WeightCtx
+  refIndex: string[]
+  refPeriods: Array<number | string> | undefined
+} {
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: snap } = useQuery({
+    queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots,
+  })
+  const { data: inv } = useQuery({
+    queryKey: nk(currentProject, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods,
+  })
+  const weightCtx: WeightCtx = useMemo(() => ({
+    snapshots: snap?.snapshots ?? refTs?.index,
+    snapshotPeriods: refTs?.periods ?? snap?.periods,
+    snapshotWeights: (snap?.weightings as unknown) as WeightCtx['snapshotWeights'],
+    periodWeights: inv?.weightings as unknown as WeightCtx['periodWeights'],
+  }), [snap, inv, refTs])
+  const refIndex: string[] = refTs?.index ?? snap?.snapshots ?? []
+  const refPeriods = refTs?.periods ?? snap?.periods
+  return { weightCtx, refIndex, refPeriods }
 }
 
 // Single-row weighting lookup. Multi-period emits `timestep` instead of

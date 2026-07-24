@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Layers, Settings2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
+import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import type { Generator, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 
@@ -48,16 +50,17 @@ interface AssetRow {
 
 export default function CapacityBoundsEditor() {
   const qc = useQueryClient()
+  const currentProject = useUIStore(s => s.currentProject)
   // Per-component-class queries. Each fetches the static rows from the
   // existing network endpoints; we filter to extendable-only client-side.
-  const { data: generators = [] }   = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators })
-  const { data: storageUnits = [] } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
-  const { data: stores = [] }       = useQuery({ queryKey: ['stores'],        queryFn: networkApi.getStores })
-  const { data: links = [] }        = useQuery({ queryKey: ['links'],         queryFn: networkApi.getLinks })
-  const { data: lines = [] }        = useQuery({ queryKey: ['lines'],         queryFn: networkApi.getLines })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'],  queryFn: networkApi.getTransformers })
-  const { data: vintageBounds }     = useQuery({ queryKey: ['vintageBounds'], queryFn: networkApi.listVintageBounds })
-  const { data: periodInfo }        = useQuery({ queryKey: ['investmentPeriods'], queryFn: networkApi.getInvestmentPeriods })
+  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
+  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
+  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers })
+  const { data: vintageBounds }     = useQuery({ queryKey: nk(currentProject, 'vintageBounds'), queryFn: networkApi.listVintageBounds })
+  const { data: periodInfo }        = useQuery({ queryKey: nk(currentProject, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods })
 
   const periodCount = (componentClass: string, name: string): number | null => {
     const entry = vintageBounds?.bounds?.[componentClass]?.[name]
@@ -145,12 +148,13 @@ export default function CapacityBoundsEditor() {
       }
       // Refresh every component query so the editor (and any other view)
       // sees the cleaned network state.
-      qc.invalidateQueries({ queryKey: ['generators'] })
-      qc.invalidateQueries({ queryKey: ['storage_units'] })
-      qc.invalidateQueries({ queryKey: ['stores'] })
-      qc.invalidateQueries({ queryKey: ['links'] })
-      qc.invalidateQueries({ queryKey: ['lines'] })
-      qc.invalidateQueries({ queryKey: ['transformers'] })
+      const proj = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(proj, 'generators') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'storage_units') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'stores') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'links') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'lines') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'transformers') })
     },
     onError: (err: Error) => toast.error(err.message || 'Cleanup failed'),
   })
@@ -322,8 +326,9 @@ function AssetRowEditor({
   const clearVintageMut = useMutation({
     mutationFn: () => networkApi.deleteVintageBounds(section.class, row.name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['vintageBounds'] })
-      qc.invalidateQueries({ queryKey: ['vintage_results'] })
+      const proj = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(proj, 'vintageBounds') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'vintage_results') })
       toast.success(`Cleared per-period bounds on ${row.name}`)
     },
     onError: (err: Error) => toast.error(err.message || 'Failed to clear'),

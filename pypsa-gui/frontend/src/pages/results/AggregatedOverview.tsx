@@ -6,6 +6,8 @@ import {
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import type { Generator, Load, StorageUnit } from '../../api/types'
 import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -40,6 +42,7 @@ interface AggregatedOverviewProps {
 }
 
 export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProps) {
+  const currentProject = useUIStore(s => s.currentProject)
   // Refs for SVG export — one per chart section. Recharts emits a single
   // <svg> inside the ResponsiveContainer parent, so the ref on the wrapping
   // div is enough for the export helper to find it.
@@ -49,16 +52,16 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   const curtailmentRef = useRef<HTMLDivElement | null>(null)
   const loadRef        = useRef<HTMLDivElement | null>(null)
 
-  const { data: gensTS }      = useQuery({ queryKey: ['results', 'generators'],       queryFn: () => resultsApi.getGeneratorResults() })
-  const { data: storPowerTS } = useQuery({ queryKey: ['results', 'storage_dispatch'], queryFn: () => resultsApi.getStorageDispatchResults() })
-  const { data: loadTS }      = useQuery({ queryKey: ['results', 'loads'],            queryFn: () => resultsApi.getLoadResults() })
-  const { data: curtailTS }   = useQuery({ queryKey: ['results', 'curtailment'],      queryFn: resultsApi.getCurtailment })
-  const { data: lostLoad }    = useQuery({ queryKey: ['results', 'lost_load'],        queryFn: resultsApi.getLostLoad })
-  const { data: cost }        = useQuery({ queryKey: ['results', 'cost_breakdown'],   queryFn: resultsApi.getCostBreakdown })
+  const { data: gensTS }      = useQuery({ queryKey: nk(currentProject, 'results', 'generators'),       queryFn: () => resultsApi.getGeneratorResults() })
+  const { data: storPowerTS } = useQuery({ queryKey: nk(currentProject, 'results', 'storage_dispatch'), queryFn: () => resultsApi.getStorageDispatchResults() })
+  const { data: loadTS }      = useQuery({ queryKey: nk(currentProject, 'results', 'loads'),            queryFn: () => resultsApi.getLoadResults() })
+  const { data: curtailTS }   = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'),      queryFn: resultsApi.getCurtailment })
+  const { data: lostLoad }    = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'),        queryFn: resultsApi.getLostLoad })
+  const { data: cost }        = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'),   queryFn: resultsApi.getCostBreakdown })
 
-  const { data: generators = [] }   = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators })
-  const { data: storageUnits = [] } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
-  const { data: loads = [] }        = useQuery({ queryKey: ['loads'],         queryFn: networkApi.getLoads })
+  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: loads = [] }        = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
 
   // ── Whole-horizon KPIs ─────────────────────────────────────────────────
   // Same KPI strip the per-period Dispatch tab renders, but here it spans

@@ -15,6 +15,8 @@ import type {
   LoadSection, TimeseriesData,
 } from '../api/types'
 import { appLog } from '../store/simulationStore'
+import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { safeMax, safeMin } from '../utils/numeric'
 import toast from 'react-hot-toast'
 import { PageHeader } from '../components/PageKit'
@@ -318,8 +320,9 @@ function ProfileChart({ name, component, attribute, unit, scale }: {
   // Used by the Renewables tab to convert p_max_pu × p_nom → MW.
   scale?: number
 }) {
+  const currentProject = useUIStore(s => s.currentProject)
   const { data: tsData, isLoading } = useQuery({
-    queryKey: ['timeseries', component, attribute, name],
+    queryKey: nk(currentProject, 'timeseries', component, attribute, name),
     queryFn: () => networkApi.getTimeseries(component, attribute, [name]),
   })
 
@@ -456,8 +459,9 @@ function AggregateChart({ component, attribute, names, unit, label, scaleByName 
 }) {
   // Stable cache key: sorted comma-joined names. Same set → same query.
   const namesKey = names.slice().sort().join(',')
+  const currentProject = useUIStore(s => s.currentProject)
   const { data: tsData, isLoading, isError, refetch } = useQuery<TimeseriesData>({
-    queryKey: ['timeseries-multi', component, attribute, namesKey],
+    queryKey: nk(currentProject, 'timeseries-multi', component, attribute, namesKey),
     queryFn: () => networkApi.getTimeseries(component, attribute, names),
     enabled: names.length > 0,
   })
@@ -887,6 +891,7 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
 
 export default function TimeSeriesManager() {
   const qc = useQueryClient()
+  const currentProject = useUIStore(s => s.currentProject)
   const [activeTab, setActiveTab] = useState<TabId>('loads')
   const [selectedName, setSelectedName] = useState<string | null>(null)
 
@@ -925,19 +930,19 @@ export default function TimeSeriesManager() {
     : activeTab === 'links' ? (LINK_ATTRS.find(a => a.id === linkAttr) ?? LINK_ATTRS[0])
     : convAttrCfg
 
-  const { data: loads = [] }      = useQuery({ queryKey: ['loads'],      queryFn: networkApi.getLoads })
-  const { data: generators = [] } = useQuery({ queryKey: ['generators'], queryFn: networkApi.getGenerators })
-  const { data: links = [] }      = useQuery({ queryKey: ['links'],      queryFn: networkApi.getLinks })
+  const { data: loads = [] }      = useQuery({ queryKey: nk(currentProject, 'loads'),      queryFn: networkApi.getLoads })
+  const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
+  const { data: links = [] }      = useQuery({ queryKey: nk(currentProject, 'links'),      queryFn: networkApi.getLinks })
   const { data: loadProfiles = {} as Record<string, LoadProfileMeta> } = useQuery({
-    queryKey: ['load_profiles'],
+    queryKey: nk(currentProject, 'load_profiles'),
     queryFn: networkApi.getLoadProfiles,
   })
   const { data: genProfiles = {} as Record<string, GeneratorProfileMeta> } = useQuery({
-    queryKey: ['generator_profiles'],
+    queryKey: nk(currentProject, 'generator_profiles'),
     queryFn: networkApi.getGeneratorProfiles,
   })
   const { data: linkProfiles = {} as Record<string, LinkProfileMeta> } = useQuery({
-    queryKey: ['link_profiles'],
+    queryKey: nk(currentProject, 'link_profiles'),
     queryFn: networkApi.getLinkProfiles,
   })
 
@@ -1144,10 +1149,11 @@ export default function TimeSeriesManager() {
   // ── Upload mutations ───────────────────────────────────────────────────────
 
   const invalidateLoadCaches = () => {
-    qc.invalidateQueries({ queryKey: ['load_profiles'] })
-    qc.invalidateQueries({ queryKey: ['timeseries', 'loads', 'p_set'] })
-    qc.invalidateQueries({ queryKey: ['timeseries-multi', 'loads'] })
-    qc.invalidateQueries({ queryKey: ['load_aggregate'] })
+    const proj = useUIStore.getState().currentProject
+    qc.invalidateQueries({ queryKey: nk(proj, 'load_profiles') })
+    qc.invalidateQueries({ queryKey: nk(proj, 'timeseries', 'loads', 'p_set') })
+    qc.invalidateQueries({ queryKey: nk(proj, 'timeseries-multi', 'loads') })
+    qc.invalidateQueries({ queryKey: nk(proj, 'load_aggregate') })
   }
 
   // Set by per-row upload handlers so the global onSuccess can verify the
@@ -1166,7 +1172,7 @@ export default function TimeSeriesManager() {
       // status-bar counter, SnapshotPicker and Model Horizon reflect the new
       // range — without this they keep showing the stale pre-upload count and
       // the user (wrongly) thinks the solve will run on the old horizon.
-      qc.invalidateQueries({ queryKey: ['snapshots'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'snapshots') })
       const target = pendingSingleLoadRef.current
       pendingSingleLoadRef.current = null
       if (target && !result.matched.includes(target)) {
@@ -1191,14 +1197,15 @@ export default function TimeSeriesManager() {
     mutationFn: ({ file, attribute }: { file: File; attribute: string }) =>
       networkApi.uploadGeneratorProfile(file, attribute),
     onSuccess: (result, variables) => {
-      qc.invalidateQueries({ queryKey: ['generator_profiles'] })
+      const proj = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(proj, 'generator_profiles') })
       // Prefix-invalidate so both p_max_pu and p_min_pu cached fetches refresh
       // (avoids a stale chart after switching attributes post-upload).
-      qc.invalidateQueries({ queryKey: ['timeseries', 'generators'] })
-      qc.invalidateQueries({ queryKey: ['timeseries-multi', 'generators'] })
+      qc.invalidateQueries({ queryKey: nk(proj, 'timeseries', 'generators') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'timeseries-multi', 'generators') })
       // See uploadLoadMut — a longer profile expands n.snapshots backend-side;
       // refresh the snapshot counter so the new horizon is visible everywhere.
-      qc.invalidateQueries({ queryKey: ['snapshots'] })
+      qc.invalidateQueries({ queryKey: nk(proj, 'snapshots') })
       const target = pendingSingleGenRef.current
       pendingSingleGenRef.current = null
       if (target && !result.matched.includes(target)) {
@@ -1222,14 +1229,15 @@ export default function TimeSeriesManager() {
     mutationFn: ({ file, attribute }: { file: File; attribute: string }) =>
       networkApi.uploadLinkProfile(file, attribute),
     onSuccess: (result, variables) => {
-      qc.invalidateQueries({ queryKey: ['link_profiles'] })
+      const proj = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(proj, 'link_profiles') })
       // Prefix-invalidate so every per-attribute cached fetch refreshes
       // (avoids a stale chart after switching attributes post-upload).
-      qc.invalidateQueries({ queryKey: ['timeseries', 'links'] })
-      qc.invalidateQueries({ queryKey: ['timeseries-multi', 'links'] })
+      qc.invalidateQueries({ queryKey: nk(proj, 'timeseries', 'links') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'timeseries-multi', 'links') })
       // See uploadLoadMut — a longer profile expands n.snapshots backend-side;
       // refresh the snapshot counter so the new horizon is visible everywhere.
-      qc.invalidateQueries({ queryKey: ['snapshots'] })
+      qc.invalidateQueries({ queryKey: nk(proj, 'snapshots') })
       const target = pendingSingleLinkRef.current
       pendingSingleLinkRef.current = null
       if (target && !result.matched.includes(target)) {
@@ -1258,12 +1266,13 @@ export default function TimeSeriesManager() {
       networkApi.deleteTimeseries(vars),
     onSuccess: (result, vars) => {
       const fam = vars.component  // 'loads' / 'generators' / 'links'
-      if (fam === 'loads') qc.invalidateQueries({ queryKey: ['load_profiles'] })
-      else if (fam === 'generators') qc.invalidateQueries({ queryKey: ['generator_profiles'] })
-      else if (fam === 'links') qc.invalidateQueries({ queryKey: ['link_profiles'] })
-      qc.invalidateQueries({ queryKey: ['timeseries', fam] })
-      qc.invalidateQueries({ queryKey: ['timeseries-multi', fam] })
-      qc.invalidateQueries({ queryKey: ['snapshots'] })
+      const proj = useUIStore.getState().currentProject
+      if (fam === 'loads') qc.invalidateQueries({ queryKey: nk(proj, 'load_profiles') })
+      else if (fam === 'generators') qc.invalidateQueries({ queryKey: nk(proj, 'generator_profiles') })
+      else if (fam === 'links') qc.invalidateQueries({ queryKey: nk(proj, 'link_profiles') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'timeseries', fam) })
+      qc.invalidateQueries({ queryKey: nk(proj, 'timeseries-multi', fam) })
+      qc.invalidateQueries({ queryKey: nk(proj, 'snapshots') })
       // Deselect the dropped name(s) so the chart pane doesn't try to
       // render a profile that no longer exists.
       const dropped = new Set(result.deleted)
@@ -1313,7 +1322,7 @@ export default function TimeSeriesManager() {
   // the default-mode template will be. Refetches whenever the horizon changes
   // upstream (Model Horizon panel).
   const { data: snapInfo } = useQuery({
-    queryKey: ['snapshots'],
+    queryKey: nk(currentProject, 'snapshots'),
     queryFn: networkApi.getSnapshots,
   })
 

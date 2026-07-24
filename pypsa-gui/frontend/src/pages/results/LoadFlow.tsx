@@ -15,6 +15,7 @@ import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, S
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 
 // ── Load Flow tab ─────────────────────────────────────────────────────────────
 // Three sections:
@@ -41,33 +42,34 @@ export default function LoadFlow() {
   // resultSource is in the queryKey so every result query re-fetches when the
   // user flips the AC PF toggle (P2). Backend honours the param via ?source=.
   const { resultSource, setResultSource } = useUIStore()
-  const { data: acPfStatus } = useQuery({ queryKey: ['results', 'ac_pf', 'status'], queryFn: resultsApi.getAcPfStatus })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: acPfStatus } = useQuery({ queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus })
   const acPfAvailable = !!acPfStatus?.available
 
-  const { data: linesTS } = useQuery({ queryKey: ['results', 'lines', resultSource],  queryFn: () => resultsApi.getLineResults(resultSource) })
+  const { data: linesTS } = useQuery({ queryKey: nk(currentProject, 'results', 'lines', resultSource),  queryFn: () => resultsApi.getLineResults(resultSource) })
   // Transformer flows — same shape as lines (per-snapshot p0 on bus0 side).
   // Drives the new Transformers loading table + chart below.
-  const { data: trafosTS } = useQuery({ queryKey: ['results', 'transformers', resultSource], queryFn: () => resultsApi.getTransformerResults(resultSource) })
+  const { data: trafosTS } = useQuery({ queryKey: nk(currentProject, 'results', 'transformers', resultSource), queryFn: () => resultsApi.getTransformerResults(resultSource) })
   // Marginal prices are LP duals — they only exist on the LOPF/SCLOPF solve.
   // PyPSA's `n.pf()` doesn't compute duals, so `?source=ac_pf` would return
   // zeros. Pin to 'lopf' regardless of the active view toggle so the price
   // chart and table stay meaningful even when the user is inspecting AC PF
   // results elsewhere on the page.
-  const { data: priceTS } = useQuery({ queryKey: ['results', 'prices', 'lopf'], queryFn: () => resultsApi.getPrices('lopf') })
+  const { data: priceTS } = useQuery({ queryKey: nk(currentProject, 'results', 'prices', 'lopf'), queryFn: () => resultsApi.getPrices('lopf') })
   // CO₂ emissions per-carrier + per-generator, plus shadow price of any
   // primary-energy CO₂ cap. Backend reads dispatched energy × carrier
   // intensity / efficiency. Same source as LOPF dispatch (LP stage).
-  const { data: emissions } = useQuery({ queryKey: ['results', 'emissions'], queryFn: resultsApi.getEmissions })
+  const { data: emissions } = useQuery({ queryKey: nk(currentProject, 'results', 'emissions'), queryFn: resultsApi.getEmissions })
   // Per-carrier KPIs (CF / curtailment / market value / revenue). Wraps
   // PyPSA's n.statistics helpers.
-  const { data: carrierKpis } = useQuery({ queryKey: ['results', 'carrier_kpis'], queryFn: resultsApi.getCarrierKpis })
+  const { data: carrierKpis } = useQuery({ queryKey: nk(currentProject, 'results', 'carrier_kpis'), queryFn: resultsApi.getCarrierKpis })
   // Line congestion shadow prices — LP duals on the s_nom capacity constraints.
   // Surfaces which corridors bind and the marginal value of additional capacity.
-  const { data: lineDuals } = useQuery({ queryKey: ['results', 'line_duals'], queryFn: resultsApi.getLineDuals })
+  const { data: lineDuals } = useQuery({ queryKey: nk(currentProject, 'results', 'line_duals'), queryFn: resultsApi.getLineDuals })
   // Unit-commitment results — only populated when committable=True on at
   // least one generator (MILP path). Returns the binary status grid for the
   // heatmap + per-generator UC stats (starts, shuts, on-hours, UC costs).
-  const { data: ucResults } = useQuery({ queryKey: ['results', 'unit_commitment'], queryFn: resultsApi.getUnitCommitment })
+  const { data: ucResults } = useQuery({ queryKey: nk(currentProject, 'results', 'unit_commitment'), queryFn: resultsApi.getUnitCommitment })
   // Transmission losses — single source of truth for both the primary
   // panel and the LP-vs-AC-PF comparison block. Previously we issued three
   // queries: one keyed by `resultSource` + two `__compare/{lopf,ac_pf}`.
@@ -79,11 +81,11 @@ export default function LoadFlow() {
   // resultSource. Falls back to the resultSource-keyed query only when
   // AC PF isn't available (single LOPF call, no duplicate).
   const { data: lossesLopf } = useQuery({
-    queryKey: ['results', 'losses', 'lopf'],
+    queryKey: nk(currentProject, 'results', 'losses', 'lopf'),
     queryFn: () => resultsApi.getLosses('lopf'),
   })
   const { data: lossesAcPf } = useQuery({
-    queryKey: ['results', 'losses', 'ac_pf'],
+    queryKey: nk(currentProject, 'results', 'losses', 'ac_pf'),
     queryFn: () => resultsApi.getLosses('ac_pf'),
     enabled: acPfAvailable,
   })
@@ -92,24 +94,24 @@ export default function LoadFlow() {
   // the network round-trip empty for plain-LOPF runs where these endpoints
   // would return 204. Each returns a TSPayload (snapshot × asset) or null.
   const { data: voltagesTS } = useQuery({
-    queryKey: ['results', 'voltages', 'ac_pf'],
+    queryKey: nk(currentProject, 'results', 'voltages', 'ac_pf'),
     queryFn: () => resultsApi.getVoltages('ac_pf'),
     enabled: acPfAvailable,
   })
   const { data: lineReactiveTS } = useQuery({
-    queryKey: ['results', 'line_reactive', 'ac_pf'],
+    queryKey: nk(currentProject, 'results', 'line_reactive', 'ac_pf'),
     queryFn: () => resultsApi.getLineReactive('ac_pf'),
     enabled: acPfAvailable,
   })
   const { data: trafoReactiveTS } = useQuery({
-    queryKey: ['results', 'transformer_reactive', 'ac_pf'],
+    queryKey: nk(currentProject, 'results', 'transformer_reactive', 'ac_pf'),
     queryFn: () => resultsApi.getTransformerReactive('ac_pf'),
     enabled: acPfAvailable,
   })
 
   // Snapshots payload — used to translate convergence-map keys into clickable
   // entries that update the snapshot picker on the canvas.
-  const { data: snap } = useQuery({ queryKey: ['snapshots'], queryFn: networkApi.getSnapshots })
+  const { data: snap } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots })
   const setResultsSnapshotIdx = useUIStore(s => s.setResultsSnapshotIdx)
   // The prices endpoint returns TWO parallel data grids: the raw LP duals
   // (`data`) and a merit-order view (`data_adjusted`) which adds back the
@@ -122,9 +124,9 @@ export default function LoadFlow() {
     negative_hours?: number
   }
 
-  const { data: lines = [] } = useQuery({ queryKey: ['lines'], queryFn: networkApi.getLines })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'], queryFn: networkApi.getTransformers })
-  const { data: buses = [] } = useQuery({ queryKey: ['buses'], queryFn: networkApi.getBuses })
+  const { data: lines = [] } = useQuery({ queryKey: nk(currentProject, 'lines'), queryFn: networkApi.getLines })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers })
+  const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
 
   const tsLines = linesTS as TSPayload | null
   const tsTrafos = trafosTS as TSPayload | null
@@ -436,7 +438,7 @@ export default function LoadFlow() {
   // default — well above normal merit-order prices, below typical VOLL.
   const [driverThreshold, setDriverThreshold] = useState<number>(2000)
   const { data: priceDrivers } = useQuery({
-    queryKey: ['results', 'price_drivers', driverThreshold],
+    queryKey: nk(currentProject, 'results', 'price_drivers', driverThreshold),
     queryFn: () => resultsApi.getPriceDrivers(driverThreshold, 200),
     // Only worth firing when prices exist. Re-runs when threshold changes.
     enabled: !!priceTS,

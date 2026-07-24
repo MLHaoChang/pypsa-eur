@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, UploadFile
 from models.schemas import ImportSummary
 from services import change_log_service
 from services.pypsa_service import PyPSAService
+from services.upload_guard import read_capped, safe_extract
 from starlette.responses import StreamingResponse
 
 router = APIRouter()
@@ -32,8 +33,14 @@ def _build_summary(n) -> ImportSummary:
 
 # ── Exports ───────────────────────────────────────────────────────────────────
 
-@router.get("/export/netcdf")
-def export_netcdf():
+# Each export is split into a `_*_bytes()/_*_text()` generator (materialises the
+# file content + audit-logs) and a thin route that wraps it in a StreamingResponse.
+# The chat-tool layer calls the generator directly so it can persist the bytes as
+# a downloadable `agent_export` artifact — a StreamingResponse can't be returned
+# as a chat-tool result (json.dumps stringifies it to "<StreamingResponse ...>").
+
+
+def _export_netcdf_bytes() -> bytes:
     n = PyPSAService.get_network()
     with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as f:
         tmp = pathlib.Path(f.name)
@@ -42,15 +49,19 @@ def export_netcdf():
     data = tmp.read_bytes()
     tmp.unlink(missing_ok=True)
     change_log_service.log("export", "Network", "network.nc", "Exported network as NetCDF (.nc)")
+    return data
+
+
+@router.get("/export/netcdf")
+def export_netcdf():
     return StreamingResponse(
-        io.BytesIO(data),
+        io.BytesIO(_export_netcdf_bytes()),
         media_type="application/x-netcdf",
         headers={"Content-Disposition": "attachment; filename=network.nc"},
     )
 
 
-@router.get("/export/csv")
-def export_csv():
+def _export_csv_zip_bytes() -> bytes:
     n = PyPSAService.get_network()
     buf = io.BytesIO()
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -59,19 +70,21 @@ def export_csv():
             for f in pathlib.Path(tmpdir).rglob("*"):
                 if f.is_file():
                     zf.write(f, f.relative_to(tmpdir))
-    buf.seek(0)
     change_log_service.log("export", "Network", "network_csv.zip", "Exported network as CSV (zip)")
+    return buf.getvalue()
+
+
+@router.get("/export/csv")
+def export_csv():
     return StreamingResponse(
-        buf,
+        io.BytesIO(_export_csv_zip_bytes()),
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=network_csv.zip"},
     )
 
 
-@router.get("/export/excel")
-def export_excel():
+def _export_excel_bytes() -> bytes:
     n = PyPSAService.get_network()
-    io.BytesIO()
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
         tmp = pathlib.Path(f.name)
     try:
@@ -96,15 +109,19 @@ def export_excel():
     finally:
         tmp.unlink(missing_ok=True)
     change_log_service.log("export", "Network", "network.xlsx", "Exported network as Excel (.xlsx)")
+    return data
+
+
+@router.get("/export/excel")
+def export_excel():
     return StreamingResponse(
-        io.BytesIO(data),
+        io.BytesIO(_export_excel_bytes()),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=network.xlsx"},
     )
 
 
-@router.get("/export/matpower")
-def export_matpower():
+def _export_matpower_text() -> str:
     from jinja2 import Environment, FileSystemLoader
     n = PyPSAService.get_network()
     bus_idx = {name: i + 1 for i, name in enumerate(n.buses.index)}
@@ -154,8 +171,13 @@ def export_matpower():
         branches=branches,
     )
     change_log_service.log("export", "Network", "network.m", "Exported network as MATPOWER (.m)")
+    return content
+
+
+@router.get("/export/matpower")
+def export_matpower():
     return StreamingResponse(
-        io.StringIO(content),
+        io.StringIO(_export_matpower_text()),
         media_type="text/plain",
         headers={"Content-Disposition": "attachment; filename=network.m"},
     )
@@ -172,7 +194,7 @@ def _reset_with_ts_clear() -> None:
 
 @router.post("/import/netcdf")
 async def import_netcdf(file: UploadFile = File(...)):
-    data = await file.read()
+    data = await read_capped(file)
     with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as f:
         f.write(data)
         tmp = pathlib.Path(f.name)
@@ -195,10 +217,10 @@ async def import_netcdf(file: UploadFile = File(...)):
 @router.post("/import/csv")
 async def import_csv(file: UploadFile = File(...)):
     import zipfile as _zip
-    data = await file.read()
+    data = await read_capped(file)
     with tempfile.TemporaryDirectory() as tmpdir:
         with _zip.ZipFile(io.BytesIO(data)) as zf:
-            zf.extractall(tmpdir)
+            safe_extract(zf, tmpdir)
         with PyPSAService.get_lock():
             _reset_with_ts_clear()
             n = PyPSAService.get_network()
@@ -214,7 +236,7 @@ async def import_csv(file: UploadFile = File(...)):
 @router.post("/import/excel")
 async def import_excel(file: UploadFile = File(...)):
     import openpyxl
-    data = await file.read()
+    data = await read_capped(file)
     wb = openpyxl.load_workbook(io.BytesIO(data))
     component_map = {
         "buses": "Bus", "generators": "Generator", "lines": "Line",
@@ -248,7 +270,7 @@ async def import_excel(file: UploadFile = File(...)):
 
 @router.post("/import/matpower")
 async def import_matpower(file: UploadFile = File(...)):
-    data = (await file.read()).decode("utf-8")
+    data = (await read_capped(file)).decode("utf-8")
     with PyPSAService.get_lock():
         _reset_with_ts_clear()
         n = PyPSAService.get_network()

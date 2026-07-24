@@ -17,7 +17,18 @@ venv/
 # These are written by the running backend, not source. They contain binary
 # NetCDF blobs and pickled solver state — never belongs in version control,
 # especially a public repo.
+# NOTE: this entry ALSO covers per-project chat.jsonl files written by the
+# chatbot integration (chat_service.append_turn writes to
+# backend/projects/<name>/chat.jsonl) — no additional gitignore line needed.
 backend/projects/
+
+# ── Secrets / API keys (chatbot integration v6) ──
+# ANTHROPIC_API_KEY and any other env-loaded credentials live in .env files,
+# loaded by the backend process at startup. NEVER commit these.
+.env
+.env.local
+.env.*
+!.env.example
 
 # ── Never commit pickles (deserialisation = code-exec risk on clone) ──
 *.pkl

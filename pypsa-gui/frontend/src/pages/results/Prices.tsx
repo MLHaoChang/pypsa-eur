@@ -8,10 +8,12 @@ import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
   ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
-  useSeasonalViewMode, SeasonalLineCardGrid,
+  useSeasonalViewMode, SeasonalLineCardGrid, durationCurvePoints,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
 
@@ -43,22 +45,23 @@ type PricesPayload = TSPayload & {
 const PER_BUS_CHART_CAP = 12
 
 export default function Prices() {
+  const currentProject = useUIStore(s => s.currentProject)
   // Refs for SVG export — one per chart section.
   const hourlyChartRef   = useRef<HTMLDivElement | null>(null)
   const durationChartRef = useRef<HTMLDivElement | null>(null)
   // Marginal prices are LP duals — they only exist on the LOPF/SCLOPF solve.
   // PyPSA's `n.pf()` doesn't compute duals, so always pin source='lopf'.
   const { data: priceTS } = useQuery({
-    queryKey: ['results', 'prices', 'lopf'],
+    queryKey: nk(currentProject, 'results', 'prices', 'lopf'),
     queryFn: () => resultsApi.getPrices('lopf'),
   })
   // CO₂ emissions for the cap shadow price KPI. Other CO₂ data lives in the
   // Emissions tab.
   const { data: emissions } = useQuery({
-    queryKey: ['results', 'emissions'],
+    queryKey: nk(currentProject, 'results', 'emissions'),
     queryFn: resultsApi.getEmissions,
   })
-  const { data: buses = [] } = useQuery({ queryKey: ['buses'], queryFn: networkApi.getBuses })
+  const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
 
   const filter = useResultsFilter()
   const tsP = priceTS as PricesPayload | null
@@ -106,7 +109,7 @@ export default function Prices() {
   } = useSeasonalViewMode('results:prices-viewmode', tsP?.index ?? [], range)
   const [driverThreshold, setDriverThreshold] = useState<number>(2000)
   const { data: priceDrivers } = useQuery({
-    queryKey: ['results', 'price_drivers', driverThreshold],
+    queryKey: nk(currentProject, 'results', 'price_drivers', driverThreshold),
     queryFn: () => resultsApi.getPriceDrivers(driverThreshold, 200),
     enabled: !!tsP,
   })
@@ -153,8 +156,7 @@ export default function Prices() {
     if (!priceChart) return null
     const arr = priceChart.avgRows.map(r => r.avg).filter(v => Number.isFinite(v))
     if (arr.length === 0) return null
-    arr.sort((a, b) => b - a)
-    return arr.map((v, i) => ({ pct: (i / Math.max(arr.length - 1, 1)) * 100, price: v }))
+    return durationCurvePoints(arr).map(p => ({ pct: p.pct, price: p.value }))
   }, [priceChart])
 
   // KPI strip: weighted-mean / peak / trough across the slice + system spread

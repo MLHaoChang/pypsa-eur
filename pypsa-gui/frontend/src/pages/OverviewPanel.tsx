@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, Box, Save, Pencil, Check, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { projectsApi } from '../api/projects'
@@ -26,15 +27,15 @@ export default function OverviewPanel() {
 
   // Network-level data. All cached by other consumers, so this page rarely
   // triggers fresh requests.
-  const { data: meta }            = useQuery({ queryKey: ['meta'],               queryFn: networkApi.getMeta,         staleTime: 5_000 })
-  const { data: status }          = useQuery({ queryKey: ['simulationStatus'],   queryFn: simulationApi.getStatus,    staleTime: 5_000 })
-  const { data: buses = [] }        = useQuery({ queryKey: ['buses'],         queryFn: networkApi.getBuses,        staleTime: 30_000 })
-  const { data: lines = [] }        = useQuery({ queryKey: ['lines'],         queryFn: networkApi.getLines,        staleTime: 30_000 })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'],  queryFn: networkApi.getTransformers, staleTime: 30_000 })
-  const { data: links = [] }        = useQuery({ queryKey: ['links'],         queryFn: networkApi.getLinks,        staleTime: 30_000 })
-  const { data: generators = [] }   = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators,   staleTime: 30_000 })
-  const { data: storageUnits = [] } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits, staleTime: 30_000 })
-  const { data: loads = [] }        = useQuery({ queryKey: ['loads'],         queryFn: networkApi.getLoads,        staleTime: 30_000 })
+  const { data: meta }            = useQuery({ queryKey: nk(currentProject, 'meta'),               queryFn: networkApi.getMeta,         staleTime: 5_000 })
+  const { data: status }          = useQuery({ queryKey: nk(currentProject, 'simulationStatus'),   queryFn: simulationApi.getStatus,    staleTime: 5_000 })
+  const { data: buses = [] }        = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses,        staleTime: 30_000 })
+  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines,        staleTime: 30_000 })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers, staleTime: 30_000 })
+  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks,        staleTime: 30_000 })
+  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators,   staleTime: 30_000 })
+  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits, staleTime: 30_000 })
+  const { data: loads = [] }        = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads,        staleTime: 30_000 })
 
   const { data: changelog = [] } = useQuery({
     queryKey: ['changelog'],
@@ -302,7 +303,7 @@ function ProjectNameEditor({
       qc.invalidateQueries({ queryKey: ['projects'] })
       qc.invalidateQueries({ queryKey: ['compare-state', oldName] })
       qc.invalidateQueries({ queryKey: ['results-summary', oldName] })
-      qc.invalidateQueries({ queryKey: ['meta'] })
+      qc.invalidateQueries({ queryKey: nk(oldName, 'meta') })
       qc.invalidateQueries({ queryKey: ['changelog'] })
       toast.success(`Renamed to '${newName}'`)
       setEditing(false)

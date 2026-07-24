@@ -5,6 +5,8 @@ import { Download, Plus, Upload, X } from 'lucide-react'
 import { confirmToast } from '../utils/toasts'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
+import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
 
@@ -86,12 +88,13 @@ const PAGE_SIZE = 100
 
 export default function ModelHorizon() {
   const qc = useQueryClient()
-  const { data: snap } = useQuery({ queryKey: ['snapshots'], queryFn: networkApi.getSnapshots })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: snap } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots })
   const { data: ip } = useQuery({
-    queryKey: ['investmentPeriods'],
+    queryKey: nk(currentProject, 'investmentPeriods'),
     queryFn: networkApi.getInvestmentPeriods,
   })
-  const { data: cfg } = useQuery({ queryKey: ['solverConfig'], queryFn: simulationApi.getSolverConfig })
+  const { data: cfg } = useQuery({ queryKey: nk(currentProject, 'solverConfig'), queryFn: simulationApi.getSolverConfig })
 
   // ── Snapshot-range scratch state (single-period mode) ───────────────────
   const [start, setStart] = useState('')
@@ -208,9 +211,10 @@ export default function ModelHorizon() {
   const applyPeriods = useMutation({
     mutationFn: (periods: number[]) => networkApi.setInvestmentPeriods({ periods }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['investmentPeriods'] })
-      qc.invalidateQueries({ queryKey: ['snapshots'] })
-      qc.invalidateQueries({ queryKey: ['meta'] })
+      const proj = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(proj, 'investmentPeriods') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'snapshots') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'meta') })
       toast.success('Investment periods saved')
     },
     onError: () => toast.error('Could not save investment periods'),
@@ -239,10 +243,11 @@ export default function ModelHorizon() {
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['solverConfig'] })
-      qc.invalidateQueries({ queryKey: ['investmentPeriods'] })
-      qc.invalidateQueries({ queryKey: ['snapshots'] })
-      qc.invalidateQueries({ queryKey: ['meta'] })
+      const proj = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(proj, 'solverConfig') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'investmentPeriods') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'snapshots') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'meta') })
     },
     onError: () => toast.error('Could not update multi-investment-periods flag'),
   })
@@ -251,7 +256,7 @@ export default function ModelHorizon() {
   const applyBulkPeriodYears = useMutation({
     mutationFn: (v: number) => networkApi.updateInvestmentPeriodWeightings({ all_years: v }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['investmentPeriods'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'investmentPeriods') })
       toast.success('Period years updated')
     },
     onError: (e: { response?: { data?: { detail?: string } } }) =>
@@ -260,7 +265,7 @@ export default function ModelHorizon() {
   const applyBulkPeriodObjective = useMutation({
     mutationFn: (v: number) => networkApi.updateInvestmentPeriodWeightings({ all_objective: v }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['investmentPeriods'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'investmentPeriods') })
       toast.success('Period objective weights updated')
     },
     onError: (e: { response?: { data?: { detail?: string } } }) =>
@@ -271,7 +276,7 @@ export default function ModelHorizon() {
       networkApi.updateInvestmentPeriodWeightings({
         updates: { [args.period]: { [args.col]: args.value } },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['investmentPeriods'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'investmentPeriods') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to update cell'),
   })
@@ -284,7 +289,7 @@ export default function ModelHorizon() {
   const updateLoadScaler = useMutation({
     mutationFn: (next: Record<string, number>) =>
       simulationApi.updateSolverConfig({ load_scalers: next }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['solverConfig'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to update load scaler'),
   })
@@ -295,7 +300,7 @@ export default function ModelHorizon() {
   const updateLoadScalersByCarrier = useMutation({
     mutationFn: (next: Record<string, Record<string, number>>) =>
       simulationApi.updateSolverConfig({ load_scalers_by_carrier: next }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['solverConfig'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to update per-carrier load scaler'),
   })
@@ -307,7 +312,7 @@ export default function ModelHorizon() {
   // multi-period horizon and growth assumptions, then build the network).
   // Any extra non-canonical carriers actually present in the network get
   // their own column appended at the end.
-  const { data: loads = [] } = useQuery({ queryKey: ['loads'], queryFn: networkApi.getLoads })
+  const { data: loads = [] } = useQuery({ queryKey: nk(currentProject, 'loads'), queryFn: networkApi.getLoads })
   const networkLoadCarriers = useMemo(() => {
     const set = new Set<string>(['electrical', 'hydrogen', 'heat'])
     for (const l of loads as Load[]) set.add(loadCarrierKey(l.carrier))
@@ -321,7 +326,7 @@ export default function ModelHorizon() {
   const updateAutoDiscount = useMutation({
     mutationFn: (enabled: boolean) =>
       simulationApi.updateSolverConfig({ auto_discount_periods: enabled }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['solverConfig'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to toggle auto-discount'),
   })
@@ -332,7 +337,7 @@ export default function ModelHorizon() {
   const updateCapexBudget = useMutation({
     mutationFn: (next: Record<string, number>) =>
       simulationApi.updateSolverConfig({ capex_budget_per_period: next }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['solverConfig'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to update CAPEX budget'),
   })
@@ -342,7 +347,7 @@ export default function ModelHorizon() {
   const applyBulkWeight = useMutation({
     mutationFn: (v: number) => networkApi.updateSnapshotWeightings({ all: v }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['snapshots'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'snapshots') })
       toast.success('Weights updated')
       setBulkWeight('')
     },
@@ -352,7 +357,7 @@ export default function ModelHorizon() {
   const updateOneWeight = useMutation({
     mutationFn: (args: { iso: string; objective: number }) =>
       networkApi.updateSnapshotWeightings({ updates: { [args.iso]: { objective: args.objective } } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['snapshots'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'snapshots') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to update weight'),
   })
@@ -409,7 +414,7 @@ export default function ModelHorizon() {
     networkApi
       .updateInvestmentPeriodWeightings({ updates })
       .then(() => {
-        qc.invalidateQueries({ queryKey: ['investmentPeriods'] })
+        qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'investmentPeriods') })
         toast.success(`Applied discount factors (r=${(r * 100).toFixed(2)} %, base ${base})`)
       })
       .catch((e: { response?: { data?: { detail?: string } } }) =>
@@ -601,7 +606,7 @@ export default function ModelHorizon() {
       async () => {
         try {
           const r = await networkApi.uploadSnapshotWeightingsCsv(file)
-          qc.invalidateQueries({ queryKey: ['snapshots'] })
+          qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'snapshots') })
           toast.success(
             `Applied ${r.applied} cell(s) across ${r.columns.join('/')}` +
             (r.skipped > 0 ? `, ${r.skipped} row(s) skipped` : ''),

@@ -28,6 +28,24 @@ import pypsa
 
 DispatchStatus = Literal["none", "fresh", "stale"]
 
+
+def network_has_dispatch(n) -> bool:
+    """
+    True when the network carries ANY result dispatch (generator power, line
+    flow, or storage state-of-charge time-series).
+
+    Looser than `dispatch_status` (which also checks topology-consistency) —
+    this is the "did a solve ever populate results?" gate the save / load /
+    import-bundle / restore-snapshot lifecycle uses to decide whether to mark a
+    project 'completed' vs 'idle'. It was an inline copy at each of those 5
+    sites (routers/projects.py ×4, routers/snapshots.py ×1); centralised here.
+    """
+    return (
+        (not n.generators.empty    and not n.generators_t.p.empty) or
+        (not n.lines.empty         and not n.lines_t.p0.empty)     or
+        (not n.storage_units.empty and not n.storage_units_t.state_of_charge.empty)
+    )
+
 # The (component_df_attr, t_df_attr, t_col_attr) triples we check.
 # Originally only covered generators/lines/storage_units/loads — but stores,
 # links, and transformers ALSO carry dispatch tables that survive topology
@@ -71,6 +89,33 @@ def dispatch_status(n: pypsa.Network) -> DispatchStatus:
         if set(t_df.columns) != set(comp_df.index):
             return "stale"
     return "fresh" if has_any else "none"
+
+
+def dispatch_status_detail(n: pypsa.Network) -> dict:
+    """
+    Richer sibling of ``dispatch_status`` that ALSO reports WHICH component
+    classes carry stale dispatch.
+
+    Returns ``{"state": <none|fresh|stale>, "mismatched_classes": [...]}``.
+    The state is classified identically to ``dispatch_status`` (stale if any
+    axis's dispatch columns diverge from its component index, else fresh if any
+    dispatch exists, else none); ``mismatched_classes`` lists every such stale
+    axis (not just the first). The plain string-returning ``dispatch_status`` is
+    left untouched so its existing callers are unaffected — this is the shape the
+    chat tool's schema promises.
+    """
+    has_any = False
+    mismatched: list[str] = []
+    for comp, t_attr, col_attr in _DISPATCH_AXES:
+        comp_df = getattr(n, comp)
+        t_df = getattr(getattr(n, t_attr), col_attr)
+        if comp_df.empty or t_df.empty:
+            continue
+        has_any = True
+        if set(t_df.columns) != set(comp_df.index):
+            mismatched.append(comp)
+    state = "stale" if mismatched else ("fresh" if has_any else "none")
+    return {"state": state, "mismatched_classes": mismatched}
 
 
 def has_fresh_dispatch(n: pypsa.Network) -> bool:

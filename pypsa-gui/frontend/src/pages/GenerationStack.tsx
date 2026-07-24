@@ -4,6 +4,7 @@ import { createColumnHelper } from '@tanstack/react-table'
 import { DataGrid } from '../components/DataGrid'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import type { Generator, StorageUnit, Store } from '../api/types'
 import toast from 'react-hot-toast'
 
@@ -47,10 +48,11 @@ const genCols = [
 function GeneratorsTab() {
   const qc = useQueryClient()
   const { setSelectedComponent } = useUIStore()
-  const { data: gens = [], isLoading } = useQuery({ queryKey: ['generators'], queryFn: networkApi.getGenerators })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: gens = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   const del = useMutation({
     mutationFn: (g: Generator) => networkApi.deleteGenerator(g.name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['generators'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'generators') }),
     onError: () => toast.error('Failed to delete generator'),
   })
   const update = useMutation({
@@ -60,7 +62,7 @@ function GeneratorsTab() {
       // defaults. Without this, editing `p_nom` in-grid would wipe
       // `marginal_cost`, `efficiency`, `capital_cost`, `committable`, …
       // back to Pydantic defaults. Same pattern as PropertiesPanel cards.
-      const cached = qc.getQueryData<Generator[]>(['generators']) ?? []
+      const cached = qc.getQueryData<Generator[]>(nk(useUIStore.getState().currentProject, 'generators')) ?? []
       const current = cached.find(g => g.name === name)
       if (!current) {
         // Refuse the partial PUT on a cache miss — without the full cached row,
@@ -73,7 +75,7 @@ function GeneratorsTab() {
       const body = { ...current, [field]: value } as Partial<Generator>
       return networkApi.updateGenerator(name, body)
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['generators'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'generators') }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update generator'),
   })
 
@@ -111,10 +113,11 @@ const suCols = [
 
 function StorageUnitsTab() {
   const qc = useQueryClient()
-  const { data: sus = [], isLoading } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: sus = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const del = useMutation({
     mutationFn: (s: StorageUnit) => networkApi.deleteStorageUnit(s.name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['storage_units'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'storage_units') }),
   })
 
   return (
@@ -143,10 +146,11 @@ const stCols = [
 
 function StoresTab() {
   const qc = useQueryClient()
-  const { data: stores = [], isLoading } = useQuery({ queryKey: ['stores'], queryFn: networkApi.getStores })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: stores = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'stores'), queryFn: networkApi.getStores })
   const del = useMutation({
     mutationFn: (s: Store) => networkApi.deleteStore(s.name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['stores'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'stores') }),
   })
 
   return (

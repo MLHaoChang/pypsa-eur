@@ -4,6 +4,7 @@ import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, Chev
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { ResultsFilterProvider } from './results/filterContext'
 import { type TSPayload, type WeightCtx } from './results/shared'
 import CompareView, { type Tab as CompareTab } from './CompareView'
@@ -94,6 +95,7 @@ export default function Results() {
   // The A-vs-B CompareView coexists on the right; the live Results tabs stay
   // fully interactive on the left. State lives in the store so the rail
   // survives result-tab switches and page reloads until explicitly closed.
+  const currentProject    = useUIStore(s => s.currentProject)
   const compareRailOpen   = useUIStore(s => s.compareRailOpen)
   const compareRailWidth  = useUIStore(s => s.compareRailWidth)
   const toggleCompareRail = useUIStore(s => s.toggleCompareRail)
@@ -138,7 +140,7 @@ export default function Results() {
   // Used by every tab — fetched once here, propagated via props so they don't
   // each issue their own poll.
   const { data: status } = useQuery({
-    queryKey: ['simulationStatus'],
+    queryKey: nk(currentProject, 'simulationStatus'),
     queryFn: simulationApi.getStatus,
     refetchInterval: (q) => (q.state.data?.running ? 1500 : false),
   })
@@ -154,7 +156,7 @@ export default function Results() {
   // Snapshot list — needed to populate sensible default placeholders + to
   // give the user feedback on what the filter actually slices.
   const { data: snap } = useQuery({
-    queryKey: ['snapshots'], queryFn: networkApi.getSnapshots, staleTime: 5_000,
+    queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots, staleTime: 5_000,
   })
   const firstSnap = snap?.snapshots?.[0]
   const lastSnap = snap?.snapshots?.[snap.count - 1]
@@ -467,12 +469,13 @@ export default function Results() {
 // parallel `periods` array). Lives at the top level so the rest of the file
 // stays focused on tab/strip orchestration.
 function AggregatedResultsBody() {
-  const { data: snap } = useQuery({ queryKey: ['snapshots'],           queryFn: networkApi.getSnapshots })
-  const { data: inv }  = useQuery({ queryKey: ['investmentPeriods'],   queryFn: networkApi.getInvestmentPeriods })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: snap } = useQuery({ queryKey: nk(currentProject, 'snapshots'),           queryFn: networkApi.getSnapshots })
+  const { data: inv }  = useQuery({ queryKey: nk(currentProject, 'investmentPeriods'),   queryFn: networkApi.getInvestmentPeriods })
   // Use generators TS as the reference for the `periods` parallel array —
   // matches what Dispatch.tsx does. Falls back to /snapshots.periods if
   // generators TS hasn't loaded yet.
-  const { data: gensTS } = useQuery({ queryKey: ['results', 'generators'], queryFn: () => resultsApi.getGeneratorResults() })
+  const { data: gensTS } = useQuery({ queryKey: nk(currentProject, 'results', 'generators'), queryFn: () => resultsApi.getGeneratorResults() })
   const weightCtx: WeightCtx = useMemo(() => {
     const refTs = gensTS as TSPayload | null
     return {

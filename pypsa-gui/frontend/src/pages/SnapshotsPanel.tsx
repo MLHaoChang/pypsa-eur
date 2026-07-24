@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { projectsApi, type SnapshotInfo } from '../api/projects'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { invalidateNetworkQueries, formatRelativeTime } from '../utils/projectActions'
 import { appLog } from '../store/simulationStore'
 import { confirmToast } from '../utils/toasts'
@@ -61,9 +62,9 @@ export default function SnapshotsPanel() {
       // Restore changes both the on-disk bundle AND the in-memory network, so
       // every network-derived query needs to refetch. Also bump the snapshot
       // list because the backend created a pre-restore safety snapshot.
-      invalidateNetworkQueries(qc)
+      invalidateNetworkQueries(qc, name)
       qc.invalidateQueries({ queryKey: ['snapshots-list', name] })
-      qc.invalidateQueries({ queryKey: ['undoInfo'] })
+      qc.invalidateQueries({ queryKey: nk(name, 'undoInfo') })
       // Stamp now() — the project files just got rewritten.
       markProjectSaved(name)
       toast.success(
@@ -396,8 +397,9 @@ function RestoreConfirmModal({
   // user can see what's actually changing. We rely on the standard `meta`
   // and `snapshots` queries (already cached by other consumers); both have
   // `staleTime` set elsewhere so this rarely triggers a request.
-  const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: networkApi.getMeta, staleTime: 10_000 })
-  const { data: snaps } = useQuery({ queryKey: ['snapshots'], queryFn: networkApi.getSnapshots, staleTime: 10_000 })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: meta } = useQuery({ queryKey: nk(currentProject, 'meta'), queryFn: networkApi.getMeta, staleTime: 10_000 })
+  const { data: snaps } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots, staleTime: 10_000 })
 
   // Compute the bus/snapshot diff between the snapshot and the live network.
   // null = unknown (still loading meta). We avoid showing partial diffs to

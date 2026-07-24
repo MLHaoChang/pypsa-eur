@@ -6,6 +6,7 @@ import { confirmToast } from '../utils/toasts'
 import { networkApi } from '../api/network'
 import { changelogApi, type ChangeLogEntry } from '../api/changelog'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { useSimulationStore } from '../store/simulationStore'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -303,9 +304,9 @@ function AssetTable({
       // bulk attribute write, so leave them alone.
       const tableKey = TAB_TO_API_KEY[componentClass] ?? componentClass.toLowerCase() + 's'
       qc.invalidateQueries({ queryKey: [tableKey] })
-      qc.invalidateQueries({ queryKey: ['undoInfo'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'undoInfo') })
       qc.invalidateQueries({ queryKey: ['changelog'] })
-      qc.invalidateQueries({ queryKey: ['results'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'results') })
       toast.success(`Updated ${r.updated} ${componentClass.toLowerCase()}(s)`)
       setSelectedRows(new Set())
       setEditCol(''); setEditValue('')
@@ -685,6 +686,15 @@ function lineClass(line: string): string {
     if (line.includes('WARN'))  return 'text-warn'
     return 'text-[#58a6ff]'
   }
+  // Numerical-conditioning diagnostics ([NUMERICS] …): amber when the objective
+  // is flagged ill-conditioned, neutral blue for the informational report.
+  if (line.startsWith('[NUMERICS]')) {
+    return line.includes('WARN') ? 'text-warn' : 'text-[#58a6ff]'
+  }
+  // Infeasibility "why" diagnostics — red, they explain a failed solve.
+  if (line.startsWith('[INFEASIBLE]')) return 'text-danger'
+  // Binding global-constraint shadow price (e.g. CO2 cap carbon price) — amber.
+  if (line.startsWith('[GLOBAL-CONSTRAINT]')) return 'text-warn'
   // App-level entries: "[HH:MM:SS] ERROR …" / "[HH:MM:SS] WARN …" / "[HH:MM:SS] INFO …"
   if (/^\[\d{2}:\d{2}:\d{2}\] ERROR/.test(line)) return 'text-danger'
   if (/^\[\d{2}:\d{2}:\d{2}\] WARN/.test(line))  return 'text-warn'
@@ -884,7 +894,7 @@ export default function BottomPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('Buses')
   const dragRef = useRef<{ startY: number; startH: number } | null>(null)
 
-  const { selectedComponent, setSelectedComponent, openRightPanel, setHighlightedComponent, bottomTabRequest, clearBottomTabRequest } = useUIStore()
+  const { selectedComponent, setSelectedComponent, openRightPanel, setHighlightedComponent, bottomTabRequest, clearBottomTabRequest, currentProject } = useUIStore()
 
   useEffect(() => {
     if (!bottomTabRequest) return
@@ -898,15 +908,15 @@ export default function BottomPanel() {
     clearBottomTabRequest()
   }, [bottomTabRequest, clearBottomTabRequest])
 
-  const { data: buses        = [] } = useQuery({ queryKey: ['buses'],         queryFn: networkApi.getBuses })
-  const { data: lines        = [] } = useQuery({ queryKey: ['lines'],         queryFn: networkApi.getLines })
-  const { data: links        = [] } = useQuery({ queryKey: ['links'],         queryFn: networkApi.getLinks })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'],  queryFn: networkApi.getTransformers })
-  const { data: generators   = [] } = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators })
-  const { data: loads        = [] } = useQuery({ queryKey: ['loads'],         queryFn: networkApi.getLoads })
-  const { data: sus          = [] } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
-  const { data: stores       = [] } = useQuery({ queryKey: ['stores'],        queryFn: networkApi.getStores })
-  const { data: carriers     = [] } = useQuery({ queryKey: ['carriers'],      queryFn: networkApi.getCarriers })
+  const { data: buses        = [] } = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses })
+  const { data: lines        = [] } = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
+  const { data: links        = [] } = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers })
+  const { data: generators   = [] } = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const { data: loads        = [] } = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
+  const { data: sus          = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: stores       = [] } = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
+  const { data: carriers     = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'),      queryFn: networkApi.getCarriers })
 
   // Component rows carry no string index signature, so TS rejects a direct
   // cast to Record<string, unknown>[]; route through `unknown` (the table
@@ -1067,12 +1077,12 @@ function CarriersTable({ rows }: CarriersTableProps) {
     mutationFn: ({ name, body }: { name: string; body: Record<string, unknown> }) =>
       networkApi.updateCarrier(name, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['carriers'] })
-      qc.invalidateQueries({ queryKey: ['undoInfo'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'carriers') })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'undoInfo') })
       // The carriers DataFrame is referenced by every result endpoint that
       // groups by carrier — invalidate those too so the next render sees
       // the new CO2 intensity / nice_name without a manual refresh.
-      qc.invalidateQueries({ queryKey: ['results'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'results') })
     },
     onError: (e: { response?: { data?: { detail?: unknown } } }) => {
       // FastAPI returns `detail: string` for HTTPException, but `detail: [
@@ -1123,7 +1133,7 @@ function CarriersTable({ rows }: CarriersTableProps) {
     // backend's remove+add cycle (in `_update_component`) doesn't reset
     // the other columns (`color`, `nice_name`, `unit`, `co2_emissions`)
     // to schema defaults. Same pattern as the PropertiesPanel cards.
-    const cached = qc.getQueryData<Array<Record<string, unknown>>>(['carriers']) ?? []
+    const cached = qc.getQueryData<Array<Record<string, unknown>>>(nk(useUIStore.getState().currentProject, 'carriers')) ?? []
     const row = cached.find(c => c.name === name) ?? rows.find(r => r.name === name) ?? { name }
     updateMut.mutate({ name, body: { ...row, [col]: next } })
   }

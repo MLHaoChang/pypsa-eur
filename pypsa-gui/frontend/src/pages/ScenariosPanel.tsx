@@ -5,7 +5,7 @@ import { GitBranch, Plus, Trash2, ArrowRight, Layers, ChevronRight } from 'lucid
 import { projectsApi } from '../api/projects'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
-import { invalidateNetworkQueries, saveProjectQuietly } from '../utils/projectActions'
+import { invalidateNetworkQueries, saveProjectQuietly, switchToProject } from '../utils/projectActions'
 import { confirmToast } from '../utils/toasts'
 import { appLog } from '../store/simulationStore'
 import type { ProjectInfo } from '../api/types'
@@ -150,10 +150,10 @@ export default function ScenariosPanel() {
     setProjectSwitchInProgress(true)
     const tId = toast.loading(`Switching to '${name}'…`)
     try {
-      // Auto-save the outgoing project so unsaved edits aren't lost.
-      // saveProjectQuietly catches and returns false on failure rather than
-      // throwing — so we have to check the return value or we'd silently
-      // advance to the load and clobber the user's unsaved edits.
+      // Auto-save the outgoing project so unsaved edits aren't lost, with this
+      // panel's unique confirm-on-failure UX (the shared switchToProject saves
+      // best-effort without prompting). saveProjectQuietly catches + returns
+      // false on failure rather than throwing.
       if (currentProject && currentProject !== name) {
         const saved = await saveProjectQuietly(currentProject)
         if (!saved) {
@@ -169,17 +169,37 @@ export default function ScenariosPanel() {
         } else {
           // The outgoing project's on-disk state just changed — drop its
           // cached compare-state so an open Compare panel doesn't show
-          // pre-save numbers (saveProjectQuietly can't invalidate; it has
-          // no QueryClient handle).
+          // pre-save numbers.
           qc.invalidateQueries({ queryKey: ['compare-state', currentProject] })
         }
       }
-      await projectsApi.load(name)
-      invalidateNetworkQueries(qc)
-      setCurrentProject(name)
-      setProjectName(name)
-      appLog('INFO', `Switched to scenario '${name}'`)
-      toast.success(`Now on '${name}'`, { id: tId })
+      // B8 instant switch: activate (pointer swap) + re-key reactive queries to
+      // the target's RETAINED cache. switchToProject re-saves the (just-saved)
+      // outgoing project — idempotent — then does the swap; NO component-table
+      // refetch (deliberately not invalidateNetworkQueries).
+      const r = await switchToProject(name, qc)
+      switch (r.status) {
+        case 'switched':
+          appLog('INFO', `Switched to scenario '${name}'`)
+          toast.success(`Now on '${name}'`, { id: tId })
+          break
+        case 'noop':
+          toast.dismiss(tId)
+          break
+        case 'abort-failed':
+          toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
+          break
+        case 'busy-solve':
+          toast.error(`Finish or abort the running solve on '${currentProject}' first.`, { id: tId })
+          break
+        case 'not-found':
+          toast.error(`'${name}' no longer exists`, { id: tId })
+          break
+        case 'error':
+          toast.error(`Could not switch to '${name}'`, { id: tId })
+          appLog('ERROR', `Switch to '${name}': ${r.message}`)
+          break
+      }
     } catch (e) {
       toast.error(`Could not switch to '${name}'`, { id: tId })
       appLog('ERROR', `Switch to '${name}': ${String((e as Error).message ?? e)}`)
@@ -203,9 +223,12 @@ export default function ScenariosPanel() {
       // resurrects it.
       if (currentProject && deleted.includes(currentProject)) {
         try { await networkApi.resetNetwork() } catch { /* best effort */ }
+        // Capture the deleted project's id before clearing — its cache is now
+        // meaningless, so scope the invalidation there (not a global nuke).
+        const deletedActive = currentProject
         setCurrentProject(null)
         setProjectName('Untitled')
-        invalidateNetworkQueries(qc)
+        invalidateNetworkQueries(qc, deletedActive)
         appLog('WARN', `Active project '${currentProject}' was deleted — network reset`)
       }
       // Drop cached compare-state for every deleted project.

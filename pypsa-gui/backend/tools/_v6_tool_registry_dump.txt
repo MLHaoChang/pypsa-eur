@@ -1,0 +1,543 @@
+TOTAL TOOLS: 100
+
+=== audit_undo (4) ===
+  audit_log: GET /api/changelog/ (changelog.py:9, main.py:262 prefix='/api/changelog')
+    inputs: limit optional
+    outputs: list of {id, action, component_type, name, description, ts}
+    safety: read, confirm: False
+    notes: B3 fix: actual prefix is /api/changelog. CLAUDE.md: change_log_service deque with itertools.count + threading.Lock for thread-safe IDs.
+  clear_audit_log: DELETE /api/changelog/ (changelog.py:14)
+    inputs: none
+    outputs: 204
+    safety: destructive, confirm: True
+    notes: Empties the audit log deque.
+  undo_last: POST /api/network/undo (network.py:1956)
+    inputs: none
+    outputs: {undone: bool, action_id}
+    safety: destructive, confirm: True
+    notes: Confirmation: rolls back the most recent mutation.
+  undo_status: GET /api/network/undo/info (network.py:1936)
+    inputs: none
+    outputs: {has_undo, stack_depth}
+    safety: read, confirm: False
+    notes: B3 fix: actual path is /undo/info.
+
+=== conversation (2) ===
+  list_chat_history: service-call: ctx.chat_state.persist_path tail-read (merges across rotated chat.NNNN.jsonl files)
+    inputs: limit optional
+    outputs: list of turn records
+    safety: read, confirm: False
+    notes: Lock-free read (file is append-only; trailing partial line skipped on JSONDecodeError). Merges across rotation files. Cost rendered live from PRICING constant at read time (M10).
+  clear_chat_history: service-call: ctx.chat_state.persist_path truncate
+    inputs: none
+    outputs: {cleared: true}
+    safety: destructive, confirm: True
+    notes: Empties chat.jsonl. Acquires ctx.chat_state.lock (M9).
+
+=== execution (2) ===
+  abort_simulation: POST /api/simulation/abort (simulation.py:565)
+    inputs: none
+    outputs: {aborted: bool, cleanup_complete: bool}
+    safety: destructive, confirm: True
+    notes: Signals stop_event. CLAUDE.md: HiGHS/Gurobi mid-iteration native code is uninterruptible.
+  force_reset_simulation: POST /api/simulation/force_reset (simulation.py:534)
+    inputs: none
+    outputs: {status: 'reset'}
+    safety: destructive, confirm: True
+    notes: v4-NIT-2 fix: classified destructive (NOT execution — was double-listed in v4). Force-reset is an emergency state-clear, not long-running. Card UX: destructive=red border + 1s delay + disclaimer 'this may not actually free the PyPSA lock if the solver is in native code'.
+
+=== execution_long_running (2) ===
+  run_simulation: POST /api/simulation/run (simulation.py:401)
+    inputs: force optional
+    outputs: {thread_started: true}
+    safety: execution, confirm: True
+    notes: Confirmation required: long-running, mutates dispatch + duals. After launch, tool subscribes to active log_queue and streams [PHASE]/[VALIDATION]/TRACEBACK lines. (ctx, log_queue) captured at tool entry under solver_state_lock (F10). CLAUDE.md: [PHASE] Failed: + TRACEBACK lines surface real errors.
+  run_ac_pf_stage: POST /api/simulation/run_ac_pf (simulation.py:611)
+    inputs: none
+    outputs: {thread_started: true}
+    safety: execution, confirm: True
+    notes: Stage 2 only. CLAUDE.md: dispatch-fix snapshot must capture static-column mutations; _normalise_dynamic_indexes belongs before n.pf().
+
+=== import_export (8) ===
+  import_network_nc: POST /api/io/import/netcdf (io.py:174)
+    inputs: filepath OR upload bytes
+    outputs: ImportSummary (Phase 1 audit against schemas.py:455-464 — same as load_project)
+    safety: destructive, confirm: True
+    notes: B3 fix: actual path is /import/netcdf. CLAUDE.md: reset_network() runs first. v6-F3: returns ImportSummary.
+  import_csv_bundle: POST /api/io/import/csv (io.py:196)
+    inputs: csv files dict
+    outputs: ImportSummary (Phase 1 audit)
+    safety: destructive, confirm: True
+    notes: B3 fix: actual path is /import/csv. v6-F3: returns ImportSummary per schemas.py:455-464.
+  import_excel: POST /api/io/import/excel (io.py:215)
+    inputs: xlsx bytes
+    outputs: ImportSummary (Phase 1 audit)
+    safety: destructive, confirm: True
+    notes: C20: Excel import path.
+  import_matpower: POST /api/io/import/matpower (io.py:250)
+    inputs: matpower case file bytes
+    outputs: ImportSummary (Phase 1 audit)
+    safety: destructive, confirm: True
+    notes: C20: MATPOWER case import.
+  export_network_nc: GET /api/io/export/netcdf (io.py:36)
+    inputs: none
+    outputs: binary stream (frontend handled)
+    safety: read, confirm: False
+    notes: B3 fix: actual path is /export/netcdf.
+  export_csv_bundle: GET /api/io/export/csv (io.py:53)
+    inputs: none
+    outputs: zip stream (frontend handled)
+    safety: read, confirm: False
+    notes: B3 fix: actual path is /export/csv.
+  export_excel: GET /api/io/export/excel (io.py:72)
+    inputs: none
+    outputs: xlsx bytes
+    safety: read, confirm: False
+    notes: C20: Excel export.
+  export_matpower: GET /api/io/export/matpower (io.py:107)
+    inputs: none
+    outputs: matpower case bytes
+    safety: read, confirm: False
+    notes: C20: MATPOWER export.
+
+=== project_mgmt (21) ===
+  list_projects: GET /api/projects/ (projects.py:468)
+    inputs: none
+    outputs: list[ProjectInfo {name: str, created_at: str, has_solver_config: bool, bus_count: int, snapshot_count: int, objective: float | None, has_orphan_tmp: bool, parent_project: str | None}] per schemas.py:467-491; augmented in Phase 1 with resident: bool
+    safety: read, confirm: False
+    notes: v6-F3 FIX: outputs use actual ProjectInfo schema fields (verified schemas.py:467-491), not invented names. v6-F2 FIX: 'resident' is a SNAPSHOT AT READ TIME — derived via PyPSAService.get_context(project_id) which is an UNLOCKED dict get at pypsa_service.py:452-457. A concurrent eviction can flip resident=true → false between this list call and a subsequent activate_project call. Both paths still s
+  load_project: GET /api/projects/{name} (projects.py:1333)
+    inputs: name
+    outputs: ImportSummary {buses: int, generators: int, lines: int, links: int, storage_units: int, stores: int, loads: int, transformers: int, snapshots: int} per schemas.py:455-464
+    safety: write, confirm: True
+    notes: v6-F3 FIX: outputs use the actual ImportSummary schema (verified schemas.py:455-464), not v5's invented {loaded, snapshots_count, bus_count}. B1 fix: actual cold-load endpoint is GET /{name}. Confirmation: swaps active context, in-memory edits lost. Memory rule: chat MUST NOT load/save while user's browser is open on the same project.
+  activate_project: POST /api/projects/{project_id}/activate (projects.py:1264)
+    inputs: project_id
+    outputs: {activated: str, evicted: list[str]} per projects.py:1330
+    safety: write, confirm: True
+    notes: v6-F3 FIX: outputs match the dict literal returned at projects.py:1330. B1 fix: instant-load resident-switch path. CLAUDE.md: refuses with 409 error_kind='solver_in_flight' when a foreground solve is in flight on currently-active ctx (projects.py:1302-1312). v6-F2: when caller saw resident=true in list_projects but the entry was evicted in the meantime, projects.py:1319-1326 takes the cold path au
+  save_project: POST /api/projects/{name} (projects.py:788)
+    inputs: name, force optional, expect optional
+    outputs: {name: str, saved: true} per projects.py route handler
+    safety: write, confirm: True
+    notes: DESTRUCTIVE — overwrites projects/<name>/. v4-MAJOR-1 + v6-F1 FIX: backend guard inserted between projects.py:949 and projects.py:957, INSIDE the `with ctx.mutation_lock:` block opened at projects.py:934, AFTER the `loaded = ctx.loaded_project` read at projects.py:940. Predicate `if dest.exists() and not force and not rebind and loaded != name: raise 409 error_kind='project_exists'`. Placement INS
+  save_project_as: POST /api/projects/{name}?rebind=true (projects.py:788)
+    inputs: name
+    outputs: {name: str, saved: true, rebound: true} per projects.py route handler
+    safety: destructive, confirm: True
+    notes: M1 fix: chat_tools-side pre-check uses list_projects FIRST — if name exists AND active ctx.loaded_project != name, return 409 error_kind='project_exists' BEFORE calling POST. Backend complement: v6-F1 line-anchored guard predicate (above). F12: chat.jsonl pointer MOVED to new dir.
+  save_project_a_copy: POST /api/projects/{name} with rebind=false (projects.py:788)
+    inputs: name
+    outputs: {name: str, saved: true, rebound: false} per projects.py route handler
+    safety: destructive, confirm: True
+    notes: Branches on disk WITHOUT rebinding the active ctx. F12: chat.jsonl is COPIED to the new dir. Active session continues on the original project's chat.jsonl.
+  rename_project: POST /api/projects/{name}/rename (projects.py:1664)
+    inputs: name, new_name
+    outputs: {old: str, new: str} per projects.py route handler (Phase 1 audit against actual return)
+    safety: destructive, confirm: True
+    notes: Renames directory + updates loaded_project. chat.jsonl moves with the directory (filesystem rename). v6-F3: Phase 1 audits actual return shape against models/schemas.py.
+  delete_project: DELETE /api/projects/{name}?cascade=bool (projects.py:1578)
+    inputs: name, cascade bool default false
+    outputs: {deleted: list[str]}
+    safety: destructive, confirm: True
+    notes: v4-MINOR-1 FIX: cascade param added. Endpoint at projects.py:1578 takes `cascade: bool = False`; on 409 with descendants (projects.py:1598-1606), confirmation card surfaces the descendant list. System prompt: 'When delete_project returns 409 with descendants, ASK user before re-issuing with cascade=true; never auto-cascade'. Doubly confirmed (typed confirmation) when name == active loaded_project.
+  create_scenario: POST /api/projects/{base}/scenarios (projects.py:1488)
+    inputs: base name, new_name, description optional
+    outputs: {name: str, parent: str} per projects.py route handler (Phase 1 audit)
+    safety: destructive, confirm: True
+    notes: Rejects when active ctx != base (projects.py:1529). F12: chat.jsonl is COPIED to scenario dir. v6-F3: Phase 1 audits actual return shape.
+  list_scenarios: derived: list_projects + filter(parent_project == name)
+    inputs: name
+    outputs: list[ProjectInfo] filtered where parent_project == name (uses same ProjectInfo schema per schemas.py:467-491)
+    safety: read, confirm: False
+    notes: B2 fix: NO /scenarios endpoint exists. Implemented as derived tool in chat_tools.py. v6-F3: outputs are ProjectInfo entries, not invented summaries.
+  get_project_results_bundle: GET /api/projects/{name}/results_bundle (projects.py:1815)
+    inputs: name
+    outputs: bundle JSON (cached results for non-active project; Phase 1 audits against actual handler return type)
+    safety: read, confirm: False
+    notes: C3: chat reads non-active project results without activate. Apply result-ref truncation. v6-F3: Phase 1 audits return shape against models/schemas.py.
+  get_project_layout: GET /api/projects/{name}/layout (projects.py:1926)
+    inputs: name
+    outputs: canvas layout dict (Phase 1 audit against actual handler)
+    safety: read, confirm: False
+    notes: C4: per-project saved canvas layout.
+  update_project_layout: PUT /api/projects/{name}/layout (projects.py:1955)
+    inputs: name, layout dict
+    outputs: {saved: true}
+    safety: write, confirm: False
+    notes: C4: writes canvas layout. Non-destructive UI state.
+  download_project_bundle: GET /api/projects/{name}/bundle (projects.py:1980)
+    inputs: name
+    outputs: zip stream (frontend handled)
+    safety: read, confirm: False
+    notes: C5: zip export of project directory.
+  get_project_statistics: GET /api/projects/{name}/statistics (projects.py:2013)
+    inputs: name
+    outputs: offline statistics summary (Phase 1 audit against actual handler)
+    safety: read, confirm: False
+    notes: C6: read-only summary without activating.
+  get_project_network_meta: GET /api/projects/{project_id}/network/meta (project_network.py:49)
+    inputs: project_id
+    outputs: non-active project network meta (Phase 1 audit against actual handler)
+    safety: read, confirm: False
+    notes: C11: peek at another project's meta without activating.
+  list_project_network_component: GET /api/projects/{project_id}/network/{component_class} (project_network.py:55)
+    inputs: project_id, component_class
+    outputs: non-active project component dataframe
+    safety: read, confirm: False
+    notes: C11: enable chat to answer questions about OTHER projects without losing the active one.
+  import_project_bundle: POST /api/projects/import_bundle (projects.py:481)
+    inputs: bundle bytes (multipart)
+    outputs: {imported: str} (Phase 1 audit against actual handler)
+    safety: destructive, confirm: True
+    notes: C9: import a project bundle export. Destructive — creates a new project dir.
+  create_project_from_template: POST /api/projects/from_template/{template_id} (projects.py:690)
+    inputs: template_id, new_name
+    outputs: {created: str} (Phase 1 audit against actual handler)
+    safety: destructive, confirm: True
+    notes: C9: scaffold a project from a built-in template.
+  get_project_compare_state: GET /api/projects/{name}/compare-state (compare.py:63)
+    inputs: name
+    outputs: A-vs-B compare payload (Phase 1 audit against actual handler)
+    safety: read, confirm: False
+    notes: C10: drive the Compare panel from chat.
+  get_project_results_summary: GET /api/projects/{name}/results-summary (compare.py:2660)
+    inputs: name
+    outputs: results summary for compare view (Phase 1 audit against actual handler)
+    safety: read, confirm: False
+    notes: C10: numeric summary for Compare rail consumers.
+
+=== project_snapshots (4) ===
+  create_project_snapshot: POST /api/projects/{name}/snapshots (snapshots.py:332)
+    inputs: name, label, message optional
+    outputs: SnapshotInfo (Phase 1 audit against models/schemas.py)
+    safety: write, confirm: True
+    notes: C2: DISK backup snapshot of project bundle (NOT network time-index snapshots — naming distinct via 'project_snapshot' prefix). Confirmation: writes to disk.
+  list_project_snapshots: GET /api/projects/{name}/snapshots (snapshots.py:345)
+    inputs: name
+    outputs: list[SnapshotInfo] (Phase 1 audit)
+    safety: read, confirm: False
+    notes: C2: read companion.
+  restore_project_snapshot: POST /api/projects/{name}/snapshots/{snapshot_id}/restore (snapshots.py:353)
+    inputs: name, snapshot_id
+    outputs: {restored: str} (Phase 1 audit)
+    safety: destructive, confirm: True
+    notes: C2: overwrites project files + reloads in-memory. Pre-restore auto-snapshot mitigates user error.
+  delete_project_snapshot: DELETE /api/projects/{name}/snapshots/{snapshot_id} (snapshots.py:511)
+    inputs: name, snapshot_id
+    outputs: 204
+    safety: destructive, confirm: True
+    notes: C2: removes a saved snapshot from disk.
+
+=== read (22) ===
+  list_components: GET /api/network/{plural} (network.py:319/465/557/579/601/623/645/751/811)
+    inputs: component_class enum (Bus,Line,Link,Generator,StorageUnit,Store,Load,Transformer,ShuntImpedance)
+    outputs: component dataframe as JSON via _df_to_json
+    safety: read, confirm: False
+    notes: Single endpoint per component class. Lock-free read. CLAUDE.md: df_to_json index-column normalization (transient PyPSA index.name loss on Links — reset_index produces 'index' col; df_to_json defensively renames to 'name').
+  get_component: service-call: PyPSAService.get_network() + df.loc[name].to_dict()
+    inputs: component_class, name
+    outputs: single component row as dict
+    safety: read, confirm: False
+    notes: N2 fix: server-side direct df.loc[name].to_dict() — does NOT re-run list_components. Single-row payload (not MB-scale dataframe).
+  get_meta: GET /api/network/meta (network.py:1732)
+    inputs: none
+    outputs: {name, bus_count, line_count, snapshot_count, ...}
+    safety: read, confirm: False
+    notes: Network overview. v6-F3: Phase 1 audit confirms field shape against actual handler return.
+  list_snapshots: GET /api/network/snapshots (network.py:833)
+    inputs: none
+    outputs: snapshot index + weightings
+    safety: read, confirm: False
+    notes: Handles flat + MultiIndex; CLAUDE.md: index name 'snapshot' normalisation rule applies.
+  list_carriers: GET /api/network/carriers (network.py:439)
+    inputs: none
+    outputs: carriers dataframe
+    safety: read, confirm: False
+    notes: For Pydantic CarrierSelect parity.
+  list_global_constraints: GET /api/network/global_constraints (network.py:1642)
+    inputs: none
+    outputs: global_constraints rows (transient-filtered)
+    safety: read, confirm: False
+    notes: Goes through _get_component so solver-internal rows stay hidden.
+  list_timeseries_profiles: GET /api/network/{loads|generators|links}/profiles (network.py:3151/3641/3891)
+    inputs: profile_kind enum {loads,generators,links}
+    outputs: available profiles for the chosen component class
+    safety: read, confirm: False
+    notes: Read-only listing of uploaded + computed time-series profiles.
+  list_transformer_types: GET /api/network/transformers/types (network.py:691)
+    inputs: none
+    outputs: transformer-type catalogue
+    safety: read, confirm: False
+    notes: C14: lookup table for transformer type strings used in create/update transformer.
+  download_timeseries_template: GET /api/network/{loads|generators|links}/template (network.py:3368/3722/3935)
+    inputs: kind enum {loads,generators,links}
+    outputs: CSV template string
+    safety: read, confirm: False
+    notes: C15: returns CSV template the user can fill + upload. CLAUDE.md: handle MultiIndex snapshots branch (_template_snapshots) — pd.DatetimeIndex(MultiIndex) raises.
+  download_snapshot_weightings_csv: GET /api/network/snapshots/weightings.csv (network.py:875)
+    inputs: none
+    outputs: CSV string
+    safety: read, confirm: False
+    notes: C12: read companion to upload_snapshot_weightings_csv. CLAUDE.md CSV pattern: CRLF + formula-injection guard already applied at endpoint.
+  list_investment_periods: GET /api/network/investment_periods (network.py:1453)
+    inputs: none
+    outputs: {periods, weightings}
+    safety: read, confirm: False
+    notes: Read companion.
+  list_vintage_bounds: GET /api/network/vintage_bounds (vintage.py:49)
+    inputs: component_class optional, name optional
+    outputs: vintage_bounds dict
+    safety: read, confirm: False
+    notes: Read from n.meta['vintage_bounds'].
+  get_vintage_results: GET /api/network/vintage_results (vintage.py:65)
+    inputs: none
+    outputs: per-vintage p_nom_opt aggregates
+    safety: read, confirm: False
+    notes: C17: CLAUDE.md multi-port Link vintage p_nom_opt pitfall — endpoint applies dispatch-based recovery.
+  get_timeseries: GET /api/network/timeseries/{component}/{attribute} (network.py:2888)
+    inputs: component_class, name, attribute, period optional
+    outputs: {index, values}
+    safety: read, confirm: False
+    notes: Returns the active series.
+  list_all_timeseries: GET /api/network/timeseries (network.py:2861)
+    inputs: none
+    outputs: list of (component, attribute, column) keys with metadata
+    safety: read, confirm: False
+    notes: Read companion: enumerate every _user_ts entry.
+  get_solver_config: GET /api/simulation/solver_config (simulation.py:230)
+    inputs: none
+    outputs: SolverConfig dict
+    safety: read, confirm: False
+    notes: From ctx.solver_state['solver_config'].
+  get_solver_capabilities: GET /api/simulation/capabilities (simulation.py:263)
+    inputs: none
+    outputs: {multi_period_supported, sclopf_supported, ...}
+    safety: read, confirm: False
+    notes: C8: chat answering 'why can't I enable SCLOPF' needs this. PyPSA n.pf() has no max_iter knob per CLAUDE.md.
+  get_asset_costs: GET /api/simulation/asset_costs (simulation.py:273)
+    inputs: none
+    outputs: asset-cost defaults table
+    safety: read, confirm: False
+    notes: C8: feeds the SolverConfig UI cost table.
+  get_simulation_status: GET /api/simulation/status (simulation.py:713)
+    inputs: none
+    outputs: {status, objective, solve_time, condition}
+    safety: read, confirm: False
+    notes: From _state_snapshot() under solver_state_lock.
+  get_simulation_lock_status: GET /api/simulation/lock_status (simulation.py:497)
+    inputs: none
+    outputs: {lock_held, worker_alive}
+    safety: read, confirm: False
+    notes: C7: non-blocking PyPSA-lock probe.
+  get_simulation_log_history: GET /api/simulation/log_history (simulation.py:746)
+    inputs: none
+    outputs: list[str] of historic log lines
+    safety: read, confirm: False
+    notes: Read companion: pull recent log lines without subscribing to live stream.
+  get_results: GET /api/results/{kind} dispatcher (results.py); ac_pf_status maps to /ac_pf/status (results.py:1272)
+    inputs: result_kind enum [cost_breakdown,objective_decomposition,economics_by_carrier,statistics,generators,storage_dispatch,store_dispatch,store_energy,storage,lines,links,lcoh,ac_pf_status,losses,carrier_kpis,emissions,transformers,unit_commitment,line_dua
+    outputs: result-kind-specific JSON
+    safety: read, confirm: False
+    notes: v4-MAJOR-4 FIX: dispatcher implementation in chat_tools.py uses a small lookup dict for enum→URL since ac_pf_status maps to /ac_pf/status (results.py:1272) while all other 27 enums map 1:1 to URL paths. C16 fix: explicit enum allowlist matches actual results.py grep. CLAUDE.md: NaN-safe _ts_payload; statistics() multi-period columns are MultiIndex (metric,period) NOT row level.
+
+=== solve_queue (4) ===
+  solve_queue_enqueue: POST /api/simulation/queue (solve_queue.py:28)
+    inputs: project_id
+    outputs: {job_id, position}
+    safety: execution, confirm: True
+    notes: Dispatcher autoruns on enqueue (solve_queue.py:46). Project must have a saved network.nc.
+  solve_queue_list: GET /api/simulation/queue (solve_queue.py:50)
+    inputs: none
+    outputs: {jobs, current}
+    safety: read, confirm: False
+    notes: FIFO list with current running job id.
+  solve_queue_abort: POST /api/simulation/queue/{job_id}/abort (solve_queue.py:58)
+    inputs: job_id
+    outputs: {aborted: bool}
+    safety: destructive, confirm: True
+    notes: Aborts running OR cancels queued.
+  solve_queue_clear_finished: POST /api/simulation/queue/clear_finished (solve_queue.py:67)
+    inputs: none
+    outputs: {removed: int}
+    safety: read, confirm: False
+    notes: N1 fix: safety_level='read' — drops in-memory listing entries only, no disk/solver impact, idempotent.
+
+=== ui_control (3) ===
+  ui_select_component: frontend message via SSE ui_event frame
+    inputs: component_class, name
+    outputs: {selected: true}
+    safety: read, confirm: False
+    notes: Emits a typed SSE frame ChatPanel forwards to uiStore.setSelectedComponent. No backend mutation.
+  ui_open_panel: frontend message via SSE ui_event frame
+    inputs: panel_id enum
+    outputs: {opened: panel_id}
+    safety: read, confirm: False
+    notes: Routes a SlidePanel open command to the frontend.
+  ui_set_snapshot: frontend message via SSE ui_event frame
+    inputs: snapshot_iso, period optional
+    outputs: {set: snapshot_iso}
+    safety: read, confirm: False
+    notes: Drives SnapshotPicker selection from chat. CLAUDE.md multi-period: use period|iso form.
+
+=== validation (3) ===
+  validate_network: POST /api/simulation/preflight (simulation.py:298)
+    inputs: none
+    outputs: list[Issue] {severity, code, component_class, name, message}
+    safety: read, confirm: False
+    notes: Lock-free preflight validation. CLAUDE.md: multi-period validation must NOT false-block cfg-only setups.
+  check_solver_availability: GET /api/simulation/check_solvers (simulation.py:258)
+    inputs: none
+    outputs: {highs, gurobi, scip, glpk}
+    safety: read, confirm: False
+    notes: B3 fix: actual endpoint is /check_solvers.
+  dispatch_status: service-call: services.dispatch_status.dispatch_status(n)
+    inputs: none
+    outputs: {state: fresh|stale|none, mismatched_classes}
+    safety: read, confirm: False
+    notes: B3 fix: NO HTTP endpoint exists. Chat tool calls the service function directly via chat_tools.py. CLAUDE.md: must survey ALL dispatch-bearing component classes.
+
+=== write_bulk (1) ===
+  bulk_update_components: PATCH /api/network/_bulk (network.py:1771)
+    inputs: component_class, names list, updates dict
+    outputs: updated count + audit summary
+    safety: write, confirm: True
+    notes: Bulk attribute set. CLAUDE.md: backend dtype coercion against df[col].dtype rejects object-column corruption; UI-side coercion-fallback for all-null sample columns must also apply. Confirmation required when |names| > 10 OR a numeric column has all-null sample.
+
+=== write_carriers (1) ===
+  create_carrier: POST /api/network/carriers (network.py:444)
+    inputs: name, color optional, co2_emissions optional
+    outputs: {name}
+    safety: write, confirm: False
+    notes: Routed through _create_component('Carrier','carriers',...).
+
+=== write_generic_crud (4) ===
+  create_component: POST /api/network/{plural} dispatched (network.py:324/444/470/562/584/606/628/650/784/816)
+    inputs: component_class, name, fields
+    outputs: {name}
+    safety: write, confirm: False
+    notes: Routes to _create_component for 10 _COMPONENT_ATTRS classes. GlobalConstraint routes to create_global_constraint (network.py:1653). Transformer routes to create_transformer (network.py:784, sanitise + voltage check). CLAUDE.md: BeforeValidator null-to-inf aliases must be active in schemas.
+  update_component: PUT /api/network/{plural}/{name} DISPATCHED
+    inputs: component_class, name, fields {new_name optional}
+    outputs: {name} (post-rename if applicable)
+    safety: write, confirm: False
+    notes: DISPATCHER routes: (a) Bus with new_name → POST /buses/{name}/rename (network.py:412); (b) Bus without new_name → PUT /buses/{name} update_bus (network.py:329, retains coord-change line-length recompute — CLAUDE.md: bus.model_dump(exclude_unset=True) gate on coord change); (c) Transformer → PUT /transformers/{name} update_transformer (network.py:795); (d) GlobalConstraint → PUT /global_constraints
+  delete_component: DELETE /api/network/{plural}/{name} (network.py:379/458/493/572/594/616/638/660/804/826/1717)
+    inputs: component_class, name
+    outputs: 204
+    safety: destructive, confirm: True
+    notes: Routes via _delete_component for 10 classes + dedicated delete_global_constraint. NON-cascade. CLAUDE.md: _user_ts_delete_asset + vintage delete_bounds_for_asset run via generic helper.
+  cascade_delete_bus: DELETE /api/network/buses/{name}/cascade (network.py:384)
+    inputs: name
+    outputs: 204
+    safety: destructive, confirm: True
+    notes: Removes bus + all attached lines/links/transformers/generators/loads/storage_units/stores.
+
+=== write_meta (1) ===
+  update_meta: PUT /api/network/meta (network.py:1738)
+    inputs: name str
+    outputs: {name}
+    safety: write, confirm: False
+    notes: M5 fix: closes n.name vs loaded_project divergence after chat-driven Save-As. No confirmation — label change only.
+
+=== write_periods (3) ===
+  set_multi_period_snapshots: POST /api/network/snapshots/multi_period (network.py:1155)
+    inputs: periods list[int], operational_from, operational_to, freq
+    outputs: new MultiIndex stats
+    safety: write, confirm: True
+    notes: Promotes flat→multi or rebuilds multi→multi. CLAUDE.md: mi.name='snapshot' set explicitly; weights reset to 1.0 needs explicit warning in confirmation card.
+  set_investment_periods: POST /api/network/investment_periods (network.py:1464)
+    inputs: periods list[int]
+    outputs: {periods, snapshots_shape}
+    safety: write, confirm: True
+    notes: Handles all 3 transitions. CLAUDE.md: multi→flat demotion trips pandas M-dtype reindex bug — pre-trim _t tables.
+  set_investment_period_weightings: PATCH /api/network/investment_period_weightings (network.py:1552)
+    inputs: updates {period: {years, objective}}
+    outputs: updated count
+    safety: write, confirm: False
+    notes: C13: PATCH on investment_period_weightings frame. CLAUDE.md: years scaling is what makes per-period OPEX correctly weighted across horizons.
+
+=== write_snapshots (4) ===
+  set_snapshots: POST /api/network/snapshots (network.py:1128)
+    inputs: from_iso, to_iso, freq
+    outputs: new snapshot count + index
+    safety: write, confirm: True
+    notes: Triggers _user_ts reapply + _normalise_dynamic_indexes. CLAUDE.md pitfall: set_snapshots(MultiIndex) silently resets snapshot_weightings to 1.0 — confirmation card warns. mi.name='snapshot' must be set post-construction.
+  set_snapshot_weightings: PATCH /api/network/snapshot_weightings (network.py:1021)
+    inputs: updates {iso_key: {objective, generators, stores}}
+    outputs: updated count
+    safety: write, confirm: False
+    notes: CLAUDE.md: build BOTH iso_key styles (period|ts_iso + bare ts_iso) for multi-period.
+  upload_snapshot_weightings_csv: POST /api/network/snapshots/weightings.csv (network.py:918)
+    inputs: csv_content (multipart), filename
+    outputs: applied rows count
+    safety: write, confirm: True
+    notes: CLAUDE.md two-pass validate-then-apply pattern is mandatory.
+  sample_representative_weeks: POST /api/network/snapshots/sample_weeks (network.py:1277)
+    inputs: n_weeks int, weighting_strategy enum
+    outputs: {sampled_count, weights_default_overwritten: bool}
+    safety: write, confirm: True
+    notes: B3 fix: actual endpoint is /sample_weeks. CLAUDE.md: replaces snapshot_weightings — confirmation required; pre-pass detects had_custom_weights for audit-log warning.
+
+=== write_solver (1) ===
+  update_solver_config: PUT /api/simulation/solver_config (simulation.py:235)
+    inputs: partial config dict
+    outputs: {updated_keys}
+    safety: write, confirm: True
+    notes: CLAUDE.md: backend MUST use cfg.model_dump(exclude_unset=True) + dict merge — partial PUT otherwise silently resets omitted fields to schema defaults.
+
+=== write_timeseries (5) ===
+  upload_timeseries: PUT /api/network/timeseries/{component}/{attribute} (network.py:2979)
+    inputs: component_class, name, attribute, csv_content
+    outputs: {rows_applied}
+    safety: write, confirm: True
+    notes: PER-ASSET path (single component+attribute). CLAUDE.md: _user_ts must follow rename/delete via generic CRUD helpers. Confirmation: overwrites prior profile.
+  delete_timeseries: DELETE /api/network/timeseries (network.py:4037)
+    inputs: component_class, name, attribute
+    outputs: 204
+    safety: destructive, confirm: True
+    notes: Removes a single _user_ts entry.
+  upload_load_profile: POST /api/network/loads/upload_profile (network.py:3497)
+    inputs: csv_content_b64 str, filename str (MULTI-COLUMN CSV: columns ARE load names, index is timestamps)
+    outputs: {matched: list[str], unmatched: list[str], rows: int, snapshot_count: int}
+    safety: write, confirm: True
+    notes: v4-MAJOR-3 FIX: signature corrected. Endpoint at network.py:3497-3511 takes ONE multipart UploadFile where CSV columns are load names — multi-load per call, NOT per-load. Use upload_timeseries (PUT /api/network/timeseries/loads/p_set) for per-asset upload. Confirmation: replaces p_set for all matched columns; may auto-expand n.snapshots.
+  upload_generator_profile: POST /api/network/generators/upload_profile (network.py:3825)
+    inputs: csv_content_b64 str, filename str, attribute str default 'p_max_pu' (MULTI-COLUMN CSV: columns ARE generator names)
+    outputs: {matched, unmatched, rows, snapshot_count}
+    safety: write, confirm: True
+    notes: v4-MAJOR-3 FIX: signature corrected per network.py:3825-3852. Multi-generator per call. Attribute defaults to p_max_pu but accepts any time-varying generator attribute.
+  upload_link_profile: POST /api/network/links/upload_profile (network.py:3981)
+    inputs: csv_content_b64 str, filename str, attribute str default 'p_max_pu' (MULTI-COLUMN CSV: columns ARE link names)
+    outputs: {matched, unmatched, rows, snapshot_count}
+    safety: write, confirm: True
+    notes: v4-MAJOR-3 FIX: signature corrected per network.py:3981-4010. Multi-link per call.
+
+=== write_topology (2) ===
+  cluster_network: POST /api/network/cluster (clustering.py:279)
+    inputs: algo enum, n_clusters int, ...
+    outputs: {bus_count, line_count}
+    safety: destructive, confirm: True
+    notes: C1: PyPSAService.set_network swap is destructive (topology reshape). Confirmation enforced — cluster collapses buses and rewrites lines.
+  recalculate_line_lengths: POST /api/network/lines/recalculate_lengths (network.py:498)
+    inputs: none
+    outputs: {updated: int}
+    safety: write, confirm: True
+    notes: C19: explicit user-driven recalc. Confirmation: rewrites all line.length values.
+
+=== write_vintage (3) ===
+  set_vintage_bounds: PUT /api/network/vintage_bounds/{class}/{name} (vintage.py:84)
+    inputs: component_class, name, period_bounds {period: {p_nom_min, p_nom_max}}
+    outputs: {applied_periods}
+    safety: write, confirm: False
+    notes: CLAUDE.md: rejects unknown periods with 400 listing valid set.
+  delete_vintage_bounds: DELETE /api/network/vintage_bounds/{class}/{name} (vintage.py:158)
+    inputs: component_class, name
+    outputs: 204
+    safety: destructive, confirm: True
+    notes: Drops the bounds entry.
+  cleanup_orphan_vintages: POST /api/network/vintage_bounds/_cleanup_orphans (vintage.py:180)
+    inputs: none
+    outputs: {cleaned: int}
+    safety: write, confirm: False
+    notes: C18: CLAUDE.md vintage orphan-cleanup needs regex AND (registry OR period-match). Idempotent.

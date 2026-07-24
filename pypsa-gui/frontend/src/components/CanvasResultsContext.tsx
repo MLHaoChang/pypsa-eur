@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
 import { resultsApi } from '../api/simulation'
 import type { Generator, Load, Line as LineT, Link as LinkT, StorageUnit, Store } from '../api/types'
@@ -106,7 +107,7 @@ function rowMap(ts: TSPayload | null | undefined, row: number): Map<string, numb
 }
 
 export function CanvasResultsProvider({ children }: { children: ReactNode }) {
-  const { resultsOverlayEnabled, resultsSnapshotIdx, resultSource, flowOverlayKind } = useUIStore()
+  const { resultsOverlayEnabled, resultsSnapshotIdx, resultSource, flowOverlayKind, currentProject } = useUIStore()
 
   // Fetch whenever the overlay is on. The provider is mounted by whichever
   // canvas is active (blank schematic OR satellite/hybrid map) — never both —
@@ -121,17 +122,17 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
   // the user flips between LOPF and AC PF result views. The trailing element
   // is what makes the cache miss; backend honours the param via ?source=.
   const { data: gensTS } = useQuery({
-    queryKey: ['results', 'generators', resultSource],
+    queryKey: nk(currentProject, 'results', 'generators', resultSource),
     queryFn: () => resultsApi.getGeneratorResults(resultSource),
     enabled: enableQueries,
   })
   const { data: loadTS } = useQuery({
-    queryKey: ['results', 'loads', resultSource],
+    queryKey: nk(currentProject, 'results', 'loads', resultSource),
     queryFn: () => resultsApi.getLoadResults(resultSource),
     enabled: enableQueries,
   })
   const { data: linesTS } = useQuery({
-    queryKey: ['results', 'lines', resultSource],
+    queryKey: nk(currentProject, 'results', 'lines', resultSource),
     queryFn: () => resultsApi.getLineResults(resultSource),
     enabled: enableQueries,
   })
@@ -141,7 +142,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
   // alongside the line flows the canvas already animates. Enabled on the
   // same gate; no extra round-trip when the overlay is off.
   const { data: linksTS } = useQuery({
-    queryKey: ['results', 'links', resultSource],
+    queryKey: nk(currentProject, 'results', 'links', resultSource),
     queryFn: () => resultsApi.getLinkResults(resultSource),
     enabled: enableQueries,
   })
@@ -150,12 +151,12 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
   // = charge (consumption). State of charge is fetched separately below so
   // we can render an SoC % alongside the dispatch arrow for BESS cards.
   const { data: storageDispatchTS } = useQuery({
-    queryKey: ['results', 'storage_dispatch', resultSource],
+    queryKey: nk(currentProject, 'results', 'storage_dispatch', resultSource),
     queryFn: () => resultsApi.getStorageDispatchResults(resultSource),
     enabled: enableQueries,
   })
   const { data: storeDispatchTS } = useQuery({
-    queryKey: ['results', 'store_dispatch', resultSource],
+    queryKey: nk(currentProject, 'results', 'store_dispatch', resultSource),
     queryFn: () => resultsApi.getStoreDispatchResults(resultSource),
     enabled: enableQueries,
   })
@@ -164,12 +165,12 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
   //   • stores        → e (MWh)              / e_nom
   // Aggregated together when a single (bus, Storage) group mixes both.
   const { data: storageSoCTS } = useQuery({
-    queryKey: ['results', 'storage', resultSource],
+    queryKey: nk(currentProject, 'results', 'storage', resultSource),
     queryFn: () => resultsApi.getStorageResults(resultSource),
     enabled: enableQueries,
   })
   const { data: storeEnergyTS } = useQuery({
-    queryKey: ['results', 'store_energy', resultSource],
+    queryKey: nk(currentProject, 'results', 'store_energy', resultSource),
     queryFn: () => resultsApi.getStoreEnergyResults(resultSource),
     enabled: enableQueries,
   })
@@ -177,35 +178,35 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
   // Keyed separately so flipping the Q toggle on doesn't invalidate the P
   // query (the P series stays valid for loading-% colouring).
   const { data: linesReactiveTS } = useQuery({
-    queryKey: ['results', 'line_reactive', 'ac_pf'],
+    queryKey: nk(currentProject, 'results', 'line_reactive', 'ac_pf'),
     queryFn: () => resultsApi.getLineReactive('ac_pf'),
     enabled: needReactive,
   })
 
   const { data: generators = [] } = useQuery({
-    queryKey: ['generators'], queryFn: networkApi.getGenerators,
+    queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators,
     enabled: enableQueries,
   })
   const { data: loads = [] } = useQuery({
-    queryKey: ['loads'], queryFn: networkApi.getLoads,
+    queryKey: nk(currentProject, 'loads'), queryFn: networkApi.getLoads,
     enabled: enableQueries,
   })
   const { data: lines = [] } = useQuery({
-    queryKey: ['lines'], queryFn: networkApi.getLines,
+    queryKey: nk(currentProject, 'lines'), queryFn: networkApi.getLines,
     enabled: enableQueries,
   })
   // Link metadata for per-link aggregation. Used to look up bus0 / bus1 /
   // carrier / p_nom when joining against linksTS for the overlay.
   const { data: links = [] } = useQuery({
-    queryKey: ['links'], queryFn: networkApi.getLinks,
+    queryKey: nk(currentProject, 'links'), queryFn: networkApi.getLinks,
     enabled: enableQueries,
   })
   const { data: storageUnits = [] } = useQuery({
-    queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits,
+    queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits,
     enabled: enableQueries,
   })
   const { data: stores = [] } = useQuery({
-    queryKey: ['stores'], queryFn: networkApi.getStores,
+    queryKey: nk(currentProject, 'stores'), queryFn: networkApi.getStores,
     enabled: enableQueries,
   })
 
@@ -216,7 +217,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
   // this lookup the label always shows the horizon-end aggregated p_nom
   // (593 MW), which is misleading when scrubbing through 2026 hourlies.
   const { data: vintageResultsRaw } = useQuery({
-    queryKey: ['vintage_results'],
+    queryKey: nk(currentProject, 'vintage_results'),
     queryFn: () => networkApi.listVintageResults(),
     enabled: enableQueries,
   })

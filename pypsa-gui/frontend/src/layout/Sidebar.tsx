@@ -8,7 +8,8 @@ import {
   MousePointer, ZoomIn, ZoomOut, AlertTriangle,
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
-  GitBranch as GitBranchIcon,
+  GitBranch as GitBranchIcon, ListChecks,
+  MessageSquare,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
@@ -23,10 +24,13 @@ import toast from 'react-hot-toast'
 import {
   invalidateNetworkQueries, saveProjectQuietly,
   resetBackendNetwork, slugify as slugifyName, downloadProjectBundle,
-  formatRelativeTime, abortRunningSim,
+  formatRelativeTime, abortRunningSim, switchToProject,
 } from '../utils/projectActions'
+import { nk } from '../utils/queryKeys'
 import NewProjectWizard from './NewProjectWizard'
 import { H2Icon } from '../components/AssetIcons'
+import { useSolveQueue } from '../hooks/useSolveQueue'
+import { isActive } from '../api/solveQueue'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED_W = 240
@@ -373,7 +377,12 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
   const { setProjectName, currentProject } = useUIStore()
 
   const handleImportSuccess = (summary: ImportSummary, fileName?: string) => {
-    qc.invalidateQueries()
+    // Scope to the active project's network + results (the import replaced the
+    // in-memory network bound to currentProject) rather than a bare
+    // `invalidateQueries()` that nuked every resident project's cache. Other
+    // open projects' caches must survive for B8 instant-switch.
+    invalidateNetworkQueries(qc, currentProject)
+    qc.invalidateQueries({ queryKey: nk(currentProject, 'results') })
     // For .pypsaproj.zip bundles, ImportZone already set the canonical project
     // name (matches the backend project key) — don't clobber it here.
     if (fileName && !fileName.toLowerCase().endsWith('.pypsaproj.zip')) {
@@ -821,7 +830,7 @@ function ProjectSectionContent({
     projectName: pn, currentProject, setCurrentProject, setProjectName,
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
-    activeSlidePanel, setSlidePanel,
+    activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -830,11 +839,26 @@ function ProjectSectionContent({
   const [showCopyModal, setShowCopyModal] = useState(false)
   // "Open Project" picker — lists existing backend projects.
   const [showOpenModal, setShowOpenModal] = useState(false)
+
+  // Phase D polish #1 — chat empty-state primer bridge. The chat panel
+  // dispatches CustomEvents instead of reaching across the layout tree;
+  // this Sidebar effect listens and opens the existing modals. Decoupled
+  // so chat panel doesn't depend on Sidebar's local state shape.
+  useEffect(() => {
+    const onNewProject = () => setShowNameModal(true)
+    const onOpenPicker = () => setShowOpenModal(true)
+    window.addEventListener('chat:open-new-project-wizard', onNewProject)
+    window.addEventListener('chat:open-project-picker', onOpenPicker)
+    return () => {
+      window.removeEventListener('chat:open-new-project-wizard', onNewProject)
+      window.removeEventListener('chat:open-project-picker', onOpenPicker)
+    }
+  }, [])
   const qc = useQueryClient()
 
   // Live network meta — used to guard autosave against saving an empty network
   const { data: networkMeta } = useQuery({
-    queryKey: ['meta'],
+    queryKey: nk(currentProject, 'meta'),
     queryFn: networkApi.getMeta,
     refetchInterval: 30_000,
     staleTime: 15_000,
@@ -901,7 +925,7 @@ function ProjectSectionContent({
       setTimeout(() => setSaveStatus('idle'), 2000)
       // The depth counter polls every 3s; force-refresh it so the badge clears
       // immediately after an explicit Save.
-      if (!auto) qc.invalidateQueries({ queryKey: ['undoInfo'] })
+      if (!auto) qc.invalidateQueries({ queryKey: nk(name, 'undoInfo') })
 
       if (auto) return  // autosave does not download a bundle
 
@@ -1042,41 +1066,58 @@ function ProjectSectionContent({
 
   const handleOpenPick = async (name: string) => {
     setShowOpenModal(false)
-    // Always proceed with the load, even when name === currentProject. This
-    // covers the common "stale frontend, empty backend" case after a server
-    // reload or browser refresh: the tab + label still say "X" but PyPSA's
-    // in-memory network is empty. Treating the click as a re-load forces the
-    // backend to read network.nc + user_ts.json from disk again.
     const tId = toast.loading(`Opening '${name}'…`)
+    setProjectSwitchInProgress(true)
     try {
-      // If a solve is in flight, the PyPSA lock blocks every mutating
-      // endpoint (save + load + reset). Cancel it FIRST and wait for the
-      // worker to release the lock — otherwise the upcoming save/load
-      // both hit axios' 30s timeout. abortRunningSim is a no-op when no
-      // solve is running.
-      const stopped = await abortRunningSim()
-      if (!stopped) {
-        toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
+      // Re-load when name === currentProject: covers the "stale frontend, empty
+      // backend" case after a server/browser reload — the tab still says "X"
+      // but PyPSA's in-memory network is empty, so force a disk re-read. This
+      // is a DESTRUCTIVE re-load (not the instant switch) — switchToProject
+      // no-ops on the same project, so it can't serve this recovery path.
+      if (name === currentProject) {
+        const stopped = await abortRunningSim()
+        if (!stopped) {
+          toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
+          return
+        }
+        await projectsApi.load(name)
+        invalidateNetworkQueries(qc, name)
+        setProjectName(name)
+        appLog('INFO', `Reloaded project '${name}'`)
+        toast.success(`Opened '${name}'`, { id: tId })
         return
       }
-      // Auto-save the active project so unsaved edits survive the switch —
-      // mirrors the tab-switch flow in ProjectTabs. Skip when the user is
-      // re-loading the same project: there's nothing to migrate, and saving
-      // an empty in-memory network on top of the on-disk one would clobber it.
-      if (currentProject && currentProject !== name) {
-        await saveProjectQuietly(currentProject)
+      // Different project → B8 instant switch (activate + re-key to the
+      // target's RETAINED cache, no component-table refetch). setCurrentProject
+      // (inside switchToProject) auto-adds the tab if not already open.
+      const r = await switchToProject(name, qc)
+      switch (r.status) {
+        case 'switched':
+          appLog('INFO', `Opened project '${name}'`)
+          toast.success(`Opened '${name}'`, { id: tId })
+          break
+        case 'noop':
+          toast.dismiss(tId)
+          break
+        case 'abort-failed':
+          toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
+          break
+        case 'busy-solve':
+          toast.error(`Finish or abort the running solve on '${currentProject}' first.`, { id: tId })
+          break
+        case 'not-found':
+          toast.error(`'${name}' no longer exists`, { id: tId })
+          break
+        case 'error':
+          appLog('ERROR', `Open '${name}' failed: ${r.message}`)
+          toast.error(`Could not open '${name}'`, { id: tId })
+          break
       }
-      await projectsApi.load(name)
-      invalidateNetworkQueries(qc)
-      // setCurrentProject auto-adds to openTabs if not already present, so the
-      // freshly opened project appears as a tab without an extra addTab call.
-      setCurrentProject(name)
-      setProjectName(name)
-      appLog('INFO', `Opened project '${name}'`)
-      toast.success(`Opened '${name}'`, { id: tId })
     } catch (e) {
       appLog('ERROR', `Open '${name}' failed: ${String((e as Error)?.message ?? e)}`)
       toast.error(`Could not open '${name}'`, { id: tId })
+    } finally {
+      setProjectSwitchInProgress(false)
     }
   }
 
@@ -1093,7 +1134,7 @@ function ProjectSectionContent({
       // the filename) and registers it as a fresh project. Importing replaces
       // the in-memory network, so the prior auto-save above is essential.
       const res = await projectsApi.importBundle(file)
-      invalidateNetworkQueries(qc)
+      invalidateNetworkQueries(qc, res.imported)
       setCurrentProject(res.imported)
       setProjectName(res.imported)
       appLog('INFO', `Opened project '${res.imported}' from disk (${file.name})`)
@@ -1108,7 +1149,7 @@ function ProjectSectionContent({
   // the last explicit Save (which clears the undo stack as its checkpoint).
   // Re-polls every 3 s — matches the cadence in AppHeader so badges stay in sync.
   const { data: undoInfo } = useQuery({
-    queryKey: ['undoInfo'],
+    queryKey: nk(currentProject, 'undoInfo'),
     queryFn: networkApi.undoInfo,
     refetchInterval: 3000,
     staleTime: 0,
@@ -1271,7 +1312,7 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   onCloseModal?: () => void
   requestBottomTab: (tab: string) => void
 }) {
-  const { setSlidePanel, activeSlidePanel } = useUIStore()
+  const { setSlidePanel, activeSlidePanel, currentProject } = useUIStore()
   void requestBottomTab
   // Polls /preflight to surface the error+warning count as a badge on the
   // Issues row. 30 s feels right for an out-of-view indicator — long enough
@@ -1279,13 +1320,18 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // accurate after an edit. The panel itself polls more aggressively when
   // open.
   const { data: preflight } = useQuery({
-    queryKey: ['preflight'],
+    queryKey: nk(currentProject, 'preflight'),
     queryFn: simulationApi.preflight,
     refetchInterval: 30_000,
     staleTime: 15_000,
   })
   const issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)
   const hasErrors = (preflight?.errors ?? 0) > 0
+  // Active (queued + running) solve-queue jobs, surfaced as a badge on the
+  // Solve queue row. Shares the ['solveQueue'] query — polls only while jobs
+  // are active (see useSolveQueue), so this idle-mounted consumer is cheap.
+  const { data: solveQueue } = useSolveQueue()
+  const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
   return (
     <div>
       <SItem icon={<Settings2 size={15} />} label="Solver Settings"
@@ -1321,6 +1367,23 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
       <SItem icon={<TrendingUp size={15} />} label="Results"
         active={activeSlidePanel === 'results'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'results' ? null : 'results'); onCloseModal?.() }}
+      />
+      <SItem icon={<ListChecks size={15} />} label="Solve Queue"
+        title="Queue saved projects to solve sequentially in the background; results persist to disk."
+        active={activeSlidePanel === 'solveQueue'}
+        rightEl={activeQueueCount > 0 ? (
+          <span
+            className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
+            style={{ background: 'rgba(217,119,6,0.18)', color: '#f59e0b' }}
+          >{activeQueueCount}</span>
+        ) : undefined}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
+      />
+      {/* Chatbot integration v6 (Phase 3) — toggle the ChatPanel slide. */}
+      <SItem icon={<MessageSquare size={15} />} label="Chat"
+        title="Conversational assistant. Ask questions about the open network, drive tools, confirm destructive actions through a card."
+        active={activeSlidePanel === 'chat'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'chat' ? null : 'chat'); onCloseModal?.() }}
       />
     </div>
   )
@@ -1625,7 +1688,7 @@ export default function Sidebar() {
       return name
     },
     onSuccess: (name: string) => {
-      invalidateNetworkQueries(qc)
+      invalidateNetworkQueries(qc, name)
       addTab(name)
       setCurrentProject(name)
       setProjectName(name)

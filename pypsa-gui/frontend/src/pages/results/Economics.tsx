@@ -18,6 +18,8 @@ import {
 } from './shared'
 import { useResultsFilter } from './filterContext'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 
 // ── Economics tab ──────────────────────────────────────────────────────────
@@ -43,6 +45,7 @@ interface AggregatedAssetRow {
   carrier: string
   bus: string
   capacity_label: string         // e.g. "1.20 GW" or "200 MWh"
+  capacity_factor: number | null // decimal 0–1, generators only (null for storage / group totals)
   energy_mwh: number             // for generators: energy dispatched; storage: discharged
   charge_mwh: number             // 0 for generators; storage charge MWh — needed for group spread
   revenue_eur: number            // for storage: discharge_revenue
@@ -79,6 +82,7 @@ function makeGenRow(g: GeneratorEconomicsRow): AggregatedAssetRow {
     capacity_label: g.p_nom_opt_mw >= 1000
       ? `${(g.p_nom_opt_mw / 1000).toFixed(2)} GW`
       : `${g.p_nom_opt_mw.toFixed(1)} MW`,
+    capacity_factor: g.capacity_factor,
     energy_mwh: g.energy_mwh,
     charge_mwh: 0,
     revenue_eur: g.revenue_eur,
@@ -110,6 +114,7 @@ function makeSURow(s: StorageUnitEconomicsRow): AggregatedAssetRow {
     carrier: s.carrier,
     bus: s.bus,
     capacity_label: `${s.p_nom_opt_mw.toFixed(1)} MW · ${s.energy_capacity_mwh.toFixed(0)} MWh`,
+    capacity_factor: null,
     energy_mwh: s.discharge_mwh,
     charge_mwh: s.charge_mwh,
     revenue_eur: s.discharge_revenue_eur,
@@ -141,6 +146,7 @@ function makeStoreRow(s: StoreEconomicsRow): AggregatedAssetRow {
     carrier: s.carrier,
     bus: s.bus,
     capacity_label: `${s.e_nom_opt_mwh.toFixed(0)} MWh`,
+    capacity_factor: null,
     energy_mwh: s.discharge_mwh,
     charge_mwh: s.charge_mwh,
     revenue_eur: s.discharge_revenue_eur,
@@ -223,6 +229,7 @@ function sumGroup(rows: AggregatedAssetRow[], group: GroupKey, period?: number |
     carrier: '',
     bus: '',
     capacity_label: `${rows.length} asset${rows.length === 1 ? '' : 's'}`,
+    capacity_factor: null,   // CF is per-generator; ambiguous for a mixed group
     energy_mwh: energy,
     charge_mwh: charge,
     revenue_eur: revenue,
@@ -256,9 +263,10 @@ function ProfitChip({ value }: { value: number }) {
 }
 
 export default function Economics() {
+  const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
   const { data: payload, isLoading } = useQuery({
-    queryKey: ['results', 'asset_economics'],
+    queryKey: nk(currentProject, 'results', 'asset_economics'),
     queryFn: resultsApi.getAssetEconomics,
   })
   // Refs for SVG / CSV export on the per-asset bar charts.
@@ -692,6 +700,7 @@ export default function Economics() {
                 <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Asset</th>
                 <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Carrier</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Capacity</th>
+                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Capacity factor = dispatched energy / (capacity × modelled hours). Generators only.">Cap. factor</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Energy</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Revenue</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Storage only — cost to charge from the market.">Charge cost</th>
@@ -837,6 +846,7 @@ function GroupSection({
         </td>
         <td className="px-2 py-1 text-[10px] text-muted">{assets.length} asset{assets.length === 1 ? '' : 's'}</td>
         <td className="px-2 py-1 text-right text-[10px] text-muted">{total.capacity_label}</td>
+        <td className="px-2 py-1 text-right text-[10px] text-muted">—</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtEnergy(total.energy_mwh)}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(total.revenue_eur)}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{total.charge_cost_eur > 0 ? fmtCurrency(total.charge_cost_eur) : '—'}</td>
@@ -899,6 +909,9 @@ function AssetRow({
         </td>
         <td className="px-2 py-1 text-[11px] text-muted">{row.carrier || '—'}</td>
         <td className="px-2 py-1 text-right text-[11px] text-muted">{row.capacity_label}</td>
+        <td className="px-2 py-1 text-right font-mono text-[11px]">
+          {row.capacity_factor != null ? `${(row.capacity_factor * 100).toFixed(0)}%` : '—'}
+        </td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtEnergy(row.energy_mwh)}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(row.revenue_eur)}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{row.charge_cost_eur > 0 ? fmtCurrency(row.charge_cost_eur) : '—'}</td>
@@ -914,7 +927,7 @@ function AssetRow({
       </tr>
       {expandable && open && (
         <tr className="bg-bg-2/50 border-b border-border/40">
-          <td colSpan={11} className="px-4 py-2">
+          <td colSpan={12} className="px-4 py-2">
             <div className="text-[10px] text-muted mb-1.5 uppercase tracking-wider">
               Per-period breakdown
             </div>
@@ -967,9 +980,10 @@ function AssetRow({
 // view (which collapses to the same numbers).
 
 function LcohSection() {
+  const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
   const { data: lcoh, isLoading } = useQuery({
-    queryKey: ['results', 'lcoh'],
+    queryKey: nk(currentProject, 'results', 'lcoh'),
     queryFn: resultsApi.getLcoh,
   })
   if (isLoading) return null

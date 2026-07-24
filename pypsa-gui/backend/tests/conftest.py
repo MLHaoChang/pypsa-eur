@@ -29,17 +29,29 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
+from routers import network as net_router
 from routers import projects as projects_router
 from routers import simulation as sim_router
 from routers.projects import _RESULTS_STATE_KEYS
 from services import undo_service
 from services.pypsa_service import PyPSAService
+from services.solve_queue import solve_queue
 from services.solver_service import SolverConfig
 
 
 def _reset_backend_state() -> None:
     """Fresh singleton network (unbound) + cleared lifecycle/result state."""
     PyPSAService.reset_network()  # new Network, _loaded_project -> None
+    PyPSAService._contexts.clear()  # B2 registry: no resident ctxs bleed across tests
+    # `_user_ts` is a PROCESS-GLOBAL time-series store in routers.network (keyed
+    # by (component, attr, name)), NOT a per-context field — so reset_network()
+    # doesn't touch it. Only POST /network/reset clears it (which tests don't
+    # hit). Without this, a profile captured by one test (e.g. test_solve_queue's
+    # Load "L1" p_set) reapplies into the next test's same-named component and
+    # silently overrides its static value — making an intended-infeasible/shed
+    # network feasible. Mirror the route handler's clear.
+    with net_router._user_ts_lock:
+        net_router._user_ts.clear()
     sim_router._state["solver_config"] = SolverConfig()
     sim_router._state_update(**{k: None for k in _RESULTS_STATE_KEYS})
     sim_router._state_update(status="idle", condition=None, objective=None, solve_time=None)
@@ -50,6 +62,10 @@ def _reset_backend_state() -> None:
     # so undo/changelog state can't bleed across tests.
     sim_router._state_update(thread=None, stop_event=None, log_queue=None)
     undo_service.clear()
+    # Drain the multi-project solve queue so jobs (and the dispatcher's view of
+    # "current") can't bleed across tests. The daemon dispatcher thread stays
+    # parked on the now-empty queue — it's reused by the next test that enqueues.
+    solve_queue.reset_for_tests()
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +89,14 @@ def tmp_projects_dir(tmp_path, monkeypatch):
     Redirect routers.projects.PROJECTS_DIR to a temp dir so save/load tests
     never read or write the user's real projects. The functions read the module
     global at call time, so monkeypatching the attribute is sufficient.
+
+    NOTE: intentionally NOT autouse. Making it autouse interacts badly with the
+    module-local autouse fixtures in test_chat_sse.py (their setup resolves
+    PROJECTS_DIR at a different point in fixture ordering, which only diverges
+    during full-suite collection) and introduces fresh cross-contamination.
+    The suite is deterministically green run cleanly; the flaky chat-tools
+    failures originate from a CONCURRENT process touching backend/tests during a
+    run (see the QA-agent / no-scratch-tests memory), not an in-process leak.
     """
     d = tmp_path / "projects"
     d.mkdir()

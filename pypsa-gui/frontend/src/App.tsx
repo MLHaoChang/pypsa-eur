@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Toaster } from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { FailureInfo } from './api/types'
 import AppHeader from './layout/AppHeader'
 import ProjectTabs from './layout/ProjectTabs'
 import Sidebar from './layout/Sidebar'
@@ -21,14 +22,18 @@ import IssuesPanel from './pages/IssuesPanel'
 import OverviewPanel from './pages/OverviewPanel'
 import ScenariosPanel from './pages/ScenariosPanel'
 import CompareView from './pages/CompareView'
+import SolveQueuePanel from './pages/SolveQueuePanel'
 import CommandPalette from './components/CommandPalette'
+import ShortcutsHelp from './components/ShortcutsHelp'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import ChatPanel from './components/ChatPanel'
 import { useUIStore, type SlidePanel } from './store/uiStore'
 import { networkApi } from './api/network'
 import { projectsApi } from './api/projects'
 import { simulationApi, createLogStream } from './api/simulation'
 import { invalidateNetworkQueries } from './utils/projectActions'
+import { nk } from './utils/queryKeys'
 import { appLog, useSimulationStore } from './store/simulationStore'
 
 // Top-level boundary so any render error in the header/tabs/sidebar/etc. shows
@@ -96,6 +101,10 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   capacityBounds: { eyebrow: 'SIMULATION', title: 'Capacity bounds' },
   issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
   results:    { eyebrow: 'SIMULATION', title: 'Results' },
+  solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
+  // Chatbot integration v6 (Phase 3). Half-width by default; the panel
+  // body handles its own layout (message list + composer + cost meter).
+  chat:       { eyebrow: 'ASSISTANT',  title: 'Chat assistant' },
 }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
@@ -118,6 +127,8 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     // PANEL_META stay exhaustive; don't re-point the triggers back here.
     case 'compare':    return <CompareView />
     case 'capacityBounds': return <CapacityBoundsEditor />
+    case 'solveQueue': return <SolveQueuePanel />
+    case 'chat':       return <ChatPanel />
     default:           return null
   }
 }
@@ -173,6 +184,7 @@ export default function App() {
   }, [density])
   const qc = useQueryClient()
   const [recoveryAttempted, setRecoveryAttempted] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
 
   // Backend project list — used in two places: (1) prune recents of names that
   // no longer exist on disk (after a delete from another tab), (2) seed
@@ -218,7 +230,14 @@ export default function App() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('mode') === 'new') {
       networkApi.resetNetwork().then(() => {
-        qc.invalidateQueries()
+        // Scope to the active project's network + results roots rather than a
+        // bare `invalidateQueries()` (which nuked EVERY resident project's
+        // cache). `?mode=new` discards the current in-memory network, so the
+        // active project's tables/results are what went stale; other open
+        // projects' caches must survive for B8 instant-switch. `projects` is
+        // refreshed by invalidateNetworkQueries (it stays global).
+        invalidateNetworkQueries(qc, currentProject)
+        qc.invalidateQueries({ queryKey: nk(currentProject, 'results') })
       }).catch(() => {/* noop — page is still usable */})
       try { localStorage.removeItem('network-diagram:default:state') } catch { /* noop */ }
       window.history.replaceState({}, '', window.location.pathname)
@@ -269,14 +288,33 @@ export default function App() {
         cleanup = createLogStream(
           (line) => useSimulationStore.getState().appendLog(line),
           (data) => {
-            const d = data as { status?: string; objective?: number | null; solve_time?: number | null }
+            const d = data as {
+              status?: string; objective?: number | null; solve_time?: number | null
+              condition?: string | null; failure?: FailureInfo | null
+            }
             const finalStatus = d.status === 'completed' ? 'completed'
               : d.status === 'aborted' ? 'aborted' : 'failed'
             const s = useSimulationStore.getState()
             s.setStatus(finalStatus)
             s.setResult(d.objective ?? null, d.solve_time ?? null)
-            qc.invalidateQueries({ queryKey: ['results'] })
-            qc.invalidateQueries({ queryKey: ['simulationStatus'] })
+            // Surface the failure card on the reload-reconnect path too, so a
+            // solve that fails after a browser refresh is just as legible as
+            // one that fails in-session (mirrors AppHeader's done handler).
+            if (finalStatus === 'failed') {
+              const fail = d.failure ?? null
+              s.setLastFailure(fail)
+              if (fail) {
+                const ui = useUIStore.getState()
+                if (ui.activeSlidePanel == null || ui.activeSlidePanel === 'issues') {
+                  ui.setSlidePanel('issues')
+                }
+              }
+            }
+            // getState() (not the closure `currentProject`) — this done
+            // handler fires long after mount; read the live active project.
+            const proj = useUIStore.getState().currentProject
+            qc.invalidateQueries({ queryKey: nk(proj, 'results') })
+            qc.invalidateQueries({ queryKey: nk(proj, 'simulationStatus') })
           },
           (reason) => {
             useSimulationStore.getState().setStatus('failed')
@@ -348,7 +386,7 @@ export default function App() {
         appLog('INFO', `Auto-recovering project '${currentProject}' (backend was empty)`)
         await projectsApi.load(currentProject)
         if (cancelled) return
-        invalidateNetworkQueries(qc)
+        invalidateNetworkQueries(qc, currentProject)
       } catch (e) {
         appLog('WARN', `Auto-recovery for '${currentProject}' failed: ${String((e as Error)?.message ?? e)}`)
       } finally {
@@ -377,8 +415,18 @@ export default function App() {
       // dismiss the comparison without also closing the Results view; a
       // second Esc then closes the panel as before.
       if (e.key === 'Escape') {
+        if (showShortcuts) { setShowShortcuts(false); return }
         if (compareRailOpen) { setCompareRailOpen(false); return }
         if (activeSlidePanel) setSlidePanel(null)
+      }
+      // "?" opens the keyboard-shortcuts help (unless the user is typing).
+      if (e.key === '?') {
+        const t = e.target as HTMLElement | null
+        if (t?.tagName !== 'INPUT' && t?.tagName !== 'TEXTAREA' && !t?.isContentEditable) {
+          e.preventDefault()
+          setShowShortcuts(true)
+          return
+        }
       }
       const modifier = e.ctrlKey || e.metaKey
       if (!modifier) return
@@ -403,7 +451,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activeSlidePanel, setSlidePanel, compareRailOpen, setCompareRailOpen])
+  }, [activeSlidePanel, setSlidePanel, compareRailOpen, setCompareRailOpen, showShortcuts])
 
   // Click-outside-to-close for slide panels. Mounts a document `mousedown`
   // listener only while a panel is open. Closes the panel unless the click
@@ -527,6 +575,7 @@ export default function App() {
       </div>
 
       <CommandPalette />
+      <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
     </AppErrorBoundary>
   )

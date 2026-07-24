@@ -32,7 +32,10 @@ import pypsa
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services import change_log_service
-from services.dispatch_status import dispatch_status as _classify_dispatch
+from services.dispatch_status import (
+    dispatch_status as _classify_dispatch,
+    network_has_dispatch,
+)
 from services.pypsa_service import PyPSAService
 
 # Reuse the same path-validation pattern as projects.py — snapshots inherit the
@@ -282,10 +285,24 @@ def _create_snapshot_internal(
             if src.exists():
                 shutil.copy2(src, snap_dir / fname)
 
+        # Chatbot uploads (Phase A) — uploads/ travels into the snapshot
+        # bundle. Same best-effort posture as chat.jsonl on Save-As: a
+        # copy failure must not abort the snapshot create.
+        try:
+            from routers.projects import _copy_bundle_dirs
+            _copy_bundle_dirs(project_dir, snap_dir)
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
         snap_nc = snap_dir / "network.nc"
         if snap_nc.exists():
             try:
-                snap_n = pypsa.Network(str(snap_nc))
+                # netCDF/HDF5 is process-global thread-unsafe — take the io
+                # lock for the read (INNER to the pypsa lock already held
+                # above, per the documented ordering). `_classify_dispatch`
+                # runs on the in-memory result, so it stays outside the lock.
+                with PyPSAService.get_netcdf_io_lock():
+                    snap_n = pypsa.Network(str(snap_nc))
                 snap_dispatch_status = _classify_dispatch(snap_n)
             except Exception:
                 # Broad except is intentional: PyPSA / xarray / pandas can
@@ -315,6 +332,30 @@ def _create_snapshot_internal(
         "dispatch_status": snap_dispatch_status,
     }
     _atomic_write_text(snap_dir / "snapshot.json", json.dumps(snap_meta, indent=2))
+
+    # Chatbot integration v6 Phase 4 — include chat.jsonl + chat.jsonl.1 in
+    # the snapshot bundle (C2). Best-effort: snapshot create must not fail
+    # because chat history could not be included. Operates on the ACTIVE
+    # ctx's chat.jsonl when the snapshot is being taken of the same project
+    # as the active binding; for snapshots of non-active projects we read
+    # the file directly from the project directory.
+    try:
+        from services import chat_service
+        active_ctx = PyPSAService.get_active_context()
+        if active_ctx.loaded_project == name:
+            chat_service.handle_snapshot_lineage(active_ctx, snap_dir, mode="create")
+        else:
+            # Non-active snapshot: copy chat.jsonl from the project dir
+            # directly (no active ctx to lock against, so a torn-write race
+            # is possible but acceptable for a checkpoint of a stale project).
+            src_chat = project_dir / chat_service.CHAT_FILENAME
+            if src_chat.exists():
+                shutil.copy2(str(src_chat), str(snap_dir / chat_service.CHAT_FILENAME))
+            src_backup = project_dir / (chat_service.CHAT_FILENAME + ".1")
+            if src_backup.exists():
+                shutil.copy2(str(src_backup), str(snap_dir / (chat_service.CHAT_FILENAME + ".1")))
+    except Exception:  # noqa: BLE001 — never abort snapshot on chat lineage
+        pass
 
     change_log_service.log(
         "snapshot", "Project", name,
@@ -416,6 +457,19 @@ def restore_snapshot(name: str, snapshot_id: str):
                 continue
             _atomic_write_with(project_dir / fname, lambda p, src=src: shutil.copy2(src, p))
 
+        # Chatbot uploads (Phase A) — snapshot restore overwrites the live
+        # uploads dir with the snapshot bundle's copy. `_copy_bundle_dirs`
+        # already rmtree's the destination before copying, so a post-
+        # snapshot session's uploads are dropped (the pre-restore safety
+        # snapshot the route handler created earlier preserves them if the
+        # user wants to undo). Best-effort: a copy failure here must not
+        # abort restore.
+        try:
+            from routers.projects import _copy_bundle_dirs
+            _copy_bundle_dirs(snap_dir, project_dir)
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
         # Reload in-memory network from the restored files. Lock is already
         # held — `reset_network()` and `import_from_netcdf()` are safe to
         # call inside the same `with` block.
@@ -442,11 +496,7 @@ def restore_snapshot(name: str, snapshot_id: str):
     # numbers from the imported netcdf — the exact inconsistency that
     # `load_project` was extended to fix. Mirror the same logic here.
     n_loaded = PyPSAService.get_network()
-    has_dispatch = (
-        (not n_loaded.generators.empty   and not n_loaded.generators_t.p.empty) or
-        (not n_loaded.lines.empty        and not n_loaded.lines_t.p0.empty)     or
-        (not n_loaded.storage_units.empty and not n_loaded.storage_units_t.state_of_charge.empty)
-    )
+    has_dispatch = network_has_dispatch(n_loaded)
     proj_meta = _read_meta(project_dir)
     # Atomic lifecycle hydration via `_state_update` so a concurrent status
     # poll can't observe a half-applied tuple (status="completed" while
@@ -471,6 +521,18 @@ def restore_snapshot(name: str, snapshot_id: str):
     # left the LP/PF result-source toggle and the Lost-Load panel blank even
     # though the netcdf dispatch loaded.
     _restore_results_state(project_dir, name)
+
+    # Chatbot integration v6 Phase 4 — restore chat.jsonl from the snapshot
+    # bundle (C2). Overwrite the active project's chat.jsonl with the snapshot
+    # copy and invalidate the persist_path cache. Best-effort: snapshot restore
+    # must not fail because chat history could not be restored.
+    try:
+        from services import chat_service
+        active_ctx = PyPSAService.get_active_context()
+        if active_ctx.loaded_project == name:
+            chat_service.handle_snapshot_lineage(active_ctx, snap_dir, mode="restore")
+    except Exception:  # noqa: BLE001
+        pass
 
     from routers.network import (
         _ensure_snapshots_cover_user_ts,

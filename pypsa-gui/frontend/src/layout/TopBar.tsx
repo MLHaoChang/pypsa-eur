@@ -7,6 +7,7 @@ import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { saveProjectQuietly } from '../utils/projectActions'
+import { nk } from '../utils/queryKeys'
 
 const BREADCRUMBS: Record<string, string> = {
   '/topology': 'Network / Topology',
@@ -24,7 +25,7 @@ export default function TopBar() {
   const location = useLocation()
   const { status, setStatus, clearLog } = useSimulationStore()
   const { requestBottomTab, currentProject } = useUIStore()
-  const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: networkApi.getMeta, refetchInterval: 10000 })
+  const { data: meta } = useQuery({ queryKey: nk(currentProject, 'meta'), queryFn: networkApi.getMeta, refetchInterval: 10000 })
 
   async function handleRun() {
     if (status === 'running') {

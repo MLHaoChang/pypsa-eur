@@ -17,6 +17,8 @@ import { networkApi } from '../api/network'
 import { resultsApi } from '../api/simulation'
 import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
+import { isRenewableCarrier } from '../utils/carriers'
 import { useSimulationStore } from '../store/simulationStore'
 import { H2Icon } from '../components/AssetIcons'
 import CarrierSelect from '../components/CarrierSelect'
@@ -43,7 +45,13 @@ interface EdgeData extends Record<string, unknown> {
 
 // ── localStorage persistence ───────────────────────────────────────────────────
 const STORAGE_VERSION = 1
-const STORAGE_KEY = 'network-diagram:default:state'
+// Per-project localStorage key, mirroring `layoutCacheKey` (defined later). The
+// `?? '__local__'` is inlined here on purpose: this helper is referenced from
+// module-level functions that run before `layoutCacheKey` is initialised, so it
+// must not depend on it. The no-active-project / offline fallback uses the
+// `__local__` slot.
+const storageKeyFor = (project: string | null): string =>
+  `network-diagram:${project ?? '__local__'}:state`
 
 interface PersistedNode { id: string; canvasX: number; canvasY: number }
 interface PersistedEdge { id: string; waypoints: WP[]; history: WP[][] }
@@ -52,13 +60,14 @@ interface PersistedState {
   nodes: PersistedNode[]; edges: PersistedEdge[]
 }
 
-function loadDiagramState(): PersistedState | null {
+function loadDiagramState(project: string | null): PersistedState | null {
+  const key = storageKeyFor(project)
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(key)
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (!parsed || parsed.version !== STORAGE_VERSION) {
-      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(key)
       return null
     }
     return parsed as PersistedState
@@ -68,9 +77,9 @@ function loadDiagramState(): PersistedState | null {
   }
 }
 
-function saveDiagramState(state: PersistedState): void {
+function saveDiagramState(project: string | null, state: PersistedState): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    localStorage.setItem(storageKeyFor(project), JSON.stringify(state))
   } catch (e) {
     console.warn('Diagram state could not be saved:', e)
   }
@@ -96,23 +105,23 @@ function coercePersistedState(raw: unknown): PersistedState | null {
 }
 
 async function fetchLayoutFor(project: string | null): Promise<PersistedState | null> {
-  if (!project) return loadDiagramState()
+  if (!project) return loadDiagramState(project)
   try {
     return coercePersistedState(await projectsApi.getLayout(project))
   } catch {
     // Server unreachable — fall back to whatever's in localStorage so the
     // user still sees *a* layout rather than an algorithm reset.
-    return loadDiagramState()
+    return loadDiagramState(project)
   }
 }
 
 function persistLayoutFor(project: string | null, state: PersistedState): void {
-  if (!project) { saveDiagramState(state); return }
+  if (!project) { saveDiagramState(project, state); return }
   projectsApi.putLayout(project, state as unknown as Record<string, unknown>)
     .catch(() => {
       // Server write failed — keep the layout in localStorage so it isn't
       // lost; it'll re-sync to the server on the next successful save.
-      saveDiagramState(state)
+      saveDiagramState(project, state)
     })
 }
 
@@ -129,7 +138,7 @@ function persistLayoutFor(project: string | null, state: PersistedState): void {
 // localStorage so the in-flight payload is never lost even if every network
 // path fails.
 function persistLayoutOnUnload(project: string | null, state: PersistedState): void {
-  saveDiagramState(state)  // safety net first, before any network attempt
+  saveDiagramState(project, state)  // safety net first, before any network attempt
   if (!project) return
   const url = `/api/projects/${encodeURIComponent(project)}/layout`
   const body = JSON.stringify(state)
@@ -203,7 +212,7 @@ export async function flushPendingLayoutToServer(project: string | null): Promis
     // No project + no in-memory cache → fall back to localStorage. This
     // catches the "user dragged in a previous session, never created a
     // project, hits Save without opening the canvas" edge case.
-    state = loadDiagramState() ?? undefined
+    state = loadDiagramState(project) ?? undefined
     source = 'localStorage fallback'
   }
   if (!state) {
@@ -212,7 +221,7 @@ export async function flushPendingLayoutToServer(project: string | null): Promis
   const nodes = state.nodes.length
   const edges = state.edges.length
   if (!project) {
-    saveDiagramState(state)
+    saveDiagramState(project, state)
     return { status: 'local', nodes, edges }
   }
   try {
@@ -222,7 +231,7 @@ export async function flushPendingLayoutToServer(project: string | null): Promis
     layoutMemCache.set(layoutCacheKey(project), state)
     return { status: 'server', nodes, edges }
   } catch (e) {
-    saveDiagramState(state)
+    saveDiagramState(project, state)
     console.warn('[layout-flush] PUT failed → wrote to localStorage instead', { project, error: e })
     return { status: 'local', nodes, edges }
   }
@@ -420,14 +429,7 @@ function getLinkColor(carrier: string, fallbackIdx: number): string {
 }
 
 // ── Asset category helpers ─────────────────────────────────────────────────────
-const RENEWABLE_KEYWORDS = ['wind', 'solar', 'pv', 'ror', 'run-of-river', 'geothermal', 'offwind', 'onwind', 'wave', 'tidal', 'rooftop']
-
-function isRenewableCarrier(carrier: string): boolean {
-  const c = carrier.toLowerCase()
-  // hydro without pump/storage is renewable; pump/storage goes under Storage
-  if (c.includes('hydro') && !c.includes('pump') && !c.includes('storage')) return true
-  return RENEWABLE_KEYWORDS.some(k => c.includes(k))
-}
+// isRenewableCarrier imported from utils/carriers (single null-safe source).
 
 // Per-category badges floating around each bus on the diagram. Pictograms
 // match the left-sidebar palette so the same glyph means the same thing
@@ -2069,25 +2071,25 @@ export default function TopologyCanvas() {
   // the toggle stays hidden). Refetch via the SSE done-handler invalidation
   // ('results' prefix matches this key).
   const { data: acPfStatus } = useQuery({
-    queryKey: ['results', 'ac_pf', 'status'], queryFn: resultsApi.getAcPfStatus,
+    queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus,
   })
   const acPfAvailable = !!acPfStatus?.available
   // Snapshots payload — used to look up the ISO key for the currently-selected
   // snapshot so we can correlate it to the convergence map.
-  const { data: snap } = useQuery({ queryKey: ['snapshots'], queryFn: networkApi.getSnapshots })
+  const { data: snap } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots })
   const currentSnapIso = snap?.snapshots?.[Math.min(resultsSnapshotIdx, (snap?.count ?? 1) - 1)] ?? ''
   const currentSnapConverged = !acPfAvailable || resultSource !== 'ac_pf'
     ? true
     : (acPfStatus?.converged_per_snapshot?.[currentSnapIso] ?? true)
 
-  const { data: buses = [] }      = useQuery({ queryKey: ['buses'],         queryFn: networkApi.getBuses })
-  const { data: lines = [] }      = useQuery({ queryKey: ['lines'],         queryFn: networkApi.getLines })
-  const { data: links = [] }      = useQuery({ queryKey: ['links'],         queryFn: networkApi.getLinks })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'], queryFn: networkApi.getTransformers })
-  const { data: generators = [] } = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators })
-  const { data: loads = [] }      = useQuery({ queryKey: ['loads'],         queryFn: networkApi.getLoads })
-  const { data: sus = [] }        = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
-  const { data: stores = [] }     = useQuery({ queryKey: ['stores'],        queryFn: networkApi.getStores })
+  const { data: buses = [] }      = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses })
+  const { data: lines = [] }      = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
+  const { data: links = [] }      = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers })
+  const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const { data: loads = [] }      = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
+  const { data: sus = [] }        = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: stores = [] }     = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
 
   const saveBusMut = useMutation({
     mutationFn: ({ name, fields }: { name: string; fields: Partial<Bus> }) => {
@@ -2097,7 +2099,7 @@ export default function TopologyCanvas() {
       // schema defaults. The canvas BusEditor only surfaces a subset of
       // bus fields; without the spread, editing voltage on the schematic
       // would wipe everything else. Same pattern as PropertiesPanel.BusPanel.
-      const cachedBuses = queryClient.getQueryData<Bus[]>(['buses']) ?? []
+      const cachedBuses = queryClient.getQueryData<Bus[]>(nk(useUIStore.getState().currentProject, 'buses')) ?? []
       const current = cachedBuses.find(b => b.name === name)
       if (!current) {
         // Refuse the partial PUT on a cache miss — degrading to `fields` alone
@@ -2110,7 +2112,7 @@ export default function TopologyCanvas() {
       const body: Partial<Bus> = { ...current, ...fields }
       return networkApi.updateBus(name, body)
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['buses'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update bus'),
   })
 
@@ -2131,11 +2133,20 @@ export default function TopologyCanvas() {
   // off the epoch instead means: re-apply the saved layout exactly once per
   // freshly-loaded layout document, while uncached buses are ALWAYS seeded.
   const layoutSeededEpoch = useRef(-1)
+  // Mirror of `layoutSeededEpoch` for the edge-sync effect. When a fresh layout
+  // is loaded (project switch bumps `layoutEpoch` + repoints `savedStateRef`),
+  // the next edge-sync makes the new saved state AUTHORITATIVE — dropping
+  // waypoints for any edge ID not present in it, so a stale in-memory edge
+  // object (same ID across projects, e.g. `line-AC1`) can't keep the previous
+  // project's waypoints. On plain edge-signature changes WITHIN the same epoch
+  // (v_nom colour refresh, add/remove), in-memory waypoints still win so an
+  // in-session drag is never clobbered.
+  const edgeSeededEpoch = useRef(-1)
   // Seed from the module-level cache first (survives a view-switch unmount),
   // falling back to localStorage for the unsaved / no-project case. This makes
   // the schematic correct on the FIRST render after a map→blank switch.
   const savedStateRef = useRef<PersistedState | null>(
-    layoutMemCache.get(layoutCacheKey(currentProject)) ?? loadDiagramState(),
+    layoutMemCache.get(layoutCacheKey(currentProject)) ?? loadDiagramState(currentProject),
   )
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -2169,31 +2180,39 @@ export default function TopologyCanvas() {
     // project's stale positions can't leak onto same-named buses if the
     // `['buses']` refetch resolves before our layout fetch does.
     posCache.current = {}
-    // Seed from the module cache immediately (covers a same-component project
-    // switch, where savedStateRef wasn't re-initialised by a remount) so the
-    // next render already has the right layout; the server fetch reconciles.
-    const cached = layoutMemCache.get(layoutCacheKey(currentProject))
-    if (cached) {
-      savedStateRef.current = cached
-      setLayoutEpoch(e => e + 1)
-    }
+    // Re-point savedStateRef at the NEW project SYNCHRONOUSLY: module cache →
+    // the new project's per-project localStorage → null. This is authoritative
+    // — it must NEVER leave the previous project's value in place, or the new
+    // project inherits the old one's edge waypoints (lines/links/transformers
+    // all share `EdgeData.waypoints`) until the async fetch resolves, and
+    // worse keeps them if the server has no layout. Bump the epoch so the
+    // node-sync (allRfNodes) and edge-sync effects re-apply the new state.
+    savedStateRef.current =
+      layoutMemCache.get(layoutCacheKey(currentProject))
+      ?? loadDiagramState(currentProject)
+      ?? null
+    setLayoutEpoch(e => e + 1)
     let cancelled = false
     fetchLayoutFor(currentProject).then(ps => {
       if (cancelled) return
-      // Only act when the server returned a usable layout. When it returns
-      // nothing (a fresh project, or a layout that hasn't round-tripped to
-      // layout.json yet), the synchronous cache-seed above already applied the
-      // right positions — re-wiping posCache + bumping the epoch here would
-      // just force a redundant re-seed. Never downgrade savedStateRef to null
-      // and strand the schematic at the algorithm default.
-      if (ps) {
-        layoutMemCache.set(layoutCacheKey(currentProject), ps)
-        savedStateRef.current = ps
-        posCache.current = {}
-        // Bumping the epoch makes `layoutSeededEpoch.current !== layoutEpoch`,
-        // so the next allRfNodes pass re-applies this freshly-loaded layout.
-        setLayoutEpoch(e => e + 1)
-      }
+      // The server is authoritative for a project's layout. Apply the fetched
+      // layout when present; otherwise fall back to the new project's own
+      // sources — module cache (an in-session drag not yet round-tripped to
+      // layout.json) then per-project localStorage (offline / not-yet-synced)
+      // — else null. So a project with no/empty server layout shows ITS OWN
+      // state or none, never the previous project's. All fallbacks are keyed to
+      // `currentProject`, so none can be the prior project's value. Always
+      // re-assign + bump the epoch.
+      const resolved = ps
+        ?? layoutMemCache.get(layoutCacheKey(currentProject))
+        ?? loadDiagramState(currentProject)
+        ?? null
+      if (resolved) layoutMemCache.set(layoutCacheKey(currentProject), resolved)
+      savedStateRef.current = resolved
+      posCache.current = {}
+      // Bumping the epoch makes `layoutSeededEpoch.current !== layoutEpoch`,
+      // so the next allRfNodes pass re-applies this freshly-loaded layout.
+      setLayoutEpoch(e => e + 1)
       // Mark as loaded AFTER the application succeeds — the
       // strict-mode early-return at the top of the effect now correctly
       // gates on "we already wrote the right state", not on "we already
@@ -2371,7 +2390,7 @@ export default function TopologyCanvas() {
     mutationFn: (params: { name: string; bus0: string; bus1: string; carrier: 'AC' | 'DC'; s_nom: number; x: number; length: number }) =>
       networkApi.createLine({ name: params.name, bus0: params.bus0, bus1: params.bus1, carrier: params.carrier, s_nom: params.s_nom, x: params.x, length: params.length, r: 0 } as Partial<Line>),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['lines'] })
+      queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       toast.success('Line added')
     },
     onError: (e: Error) => toast.error(e.message),
@@ -2386,7 +2405,7 @@ export default function TopologyCanvas() {
         v_nom_0: params.v_nom_0, v_nom_1: params.v_nom_1,
       } as Partial<Transformer>),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transformers'] })
+      queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'transformers') })
       toast.success('Transformer added')
     },
     onError: (e: Error) => toast.error(e.message),
@@ -2664,30 +2683,53 @@ export default function TopologyCanvas() {
     const allRfEdges = [...rfNetworkEdges, ...rfAssetEdges]
     // Include color in sig so edge styles update when v_nom changes (even if IDs are stable)
     const sig = allRfEdges.map(e => `${e.id}:${(e.data as EdgeData).color}`).sort().join('|')
-    if (sig === prevEdgeSig.current) return
+    // A fresh layout load (project switch) advances `layoutEpoch` and repoints
+    // `savedStateRef`; reconcile even when the edge signature is unchanged so
+    // the new project's saved state (or absence of it) is applied authoritatively.
+    const freshLayout = edgeSeededEpoch.current !== layoutEpoch
+    if (sig === prevEdgeSig.current && !freshLayout) return
     prevEdgeSig.current = sig
+    edgeSeededEpoch.current = layoutEpoch
+    const saved = savedStateRef.current
     setEdges(prev => {
       const wpMap: Record<string, WP[]> = {}
       const histMap: Record<string, WP[][]> = {}
       // Seed from saved state (only affects edges with no current in-memory state)
-      if (savedStateRef.current) {
-        savedStateRef.current.edges.forEach(pe => {
+      if (saved) {
+        saved.edges.forEach(pe => {
           if (pe.waypoints?.length) wpMap[pe.id] = pe.waypoints
           if (pe.history?.length > 1) histMap[pe.id] = pe.history
         })
       }
-      // Current in-memory state always wins over saved state
-      prev.forEach(e => {
-        const d = (e.data as unknown as EdgeData)
-        if (d?.waypoints?.length) wpMap[e.id] = d.waypoints
-        if (d?.history?.length > 1) histMap[e.id] = d.history
-      })
+      // Current in-memory state wins over saved state — EXCEPT on a fresh
+      // layout load (project switch / reload), where the NEW project's saved
+      // state is AUTHORITATIVE and the in-memory `prev` edges are stale
+      // leftovers from the PREVIOUS project. On `freshLayout` we therefore do
+      // NOT carry `prev` waypoints over at all — `wpMap`/`histMap` are seeded
+      // purely from the new project's saved edges above, so an edge with the
+      // same id in both projects (e.g. a transformer `tr-foo`) but NO saved
+      // waypoints in the new project correctly renders straight, instead of
+      // inheriting the old project's bend (which dragged the transformer
+      // symbol — drawn at the edge-path midpoint — off into empty space).
+      // The earlier guard `!savedIds.has(e.id)` only dropped IDs ABSENT from
+      // saved; but `scheduleSave` persists every edge with `waypoints: []`, so
+      // a waypointless transformer IS in saved → the absent-check missed it.
+      // Skipping the whole carry-over on freshLayout is the complete fix.
+      // On intra-project signature changes (`!freshLayout`) in-memory always
+      // wins so an in-session drag is never clobbered.
+      if (!freshLayout) {
+        prev.forEach(e => {
+          const d = (e.data as unknown as EdgeData)
+          if (d?.waypoints?.length) wpMap[e.id] = d.waypoints
+          if (d?.history?.length > 1) histMap[e.id] = d.history
+        })
+      }
       return allRfEdges.map(e => ({
         ...e, data: { ...(e.data as object), waypoints: wpMap[e.id] ?? [], history: histMap[e.id] ?? [[]] },
       })) as Edge<EdgeData>[]
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rfNetworkEdges, rfAssetEdges])
+  }, [rfNetworkEdges, rfAssetEdges, layoutEpoch])
 
   // ReactFlow's handle-drag onConnect: route to the same dialog Connect
   // Mode uses, so the line is persisted via createLineMut instead of just
@@ -2849,7 +2891,7 @@ export default function TopologyCanvas() {
   }, [buses, generators, loads, sus, stores, setNodes, setEdges, scheduleSave])
 
   const handleResetDiagram = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY)
+    try { localStorage.removeItem(storageKeyFor(currentProject)) } catch { /* noop */ }
     savedStateRef.current = null
     // Mark the current epoch as already-seeded: this handler imperatively
     // re-seeds posCache via runLayout below, and savedStateRef is now null,
@@ -2876,7 +2918,7 @@ export default function TopologyCanvas() {
     scheduleSave()
     toast.success('Diagram reset — positions and waypoints cleared')
     setTimeout(() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 }), 50)
-  }, [buses, generators, loads, sus, stores, setNodes, setEdges, scheduleSave, layoutEpoch])
+  }, [buses, generators, loads, sus, stores, setNodes, setEdges, scheduleSave, layoutEpoch, currentProject])
 
   const onNodeDoubleClick = useCallback((e: React.MouseEvent, node: Node) => {
     if (node.id.startsWith('assetgrp-')) return
@@ -3025,10 +3067,10 @@ export default function TopologyCanvas() {
       try {
         if (isLink) {
           await networkApi.deleteLink(name)
-          queryClient.invalidateQueries({ queryKey: ['links'] })
+          queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'links') })
         } else {
           await networkApi.deleteLine(name)
-          queryClient.invalidateQueries({ queryKey: ['lines'] })
+          queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
         }
       } catch (err) {
         toast.error(`Delete failed: ${(err as Error).message}`)
@@ -3209,7 +3251,7 @@ export default function TopologyCanvas() {
                     while (existing.has(name)) { i += 1; name = `bus_${i}` }
                     networkApi.createBus({ name, v_nom: 1, carrier: 'AC', x: 0, y: 0 } as Bus)
                       .then(() => {
-                        queryClient.invalidateQueries({ queryKey: ['buses'] })
+                        queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
                         setSelectedComponent({ type: 'Bus', name })
                       })
                       .catch((e: { response?: { data?: { detail?: string } } }) => {
@@ -3445,7 +3487,8 @@ export default function TopologyCanvas() {
               setContextMenu(null)
               networkApi.deleteBusCascade(busName).then(() => {
                 const keys = ['buses', 'lines', 'links', 'generators', 'loads', 'storage_units', 'stores', 'transformers', 'carriers', 'snapshots', 'undoInfo']
-                keys.forEach(k => queryClient.invalidateQueries({ queryKey: [k] }))
+                const proj = useUIStore.getState().currentProject
+                keys.forEach(k => queryClient.invalidateQueries({ queryKey: nk(proj, k) }))
                 toast.custom(
                   (t) => (
                     <div style={{ opacity: t.visible ? 1 : 0, transition: 'opacity 0.15s' }}
@@ -3456,7 +3499,7 @@ export default function TopologyCanvas() {
                         onClick={() => {
                           toast.dismiss(t.id)
                           networkApi.undo().then(() => {
-                            keys.forEach(k => queryClient.invalidateQueries({ queryKey: [k] }))
+                            keys.forEach(k => queryClient.invalidateQueries({ queryKey: nk(proj, k) }))
                             toast.success('Undone')
                           }).catch((e: Error) => toast.error(e.message))
                         }}

@@ -204,6 +204,10 @@ export interface SolverConfig {
   // magnitude (e.g. annualised CAPEX vs marginal_cost) and the solver
   // reports numerical-conditioning warnings. Default 1.0 = identity.
   user_objective_scale: number
+  // When true, the solver auto-picks the objective scale from the model's
+  // cost-coefficient spread, overriding user_objective_scale. Engages only for
+  // ill-conditioned models; a no-op otherwise. Default false.
+  auto_objective_scale: boolean
   // Solve strategy. 'full' = single LP over all snapshots (default).
   // 'rolling' = PyPSA optimize_with_rolling_horizon, splitting into
   // `rolling_horizon`-sized chunks with `rolling_overlap` SoC carry —
@@ -230,9 +234,25 @@ export interface SolverConfig {
   mip_gap: number
   mip_time_limit_s: number
 }
+/**
+ * Actionable failure card for a finished solve. Produced by the backend's
+ * failure taxonomy (services/failure_taxonomy.py); null on success/abort.
+ * `category` is a stable machine token; `title`/`hint` are user-facing.
+ */
+export interface FailureInfo {
+  category: string
+  title: string
+  hint: string
+  detail: string
+}
 export interface SimulationStatus {
   running: boolean; status: string; condition: string | null
   objective: number | null; solve_time: number | null
+  failure?: FailureInfo | null
+  // Dispatch freshness: 'fresh' (results match topology), 'stale' (results
+  // exist but columns diverge), 'none' (no/cleared results). A topology edit on
+  // a solved network clears it → the UI flags "results invalidated, re-run".
+  dispatch?: 'fresh' | 'stale' | 'none'
 }
 export interface ValidationIssue {
   severity: 'error' | 'warning'

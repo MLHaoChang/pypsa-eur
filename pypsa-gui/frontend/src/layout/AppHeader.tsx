@@ -5,9 +5,11 @@ import { networkApi } from '../api/network'
 import { simulationApi, createLogStream } from '../api/simulation'
 import { projectsApi } from '../api/projects'
 import { downloadProjectBundle, saveProjectQuietly, type BundleSaveResult } from '../utils/projectActions'
+import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from '../hooks/useSolveQueue'
+import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore } from '../store/uiStore'
-import type { Bus, Generator, Line, Link, Load, StorageUnit } from '../api/types'
+import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
 import toast from 'react-hot-toast'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
@@ -128,7 +130,7 @@ export default function AppHeader() {
           queryClient.invalidateQueries({ queryKey: ['projects'] })
           queryClient.invalidateQueries({ queryKey: ['compare-state', currentProject] })
           queryClient.invalidateQueries({ queryKey: ['results-summary', currentProject] })
-          queryClient.invalidateQueries({ queryKey: ['meta'] })
+          queryClient.invalidateQueries({ queryKey: nk(currentProject, 'meta') })
           queryClient.invalidateQueries({ queryKey: ['changelog'] })
           toast.success(`Renamed to '${trimmed}'`)
         })
@@ -176,13 +178,13 @@ export default function AppHeader() {
 
   const searchActive = debouncedSearch.trim().length >= 2
 
-  const { data: buses = [] }      = useQuery({ queryKey: ['buses'],         queryFn: networkApi.getBuses })
-  const { data: lines = [] }      = useQuery({ queryKey: ['lines'],         queryFn: networkApi.getLines })
-  const { data: generators = [] } = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators })
-  const { data: sus = [] }        = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
-  const { data: loads = [] }      = useQuery({ queryKey: ['loads'],         queryFn: networkApi.getLoads })
-  const { data: links = [] }      = useQuery({ queryKey: ['links'],         queryFn: networkApi.getLinks })
-  const { data: meta }            = useQuery({ queryKey: ['meta'],          queryFn: networkApi.getMeta, refetchInterval: 30000 })
+  const { data: buses = [] }      = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses })
+  const { data: lines = [] }      = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
+  const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const { data: sus = [] }        = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: loads = [] }      = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
+  const { data: links = [] }      = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
+  const { data: meta }            = useQuery({ queryKey: nk(currentProject, 'meta'),          queryFn: networkApi.getMeta, refetchInterval: 30000 })
 
   const searchResults = useMemo((): SearchResult[] => {
     if (!searchActive) return []
@@ -264,7 +266,7 @@ export default function AppHeader() {
   // queryClient is declared at the top of the component (next to the
   // useUIStore destructure) so commitName can use it for cache invalidation.
   const { data: undoInfoData } = useQuery({
-    queryKey: ['undoInfo'],
+    queryKey: nk(currentProject, 'undoInfo'),
     queryFn: networkApi.undoInfo,
     refetchInterval: 3000,
     staleTime: 0,
@@ -278,7 +280,8 @@ export default function AppHeader() {
   const undoMut = useMutation({
     mutationFn: networkApi.undo,
     onSuccess: (data) => {
-      ALL_NETWORK_KEYS.forEach(k => queryClient.invalidateQueries({ queryKey: [k] }))
+      const proj = useUIStore.getState().currentProject
+      ALL_NETWORK_KEYS.forEach(k => queryClient.invalidateQueries({ queryKey: nk(proj, k) }))
       toast.success(`Undone · ${data.remaining} step${data.remaining !== 1 ? 's' : ''} left`)
     },
     onError: () => toast.error('Nothing to undo'),
@@ -379,7 +382,9 @@ export default function AppHeader() {
       // "Saved Xm ago" without polling the backend.
       markProjectSaved(result.saved)
       // Depth counter polls every 3s; force-refresh so the badge clears now.
-      queryClient.invalidateQueries({ queryKey: ['undoInfo'] })
+      // Scope to the just-saved project (which becomes the active project on a
+      // first save) so a background project's depth badge isn't disturbed.
+      queryClient.invalidateQueries({ queryKey: nk(result.saved, 'undoInfo') })
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       // The compare view caches per-project state keyed ['compare-state', name].
       // A save changes the saved-state the compare endpoint reads from disk —
@@ -457,7 +462,7 @@ export default function AppHeader() {
   // Polled at 4 s so a change made in Solver Settings shows up promptly without
   // hammering the backend.
   const { data: solverCfg } = useQuery({
-    queryKey: ['solverConfig'],
+    queryKey: nk(currentProject, 'solverConfig'),
     queryFn: simulationApi.getSolverConfig,
     refetchInterval: 4000,
   })
@@ -480,115 +485,208 @@ export default function AppHeader() {
   // SSE cleanup ref — close the stream on Abort / unmount so a long-lived
   // EventSource doesn't leak across re-renders.
   const esCleanupRef = useRef<(() => void) | null>(null)
+  // Bounded retry for the rare "auto-attached the SSE a hair before the
+  // dispatcher set the active ctx's log_queue" race (job.status flips to
+  // 'running' in the queue a few statements before ctx_state_update sets
+  // log_queue, so a 1.5s poll can land in that microsecond gap). On an early
+  // stream error we reset the attach guard so the next poll re-attaches —
+  // bounded so a genuinely dead stream still surfaces as 'failed'.
+  const attachRetryRef = useRef<{ id: number; tries: number }>({ id: -1, tries: 0 })
+  // Latch covering the idle-click enqueue path (pre-save await + enqueue), so a
+  // fast double-click can't stack two jobs before enqueue.isPending flips.
+  const enqueuingRef = useRef(false)
   const qcRef = useQueryClient()
 
-  const handleRun = async () => {
-    if (isRunning) {
-      await simulationApi.abort()
+  // ── Solve queue wiring ───────────────────────────────────────────────────
+  // Run now ENQUEUES the foreground project: the FIFO dispatcher solves it
+  // immediately if the slot is free, or queues it behind a running solve.
+  const { data: solveQueue } = useSolveQueue()
+  const enqueue = useEnqueueSolve()
+  const abort = useAbortJob()
+  // The current project's active (queued|running) queue job, if any. Drives
+  // the smart Run/Queued/Abort button + the status pill.
+  const myJob = currentProject ? activeJobForProject(solveQueue, currentProject) : undefined
+  // Tracks the job id we've already opened the SSE for, so the auto-attach
+  // effect opens the stream EXACTLY once per run (not on every 1.5s poll).
+  const attachedJobRef = useRef<number | null>(null)
+
+  // The single SSE-open closure, shared by the auto-attach effect (and kept
+  // identical to the historical direct-/run done/err logic). `runLabel` is
+  // read via the ref-captured closure value at attach time. On `done` we also
+  // invalidate ['solveQueue'] so the queue UI reflects the finished job.
+  const openLogStream = useCallback((label: string, jobId?: number) => {
+    esCleanupRef.current?.()
+    esCleanupRef.current = createLogStream(
+      (line) => {
+        // First real line confirms the stream is live — reset the retry budget
+        // for this job so a LATE blip doesn't consume a re-attach.
+        if (jobId != null && attachRetryRef.current.id === jobId) {
+          attachRetryRef.current.tries = 0
+        }
+        appendLog(line)
+      },
+      (data) => {
+        const d = data as {
+          status?: string; objective?: number | null; solve_time?: number | null
+          condition?: string | null; failure?: FailureInfo | null
+        }
+        const finalStatus = d.status === 'completed' ? 'completed'
+          : d.status === 'aborted' ? 'aborted'
+          : 'failed'
+        setStatus(finalStatus)
+        if (finalStatus === 'completed') {
+          appLog('INFO',
+            `${label} completed: objective=${d.objective ?? 'n/a'}, solve_time=${d.solve_time ?? 'n/a'} s`,
+          )
+          // Invalidate every result query so the Results panel and any open
+          // result charts re-fetch the freshly populated DataFrames. Read the
+          // live active project via getState() — this done handler fires
+          // asynchronously, long after the closure was created.
+          const proj = useUIStore.getState().currentProject
+          qcRef.invalidateQueries({ queryKey: nk(proj, 'results') })
+          qcRef.invalidateQueries({ queryKey: nk(proj, 'simulationStatus') })
+        } else if (finalStatus === 'failed') {
+          // Surface the actionable failure card from the backend taxonomy:
+          // store it (drives the IssuesPanel banner), auto-open the Issues
+          // panel, and toast the headline. getState() — same async-closure
+          // reasoning as the completed branch above.
+          const fail = d.failure ?? null
+          appLog('ERROR', fail ? `${label} failed — ${fail.title}: ${fail.hint}` : `${label} failed`)
+          useSimulationStore.getState().setLastFailure(fail)
+          if (fail) {
+            // Don't yank the user out of a panel they deliberately opened mid-
+            // solve; only auto-open Issues when nothing (or Issues) is showing.
+            const ui = useUIStore.getState()
+            if (ui.activeSlidePanel == null || ui.activeSlidePanel === 'issues') {
+              ui.setSlidePanel('issues')
+            }
+            toast.error(`Solve failed — ${fail.title}. See the Issues panel.`, { duration: 6000 })
+          }
+        }
+        qcRef.invalidateQueries({ queryKey: ['solveQueue'] })
+        esCleanupRef.current = null
+      },
+      // SSE error recovery: if the stream dies before `done` (browser sleep,
+      // backend crash, network blip past the auto-retry window), surface
+      // the failure and unlock the UI so the user can Run again instead of
+      // being stuck in the "Abort" state forever.
+      (reason) => {
+        esCleanupRef.current = null
+        // Self-heal the attach-before-log_queue race: if this stream died early
+        // (no `done`) while THIS job is still the running one, reset the attach
+        // guard so the next poll re-opens it — by then log_queue is set. Bounded
+        // to 3 tries; past that, a genuinely dead stream surfaces as 'failed'.
+        if (jobId != null && attachRetryRef.current.id === jobId
+            && attachRetryRef.current.tries < 3) {
+          attachRetryRef.current.tries += 1
+          attachedJobRef.current = null  // allow the effect to re-attach
+          appLog('WARN', `${label}: log stream not ready yet — retrying (${attachRetryRef.current.tries}/3)…`)
+          return
+        }
+        setStatus('failed')
+        appLog('ERROR', `${label}: ${reason}`)
+        qcRef.invalidateQueries({ queryKey: ['solveQueue'] })
+      },
+    )
+  }, [appendLog, setStatus, appLog, qcRef])
+
+  // Auto-attach the SSE log the moment the CURRENT project's queue job starts
+  // running. `/log_stream` captures _state["log_queue"] at open, so we MUST
+  // gate on status 'running' (the dispatcher sets log_queue on the active ctx
+  // only then) — opening while 'queued' would capture a stale/None queue. The
+  // history-replay buffer backfills any lines emitted in the ≤1.5s before the
+  // poll catches the transition. The ref guard makes this fire once per run.
+  useEffect(() => {
+    if (!myJob) {
+      // No active job for this project — clear the guard so the NEXT run of
+      // this project (a new job id) attaches afresh.
+      attachedJobRef.current = null
+      return
+    }
+    if (myJob.status === 'running' && attachedJobRef.current !== myJob.id) {
+      attachedJobRef.current = myJob.id
+      // Seed the retry budget for this job on the first attach (a re-attach
+      // after an early-error keeps the same id and decrements the budget).
+      if (attachRetryRef.current.id !== myJob.id) {
+        attachRetryRef.current = { id: myJob.id, tries: 0 }
+      }
+      if (status !== 'running') {
+        clearLog()
+        setStatus('running')
+      }
+      requestBottomTab('Log')
+      openLogStream(runLabel, myJob.id)
+    }
+  }, [myJob, status, runLabel, openLogStream, clearLog, setStatus, requestBottomTab])
+
+  // The current project is actively solving (its job runs, or a legacy direct
+  // /run set status='running'). Drives the Abort affordance.
+  const jobRunning = myJob?.status === 'running'
+  const jobQueued = myJob?.status === 'queued'
+  const busy = jobRunning || jobQueued || isRunning
+
+  const handleRunButton = async () => {
+    // 1. RUNNING (queue job or legacy /run) → abort.
+    if (jobRunning || isRunning) {
+      if (myJob) {
+        await abort.mutateAsync(myJob.id)
+      } else {
+        // Legacy path: a solve started via direct /run before this change.
+        await simulationApi.abort()
+      }
       esCleanupRef.current?.()
       esCleanupRef.current = null
+      attachedJobRef.current = null
       setStatus('aborted')
       appLog('WARN', 'Simulation aborted by user')
       return
     }
-    clearLog()
-    // Pre-run snapshot: serialise the CURRENT (clean) network to disk
-    // BEFORE the LP starts mutating it. This is the "last known good"
-    // state — if the solve takes hours and the user loses the backend
-    // mid-iteration, reloading the project picks up the pre-solve
-    // network rather than nothing. Also lets the autosave loop pause
-    // for the duration of the solve without losing recent edits.
-    // Pre-save runs while status is still 'idle' / 'completed' / 'aborted'
-    // so saveProjectQuietly's "skip if running" guard doesn't trip; we
-    // flip to 'running' only AFTER the save returns.
-    if (currentProject) {
-      appLog('INFO', `Pre-run snapshot: saving '${currentProject}' before the LP starts mutating the network…`)
+    // 2. QUEUED (waiting behind another solve) → cancel the queued job.
+    if (jobQueued && myJob) {
+      await abort.mutateAsync(myJob.id)
+      appLog('WARN', `Cancelled queued solve of '${currentProject}'`)
+      return
+    }
+    // 3. IDLE / slot may be free → ENQUEUE the current project.
+    if (!currentProject) {
+      toast.error('Save the project before running it.')
+      return
+    }
+    // Guard the pre-save→enqueue window against a fast double-click (the await
+    // on saveProjectQuietly precedes enqueue.isPending flipping to true). The
+    // latch is released in the finally so every exit path clears it.
+    if (enqueuingRef.current) return
+    enqueuingRef.current = true
+    try {
+      clearLog()
+      // Pre-run snapshot: enqueue REQUIRES a saved network.nc on disk (the
+      // dispatcher solves the resident foreground ctx in place, but the enqueue
+      // endpoint validates the file exists). This also serialises the CURRENT
+      // (clean) network as the "last known good" state before the LP mutates it.
+      appLog('INFO', `Pre-run snapshot: saving '${currentProject}' before queuing the solve…`)
       const ok = await saveProjectQuietly(currentProject)
       if (!ok) {
-        appLog('WARN', `Pre-run snapshot of '${currentProject}' failed — continuing with run anyway.`)
+        appLog('ERROR', `Pre-run snapshot of '${currentProject}' failed — cannot queue the solve.`)
+        toast.error('Save failed — cannot queue the solve.')
+        return
       }
-    }
-    setStatus('running')
-    appLog('INFO', `${runLabel} started`)
-    // Pop the bottom panel open on the Log tab so the SSE stream is visible
-    // the instant the worker starts pushing lines. BottomPanel watches
-    // bottomTabRequest and also un-collapses + restores its last height.
-    requestBottomTab('Log')
-    try {
-      // Kick off the worker on the backend. The POST returns immediately —
-      // the actual progress comes via SSE.
-      await simulationApi.run()
-      // Open the SSE log stream. Each line lands in useSimulationStore.logLines
-      // which the bottom-panel Log tab renders. The 'done' event carries the
-      // final objective + solve_time so the status indicator can update.
-      esCleanupRef.current?.()
-      esCleanupRef.current = createLogStream(
-        (line) => appendLog(line),
-        (data) => {
-          const d = data as { status?: string; objective?: number | null; solve_time?: number | null }
-          const finalStatus = d.status === 'completed' ? 'completed'
-            : d.status === 'aborted' ? 'aborted'
-            : 'failed'
-          setStatus(finalStatus)
-          if (finalStatus === 'completed') {
-            appLog('INFO',
-              `${runLabel} completed: objective=${d.objective ?? 'n/a'}, solve_time=${d.solve_time ?? 'n/a'} s`,
-            )
-            // Invalidate every result query so the Results panel and any open
-            // result charts re-fetch the freshly populated DataFrames.
-            qcRef.invalidateQueries({ queryKey: ['results'] })
-            qcRef.invalidateQueries({ queryKey: ['simulationStatus'] })
-          } else if (finalStatus === 'failed') {
-            appLog('ERROR', `${runLabel} failed`)
-          }
-          esCleanupRef.current = null
-        },
-        // SSE error recovery: if the stream dies before `done` (browser sleep,
-        // backend crash, network blip past the auto-retry window), surface
-        // the failure and unlock the UI so the user can Run again instead of
-        // being stuck in the "Abort" state forever.
-        (reason) => {
-          setStatus('failed')
-          appLog('ERROR', `${runLabel}: ${reason}`)
-          esCleanupRef.current = null
-        },
-      )
+      // Pop the bottom panel open on the Log tab so the stream is visible the
+      // instant the auto-attach effect opens it (when the job goes running).
+      requestBottomTab('Log')
+      const job = await enqueue.mutateAsync(currentProject)
+      appLog('INFO', job.status === 'running'
+        ? `${runLabel} started`
+        : `${runLabel} queued (#${job.position ?? '?'})`)
+      // DO NOT open the SSE here — the auto-attach effect opens it once the
+      // job transitions to 'running' (immediately if the slot was free, or
+      // after the preceding solve finishes). Gating on 'running' guarantees
+      // the backend's log_queue is set before /log_stream captures it.
     } catch (err) {
-      setStatus('failed')
-      const status = (err as { response?: { status?: number } })?.response?.status
-      if (status === 409) {
-        // Backend rejects because a previous worker thread is still alive —
-        // typically a long solve whose SSE log the frontend has lost. Surface
-        // a toast with a force-restart action so the user can recover without
-        // a backend restart. /force_reset disowns the orphaned worker; we
-        // then retry /run.
-        appLog('WARN', `${runLabel} blocked: previous simulation still running`)
-        toast(
-          (t) => (
-            <div className="flex items-center gap-3">
-              <span>Previous simulation still running.</span>
-              <button
-                className="px-2 py-0.5 rounded bg-accent text-white text-xs hover:opacity-90"
-                onClick={async () => {
-                  toast.dismiss(t.id)
-                  try {
-                    await simulationApi.forceReset()
-                    appLog('WARN', 'Forced reset of previous simulation')
-                    void handleRun()
-                  } catch {
-                    appLog('ERROR', 'Force reset failed — restart the backend')
-                  }
-                }}
-              >
-                Force restart
-              </button>
-            </div>
-          ),
-          { duration: 10000 },
-        )
-      } else {
-        appLog('ERROR', `${runLabel} failed to start`)
-      }
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      appLog('ERROR', `${runLabel} failed to queue: ${typeof detail === 'string' ? detail : 'unknown error'}`)
+      toast.error(typeof detail === 'string' ? detail : 'Failed to queue the solve.')
+    } finally {
+      enqueuingRef.current = false
     }
   }
 
@@ -700,7 +798,7 @@ export default function AppHeader() {
       {/* Undo */}
       <button
         onClick={handleUndo}
-        disabled={undoDepth === 0 || undoMut.isPending || isRunning}
+        disabled={undoDepth === 0 || undoMut.isPending || busy}
         title={undoDepth > 0 ? `Undo last action (Ctrl+Z) · ${undoDepth} step${undoDepth !== 1 ? 's' : ''} available` : 'Nothing to undo'}
         className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium border border-border text-text hover:bg-border/30 transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
       >
@@ -720,7 +818,7 @@ export default function AppHeader() {
           Ctrl+S already takes. Only disable for in-flight save / running solve. */}
       <button
         onClick={handleQuickSave}
-        disabled={saveMut.isPending || isRunning}
+        disabled={saveMut.isPending || busy}
         title={currentProject
           ? `Save '${currentProject}' (Ctrl+S) — overwrites the saved project & clears revert history`
           : 'Save (Ctrl+S) — you will be prompted to name the project'}
@@ -735,39 +833,66 @@ export default function AppHeader() {
 
       <div className="flex-1" />
 
-      {/* Run simulation — single button. Doubles as Abort while running.
-          Label tracks solver_config.mode (Run LOPF / Run Load Flow /
-          Run AC Power Flow). Mode is configured in Sidebar → Solver Settings. */}
-      <button
-        onClick={handleRun}
-        title={isRunning
-          ? 'Abort the running simulation'
-          : `${runLabel}: ${MODE_DESC[mode] ?? ''} — change mode in Solver Settings`}
-        className="flex items-center gap-1.5 px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px"
-        style={{
-          // Design system: 3-stop green gradient with layered + inset shadows;
-          // amber gradient while running ("Abort").
-          background: isRunning
-            ? 'linear-gradient(180deg, #f59e0b 0%, #d97706 50%, #b45309 100%)'
-            : 'linear-gradient(180deg, #22c55e 0%, #16a34a 50%, #15803d 100%)',
-          boxShadow: isRunning
-            ? '0 1px 0 rgba(180,80,0,0.35), 0 1px 3px rgba(180,80,0,0.2), inset 0 1px 0 rgba(255,255,255,0.22)'
-            : '0 1px 0 rgba(20,100,50,0.4), 0 1px 3px rgba(20,100,50,0.25), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.08)',
-        }}
-      >
-        {isRunning
-          ? <><Loader size={11} className="animate-spin" /> Abort</>
-          : <>
-              {mode === 'lopf' ? <Zap size={11} /> : <Play size={11} />}
-              {runLabel}
-            </>}
-      </button>
+      {/* Run simulation — smart Run/Queue/Cancel/Abort button. Clicking Run
+          ENQUEUES the foreground project; the FIFO dispatcher solves it now if
+          the slot is free, or queues it behind a running solve. Three states:
+            • idle           → green "Run LOPF/…", click enqueues
+            • queued behind  → amber "Queued #N", click cancels the queued job
+            • running        → amber "Abort", click aborts the solve
+          Label's run mode tracks solver_config.mode (Solver Settings). */}
+      {(() => {
+        // amber for both queued + running; green only at idle.
+        const amber = jobQueued || jobRunning || isRunning
+        const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
+        return (
+          <button
+            onClick={handleRunButton}
+            disabled={abort.isPending || enqueue.isPending}
+            title={jobRunning || isRunning
+              ? 'Abort the running simulation'
+              : jobQueued
+                ? 'Cancel this queued solve'
+                : `${runLabel}: ${MODE_DESC[mode] ?? ''} — queues the solve; runs now if the queue is free`}
+            className="flex items-center gap-1.5 px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-wait"
+            style={{
+              // Design system: 3-stop green gradient with layered + inset shadows;
+              // amber gradient while queued / running.
+              background: amber
+                ? 'linear-gradient(180deg, #f59e0b 0%, #d97706 50%, #b45309 100%)'
+                : 'linear-gradient(180deg, #22c55e 0%, #16a34a 50%, #15803d 100%)',
+              boxShadow: amber
+                ? '0 1px 0 rgba(180,80,0,0.35), 0 1px 3px rgba(180,80,0,0.2), inset 0 1px 0 rgba(255,255,255,0.22)'
+                : '0 1px 0 rgba(20,100,50,0.4), 0 1px 3px rgba(20,100,50,0.25), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.08)',
+            }}
+          >
+            {jobRunning || isRunning
+              ? <><Loader size={11} className="animate-spin" /> Abort</>
+              : jobQueued
+                ? <><Loader size={11} className="animate-spin" /> {queuedLabel}</>
+                : <>
+                    {mode === 'lopf' ? <Zap size={11} /> : <Play size={11} />}
+                    {runLabel}
+                  </>}
+          </button>
+        )
+      })()}
 
-      {/* Status indicator — bordered pill with a glowing LED (design system) */}
-      <div className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border bg-bg-2">
-        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[status] ?? STATUS_DOT.idle}`} />
-        <span className="text-[10px] text-muted font-mono">{STATUS_LABEL[status] ?? 'Idle'}</span>
-      </div>
+      {/* Status indicator — bordered pill with a glowing LED (design system).
+          A queued (not-yet-running) job shows "Queued #N" instead of "Idle"
+          without disturbing the simulationStore `status` semantics. */}
+      {(() => {
+        const queued = jobQueued
+        const dot = queued ? STATUS_DOT.running : (STATUS_DOT[status] ?? STATUS_DOT.idle)
+        const label = queued
+          ? `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
+          : (STATUS_LABEL[status] ?? 'Idle')
+        return (
+          <div className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border bg-bg-2">
+            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+            <span className="text-[10px] text-muted font-mono">{label}</span>
+          </div>
+        )
+      })()}
 
       {/* Right panel toggle */}
       <button

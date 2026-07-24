@@ -7,7 +7,11 @@ import './index.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, staleTime: 5000 },
+    // refetchOnWindowFocus OFF: the app drives its own refetch intervals
+    // (status, queue, changelog, meta), so re-fetching every query on every
+    // Alt-Tab back to the browser was a pure refetch storm + re-render jank
+    // with no freshness benefit.
+    queries: { retry: 1, staleTime: 5000, refetchOnWindowFocus: false },
     mutations: { retry: 0 },
   },
 })

@@ -107,6 +107,19 @@ export const projectsApi = {
       },
     }).then(r => r.data),
   load: (name: string) => client.get<ImportSummary>(`/projects/${encodeURIComponent(name)}`).then(r => r.data),
+  // B8 instant in-memory switch: make `name` the active backend context. No
+  // destructive round-trip when the project is already resident (pure pointer
+  // swap server-side); a cold project is built + hydrated + registered. 409 if
+  // a FOREGROUND solve is in flight on the current project; 404 unknown; 400 bad
+  // id. The switch flow re-keys all reactive queries to nk(name,…) afterwards.
+  // `evicted` (B9) lists project_ids the backend dropped from its resident
+  // registry to stay under RESIDENT_CAP when this activate registered a new
+  // context. The switch flow drops those projects' retained React Query caches
+  // so the client RAM mirrors the server-side eviction.
+  activate: (name: string) =>
+    client.post<{ activated: string; evicted?: string[] }>(
+      `/projects/${encodeURIComponent(name)}/activate`,
+    ).then(r => r.data),
   // `cascade=true` deletes child scenarios recursively. Default `false` makes
   // the backend refuse (409) when the project has descendants — UI surfaces
   // a "X has N scenarios attached" prompt before retrying with cascade=true.

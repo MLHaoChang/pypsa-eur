@@ -4,6 +4,8 @@ import { Layers, Trash2, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { networkApi } from '../api/network'
+import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 
 interface Props {
   componentClass: string  // "Generator" | "StorageUnit" | "Store" | "Link"
@@ -36,13 +38,14 @@ const UNIT_FOR_CLASS: Record<string, string> = {
 
 export default function VintagePeriodBoundsModal({ componentClass, name, onClose }: Props) {
   const qc = useQueryClient()
+  const currentProject = useUIStore(s => s.currentProject)
   const unit = UNIT_FOR_CLASS[componentClass] ?? 'MW'
 
   // Periods come from the multi-period config. Single-period networks have
   // an empty list — the modal then surfaces a hint to enable periods first
   // rather than rendering an empty table.
   const periodsQuery = useQuery({
-    queryKey: ['investmentPeriods'],
+    queryKey: nk(currentProject, 'investmentPeriods'),
     queryFn: networkApi.getInvestmentPeriods,
   })
   const periods = useMemo(() => {
@@ -52,7 +55,7 @@ export default function VintagePeriodBoundsModal({ componentClass, name, onClose
 
   // Saved bounds for this asset only — load the global list and pluck.
   const boundsQuery = useQuery({
-    queryKey: ['vintageBounds'],
+    queryKey: nk(currentProject, 'vintageBounds'),
     queryFn: networkApi.listVintageBounds,
   })
   const savedForAsset = useMemo(() => {
@@ -108,7 +111,7 @@ export default function VintagePeriodBoundsModal({ componentClass, name, onClose
       return networkApi.updateVintageBounds(componentClass, name, bounds)
     },
     onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['vintageBounds'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'vintageBounds') })
       const n = Object.keys(res.bounds).length
       toast.success(n > 0
         ? `Saved per-period bounds for ${n} period(s)`
@@ -124,7 +127,7 @@ export default function VintagePeriodBoundsModal({ componentClass, name, onClose
   const clearMut = useMutation({
     mutationFn: () => networkApi.deleteVintageBounds(componentClass, name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['vintageBounds'] })
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'vintageBounds') })
       toast.success('Cleared all per-period bounds')
       onClose()
     },

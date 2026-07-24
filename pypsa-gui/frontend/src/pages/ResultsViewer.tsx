@@ -6,6 +6,8 @@ import {
 } from 'recharts'
 import { resultsApi } from '../api/simulation'
 import { safeMax } from '../utils/numeric'
+import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 
 const TABS = ['Summary', 'Dispatch', 'Prices', 'Storage', 'Line Flows'] as const
 type Tab = typeof TABS[number]
@@ -32,7 +34,8 @@ function NoData() {
 
 // ── Summary tab ───────────────────────────────────────────────────────────────
 function SummaryTab() {
-  const { data: stats } = useQuery({ queryKey: ['results_statistics'], queryFn: resultsApi.getStatistics })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: stats } = useQuery({ queryKey: nk(currentProject, 'results_statistics'), queryFn: resultsApi.getStatistics })
 
   if (!stats) return <NoData />
 
@@ -85,8 +88,9 @@ function SummaryTab() {
 
 // ── Dispatch tab ──────────────────────────────────────────────────────────────
 function DispatchTab() {
-  const { data: genRes } = useQuery({ queryKey: ['results_generators'], queryFn: () => resultsApi.getGeneratorResults() })
-  const { data: loadRes } = useQuery({ queryKey: ['results_loads'], queryFn: () => resultsApi.getLoadResults() })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: genRes } = useQuery({ queryKey: nk(currentProject, 'results_generators'), queryFn: () => resultsApi.getGeneratorResults() })
+  const { data: loadRes } = useQuery({ queryKey: nk(currentProject, 'results_loads'), queryFn: () => resultsApi.getLoadResults() })
   const [selectedCarriers, setSelectedCarriers] = useState<Set<string>>(new Set())
 
   const { chartData, carriers } = useMemo(() => {
@@ -155,7 +159,8 @@ function DispatchTab() {
 
 // ── Prices tab ────────────────────────────────────────────────────────────────
 function PricesTab() {
-  const { data: priceRes } = useQuery({ queryKey: ['results_prices'], queryFn: () => resultsApi.getPrices() })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: priceRes } = useQuery({ queryKey: nk(currentProject, 'results_prices'), queryFn: () => resultsApi.getPrices() })
   const [selectedBuses, setSelectedBuses] = useState<Set<string>>(new Set())
 
   const { chartData, buses } = useMemo(() => {
@@ -236,7 +241,8 @@ function PricesTab() {
 
 // ── Storage tab ───────────────────────────────────────────────────────────────
 function StorageTab() {
-  const { data: stoRes } = useQuery({ queryKey: ['results_storage'], queryFn: () => resultsApi.getStorageResults() })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: stoRes } = useQuery({ queryKey: nk(currentProject, 'results_storage'), queryFn: () => resultsApi.getStorageResults() })
 
   const { chartData, units } = useMemo(() => {
     if (!stoRes) return { chartData: [], units: [] as string[] }
@@ -275,7 +281,8 @@ function StorageTab() {
 
 // ── Line Flows tab ────────────────────────────────────────────────────────────
 function LineFlowsTab() {
-  const { data: lineRes } = useQuery({ queryKey: ['results_lines'], queryFn: () => resultsApi.getLineResults() })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: lineRes } = useQuery({ queryKey: nk(currentProject, 'results_lines'), queryFn: () => resultsApi.getLineResults() })
   const [selectedLine, setSelectedLine] = useState<string | null>(null)
 
   const { chartData, lines, lineStats } = useMemo(() => {

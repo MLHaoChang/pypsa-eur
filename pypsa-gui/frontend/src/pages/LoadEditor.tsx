@@ -3,6 +3,8 @@ import { createColumnHelper } from '@tanstack/react-table'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { DataGrid } from '../components/DataGrid'
 import { networkApi } from '../api/network'
+import { useUIStore } from '../store/uiStore'
+import { nk } from '../utils/queryKeys'
 import type { Load } from '../api/types'
 
 const col = createColumnHelper<Load>()
@@ -17,10 +19,11 @@ const columns = [
 
 export default function LoadEditor() {
   const qc = useQueryClient()
-  const { data: loads = [], isLoading } = useQuery({ queryKey: ['loads'], queryFn: networkApi.getLoads })
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data: loads = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'loads'), queryFn: networkApi.getLoads })
   const del = useMutation({
     mutationFn: (l: Load) => networkApi.deleteLoad(l.name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['loads'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'loads') }),
   })
 
   // Aggregate load per bus for the chart

@@ -3,14 +3,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Search, X, FolderOpen, Camera, Save as SaveIcon, FilePlus, Settings2,
   TrendingUp, Clock, Zap, RotateCcw, LayoutDashboard,
-  Sun, Moon, Rows2, Rows3, GitBranch, Layers,
+  Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { projectsApi } from '../api/projects'
 import { appLog } from '../store/simulationStore'
-import { invalidateNetworkQueries, saveProjectQuietly, formatRelativeTime, abortRunningSim } from '../utils/projectActions'
+import { invalidateNetworkQueries, saveProjectQuietly, formatRelativeTime, switchToProject } from '../utils/projectActions'
+import { nk } from '../utils/queryKeys'
 import type { Bus, Generator, Load, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -227,6 +228,7 @@ function useCommands(mode: PaletteMode): Command[] {
   const setSlidePanel        = useUIStore(s => s.setSlidePanel)
   const setCompareRailOpen   = useUIStore(s => s.setCompareRailOpen)
   const markProjectSaved     = useUIStore(s => s.markProjectSaved)
+  const setProjectSwitchInProgress = useUIStore(s => s.setProjectSwitchInProgress)
   const theme                = useUIStore(s => s.theme)
   const density              = useUIStore(s => s.density)
   const toggleTheme          = useUIStore(s => s.toggleTheme)
@@ -253,14 +255,14 @@ function useCommands(mode: PaletteMode): Command[] {
   // first-load isn't paying for them. Each component class is a separate
   // query so they hit the React Query cache shared with the asset tables.
   const enableAssets = mode === 'all'
-  const { data: buses = [] }        = useQuery({ queryKey: ['buses'],         queryFn: networkApi.getBuses,         enabled: enableAssets, staleTime: 30_000 })
-  const { data: generators = [] }   = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators,    enabled: enableAssets, staleTime: 30_000 })
-  const { data: loads = [] }        = useQuery({ queryKey: ['loads'],         queryFn: networkApi.getLoads,         enabled: enableAssets, staleTime: 30_000 })
-  const { data: lines = [] }        = useQuery({ queryKey: ['lines'],         queryFn: networkApi.getLines,         enabled: enableAssets, staleTime: 30_000 })
-  const { data: links = [] }        = useQuery({ queryKey: ['links'],         queryFn: networkApi.getLinks,         enabled: enableAssets, staleTime: 30_000 })
-  const { data: storageUnits = [] } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits,  enabled: enableAssets, staleTime: 30_000 })
-  const { data: stores = [] }       = useQuery({ queryKey: ['stores'],        queryFn: networkApi.getStores,        enabled: enableAssets, staleTime: 30_000 })
-  const { data: transformers = [] } = useQuery({ queryKey: ['transformers'],  queryFn: networkApi.getTransformers,  enabled: enableAssets, staleTime: 30_000 })
+  const { data: buses = [] }        = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses,         enabled: enableAssets, staleTime: 30_000 })
+  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators,    enabled: enableAssets, staleTime: 30_000 })
+  const { data: loads = [] }        = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads,         enabled: enableAssets, staleTime: 30_000 })
+  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines,         enabled: enableAssets, staleTime: 30_000 })
+  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks,         enabled: enableAssets, staleTime: 30_000 })
+  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits,  enabled: enableAssets, staleTime: 30_000 })
+  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores,        enabled: enableAssets, staleTime: 30_000 })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers,  enabled: enableAssets, staleTime: 30_000 })
 
   return useMemo(() => {
     const cmds: Command[] = []
@@ -281,7 +283,7 @@ function useCommands(mode: PaletteMode): Command[] {
               return
             }
             await saveProjectQuietly(currentProject, true)
-            qc.invalidateQueries({ queryKey: ['undoInfo'] })
+            qc.invalidateQueries({ queryKey: nk(currentProject, 'undoInfo') })
             qc.invalidateQueries({ queryKey: ['projects'] })
             toast.success(`Saved · ${currentProject}`)
           },
@@ -325,6 +327,14 @@ function useCommands(mode: PaletteMode): Command[] {
           run: () => setSlidePanel('results'),
         },
         {
+          id: 'act-solvequeue',
+          kind: 'action',
+          title: 'Open solve queue',
+          subtitle: 'Queue saved projects to solve sequentially in the background',
+          icon: <ListChecks size={14} />,
+          run: () => setSlidePanel('solveQueue'),
+        },
+        {
           id: 'act-solver',
           kind: 'action',
           title: 'Open solver settings',
@@ -356,9 +366,13 @@ function useCommands(mode: PaletteMode): Command[] {
             // Same path as the header's "New" button — clears state and
             // strips the active project marker.
             await networkApi.resetNetwork()
+            // Scope the invalidation to the project we're leaving (captured
+            // before setCurrentProject(null)) so its now-stale cache clears
+            // without nuking other resident projects.
+            const leaving = currentProject
             setCurrentProject(null)
             setProjectName('Untitled')
-            invalidateNetworkQueries(qc)
+            invalidateNetworkQueries(qc, leaving)
             toast.success('New empty project — give it a name and save')
           },
         },
@@ -405,29 +419,37 @@ function useCommands(mode: PaletteMode): Command[] {
             toast('Already on this project', { icon: '·' })
             return
           }
-          // Mirror Sidebar.handleOpenPick — auto-save outgoing, load incoming.
+          // B8 instant switch: activate (pointer swap) + re-key reactive
+          // queries to the target's RETAINED cache — no component-table
+          // refetch. switchToProject owns the abort + outgoing-save + swap.
           const tId = toast.loading(`Opening '${p.name}'…`)
+          setProjectSwitchInProgress(true)
           try {
-            // Abort any in-flight solve first; otherwise the lock-holding
-            // worker would make both save_project and load_project time
-            // out at axios' 30s limit.
-            const stopped = await abortRunningSim()
-            if (!stopped) {
-              toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
-              return
+            const r = await switchToProject(p.name, qc)
+            switch (r.status) {
+              case 'switched':
+                appLog('INFO', `Opened '${p.name}' via command palette`)
+                toast.success(`Opened '${p.name}'`, { id: tId })
+                break
+              case 'noop':
+                toast.dismiss(tId)
+                break
+              case 'abort-failed':
+                toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
+                break
+              case 'busy-solve':
+                toast.error(`Finish or abort the running solve on '${currentProject}' first.`, { id: tId })
+                break
+              case 'not-found':
+                toast.error(`'${p.name}' no longer exists`, { id: tId })
+                break
+              case 'error':
+                toast.error(`Could not open '${p.name}'`, { id: tId })
+                appLog('ERROR', `Palette open '${p.name}': ${r.message}`)
+                break
             }
-            if (currentProject && currentProject !== p.name) {
-              await saveProjectQuietly(currentProject)
-            }
-            await projectsApi.load(p.name)
-            invalidateNetworkQueries(qc)
-            setCurrentProject(p.name)
-            setProjectName(p.name)
-            appLog('INFO', `Opened '${p.name}' via command palette`)
-            toast.success(`Opened '${p.name}'`, { id: tId })
-          } catch (e) {
-            toast.error(`Could not open '${p.name}'`, { id: tId })
-            appLog('ERROR', `Palette open '${p.name}': ${String((e as Error).message ?? e)}`)
+          } finally {
+            setProjectSwitchInProgress(false)
           }
         },
       })
@@ -449,7 +471,7 @@ function useCommands(mode: PaletteMode): Command[] {
           const tId = toast.loading(`Restoring '${s.label || s.id}'…`)
           try {
             await projectsApi.restoreSnapshot(currentProject, s.id)
-            invalidateNetworkQueries(qc)
+            invalidateNetworkQueries(qc, currentProject)
             qc.invalidateQueries({ queryKey: ['snapshots-list', currentProject] })
             markProjectSaved(currentProject)
             toast.success(`Restored '${s.label || s.id}'`, { id: tId })
@@ -513,6 +535,7 @@ function useCommands(mode: PaletteMode): Command[] {
     // re-runs in practice, but listing them documents the closure's surface.
     setCurrentProject, setProjectName, setSelectedComponent,
     setHighlightedComponent, openRightPanel, setSlidePanel, setCompareRailOpen, markProjectSaved,
+    setProjectSwitchInProgress,
     theme, density, toggleTheme, toggleDensity,
   ])
 }

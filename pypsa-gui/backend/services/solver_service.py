@@ -36,6 +36,21 @@ _LOAD_HEAT_TOKENS = ("heat", "thermal")
 _LOAD_HYDROGEN_TOKENS = ("hydrogen", "h2")
 
 
+def _safe_log(log_queue, msg: str) -> None:
+    """
+    Put `msg` on the solver log queue, swallowing a None queue or any put
+    error. The None-safe try/except wrapper for the per-phase `_emit`/`_put`
+    closures (BUDGET / CURT / NUMERICS / objective-scale), which keep their own
+    tag prefixes and delegate the boilerplate here.
+    """
+    if log_queue is None:
+        return
+    try:
+        log_queue.put(msg)
+    except Exception:
+        pass
+
+
 def _canonical_load_carrier_key(raw) -> str:
     """
     Return the canonical bucket key for a PyPSA `loads.carrier` value.
@@ -223,6 +238,17 @@ class SolverConfig:
     # Range enforced at solve time: must be > 0 and finite. Anything else
     # is treated as 1.0 (a warning is logged so the user notices).
     user_objective_scale: float = 1.0
+    # ── Automatic objective conditioning ───────────────────────────────────
+    # When True, the solver picks an objective scale ITSELF (a power of 10)
+    # from the spread of the model's cost coefficients, overriding
+    # `user_objective_scale`. It only engages for genuinely ill-conditioned
+    # models (geometric-mean coefficient far outside a healthy band) and is a
+    # no-op otherwise — so leaving it on is safe for well-behaved networks.
+    # The reported `n.objective` / duals are divided back exactly as for the
+    # manual scale, so user-facing € are unchanged. Default OFF — the
+    # always-on `[NUMERICS]` diagnostic recommends a value first; this just
+    # applies it without a manual step.
+    auto_objective_scale: bool = False
     # ── MIP knobs ──────────────────────────────────────────────────────────
     # Only consumed by the LP backend when at least one generator has
     # committable=True (the LP becomes a MILP — branch-and-bound over the
@@ -324,22 +350,217 @@ def check_solver_availability() -> dict[str, bool]:
 
 
 # ── Abort plumbing ──────────────────────────────────────────────────────────
-# The /abort endpoint sets a stop_event that the worker is expected to poll at
-# natural checkpoints. Two hard constraints:
+# The /abort endpoint sets a stop_event that the worker observes two ways:
 #
-#   * HiGHS / Gurobi don't yield mid-iteration — n.optimize() is a blocking
-#     native call. We can poll BEFORE optimize() (during validation, applying
-#     modelling assumptions, building snapshots), BETWEEN iterations in the
-#     myopic driver, and AFTER optimize() returns (during AC PF, diagnostics,
-#     storage). We CAN'T interrupt a single full-horizon LP once it's started.
-#   * `restore_modelling()` MUST run regardless of abort — it reverts vintage
-#     rows, slack generators, dispatch fix, etc. Letting an abort bypass it
-#     leaves the network in a half-mutated state on disk.
+#   1. COOPERATIVE checkpoints — `_check_stop()` polls the event BEFORE optimize()
+#      (validation, modelling assumptions, snapshot build), BETWEEN myopic
+#      iterations, and AFTER optimize() (AC PF, diagnostics, storage). Cheap,
+#      always-safe, raises `SolveAborted`.
+#   2. NATIVE-SOLVE interrupt — while HiGHS is inside the blocking `n.optimize()`
+#      C call, cooperative polling can't fire. linopy 0.6.5 runs `h.run()` on its
+#      own sub-thread and polls `finished.wait(0.1)` catching `KeyboardInterrupt`
+#      → `h.cancelSolve()` (HiGHS returns `kInterrupt` → a CLEAN user-interrupt
+#      status, not an error). So we make the running LP abortable by INJECTING a
+#      `KeyboardInterrupt` into the solver worker thread the moment the stop_event
+#      fires during the optimize window — `_AbortWatcher` does this. The injected
+#      KeyboardInterrupt lands at linopy's next poll tick (≤0.1s), HiGHS cancels
+#      mid-iteration, and PyPSA returns. The worker's KeyboardInterrupt handler
+#      re-raises it as `SolveAborted` so the existing restore chain runs.
 #
-# Mechanism: `_check_stop()` raises `SolveAborted` (a regular Exception) which
-# propagates up to `run_simulation`'s outer except. The existing finally chain
-# (worker → restore_modelling → registry clear) runs as designed. The except
-# handler translates `SolveAborted` into `("aborted", "user_aborted")` status.
+# Hard constraint preserved: `restore_modelling()` MUST run regardless of abort
+# — it reverts vintage rows, slack generators, dispatch fix, etc. Both the
+# cooperative and injected paths converge on `SolveAborted` → the outer except
+# runs restore before returning ("aborted", "user_aborted").
+
+import ctypes as _ctypes
+
+
+def _async_raise_in_thread(thread_id: int, exc_type: type) -> int:
+    """
+    Inject `exc_type` into the thread with id `thread_id` (CPython async-exc).
+
+    Returns the count of threads affected (1 = delivered). The exception is
+    raised at that thread's NEXT bytecode boundary — which, for a thread parked
+    in linopy's `finished.wait(0.1)` poll loop around HiGHS's `h.run()`, is
+    within ~0.1s. Used only to interrupt a native solve on user abort; every
+    other phase uses the cooperative `_check_stop`.
+    """
+    res = _ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        _ctypes.c_long(thread_id), _ctypes.py_object(exc_type)
+    )
+    if res > 1:
+        # Should never happen (one thread id) — undo to avoid corrupting state.
+        _ctypes.pythonapi.PyThreadState_SetAsyncExc(_ctypes.c_long(thread_id), None)
+    return res
+
+
+class _AbortWatcher:
+    """
+    Background watcher that injects KeyboardInterrupt into the SOLVER WORKER
+    thread when the stop_event fires WHILE ARMED.
+
+    The armed window (via `arm()`/`disarm()`) spans the WHOLE solve `try:` body —
+    the native `n.optimize()` call (the case that matters: it's the long blocking
+    one) AND the post-solve work that follows it inside the same try (capacity
+    capture, objective rescale, post-solve diagnostics, and — for myopic — every
+    iteration plus its per-iteration restore). An interrupt landing ANYWHERE in
+    that window is safe: it propagates to the solve `finally:`, whose FIRST act is
+    `disarm()` (so injection stops before the restore walk), then the once-guarded
+    `restore_modelling()` runs (idempotent, per-entry-guarded) and the outer
+    `except KeyboardInterrupt` re-runs it defensively. So the restore discipline
+    holds regardless of WHERE the interrupt fired — the network is never left
+    carrying transient LP transforms, and an aborted solve is never autosaved.
+    What's NOT in the window: validation + modelling-assumptions apply (pre-arm,
+    covered by cooperative `_check_stop`) and `restore_modelling` itself + result
+    writes + AC-PF (post-disarm).
+
+    SINGLE-SHOT delivery (critical correctness invariant). The watcher injects
+    KeyboardInterrupt EXACTLY ONCE — the instant `PyThreadState_SetAsyncExc`
+    confirms delivery (return == 1) it NEVER injects again for this run. It does
+    NOT need to: linopy 0.6.5 runs `highspy.Highs.run()` on a daemon sub-thread
+    while the worker (this `worker_tid`) sits in a Python-level
+    `while not finished.wait(0.1): pass` poll loop, so a single async-exc is
+    reliably raised at the next 0.1s poll tick — there is no "deep in C code that
+    misses the signal" window to retry around. Re-injecting would be actively
+    HARMFUL: after linopy catches the first KeyboardInterrupt it calls
+    `h.cancelSolve()` and enters a SECOND, un-guarded `finished.wait(0.1)` loop to
+    wait for HiGHS to actually stop; a second injected interrupt landing there
+    propagates out of linopy WHILE `h.run()` is still executing on the sub-thread
+    (orphaning the native solve — CPU thrash that starves the next queued job),
+    and a still-later injection can land inside `restore_modelling` (which catches
+    only `Exception`, not `BaseException`) and strand the network half-restored.
+    Single-shot lets linopy's own clean cancel→wait→re-raise path complete
+    uninterrupted, so the network is fully restored and no native thread leaks.
+    A genuine non-delivery (return == 0, e.g. the worker thread already gone) is
+    the only case the loop retries — there is nothing to orphan in that case.
+    """
+
+    def __init__(self, stop_event: "threading.Event | None", worker_tid: int) -> None:
+        self._stop_event = stop_event
+        self._worker_tid = worker_tid
+        self._armed = threading.Event()
+        self._shutdown = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._stop_event is None:
+            return  # no abort channel (qa scripts) → nothing to watch
+        self._thread = threading.Thread(
+            target=self._loop, name="solve-abort-watcher", daemon=True
+        )
+        self._thread.start()
+
+    def arm(self) -> None:
+        self._armed.set()
+
+    def disarm(self) -> None:
+        self._armed.clear()
+
+    def shutdown(self) -> None:
+        self._shutdown.set()
+        t = self._thread
+        if t is not None:
+            t.join(timeout=2)
+
+    def _loop(self) -> None:
+        se = self._stop_event
+        injected = False  # latch: inject ONCE on confirmed delivery, never again
+        while not self._shutdown.is_set():
+            # Wait for an abort request (cheap; wakes immediately on .set()).
+            if se is None or not se.wait(timeout=0.2):
+                continue
+            # Abort requested. Inject a SINGLE KeyboardInterrupt while armed (the
+            # native-solve window). The instant SetAsyncExc confirms delivery
+            # (==1) we latch `injected` and stop — re-injection would break
+            # linopy's post-cancelSolve finish-wait and orphan h.run() / strand
+            # restore (see class docstring). Only a genuine non-delivery (==0,
+            # worker gone) retries on the next tick.
+            while se.is_set() and not self._shutdown.is_set():
+                if self._armed.is_set() and not injected:
+                    if _async_raise_in_thread(self._worker_tid, KeyboardInterrupt) == 1:
+                        injected = True
+                if self._shutdown.wait(timeout=0.2):
+                    return
+
+
+class _SolveHeartbeat:
+    """
+    Periodic liveness pings during the otherwise-silent native solve window.
+
+    HiGHS runs the LP inside a C-extension call (`h.run()`); depending on the
+    solver phase — presolve especially — it can go many seconds, minutes on a
+    large model, WITHOUT writing a single line to its log file. The log tail
+    then shows nothing and the GUI looks frozen: the user can't tell a long
+    solve from a hung one. This daemon emits a `[PHASE]` heartbeat every
+    `interval` seconds while a solve is active, carrying elapsed wall time and
+    the reminder that Abort is available — so a long solve always reads as
+    alive and interruptible. It writes to the SAME `log_queue` the SSE consumer
+    drains, so the lines stream live and land in the replay buffer.
+
+    Lifecycle mirrors `_AbortWatcher`: `start()` once at run entry, `begin()` /
+    `end()` bracket the native-solve window (the same arm/disarm points), and
+    `shutdown()` in the outer finally joins the thread. Inactive (parked, no
+    pings) outside a begin/end window, so pre-LP setup and post-solve
+    diagnostics stay quiet. The first ping fires one full `interval` AFTER
+    begin() — a fast solve that finishes inside the interval emits nothing.
+    """
+
+    def __init__(self, log_queue, interval: float = 15.0) -> None:
+        self._q = log_queue
+        self._interval = interval
+        self._active = threading.Event()
+        self._shutdown = threading.Event()
+        self._start_monotonic = 0.0
+        self._label = "Optimising"
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(
+            target=self._loop, name="solve-heartbeat", daemon=True
+        )
+        self._thread.start()
+
+    def begin(self, label: str = "Optimising") -> None:
+        self._label = label
+        self._start_monotonic = time.monotonic()
+        self._active.set()
+
+    def end(self) -> None:
+        self._active.clear()
+
+    def shutdown(self) -> None:
+        self._shutdown.set()
+        self._active.set()  # wake the loop so it observes _shutdown promptly
+        t = self._thread
+        if t is not None:
+            t.join(timeout=2)
+
+    def _loop(self) -> None:
+        while not self._shutdown.is_set():
+            # Park until a solve begins (cheap; wakes on begin()/shutdown()).
+            if not self._active.wait(timeout=0.5):
+                continue
+            if self._shutdown.is_set():
+                return
+            # Active. Sleep the interval in short hops so end() silences pings
+            # within ~0.5s, then emit ONE heartbeat if the solve is still going.
+            waited = 0.0
+            while waited < self._interval:
+                if self._shutdown.is_set() or not self._active.is_set():
+                    break
+                time.sleep(0.5)
+                waited += 0.5
+            if self._active.is_set() and not self._shutdown.is_set():
+                elapsed = int(time.monotonic() - self._start_monotonic)
+                mm, ss = divmod(elapsed, 60)
+                try:
+                    self._q.put(
+                        f"[PHASE] ⏳ {self._label}… {mm:d}:{ss:02d} "
+                        f"elapsed — click Abort to cancel."
+                    )
+                except Exception:
+                    pass  # never let a logging hiccup kill the heartbeat thread
+
 
 class SolveAborted(Exception):
     """
@@ -369,13 +590,66 @@ def _check_stop(stop_event: threading.Event | None, phase, where: str) -> None:
         raise SolveAborted(where)
 
 
+class _RollingWindowFailureCatcher(logging.Handler):
+    """
+    Captures PyPSA's per-window "Optimization failed" warnings.
+
+    `optimize_with_rolling_horizon` solves each window and, on a non-ok window,
+    LOGS ``logger.warning("Optimization failed with status %s and condition
+    %s", status, condition)`` and CONTINUES — it returns the network (not a
+    status tuple) and never raises. So a clean return does NOT mean every window
+    solved. This handler, attached to ``pypsa.optimization.abstract`` for the
+    duration of the call, records each failed window's ``(status, condition)``
+    (read from ``record.args``) so the caller can surface a real failure instead
+    of reporting a masked "optimal".
+
+    Thread-scoped: the logger is process-global, so a CONCURRENT solve (foreground
+    vs queue background) attaching its own catcher would otherwise see THIS
+    solve's window warnings and cross-attribute them. PyPSA emits the warning
+    synchronously inside the solving thread, so we capture this solve's thread
+    ident at construction and ignore records emitted from any other thread.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.failures: list[tuple[str, str]] = []
+        self._tid = threading.get_ident()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Only count failures emitted from the thread that owns this catcher —
+        # a concurrent solve on another thread shares this global logger.
+        if getattr(record, "thread", None) != self._tid:
+            return
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return
+        if "Optimization failed with status" in msg:
+            args = record.args if isinstance(record.args, tuple) else ()
+            st = str(args[0]) if len(args) >= 1 else "warning"
+            cond = str(args[1]) if len(args) >= 2 else "unknown"
+            self.failures.append((st, cond))
+
+
 def run_simulation(
     config: SolverConfig,
     network: pypsa.Network,
     lock: threading.Lock,
     stop_event: threading.Event,
     log_queue: queue.SimpleQueue,
+    state_update: Callable[..., None] | None = None,
 ) -> tuple[str, str]:
+    # `state_update` is the sink for this solve's side-results (lost-load,
+    # AC-PF). It's injected (not imported) so a multi-project dispatcher can
+    # point it at the SOLVING project's ProjectSolverState rather than the
+    # foreground module-global `_state` — a background solve must not clobber
+    # the project the user is currently viewing. The `/run` worker passes
+    # `routers.simulation._state_update`; the standalone qa_*.py scripts pass
+    # nothing (None) — they inspect the network directly and don't need the
+    # state side-channel, so the writes below are simply skipped for them.
+    def _emit_state(**kw) -> None:
+        if state_update is not None:
+            state_update(**kw)
     queue_handler = logging.handlers.QueueHandler(log_queue)
     root_logger = logging.getLogger()
     root_logger.addHandler(queue_handler)
@@ -389,6 +663,21 @@ def run_simulation(
     tmp_log = pathlib.Path(tempfile.mktemp(suffix=".log"))
     tail_stop = threading.Event()
     tail_thread: threading.Thread | None = None
+    # Abort watcher — injects KeyboardInterrupt into THIS (worker) thread when
+    # the user aborts during the native `n.optimize()` window, so a long HiGHS
+    # solve is cancelled mid-iteration instead of running to completion. Armed
+    # only across the solve region (see `_abort_watcher.arm/disarm` below);
+    # outside it the cooperative `_check_stop` handles aborts. No-op when
+    # stop_event is None (qa scripts).
+    _abort_watcher = _AbortWatcher(stop_event, threading.get_ident())
+    _abort_watcher.start()
+    # Heartbeat — emits an elapsed-time `[PHASE]` ping every 15s while the LP is
+    # in HiGHS's native solve (which can be silent for minutes during presolve).
+    # Bracketed by begin()/end() at the SAME points the abort watcher arms/
+    # disarms, so it's quiet during setup + post-solve and only chatters while
+    # the genuinely-long, log-silent solve is running.
+    _heartbeat = _SolveHeartbeat(log_queue)
+    _heartbeat.start()
     # Always-bound so the outer except handlers can revert the modelling
     # transforms even when an exception fires in the window between
     # `_apply_modelling_assumptions` and the solve try/finally (an abort at the
@@ -441,7 +730,11 @@ def run_simulation(
             warn_count = sum(1 for i in issues if i.severity == "warning")
             if has_errors(issues):
                 phase(f"Validation failed: {err_count} error(s). Aborting.")
-                return "error", "validation_failed"
+                # Set the vars (not a literal return) so the terminal
+                # failure-classification in the outer `finally` sees the right
+                # condition and emits a "validation" failure card.
+                status, condition = "error", "validation_failed"
+                return status, condition
             phase(f"Validation passed ({warn_count} warning{'s' if warn_count != 1 else ''}).")
             _check_stop(stop_event, phase, "after validation, before modelling assumptions")
 
@@ -462,13 +755,35 @@ def run_simulation(
             # The reapply helper handles all 4 cases (flat↔multi, with
             # broadcasting via level-1 timestep match) and is idempotent.
             # Imported here to avoid a circular top-level import.
+            # GATED on "is this the FOREGROUND/active network?" — `_user_ts` is a
+            # process-global store that belongs to the ACTIVE project (B6-writes
+            # deferred → no per-ctx _user_ts yet). For a foreground solve (/run, or
+            # the dispatcher solving the resident foreground in-place) `network IS`
+            # the active network → reapply (byte-identical to pre-B4). For a
+            # BACKGROUND ctx solve (B4.3 dispatcher on a non-active project) the
+            # active `_user_ts` is a DIFFERENT project's store; reapplying it would
+            # overlay the foreground's uploaded profiles onto this project's network
+            # wherever an asset name collides (corrupting its LP + persisted
+            # dispatch). Skip it — the background netcdf already carries baked,
+            # solve-ready profiles (`_hydrate_context_from_disk`). Closes the C2
+            # end-to-end QA `_user_ts` cross-talk finding.
             try:
-                from routers.network import _reapply_user_ts_to_network as _reapply_ts
-                _reapply_ts(network)
-                phase("Re-applied user-uploaded time series to network "
-                      "(_t tables aligned to current snapshots).")
-            except Exception as exc:
-                phase(f"WARN: could not re-apply user time series: {type(exc).__name__}: {exc}")
+                from services.pypsa_service import PyPSAService as _PS
+                _is_foreground = network is _PS.get_network()
+            except Exception:
+                _is_foreground = True  # fail safe → preserve legacy reapply
+            if _is_foreground:
+                try:
+                    from routers.network import _reapply_user_ts_to_network as _reapply_ts
+                    _reapply_ts(network)
+                    phase("Re-applied user-uploaded time series to network "
+                          "(_t tables aligned to current snapshots).")
+                except Exception as exc:
+                    phase(f"WARN: could not re-apply user time series: {type(exc).__name__}: {exc}")
+            else:
+                phase("Skipped _user_ts reapply (background project solve — netcdf "
+                      "carries baked profiles; the active _user_ts belongs to the "
+                      "foreground project).")
             # Belt-and-suspenders index sync: makes sure every _t DataFrame's
             # row index matches n.snapshots before the LP. Catches stale
             # MultiIndex residue from a previous multi-period solve that
@@ -688,11 +1003,22 @@ def run_simulation(
                         f"Normalised {fixed_idx} stale dynamic index/indexes "
                         "after modelling assumptions, pre-LP."
                     )
-                # Last checkpoint before kicking off the LP. Once n.optimize()
-                # starts, the solver is in native code and stop_event becomes
-                # a placebo until either the LP finishes (single-shot) or the
-                # myopic driver hits its inter-iteration checkpoint.
+                # Last cooperative checkpoint before kicking off the LP. ARM the
+                # abort watcher across the whole solve try-body (the long native
+                # n.optimize() is what matters; post-solve diagnostics are also in
+                # the window but harmless — see _AbortWatcher). A user abort now
+                # injects KeyboardInterrupt into this thread, which lands at
+                # linopy's HiGHS-run poll tick (≤0.1s) → h.cancelSolve() → clean
+                # interrupt. Disarmed in the solve `finally` BEFORE the restore
+                # walk, so injection never overlaps restore_modelling.
+                # Read-only numerical-conditioning report (and a WARN +
+                # recommended scale when the objective is ill-conditioned).
+                # After modelling assumptions so VOLL slacks / vintage rows are
+                # included; before the solve so the user sees it up front.
+                _log_objective_conditioning(network, log_queue)
                 _check_stop(stop_event, phase, "before LP solve")
+                _abort_watcher.arm()
+                _heartbeat.begin("Optimising")
                 try:
                     if use_myopic:
                         status, condition, _ = _run_myopic_foresight(
@@ -734,21 +1060,41 @@ def run_simulation(
                         _patch_passive_branch_holes(network, phase)
                     elif use_rolling:
                         # PyPSA's rolling-horizon returns the network itself
-                        # (not a (status, condition) tuple). We synthesise a
-                        # success tuple so the downstream lifecycle code
-                        # (status, condition, autosave) works unchanged. Per-
-                        # window failures (e.g. an infeasible chunk) raise
-                        # inside the call and propagate to the outer except.
-                        network.optimize.optimize_with_rolling_horizon(
-                            horizon=H,
-                            overlap=O,
-                            solver_name=config.solver_name,
-                            extra_functionality=extra_fn,
-                            **merged_solver_options,
-                        )
+                        # (not a (status, condition) tuple) and, on a non-ok
+                        # window, only LOGS a warning and CONTINUES — it does NOT
+                        # raise. So a clean return does NOT mean every window
+                        # solved. Previously this hardcoded status="ok"/"optimal"
+                        # unconditionally, masking an infeasible window as a
+                        # successful run. Attach a handler that captures each
+                        # failed window's (status, condition) for the duration of
+                        # the call, then surface a real failure if ANY window
+                        # failed.
+                        _roll_catcher = _RollingWindowFailureCatcher()
+                        _roll_logger = logging.getLogger("pypsa.optimization.abstract")
+                        _roll_logger.addHandler(_roll_catcher)
+                        try:
+                            network.optimize.optimize_with_rolling_horizon(
+                                horizon=H,
+                                overlap=O,
+                                solver_name=config.solver_name,
+                                extra_functionality=extra_fn,
+                                **merged_solver_options,
+                            )
+                        finally:
+                            _roll_logger.removeHandler(_roll_catcher)
                         _capture_extendable_p_nom_opt_to_frozen_store(network, phase)
                         _rescale_results_for_objective(network, log_queue=log_queue)
-                        status, condition = "ok", "optimal"
+                        if _roll_catcher.failures:
+                            _fst, _fcond = _roll_catcher.failures[0]
+                            phase(
+                                f"Rolling-horizon: {len(_roll_catcher.failures)} "
+                                f"window(s) failed to solve (first: {_fst}/{_fcond}). "
+                                "The dispatch is incomplete — treating the run as "
+                                "failed."
+                            )
+                            status, condition = _fst, _fcond
+                        else:
+                            status, condition = "ok", "optimal"
                     else:
                         # Auto-scale the secant loss tolerance so small-r lines
                         # don't trip the spurious flow-cap bug (see
@@ -784,16 +1130,21 @@ def run_simulation(
                         # period jointly — there's no single iteration period.
                         if status in ("ok", "optimal"):
                             try:
-                                _log_curtailment_post_solve(network, network.snapshots, "ALL", phase)
-                                _log_storage_post_solve(network, network.snapshots, "ALL", phase)
-                                _log_line_post_solve(network, network.snapshots, "ALL", phase)
-                                _log_corridor_summary_post_solve(network, network.snapshots, "ALL", phase)
-                                _log_capacity_summary_post_solve(network, "ALL", phase)
-                                _log_bus_balance_post_solve(network, network.snapshots, "ALL", phase)
+                                _emit_core_post_solve_diagnostics(network, network.snapshots, "ALL", phase)
                                 _log_cost_decomposition_post_solve(network, config, network.snapshots, "ALL", phase)
+                                _log_global_constraint_shadow_prices(network, log_queue)
                             except Exception as exc:
                                 phase(f"Post-solve diagnostic failed: {exc}")
                 finally:
+                    # DISARM the abort watcher FIRST — the solve window is over.
+                    # From here on the restore walk + modelling-assumption unwind
+                    # MUST complete; an injected KeyboardInterrupt mid-restore
+                    # would leave vintage rows / slacks on the network. After
+                    # disarm, a pending abort is honoured cooperatively (the
+                    # KeyboardInterrupt that already landed propagates as normal;
+                    # any further abort signal is a no-op here).
+                    _abort_watcher.disarm()
+                    _heartbeat.end()  # silence pings before the restore walk
                     # Reverse myopic capacity-freezes first (innermost layer),
                     # then unwind the modelling-assumption transforms. Each
                     # entry is ("col", attr, col, idx, original) matching the
@@ -820,8 +1171,7 @@ def run_simulation(
                 # so the /results/lost_load endpoint can serve it.
                 if captured.get("lost_load_t") is not None:
                     try:
-                        from routers.simulation import _state as _sim_state
-                        _sim_state["last_lost_load"] = captured
+                        _emit_state(last_lost_load=captured)
                         phase(
                             f"Lost load captured: {captured.get('lost_load_total_mwh', 0):.1f} MWh "
                             f"(cost {captured.get('lost_load_cost_eur', 0):,.0f} EUR)"
@@ -836,6 +1186,16 @@ def run_simulation(
             phase(
                 f"Solve complete (status={status}, condition={condition}, {solve_secs:.2f} s)"
             )
+
+            # Explainability: on a CONFIRMED-infeasible solve, point at the likely
+            # structural cause (HiGHS exposes no exact IIS). Read-only, runs only
+            # when infeasible — so the hints are safe pointers, never a false
+            # block. Gurobi additionally gets its native infeasibility report.
+            if status not in ("ok", "optimal") and "infeasible" in str(condition).lower():
+                try:
+                    _diagnose_infeasibility(network, config, log_queue)
+                except Exception as _dexc:
+                    phase(f"Infeasibility diagnosis skipped: {_dexc}")
 
             # Post-process — PyPSA already populates the result DataFrames in
             # place during n.optimize() / n.pf(). We don't need to
@@ -890,18 +1250,20 @@ def run_simulation(
                     and config.mode == "lopf"
                     and status in ("ok", "optimal")):
                 try:
+                    # Lazy import: ac_pf_service imports SolverConfig /
+                    # _normalise_dynamic_indexes / _DISPATCH_FIX_ACCESSORS back
+                    # from this module at module level, so importing it here (not
+                    # at top level) is what keeps the dependency acyclic.
+                    from services.ac_pf_service import run_ac_pf_stage
                     ac_pf_out = run_ac_pf_stage(network, config, log_queue)
                     try:
                         # Atomic update — the status-poll endpoint reads
                         # `ac_pf_results` + `ac_pf_convergence` together and
                         # a bare `.update(dict)` between two reads can show
                         # `available=True` with a half-populated convergence
-                        # list. `_state_update` holds `_state_lock` for the
-                        # full multi-key apply so the poll sees all-or-none.
-                        from routers.simulation import (
-                            _state_update as _sim_state_update,
-                        )
-                        _sim_state_update(**ac_pf_out)
+                        # list. The injected `state_update` holds `_state_lock`
+                        # for the full multi-key apply so the poll sees all-or-none.
+                        _emit_state(**ac_pf_out)
                     except Exception:
                         pass
                     # Flip `condition` so /api/simulation/status reflects that
@@ -926,6 +1288,22 @@ def run_simulation(
                     for line in tb_str.rstrip().split("\n"):
                         log_queue.put(f"TRACEBACK: {line}")
                     condition = f"{condition}; ac_pf_failed: {exc}"
+    except KeyboardInterrupt:
+        # The abort watcher injected this to cancel the native HiGHS solve mid-
+        # iteration (linopy caught it → h.cancelSolve() → PyPSA returned, then
+        # it re-propagated here). Translate to the SAME clean-abort path as a
+        # cooperative `_check_stop`: revert modelling transforms, status=aborted.
+        # The solve `finally` already disarmed the watcher and ran the inner
+        # restore, but call the once-guarded restore_modelling again defensively
+        # (idempotent) in case the interrupt landed before the inner finally.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after abort failed: {_rexc}")
+        log_queue.put("[PHASE] Aborted by user (solver interrupted mid-iteration). "
+                      "Modelling assumptions reverted.")
+        status, condition = "aborted", "user_aborted:native_solve"
     except SolveAborted as exc:
         # Clean user-requested abort. Revert the modelling transforms here too:
         # if the abort fired at the pre-LP checkpoint (before the solve
@@ -963,6 +1341,11 @@ def run_simulation(
             log_queue.put(f"TRACEBACK: {line}")
         status, condition = "error", str(exc)
     finally:
+        # Tear down the abort watcher FIRST so no stray KeyboardInterrupt can be
+        # injected during cleanup (disarm already stopped injection at the solve
+        # boundary; shutdown joins the watcher thread).
+        _abort_watcher.shutdown()
+        _heartbeat.shutdown()
         root_logger.removeHandler(queue_handler)
         tail_stop.set()
         # tail_thread may be None if compile/wrap raised before we spawned it.
@@ -971,6 +1354,17 @@ def run_simulation(
         try:
             tmp_log.unlink()
         except OSError:
+            pass
+        # Classify the terminal outcome into an actionable failure card (or
+        # None on success/abort) and stash it on the lifecycle state via the
+        # same sink the rest of the state flows through, so /status and the SSE
+        # `done` payload can surface "why it failed + what to try". Emitting
+        # None on success clears any stale card from a prior run. Best-effort —
+        # a taxonomy hiccup must never block the sentinel below.
+        try:
+            from services.failure_taxonomy import classify_failure
+            _emit_state(last_failure=classify_failure(status, condition))
+        except Exception:
             pass
         # ALWAYS emit the SSE sentinel — without this the consumer
         # (loop.run_in_executor in routers/simulation.py) blocks forever on
@@ -1033,6 +1427,165 @@ def _compile_extra_functionality(code_str: str):
     return fn
 
 
+def _diagnose_infeasibility(network, config, log_queue) -> None:
+    """
+    Heuristic "why is it infeasible?" hints, emitted as ``[INFEASIBLE]`` lines.
+
+    HiGHS (the default solver) exposes no exact irreducible-inconsistent-subsystem
+    (IIS), so on a CONFIRMED-infeasible LP we point at the common structural
+    causes a modeller can act on: a bus carrying load with no way to serve it; a
+    peak demand that exceeds all available + buildable generation with no VOLL;
+    and any active global constraint (CO2 cap, …) that may be infeasibly tight.
+    Read-only, and it runs ONLY after the solver already returned infeasible — so
+    every hint is a safe pointer, never a false block. When the solver is Gurobi,
+    also surface its native infeasibility report.
+    """
+    def emit(msg: str) -> None:
+        try:
+            log_queue.put(msg)
+        except Exception:
+            pass
+
+    n = network
+    emit("[INFEASIBLE] Diagnosing likely causes (heuristic — the LP solver found "
+         "no feasible point):")
+    hints = 0
+
+    # 1) Islanded load: a bus with load but no local supply AND no branch.
+    try:
+        connected: set = set()
+        for comp in ("lines", "transformers"):
+            df = getattr(n, comp, None)
+            if df is not None and not df.empty:
+                connected |= set(df["bus0"]) | set(df["bus1"])
+        links = getattr(n, "links", None)
+        if links is not None and not links.empty:
+            for col in ("bus0", "bus1", "bus2", "bus3", "bus4"):
+                if col in links.columns:
+                    connected |= {b for b in links[col].astype(str) if b and b != "nan"}
+        supply_buses: set = set()
+        for comp in ("generators", "storage_units", "stores"):
+            df = getattr(n, comp, None)
+            if df is not None and not df.empty and "bus" in df.columns:
+                supply_buses |= set(df["bus"])
+        loads = getattr(n, "loads", None)
+        if loads is not None and not loads.empty:
+            ldt = getattr(n.loads_t, "p_set", None)
+            for name, ld in loads.iterrows():
+                bus = ld["bus"]
+                if ldt is not None and name in ldt.columns:
+                    peak = float(ldt[name].abs().max())
+                else:
+                    peak = float(abs(ld.get("p_set", 0.0)))
+                if peak > 1e-6 and bus not in supply_buses and bus not in connected:
+                    emit(f"[INFEASIBLE]   • Bus '{bus}' carries ~{peak:,.0f} MW of load but "
+                         "has no generator/storage and no line/link — it can never be served.")
+                    hints += 1
+    except Exception:
+        pass
+
+    # 2) Whole-network peak demand vs maximum available + buildable supply.
+    try:
+        import numpy as _np
+        ldt = getattr(n.loads_t, "p_set", None)
+        if ldt is not None and not ldt.empty:
+            peak_load = float(ldt.sum(axis=1).abs().max())
+        else:
+            peak_load = float(n.loads["p_set"].abs().sum()) if not n.loads.empty else 0.0
+        avail = 0.0
+        gens = getattr(n, "generators", None)
+        if gens is not None and not gens.empty:
+            gmax = getattr(n.generators_t, "p_max_pu", None)
+            for name, g in gens.iterrows():
+                if bool(g.get("p_nom_extendable", False)):
+                    pmax = float(g.get("p_nom_max", _np.inf))
+                    avail += pmax if _np.isfinite(pmax) else _np.inf
+                else:
+                    pu = (float(gmax[name].max()) if gmax is not None and name in gmax.columns
+                          else float(g.get("p_max_pu", 1.0)))
+                    avail += float(g.get("p_nom", 0.0)) * pu
+        # storage/store discharge headroom (an upper bound on instantaneous supply)
+        for comp, col in (("storage_units", "p_nom"), ("stores", "e_nom")):
+            df = getattr(n, comp, None)
+            if df is not None and not df.empty and col in df.columns:
+                avail += float(df[col].clip(lower=0).sum())
+        voll = float(getattr(config, "voll", 0.0) or 0.0)
+        if _np.isfinite(avail) and peak_load > avail * (1.0 + 1e-6) and voll <= 0:
+            emit(f"[INFEASIBLE]   • Peak demand ~{peak_load:,.0f} MW exceeds the maximum "
+                 f"available + buildable generation ~{avail:,.0f} MW, and no Value of Lost "
+                 "Load is set. Add capacity, raise an extendable p_nom_max, or set a VOLL "
+                 "to price unserved demand.")
+            hints += 1
+    except Exception:
+        pass
+
+    # 3) Active global constraints (CO2 caps etc.) that may be binding too tight.
+    try:
+        gc = getattr(n, "global_constraints", None)
+        if gc is not None and not gc.empty:
+            for name, row in gc.iterrows():
+                emit(f"[INFEASIBLE]   • Global constraint '{name}' "
+                     f"({row.get('type', '?')} {row.get('sense', '')} "
+                     f"{row.get('constant', '?')}) is active — if it's a CO2 / primary-"
+                     "energy cap it may be infeasibly tight; relax it or check must-run "
+                     "emitters.")
+                hints += 1
+    except Exception:
+        pass
+
+    # 4) Gurobi-only: native infeasibility report (IIS).
+    try:
+        if str(getattr(config, "solver_name", "")).lower() == "gurobi":
+            model = getattr(n, "model", None)
+            printer = getattr(model, "print_infeasibilities", None)
+            if callable(printer):
+                emit("[INFEASIBLE]   • Gurobi infeasibility report (constraints in the "
+                     "irreducible conflict set) follows in the solver log.")
+                printer()
+    except Exception:
+        pass
+
+    if hints == 0:
+        emit("[INFEASIBLE]   • No obvious structural cause found. Check binding capacity "
+             "bounds (p_nom_min/max), reserve / storage-SoC targets, ramp limits, or a "
+             "too-tight global constraint. Turning OFF presolve can make the solver report "
+             "whether the model is infeasible vs unbounded.")
+
+
+def _log_global_constraint_shadow_prices(network, log_queue) -> None:
+    """
+    On a successful solve, report each BINDING global constraint's shadow price
+    (``global_constraints.mu``) as a raw ``[GLOBAL-CONSTRAINT]`` line — e.g. a CO2
+    cap's mu is the implied carbon price (the marginal abatement cost at which the
+    cap binds). Skips non-binding (mu ≈ 0) constraints. Read-only; mu is already
+    in user-facing units.
+    """
+    try:
+        gc = getattr(network, "global_constraints", None)
+        if gc is None or gc.empty or "mu" not in gc.columns:
+            return
+        for name, row in gc.iterrows():
+            try:
+                mu = float(row.get("mu", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if abs(mu) < 1e-6:
+                continue
+            ctype = str(row.get("type", ""))
+            is_carbon = "co2" in str(name).lower() or "primary_energy" in ctype.lower()
+            unit = "€/t" if is_carbon else "€/unit"
+            try:
+                log_queue.put(
+                    f"[GLOBAL-CONSTRAINT] '{name}' ({ctype} {row.get('sense', '')} "
+                    f"{row.get('constant', '?')}) BINDS — shadow price {mu:,.2f} {unit} "
+                    "(marginal cost of tightening it by one unit)."
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def _log_curtailment_post_solve(network, sns, current_period, phase) -> None:
     """
     After each myopic iteration, log per-vintage build + curtailment so
@@ -1054,7 +1607,6 @@ def _log_curtailment_post_solve(network, sns, current_period, phase) -> None:
     meaning some other benefit (VOLL avoidance, OPEX savings) made it
     worth it. That's the smoking gun for VOLL > cc.
     """
-    import pandas as pd
     gens = getattr(network, "generators", None)
     if gens is None or "curtailment_cost" not in gens.columns:
         return
@@ -1150,7 +1702,6 @@ def _log_storage_post_solve(network, sns, current_period, phase) -> None:
     causes: capital_cost too high, max_hours too low (storage shifts too
     little energy), or curtailment_cost too low to justify the build.
     """
-    import pandas as pd
     sus = getattr(network, "storage_units", None)
     if sus is None or sus.empty:
         return
@@ -1248,7 +1799,6 @@ def _log_sclopf_post_solve(
         return
     import math as _math
 
-    import pandas as pd
     # `lines_t.p0` carries the base-case flow per line per snapshot. PyPSA
     # writes it after every successful solve.
     try:
@@ -1430,7 +1980,6 @@ def _log_line_post_solve(network, sns, current_period, phase) -> None:
     Surfaces ALL line/transformer rows, including vintages, so the user
     can see per-vintage decisions (parent + Line@2026 + Line@2027 + …).
     """
-    import pandas as pd
     sw_full = network.snapshot_weightings.loc[sns, "objective"].astype(float)
     if isinstance(sns, pd.MultiIndex):
         try:
@@ -1540,7 +2089,6 @@ def _log_corridor_summary_post_solve(network, sns, current_period, phase) -> Non
 
     Pairs of (bus0,bus1) and (bus1,bus0) are treated as the same corridor.
     """
-    import pandas as pd
     sw = network.snapshot_weightings.loc[sns, "objective"].astype(float)
     if isinstance(sns, pd.MultiIndex):
         try:
@@ -1634,7 +2182,6 @@ def _log_bus_balance_post_solve(network, sns, current_period, phase) -> None:
     Negative net_export = bus imports. Large absolute values relative to
     load suggest a heavily-transit'd bus.
     """
-    import pandas as pd
     buses = getattr(network, "buses", None)
     if buses is None or buses.empty:
         return
@@ -1731,7 +2278,6 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     """
     import math as _math
 
-    import pandas as pd
 
     gens = getattr(network, "generators", None)
     if gens is None or gens.empty:
@@ -2024,6 +2570,34 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
         )
 
 
+def _emit_core_post_solve_diagnostics(network, sns, current_period, phase) -> None:
+    """
+    The SIX per-solve diagnostic loggers shared by the full-horizon and myopic
+    paths: curtailment / storage / line / corridor / capacity / bus-balance.
+
+    Deliberately BARE (no try/except) so each caller keeps its OWN error policy
+    — the divergence is intentional, not accidental:
+      • full-horizon (`run_simulation`) wraps this in a swallow-all try/except:
+        diagnostics are best-effort inspectability on a completed joint LP and
+        must not fail the solve.
+      • myopic (`_run_myopic_foresight`) calls it BARE: a diagnostic failure in a
+        rolling iteration should SURFACE (propagate → abort that iteration),
+        because a broken diagnostic there usually means the iteration's network
+        state is itself malformed and the next iteration would compound it.
+
+    Path-specific extras stay at the call site: full-horizon also emits
+    `_log_cost_decomposition_post_solve` + `_log_global_constraint_shadow_prices`
+    (the joint-LP global-constraint duals); myopic also emits the conditional
+    `_log_sclopf_post_solve` (per-iteration contingencies) + cost-decomposition.
+    """
+    _log_curtailment_post_solve(network, sns, current_period, phase)
+    _log_storage_post_solve(network, sns, current_period, phase)
+    _log_line_post_solve(network, sns, current_period, phase)
+    _log_corridor_summary_post_solve(network, sns, current_period, phase)
+    _log_capacity_summary_post_solve(network, current_period, phase)
+    _log_bus_balance_post_solve(network, sns, current_period, phase)
+
+
 def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=None):
     """
     Compose the extra_functionality callback with a per-period CAPEX
@@ -2074,11 +2648,7 @@ def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=No
     )
 
     def _emit(msg: str) -> None:
-        if log_queue is not None:
-            try:
-                log_queue.put(f"[BUDGET] {msg}")
-            except Exception:
-                pass
+        _safe_log(log_queue, f"[BUDGET] {msg}")
 
     def capex_budget_fn(n, snapshots):
         for period, budget in normalized.items():
@@ -2224,11 +2794,7 @@ def _wrap_with_curtailment_cost(network: "pypsa.Network", user_fn, log_queue=Non
         # directly to the queue — see solver_service.run_simulation), so
         # logger.info(...) calls would be silently dropped.
         def _emit(msg: str) -> None:
-            if log_queue is not None:
-                try:
-                    log_queue.put(f"[CURT] {msg}")
-                except Exception:
-                    pass
+            _safe_log(log_queue, f"[CURT] {msg}")
 
         _emit(
             f"Curtailment-cost wrapper active: {len(live)} generator(s) "
@@ -2250,7 +2816,6 @@ def _wrap_with_curtailment_cost(network: "pypsa.Network", user_fn, log_queue=Non
         except Exception:
             pass
 
-        import pandas as pd
         import xarray as xr
 
         p_max_pu = n.get_switchable_as_dense("Generator", "p_max_pu")
@@ -2470,6 +3035,145 @@ def _wrap_with_curtailment_cost(network: "pypsa.Network", user_fn, log_queue=Non
     return wrapper
 
 
+# Healthy band for the geometric mean of objective cost coefficients. Inside
+# this band the model is well-conditioned and auto-scale is a no-op; outside,
+# the recommended scale pulls the geomean back toward _COND_TARGET.
+_COND_GEOMEAN_LOW = 1e-1
+_COND_GEOMEAN_HIGH = 1e4
+_COND_TARGET = 1e2
+# Warn when the coefficient spread exceeds this many orders of magnitude — a
+# uniform objective scale CANNOT fix spread (only HiGHS's internal per-element
+# scaling / normalising the outlier costs can), so the diagnostic calls it out.
+_COND_SPREAD_WARN_LOG10 = 9.0
+
+
+def _objective_conditioning(network: "pypsa.Network") -> dict | None:
+    """
+    Summarise the magnitude spread of the LP's objective cost coefficients.
+
+    The objective is roughly ``Σ weight·marginal_cost·dispatch +
+    Σ capital_cost·capacity``, so the per-variable coefficient magnitudes are
+    ``|marginal_cost|·max_weight`` (operating) and ``|capital_cost|`` on
+    extendable assets (investment). A very wide spread, or a geometric mean far
+    from O(1–1e3), is what trips solver "numerical trouble" / "objective too
+    large" warnings.
+
+    Returns ``None`` when there are fewer than two nonzero coefficients (nothing
+    to condition), else a dict with ``count / min / max / geomean /
+    spread_log10 / recommended_scale``. ``recommended_scale`` is a power of 10
+    (1.0 when already healthy) that, applied to the whole objective, pulls the
+    geometric mean toward ``_COND_TARGET``. Pure + read-only.
+    """
+    import numpy as _np
+
+    coeffs: list[float] = []
+    try:
+        sw = network.snapshot_weightings
+        max_w = float(sw["objective"].abs().max()) if "objective" in sw else 1.0
+    except Exception:
+        max_w = 1.0
+    if not _np.isfinite(max_w) or max_w <= 0:
+        max_w = 1.0
+
+    def _nonzero_abs(df, col):
+        if df is None or getattr(df, "empty", True) or col not in df.columns:
+            return None
+        v = df[col].abs()
+        return v[(v > 0) & _np.isfinite(v)]
+
+    # Operating coefficients: |marginal_cost| × representative weight.
+    for comp in ("generators", "links", "storage_units", "stores"):
+        v = _nonzero_abs(getattr(network, comp, None), "marginal_cost")
+        if v is not None and not v.empty:
+            coeffs.extend((v * max_w).tolist())
+    # Investment coefficients: |capital_cost| on EXTENDABLE assets only.
+    for comp, ext_col in (("generators", "p_nom_extendable"),
+                          ("links", "p_nom_extendable"),
+                          ("lines", "s_nom_extendable"),
+                          ("storage_units", "p_nom_extendable"),
+                          ("stores", "e_nom_extendable")):
+        df = getattr(network, comp, None)
+        if df is None or getattr(df, "empty", True) or "capital_cost" not in df.columns:
+            continue
+        sub = df[df[ext_col]] if ext_col in df.columns else df
+        v = _nonzero_abs(sub, "capital_cost")
+        if v is not None and not v.empty:
+            coeffs.extend(v.tolist())
+
+    coeffs = [c for c in coeffs if c > 0 and _np.isfinite(c)]
+    if len(coeffs) < 2:
+        return None
+
+    arr = _np.asarray(coeffs, dtype=float)
+    cmin, cmax = float(arr.min()), float(arr.max())
+    geomean = float(_np.exp(_np.log(arr).mean()))
+    spread_log10 = float(_np.log10(cmax / cmin)) if cmin > 0 else float("inf")
+
+    if geomean > 0 and _np.isfinite(geomean) and (
+        geomean < _COND_GEOMEAN_LOW or geomean > _COND_GEOMEAN_HIGH
+    ):
+        rec = 10.0 ** round(_np.log10(_COND_TARGET / geomean))
+        rec = float(min(max(rec, 1e-6), 1e6))
+    else:
+        rec = 1.0
+
+    return {
+        "count": len(coeffs),
+        "min": cmin,
+        "max": cmax,
+        "geomean": geomean,
+        "spread_log10": spread_log10,
+        "recommended_scale": rec,
+    }
+
+
+def _log_objective_conditioning(network: "pypsa.Network", log_queue) -> None:
+    """
+    Emit a one-line ``[NUMERICS]`` pre-solve report on the objective's
+    conditioning, and a WARN with an actionable remedy when it's poor.
+
+    Read-only — never mutates the network or the LP. Cheap (vectorised over the
+    component DataFrames). Runs AFTER modelling assumptions so VOLL slacks /
+    vintage rows are included in the magnitude analysis. Writes raw ``[NUMERICS]``
+    lines (the tag convention shared with ``[VALIDATION]`` / ``[OBJ-SCALE]``) so
+    the frontend can colour the WARN amber.
+    """
+    if log_queue is None:
+        return
+    try:
+        cond = _objective_conditioning(network)
+    except Exception:
+        return  # diagnostics must never break a solve
+    if cond is None:
+        return
+
+    def _put(msg: str) -> None:
+        _safe_log(log_queue, msg)
+
+    _put(
+        f"[NUMERICS] Objective cost coefficients: {cond['count']} terms, "
+        f"range {cond['min']:.3g}…{cond['max']:.3g} "
+        f"(geom. mean {cond['geomean']:.3g}, spread {cond['spread_log10']:.1f} "
+        "orders of magnitude)."
+    )
+    poor_geomean = cond["recommended_scale"] != 1.0
+    wide_spread = cond["spread_log10"] > _COND_SPREAD_WARN_LOG10
+    if poor_geomean or wide_spread:
+        bits = []
+        if wide_spread:
+            bits.append(
+                "coefficients span a very wide magnitude range — normalising "
+                "outlier cost/capacity values is the most robust fix"
+            )
+        if poor_geomean:
+            bits.append(
+                f"set user_objective_scale ≈ {cond['recommended_scale']:g} "
+                "(or enable Auto-scale objective) to recentre the magnitudes"
+            )
+        _put("[NUMERICS] WARN: the objective may be ill-conditioned — "
+             + "; ".join(bits) + ".")
+
+
 def _wrap_with_objective_scale(network: "pypsa.Network", user_fn, cfg, log_queue=None):
     """
     Apply `cfg.user_objective_scale` to the linopy model's objective.
@@ -2489,6 +3193,29 @@ def _wrap_with_objective_scale(network: "pypsa.Network", user_fn, cfg, log_queue
     import math as _math
 
     raw = getattr(cfg, "user_objective_scale", 1.0)
+    # Auto-scale: when enabled, the solver picks the scale itself from the
+    # model's cost-coefficient spread, overriding the manual value. A no-op
+    # (recommended_scale == 1.0) for well-conditioned models, so it's safe to
+    # leave on. Computed on the pre-modelling-assumptions network — the base
+    # cost structure already fixes the power-of-10 decision; the later VOLL/
+    # vintage rows don't shift it. Falls back to the manual value if the
+    # analyser can't run.
+    if getattr(cfg, "auto_objective_scale", False):
+        try:
+            cond = _objective_conditioning(network)
+        except Exception:
+            cond = None
+        if cond is not None:
+            raw = cond["recommended_scale"]
+            if log_queue is not None and raw != 1.0:
+                try:
+                    log_queue.put(
+                        f"[NUMERICS] Auto-scale engaged: objective × {raw:g} "
+                        f"(geom. mean coeff {cond['geomean']:.3g} → ~{_COND_TARGET:g}); "
+                        "reported € and duals are divided back post-solve."
+                    )
+                except Exception:
+                    pass
     try:
         scale = float(raw)
     except (TypeError, ValueError):
@@ -2513,12 +3240,7 @@ def _wrap_with_objective_scale(network: "pypsa.Network", user_fn, cfg, log_queue
         return user_fn
 
     def _emit(msg: str) -> None:
-        if log_queue is None:
-            return
-        try:
-            log_queue.put(msg)
-        except Exception:
-            pass
+        _safe_log(log_queue, msg)
 
     def objective_scale_fn(n, snapshots):
         try:
@@ -2585,12 +3307,7 @@ def _rescale_results_for_objective(network: "pypsa.Network", log_queue=None) -> 
     inv = 1.0 / scale_f
 
     def _emit(msg: str) -> None:
-        if log_queue is None:
-            return
-        try:
-            log_queue.put(msg)
-        except Exception:
-            pass
+        _safe_log(log_queue, msg)
 
     # n.objective is a read-only property; the underlying value lives in
     # `_objective`. Write to that field directly so the property reflects
@@ -2636,7 +3353,7 @@ def _rescale_results_for_objective(network: "pypsa.Network", log_queue=None) -> 
             except Exception as exc:
                 _emit(f"[OBJ-SCALE] could not rescale {comp_attr}.{a}: {exc}")
     # Global constraint duals (`mu`) — €/(constraint-unit), e.g. €/tCO2 on
-    # primary_energy CO₂ caps.
+    # primary_energy CO2 caps.
     try:
         gc = getattr(network, "global_constraints", None)
         if gc is not None and not gc.empty and "mu" in gc.columns:
@@ -2690,7 +3407,6 @@ def fill_periodized_cost_defaults(n, cfg: "SolverConfig") -> Callable[[], None]:
     state keeps the fill and a later global-rate change won't propagate.
     """
     import numpy as np
-    import pandas as pd
 
     undo: list[tuple[str, str, pd.Index, pd.Series]] = []
     for comp_attr in ("generators", "storage_units", "stores", "links", "lines", "transformers"):
@@ -3061,151 +3777,6 @@ def _compute_loss_atol(n) -> dict | bool:
     return {"mode": "secants", "atol": atol}
 
 
-# ── Stage 2: post-solve AC Power Flow ────────────────────────────────────────
-
-# Names of the result DataFrames we snapshot before and after AC PF so the
-# frontend can flip between LOPF and AC PF result sets via `?source=...`.
-# Keep narrow: only the fields the existing /results/* endpoints surface, plus
-# voltage fields which become meaningful only after a PF run.
-_RESULT_DYNAMIC_ATTRS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # q0/q1 are populated by PyPSA's n.pf() (AC PF stage); LP stage produces
-    # only p0/p1. Snapshotting them here keeps the AC PF result-source endpoint
-    # consistent — frontend asks for `?source=ac_pf` and gets Q values.
-    # mu_upper/mu_lower are populated by the LP solve with assign_all_duals=True;
-    # they're the congestion-rent duals (€/MWh per snapshot) that drive the
-    # /results/line_duals endpoint.
-    ("lines_t",         ("p0", "p1", "q0", "q1", "loss", "mu_upper", "mu_lower")),
-    ("transformers_t",  ("p0", "p1", "q0", "q1", "loss", "mu_upper", "mu_lower")),
-    # status / start_up / shut_down are MILP outputs populated only when one
-    # or more generators has committable=True. Snapshotting them here lets
-    # the /results/unit_commitment endpoint serve them after the dispatch-fix
-    # cycle of an auto-chained AC PF run.
-    ("generators_t",    ("p", "q", "status", "start_up", "shut_down")),
-    ("storage_units_t", ("p", "state_of_charge")),
-    ("stores_t",        ("p", "e")),
-    ("loads_t",         ("p", "q")),
-    ("buses_t",         ("marginal_price", "v_mag_pu", "v_ang")),
-)
-
-
-def _snapshot_result_state(n) -> dict:
-    """
-    Deep-copy every result DataFrame we serve from /results/* into a dict
-    keyed by `'<components>_t.<attr>'`. Used to preserve the LP-stage result
-    state before `n.pf()` overwrites the in-memory DataFrames.
-    """
-    import copy
-    out: dict[str, pd.DataFrame] = {}
-    for accessor_name, attrs in _RESULT_DYNAMIC_ATTRS:
-        try:
-            accessor = getattr(n, accessor_name, None)
-        except Exception:
-            continue
-        if accessor is None:
-            continue
-        for attr in attrs:
-            try:
-                df = getattr(accessor, attr, None)
-            except Exception:
-                df = None
-            if df is None:
-                continue
-            try:
-                out[f"{accessor_name}.{attr}"] = copy.deepcopy(df)
-            except Exception:
-                # Some PyPSA accessors return non-DataFrame helpers; skip
-                # anything that isn't pandas-shaped.
-                pass
-    return out
-
-
-def _pick_ac_pf_slack_bus(n, cfg: "SolverConfig") -> str:
-    """
-    Resolve the slack bus for the AC PF.
-
-    Order of precedence:
-      1. User-specified `cfg.ac_pf_slack_bus` (must exist as a bus).
-      2. Bus already marked with `control='Slack'` (smallest index, deterministic).
-      3. Auto-pick: bus with the largest aggregate p_nom across generators.
-      4. Bus with the largest mean dispatch (sum of |generators_t.p|).
-      5. Fallback: the first bus in n.buses.
-
-    Returns the bus name. Side-effect: sets n.buses.at[bus, 'control'] = 'Slack'
-    if not already so. PyPSA's pf() requires exactly one slack per connected
-    sub-network; we set it on the resolved bus and trust the caller to pass
-    a single-component network for v1 (Phase 7 validation will guard this).
-    """
-    bus_names = n.buses.index.astype(str).tolist()
-    if not bus_names:
-        raise ValueError("No buses — cannot pick slack")
-    # (1) user override
-    chosen = ""
-    user_bus = (cfg.ac_pf_slack_bus or "").strip()
-    if user_bus and user_bus in bus_names:
-        chosen = user_bus
-    # (2) existing Slack
-    if not chosen and "control" in n.buses.columns:
-        already = n.buses[n.buses["control"].astype(str).str.lower() == "slack"]
-        if not already.empty:
-            chosen = str(already.index[0])
-    # (3) largest aggregate p_nom
-    if not chosen and not n.generators.empty:
-        gen_by_bus = n.generators.groupby("bus")["p_nom"].sum()
-        if not gen_by_bus.empty:
-            chosen = str(gen_by_bus.idxmax())
-    # (4) largest mean dispatch
-    if not chosen and hasattr(n.generators_t, "p") and not n.generators_t.p.empty:
-        means = n.generators_t.p.abs().mean()
-        if not means.empty:
-            gen_bus = str(n.generators.at[str(means.idxmax()), "bus"])
-            chosen = gen_bus
-    # (5) fallback
-    if not chosen:
-        chosen = bus_names[0]
-    if "control" in n.buses.columns:
-        n.buses.loc[chosen, "control"] = "Slack"
-    return chosen
-
-
-def _strip_voll_slacks(n) -> list[str]:
-    """
-    Remove VOLL slack generators (added by _apply_modelling_assumptions)
-    before AC PF. The restore step in run_simulation already removes them when
-    the LP finishes — but if the user re-runs Stage 2 standalone after a
-    different LP setup, defensively scan for the same naming convention here.
-    Returns the list of removed names.
-
-    Convention: VOLL slack gens are added at every bus with
-    name=f"__voll_<bus>" and carrier="load_shedding" (see step 3 of
-    _apply_modelling_assumptions, around line 3540). Earlier versions used
-    `voll_slack` for both — kept as a fallback match so a netcdf produced
-    by an older build that crashed pre-restore still cleans up here.
-    Match on carrier OR name prefix — defence in depth against either
-    side drifting.
-    """
-    if n.generators.empty:
-        return []
-    if "carrier" not in n.generators.columns:
-        return []
-    carrier_str = n.generators["carrier"].astype(str)
-    name_str = n.generators.index.astype(str)
-    mask = (
-        (carrier_str == "load_shedding")
-        | (carrier_str == "voll_slack")
-        | name_str.str.startswith("__voll_")
-        | name_str.str.startswith("voll_slack_")
-    )
-    removed = n.generators.index[mask].astype(str).tolist()
-    if not removed:
-        return []
-    n.remove("Generator", removed)
-    # Also clear any transient-row marks for these names so the GET
-    # filter doesn't keep hiding rows that no longer exist.
-    for nm in removed:
-        PyPSAService.unmark_transient("Generator", nm)
-    return removed
-
-
 _PRESOLVE_KEYS_BY_SOLVER = {
     # Each entry: (option_key, on_value, off_value). User-supplied values in
     # solver_options always win over the toggle so power users can pin specific
@@ -3307,7 +3878,6 @@ def _normalise_dynamic_indexes(n, phase=None) -> int:
     ``set_investment_periods`` misses an attribute that was created later
     by PyPSA itself.
     """
-    import pandas as pd
     # Ensure n.snapshots has .name = "snapshot". When this is None, xarray
     # converts _t DataArrays with the unnamed dim labelled "dim_0", and
     # PyPSA's optimizer fails on .sel(snapshot=sns) with
@@ -3399,7 +3969,6 @@ def _clear_dispatch_fix(n, phase=None) -> None:
     the row index doesn't match `n.snapshots`.
     """
     cleared = []
-    import pandas as pd
     for accessor_name in _DISPATCH_FIX_ACCESSORS:
         accessor = getattr(n, accessor_name, None)
         if accessor is None:
@@ -3415,325 +3984,6 @@ def _clear_dispatch_fix(n, phase=None) -> None:
                 pass
     if cleared and phase is not None:
         phase(f"Cleared stale dispatch-fix on {len(cleared)} accessor(s): {', '.join(cleared)}")
-
-
-def _snapshot_dispatch_fix_state(n) -> dict:
-    """
-    Capture state mutated by AC PF prep so it can be restored after the
-    `n.pf()` call. Two layers:
-
-    1. `*_t.p_set` (dispatch-fix overrides) — covered by the original
-       implementation. `_fix_dispatch_for_ac_pf` writes these from the
-       LP solution to constrain PF input.
-    2. `buses["control"]` and `generators["control"]` — added later.
-       `_pick_ac_pf_slack_bus` silently mutates one bus's control to
-       "Slack" when no slack was previously declared, and
-       `_fix_dispatch_for_ac_pf` coerces blank/unknown generator
-       controls to "PQ". Without snapshotting these the user's
-       on-disk network silently gains a synthetic slack bus and
-       has all blank generator controls overwritten on every AC PF —
-       surprising at save time and undocumented from the user's side.
-
-    Returns a dict suitable for `_restore_dispatch_fix_state(n, snapshot)`.
-    """
-    snap: dict = {}
-    for accessor_name in _DISPATCH_FIX_ACCESSORS:
-        accessor = getattr(n, accessor_name, None)
-        if accessor is None:
-            continue
-        for attr in ("p_set", "p_dispatch_set", "p_store_set"):
-            df = getattr(accessor, attr, None)
-            if df is not None:
-                snap[f"{accessor_name}.{attr}"] = df.copy()
-    # Static-column captures use a distinct key prefix so restore can route
-    # them through `.loc[:, col] = series` instead of `setattr`.
-    try:
-        if not n.buses.empty and "control" in n.buses.columns:
-            snap["__col__buses.control"] = n.buses["control"].copy()
-    except Exception:
-        pass
-    try:
-        if not n.generators.empty and "control" in n.generators.columns:
-            snap["__col__generators.control"] = n.generators["control"].copy()
-    except Exception:
-        pass
-    return snap
-
-
-def _restore_dispatch_fix_state(n, snap: dict) -> None:
-    """
-    Restore *_t.p_set + static control columns from a snapshot.
-    Tolerant of missing accessors / absent columns.
-    """
-    for key, df in snap.items():
-        if key.startswith("__col__"):
-            comp_attr = key[len("__col__"):]
-            comp_name, _, col = comp_attr.partition(".")
-            comp_df = getattr(n, comp_name, None)
-            if comp_df is None or col not in comp_df.columns:
-                continue
-            try:
-                # Restrict to the index that existed at capture time — if a
-                # row was added during AC PF (shouldn't happen, defensive)
-                # the new row keeps its default value.
-                shared = comp_df.index.intersection(df.index)
-                if len(shared) > 0:
-                    comp_df.loc[shared, col] = df.loc[shared]
-            except Exception:
-                pass
-            continue
-        accessor_name, _, attr = key.partition(".")
-        accessor = getattr(n, accessor_name, None)
-        if accessor is None:
-            continue
-        try:
-            setattr(accessor, attr, df)
-        except Exception:
-            pass
-
-
-def _fix_dispatch_for_ac_pf(n) -> None:
-    """
-    Copy the LP-optimal dispatch into the *_t.p_set DataFrames so the AC PF
-    treats it as fixed input. Also assign default `control='PQ'` to any
-    generator without one (PyPSA's PF needs a control type per generator).
-
-    Notes:
-      • Storage units / stores: p_set is the net injection (positive = into
-        the bus). PyPSA's storage_units_t.p uses the same sign convention,
-        so a direct copy is correct.
-      • Loads: already populated from input — no change.
-      • Generators with control='PV' are left alone on the P side (set p_set
-        from LP) but get v_mag_pu_set from the connected bus's existing
-        value (PyPSA's PF default). v1: we don't expose voltage setpoints.
-    """
-    # Generators: control defaults
-    if not n.generators.empty and "control" in n.generators.columns:
-        # Blank / NaN / unknown → PQ. Leave explicit PV / Slack alone.
-        ctrl = n.generators["control"].astype(str).str.strip()
-        unknown = ~ctrl.isin(["PQ", "PV", "Slack"])
-        n.generators.loc[unknown, "control"] = "PQ"
-    # Dispatch fix
-    for accessor_name, p_col in (
-        ("generators_t",    "p"),
-        ("storage_units_t", "p"),
-        ("stores_t",        "p"),
-    ):
-        try:
-            accessor = getattr(n, accessor_name, None)
-            if accessor is None:
-                continue
-            df = getattr(accessor, p_col, None)
-            if df is None or df.empty:
-                continue
-            setattr(accessor, "p_set", df.copy())
-        except Exception:
-            # Best-effort — a missing accessor or unwritable attribute should
-            # not block the PF call. The PF will diverge loudly if needed.
-            pass
-
-
-def run_ac_pf_stage(
-    network,
-    config: "SolverConfig",
-    log_queue,
-) -> dict:
-    """
-    Run Stage 2 (AC PF) on a network that has LP-stage dispatch populated.
-
-    Caller must hold `PyPSAService.get_lock()`. Returns a dict ready to drop
-    into `_state` (in routers.simulation) with the convergence map, slack
-    bus used, list of stripped VOLL slacks, and snapshots of both result
-    states.
-
-    Phase markers are pushed onto `log_queue` so the existing SSE stream
-    consumer renders Stage 2 progress in the live log.
-    """
-
-    def phase(msg: str) -> None:
-        log_queue.put(f"[PHASE] {msg}")
-
-    # Two gates, both required:
-    #
-    #   1. `n.is_solved` covers the genuine "no LP has ever run" case for
-    #      freshly-loaded networks.
-    #
-    #   2. `dispatch_status(network) == 'fresh'` is the load-bearing check:
-    #      `n.is_solved` is unreliable post-reload — PyPSA persists the
-    #      flag across netcdf round-trips (it's backed by `_objective`).
-    #      A network saved post-solve and reloaded reports `is_solved=True`
-    #      even when result `_t` tables are empty or carry dispatch for a
-    #      topology that no longer matches (user added a bus after the
-    #      solve). Running PF on stale dispatch produces garbage flows.
-    #
-    # The looser `n.generators_t.p.empty` check the old code used here
-    # caught only the EMPTY case, not the STALE case. `dispatch_status`
-    # catches both: returns 'none' when empty and 'stale' when topology
-    # diverged. We accept only 'fresh'.
-    from services.dispatch_status import dispatch_status
-    if not getattr(network, "is_solved", False):
-        raise RuntimeError("Stage 2 requires a solved network (run LOPF first).")
-    status = dispatch_status(network)
-    if status == "none":
-        raise RuntimeError(
-            "Stage 2 requires generator dispatch in n.generators_t.p — re-run LOPF."
-        )
-    if status == "stale":
-        raise RuntimeError(
-            "Stage 2 cannot run: dispatch tables in n.generators_t.p / lines_t.p0 / "
-            "storage_units_t / loads_t carry results for a different topology "
-            "(rows or column names diverged from the current network). PyPSA does "
-            "not auto-clear `_t` tables on topology mutations — re-run LOPF to "
-            "regenerate dispatch consistent with the current model."
-        )
-
-    # 0. Normalise dynamic indexes BEFORE any PF work. PyPSA's `n.pf()`
-    #    iterates `_t` accessors and calls `.sel(snapshot=…)` internally;
-    #    any stale MultiIndex (or missing `index.name = "snapshot"`) left
-    #    over from a previous multi-period LP solve makes that fail with
-    #    cryptic `dim_0` / `cannot include dtype 'M' in a buffer` errors
-    #    that look like a PF divergence but are actually a stale dual
-    #    `_t` frame. `run_simulation` already calls this before LOPF; the
-    #    standalone `/api/simulation/run_ac_pf` path skipped it and would
-    #    silently fail on any network where the user demoted from
-    #    multi-period back to flat between LOPF and AC PF. Belt-and-
-    #    suspenders: cheap to re-run, idempotent on a healthy network.
-    fixed_idx = _normalise_dynamic_indexes(network, phase)
-    if fixed_idx:
-        phase(f"Stage 2: Normalised {fixed_idx} stale dynamic index/indexes pre-PF.")
-
-    # 1. Snapshot LP results BEFORE n.pf() overwrites them.
-    phase("Stage 2: Snapshotting LOPF result state...")
-    lopf_snapshot = _snapshot_result_state(network)
-
-    # 2. Strip VOLL slack generators (defensive — usually already removed
-    #    by run_simulation's restore_modelling, but be robust for standalone
-    #    invocations or future code paths that skip the restore.)
-    stripped = _strip_voll_slacks(network)
-    if stripped:
-        phase(f"Stage 2: Stripped {len(stripped)} VOLL slack generator(s) "
-              f"({', '.join(stripped[:5])}{'...' if len(stripped) > 5 else ''})")
-
-    # 3. Fix dispatch from the LP solution into *_t.p_set.
-    #    Snapshot the prior p_set first so we can revert in finally — otherwise
-    #    these values survive autosave and PyPSA's create_model() adds
-    #    Generator-p_set equality constraints on the next solve, making
-    #    SCLOPF infeasible (no redispatch room for contingency LODF caps).
-    phase("Stage 2: Fixing dispatch from LOPF (generators, storage units, stores)...")
-    dispatch_fix_snapshot = _snapshot_dispatch_fix_state(network)
-    _fix_dispatch_for_ac_pf(network)
-
-    # 4. Resolve slack bus.
-    slack_bus = _pick_ac_pf_slack_bus(network, config)
-    phase(f"Stage 2: Slack bus = '{slack_bus}'")
-
-    # 5. Run AC PF per snapshot. PyPSA's pf() returns a structure containing
-    #    a 'converged' DataFrame indexed by (snapshot, sub_network). For a
-    #    single sub-network we collapse to a 1-D mapping; multi-subnet
-    #    networks still yield a per-snapshot bool by AND-ing across subnets.
-    phase(f"Stage 2: Running AC PF on {len(network.snapshots)} snapshot(s) "
-          f"(x_tol={config.ac_pf_x_tol:g})...")
-    converged_map: dict[str, bool] = {}
-    try:
-        try:
-            pf_result = network.pf(
-                snapshots=network.snapshots,
-                x_tol=config.ac_pf_x_tol,
-                use_seed=False,
-                distribute_slack=False,
-            )
-        except Exception as exc:
-            # Per-snapshot non-convergence shouldn't raise — but bad config (e.g.
-            # zero-impedance lines, missing slack) does. Surface and re-raise so
-            # the caller's `[PHASE] Failed` branch picks it up.
-            phase(f"Stage 2: AC PF errored before completion: {exc}")
-            raise
-    finally:
-        # Revert *_t.p_set so autosave writes a clean network. PyPSA's PF has
-        # already consumed p_set as input by this point; the result data
-        # lives in *_t.p / *_t.q / buses_t.v_mag_pu etc.
-        _restore_dispatch_fix_state(network, dispatch_fix_snapshot)
-
-    # PyPSA's pf() return value: a Dict with 'converged' (DataFrame:
-    # snapshots × sub_networks of bool). Older PyPSA returned a Series.
-    # Be resilient to both. Keys are emitted in ISO-T format
-    # (e.g. "2026-05-11T00:00:00") to match the format used by
-    # `/results/lines.index` etc., so the frontend can correlate
-    # convergence to result rows without timestamp normalisation.
-    def _iso(ts) -> str:
-        """
-        ISO format for a snapshot tuple OR Timestamp.
-
-        Multi-period: `ts` is a `(period, timestep)` tuple. Tuples have no
-        `.isoformat()` so the previous `str(ts)` fallback produced garbage
-        like "(2026, Timestamp('...'))" — the same bug P1 fixed for the
-        /results/* TS payloads. Here we just return the timestep ISO; the
-        period is carried separately in the parallel `converged_per_snapshot`
-        list (see below).
-        """
-        if isinstance(ts, tuple) and len(ts) == 2:
-            t = ts[1]
-            return t.isoformat() if hasattr(t, "isoformat") else str(t)
-        return ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-
-    def _period(ts):
-        """Period level for a snapshot tuple; None for flat snapshots."""
-        if isinstance(ts, tuple) and len(ts) == 2:
-            try:
-                return int(ts[0])
-            except (TypeError, ValueError):
-                return str(ts[0])
-        return None
-
-    # converged_map is the legacy `{iso: bool}` dict, kept for backward
-    # compatibility with consumers that don't care about multi-period (the
-    # convergence-bar KPI in the status section). We ALSO emit a parallel
-    # list `converged_per_snapshot_list` of {snapshot, period, ok} so the
-    # multi-period UI can disambiguate same-iso entries from different
-    # periods. Frontend should prefer the list and treat the dict as a
-    # convenience for sub-renders.
-    converged_list: list[dict] = []
-
-    try:
-        conv_df = pf_result.get("converged") if isinstance(pf_result, dict) else pf_result
-        if conv_df is None:
-            # No info — assume all converged (PyPSA would have raised otherwise).
-            for sn in network.snapshots:
-                converged_map[_iso(sn)] = True
-                converged_list.append({"snapshot": _iso(sn), "period": _period(sn), "ok": True})
-        elif hasattr(conv_df, "all") and hasattr(conv_df, "index"):
-            # DataFrame: AND across columns (sub_networks).
-            per_snap = conv_df.all(axis=1) if conv_df.ndim == 2 else conv_df
-            for sn, ok in per_snap.items():
-                ok_b = bool(ok)
-                converged_map[_iso(sn)] = ok_b
-                converged_list.append({"snapshot": _iso(sn), "period": _period(sn), "ok": ok_b})
-        else:
-            for sn in network.snapshots:
-                converged_map[_iso(sn)] = True
-                converged_list.append({"snapshot": _iso(sn), "period": _period(sn), "ok": True})
-    except Exception:
-        for sn in network.snapshots:
-            converged_map[_iso(sn)] = True
-            converged_list.append({"snapshot": _iso(sn), "period": _period(sn), "ok": True})
-
-    n_ok = sum(1 for v in converged_map.values() if v)
-    n_total = len(converged_map) or len(network.snapshots)
-    phase(f"Stage 2: AC PF complete — {n_ok}/{n_total} snapshot(s) converged.")
-
-    # 6. Snapshot AC PF result state.
-    ac_pf_snapshot = _snapshot_result_state(network)
-
-    return {
-        "lopf_results": lopf_snapshot,
-        "ac_pf_results": ac_pf_snapshot,
-        "ac_pf_convergence": converged_map,
-        "ac_pf_convergence_list": converged_list,
-        "ac_pf_slack_bus_used": slack_bus,
-        "ac_pf_stripped_voll_slacks": stripped,
-        "ac_pf_converged_count": n_ok,
-        "ac_pf_total_snapshots": n_total,
-    }
 
 
 def _sanitise_transformer_types(n, phase) -> None:
@@ -3790,7 +4040,6 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     must re-resolve via getattr(n, attr) at restore time.
     """
     import numpy as np
-    import pandas as pd
 
     # Each undo entry is ("col", attr_name, col_name, idx, original_series)
     # or ("call", callable_to_run). Listed in apply-order; restore walks the
@@ -3804,10 +4053,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     # Wipe the cross-iteration frozen-capacity side-store. Populated by
     # `_freeze_period_capacities` during the myopic loop and read by
     # `vintage_service._capture_and_drop_vintages` at restore. Stale
-    # entries from a previous solve would otherwise mis-attribute capacity
-    # to this solve's vintages. (Module state on solver_service —
-    # see `_FROZEN_VINTAGE_CAPACITIES` definition for rationale.)
-    _FROZEN_VINTAGE_CAPACITIES.clear()
+    # entries from a previous solve on THIS thread would otherwise
+    # mis-attribute capacity to this solve's vintages. (Thread-local on
+    # solver_service — see `_frozen_vintage_store` for the per-thread
+    # isolation rationale.)
+    _frozen_vintage_store().clear()
 
     # 1) Discount-rate / lifetime fill — delegated to the shared helper so
     #    /results/cost_breakdown can re-apply the same fill at report time
@@ -4357,11 +4607,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         except Exception:
             pass
         # Drop the freeze-time vintage-capacity side-store after all
-        # capture closures have read from it. Module state, so the
-        # explicit clear() at end-of-restore prevents any chance of
-        # leakage into the next solve cycle.
+        # capture closures have read from it. Thread-local, so the explicit
+        # clear() at end-of-restore prevents any chance of leakage into the
+        # next solve cycle on this same worker thread.
         try:
-            _FROZEN_VINTAGE_CAPACITIES.clear()
+            _frozen_vintage_store().clear()
         except Exception:
             pass
 
@@ -4419,7 +4669,6 @@ def _build_iteration_snapshots(n, current_period, all_periods, cfg):
         objective / energy-balance terms see the future-period costs at the
         right magnitude.
     """
-    import pandas as pd
     if not isinstance(n.snapshots, pd.MultiIndex):
         # Single-period (flat) snapshots — myopic degenerates to a single
         # solve over the whole index. The validation layer should have
@@ -4463,16 +4712,42 @@ def _build_iteration_snapshots(n, current_period, all_periods, cfg):
     return combined, (overrides if not overrides.empty else None)
 
 
-# Module-level side-store for freeze-time vintage capacities. Populated by
+# Per-thread side-store for freeze-time vintage capacities. Populated by
 # `_freeze_period_capacities` after each myopic period's LP solves and read
-# by `vintage_service._capture_and_drop_vintages` at restore. Lives here
-# (not on n.meta) because PyPSA's n.optimize() apparently resets n.meta
-# between myopic iterations, wiping our writes — observed empirically on
-# multi-port heat-pump Links where the live `p_nom_opt` always reads -0.0
-# post-solve regardless of LP outcome. Module state is safe: solver runs
-# under PyPSAService.get_lock() for the whole solve duration; nothing else
-# touches this dict.
-_FROZEN_VINTAGE_CAPACITIES: dict[tuple[str, str], float] = {}
+# by `vintage_service._capture_and_drop_vintages` at restore. Lives off
+# n.meta because PyPSA's n.optimize() apparently resets n.meta between
+# myopic iterations, wiping our writes — observed empirically on multi-port
+# heat-pump Links where the live `p_nom_opt` always reads -0.0 post-solve
+# regardless of LP outcome.
+#
+# Thread-local rather than a plain module dict: a process-wide dict WAS safe
+# when the solver was single-threaded under one global lock, but B4's
+# per-context solver locks let two `run_simulation` calls run concurrently
+# (foreground /run + background queue) on different threads. A shared dict
+# raced — cross-`.clear()` mid-restore and key collisions on the
+# deterministic `{parent}@{year}` vintage names — producing silent wrong
+# vintage/myopic capacities. One solve == one worker thread (the myopic loop
+# runs its iterations sequentially on that thread), so a thread-local store
+# isolates concurrent solves while preserving cross-iteration myopic
+# behaviour. The reader runs inside `restore_modelling`, synchronously on
+# the same solve thread that wrote the store — see `_frozen_vintage_store`.
+_frozen_vintage_local = threading.local()
+
+
+def _frozen_vintage_store() -> dict:
+    """
+    Per-thread vintage/myopic freeze store. Module-global WAS process-wide,
+    but B4's per-context solver locks allow two concurrent run_simulation calls
+    (foreground /run + background queue) on different threads; a shared dict
+    raced → silent wrong vintage capacities. One solve == one thread (myopic
+    iterations are sequential on that thread), so a thread-local store isolates
+    concurrent solves while preserving cross-iteration myopic behaviour.
+    """
+    s = getattr(_frozen_vintage_local, "store", None)
+    if s is None:
+        s = {}
+        _frozen_vintage_local.store = s
+    return s
 
 
 def _freeze_period_capacities(n, period, undo_actions, phase) -> int:
@@ -4567,12 +4842,14 @@ def _freeze_period_capacities(n, period, undo_actions, phase) -> int:
         # First attempt used `n.meta["__vintage_frozen_capacities"]`, but
         # PyPSA's `n.optimize()` appears to reset `n.meta` somewhere in
         # its setup, wiping our writes between myopic iterations. Move
-        # the stash to a module-level dict that PyPSA can't touch. The
-        # solver is single-threaded (PyPSAService.get_lock() held for
-        # the whole solve), so module state is safe here.
+        # the stash to a thread-local store that PyPSA can't touch. This
+        # myopic loop runs its iterations sequentially on the solve's
+        # worker thread, so the per-thread store persists across them; two
+        # concurrent solves on different threads get separate stores.
+        store = _frozen_vintage_store()
         for nm, val in zip(names, opt_vals):
             try:
-                _FROZEN_VINTAGE_CAPACITIES[(comp_class, str(nm))] = float(val)
+                store[(comp_class, str(nm))] = float(val)
             except (TypeError, ValueError):
                 pass
         frozen += len(names)
@@ -4587,8 +4864,8 @@ def _capture_extendable_p_nom_opt_to_frozen_store(n, phase) -> int:
     non-myopic solve paths (full-horizon single-shot, SCLOPF, rolling).
 
     Walks every extendable asset across ``_NOM_TRIPLES`` and writes its
-    current ``p_nom_opt`` into the module-level
-    ``_FROZEN_VINTAGE_CAPACITIES`` dict. **No mutation** — does not touch
+    current ``p_nom_opt`` into the per-thread freeze store
+    (``_frozen_vintage_store()``). **No mutation** — does not touch
     ``p_nom`` or ``p_nom_extendable``. Call immediately after a successful
     ``n.optimize()`` and before any rescaling / post-solve pass.
 
@@ -4608,6 +4885,7 @@ def _capture_extendable_p_nom_opt_to_frozen_store(n, phase) -> int:
     """
     captured = 0
     recovered = 0
+    store = _frozen_vintage_store()
     has_model = hasattr(n, "model") and n.model is not None
     for comp_class, attr, pf in _NOM_TRIPLES:
         df = getattr(n, attr, None)
@@ -4647,7 +4925,7 @@ def _capture_extendable_p_nom_opt_to_frozen_store(n, phase) -> int:
                 if real is not None and math.isfinite(real) and real >= 0:
                     fval = real
                     recovered += 1
-            _FROZEN_VINTAGE_CAPACITIES[(comp_class, str(nm))] = fval
+            store[(comp_class, str(nm))] = fval
             captured += 1
     if captured:
         msg = f"Captured p_nom_opt for {captured} extendable asset(s) into freeze store"
@@ -4811,7 +5089,6 @@ def _run_myopic_foresight(
     capture callback runs once at the very end during restore and
     aggregates the frozen p_nom_opt across vintages.
     """
-    import pandas as pd
 
     if not isinstance(network.snapshots, pd.MultiIndex):
         raise RuntimeError(
@@ -4914,10 +5191,72 @@ def _run_myopic_foresight(
                 has_active_extendable = True
                 break
         if not has_active_extendable:
+            # No EXPANSION decisions remain for this period (capacity is frozen
+            # from earlier iterations). BUT we must still verify the frozen
+            # fleet can OPERATIONALLY serve this period's load — and produce its
+            # dispatch. The previous behaviour `continue`d here, skipping the
+            # solve entirely, which (a) masked operational infeasibility as a
+            # clean "optimal" run (the frozen capacity literally cannot serve a
+            # higher-demand later period → infeasible, reported as success), and
+            # (b) left the period with no dispatch results. Solve dispatch-only
+            # over this period's snapshots instead.
             phase(
-                f"Myopic [{i}/{len(periods)}] period {current_period}: no extendable "
-                f"assets active — capacity already determined by earlier iterations, "
-                f"skipping LP."
+                f"Myopic [{i}/{len(periods)}] period {current_period}: no new "
+                f"extendable assets — running operational dispatch to verify "
+                f"feasibility (capacity already frozen)."
+            )
+            try:
+                op_status, op_condition = network.optimize(
+                    snapshots=sns,
+                    solver_name=cfg.solver_name,
+                    multi_investment_periods=True,
+                    extra_functionality=extra_fn,
+                    log_fn=str(tmp_log),
+                    solver_options=merged_solver_options,
+                    assign_all_duals=True,
+                )
+            except Exception as exc:
+                # PyPSA can trip its `periodized_cost` / `nyears` check when the
+                # extendable index is empty under multi_investment_periods
+                # (notably with differing period durations). Retry as a plain
+                # single-period operational solve over the same snapshots — same
+                # feasibility verdict + dispatch, avoiding that code path.
+                phase(
+                    f"Myopic period {current_period}: multi-period dispatch solve "
+                    f"tripped ({type(exc).__name__}: {exc}); retrying operational."
+                )
+                op_status, op_condition = network.optimize(
+                    snapshots=sns,
+                    solver_name=cfg.solver_name,
+                    extra_functionality=extra_fn,
+                    log_fn=str(tmp_log),
+                    solver_options=merged_solver_options,
+                    assign_all_duals=True,
+                )
+            _rescale_results_for_objective(network)
+            if op_status != "ok":
+                phase(
+                    f"Myopic period {current_period} is operationally INFEASIBLE "
+                    f"({op_status}/{op_condition}) — the capacity frozen by earlier "
+                    f"periods cannot serve this period's load. Aborting (later "
+                    f"periods would only drift further)."
+                )
+                return op_status, op_condition, iteration_undo
+            # Accumulate the period's operating cost into the horizon total, the
+            # same way the expansion path does (so the reported objective covers
+            # every period, not just the ones that expanded).
+            try:
+                _per_obj = float(network.objective) if getattr(network, "objective", None) is not None else 0.0
+            except Exception:
+                _per_obj = 0.0
+            try:
+                _per_const = float(getattr(network, "objective_constant", 0.0) or 0.0)
+            except Exception:
+                _per_const = 0.0
+            if not hasattr(network, "_myopic_period_objectives"):
+                network._myopic_period_objectives = []
+            network._myopic_period_objectives.append(
+                (int(current_period), _per_obj, _per_const)
             )
             continue
         # Phase 2: rewrite snapshot_weightings so the LP's view of each
@@ -5170,12 +5509,9 @@ def _run_myopic_foresight(
         #                    vintages summed — easier to see overall expansion)
         #   [BUS-BAL]      — per-bus energy balance (detect transmission
         #                    bottlenecks limiting renewable absorption)
-        _log_curtailment_post_solve(network, sns, current_period, phase)
-        _log_storage_post_solve(network, sns, current_period, phase)
-        _log_line_post_solve(network, sns, current_period, phase)
-        _log_corridor_summary_post_solve(network, sns, current_period, phase)
-        _log_capacity_summary_post_solve(network, current_period, phase)
-        _log_bus_balance_post_solve(network, sns, current_period, phase)
+        # BARE (no try/except) on purpose — a diagnostic failure here propagates
+        # to abort this myopic iteration (see _emit_core_post_solve_diagnostics).
+        _emit_core_post_solve_diagnostics(network, sns, current_period, phase)
         # SCLOPF-specific post-solve check: for each active contingency,
         # report the worst-case post-outage line loading and whether the
         # constraint actually binds. Only fires when this iteration ran
@@ -5239,7 +5575,6 @@ def _patch_passive_branch_holes(n, phase) -> None:
     to read 0 — the LP COULDN'T put flow there because earlier iters
     froze the topology; 0 is the correct LP output, not "missing".
     """
-    import pandas as pd
     if n is None or not isinstance(n.snapshots, pd.MultiIndex):
         return  # flat network: PyPSA's bug doesn't fire here
     sns = n.snapshots

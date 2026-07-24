@@ -23,7 +23,10 @@ export interface CreationRequest {
 // the new component appears in the React Query cache.
 export interface PendingNodePosition { name: string; position: { x: number; y: number } }
 export type CanvasMode = 'select' | 'connect'
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds'
+// `chat` is the chatbot integration v6 panel (Phase 3). It opens a
+// half-width slide-panel on the right with the conversation, confirmation
+// cards, and live tool-progress streams. Reset via chatStore on project switch.
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'chat'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -75,12 +78,31 @@ function storedAutosave(): boolean {
   try { return localStorage.getItem(AUTOSAVE_KEY) === 'true' } catch { return false }
 }
 
-function storedOpenTabs(): string[] {
+// An open project tab. `lastInteractedAt` is an LRU signal (B9 eviction) —
+// epoch-ms of the last time the user switched TO this tab; 0 when unknown
+// (e.g. migrated from the legacy `string[]` shape). In-memory consumers read
+// `.name`; the timestamp is persisted so LRU survives reloads.
+export interface OpenTab { name: string; lastInteractedAt: number }
+
+function storedOpenTabs(): OpenTab[] {
   try {
     const raw = localStorage.getItem(OPEN_TABS_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter((s: unknown): s is string => typeof s === 'string') : []
+    if (!Array.isArray(parsed)) return []
+    // Migrate BOTH shapes so existing users' localStorage doesn't break:
+    //   * legacy `string[]`  → wrap each as {name, lastInteractedAt: 0}
+    //   * current `OpenTab[]` → validate name + coerce a finite timestamp
+    const out: OpenTab[] = []
+    for (const entry of parsed) {
+      if (typeof entry === 'string') {
+        out.push({ name: entry, lastInteractedAt: 0 })
+      } else if (entry && typeof entry === 'object' && typeof (entry as { name?: unknown }).name === 'string') {
+        const t = (entry as { lastInteractedAt?: unknown }).lastInteractedAt
+        out.push({ name: (entry as { name: string }).name, lastInteractedAt: typeof t === 'number' && Number.isFinite(t) ? t : 0 })
+      }
+    }
+    return out
   } catch { return [] }
 }
 
@@ -130,7 +152,7 @@ function storedCompareRailWidth(): number {
   return 560
 }
 
-function persistOpenTabs(tabs: string[]) {
+function persistOpenTabs(tabs: OpenTab[]) {
   try { localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(tabs)) } catch { /* noop */ }
 }
 
@@ -188,7 +210,15 @@ interface UIStore {
   // Which result set to read from /results/* — flipped by the AC PF toggle
   // in TopologyCanvas / LoadFlow when Stage 2 is available. Always 'lopf'
   // when no AC PF has been run (the toggle UI is hidden in that case).
+  // PER-PROJECT (B8): this top-level field always reflects the CURRENT
+  // project's choice; `setCurrentProject` reloads it from
+  // `resultSourceByProject` so an instant switch restores the right source.
+  // Consumers read this field unchanged.
   resultSource: 'lopf' | 'ac_pf'
+  // Per-project store of the result-source choice. In-memory only (resets on
+  // reload — a fresh session always defaults to 'lopf' per project). Written by
+  // setResultSource alongside the top-level mirror; read by setCurrentProject.
+  resultSourceByProject: Record<string, 'lopf' | 'ac_pf'>
   // Which physical quantity the canvas edge overlay shows when results are
   // active. 'p' is the LP and AC-PF default (active power, MW). 'q' is
   // populated only by AC PF (reactive power, MVAr); the toggle UI is hidden
@@ -219,7 +249,7 @@ interface UIStore {
   bottomTabRequest: string | null
   currentProject: string | null
   autosaveEnabled: boolean
-  openTabs: string[]
+  openTabs: OpenTab[]
   // ISO timestamp of the last save for each known project. UI consumers
   // (StatusBar, ProjectSection) derive "Saved Xm ago" from the active
   // project's entry. Updated by saveMut.onSuccess and project load.
@@ -269,6 +299,10 @@ interface UIStore {
   addTab: (name: string) => void
   closeTab: (name: string) => void
   renameTab: (oldName: string, newName: string) => void
+  // Stamp `lastInteractedAt = Date.now()` on the named tab (B9 LRU signal).
+  // Called by the switch flow when a project becomes active. No-op if the
+  // tab isn't open (defensive).
+  touchTab: (name: string) => void
   // Single atomic update for after a successful backend rename: rewrites
   // currentProject (if it was the renamed one), openTabs, recents, and the
   // lastSavedByProject map's key. Saves one render vs. four separate setter
@@ -290,6 +324,7 @@ export const useUIStore = create<UIStore>((set) => ({
   bottomPanelHeight: 200,
   resultsOverlayEnabled: storedResultsOverlay(),
   resultSource: 'lopf',
+  resultSourceByProject: {},
   flowOverlayKind: 'p',
   resultsSnapshotIdx: 0,
   creationItem: null,
@@ -306,7 +341,7 @@ export const useUIStore = create<UIStore>((set) => ({
   openTabs: (() => {
     const tabs = storedOpenTabs()
     const cur = storedCurrentProject()
-    if (cur && !tabs.includes(cur)) tabs.push(cur)
+    if (cur && !tabs.some(t => t.name === cur)) tabs.push({ name: cur, lastInteractedAt: Date.now() })
     return tabs
   })(),
   lastSavedByProject: storedLastSaved(),
@@ -364,7 +399,15 @@ export const useUIStore = create<UIStore>((set) => ({
     try { localStorage.setItem(RESULTS_OVERLAY_KEY, v ? 'true' : 'false') } catch { /* noop */ }
     set({ resultsOverlayEnabled: v })
   },
-  setResultSource: (s) => set({ resultSource: s === 'ac_pf' ? 'ac_pf' : 'lopf' }),
+  setResultSource: (s) => set(state => {
+    const v: 'lopf' | 'ac_pf' = s === 'ac_pf' ? 'ac_pf' : 'lopf'
+    // Per-project (B8): write the active project's entry alongside the
+    // top-level mirror so a later instant switch restores the right source.
+    const byProject = state.currentProject
+      ? { ...state.resultSourceByProject, [state.currentProject]: v }
+      : state.resultSourceByProject
+    return { resultSource: v, resultSourceByProject: byProject }
+  }),
   setFlowOverlayKind: (k) => set({ flowOverlayKind: k === 'q' ? 'q' : 'p' }),
   setResultsSnapshotIdx: (i) => set({ resultsSnapshotIdx: Math.max(0, Math.floor(i)) }),
   setCreationItem: (item) => set({ creationItem: item }),
@@ -408,9 +451,13 @@ export const useUIStore = create<UIStore>((set) => ({
         currentProject: name,
         selectedComponent: null,
         highlightedComponent: null,
+        // Per-project result-source (B8): restore the new project's choice so
+        // an instant switch lands on the source the user last picked there.
+        // Defaults to 'lopf' for a never-visited / fresh project.
+        resultSource: name ? (s.resultSourceByProject[name] ?? 'lopf') : 'lopf',
       }
-      if (name && !s.openTabs.includes(name)) {
-        const nextTabs = [...s.openTabs, name]
+      if (name && !s.openTabs.some(t => t.name === name)) {
+        const nextTabs = [...s.openTabs, { name, lastInteractedAt: Date.now() }]
         persistOpenTabs(nextTabs)
         patch.openTabs = nextTabs
       }
@@ -429,30 +476,47 @@ export const useUIStore = create<UIStore>((set) => ({
     set({ autosaveEnabled: v })
   },
   addTab: (name) => set(s => {
-    if (s.openTabs.includes(name)) return s
-    const next = [...s.openTabs, name]
+    if (s.openTabs.some(t => t.name === name)) return s
+    const next = [...s.openTabs, { name, lastInteractedAt: Date.now() }]
     persistOpenTabs(next)
     return { openTabs: next }
   }),
   closeTab: (name) => set(s => {
-    const next = s.openTabs.filter(t => t !== name)
+    const next = s.openTabs.filter(t => t.name !== name)
     persistOpenTabs(next)
     return { openTabs: next }
   }),
   renameTab: (oldName, newName) => set(s => {
-    const next = s.openTabs.map(t => t === oldName ? newName : t)
+    const next = s.openTabs.map(t => t.name === oldName ? { ...t, name: newName } : t)
+    persistOpenTabs(next)
+    return { openTabs: next }
+  }),
+  touchTab: (name) => set(s => {
+    let changed = false
+    const next = s.openTabs.map(t => {
+      if (t.name === name) { changed = true; return { ...t, lastInteractedAt: Date.now() } }
+      return t
+    })
+    if (!changed) return s
     persistOpenTabs(next)
     return { openTabs: next }
   }),
   renameProject: (oldName, newName) => set(s => {
     const wasCurrent = s.currentProject === oldName
-    // openTabs / recents — substitute the name in-place to preserve order.
-    const nextTabs = s.openTabs.map(t => t === oldName ? newName : t)
+    // openTabs / recents — substitute the name in-place to preserve order
+    // (and the tab's LRU timestamp).
+    const nextTabs = s.openTabs.map(t => t.name === oldName ? { ...t, name: newName } : t)
     const nextRecents = s.recents.map(r => r === oldName ? newName : r)
     // lastSavedByProject — move the timestamp from old key to new key.
     const nextLastSaved: LastSavedMap = {}
     for (const [k, v] of Object.entries(s.lastSavedByProject)) {
       nextLastSaved[k === oldName ? newName : k] = v
+    }
+    // resultSourceByProject (B8) — re-key the per-project result source too so
+    // the renamed project keeps its lopf/ac_pf choice (in-memory only).
+    const nextResultSource: Record<string, 'lopf' | 'ac_pf'> = {}
+    for (const [k, v] of Object.entries(s.resultSourceByProject)) {
+      nextResultSource[k === oldName ? newName : k] = v
     }
     // Persist whichever sub-stores actually changed. Skip a localStorage
     // write if the entry was already absent (saves a no-op write).
@@ -467,6 +531,7 @@ export const useUIStore = create<UIStore>((set) => ({
       openTabs: nextTabs,
       recents: nextRecents,
       lastSavedByProject: nextLastSaved,
+      resultSourceByProject: nextResultSource,
       // Window title is driven by `projectName` (separate from currentProject);
       // refresh it too so the document title updates immediately.
       projectName: wasCurrent ? newName : s.projectName,

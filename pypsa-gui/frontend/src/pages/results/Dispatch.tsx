@@ -9,12 +9,14 @@ import toast from 'react-hot-toast'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
 import type { Generator, Load, StorageUnit, Store, Link as LinkT } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, type ResultsViewMode, type Season,
-  generatorGroup, aggregateTS, isRenewableCarrier,
+  generatorGroup, aggregateTS, isRenewableCarrier, durationCurvePoints, useWeightCtx,
   weightedSum, weightedSumSplit, averageScaling, hasScaling,
-  fmtEnergy, fmtCurrency, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
+  fmtEnergy, fmtCurrency, fmtPower, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
+  ChartCard, ChartActions,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   SEASONS, SEASON_OF_MONTH, SEASON_ACCENT,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
@@ -242,58 +244,58 @@ export default function Dispatch() {
   // and falls back when a given table has no ac_pf variant, so this is safe
   // for the LP-only quantities too.
   const resultSource = useUIStore(s => s.resultSource)
+  const currentProject = useUIStore(s => s.currentProject)
   // Cost breakdown: used by the OPEX KPI strip + per-class table below. Same
   // endpoint Capacity Expansion uses, cached under the shared queryKey so we
   // don't double-fetch when both tabs are mounted. (LP-only — no source.)
-  const { data: cost } = useQuery({ queryKey: ['results', 'cost_breakdown'], queryFn: resultsApi.getCostBreakdown })
-  const { data: gensTS } = useQuery({ queryKey: ['results', 'generators', resultSource], queryFn: () => resultsApi.getGeneratorResults(resultSource) })
+  const { data: cost } = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'), queryFn: resultsApi.getCostBreakdown })
+  const { data: gensTS } = useQuery({ queryKey: nk(currentProject, 'results', 'generators', resultSource), queryFn: () => resultsApi.getGeneratorResults(resultSource) })
   // Curtailment = max(p_max_pu * p_nom_opt − p, 0). Computed server-side.
   // Used for the renewables KPI + the toggleable per-section plot below.
   // (LP-only — AC PF doesn't produce curtailment.)
-  const { data: curtailTS } = useQuery({ queryKey: ['results', 'curtailment'], queryFn: resultsApi.getCurtailment })
+  const { data: curtailTS } = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'), queryFn: resultsApi.getCurtailment })
   // Storage gets BOTH SoC (MWh) AND signed power (MW). The power view is what
   // the user means by "production / consumption" — positive = discharging,
   // negative = charging. SoC is the energy reservoir level.
-  const { data: storTS }     = useQuery({ queryKey: ['results', 'storage', resultSource],          queryFn: () => resultsApi.getStorageResults(resultSource) })
-  const { data: storPowerTS }= useQuery({ queryKey: ['results', 'storage_dispatch', resultSource], queryFn: () => resultsApi.getStorageDispatchResults(resultSource) })
-  const { data: storeTS }    = useQuery({ queryKey: ['results', 'store_dispatch', resultSource],   queryFn: () => resultsApi.getStoreDispatchResults(resultSource) })
-  const { data: storeETS }   = useQuery({ queryKey: ['results', 'store_energy', resultSource],     queryFn: () => resultsApi.getStoreEnergyResults(resultSource) })
-  const { data: loadTS } = useQuery({ queryKey: ['results', 'loads', resultSource],      queryFn: () => resultsApi.getLoadResults(resultSource) })
+  const { data: storTS }     = useQuery({ queryKey: nk(currentProject, 'results', 'storage', resultSource),          queryFn: () => resultsApi.getStorageResults(resultSource) })
+  const { data: storPowerTS }= useQuery({ queryKey: nk(currentProject, 'results', 'storage_dispatch', resultSource), queryFn: () => resultsApi.getStorageDispatchResults(resultSource) })
+  const { data: storeTS }    = useQuery({ queryKey: nk(currentProject, 'results', 'store_dispatch', resultSource),   queryFn: () => resultsApi.getStoreDispatchResults(resultSource) })
+  const { data: storeETS }   = useQuery({ queryKey: nk(currentProject, 'results', 'store_energy', resultSource),     queryFn: () => resultsApi.getStoreEnergyResults(resultSource) })
+  const { data: loadTS } = useQuery({ queryKey: nk(currentProject, 'results', 'loads', resultSource),      queryFn: () => resultsApi.getLoadResults(resultSource) })
   // Per-link p0 (signed MW; positive = bus0→bus1). Rendered as one section
   // per link carrier so the user can compare e.g. HVDC interconnect vs
   // electrolyser dispatch separately.
-  const { data: linkTS } = useQuery({ queryKey: ['results', 'links', resultSource], queryFn: () => resultsApi.getLinkResults(resultSource) })
+  const { data: linkTS } = useQuery({ queryKey: nk(currentProject, 'results', 'links', resultSource), queryFn: () => resultsApi.getLinkResults(resultSource) })
   // VOLL slack dispatch — non-null only when last solve ran with voll > 0
   // and the LP actually shed load. Drives the Lost Load KPI + chart below.
-  const { data: lostLoad } = useQuery({ queryKey: ['results', 'lost_load'], queryFn: resultsApi.getLostLoad })
+  const { data: lostLoad } = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'), queryFn: resultsApi.getLostLoad })
   // Per-carrier economics (live network) — drives the per-carrier KPI strip
   // above each DispatchStack. Mirrors the Compare View's by_carrier split
   // (gen/charge/curtailment/lost-load) so the single-project view shows
   // the same comprehensive OPEX picture without depending on autosave.
   const { data: econByCarrier } = useQuery({
-    queryKey: ['results', 'economics_by_carrier'],
+    queryKey: nk(currentProject, 'results', 'economics_by_carrier'),
     queryFn: resultsApi.getEconomicsByCarrier,
   })
 
-  const { data: buses = [] }        = useQuery({ queryKey: ['buses'],         queryFn: networkApi.getBuses })
-  const { data: generators = [] }   = useQuery({ queryKey: ['generators'],    queryFn: networkApi.getGenerators })
-  const { data: storageUnits = [] } = useQuery({ queryKey: ['storage_units'], queryFn: networkApi.getStorageUnits })
-  const { data: stores = [] }       = useQuery({ queryKey: ['stores'],        queryFn: networkApi.getStores })
-  const { data: loads = [] }        = useQuery({ queryKey: ['loads'],         queryFn: networkApi.getLoads })
-  const { data: links = [] }        = useQuery({ queryKey: ['links'],         queryFn: networkApi.getLinks })
+  const { data: buses = [] }        = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses })
+  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
+  const { data: loads = [] }        = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
+  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
 
   // Snapshot weights + period weights drive the KPI scaling. Without these,
   // a representative-week run with snapshot_weightings.generators = 52.14 shows
   // its raw 168-hour energy total (52× too small versus n.statistics()).
-  const { data: snapInfo } = useQuery({ queryKey: ['snapshots'],           queryFn: networkApi.getSnapshots })
-  const { data: invPeriods } = useQuery({ queryKey: ['investmentPeriods'], queryFn: networkApi.getInvestmentPeriods })
+  // /snapshots + /investmentPeriods are fetched inside useWeightCtx (below).
   // Per-vintage build_year/p_nom_opt for assets with per-period bounds. Used by
   // the Storage SoC `%` view to scale by the period-active energy capacity
   // instead of the cumulative final-year capacity. Without this, the SoC bar in
   // the earliest period appears tiny (~25% of full) because the denominator
   // includes vintages that don't yet exist.
   const { data: vintageResults } = useQuery({
-    queryKey: ['vintage_results'],
+    queryKey: nk(currentProject, 'vintage_results'),
     queryFn: networkApi.listVintageResults,
   })
 
@@ -491,22 +493,46 @@ export default function Dispatch() {
   const refPeriods = refTs?.periods
   const range = resolveRange(refIndex, filter, refPeriods)
 
+  const durationChartRef = useRef<HTMLDivElement | null>(null)
+  // Load- and residual-load-duration curves. Total load and residual load
+  // (load − variable-renewable generation) are each sorted descending over the
+  // (range-sliced) horizon. The residual curve is the net demand the
+  // dispatchable + storage fleet must actually meet — its peak sizes firm
+  // capacity, its tail flags hours of renewable surplus. Each series is sorted
+  // INDEPENDENTLY (standard duration-curve convention; x = % of hours).
+  const durationCurves = useMemo(() => {
+    const load = aggregateTS(loadTS as TSPayload | null, loadNames, range)
+    if (!load || load.length === 0) return null
+    const vre = aggregateTS(gensTS as TSPayload | null, groupCols.renew, range)
+    const n = load.length
+    const loadArr = new Array<number>(n)
+    const resArr = new Array<number>(n)
+    for (let i = 0; i < n; i++) {
+      const l = load[i].value
+      loadArr[i] = l
+      resArr[i] = l - (vre ? (vre[i]?.value ?? 0) : 0)
+    }
+    const loadPts = durationCurvePoints(loadArr)
+    const resPts = durationCurvePoints(resArr)
+    const hasVre = !!vre && vre.some(v => Math.abs(v.value) > 1e-9)
+    return {
+      hasVre,
+      rows: loadPts.map((p, i) => ({
+        pct: p.pct, load: p.value, residual: resPts[i].value,
+      })),
+    }
+  }, [loadTS, gensTS, loadNames, groupCols.renew, range])
+
   // Weight context — assembled once and shared across every weightedSum call.
   // snapshotPeriods comes from any /results/* TS payload (they all carry the
   // same parallel periods array), and falls back to /api/network/snapshots
   // when no result series is loaded yet.
-  const weightCtx: WeightCtx = useMemo(() => {
-    const refTs = (gensTS as TSPayload | null)
-                ?? (loadTS as TSPayload | null)
-                ?? (storTS as TSPayload | null)
-                ?? null
-    return {
-      snapshots: snapInfo?.snapshots ?? refTs?.index,
-      snapshotPeriods: refTs?.periods ?? snapInfo?.periods,
-      snapshotWeights: (snapInfo?.weightings as unknown) as WeightCtx['snapshotWeights'],
-      periodWeights: invPeriods?.weightings as unknown as WeightCtx['periodWeights'],
-    }
-  }, [snapInfo, invPeriods, gensTS, loadTS, storTS])
+  const { weightCtx } = useWeightCtx(
+    (gensTS as TSPayload | null)
+      ?? (loadTS as TSPayload | null)
+      ?? (storTS as TSPayload | null)
+      ?? null,
+  )
 
   // Track whether scaling is non-trivial — drives the "× factor" hint on KPIs.
   const scaled = hasScaling(weightCtx)
@@ -1456,6 +1482,65 @@ export default function Dispatch() {
           </div>
         )}
       </section>
+
+      {/* ── Load- & residual-load duration curves ─────────────────── */}
+      {durationCurves && durationCurves.rows.length > 1 && (
+        <ChartCard
+          title="Load duration curve"
+          hint={durationCurves.hasVre ? 'total load vs residual (load − renewables), each sorted descending'
+                                       : 'total load, sorted descending'}
+          right={
+            <ChartActions
+              chartRef={durationChartRef}
+              onExportCSV={() => {
+                downloadCSV('load_duration_curve.csv',
+                  ['pct_of_hours', 'load_MW', 'residual_load_MW'],
+                  durationCurves.rows.map(r => [r.pct, r.load, r.residual]))
+                toast.success('Exported')
+              }}
+              filename="load_duration_curve" />
+          }
+          bodyClassName="p-3"
+        >
+          <p className="text-[11px] text-muted mb-2">
+            Total system load sorted high-to-low (x = % of hours). {durationCurves.hasVre && (
+              <>The <span className="font-medium text-text">residual</span> curve subtracts variable-renewable
+              generation — the net demand the dispatchable + storage fleet must meet (its peak sizes firm
+              capacity; a dip below zero flags renewable-surplus hours).</>
+            )}
+          </p>
+          <div ref={durationChartRef}>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={durationCurves.rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="ldc-load-grad" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#6b7280" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="#6b7280" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="ldc-res-grad" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#0369a1" stopOpacity={0.28} />
+                    <stop offset="100%" stopColor="#0369a1" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid {...CHART_GRID} />
+                <XAxis dataKey="pct" type="number" domain={[0, 100]}
+                  tickFormatter={(v: number) => `${v.toFixed(0)} %`} {...CHART_AXIS} />
+                <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtPower(v, 1)} label={yAxisLabel('MW')} />
+                <RTooltip {...CHART_TOOLTIP}
+                  labelFormatter={(v: number) => `${Number(v).toFixed(1)} % of hours`}
+                  formatter={(v: number, n: string) => [fmtPower(v), n === 'residual' ? 'Residual load' : 'Load']} />
+                {durationCurves.hasVre && <Legend {...CHART_LEGEND} />}
+                <Area type="monotone" dataKey="load" name="Load" stroke="#6b7280"
+                      fill="url(#ldc-load-grad)" strokeWidth={1.4} isAnimationActive={false} />
+                {durationCurves.hasVre && (
+                  <Area type="monotone" dataKey="residual" name="Residual load" stroke="#0369a1"
+                        fill="url(#ldc-res-grad)" strokeWidth={1.6} isAnimationActive={false} />
+                )}
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
+      )}
 
       {effectiveMode !== 'timeframe' && seasonalViewByCarrier ? (
         <div className="flex flex-col gap-4">

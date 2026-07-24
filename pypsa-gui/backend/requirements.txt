@@ -4,3 +4,18 @@ uvicorn[standard]>=0.30
 sse-starlette>=2.1
 aiofiles>=24.0
 python-multipart>=0.0.12
+
+# Chatbot integration v6 — Phase 3.
+# anthropic ships the Messages API client used by chat_service.run_turn.
+# Optional at runtime: when not installed (or ANTHROPIC_API_KEY missing) the
+# /api/chat/stream endpoint emits a 503 / error frame so the panel renders
+# disabled rather than crashing the whole backend on boot.
+anthropic>=0.40
+
+# Chatbot uploads — Phase A. MIME sniff (python-magic) + .docx parsing
+# (python-docx) + PDF page counting / truncation (pypdf). The pixi env carries
+# these via pixi.toml; this file keeps the upload feature usable in a pure-pip
+# deployment too.
+python-magic>=0.4.27
+python-docx>=0.8.11
+pypdf>=4.0

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { SolverConfig } from '../api/types'
+import type { FailureInfo, SolverConfig } from '../api/types'
 
 type SimStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR'
@@ -9,8 +9,30 @@ interface SimulationStore {
   logLines: string[]
   objective: number | null
   solveTime: number | null
+  /**
+   * Epoch ms when the current solve entered `running`, or null when not
+   * running. Set centrally in `setStatus` so the StatusBar can render a live
+   * elapsed timer without every caller threading a timestamp. Cleared the
+   * moment status leaves `running` (terminal or reset).
+   */
+  runStartedAt: number | null
+  /**
+   * Actionable failure card from the last finished solve (null on success /
+   * abort / before any run). Set from the SSE `done` payload; cleared when a
+   * new run starts and on project switch. Drives the IssuesPanel failure
+   * banner + the auto-open-on-failure behaviour.
+   */
+  lastFailure: FailureInfo | null
   config: SolverConfig
   setStatus: (s: SimStatus) => void
+  setLastFailure: (f: FailureInfo | null) => void
+  /**
+   * Clear the result display (status/objective/solveTime/failure) without
+   * touching the log or config — used when a topology edit invalidates the
+   * solver dispatch, so the StatusBar stops showing a stale "Completed · €X"
+   * for results the backend has already cleared.
+   */
+  clearResults: () => void
   appendLog: (line: string) => void
   clearLog: () => void
   setResult: (objective: number | null, solveTime: number | null) => void
@@ -57,6 +79,7 @@ const defaultConfig: SolverConfig = {
   ac_pf_x_tol: 1e-6,
   presolve_enabled: true,
   user_objective_scale: 1,
+  auto_objective_scale: false,
   solve_strategy: 'full',
   rolling_horizon: 168,
   rolling_overlap: 24,
@@ -74,8 +97,28 @@ export const useSimulationStore = create<SimulationStore>((set) => ({
   logLines: [],
   objective: null,
   solveTime: null,
+  runStartedAt: null,
+  lastFailure: null,
   config: defaultConfig,
-  setStatus: (s) => set({ status: s }),
+  // Stamp runStartedAt on the idle/terminal → running transition; keep the
+  // existing stamp if already running (so an SSE re-attach mid-solve doesn't
+  // reset the clock); clear it on any non-running status. Entering `running`
+  // also clears any stale failure card from the previous run.
+  setStatus: (s) => set(st => ({
+    status: s,
+    runStartedAt: s === 'running'
+      ? (st.status === 'running' && st.runStartedAt != null ? st.runStartedAt : Date.now())
+      : null,
+    lastFailure: s === 'running'
+      ? (st.status === 'running' ? st.lastFailure : null)
+      : st.lastFailure,
+  })),
+  setLastFailure: (f) => set({ lastFailure: f }),
+  // Don't clear logLines — the last solve's log stays useful after an edit.
+  clearResults: () => set({
+    status: 'idle', objective: null, solveTime: null,
+    runStartedAt: null, lastFailure: null,
+  }),
   appendLog: (line) => set(st => ({
     logLines: st.logLines.length > 2000
       ? [...st.logLines.slice(-1800), line]
@@ -89,6 +132,8 @@ export const useSimulationStore = create<SimulationStore>((set) => ({
     logLines: [],
     objective: null,
     solveTime: null,
+    runStartedAt: null,
+    lastFailure: null,
   }),
 }))
 
