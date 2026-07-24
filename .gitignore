@@ -90,3 +90,17 @@ CLAUDE.local.md
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Scratch / debug artifacts from interactive API poking. These accumulated at
+# the repo root during GUI development and were repeatedly picked up by
+# `git add -A`; none of them are inputs to the workflow or the GUI.
+/A_*.json
+/B_*.json
+/WindowsTemp*.json
+/bp.json
+/bp_b.json
+/oa.json
+/resp*.json
+/response.json
+/tmp_audit/
+.pytest_cache/
