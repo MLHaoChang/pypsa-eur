@@ -30,8 +30,10 @@ _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 @pytest.fixture
 def install_with_uploads(tmp_projects_dir, install_network):
-    """Install a network bound to project 'P' + create the project dir on disk
-    so upload_service.add_upload has a real uploads/ to write into."""
+    """
+    Install a network bound to project 'P' + create the project dir on disk
+    so upload_service.add_upload has a real uploads/ to write into.
+    """
     n = build_network()
     install_network(n, name="P")
     (tmp_projects_dir / "P").mkdir(parents=True, exist_ok=True)

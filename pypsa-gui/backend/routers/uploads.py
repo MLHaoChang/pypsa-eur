@@ -24,7 +24,6 @@ import hashlib
 import hmac
 import logging
 import mimetypes
-import os
 import secrets
 import time
 

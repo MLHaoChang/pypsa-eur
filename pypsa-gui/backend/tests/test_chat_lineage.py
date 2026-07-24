@@ -19,7 +19,6 @@ import json
 import pathlib
 
 import pypsa
-import pytest
 
 from services import chat_service
 from services.project_context import ProjectContext
@@ -402,8 +401,10 @@ def test_lineage_helpers_acquire_chat_state_lock(tmp_projects_dir, monkeypatch):
 
 
 def test_save_context_rebind_invokes_lineage_rebind_move(tmp_projects_dir, monkeypatch):
-    """When _save_context is invoked with rebind=True against a DIFFERENT
-    target than ctx.loaded_project, handle_save_lineage runs with mode='rebind_move'."""
+    """
+    When _save_context is invoked with rebind=True against a DIFFERENT
+    target than ctx.loaded_project, handle_save_lineage runs with mode='rebind_move'.
+    """
     from routers import projects as projects_router
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
 

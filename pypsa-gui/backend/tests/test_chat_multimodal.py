@@ -21,7 +21,6 @@ from openpyxl import Workbook
 
 import main
 from services import chat_tools, chat_service, upload_service
-from models.upload_schemas import UploadMeta
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -372,8 +371,10 @@ class TestRunTurnMultimodal:
     def test_image_attachment_prepended_to_user_content(
         self, tmp_projects_dir, install_network,
     ):
-        """When attachment_file_ids is set, the SDK receives a multimodal
-        content list with the image block BEFORE the user's text block."""
+        """
+        When attachment_file_ids is set, the SDK receives a multimodal
+        content list with the image block BEFORE the user's text block.
+        """
         from tests.conftest import build_network
         n = build_network()
         install_network(n, name="P")
@@ -419,7 +420,7 @@ class TestRunTurnMultimodal:
         self, tmp_projects_dir, install_network,
     ):
         """
-        xlsx files attached via the chip strip used to 415 because the
+        Xlsx files attached via the chip strip used to 415 because the
         multimodal API doesn't accept Office formats. The fix splits
         attachments into multimodal-eligible (image/pdf) and tool-
         accessible (xlsx/docx/csv): xlsx files now annotate the user text

@@ -57,7 +57,8 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Generator, Iterable, Optional
+from typing import Any
+from collections.abc import Callable, Generator, Iterable
 
 from fastapi import HTTPException
 from services.project_context import ProjectContext
@@ -639,7 +640,7 @@ _SESSIONS: dict[str, ChatSession] = {}
 _SESSIONS_LOCK = threading.Lock()
 
 
-def get_session(session_id: str) -> Optional[ChatSession]:
+def get_session(session_id: str) -> ChatSession | None:
     with _SESSIONS_LOCK:
         return _SESSIONS.get(session_id)
 
@@ -667,7 +668,7 @@ def _evict_idle_sessions_locked(now: float) -> None:
 
 
 def get_or_create_session(
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     *,
     model: str = DEFAULT_MODEL,
 ) -> ChatSession:
@@ -701,7 +702,8 @@ def drop_session(session_id: str) -> None:
 
 
 def _reset_sessions_for_tests() -> None:
-    """Test-only cleanup hook so the registry can't bleed across pytest runs.
+    """
+    Test-only cleanup hook so the registry can't bleed across pytest runs.
 
     Also clears the #20 metrics and #26 rate-limit buckets — the chat test
     suites' autouse `_reset_chat_sessions` fixture calls this around every
@@ -715,7 +717,7 @@ def _reset_sessions_for_tests() -> None:
         _RATE_BUCKETS.clear()
 
 
-def get_persist_path(ctx: ProjectContext) -> Optional[Path]:
+def get_persist_path(ctx: ProjectContext) -> Path | None:
     """
     Resolve `ctx`'s chat.jsonl on-disk path, caching it on `ctx.chat_state`.
 
@@ -955,7 +957,8 @@ def _rotate_chat_jsonl_unlocked(path: Path) -> None:
 
 
 def sse_frame(event: str, data: dict[str, Any]) -> bytes:
-    """Render one SSE frame in the `event:`/`data:`/blank-line convention.
+    """
+    Render one SSE frame in the `event:`/`data:`/blank-line convention.
 
     Belt-and-suspenders defence: `default=str` ensures a Pydantic model that
     leaks past `_truncate_result` (or any other future tool result path) is
@@ -966,7 +969,7 @@ def sse_frame(event: str, data: dict[str, Any]) -> bytes:
     bug-by-omission elsewhere in the pipeline can't take the chat panel down.
     """
     payload = json.dumps(data, ensure_ascii=False, default=str)
-    return f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
+    return f"event: {event}\ndata: {payload}\n\n".encode()
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1023,7 +1026,7 @@ def solver_log_bridge(
     ctx: ProjectContext,
     *,
     poll_interval: float = 0.05,
-    is_solver_done: Optional[Callable[[], bool]] = None,
+    is_solver_done: Callable[[], bool] | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Subscribe to the ACTIVE solver's BufferedLogQueue for the lifetime of one
@@ -1088,7 +1091,7 @@ def agent_loop_stub(
     script: list[dict[str, Any]],
     *,
     confirmation_wait_seconds: float | None = None,
-    is_disconnected: Optional[Callable[[], bool]] = None,
+    is_disconnected: Callable[[], bool] | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Drive a scripted sequence of SSE frames. The stub stands in for the
@@ -2497,7 +2500,7 @@ def handle_save_lineage(
     ctx: ProjectContext,
     target_name: str,
     mode: str,
-    source_name: Optional[str] = None,
+    source_name: str | None = None,
 ) -> None:
     """
     F12 — apply the appropriate chat.jsonl lineage rule on a project-save

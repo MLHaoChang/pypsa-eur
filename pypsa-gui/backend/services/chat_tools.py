@@ -262,7 +262,8 @@ def list_all_timeseries() -> list[dict]:
 
 
 def get_aggregate_load(section: str | None = None, names: str | None = None) -> dict:
-    """Time-aligned sum of load p_set, by explicit names (CSV) or by section.
+    """
+    Time-aligned sum of load p_set, by explicit names (CSV) or by section.
 
     The handler returns a plain, already-NaN-safe dict ({index, values,
     total_loads, loads_with_profile, peak, mean}) — no normalization needed.
@@ -1326,7 +1327,8 @@ def clear_uploads() -> dict:
 
 
 def _require_active_project() -> str:
-    """Return the active project name or raise an HTTPException(400).
+    """
+    Return the active project name or raise an HTTPException(400).
 
     Reused by every Phase B upload tool — the upload dir is per-project and
     a tool call with no active project has no canonical destination.

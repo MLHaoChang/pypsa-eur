@@ -14,7 +14,7 @@ fields can be loaded by a v1 reader (forward compat).
 """
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -48,8 +48,8 @@ class UploadMeta(BaseModel):
     blob_ready: bool = False
     version: int = 1
     # Phase C additions — optional in v1.
-    page_count: Optional[int] = None
-    truncated_to_100_pages: Optional[bool] = None
+    page_count: int | None = None
+    truncated_to_100_pages: bool | None = None
 
 
 class DeleteUploadResponse(BaseModel):
@@ -70,10 +70,10 @@ class DeleteUploadResponse(BaseModel):
 
     deleted: bool
     file_id: str
-    reason: Optional[Literal["not_found", "in_use"]] = None
+    reason: Literal["not_found", "in_use"] | None = None
 
     @model_validator(mode="after")
-    def _check_reason_contract(self) -> "DeleteUploadResponse":
+    def _check_reason_contract(self) -> DeleteUploadResponse:
         if self.deleted and self.reason is not None:
             raise ValueError(
                 "DeleteUploadResponse(deleted=True) MUST NOT carry a reason"

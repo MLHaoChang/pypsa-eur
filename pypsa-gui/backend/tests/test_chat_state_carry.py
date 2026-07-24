@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import pathlib
-import unittest.mock as mock
 
 import pypsa
 import pytest
@@ -356,7 +355,7 @@ def test_save_guard_blocks_cross_project_overwrite(tmp_projects_dir):
 
 
 def test_save_guard_allows_same_project_resave(tmp_projects_dir):
-    """loaded == name — re-save (autosave) path, no 409 from the new guard."""
+    """Loaded == name — re-save (autosave) path, no 409 from the new guard."""
     _seed_existing_project(tmp_projects_dir, "A")
     ctx = _make_bound_ctx("A")
     # Re-save under same name. The export may or may not succeed (test

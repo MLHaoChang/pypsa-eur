@@ -320,7 +320,7 @@ def _chatbot_startup_check() -> None:
     chatbot panel renders disabled on the frontend if the key is absent
     (chat_health() reports `anthropic_api_key_present`).
     """
-    import logging, os
+    import logging
     log = logging.getLogger("pypsa_gui.chat")
     if os.environ.get("ANTHROPIC_API_KEY"):
         log.info("chatbot: ANTHROPIC_API_KEY present — chat panel enabled.")

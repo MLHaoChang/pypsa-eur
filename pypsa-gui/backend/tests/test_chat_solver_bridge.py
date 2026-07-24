@@ -29,7 +29,7 @@ def _reset_chat_sessions():
     chat_service._reset_sessions_for_tests()
 
 
-def _bind_log_queue_to_ctx(install_network, q: BufferedLogQueue) -> "ProjectContext":
+def _bind_log_queue_to_ctx(install_network, q: BufferedLogQueue) -> ProjectContext:
     """Install a tiny network and inject a fake log_queue into solver_state."""
     n = pypsa.Network()
     n.add("Bus", "B1")
@@ -42,7 +42,8 @@ def _bind_log_queue_to_ctx(install_network, q: BufferedLogQueue) -> "ProjectCont
 
 
 def _wait_for_subscriber(q: BufferedLogQueue, timeout: float = 2.0) -> bool:
-    """Poll `q._subscribers` until at least one subscriber registers.
+    """
+    Poll `q._subscribers` until at least one subscriber registers.
 
     Phase 2 tests run a producer thread AFTER the bridge generator subscribes.
     Without this barrier the producer can push every line before the bridge
@@ -105,9 +106,11 @@ def test_solver_bridge_streams_phase_lines(install_network):
 
 
 def test_solver_bridge_skips_none_sentinel(install_network):
-    """The solver emits None to signal end-of-stream to the legacy log_stream
+    """
+    The solver emits None to signal end-of-stream to the legacy log_stream
     consumer. The subscriber deque must NOT receive it; the bridge must end
-    via is_solver_done rather than yielding a None payload."""
+    via is_solver_done rather than yielding a None payload.
+    """
     q = BufferedLogQueue(maxlen=100)
     ctx = _bind_log_queue_to_ctx(install_network, q)
     session = chat_service.ChatSession()
@@ -145,8 +148,10 @@ def test_solver_bridge_skips_none_sentinel(install_network):
 
 
 def test_solver_bridge_unsubscribes_on_early_close(install_network):
-    """Closing the generator before the solver finishes must release the
-    subscriber — _subscribers must be empty afterwards. F9 invariant."""
+    """
+    Closing the generator before the solver finishes must release the
+    subscriber — _subscribers must be empty afterwards. F9 invariant.
+    """
     q = BufferedLogQueue(maxlen=100)
     ctx = _bind_log_queue_to_ctx(install_network, q)
     session = chat_service.ChatSession()
@@ -225,8 +230,10 @@ def test_solver_bridge_unsubscribes_on_exception_propagation(install_network):
 
 
 def test_solver_bridge_abort_event_terminates(install_network):
-    """Pre-setting abort_event causes the bridge to exit on first iteration
-    without emitting any payloads, and unsubscribe runs cleanly."""
+    """
+    Pre-setting abort_event causes the bridge to exit on first iteration
+    without emitting any payloads, and unsubscribe runs cleanly.
+    """
     q = BufferedLogQueue(maxlen=100)
     ctx = _bind_log_queue_to_ctx(install_network, q)
     session = chat_service.ChatSession()

@@ -7,7 +7,7 @@ display-only and never re-used as a path component, so the safety bar here
 is "render-safe + cross-platform-portable", not "filesystem-injection-proof".
 
 `safe_upload_filename` enforces:
-  * No path-traversal sequences (`..`, `/`, `\`)
+  * No path-traversal sequences (`..`, `/`, `\\`)
   * No control characters (`\x00`-`\x1f`)
   * No Windows reserved names (CON, PRN, NUL, AUX, COM1-9, LPT1-9 + extensions)
   * No leading dots (hidden-file-on-unix avoidance)

@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -268,8 +267,11 @@ def test_schema_property_names_are_valid_python_identifiers(tool):
 
 
 class _SampleProjectInfo(BaseModel):
-    """Mirror of models.schemas.ProjectInfo shape - kept local so this test
-    doesn't couple to that file's structure."""
+    """
+    Mirror of models.schemas.ProjectInfo shape - kept local so this test
+    doesn't couple to that file's structure.
+    """
+
     name: str
     bus_count: int
     has_solver_config: bool
@@ -505,8 +507,10 @@ def test_consistency_check_logic_detects_synthesised_missing_required():
 
 
 def test_signature_waivers_reference_existing_tools():
-    """A waiver entry that references a deleted tool name is dead code -
-    fail so the list stays clean."""
+    """
+    A waiver entry that references a deleted tool name is dead code -
+    fail so the list stays clean.
+    """
     tool_names = {t["name"] for t in TOOLS}
     stale = [n for n in SIGNATURE_INTROSPECTION_WAIVERS if n not in tool_names]
     assert not stale, (

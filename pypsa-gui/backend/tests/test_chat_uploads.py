@@ -18,7 +18,6 @@ Covers:
 """
 from __future__ import annotations
 
-import io
 import threading
 import time
 
@@ -135,8 +134,10 @@ class TestAddUpload:
         assert m1.filename == m2.filename == "a.xlsx"
 
     def test_concurrent_same_bytes_serialise(self, demo_project):
-        """N threads racing to upload the same bytes must all see the same
-        file_id + uploaded_at (first-writer wins via the per-project lock)."""
+        """
+        N threads racing to upload the same bytes must all see the same
+        file_id + uploaded_at (first-writer wins via the per-project lock).
+        """
         N = 16
         results: list[UploadMeta] = []
         errors: list[str] = []
@@ -165,7 +166,6 @@ class TestAddUpload:
 
     def test_quota_exceeded_raises_507(self, demo_project, monkeypatch):
         # Cap at 1 KiB to force the 507 with tiny blobs.
-        from fastapi import HTTPException
         big = b"P" * (2 * 1024)  # 2 KiB, exceeds the 1 KiB cap
         with pytest.raises(HTTPException) as ei:
             upload_service.add_upload(
@@ -210,8 +210,10 @@ class TestDelete:
 
 class TestPruneOrphans:
     def test_prune_partial_meta_only(self, demo_project, tmp_projects_dir):
-        """A file_id dir with a meta.json marked blob_ready=False + no blob
-        gets reaped after the grace period."""
+        """
+        A file_id dir with a meta.json marked blob_ready=False + no blob
+        gets reaped after the grace period.
+        """
         from services.upload_service import _resolve_paths
         paths = _resolve_paths(demo_project)
         paths.uploads_dir.mkdir(exist_ok=True)

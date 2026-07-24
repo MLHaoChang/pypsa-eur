@@ -47,8 +47,8 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 try:
     import requests
@@ -136,6 +136,7 @@ def _iter_sse(response: requests.Response) -> Iterator[SSEFrame]:
 @dataclass
 class PromptResult:
     """Outcome of one prompt run."""
+
     name: str
     passed: bool
     seconds: float = 0.0
@@ -157,6 +158,7 @@ class PromptResult:
 @dataclass
 class SmokePrompt:
     """One prompt + post-run on-disk assertion."""
+
     name: str
     message: str
     # If non-empty: every tool_error frame whose ``error_kind`` is NOT in this
@@ -361,7 +363,8 @@ def _reset_in_memory_network(base_url: str, session: requests.Session) -> bool:
 
 
 def _capture_current_project(base_url: str, session: requests.Session) -> str | None:
-    """Read the currently loaded project name so we can restore it after the run.
+    """
+    Read the currently loaded project name so we can restore it after the run.
 
     There is no ``/api/projects/current`` endpoint - the source of truth is
     ``/api/network/meta``'s ``loaded_project`` field.
@@ -446,7 +449,8 @@ def assert_generator_named(name: str):
 
 
 def build_prompts(smoke_project: str) -> list[SmokePrompt]:
-    """The smoke battery. Order matters - each prompt builds on the prior state.
+    """
+    The smoke battery. Order matters - each prompt builds on the prior state.
 
     Add new prompts when a chatbot tool ships. The discipline is:
         schema (chat_tools_schema.py)
@@ -523,7 +527,7 @@ def main() -> int:
         + "_" + uuid.uuid4().hex[:4]
     )
     original_project = _capture_current_project(args.base_url, session)
-    print(f"  backend ok, key present, no solve running")
+    print("  backend ok, key present, no solve running")
     print(f"  smoke_project: {_yellow(smoke_project)}")
     if original_project:
         print(f"  original_project: {_dim(original_project)} (will restore after run)")

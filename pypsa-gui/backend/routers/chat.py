@@ -20,8 +20,7 @@ TestClient.
 """
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -52,11 +51,11 @@ class StreamRequest(BaseModel):
                   `read_excel_sheet` tool instead.
     """
 
-    session_id: Optional[str] = None
-    model: Optional[str] = None
-    script: Optional[list[dict[str, Any]]] = None
-    message: Optional[str] = None
-    attachment_file_ids: Optional[list[str]] = None
+    session_id: str | None = None
+    model: str | None = None
+    script: list[dict[str, Any]] | None = None
+    message: str | None = None
+    attachment_file_ids: list[str] | None = None
 
 
 class ConfirmRequest(BaseModel):

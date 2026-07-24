@@ -32,9 +32,6 @@ from __future__ import annotations
 
 import io
 import json
-import logging
-import os
-import re
 import sys
 import types
 import unittest.mock as mock
@@ -80,6 +77,7 @@ class _FakeUsage:
 
 class _FakeStream:
     """Context-manager that mimics anthropic.MessagesStream."""
+
     def __init__(self, events, final_message):
         self._events = events
         self._final = final_message
@@ -115,6 +113,7 @@ class FakeAnthropicClient:
     Some tests inject an exception class on `raise_on_stream` to simulate
     SDK error-matrix behaviour (AuthenticationError / RateLimitError).
     """
+
     def __init__(self, turns, raise_on_stream=None):
         self._turns = list(turns)
         self.messages = _FakeMessages(self)
@@ -333,8 +332,10 @@ def test_two_destructives_in_one_turn_yield_two_tool_errors(install_network):
 
 
 def test_project_exists_propagates_to_tool_error_kind(install_network, monkeypatch):
-    """The save_project_as M1 pre-check raises HTTPException(409, ...); the agent
-    propagates the structured error_kind into the tool_error frame."""
+    """
+    The save_project_as M1 pre-check raises HTTPException(409, ...); the agent
+    propagates the structured error_kind into the tool_error frame.
+    """
     import pypsa
     from fastapi import HTTPException
 
@@ -371,7 +372,8 @@ def test_project_exists_propagates_to_tool_error_kind(install_network, monkeypat
     monkeypatch.setitem(chat_tools.DISPATCHERS, "save_project_as", fake_save_project_as)
 
     # Approve the destructive confirmation card so the dispatcher actually runs.
-    import threading, time as _t
+    import threading
+    import time as _t
     streamed: list[tuple[str, dict]] = []
     done = threading.Event()
 
@@ -437,7 +439,8 @@ def test_descendants_exist_propagates_to_tool_error_kind(install_network, monkey
         )
     monkeypatch.setitem(chat_tools.DISPATCHERS, "delete_project", fake_delete_project)
 
-    import threading, time as _t
+    import threading
+    import time as _t
     streamed: list[tuple[str, dict]] = []
     done = threading.Event()
     def _run():
@@ -467,10 +470,12 @@ def test_descendants_exist_propagates_to_tool_error_kind(install_network, monkey
 
 
 def test_cold_path_activate_renders_as_success(install_network, monkeypatch):
-    """activate_project on a non-resident project (cold path) emits a normal
+    """
+    activate_project on a non-resident project (cold path) emits a normal
     tool_result, NOT a tool_error. activate_project is `write` tier (not
     destructive) so there's no confirmation card — the dispatcher runs
-    inline."""
+    inline.
+    """
     import pypsa
     n = pypsa.Network()
     n.add("Bus", "B1")
@@ -538,8 +543,10 @@ def test_session_output_cap_refuses_new_turn(install_network):
 
 
 def test_tool_call_per_turn_cap_emits_error(install_network, monkeypatch):
-    """If the model issues > MAX_TOOL_CALLS_PER_TURN tool_use blocks, the
-    agent loop emits a tool_error and bails."""
+    """
+    If the model issues > MAX_TOOL_CALLS_PER_TURN tool_use blocks, the
+    agent loop emits a tool_error and bails.
+    """
     import pypsa
     n = pypsa.Network()
     n.add("Bus", "B1")
@@ -574,8 +581,10 @@ def test_tool_call_per_turn_cap_emits_error(install_network, monkeypatch):
 
 
 def _install_fake_anthropic_module(exc_map):
-    """Inject a fake `anthropic` module with the named exception classes so
-    `_map_sdk_exception` can isinstance-check them."""
+    """
+    Inject a fake `anthropic` module with the named exception classes so
+    `_map_sdk_exception` can isinstance-check them.
+    """
     mod = types.ModuleType("anthropic")
     class AuthenticationError(Exception): pass
     class RateLimitError(Exception): pass
@@ -654,6 +663,7 @@ def _zero_retry_delays(monkeypatch):
 
 class _RaiseNThenSucceedClient:
     """Raises `exc` on the first `n_raises` stream() calls, then replays `turn`."""
+
     def __init__(self, n_raises, exc, turn):
         self._left = n_raises
         self._exc = exc
@@ -742,6 +752,7 @@ def test_unauthorized_is_not_retried(
 
 class _RaiseAfterTokenStream:
     """A stream that yields one token, then raises mid-iteration."""
+
     def __init__(self, exc):
         self._exc = exc
 
@@ -856,8 +867,10 @@ def test_lru_cap_evicts_least_recently_active(monkeypatch):
 
 
 def test_api_key_redacted_from_log_when_exception_carries_it(monkeypatch, caplog):
-    """An exception whose str() contains the API key value must NOT log
-    the literal value — _redact_for_log strips it."""
+    """
+    An exception whose str() contains the API key value must NOT log
+    the literal value — _redact_for_log strips it.
+    """
     secret = "sk-ant-EXAMPLE-DO-NOT-USE-1234567890"
     monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
 
@@ -1281,7 +1294,8 @@ def test_save_project_as_m1_precheck_raises_when_target_exists(monkeypatch):
 
 
 def test_save_project_as_m1_precheck_allows_target_when_active(monkeypatch):
-    """Save-As to the CURRENTLY loaded project (same name) is a routine re-save
+    """
+    Save-As to the CURRENTLY loaded project (same name) is a routine re-save
     of the already-active binding and must NOT raise project_exists.
 
     The M1 check is `name in names AND active_loaded != name` — the second

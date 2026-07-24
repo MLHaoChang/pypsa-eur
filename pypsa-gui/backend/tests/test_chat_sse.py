@@ -283,7 +283,7 @@ def test_late_confirm_after_ttl_returns_409(client, monkeypatch):
     time.sleep(0.2)  # let TTL elapse
 
     r = client.post(
-        f"/api/chat/sess-late/confirm",
+        "/api/chat/sess-late/confirm",
         json={"token": pc.token, "decision": "approve"},
     )
     # Either 409 expired (caught before wait prunes) or 404 (post-prune).

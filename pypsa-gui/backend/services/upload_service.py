@@ -40,7 +40,6 @@ Quota:
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import pathlib
@@ -48,7 +47,6 @@ import shutil
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from fastapi import HTTPException
 
@@ -169,8 +167,10 @@ def _probe_pdf_page_count(blob_bytes: bytes) -> tuple[int | None, bool]:
 
 
 def io_module_BytesIO_compat(blob: bytes):
-    """Local import wrapper so `_probe_pdf_page_count` doesn't drag a top-
-    level `io` import into the module just for the page-count probe."""
+    """
+    Local import wrapper so `_probe_pdf_page_count` doesn't drag a top-
+    level `io` import into the module just for the page-count probe.
+    """
     import io as _io
     return _io.BytesIO(blob)
 
@@ -192,7 +192,7 @@ def _atomic_write_meta(dest: pathlib.Path, meta: UploadMeta) -> None:
     _atomic_write_bytes(dest, payload)
 
 
-def _read_meta(meta_path: pathlib.Path) -> Optional[UploadMeta]:
+def _read_meta(meta_path: pathlib.Path) -> UploadMeta | None:
     """Read meta.json into UploadMeta. None on missing / malformed."""
     if not meta_path.exists():
         return None
