@@ -625,9 +625,17 @@ def test_phase_b_tool_count():
     from services.chat_tools_schema import TOOLS
     from services.chat_tools import DISPATCHERS
     assert len(TOOLS) == len(DISPATCHERS)
-    # 100 pre-Phase-B + 10 Phase B (5 consume + 1 vision + 4 produce) + 1
-    # post-QA addition (clear_uploads, locked decision row 7).
-    assert len(TOOLS) == 111
+    # The hardcoded `assert len(TOOLS) == 111` that used to sit here went
+    # stale the moment get_aggregate_load was added (112), and nobody noticed
+    # because this file could not be collected — importing chat_tools raised
+    # NameError on the unimplemented synthesis tools. It also contradicted
+    # chat_tools_schema's own stated convention (v4-NIT-1 / v6-F4): "len(TOOLS)
+    # is the only source of truth for the tool count — no pre-stated magic
+    # number anywhere."
+    #
+    # The invariant above is the real check. Per-tool presence is covered by
+    # test_phase_b_tools_have_callable_dispatchers below, which names the ten
+    # Phase B tools explicitly instead of counting them.
 
 
 def test_phase_b_tools_have_callable_dispatchers():

@@ -2142,15 +2142,27 @@ DISPATCHERS: dict[str, Any] = {
     "get_simulation_log_history": get_simulation_log_history,
     "get_results": get_results,
     "get_aggregate_load": get_aggregate_load,
-    # synthesis / analysis (read) — composite, in-process result fusion
-    "diagnose_results": diagnose_results,
-    "solve_overview": solve_overview,
-    "sanity_check_results": sanity_check_results,
-    "compare_scenarios": compare_scenarios,
-    "generate_run_report": generate_run_report,
-    "submit_plan": submit_plan,
-    "plan_what_if": plan_what_if,
-    "undo_my_last_chat_action": undo_my_last_chat_action,
+    # synthesis / analysis (read) — composite, in-process result fusion.
+    #
+    # NOT YET IMPLEMENTED. This block previously registered eight names —
+    # diagnose_results, solve_overview, sanity_check_results,
+    # compare_scenarios, generate_run_report, submit_plan, plan_what_if,
+    # undo_my_last_chat_action — that were never defined anywhere in this
+    # module. Importing chat_tools therefore raised
+    # `NameError: name 'diagnose_results' is not defined` at module scope,
+    # which took the whole chat tool surface down and blocked collection of
+    # six test files, including test_tool_schema_signature_consistency.py —
+    # the very test that asserts len(TOOLS) == len(DISPATCHERS). The defect
+    # disabled its own detector.
+    #
+    # They are also absent from chat_tools_schema.TOOLS, so the LLM never
+    # saw them: removing the registrations loses no working behaviour and
+    # restores the documented invariant (112 schema == 112 dispatchers).
+    #
+    # To add one for real: implement the function here, add a matching entry
+    # to chat_tools_schema.TOOLS *and* TOOL_ROUTES, and confirm the schema
+    # `required` array matches the Python signature's defaults (see the
+    # "Optional tool params" pitfall in CLAUDE.md).
     # write_generic_crud (4)
     "create_component": create_component,
     "update_component": update_component,

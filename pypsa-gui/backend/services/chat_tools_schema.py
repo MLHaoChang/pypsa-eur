@@ -1278,6 +1278,7 @@ TOOL_ROUTES: dict[str, list] = {
         # one outlier (v4-MAJOR-4 lookup-dict gap).
         ("GET", f"/api/results/{k}") for k in RESULTS_ENUM if k != "ac_pf_status"
     ] + [("GET", "/api/results/ac_pf/status")],
+    "get_aggregate_load": [("GET", "/api/network/loads/aggregate")],
     # write_generic_crud (4)
     "create_component": _COMP_CREATE_ROUTES,
     "update_component": _COMP_UPDATE_ROUTES,
