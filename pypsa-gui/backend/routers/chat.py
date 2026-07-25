@@ -145,9 +145,11 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
                     user_text = rec.get("user")
                     assistant_blocks = rec.get("assistant")
                     if user_text is not None:
-                        sess.messages.append({"role": "user", "content": user_text})
+                        sess.append_history_message(
+                            {"role": "user", "content": user_text}
+                        )
                     if isinstance(assistant_blocks, list):
-                        sess.messages.append(
+                        sess.append_history_message(
                             {"role": "assistant", "content": assistant_blocks}
                         )
 

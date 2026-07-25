@@ -457,16 +457,20 @@ class ChatSession:
     # Multi-turn message history for the Anthropic Messages API. Each entry
     # is a dict matching the SDK's message shape ({role, content}). Run_turn
     # appends user + assistant + tool_result messages per turn so subsequent
-    # turns see the full conversation context. Bounded so a runaway loop
-    # cannot grow this past memory limits (E2E QA: INT-001).
-    messages: collections.deque = field(
-        default_factory=lambda: collections.deque(maxlen=400)
-    )
+    # turns see the full conversation context. Bounded via pairing-aware
+    # trim (A6) — NOT deque(maxlen=…), which can orphan a tool_use without
+    # its tool_result and make the next Anthropic call reject the sequence.
+    messages: collections.deque = field(default_factory=collections.deque)
 
     # ── Identity ────────────────────────────────────────────────────────────
     def session6(self) -> str:
         """First 6 hex chars of session_id — audit-log action-prefix tag."""
         return self.session_id[:6]
+
+    def append_history_message(self, msg: dict[str, Any]) -> None:
+        """Append one history message and trim pairing-aware if over cap."""
+        self.messages.append(msg)
+        trim_session_messages(self.messages)
 
     # ── Confirmation lifecycle (F13 + v4-MINOR-3) ──────────────────────────
     def issue_confirmation(
@@ -1508,6 +1512,59 @@ _UNTRUSTED_DATA_CLAUSE = (
 )
 
 
+# A6 — session history soft/hard caps. Trim drops COMPLETE turn groups so a
+# tool_use is never left without its matching tool_result.
+SESSION_MESSAGES_MAX: int = 400
+
+
+def _message_is_tool_results(msg: dict[str, Any]) -> bool:
+    content = msg.get("content")
+    if not isinstance(content, list) or not content:
+        return False
+    return all(
+        isinstance(block, dict) and block.get("type") == "tool_result"
+        for block in content
+    )
+
+
+def _drop_oldest_turn_group(messages: collections.deque) -> bool:
+    """
+    Remove the oldest complete turn group from the left.
+
+    Group shape: user (text) → assistant* → user(tool_result)*  (repeat
+    assistant/tool_result pairs), stopping before the next non-tool-result
+    user message. Stray leading tool_result messages are dropped alone
+    (recovery from a previously-broken history).
+    """
+    if not messages:
+        return False
+    first = messages.popleft()
+    if _message_is_tool_results(first):
+        return True
+    while messages:
+        nxt = messages[0]
+        role = nxt.get("role")
+        if role == "assistant":
+            messages.popleft()
+            continue
+        if role == "user" and _message_is_tool_results(nxt):
+            messages.popleft()
+            continue
+        break
+    return True
+
+
+def trim_session_messages(
+    messages: collections.deque,
+    max_len: int | None = None,
+) -> None:
+    """Drop oldest complete turn groups until `len(messages) <= max_len`."""
+    limit = SESSION_MESSAGES_MAX if max_len is None else max_len
+    while len(messages) > limit:
+        if not _drop_oldest_turn_group(messages):
+            break
+
+
 def _format_live_network_meta(ctx: Any) -> str | None:
     """
     One-line orientation for the system prompt: project binding + size +
@@ -1883,7 +1940,7 @@ def _run_turn_body(
 
     messages.append({"role": "user", "content": user_content})
     with session._lock:
-        session.messages.append({"role": "user", "content": user_content})
+        session.append_history_message({"role": "user", "content": user_content})
 
     tool_call_count = 0
     tools = _tools_payload()
@@ -2016,7 +2073,7 @@ def _run_turn_body(
         messages.append({"role": "assistant", "content": assistant_blocks})
         # Persist to session for next-turn rehydration (E2E QA: INT-001).
         with session._lock:
-            session.messages.append({"role": "assistant", "content": assistant_blocks})
+            session.append_history_message({"role": "assistant", "content": assistant_blocks})
 
         tool_uses = [b for b in assistant_blocks if b.get("type") == "tool_use"]
 
@@ -2101,7 +2158,7 @@ def _run_turn_body(
                 })
             messages.append({"role": "user", "content": tool_results})
             with session._lock:
-                session.messages.append({"role": "user", "content": tool_results})
+                session.append_history_message({"role": "user", "content": tool_results})
             continue
 
         # Dispatch each tool sequentially. Before EACH dispatch, re-check that
@@ -2176,7 +2233,7 @@ def _run_turn_body(
                     turn_project_holder[0] = new_bound
         messages.append({"role": "user", "content": tool_results_for_next_turn})
         with session._lock:
-            session.messages.append(
+            session.append_history_message(
                 {"role": "user", "content": tool_results_for_next_turn}
             )
         if switched_mid_turn:
