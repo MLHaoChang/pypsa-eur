@@ -38,6 +38,7 @@ import {
 import { deriveCostEur, useChatStore, type UploadMetaUI } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
+import { isNearBottom } from '../utils/chatUi'
 import ChatMarkdown from './ChatMarkdown'
 import { UploadProgressToast } from './UploadProgressToast'
 
@@ -1007,7 +1008,7 @@ export default function ChatPanel() {
   const onMessagesScroll = useCallback(() => {
     const el = messagesScrollRef.current
     if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const nearBottom = isNearBottom(el, 80)
     setStickToBottom(nearBottom)
     if (nearBottom) setShowJumpLatest(false)
   }, [])

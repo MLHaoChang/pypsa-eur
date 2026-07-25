@@ -13,11 +13,12 @@ import { useCallback, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
+import { extractCopyText } from '../utils/chatUi'
 
 function CodeBlockPre({ children, ...rest }: { children?: ReactNode } & Record<string, unknown>) {
   const [copied, setCopied] = useState(false)
   const onCopy = useCallback(async () => {
-    const text = extractText(children)
+    const text = extractCopyText(children)
     if (!text) return
     try {
       await navigator.clipboard.writeText(text)
@@ -44,17 +45,6 @@ function CodeBlockPre({ children, ...rest }: { children?: ReactNode } & Record<s
       </button>
     </div>
   )
-}
-
-function extractText(node: ReactNode): string {
-  if (node == null || typeof node === 'boolean') return ''
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(extractText).join('')
-  if (typeof node === 'object' && 'props' in node) {
-    const props = (node as { props?: { children?: ReactNode } }).props
-    return extractText(props?.children)
-  }
-  return ''
 }
 
 const components: Components = {
