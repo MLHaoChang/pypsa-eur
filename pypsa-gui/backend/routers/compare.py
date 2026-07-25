@@ -24,7 +24,7 @@ import pathlib
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from services import period_utils
+from services import economics, period_utils
 from models.schemas import (
     AssetLCOHEntry,
     CapacityComparison,
@@ -57,6 +57,12 @@ from routers.projects import (
     _safe_unpickle_results,
     _unwrap_results_state,
 )
+# Shared with the single-network Results endpoints. These were previously
+# imported inside four separate function bodies to dodge a suspected import
+# cycle; there is none — verified that `compare -> results` and
+# `results -> compare` both import cleanly in either order. Hoisted so the
+# dependency is visible at the top of the file like every other one.
+from routers.results import corrected_marginal_prices, lp_scaled_load_frame
 
 router = APIRouter()
 
@@ -152,9 +158,8 @@ def get_compare_state(name: str) -> CompareState:
         # not the live network's cached result snapshot.
         try:
             from routers.simulation import _state as _sim_state2
-            from routers.results import lp_scaled_load_frame as _lp_scaled
             _cfg2 = _sim_state2.get("solver_config")
-            loads_t_p = _lp_scaled(temp_n, _cfg2, from_state=False)
+            loads_t_p = lp_scaled_load_frame(temp_n, _cfg2, from_state=False)
             if loads_t_p is None:
                 loads_t_p = temp_n.loads_t.p_set
         except Exception:
@@ -994,8 +999,7 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchCompar
     p_set_t = None
     try:
         from routers.simulation import _state as _sim_state3
-        from routers.results import lp_scaled_load_frame as _lp_scaled3
-        p_set_t = _lp_scaled3(n, _sim_state3.get("solver_config"), from_state=False)
+        p_set_t = lp_scaled_load_frame(n, _sim_state3.get("solver_config"), from_state=False)
     except Exception:
         p_set_t = None
     if p_set_t is None:
@@ -1202,7 +1206,6 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
     # Prices tab applies), so the duration curve / mean / max / min match.
     # from_state=False → read this bundle's own buses_t, not the live snapshot.
     try:
-        from routers.results import corrected_marginal_prices
         p_t = corrected_marginal_prices(n, from_state=False)
     except Exception:
         p_t = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
@@ -1376,26 +1379,13 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
 def _co2_intensity_map(n) -> dict[str, float]:
     """
     Return ``carrier_name_lower → co2_emissions (tCO2/MWh_th)`` for every
-    carrier whose ``co2_emissions`` is finite. Empty if the network has no
-    carriers DataFrame, or no ``co2_emissions`` column.
+    carrier whose ``co2_emissions`` is finite.
+
+    Thin wrapper kept for this module's call sites; the implementation moved
+    to `services.economics.co2_intensity_map` so the Results tab and the
+    Compare rail read the same carrier intensities.
     """
-    import math as _math
-    out: dict[str, float] = {}
-    carriers = getattr(n, "carriers", None)
-    if carriers is None or carriers.empty or "co2_emissions" not in carriers.columns:
-        return out
-    try:
-        for k, v in carriers["co2_emissions"].items():
-            try:
-                fv = float(v)
-            except (TypeError, ValueError):
-                continue
-            if not _math.isfinite(fv):
-                continue
-            out[str(k).lower()] = fv
-    except Exception:
-        pass
-    return out
+    return economics.co2_intensity_map(n)
 
 
 def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComparison:
@@ -1551,7 +1541,6 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # `_state` snapshot, matching asset_economics); False for a loaded Compare
     # bundle (read temp_n's own duals, never the live network's cached snapshot).
     try:
-        from routers.results import corrected_marginal_prices
         bus_prices = corrected_marginal_prices(n, from_state=prices_from_state)
     except Exception:
         bus_prices = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
