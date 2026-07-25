@@ -419,7 +419,14 @@ export default function Economics() {
     // For generators charge_cost is 0; for storage it's the discharged-MWh
     // weighted purchase cost. Useful for comparing whole-portfolio €/MWh.
     const sysLcoe = energy > 1e-6 ? (fixed + vom + charge_cost) / energy : null
-    return { revenue, charge_cost, vom, fixed, energy, net, profitable, unprofitable, sysLcoe }
+    // Volume-weighted avg capture price — pair with sysLcoe (price vs cost).
+    const avgCapture = energy > 1e-6 ? revenue / energy : null
+    // Margin on revenue; undefined when no revenue (avoid ÷0).
+    const profitMarginPct = Math.abs(revenue) > 1e-6 ? (net / revenue) * 100 : null
+    return {
+      revenue, charge_cost, vom, fixed, energy, net,
+      profitable, unprofitable, sysLcoe, avgCapture, profitMarginPct,
+    }
   }, [projectedRows])
 
   const groupTotals = useMemo(() => {
@@ -567,11 +574,13 @@ export default function Economics() {
                hint="Σ |p| × marginal_cost. For storage assets this also includes the cost of charging energy (charge_mwh × bus price) — the market price paid to fill the reservoir." />
           <KPI label="Net profit"
                value={fmtCurrency(kpis.net)}
-               sub={`= revenue − ${kpis.charge_cost > 0 ? 'charge − ' : ''}vom − fixed`}
+               sub={kpis.profitMarginPct != null
+                 ? `margin ${kpis.profitMarginPct >= 0 ? '' : '−'}${Math.abs(kpis.profitMarginPct).toFixed(1)}% · = revenue − ${kpis.charge_cost > 0 ? 'charge − ' : ''}vom − fixed`
+                 : `= revenue − ${kpis.charge_cost > 0 ? 'charge − ' : ''}vom − fixed`}
                deltaState={kpis.net > 0 ? 'ok' : kpis.net < 0 ? 'err' : undefined}
-               hint="Sum of per-asset net profits. Negative means the portfolio doesn't recover its annualised costs at market prices (typical for must-run assets needed for reliability, not arbitrage)." />
+               hint="Sum of per-asset net profits (revenue − charge − VOM − fixed). Margin = net ÷ revenue. Negative means the portfolio doesn't recover its annualised costs at market prices." />
         </div>
-        <div className="mt-3 grid gap-3 grid-cols-2 md:grid-cols-3">
+        <div className="mt-3 grid gap-3 grid-cols-2 md:grid-cols-4">
           <KPI label="Energy delivered"
                value={fmtEnergy(kpis.energy)}
                sub="MWh sold into the market (Σ p+ × weight)"
@@ -583,7 +592,11 @@ export default function Economics() {
           <KPI label="System LCOE / LCOS"
                value={kpis.sysLcoe != null ? `${kpis.sysLcoe.toFixed(2)} €/MWh` : '—'}
                sub="(Σ fixed + vom + charge) / Σ energy"
-               hint="Portfolio-wide €/MWh — what every MWh delivered into the market costs the system to produce, on average. Useful as a yardstick: the avg market price needs to exceed this for the portfolio to recover costs." />
+               hint="Portfolio-wide €/MWh — what every MWh delivered into the market costs the system to produce, on average. Useful as a yardstick: the avg capture price needs to exceed this for the portfolio to recover costs." />
+          <KPI label="Avg capture price"
+               value={kpis.avgCapture != null ? `${kpis.avgCapture.toFixed(2)} €/MWh` : '—'}
+               sub="Σ revenue / Σ energy delivered"
+               hint="Volume-weighted average price the portfolio earned on delivered MWh (discharge for storage). Compare to System LCOE / LCOS: capture above LCOE means market prices cover production cost on average." />
         </div>
       </section>
 
