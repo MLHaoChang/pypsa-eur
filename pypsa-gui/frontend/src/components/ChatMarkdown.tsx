@@ -9,9 +9,53 @@
 // react-markdown v10 passes a `node` prop to every component override; it must be
 // destructured OUT before spreading the rest onto the DOM element (otherwise
 // React warns about an unknown `node` attribute).
+import { useCallback, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
+
+function CodeBlockPre({ children, ...rest }: { children?: ReactNode } & Record<string, unknown>) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = useCallback(async () => {
+    const text = extractText(children)
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard may be denied; leave UI unchanged.
+    }
+  }, [children])
+
+  return (
+    <div className="relative my-1.5 group">
+      <pre className="p-2 pr-14 rounded bg-bg-2 overflow-x-auto text-[12px]" {...rest}>
+        {children}
+      </pre>
+      <button
+        type="button"
+        className="absolute top-1.5 right-1.5 px-1.5 py-0.5 text-[10px] rounded border border-border bg-bg/90 text-muted hover:text-text opacity-80 group-hover:opacity-100"
+        onClick={onCopy}
+        data-testid="chat-code-copy"
+        aria-label="Copy code"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
+function extractText(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(extractText).join('')
+  if (typeof node === 'object' && 'props' in node) {
+    const props = (node as { props?: { children?: ReactNode } }).props
+    return extractText(props?.children)
+  }
+  return ''
+}
 
 const components: Components = {
   h1: ({ node, ...p }) => <h1 className="text-[15px] font-semibold text-text mt-3 mb-1.5 first:mt-0" {...p} />,
@@ -35,7 +79,7 @@ const components: Components = {
       ? <code className={'font-mono text-[12px] ' + (className ?? '')} {...rest}>{children}</code>
       : <code className="px-1 py-0.5 rounded bg-bg-3 text-[12px] font-mono text-text" {...rest}>{children}</code>
   },
-  pre: ({ node, ...p }) => <pre className="my-1.5 p-2 rounded bg-bg-2 overflow-x-auto text-[12px]" {...p} />,
+  pre: ({ node, ...p }) => <CodeBlockPre {...p} />,
   table: ({ node, ...p }) => (
     <div className="my-2 overflow-x-auto">
       <table className="w-full border-collapse text-[12px]" {...p} />
