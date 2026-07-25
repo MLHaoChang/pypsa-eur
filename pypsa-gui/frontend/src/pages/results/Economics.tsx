@@ -403,14 +403,13 @@ export default function Economics() {
 
   // Top KPIs — horizon-wide totals (or selected-period totals when filtered).
   const kpis = useMemo(() => {
-    let revenue = 0, charge_cost = 0, vom = 0, fixed = 0, fom = 0, energy = 0
+    let revenue = 0, charge_cost = 0, vom = 0, fixed = 0, energy = 0
     let profitable = 0, unprofitable = 0
     for (const r of projectedRows) {
       revenue += r.revenue_eur
       charge_cost += r.charge_cost_eur
       vom += r.vom_cost_eur
       fixed += r.fixed_cost_eur
-      fom += r.fom_cost_eur
       energy += r.energy_mwh
       if (r.net_profit_eur > 1) profitable += 1
       else if (r.net_profit_eur < -1) unprofitable += 1
@@ -420,7 +419,7 @@ export default function Economics() {
     // For generators charge_cost is 0; for storage it's the discharged-MWh
     // weighted purchase cost. Useful for comparing whole-portfolio €/MWh.
     const sysLcoe = energy > 1e-6 ? (fixed + vom + charge_cost) / energy : null
-    return { revenue, charge_cost, vom, fixed, fom, energy, net, profitable, unprofitable, sysLcoe }
+    return { revenue, charge_cost, vom, fixed, energy, net, profitable, unprofitable, sysLcoe }
   }, [projectedRows])
 
   const groupTotals = useMemo(() => {
@@ -478,7 +477,6 @@ export default function Economics() {
         r.charge_cost_eur.toFixed(2),
         r.vom_cost_eur.toFixed(2),
         r.fixed_cost_eur.toFixed(2),
-        r.fom_cost_eur.toFixed(2),
         r.net_profit_eur.toFixed(2),
         r.lcoe_or_lcos != null ? r.lcoe_or_lcos.toFixed(4) : '',
         r.spread_or_avg_price != null ? r.spread_or_avg_price.toFixed(4) : '',
@@ -492,7 +490,6 @@ export default function Economics() {
           pe.charge_cost_eur.toFixed(2),
           pe.vom_cost_eur.toFixed(2),
           pe.fixed_cost_eur.toFixed(2),
-          pe.fom_cost_eur.toFixed(2),
           pe.net_profit_eur.toFixed(2),
           pe.lcoe_or_lcos != null ? pe.lcoe_or_lcos.toFixed(4) : '',
           '',
@@ -504,7 +501,7 @@ export default function Economics() {
       [
         'group', 'asset', 'carrier', 'bus', 'period',
         'energy_mwh', 'revenue_eur', 'charge_cost_eur',
-        'vom_cost_eur', 'fixed_cost_eur', 'fom_cost_eur',
+        'vom_cost_eur', 'fixed_cost_eur',
         'net_profit_eur', 'lcoe_lcos_eur_per_mwh', 'spread_or_avg_price_eur_per_mwh',
       ],
       rows,
@@ -560,7 +557,7 @@ export default function Economics() {
                hint="Annualised market revenue across every generator, storage unit and store. Storage uses discharge revenue only (charge cost is booked separately)." />
           <KPI label="Fixed cost"
                value={fmtCurrency(kpis.fixed)}
-               sub="annualised CAPEX + FOM"
+               sub="annualised CAPEX (capital_cost × p_nom_opt)"
                hint="Σ capital_cost × p_nom_opt. PyPSA's capital_cost is already annualised (overnight × annuity), so this matches the LP-objective contribution." />
           <KPI label="Variable cost"
                value={fmtCurrency(kpis.vom + kpis.charge_cost)}
@@ -574,7 +571,7 @@ export default function Economics() {
                deltaState={kpis.net > 0 ? 'ok' : kpis.net < 0 ? 'err' : undefined}
                hint="Sum of per-asset net profits. Negative means the portfolio doesn't recover its annualised costs at market prices (typical for must-run assets needed for reliability, not arbitrage)." />
         </div>
-        <div className="mt-3 grid gap-3 grid-cols-2 md:grid-cols-4">
+        <div className="mt-3 grid gap-3 grid-cols-2 md:grid-cols-3">
           <KPI label="Energy delivered"
                value={fmtEnergy(kpis.energy)}
                sub="MWh sold into the market (Σ p+ × weight)"
@@ -587,10 +584,6 @@ export default function Economics() {
                value={kpis.sysLcoe != null ? `${kpis.sysLcoe.toFixed(2)} €/MWh` : '—'}
                sub="(Σ fixed + vom + charge) / Σ energy"
                hint="Portfolio-wide €/MWh — what every MWh delivered into the market costs the system to produce, on average. Useful as a yardstick: the avg market price needs to exceed this for the portfolio to recover costs." />
-          <KPI label="FOM (informational)"
-               value={fmtCurrency(kpis.fom)}
-               sub="user-typed fom_cost × p_nom_opt"
-               hint="Reads the asset's fom_cost field × installed capacity. Already part of fixed cost when the user encoded it that way; surfaced here so you can see what fraction of fixed cost is FOM vs annualised CAPEX." />
         </div>
       </section>
 
@@ -705,7 +698,7 @@ export default function Economics() {
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Revenue</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Storage only — cost to charge from the market.">Charge cost</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Σ |p| × marginal_cost.">VOM</th>
-                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Annualised CAPEX + FOM (capital_cost × p_nom_opt).">Fixed</th>
+                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Annualised CAPEX (capital_cost × p_nom_opt).">Fixed</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Net profit</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="LCOE for generators / LCOS for storage.">LCOE/LCOS</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Avg price for generators (€/MWh sold); discharge−charge spread for storage.">Spread / avg €</th>
@@ -793,8 +786,7 @@ export default function Economics() {
           </p>
           <p>
             <span className="font-mono">fixed_cost</span> = capital_cost × p_nom_opt. PyPSA's capital_cost is already annualised
-            (overnight × annuity if you typed overnight_cost), so this equals the LP-objective contribution. FOM is included if
-            the user folded it in; the separate <span className="font-mono">fom_cost</span> field is shown for reference only.
+            (overnight × annuity if you typed overnight_cost), so this equals the LP-objective contribution.
           </p>
           <p>
             <span className="font-mono">net_profit</span> = revenue − charge_cost − vom_cost − fixed_cost. Negative means the
