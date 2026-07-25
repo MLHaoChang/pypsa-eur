@@ -33,10 +33,10 @@
 
 | Field | Value |
 |---|---|
-| Status | `PENDING_REVIEW` |
-| Last review | 2026-07-25 pass 2 — `GAPS_FOUND` (checkpointer durability + orch.jsonl lineage); pass-1 G1–G8 closed |
-| Blocking gaps addressed in amendment | Pass1 G1–G8; Pass2: durable Sqlite checkpointer path + resume-across-restart test; orchestrate.jsonl lineage; D19 single-run; D20 AbortController |
-| Cleared to implement | **NO** |
+| Status | `CLEARED` |
+| Last review | 2026-07-25 pass 3 — `CLEARED` (pass-1 G1–G8 closed; pass-2 checkpointer + lineage closed; no new blockers) |
+| Blocking gaps | None |
+| Cleared to implement | **YES** |
 
 When a review agent returns zero blocking gaps, set Status to `CLEARED` and Cleared to implement to **YES**.
 
@@ -475,7 +475,7 @@ Each PLAN phase (1–10) = one task group below. Stop for review after Phases 3,
 - Private runs refused; DRY_RUN returns plan/estimate without executors
 - Analyze mode uses orchestrate SSE only (no `run_turn` for that submit); returns artifact without mutating the network
 - Project mismatch / rate limit / single-active-run / orch daily+per-run budgets enforced
-- `orchestrate.jsonl` (+ checkpoint sqlite) follow project lineage on Save-As/rename/copy
+- `orchestrate.jsonl` follows project lineage on Save-As/rename/copy; checkpoint sqlite is best-effort per D14
 - Light/heavy roles remappable via YAML only
 - `run_done` always includes `thread_id`; resume works across fresh graph instance (durable checkpointer)
 
@@ -520,7 +520,7 @@ Each PLAN phase (1–10) = one task group below. Stop for review after Phases 3,
 
 **Placeholder scan:** none intentional; deferred composites named with IDs.
 
-**Review amendment log:** Pass 1 found G1–G8 (closed). Pass 2 found durable checkpointer + orch.jsonl lineage (amended via D13/D14/D16/D19/D20). Pass 3 pending.
+**Review amendment log:** Pass 1 found G1–G8 (closed). Pass 2 found durable checkpointer + orch.jsonl lineage (closed via D13/D14/D16/D19/D20). Pass 3 CLEARED.
 
 ---
 
