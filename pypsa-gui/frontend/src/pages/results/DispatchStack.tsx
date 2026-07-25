@@ -10,9 +10,9 @@ import { type TSPayload, shortStamp, stampWithPeriod, fmtPower, isRenewableCarri
 
 // ── Per-period generation dispatch stack ────────────────────────────────────
 // Carrier-stacked area chart showing hourly generation by fuel type, with the
-// system load drawn on top as a dashed line. Storage discharge sits under the
-// fuel stack (above zero) so spiky charge/discharge edges stay near the axis;
-// storage charge is a separate negative stack below zero.
+// system load drawn on top as a dashed line. Energy-charts order (bottom→top):
+// renewables → storage discharge → thermal. Hourly series use stepAfter.
+// Storage charge is a separate negative stack below zero.
 //
 // Renders only when `selectedPeriod` is set (the parent Dispatch tab gates
 // this). Period filtering is applied via `range` from useResultsFilter.
@@ -111,14 +111,13 @@ export default function DispatchStack({
       if (hasGenFilter && !genNames!.has(c)) continue
       genCarrierSet.add(carrierByGen.get(c) ?? 'other')
     }
-    // Ordering: storage discharge at the BOTTOM (under fuels) so its spiky
-    // 0↔peak edges don't cut through the generation bands; thermal next,
-    // renewables on top for a cleaner silhouette. Charge stays below axis.
+    // Energy-charts order (bottom → top): renewables, storage discharge,
+    // thermal. Solar/wind form the base silhouette; gas fills residual on top.
     const thermal = [...genCarrierSet].filter(c => !isRenewableCarrier(c))
     const renew   = [...genCarrierSet].filter(c => isRenewableCarrier(c))
     thermal.sort()
     renew.sort()
-    const stack: string[] = []
+    const stack: string[] = [...renew]
     // When the parent scoped this stack to a specific bus carrier via
     // `electricalStorageNames`, only show storage when AT LEAST ONE storage
     // unit on that bus exists — otherwise a heat-bus chart inherits Battery
@@ -130,7 +129,7 @@ export default function DispatchStack({
         : storageUnits.length > 0
     )
     if (hasStorageOnThisCarrier) stack.push('storage_discharge')
-    stack.push(...thermal, ...renew)
+    stack.push(...thermal)
     const colours: Record<string, string> = {}
     stack.forEach((c, i) => { colours[c] = colourForCarrier(c, i) })
     colours['storage_discharge'] = colourForCarrier('storage')
@@ -390,36 +389,38 @@ export default function DispatchStack({
             <Legend {...CHART_LEGEND} />
             {/* Carrier stack — order matters: bottom first. */}
             {stackOrder.map(carrier => (
-              <Area key={carrier} type="monotone" dataKey={carrier}
+              <Area key={carrier} type="stepAfter" dataKey={carrier}
                 stackId="gen"
                 stroke={colourByCarrier[carrier]}
                 fill={colourByCarrier[carrier]}
                 fillOpacity={0.85}
-                strokeWidth={0} />
+                strokeWidth={0} isAnimationActive={false} />
             ))}
             {/* Cross-carrier link inflows (positive) — e.g., electrolyzer
                 producing H2 on the H2 bus, heat-pump producing high-T heat
                 on the heat bus. Same stackId as carrier gens so they stack
                 on top of native generation. */}
             {hasLinkContribs && (
-              <Area type="monotone" dataKey="link_inflows"
+              <Area type="stepAfter" dataKey="link_inflows"
                 stackId="gen"
                 stroke={colourByCarrier['link_inflows']}
                 fill={colourByCarrier['link_inflows']}
                 fillOpacity={0.65}
                 strokeWidth={0}
-                name="link_inflows" />
+                name="link_inflows"
+                isAnimationActive={false} />
             )}
             {/* Storage charge — separate stack below zero. Recharts'
                 stackOffset="sign" lets positive + negative coexist when
                 stackIds differ. */}
             {hasStorage && (
-              <Area type="monotone" dataKey="storage_charge"
+              <Area type="stepAfter" dataKey="storage_charge"
                 stackId="charge"
                 stroke={colourByCarrier['storage_charge']}
                 fill={colourByCarrier['storage_charge']}
                 fillOpacity={0.55}
-                strokeWidth={0} />
+                strokeWidth={0}
+                isAnimationActive={false} />
             )}
             {/* Cross-carrier link outflows (negative, below axis) — e.g.,
                 electrolyzer consuming AC on the electrical bus, heat-pump
@@ -427,33 +428,36 @@ export default function DispatchStack({
                 series when the parent passes busNames (general logic
                 supersedes the special case). */}
             {hasLinkContribs && (
-              <Area type="monotone" dataKey="link_outflows"
+              <Area type="stepAfter" dataKey="link_outflows"
                 stackId="charge"
                 stroke={colourByCarrier['link_outflows']}
                 fill={colourByCarrier['link_outflows']}
                 fillOpacity={0.55}
                 strokeWidth={0}
-                name="link_outflows" />
+                name="link_outflows"
+                isAnimationActive={false} />
             )}
             {/* Electrolyzer consumption — legacy fallback for single-carrier
                 networks. When busNames is provided, link_outflows above
                 supersedes this series (avoids double-counting). */}
             {hasElectrolyzer && !hasLinkContribs && (
-              <Area type="monotone" dataKey="electrolyzer_consume"
+              <Area type="stepAfter" dataKey="electrolyzer_consume"
                 stackId="charge"
                 stroke={colourByCarrier['electrolyzer_consume']}
                 fill={colourByCarrier['electrolyzer_consume']}
                 fillOpacity={0.55}
                 strokeWidth={0}
-                name="electrolyzer_consume" />
+                name="electrolyzer_consume"
+                isAnimationActive={false} />
             )}
             {/* System load — drawn as a dashed line ON TOP of the stack so
                 operators can read at a glance where dispatch covers demand. */}
-            <Line type="monotone" dataKey="load_total"
+            <Line type="stepAfter" dataKey="load_total"
               stroke="var(--color-text)"
               strokeDasharray="4 3"
               strokeWidth={1.4}
               dot={false}
+              isAnimationActive={false}
               name={hasElectricalFilter ? `Load (${carrierLabel})` : 'Load (total)'} />
           </ComposedChart>
         </ResponsiveContainer>

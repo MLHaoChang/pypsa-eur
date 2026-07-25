@@ -1939,9 +1939,9 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
   }
   // Non-generation stack keys (Storage / Stores / Conversion split into ▲/▼).
   // `Generation` is intentionally absent here — generation is rendered via
-  // genCarrier-specific Areas below. Positive ▲ series sit UNDER generation
-  // so spiky storage/conversion edges don't cut through the fuel bands;
-  // negative ▼ series stay below the axis (stackOffset="sign").
+  // genCarrier-specific Areas. Energy-charts order (bottom→top): renewables,
+  // storage/conversion ▲, thermal. Negative ▼ series stay below the axis
+  // (stackOffset="sign").
   const POS_NON_GEN_KEYS = [
     'Storage ▲', 'Stores ▲', 'Conversion in ▲', 'Conversion out ▲',
   ]
@@ -1983,10 +1983,21 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
         return v != null && v !== 0
       }),
     )
+    // Energy-charts: renewables at the base, thermal on top.
+    const renewGens = presentGenCarriers.filter(gc => isRenewableCarrier(gc)).sort()
+    const thermalGens = presentGenCarriers.filter(gc => !isRenewableCarrier(gc)).sort()
     const hasLoadTotal = rows.some(r => (r.LoadTotal ?? 0) !== 0)
     const hasAnything =
       presentPosNonGen.length > 0 || presentNegNonGen.length > 0
       || presentGenCarriers.length > 0 || hasLoadTotal
+    const renderGenArea = (gc: string, idx: number) => (
+      <Area key={`Gen:${gc}`} type="stepAfter" dataKey={`Gen:${gc}`}
+        name={`Gen:${gc}`} stackId="dispatch"
+        stroke={colourForCarrier(gc, idx)}
+        fill={colourForCarrier(gc, idx)}
+        fillOpacity={0.78}
+        strokeWidth={0} connectNulls isAnimationActive={false} />
+    )
     return (
       <div key={sn}
         className="rounded-[10px] border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
@@ -2023,44 +2034,37 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
                   formatter={(v: string) =>
                     typeof v === 'string' && v.startsWith('Gen:') ? v.slice(4) : v
                   } />
-                {/* Stack order (bottom → top): storage/conversion ▲, then
-                    per-fuel generation, then charge/conversion ▼ below zero.
-                    strokeWidth=0 avoids Recharts drawing vertical edges when
-                    a spiky series drops to 0 through the bands above it. */}
+                {/* Bottom → top: renewables, storage/conversion ▲, thermal.
+                    Charge/conversion ▼ below zero. stepAfter matches hourly bins. */}
+                {renewGens.map((gc, idx) => renderGenArea(gc, idx))}
                 {presentPosNonGen.map(k => {
                   const base = carrierBaseGroup(k)
                   return (
-                    <Area key={k} type="monotone" dataKey={k}
+                    <Area key={k} type="stepAfter" dataKey={k}
                       name={carrierSeriesLabel(k)} stackId="dispatch"
                       stroke={CARRIER_GROUP_STYLE[base].color}
                       fill={CARRIER_GROUP_STYLE[base].color}
-                      fillOpacity={0.45}
-                      strokeWidth={0} connectNulls />
+                      fillOpacity={0.5}
+                      strokeWidth={0} connectNulls isAnimationActive={false} />
                   )
                 })}
-                {presentGenCarriers.map((gc, idx) => (
-                  <Area key={`Gen:${gc}`} type="monotone" dataKey={`Gen:${gc}`}
-                    name={`Gen:${gc}`} stackId="dispatch"
-                    stroke={colourForCarrier(gc, idx)}
-                    fill={colourForCarrier(gc, idx)}
-                    fillOpacity={0.7}
-                    strokeWidth={0} connectNulls />
-                ))}
+                {thermalGens.map((gc, idx) => renderGenArea(gc, renewGens.length + idx))}
                 {presentNegNonGen.map(k => {
                   const base = carrierBaseGroup(k)
                   return (
-                    <Area key={k} type="monotone" dataKey={k}
+                    <Area key={k} type="stepAfter" dataKey={k}
                       name={carrierSeriesLabel(k)} stackId="dispatch"
                       stroke={CARRIER_GROUP_STYLE[base].color}
                       fill={CARRIER_GROUP_STYLE[base].color}
-                      fillOpacity={0.3}
-                      strokeWidth={0} connectNulls />
+                      fillOpacity={0.35}
+                      strokeWidth={0} connectNulls isAnimationActive={false} />
                   )
                 })}
                 {hasLoadTotal && (
-                  <Line type="monotone" dataKey="LoadTotal" name="Total demand"
+                  <Line type="stepAfter" dataKey="LoadTotal" name="Total demand"
                     stroke={CARRIER_GROUP_STYLE.Load.color} strokeWidth={1.6}
-                    strokeDasharray="4 3" dot={false} connectNulls />
+                    strokeDasharray="4 3" dot={false} connectNulls
+                    isAnimationActive={false} />
                 )}
               </ComposedChart>
             </ResponsiveContainer>
@@ -2074,7 +2078,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
       <header className="flex items-center gap-2 mb-2">
         <span className="text-[12px] font-semibold text-text">{carrierDisplayLabel(carrier)} — averaged {mode === 'weekly' ? 'week' : 'month'}</span>
         <span className="text-[10px] text-muted">
-          storage/conversion under generation (above zero) vs charge/conversion out below; load as dashed line
+          renewables → storage → thermal (above zero); charge below; load dashed
         </span>
       </header>
       {season === 'all' ? (
