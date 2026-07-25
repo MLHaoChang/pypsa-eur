@@ -57,6 +57,7 @@ describe('speech → composer e2e', () => {
 
     session.start()
     instances[0].onresult?.({
+      resultIndex: 0,
       results: {
         length: 1,
         0: { isFinal: true, 0: { transcript: 'add a bus named B1' } },

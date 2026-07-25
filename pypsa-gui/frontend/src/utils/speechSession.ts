@@ -37,7 +37,12 @@ export class SpeechSession {
     recognition.interimResults = true
 
     recognition.onresult = (ev: SpeechRecognitionEvent) => {
-      const { finalText, interimText } = parseSpeechResults(ev.results)
+      // Only consume NEW results (from resultIndex). Replaying the full
+      // result list re-inserts earlier finals after every pause/partial.
+      const { finalText, interimText } = parseSpeechResults(
+        ev.results,
+        ev.resultIndex ?? 0,
+      )
       this.handlers.onInterim(interimText)
       if (finalText.trim()) this.handlers.onFinal(finalText)
     }

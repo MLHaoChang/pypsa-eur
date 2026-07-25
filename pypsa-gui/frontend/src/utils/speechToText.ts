@@ -64,12 +64,23 @@ export type ParsedSpeechResults = {
   interimText: string
 }
 
-/** Split a SpeechRecognitionResultList into committed finals vs live interim. */
-export function parseSpeechResults(results: SpeechRecognitionResultList): ParsedSpeechResults {
+/**
+ * Split a SpeechRecognitionResultList into committed finals vs live interim.
+ *
+ * Important: pass `resultIndex` from the SpeechRecognitionEvent. The API
+ * re-sends earlier final results on later events; only indices >= resultIndex
+ * are new. Re-inserting all finals causes the "you to set the you to set the…"
+ * duplication after thinking pauses.
+ */
+export function parseSpeechResults(
+  results: SpeechRecognitionResultList,
+  resultIndex = 0,
+): ParsedSpeechResults {
   let finalText = ''
   let interimText = ''
   const len = results?.length ?? 0
-  for (let i = 0; i < len; i++) {
+  const start = Math.max(0, Math.min(resultIndex, len))
+  for (let i = start; i < len; i++) {
     const result = results[i]
     const piece = result?.[0]?.transcript ?? ''
     if (!piece) continue

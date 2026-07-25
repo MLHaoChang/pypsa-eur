@@ -68,9 +68,27 @@ describe('SpeechSession', () => {
       0: { isFinal: true, 0: { transcript: 'add a bus ' } },
       1: { isFinal: false, 0: { transcript: 'named' } },
     }
-    instances[0].onresult?.({ results } as unknown as SpeechRecognitionEvent)
+    instances[0].onresult?.({ results, resultIndex: 0 } as unknown as SpeechRecognitionEvent)
     expect(h.onFinal).toHaveBeenCalledWith('add a bus ')
     expect(h.onInterim).toHaveBeenCalledWith('named')
+  })
+
+  it('does not re-insert earlier finals when resultIndex advances', () => {
+    const { MockRecognition, instances } = mockCtor()
+    const h = handlers()
+    const session = new SpeechSession(MockRecognition as unknown as new () => SpeechRecognition, h)
+    session.start()
+    const results = {
+      length: 2,
+      0: { isFinal: true, 0: { transcript: 'you to set the ' } },
+      1: { isFinal: true, 0: { transcript: 'time series' } },
+    }
+    instances[0].onresult?.({ results, resultIndex: 0 } as unknown as SpeechRecognitionEvent)
+    instances[0].onresult?.({ results, resultIndex: 1 } as unknown as SpeechRecognitionEvent)
+    expect(h.onFinal.mock.calls.map((c) => c[0])).toEqual([
+      'you to set the ',
+      'time series',
+    ])
   })
 
   it('toggle stops an active session', () => {

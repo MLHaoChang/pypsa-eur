@@ -69,6 +69,21 @@ describe('parseSpeechResults', () => {
       interimText: 'world',
     })
   })
+
+  it('ignores finals before resultIndex (pause / continuous events)', () => {
+    const results = {
+      length: 2,
+      0: { isFinal: true, 0: { transcript: 'you to set the ' } },
+      1: { isFinal: true, 0: { transcript: 'time series' } },
+    }
+    // Second event: only index 1 is new — must not re-emit the first phrase.
+    expect(
+      parseSpeechResults(results as unknown as SpeechRecognitionResultList, 1),
+    ).toEqual({
+      finalText: 'time series',
+      interimText: '',
+    })
+  })
 })
 
 describe('speechErrorMessage', () => {
