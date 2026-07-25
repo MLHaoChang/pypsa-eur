@@ -228,6 +228,10 @@ _TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 # Cap on a single tool result's serialized size handed to the model. Oversized
+# A7 — aggregate cap across all tool_result payloads in one turn (after the
+# per-result `_RESULT_CONTENT_CAP` cut). Further results become an omitted stub.
+MAX_TOOL_RESULT_CHARS_PER_TURN: int = 40_000
+
 # results are cut WITH an explicit marker (see _result_to_anthropic_content) so
 # the model knows data was elided rather than treating a partial blob as whole.
 _RESULT_CONTENT_CAP: int = 4000
@@ -2169,6 +2173,8 @@ def _run_turn_body(
         # requires each tool_use_id have a matching tool_result, so this keeps
         # the in-memory history valid for a resumed turn — then end the turn.
         tool_results_for_next_turn: list[dict[str, Any]] = []
+        # A7 — shared across every tool in this assistant step / turn.
+        tool_result_char_budget = {"used": 0}
         switched_mid_turn = False
         for idx, tu in enumerate(tool_uses):
             if _project_switched():
@@ -2207,6 +2213,7 @@ def _run_turn_body(
                 return
             yield from _dispatch_real_tool_call(
                 session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
+                result_char_budget=tool_result_char_budget,
             )
             # If the agent just dispatched a rebinding tool (activate_project /
             # load_project / save_project_as / rename_project /
@@ -2256,6 +2263,7 @@ def _dispatch_real_tool_call(
     tool_results_collector: list[dict[str, Any]],
     *,
     turn_ctx: Any | None = None,
+    result_char_budget: dict[str, int] | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Drive ONE Anthropic tool_use through the chat_tools dispatcher with
@@ -2266,6 +2274,10 @@ def _dispatch_real_tool_call(
     long-running solver bridge polls its solver_state so a mid-solve project
     switch can't redirect the poll to another project. Defaults to the active
     context when omitted (direct unit-test callers).
+
+    `result_char_budget` (A7) is a mutable `{"used": int}` shared for the
+    turn; once `used >= MAX_TOOL_RESULT_CHARS_PER_TURN`, further success
+    payloads are replaced with an omitted stub.
     """
     tool_use_id = tu.get("id") or uuid.uuid4().hex
     tool_name = tu.get("name") or "<missing-name>"
@@ -2458,10 +2470,13 @@ def _dispatch_real_tool_call(
         "tool_name": tool_name,
         "result": _truncate_result(result),
     }
+    content = _result_to_anthropic_content(result)
+    if result_char_budget is not None:
+        content = _apply_turn_tool_result_budget(content, result_char_budget)
     tool_results_collector.append({
         "type": "tool_result",
         "tool_use_id": tool_use_id,
-        "content": _result_to_anthropic_content(result),
+        "content": content,
     })
 
 
@@ -2539,6 +2554,32 @@ def _truncation_marker(total: int, shown: int) -> str:
         f" …[RESULT TRUNCATED: showed {shown} of {total} chars — "
         "call a narrower / paginated query for the rest]"
     )
+
+
+def _apply_turn_tool_result_budget(
+    content: Any,
+    budget: dict[str, int],
+) -> Any:
+    """
+    A7 — enforce MAX_TOOL_RESULT_CHARS_PER_TURN across tool_result bodies.
+
+    Once the running total is exhausted, replace further full payloads with a
+    small omitted stub so the model knows to narrow queries.
+    """
+    text = content if isinstance(content, str) else str(content)
+    length = len(text)
+    if budget.get("used", 0) >= MAX_TOOL_RESULT_CHARS_PER_TURN:
+        return _result_to_anthropic_content({
+            "_omitted": True,
+            "length": length,
+            "reason": "per_turn_tool_result_budget",
+            "message": (
+                "Per-turn tool-result budget exhausted — request a narrower "
+                "query for further data."
+            ),
+        })
+    budget["used"] = budget.get("used", 0) + length
+    return content
 
 
 def _result_to_anthropic_content(result: Any) -> Any:
