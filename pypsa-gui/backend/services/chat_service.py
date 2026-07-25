@@ -1988,7 +1988,14 @@ def _run_turn_body(
         # so we surface the error instead. The loop always either breaks (the
         # stream completed) or returns (terminal/exhausted error).
         final_message = None
-        for attempt in range(MAX_STREAM_RETRIES + 1):
+        # A8 — at most one Opus→Sonnet downgrade after rate_limited retries
+        # are exhausted (public cost/availability escape hatch).
+        model_fallback_used = False
+        attempt = 0
+        # +1 slot reserved so a late Opus→Sonnet fallback can still run once
+        # after the normal retry budget is spent.
+        max_attempts = MAX_STREAM_RETRIES + 1
+        while attempt < max_attempts:
             emitted_this_attempt = False
             # Drain the streaming events. We accumulate content blocks locally
             # so we can replay them as a single assistant message back into the
@@ -2045,6 +2052,31 @@ def _run_turn_body(
                         error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
                     )
                     time.sleep(delay)
+                    attempt += 1
+                    continue
+                # A8 — persistent rate_limited on Opus → one Sonnet attempt.
+                if (
+                    error_kind == "rate_limited"
+                    and not emitted_this_attempt
+                    and session.model == OPUS_MODEL
+                    and not model_fallback_used
+                    and not session.abort_event.is_set()
+                ):
+                    model_fallback_used = True
+                    from_model = session.model
+                    session.model = DEFAULT_MODEL
+                    logger.warning(
+                        "chat: rate_limited on %s after retries — falling back to %s",
+                        from_model, DEFAULT_MODEL,
+                    )
+                    yield "model_fallback", {
+                        "from_model": from_model,
+                        "to_model": DEFAULT_MODEL,
+                        "reason": "rate_limited",
+                    }
+                    # Grant exactly one extra attempt on the cheaper model.
+                    max_attempts = attempt + 2
+                    attempt += 1
                     continue
                 _metric_error(error_kind)
                 yield "error", {"error_kind": error_kind, "message": msg}

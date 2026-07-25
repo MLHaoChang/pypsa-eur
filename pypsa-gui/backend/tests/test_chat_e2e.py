@@ -2444,3 +2444,63 @@ def test_import_redacts_secrets(
     assert "password=imp" not in raw
     assert "[REDACTED-API-KEY]" in raw
 
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# A8 — Opus → Sonnet fallback after persistent rate_limited retries
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_opus_rate_limit_falls_back_to_sonnet(
+    tmp_projects_dir, fake_anthropic_module, install_network, monkeypatch,
+):
+    import pypsa
+    n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
+    _zero_retry_delays(monkeypatch)
+
+    session = chat_service.ChatSession(model=chat_service.OPUS_MODEL)
+    success = (
+        [_text_event("ok on sonnet")],
+        _FakeFinalMessage(content=[_text_block("ok on sonnet")], usage=_FakeUsage()),
+    )
+    client = _RaiseNThenSucceedClient(
+        chat_service.MAX_STREAM_RETRIES + 1,
+        fake_anthropic_module.RateLimitError("opus busy"),
+        success,
+    )
+
+    events = list(chat_service.run_turn(session, "hi", client=client))
+    names = [e for e, _ in events]
+    assert "model_fallback" in names
+    assert "error" not in names
+    assert "token" in names
+    fb = next(p for e, p in events if e == "model_fallback")
+    assert fb["from_model"] == chat_service.OPUS_MODEL
+    assert fb["to_model"] == chat_service.DEFAULT_MODEL
+    assert session.model == chat_service.DEFAULT_MODEL
+    assert client.calls[-1]["model"] == chat_service.DEFAULT_MODEL
+    assert all(c["model"] == chat_service.OPUS_MODEL for c in client.calls[:-1])
+
+
+def test_sonnet_rate_limit_does_not_fallback(
+    tmp_projects_dir, fake_anthropic_module, install_network, monkeypatch,
+):
+    import pypsa
+    n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
+    _zero_retry_delays(monkeypatch)
+
+    session = chat_service.ChatSession(model=chat_service.DEFAULT_MODEL)
+    client = _RaiseNThenSucceedClient(
+        20,
+        fake_anthropic_module.RateLimitError("sonnet busy"),
+        (
+            [_text_event("never")],
+            _FakeFinalMessage(content=[_text_block("never")], usage=_FakeUsage()),
+        ),
+    )
+
+    events = list(chat_service.run_turn(session, "hi", client=client))
+    names = [e for e, _ in events]
+    assert "model_fallback" not in names
+    kinds = [p.get("error_kind") for e, p in events if e == "error"]
+    assert kinds == ["rate_limited"]
