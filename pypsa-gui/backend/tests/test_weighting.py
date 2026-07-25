@@ -8,7 +8,7 @@ from __future__ import annotations
 import pandas as pd
 import pypsa
 
-from conftest import build_network
+from tests.conftest import build_network
 from routers.compare import _build_snapshot_weights
 
 

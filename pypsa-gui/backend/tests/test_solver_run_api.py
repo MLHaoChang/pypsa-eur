@@ -12,7 +12,7 @@ would not land in `_state` and the assertion fails.
 """
 from __future__ import annotations
 
-from conftest import build_network
+from tests.conftest import build_network
 from routers import simulation as sim_router
 from services.solver_service import SolverConfig
 

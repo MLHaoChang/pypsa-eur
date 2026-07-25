@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pickle
 
-from conftest import build_network
+from tests.conftest import build_network
 from routers import simulation as sim_router
 from routers.projects import _restore_results_state
 

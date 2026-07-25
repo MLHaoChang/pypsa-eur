@@ -5,7 +5,7 @@ overwrite fix (a stale-name save must be refused, not silently misdirected).
 """
 from __future__ import annotations
 
-from conftest import build_network
+from tests.conftest import build_network
 from services.pypsa_service import PyPSAService
 
 

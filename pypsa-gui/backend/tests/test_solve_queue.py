@@ -19,7 +19,7 @@ import time
 
 import pypsa
 
-from conftest import build_network
+from tests.conftest import build_network
 from services.pypsa_service import PyPSAService
 from services.solve_queue import solve_queue
 

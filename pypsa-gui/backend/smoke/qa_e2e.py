@@ -563,11 +563,23 @@ def suite_S8():
     m = re.search(r"(\d+) passed", out)
     record("S8.2", r.returncode == 0, f"pypsa-eur {m.group(1) if m else '?'} passed rc={r.returncode}")
 
-    r = sh(["pixi", "run", "ruff", "check", "pypsa-gui/backend"])
+    # ruff lives in the `dev` feature (upstream moved it out of the default
+    # environment), so it must run via `-e dev`. The previous `pixi run ruff`
+    # form silently stopped resolving after that move and the parse fell
+    # through to -1, which passed the `<= 7` check vacuously — a test that
+    # goes green when the tool is missing is worse than no test, so an
+    # unparseable result is now an explicit failure.
+    r = sh(["pixi", "run", "-e", "dev", "ruff", "check", "pypsa-gui/backend"])
     out = (r.stdout or "") + (r.stderr or "")
     m = re.search(r"Found (\d+) error", out)
-    n = int(m.group(1)) if m else (0 if r.returncode == 0 else -1)
-    record("S8.3", n <= 7, f"ruff findings={n} (<=7 known-benign)")
+    if m:
+        n = int(m.group(1))
+    elif r.returncode == 0 and "All checks passed" in out:
+        n = 0
+    else:
+        n = None
+    record("S8.3", n is not None and n <= 7,
+           f"ruff findings={n if n is not None else 'UNPARSEABLE'} (<=7 known-benign)")
 
 
 # ── S9 ────────────────────────────────────────────────────────────────────
