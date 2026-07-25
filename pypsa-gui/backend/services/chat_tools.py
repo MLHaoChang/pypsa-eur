@@ -673,12 +673,115 @@ def upload_timeseries(component: str, name: str, attribute: str, csv_content: st
     — so `csv_content` MUST have a column header equal to `name`. We bridge the
     string into an UploadFile and drive the coroutine via `_sync`, the same idiom
     the import_* tools use; this keeps the endpoint's flat/multi-period handling.
+
+    Prefer ``generate_exemplary_timeseries`` for full-year synthetic profiles —
+    inlining ~8760 CSV rows in a tool call exceeds the turn output budget and
+    freezes the chat UI while the model streams the tool arguments.
     """
     import io
     from fastapi import UploadFile
     from routers.network import upload_timeseries as _h
     upload = UploadFile(filename=f"{name}.csv", file=io.BytesIO(csv_content.encode("utf-8")))
     return _sync(_h(component=component, attribute=attribute, file=upload))
+
+
+def generate_exemplary_timeseries(
+    component: str,
+    name: str,
+    attribute: str,
+    profile: str = "load_daily",
+    peak: float = 1.0,
+) -> dict:
+    """
+    Build a synthetic profile aligned to ``n.snapshots`` and upload it.
+
+    Avoids the agent emitting tens of thousands of CSV tokens for a year of
+    hourly data (which exceeds MAX_OUTPUT_TOKENS_PER_TURN and looks "stuck").
+
+    Profiles:
+      * ``load_daily`` — weekday/weekend diurnal demand shape (good for p_set).
+      * ``pv_solar`` — daytime solar availability with mild seasonality
+        (good for generators p_max_pu; peak should be ≤ 1).
+      * ``constant`` — flat series at ``peak``.
+    """
+    import math
+
+    import numpy as np
+    import pandas as pd
+    from services.pypsa_service import PyPSAService
+
+    component = (component or "").strip().lower()
+    attribute = (attribute or "").strip()
+    name = (name or "").strip()
+    profile_key = (profile or "load_daily").strip().lower()
+    if component not in ("loads", "generators", "links", "storage_units", "stores"):
+        raise ValueError(f"unsupported component {component!r}")
+    if profile_key not in ("load_daily", "pv_solar", "constant"):
+        raise ValueError(
+            f"unsupported profile {profile!r}; use load_daily|pv_solar|constant"
+        )
+
+    n = PyPSAService.get_network()
+    static = getattr(n, component, None)
+    if static is None or name not in static.index:
+        raise ValueError(f"{component!r} has no asset named {name!r}")
+
+    sns = n.snapshots
+    if len(sns) == 0:
+        raise ValueError("network has no snapshots — call set_snapshots first")
+
+    # Work in wall-clock space even for MultiIndex (period, timestep).
+    if isinstance(sns, pd.MultiIndex):
+        times = pd.DatetimeIndex(sns.get_level_values(-1))
+    else:
+        times = pd.DatetimeIndex(sns)
+
+    hour = times.hour.to_numpy(dtype=float)
+    doy = times.dayofyear.to_numpy(dtype=float)
+    weekday = times.dayofweek.to_numpy(dtype=int)  # Mon=0 … Sun=6
+    peak_f = float(peak)
+
+    if profile_key == "constant":
+        values = np.full(len(times), peak_f, dtype=float)
+    elif profile_key == "load_daily":
+        # Simple European-ish load: morning + evening peaks, weekend dip.
+        diurnal = (
+            0.55
+            + 0.20 * np.sin((hour - 8.0) * math.pi / 12.0) ** 2
+            + 0.25 * np.sin((hour - 18.0) * math.pi / 10.0) ** 2
+        )
+        weekend = np.where(weekday >= 5, 0.85, 1.0)
+        seasonal = 0.92 + 0.08 * np.cos((doy - 20.0) * 2.0 * math.pi / 365.0)
+        values = peak_f * diurnal * weekend * seasonal
+        values = np.clip(values, 0.0, None)
+    else:  # pv_solar
+        # Daylight hump × seasonal amplitude; night ≈ 0. peak is capacity factor scale.
+        elev = np.clip(np.sin((hour - 6.0) * math.pi / 12.0), 0.0, None) ** 1.4
+        seasonal = 0.55 + 0.45 * np.cos((doy - 172.0) * 2.0 * math.pi / 365.0)
+        values = peak_f * elev * seasonal
+        values = np.clip(values, 0.0, max(peak_f, 1.0))
+
+    df = pd.DataFrame({name: values}, index=times)
+    # Preserve MultiIndex on the wire if the network uses one — upload route
+    # accepts DatetimeIndex and broadcasts / stitches; for flat networks this
+    # is exact. Reindex labels to the network's snapshot index for CSV dump.
+    df.index = sns
+    csv_content = df.to_csv(index=True, lineterminator="\n")
+    result = upload_timeseries(
+        component=component, name=name, attribute=attribute, csv_content=csv_content,
+    )
+    return {
+        **(result if isinstance(result, dict) else {"result": result}),
+        "profile": profile_key,
+        "peak": peak_f,
+        "asset": name,
+        "attribute": attribute,
+        "component": component,
+        "snapshot_count": int(len(sns)),
+        "value_min": float(np.min(values)),
+        "value_max": float(np.max(values)),
+        "value_mean": float(np.mean(values)),
+    }
 
 
 def delete_timeseries(component: str, name: str, attribute: str) -> None:
@@ -2192,8 +2295,9 @@ DISPATCHERS: dict[str, Any] = {
     "set_vintage_bounds": set_vintage_bounds,
     "delete_vintage_bounds": delete_vintage_bounds,
     "cleanup_orphan_vintages": cleanup_orphan_vintages,
-    # write_timeseries (5)
+    # write_timeseries (6)
     "upload_timeseries": upload_timeseries,
+    "generate_exemplary_timeseries": generate_exemplary_timeseries,
     "delete_timeseries": delete_timeseries,
     "upload_load_profile": upload_load_profile,
     "upload_generator_profile": upload_generator_profile,

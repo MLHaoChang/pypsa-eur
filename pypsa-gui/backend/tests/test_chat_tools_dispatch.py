@@ -240,6 +240,51 @@ def test_upload_load_profile_decodes_base64_and_dispatches(install_network):
     assert "matched" in result or "applied" in result or isinstance(result, dict)
 
 
+def test_generate_exemplary_timeseries_builds_year_without_inline_csv(install_network):
+    """
+    Full-year synthetic profiles must be built server-side — inlining ~8760
+    CSV rows in a tool call exceeds MAX_OUTPUT_TOKENS_PER_TURN and freezes UI.
+    """
+    import pandas as pd
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=8760, freq="h"))
+    n.add("Bus", "B1")
+    n.add("Load", "Load_B1", bus="B1", p_set=0.0)
+    n.add("Generator", "PV_B3", bus="B1", p_nom=100.0, p_max_pu=0.0)
+    install_network(n, name=None)
+
+    load_res = chat_tools.generate_exemplary_timeseries(
+        component="loads",
+        name="Load_B1",
+        attribute="p_set",
+        profile="load_daily",
+        peak=50.0,
+    )
+    assert load_res["snapshot_count"] == 8760
+    assert load_res["profile"] == "load_daily"
+    assert load_res["value_max"] > load_res["value_min"] >= 0.0
+    assert "Load_B1" in n.loads_t.p_set.columns
+    assert len(n.loads_t.p_set["Load_B1"]) == 8760
+
+    pv_res = chat_tools.generate_exemplary_timeseries(
+        component="generators",
+        name="PV_B3",
+        attribute="p_max_pu",
+        profile="pv_solar",
+        peak=1.0,
+    )
+    assert pv_res["snapshot_count"] == 8760
+    assert pv_res["profile"] == "pv_solar"
+    assert 0.0 <= pv_res["value_min"] <= pv_res["value_max"] <= 1.0 + 1e-9
+    # Night hours should be ~0 for a January 00:00 start.
+    assert float(n.generators_t.p_max_pu["PV_B3"].iloc[0]) == pytest.approx(0.0, abs=1e-9)
+
+    assert "generate_exemplary_timeseries" in chat_tools.DISPATCHERS
+    desc = _tool_description("generate_exemplary_timeseries")
+    assert "load_daily" in desc and "pv_solar" in desc
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # (j) v4-MINOR-1 — delete_project cascade param plumbed
 # ─────────────────────────────────────────────────────────────────────────────

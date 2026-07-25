@@ -468,7 +468,10 @@ TOOLS: list[dict[str, Any]] = [
         "PER-ASSET time-series upload (POST /api/network/timeseries/upload). "
         "csv_content is a CSV whose first column is the timestamp index and whose "
         "data column is named EXACTLY `name` (the asset). _user_ts follows "
-        "rename/delete via generic CRUD helpers. Safety: write.",
+        "rename/delete via generic CRUD helpers. "
+        "CRITICAL: do NOT inline full-year hourly CSVs (~8760 rows) — that "
+        "exceeds the turn output budget and freezes the UI. For synthetic "
+        "year profiles use generate_exemplary_timeseries instead. Safety: write.",
         {
             "component": {"type": "string"},
             "name": {"type": "string"},
@@ -476,6 +479,29 @@ TOOLS: list[dict[str, Any]] = [
             "csv_content": {"type": "string"},
         },
         ["component", "name", "attribute", "csv_content"],
+    ),
+    _t(
+        "generate_exemplary_timeseries",
+        "SERVER-SIDE synthetic profile aligned to n.snapshots (no giant CSV in "
+        "the tool args). Use this for exemplary full-year load / PV / flat "
+        "series. Profiles: load_daily (diurnal+weekend demand → loads p_set), "
+        "pv_solar (daylight CF → generators p_max_pu, peak≤1), constant. "
+        "`peak` is MW for load p_set or per-unit for p_max_pu. Returns "
+        "{rows, profile, value_min/max/mean, snapshot_count, …}. Safety: write.",
+        {
+            "component": {
+                "type": "string",
+                "enum": ["loads", "generators", "links", "storage_units", "stores"],
+            },
+            "name": {"type": "string"},
+            "attribute": {"type": "string"},
+            "profile": {
+                "type": "string",
+                "enum": ["load_daily", "pv_solar", "constant"],
+            },
+            "peak": {"type": "number"},
+        },
+        ["component", "name", "attribute"],
     ),
     _t(
         "delete_timeseries",
@@ -492,7 +518,9 @@ TOOLS: list[dict[str, Any]] = [
         "MULTI-COLUMN CSV upload of load p_set profiles. Columns ARE load "
         "names, index is timestamps. Returns {matched, unmatched, rows, "
         "snapshot_count}. For per-load upload use upload_timeseries with "
-        "component='loads', attribute='p_set'. Safety: write.",
+        "component='loads', attribute='p_set'. CRITICAL: do NOT base64-encode "
+        "full-year hourly CSVs in the tool args — use "
+        "generate_exemplary_timeseries for synthetic profiles. Safety: write.",
         {
             "csv_content_b64": {"type": "string"},
             "filename": {"type": "string"},
@@ -503,7 +531,9 @@ TOOLS: list[dict[str, Any]] = [
         "upload_generator_profile",
         "MULTI-COLUMN CSV upload of generator profiles (default attribute "
         "p_max_pu). Columns ARE generator names. Returns {matched, unmatched, "
-        "rows, snapshot_count}. Safety: write.",
+        "rows, snapshot_count}. CRITICAL: do NOT base64-encode full-year "
+        "hourly CSVs — use generate_exemplary_timeseries (pv_solar) for "
+        "synthetic PV. Safety: write.",
         {
             "csv_content_b64": {"type": "string"},
             "filename": {"type": "string"},
@@ -1306,8 +1336,9 @@ TOOL_ROUTES: dict[str, list] = {
     "set_vintage_bounds": [("PUT", "/api/network/vintage_bounds/{component_class}/{name}")],
     "delete_vintage_bounds": [("DELETE", "/api/network/vintage_bounds/{component_class}/{name}")],
     "cleanup_orphan_vintages": [("POST", "/api/network/vintage_bounds/_cleanup_orphans")],
-    # write_timeseries (5)
+    # write_timeseries (6)
     "upload_timeseries": [("PUT", "/api/network/timeseries/{component}/{attribute}")],
+    "generate_exemplary_timeseries": _SERVICE_CALL,
     "delete_timeseries": [("DELETE", "/api/network/timeseries")],
     "upload_load_profile": [("POST", "/api/network/loads/upload_profile")],
     "upload_generator_profile": [("POST", "/api/network/generators/upload_profile")],

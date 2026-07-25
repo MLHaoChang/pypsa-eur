@@ -1455,7 +1455,14 @@ _DOMAIN_GUIDE = (
     "per-period results use the by_period field from get_results, never re-sum "
     "the raw statistics columns yourself. To interpret a solved network, CHAIN "
     "get_results carrier_kpis + get_results cost_breakdown + get_results "
-    "emissions and reconcile the three before narrating."
+    "emissions and reconcile the three before narrating. "
+    "Time-series: NEVER paste full-year hourly CSVs (~8760 rows) into "
+    "upload_timeseries / upload_load_profile / upload_generator_profile — that "
+    "blows the turn output budget and freezes the chat UI with no tool "
+    "progress. For synthetic exemplary year profiles call "
+    "generate_exemplary_timeseries (load_daily for loads p_set, pv_solar for "
+    "generators p_max_pu). Only use upload_* when the user supplied a real "
+    "file or a short series."
 )
 
 # Solver-error decoder (#3). Symptom→cause table seeded from CLAUDE.md so the
@@ -2022,6 +2029,18 @@ def _run_turn_body(
                             yield "thinking", {
                                 "delta": getattr(event, "thinking", "") or "",
                             }
+                        # Tool-arg streaming is silent on `token` — without a
+                        # signal the UI looks frozen after "I'll create them…".
+                        # Emit as soon as the model opens a tool_use block.
+                        elif etype == "content_block_start":
+                            block = getattr(event, "content_block", None)
+                            btype = getattr(block, "type", None) if block else None
+                            if btype == "tool_use":
+                                emitted_this_attempt = True
+                                yield "tool_preparing", {
+                                    "tool_use_id": getattr(block, "id", "") or "",
+                                    "tool_name": getattr(block, "name", "") or "",
+                                }
                         # content_block_stop indicates a tool_use block has
                         # fully accumulated. The SDK exposes it as
                         # event.content_block.

@@ -1080,6 +1080,17 @@ export default function ChatPanel() {
         appendTokenDelta(d.delta)
         break
       }
+      case 'tool_preparing': {
+        // Model opened a tool_use block; args may still be streaming (and are
+        // not shown as tokens). Without this the UI looks stuck after prose.
+        const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
+        appendMessage({
+          role: 'tool',
+          content: `… preparing ${d.tool_name}`,
+          tool_use_id: d.tool_use_id, tool_name: d.tool_name,
+        })
+        break
+      }
       case 'tool_request': {
         const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
         appendMessage({

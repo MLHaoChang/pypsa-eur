@@ -131,6 +131,7 @@ python-docx = ">=0.8.11"
 pypdf = ">=4.0"
 snakemake-logger-plugin-snkmt = "==0.1.6" # For better pypsa-app integration
 streamlit = ">=1.36"
+anthropic = ">=0.117.0"
 
 [target.unix.dependencies]
 snakemake-executor-plugin-slurm = ">=1.9.2"
