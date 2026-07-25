@@ -5,6 +5,12 @@ channels:
 - gurobi
 - nodefaults
 dependencies:
+- nodejs >=22
+- fastapi >=0.115
+- uvicorn >=0.30
+- python-multipart >=0.0.12
+- sse-starlette >=2.1
+- aiofiles >=24.0
 - atlite >=0.3,!=0.5.0
 - bokeh >=3.8.0
 - cartopy >=0.25.0
@@ -24,9 +30,8 @@ dependencies:
 - highspy >=1.12.0
 - ipython >=9.7.0
 - jpype1 >=1.6.0
-- jupyter >=1.1.1
 - libgdal-netcdf >=3.10.3
-- linopy >=0.6.1
+- linopy >=0.8,<0.9
 - lxml >=6.0.2
 - matplotlib >=3.10.7
 - memory_profiler >=0.61.0
@@ -39,9 +44,7 @@ dependencies:
 - powerplantmatching >=0.5.15
 - pydantic >=2
 - python-dotenv >=1.0
-- pre-commit >=4.3.0
 - proj >=9.6.2
-- pylint >=4.0.2
 - pydeck >0.6
 - pypsa >=0.35.2
 - pyscipopt >=5.6.0
@@ -52,7 +55,6 @@ dependencies:
 - rasterio >=1.4.3
 - rasterstats >=0.10.3
 - rioxarray >=0.20.0
-- ruff >=0.14.3
 - ruamel.yaml >=0.18.0
 - scipy >=1.16.3
 - seaborn >=0.13.2
@@ -72,5 +74,9 @@ dependencies:
 - snakemake-logger-plugin-pypsa >=0.1.0
 - pydeflate >=2.3.4
 - grpcio <1.78
+- python-magic >=0.4.27
+- python-docx >=0.8.11
+- pypdf >=4.0
 - snakemake-logger-plugin-snkmt ==0.1.6
+- streamlit >=1.36
 - snakemake-executor-plugin-slurm >=1.9.2
