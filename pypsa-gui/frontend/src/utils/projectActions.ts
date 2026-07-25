@@ -403,8 +403,14 @@ export function nextUntitledName(taken: readonly string[]): string {
 }
 
 // Slugify a free-form project title into a backend-friendly name.
+//
+// The trim regex needs BOTH the `g` flag and `+`. Without them (`/^_|_$/`) the
+// alternation replaces only the FIRST match, so a title with junk at both ends
+// kept its trailing underscore: "  spaced  " → "spaced_", "!My Project!" →
+// "my_project_". Only affects names generated from here on; existing project
+// directories keep whatever name they were created with.
 export function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/, '') || 'network'
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'network'
 }
 
 // Resolve a collision-free on-disk project id for a NEW-project flow.
