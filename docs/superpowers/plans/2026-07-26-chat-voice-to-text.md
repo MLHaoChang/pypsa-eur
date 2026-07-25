@@ -28,39 +28,40 @@
 
 **Produces:** `insertAtCursor`, `getSpeechRecognitionCtor`, `parseSpeechResults`, `speechErrorMessage`
 
-- [ ] Write failing tests for insert + parse + error map
-- [ ] Implement helpers
-- [ ] Run `npm test -- --run src/utils/speechToText.test.ts` — PASS
-- [ ] Commit
+- [x] Write failing tests for insert + parse + error map
+- [x] Implement helpers
+- [x] Run `npm test -- --run src/utils/speechToText.test.ts` — PASS
+- [x] Commit
 
 ### Task 2: Speech session controller + hook
 
 **Files:**
 - Create: `pypsa-gui/frontend/src/hooks/useSpeechToText.ts`
-- Create: `pypsa-gui/frontend/src/hooks/useSpeechToText.test.ts` (controller logic via injectable mock recognition)
+- Create: `pypsa-gui/frontend/src/utils/speechSession.ts` (+ `speechSession.test.ts`)
 
 **Produces:** `useSpeechToText({ enabled, onFinal, onError })` → `{ supported, listening, interim, toggle, stop }`
 
-- [ ] Write failing tests with mock `SpeechRecognition`
-- [ ] Implement controller + hook
-- [ ] Run Vitest — PASS
-- [ ] Commit
+- [x] Write failing tests with mock `SpeechRecognition`
+- [x] Implement controller + hook
+- [x] Run Vitest — PASS
+- [x] Commit
 
 ### Task 3: ChatPanel mic + CHATBOT.md
 
 **Files:**
 - Modify: `pypsa-gui/frontend/src/components/ChatPanel.tsx`
 - Modify: `pypsa-gui/CHATBOT.md`
+- Create: `pypsa-gui/frontend/src/utils/speechComposer.e2e.test.ts`
 
-- [ ] Wire mic button, interim preview, Esc/project-switch stop, insert-at-cursor
-- [ ] Document Voice input in CHATBOT.md
-- [ ] `tsc -b` + Vitest suite for speech files — PASS
-- [ ] Commit
+- [x] Wire mic button, interim preview, Esc/project-switch stop, insert-at-cursor
+- [x] Document Voice input in CHATBOT.md
+- [x] `tsc -b` + Vitest suite for speech files — PASS
+- [x] Commit
 
 ### Task 4: Manual e2e checklist (Chrome)
 
-- [ ] Mic unsupported path (mock) already covered by unit tests
-- [ ] Smoke: frontend builds; document manual Chrome mic grant/deny for operator
+- [x] Logic e2e: `speechComposer.e2e.test.ts` (session → insertAtCursor)
+- [ ] Operator: Chrome mic grant/deny + dictate + Send (manual)
 
 ---
 
