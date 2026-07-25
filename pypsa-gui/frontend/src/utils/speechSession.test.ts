@@ -78,13 +78,24 @@ describe('SpeechSession', () => {
     const h = handlers()
     const session = new SpeechSession(MockRecognition as unknown as new () => SpeechRecognition, h)
     session.start()
-    const results = {
-      length: 2,
-      0: { isFinal: true, 0: { transcript: 'you to set the ' } },
-      1: { isFinal: true, 0: { transcript: 'time series' } },
-    }
-    instances[0].onresult?.({ results, resultIndex: 0 } as unknown as SpeechRecognitionEvent)
-    instances[0].onresult?.({ results, resultIndex: 1 } as unknown as SpeechRecognitionEvent)
+    // Event 1: first phrase final, second still interim (typical mid-pause).
+    instances[0].onresult?.({
+      resultIndex: 0,
+      results: {
+        length: 2,
+        0: { isFinal: true, 0: { transcript: 'you to set the ' } },
+        1: { isFinal: false, 0: { transcript: 'time' } },
+      },
+    } as unknown as SpeechRecognitionEvent)
+    // Event 2: only index 1 is new/final — must not re-emit phrase 0.
+    instances[0].onresult?.({
+      resultIndex: 1,
+      results: {
+        length: 2,
+        0: { isFinal: true, 0: { transcript: 'you to set the ' } },
+        1: { isFinal: true, 0: { transcript: 'time series' } },
+      },
+    } as unknown as SpeechRecognitionEvent)
     expect(h.onFinal.mock.calls.map((c) => c[0])).toEqual([
       'you to set the ',
       'time series',
