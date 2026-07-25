@@ -1,0 +1,23 @@
+---
+description: Policy for legacy gui_streamlit — freeze unless explicitly requested
+globs: gui_streamlit/**/*
+alwaysApply: false
+---
+
+# Streamlit GUI policy (`gui_streamlit/`)
+
+PyPSA GUI (`pypsa-gui/`) is the primary product. Streamlit is a legacy Snakemake launcher.
+
+## Default
+- **Do not** add features, refactors, or drive-by cleanups here unless the user explicitly asks.
+- Prefer fixing/extending `pypsa-gui/` for user-facing workflow work.
+
+## If explicitly asked to change Streamlit
+Known footguns — fix these rather than adding surface area:
+- Run button disable key must match session key (`active_process` vs `process_running`).
+- `save_user_config` must deep-merge with existing `config/config.yaml`, not overwrite with a partial form dict.
+- Sector toggles shown in the UI (`district_heating`, `methanol`, …) must be persisted if changed.
+- Prefer logging/clear errors over broad `except Exception` that only shows a generic message.
+
+## Config
+- Use `gui_streamlit/utils/config_manager.py` for load/merge; align overrides with validated config shapes where possible.

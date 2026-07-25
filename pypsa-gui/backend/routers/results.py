@@ -41,8 +41,10 @@ from services.solver_service import (
 # the legacy underscore name so call sites are unchanged; `is_multi_period` is
 # NOT imported because this module uses that name as a LOCAL variable.
 from services.period_utils import (
+    is_multi_period,
     is_period_only as _is_period_only,
     period_years_map,
+    snapshot_weights,
     years_for_period,
 )
 
@@ -942,24 +944,8 @@ def get_lcoh():
 
     # Snapshot weight × period years — same weighting basis as cost_breakdown.
     sns = n.snapshots
-    try:
-        sw = n.snapshot_weightings.loc[sns, "objective"].astype(float)
-    except Exception:
-        sw = _pd.Series(1.0, index=sns, dtype=float)
-    is_multi = isinstance(sns, _pd.MultiIndex)
-    if is_multi:
-        try:
-            ipw = n.investment_period_weightings["years"]
-            period_lvl = sns.get_level_values(0)
-            years_s = _pd.Series(
-                [float(ipw.get(int(p), 1.0)) for p in period_lvl],
-                index=sns, dtype=float,
-            )
-            weights = sw * years_s
-        except Exception:
-            weights = sw
-    else:
-        weights = sw
+    is_multi = is_multi_period(n)
+    weights = snapshot_weights(n, "objective")
 
     # ENERGY weighting for the H₂-produced denominator follows the `generators`
     # column (matching PyPSA n.statistics() and the Dispatch tab); the cost

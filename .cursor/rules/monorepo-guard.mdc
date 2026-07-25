@@ -1,0 +1,13 @@
+---
+description: Monorepo orientation — prefer pypsa-gui; don't mix layers
+alwaysApply: true
+---
+
+# Worktree orientation
+
+This is a PyPSA-Eur fork. Three layers:
+1. **Primary product:** `pypsa-gui/` (FastAPI + React)
+2. **Upstream model:** `scripts/`, `rules/`, `config/`
+3. **Legacy:** `gui_streamlit/` (frozen unless asked)
+
+When the task is ambiguous, assume **pypsa-gui**. Don't edit outside the active git worktree. Don't commit unless asked.

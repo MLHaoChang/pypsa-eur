@@ -341,7 +341,7 @@ def get(item, investment_year=None):
             logger.warning(f"Lower than minimum key. Taking minimum key {keys[0]}")
             return item[keys[0]]
         elif investment_year > keys[-1]:
-            logger.warning(f"Higher than maximum key. Taking maximum key {keys[0]}")
+            logger.warning(f"Higher than maximum key. Taking maximum key {keys[-1]}")
             return item[keys[-1]]
         else:
             logger.warning(
@@ -775,12 +775,10 @@ def update_config_from_wildcards(config, w, inplace=True):
             config["solving"]["constraints"]["CCL"] = True
 
         eq_value = get_opt(opts, r"^EQ+\d*\.?\d+(c|)")
-        for o in opts:
-            if eq_value is not None:
-                config["solving"]["constraints"]["EQ"] = eq_value
-            elif "EQ" in o:
-                config["solving"]["constraints"]["EQ"] = True
-            break
+        if eq_value is not None:
+            config["solving"]["constraints"]["EQ"] = eq_value
+        elif any("EQ" in o for o in opts):
+            config["solving"]["constraints"]["EQ"] = True
 
         if "BAU" in opts:
             config["solving"]["constraints"]["BAU"] = True
@@ -912,11 +910,14 @@ def get_snapshots(
         )
         time_periods.append(period)
 
-    time = pd.DatetimeIndex([])
-    for period in time_periods:
-        time = time.append(period)
+    if not time_periods:
+        time = pd.DatetimeIndex([])
+    else:
+        time = time_periods[0]
+        for period in time_periods[1:]:
+            time = time.union(period)
 
-    if drop_leap_day and time.is_leap_year.any():
+    if drop_leap_day and len(time) and time.is_leap_year.any():
         time = time[~((time.month == 2) & (time.day == 29))]
 
     return time
@@ -1053,7 +1054,11 @@ def load_cutout(
     elif isinstance(cutout_files, list):
         cutout_da = [atlite.Cutout(c, chunks=chunks).data for c in cutout_files]
         combined_data = xr.concat(cutout_da, dim="time", data_vars="minimal")
-        cutout = atlite.Cutout(NamedTemporaryFile().name, data=combined_data)
+        # Keep the temp path alive: NamedTemporaryFile() deletes on GC when
+        # delete=True (default), which breaks atlite.Cutout on some platforms.
+        tmp = NamedTemporaryFile(suffix=".nc", delete=False)
+        tmp.close()
+        cutout = atlite.Cutout(tmp.name, data=combined_data)
 
     if time is not None:
         cutout.data = cutout.data.sel(time=time)

@@ -1,0 +1,38 @@
+---
+description: PyPSA GUI FastAPI backend conventions (routers, services, weighting, errors)
+globs: pypsa-gui/backend/**/*
+alwaysApply: false
+---
+
+# PyPSA GUI backend
+
+## Architecture
+- Routers stay thin; business logic lives in `services/`.
+- Prefer extending existing helpers over new copies in routers.
+- Leaf modules must not import `routers.*` (see `period_utils.py`).
+
+## Weighting & results (correctness)
+- Multi-period snapshot/years weighting goes through `services/period_utils.py`
+  (`snapshot_weights`, `period_years_map`, `years_for_period`).
+- Do **not** re-inline `investment_period_weightings["years"]` in `compare.py` / `results.py`.
+- JSON at the API boundary: use `services/serialization.py` (`df_to_json`, `ts_payload`, `safe_float`).
+
+## Error handling
+- Unsolved / stale dispatch → 204 via `_not_solved()` / `_dispatch_ready()`.
+- Unexpected exceptions in result serializers → log and return **500**, not 204.
+- Solver-in-flight mutations are gated in `main.py` middleware (`code: solver_in_flight`).
+  Prefer structured `{ detail, code }` over opaque strings.
+
+## Change hotspots (be careful)
+- `routers/network.py`, `routers/results.py`, `routers/compare.py`
+- `services/solver_service.py`, `services/pypsa_service.py`
+Avoid drive-by refactors of these god modules unless the task requires it.
+
+## Tests
+- Backend tests: `pixi run gui-tests` (cwd `pypsa-gui/backend`).
+- Prefer pytest over one-off `qa_*.py` for new regressions.
+- Reset harness lives in `tests/conftest.py` — don't invent a second network singleton.
+
+## Carrier catalog
+- Backend: `services/carrier_catalog.py`. Frontend mirror: `frontend/src/utils/carrierCatalog.ts`.
+- If you change one, update the other (or regenerate from a shared source).

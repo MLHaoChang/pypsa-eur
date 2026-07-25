@@ -1,0 +1,39 @@
+# Large / generated artifacts — keep Cursor index + context lean
+resources/
+resources*/
+results/
+networks/
+benchmarks/
+logs/
+cutouts/
+tmp/
+notebooks/
+doc/_build/
+_build/
+
+# Data blobs (keep configs; ignore bulk downloads)
+data/*
+!data/versions.csv
+
+# Binary / solve outputs
+**/*.nc
+**/*.h5
+**/*.hdf5
+**/*.parquet
+**/*.zip
+**/*.tar
+**/*.gz
+
+# Env / locks (huge, low signal for agents)
+.pixi/
+pixi.lock
+**/node_modules/
+**/dist/
+**/.vite/
+**/__pycache__/
+**/.pytest_cache/
+**/.snakemake*/
+
+# Secrets
+**/.env
+**/.env.*

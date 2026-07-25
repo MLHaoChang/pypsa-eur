@@ -1,0 +1,29 @@
+---
+description: PyPSA-Eur Snakemake script conventions (_helpers, logging, downloads)
+globs: scripts/**/*
+alwaysApply: false
+---
+
+# Snakemake scripts (`scripts/`)
+
+## Bootstrap
+- Prefer shared helpers from `scripts/_helpers.py` (`configure_logging`, `set_scenario_config`, `mock_snakemake`).
+- Don't invent a new snakemake entry pattern per script; keep wildcards explicit for `mock_snakemake`.
+
+## Config / wildcards
+- Wildcard → config updates go through `update_config_from_wildcards()` — don't fork parallel parsers.
+- Use `_helpers.get()` for investment-year keyed dicts; don't copy its fallback logic.
+
+## I/O & downloads
+- Prefer one download utility (reuse or fix `progress_retrieve`) instead of ad-hoc `requests.get` + tqdm.
+- Always set timeouts on HTTP; don't write error HTML bodies to data paths on 403/404.
+
+## Logging
+- Use the module logger configured by `configure_logging` — not `print()` for errors/warnings.
+
+## Validation schemas
+- Config schema lives under `scripts/lib/validation/`. Runtime helpers belong in `_helpers` or a new `scripts/lib/*.py` — don't grow unrelated logic inside validation modules.
+
+## Tests
+- Unit tests for helpers: `test/` + `pixi run unit-tests`.
+- Import style: prefer `from scripts.X import ...` consistently (avoid `sys.path.append("./scripts")` in new tests).

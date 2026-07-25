@@ -14,6 +14,7 @@ from typing import Literal
 import pandas as pd
 import pypsa
 
+from services import period_utils as _period_utils
 from services.pypsa_service import PyPSAService
 from services.validation_service import has_errors, validate_for_run
 from services.vintage_service import apply_vintage_bounds
@@ -2288,23 +2289,10 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     # Per-snapshot effective weight = snapshot.objective × period.years.
     # This is the multiplier the LP sees for any cost term aggregated over
     # snapshots; matches how cost_breakdown / asset_economics report €.
-    try:
-        sw = network.snapshot_weightings.loc[sns, "objective"].astype(float)
-    except Exception:
-        sw = pd.Series(1.0, index=sns, dtype=float)
-    if is_multi:
-        try:
-            ipw_years = network.investment_period_weightings["years"]
-            period_lvl = sns.get_level_values(0)
-            years_series = pd.Series(
-                [float(ipw_years.get(int(p), 1.0)) for p in period_lvl],
-                index=sns, dtype=float,
-            )
-            weights = sw * years_series
-        except Exception:
-            weights = sw
-    else:
-        weights = sw
+    # `sns` is the LP's ACTUAL snapshot span, which for myopic foresight and
+    # SCLOPF is a subset of n.snapshots — pass it explicitly so the weights
+    # cover the same rows the objective did.
+    weights = _period_utils.snapshot_weights(network, "objective", sns=sns)
 
     # Per-period bucket structure — periods are level-0 of the MultiIndex
     # or the single sentinel "ALL" on flat horizons.

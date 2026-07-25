@@ -1,0 +1,32 @@
+---
+description: PyPSA GUI React/TS frontend conventions (Query, stores, API errors)
+globs: pypsa-gui/frontend/**/*
+alwaysApply: false
+---
+
+# PyPSA GUI frontend
+
+## Stack
+- React 19 + Vite + TypeScript + Tailwind 4
+- Server state: TanStack Query; UI state: Zustand (`uiStore`, `simulationStore`, `chatStore`)
+- API: Axios instance in `src/api/client.ts` (`baseURL: '/api'`)
+
+## React Query
+- Always scope keys with `nk(projectId, ...)` from `src/utils/queryKeys.ts`.
+- Wrong `projectId` in `getQueryData` silently returns `undefined` and can wipe PUT payloads — never hardcode keys.
+
+## API errors
+- Interceptor toasts `detail`. Format arrays/objects (FastAPI validation) into readable strings — never `String([{...}])` → `[object Object]`.
+- Prefer handling structured `code` (e.g. `solver_in_flight`) over toast spam for expected 409s.
+- Quiet polls: keep `/network/undo/info` and `/changelog` in `QUIET_POLL_URLS`.
+
+## UI structure
+- Navigation is slide-panel based (`uiStore`), not a full route tree. Don't add `react-router` routes unless implementing deep links on purpose.
+- Reuse `components/ErrorBoundary.tsx` — don't add a second inline boundary in `App.tsx`.
+
+## Carriers
+- Names/colors/CO₂: `src/utils/carrierCatalog.ts` must stay aligned with backend `carrier_catalog.py`.
+- Renewable checks: use shared helpers in `src/utils/carriers.ts` (don't re-copy `isRenewableCarrier`).
+
+## Tests / verify
+- No vitest suite yet — at minimum run `npm run build` (`tsc -b && vite build`) after non-trivial TS changes.
