@@ -2502,7 +2502,7 @@ function CarrierKpiPanel({
                                                     ? fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier)) : '—'}
                      hint="VOLL × unserved demand on this carrier's buses" />
                 <KPI label="CAPEX (annuitised)" value={fmtCurrency(econ.capex * 1e6)}
-                     hint="Σ capital_cost × p_nom_opt × years_in_horizon for assets on this carrier" />
+                     hint="Σ (overnight × annuity, or capital_cost) × p_nom_opt × years_in_horizon — same gens/storage basis as Economics Fixed cost (excludes line CAPEX)." />
                 <KPI label="LCOE" value={lcoe > 1e-6 ? `${lcoe.toFixed(1)} €/MWh` : '—'}
                      hint="(CAPEX + OPEX) ÷ (gen + link gen + storage discharge) — aggregated across this carrier's component-carriers" />
               </>

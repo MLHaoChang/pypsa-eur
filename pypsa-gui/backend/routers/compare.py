@@ -334,13 +334,20 @@ def _to_pv(d: dict) -> CarrierPeriodValue:
 
 def _safe_capital_cost(row, default_dr: float, default_lt: float) -> float:
     """
-    LP-effective annuitised €/MW/yr for one asset row, matching what
-    [solver_service._log_cost_decomposition_post_solve] reports:
+    LP-effective annuitised €/MW/yr for one asset row, matching
+    ``periodized_capital_costs`` / ``asset_economics`` / ``cost_breakdown``:
 
-      * Use ``capital_cost`` directly when set (>0 and finite).
-      * Otherwise fall back to ``overnight_cost × annuity(discount_rate,
-        lifetime)`` with per-asset values, defaulting to the config-level
-        rate/lifetime when the asset's own values are missing.
+      * Prefer ``overnight_cost × annuity(discount_rate, lifetime)`` when
+        overnight_cost > 0 — the GUI's investment parameter and what PyPSA
+        annualises into the LP ``capital_cost``.
+      * Otherwise use ``capital_cost`` when set (>0 and finite).
+      * Per-asset discount_rate / lifetime fall back to the config defaults.
+
+    Preferring overnight over a non-zero ``capital_cost`` column is
+    intentional: networks often keep a stale straight-line figure
+    (overnight ÷ lifetime) alongside overnight_cost. Using the column first
+    under-counted CAPEX vs Economics Fixed / cost_breakdown (e.g. gas
+    60 000 vs annuity ≈ 77 229 €/MW/yr).
 
     Returns 0.0 when no usable cost is found — caller skips the contribution.
     """
@@ -350,17 +357,15 @@ def _safe_capital_cost(row, default_dr: float, default_lt: float) -> float:
     # of `services.serialization.safe_float`; every call below passes an
     # explicit default, so the shared default (0.0) is never relied upon here.
 
+    oc = _safe_float(row.get("overnight_cost") if hasattr(row, "get") else None, 0.0)
+    dr = _safe_float(row.get("discount_rate") if hasattr(row, "get") else None, default_dr) or default_dr
+    lt = _safe_float(row.get("lifetime") if hasattr(row, "get") else None, default_lt) or default_lt
+    if oc and oc > 0 and lt > 0:
+        return oc * _annuity(dr, lt)
     cc = _safe_float(row.get("capital_cost") if hasattr(row, "get") else None, 0.0)
     if cc and cc > 0:
         return cc
-    oc = _safe_float(row.get("overnight_cost") if hasattr(row, "get") else None, 0.0)
-    if not oc or oc <= 0:
-        return 0.0
-    dr = _safe_float(row.get("discount_rate") if hasattr(row, "get") else None, default_dr) or default_dr
-    lt = _safe_float(row.get("lifetime") if hasattr(row, "get") else None, default_lt) or default_lt
-    if lt <= 0:
-        return 0.0
-    return oc * _annuity(dr, lt)
+    return 0.0
 
 
 def _classify_build_year(value) -> int | None:

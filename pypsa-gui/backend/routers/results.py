@@ -1579,7 +1579,21 @@ def get_carrier_kpis():
     # energy. PyPSA's n.statistics.curtailment() still computes the gap, but
     # surfacing it as "92% curtailed" is nonsensical for a battery. Suppress
     # it for those components in the UI.
+    #
+    # Additionally restrict Generator curtailment to renewable carriers —
+    # PyPSA also reports "curtailment" for thermal plant as unused headroom
+    # (p_nom − p), which the Curtailment / Dispatch tabs never show. Keeping
+    # it here made Load Flow's carrier table disagree with those tabs (e.g.
+    # gas "1 017 GWh curtailed" while Curtailment only listed PV spill).
     CURTAILMENT_SOURCES = {"Generator", "Link"}
+    _RENEWABLE_KW = (
+        "wind", "solar", "ror", "hydro", "geothermal", "wave", "tidal",
+        "pv", "biomass", "biogas", "run-of-river",
+    )
+
+    def _is_renewable_carrier(name: str) -> bool:
+        c = (name or "").lower()
+        return any(k in c for k in _RENEWABLE_KW)
 
     rows: list[dict] = []
     for comp, carrier in sorted(keys):
@@ -1587,7 +1601,10 @@ def get_carrier_kpis():
         # so capacity-expansion runs see the expanded fleet.
         cap_mw = cap_opt.get((comp, carrier), cap_ins.get((comp, carrier), 0.0))
         energy_mwh = energy.get((comp, carrier), 0.0)
-        if comp in CURTAILMENT_SOURCES:
+        if (
+            comp in CURTAILMENT_SOURCES
+            and (comp != "Generator" or _is_renewable_carrier(carrier))
+        ):
             curt_mwh = curt.get((comp, carrier), 0.0)
             # Curtailment ratio: dispatched + curtailed = the max-available
             # envelope, so % = curtailed / envelope.
@@ -1596,7 +1613,7 @@ def get_carrier_kpis():
             else:
                 curt_pct = 0.0
         else:
-            # StorageUnit / Store: no physical curtailment.
+            # StorageUnit / Store / thermal generators: no renewable spill KPI.
             curt_mwh = 0.0
             curt_pct = 0.0
         rows.append({
@@ -1610,6 +1627,69 @@ def get_carrier_kpis():
             "market_value_eur_per_mwh": mv.get((comp, carrier), 0.0),
             "revenue_eur": rev.get((comp, carrier), 0.0),
         })
+
+    # Storage revenue from n.statistics is NET (discharge − charge at bus
+    # price). Economics / economics_by_carrier report GROSS discharge revenue
+    # and book charge cost separately — override so Load Flow's carrier table
+    # matches those tabs (and market_value = capture price on discharge).
+    try:
+        from services.period_utils import snapshot_weights as _sw
+        bus_prices = corrected_marginal_prices(n, from_state=True)
+        w_obj = _sw(n, "objective")
+        sns = n.snapshots
+
+        def _overlay_storage_revenue(df, t_p_df, comp_label: str) -> None:
+            if df is None or df.empty or t_p_df is None or t_p_df.empty:
+                return
+            if bus_prices is None or bus_prices.empty:
+                return
+            # Key by lower-case carrier — n.statistics() often returns the
+            # carrier nice_name ("Battery") while the component table stores
+            # the raw carrier id ("battery").
+            by_carrier_rev: dict[str, float] = {}
+            for asset_name in df.index:
+                if asset_name not in t_p_df.columns:
+                    continue
+                bus = df.at[asset_name, "bus"] if "bus" in df.columns else None
+                if bus is None or bus not in bus_prices.columns:
+                    continue
+                carrier = str(
+                    df.at[asset_name, "carrier"] if "carrier" in df.columns else "unknown"
+                ).lower()
+                series = t_p_df[asset_name].reindex(sns).fillna(0.0).astype(float)
+                discharge = series.clip(lower=0)
+                bp = bus_prices[bus].reindex(sns).fillna(0.0).astype(float)
+                rev_total = float((discharge * bp * w_obj).sum())
+                if not _math.isfinite(rev_total):
+                    continue
+                by_carrier_rev[carrier] = by_carrier_rev.get(carrier, 0.0) + rev_total
+            if not by_carrier_rev:
+                return
+            for row in rows:
+                if row["component"] != comp_label:
+                    continue
+                key = str(row["carrier"] or "").lower()
+                if key not in by_carrier_rev:
+                    continue
+                row["revenue_eur"] = by_carrier_rev[key]
+                e = row["energy_mwh"] or 0.0
+                row["market_value_eur_per_mwh"] = (
+                    row["revenue_eur"] / e if e > 1e-9 else 0.0
+                )
+
+        _overlay_storage_revenue(
+            n.storage_units,
+            getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None,
+            "StorageUnit",
+        )
+        # Stores: positive p = discharge from store to bus.
+        _overlay_storage_revenue(
+            n.stores,
+            getattr(n.stores_t, "p", None) if hasattr(n, "stores_t") else None,
+            "Store",
+        )
+    except Exception:
+        pass
 
     # Sort by revenue desc (biggest earners first); ties broken by energy.
     rows.sort(key=lambda r: (-(r["revenue_eur"] or 0), -(r["energy_mwh"] or 0)))

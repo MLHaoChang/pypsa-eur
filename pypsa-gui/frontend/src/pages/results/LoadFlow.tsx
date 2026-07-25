@@ -699,8 +699,9 @@ export default function LoadFlow() {
       )}
 
       {/* ── Per-carrier KPIs ────────────────────────────────── */}
-      {/* Wraps PyPSA's n.statistics.capacity_factor / curtailment /
-          market_value / revenue helpers grouped by carrier. The four headline
+      {/* Wraps PyPSA's n.statistics helpers grouped by carrier. Storage revenue
+          / market value are overlaid to gross discharge (Economics-aligned);
+          generator curtailment is renewable-only (Curtailment-tab-aligned). The four headline
           questions every LOPF report needs to answer: how much was each
           carrier dispatching, how much got left on the table, what price did
           they fetch, how much money did they make. */}
@@ -740,8 +741,8 @@ export default function LoadFlow() {
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="energy / (capacity × hours_in_horizon). PyPSA: n.statistics.capacity_factor.">CF (%)</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="(max-available − dispatched). Most meaningful for renewables; for storage it includes idle hours.">Curtailment (MWh)</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Curt %</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="revenue / energy. The €/MWh price the carrier received. PyPSA: n.statistics.market_value.">Market value (€/MWh)</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Σ (p × marginal_price × weight). PyPSA: n.statistics.revenue. Can be negative for off-design behaviour.">Revenue (€)</th>
+                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="revenue / energy. For storage this is the discharge capture price (matches Economics), not PyPSA's net market_value.">Market value (€/MWh)</th>
+                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Generators: Σ p × price × weight. Storage: gross discharge revenue (charge cost is booked separately on Economics / Dispatch — matches those tabs).">Revenue (€)</th>
                 </tr>
               </thead>
               <tbody>
@@ -765,7 +766,7 @@ export default function LoadFlow() {
             <strong>CF</strong>: dispatched energy / nameplate × hours. <strong>Curtailment</strong>:
             for renewables, the energy <em>could</em> have been generated but wasn't; for storage, includes idle hours
             so the number inflates and is less directly meaningful. <strong>Market value</strong> = revenue / energy.
-            <strong>Revenue</strong>: Σ p × marginal_price × weight.
+            <strong>Revenue</strong>: generators = Σ p × price × weight; storage = gross discharge revenue (Economics-aligned).
           </p>
         </section>
       )}

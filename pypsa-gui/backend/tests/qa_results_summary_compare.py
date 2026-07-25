@@ -17,8 +17,8 @@ Covers capacity + dispatch payloads:
       of generators_t.p and storage_units_t.p_dispatch (charging
       excluded — only the dispatch half feeds the energy mix).
   [5] OPEX (M€) = Σ marginal_cost × p × weights, scaled by 1e6.
-  [6] overnight_cost annuitisation falls back to capital_cost when
-      capital_cost == 0 (matches solver_service._safe_capital_cost).
+  [6] overnight_cost annuitisation is preferred when overnight_cost > 0;
+      otherwise capital_cost is used (matches compare._safe_capital_cost).
 """
 from __future__ import annotations
 

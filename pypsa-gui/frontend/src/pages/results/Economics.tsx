@@ -564,8 +564,8 @@ export default function Economics() {
                hint="Annualised market revenue across every generator, storage unit and store. Storage uses discharge revenue only (charge cost is booked separately)." />
           <KPI label="Fixed cost"
                value={fmtCurrency(kpis.fixed)}
-               sub="annualised CAPEX (capital_cost × p_nom_opt)"
-               hint="Σ capital_cost × p_nom_opt. PyPSA's capital_cost is already annualised (overnight × annuity), so this matches the LP-objective contribution." />
+               sub="annualised CAPEX (gens + storage)"
+               hint="Σ (overnight × annuity, or capital_cost) × p_nom_opt over generators, storage units and stores. Same basis as Dispatch CAPEX (annuitised). Excludes line / transformer CAPEX (see Capacity Expansion)." />
           <KPI label="Variable cost"
                value={fmtCurrency(kpis.vom + kpis.charge_cost)}
                sub={kpis.charge_cost > 0
