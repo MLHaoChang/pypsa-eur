@@ -10,9 +10,9 @@ import { type TSPayload, shortStamp, stampWithPeriod, fmtPower, isRenewableCarri
 
 // ── Per-period generation dispatch stack ────────────────────────────────────
 // Carrier-stacked area chart showing hourly generation by fuel type, with the
-// system load drawn on top as a dashed line. Storage discharge appears as a
-// positive contributor (above zero); storage charge as a separate negative
-// stack below zero. Matches the "Generation Dispatch Stack" reference layout.
+// system load drawn on top as a dashed line. Storage discharge sits under the
+// fuel stack (above zero) so spiky charge/discharge edges stay near the axis;
+// storage charge is a separate negative stack below zero.
 //
 // Renders only when `selectedPeriod` is set (the parent Dispatch tab gates
 // this). Period filtering is applied via `range` from useResultsFilter.
@@ -111,26 +111,26 @@ export default function DispatchStack({
       if (hasGenFilter && !genNames!.has(c)) continue
       genCarrierSet.add(carrierByGen.get(c) ?? 'other')
     }
-    // Ordering: thermal carriers first (so they form the base of the stack
-    // visually), renewables next, storage discharge on top.
+    // Ordering: storage discharge at the BOTTOM (under fuels) so its spiky
+    // 0↔peak edges don't cut through the generation bands; thermal next,
+    // renewables on top for a cleaner silhouette. Charge stays below axis.
     const thermal = [...genCarrierSet].filter(c => !isRenewableCarrier(c))
     const renew   = [...genCarrierSet].filter(c => isRenewableCarrier(c))
     thermal.sort()
     renew.sort()
-    const stack = [...thermal, ...renew]
-    // Storage stacks as its own series above the renewable area when
-    // discharging; charge goes negative under the axis. When the parent
-    // scoped this stack to a specific bus carrier via `electricalStorageNames`,
-    // only show the storage series when AT LEAST ONE storage unit on that
-    // bus exists — otherwise a heat-bus chart inherits Battery + H2 storage
-    // from the network-wide storageUnits array even though neither is on
-    // a heat bus.
+    const stack: string[] = []
+    // When the parent scoped this stack to a specific bus carrier via
+    // `electricalStorageNames`, only show storage when AT LEAST ONE storage
+    // unit on that bus exists — otherwise a heat-bus chart inherits Battery
+    // + H2 storage from the network-wide array even though neither is on a
+    // heat bus.
     const hasStorageOnThisCarrier = storPowerTS != null && (
       electricalStorageNames !== undefined
         ? electricalStorageNames.size > 0
         : storageUnits.length > 0
     )
     if (hasStorageOnThisCarrier) stack.push('storage_discharge')
+    stack.push(...thermal, ...renew)
     const colours: Record<string, string> = {}
     stack.forEach((c, i) => { colours[c] = colourForCarrier(c, i) })
     colours['storage_discharge'] = colourForCarrier('storage')

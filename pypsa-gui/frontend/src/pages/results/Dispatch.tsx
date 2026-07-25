@@ -1943,8 +1943,15 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
   }
   // Non-generation stack keys (Storage / Stores / Conversion split into ▲/▼).
   // `Generation` is intentionally absent here — generation is rendered via
-  // genCarrier-specific Areas below.
-  const NON_GEN_STACK_KEYS = CARRIER_STACK_KEYS.filter(k => k !== 'Generation')
+  // genCarrier-specific Areas below. Positive ▲ series sit UNDER generation
+  // so spiky storage/conversion edges don't cut through the fuel bands;
+  // negative ▼ series stay below the axis (stackOffset="sign").
+  const POS_NON_GEN_KEYS = [
+    'Storage ▲', 'Stores ▲', 'Conversion in ▲', 'Conversion out ▲',
+  ]
+  const NEG_NON_GEN_KEYS = [
+    'Storage ▼', 'Stores ▼', 'Conversion in ▼', 'Conversion out ▼',
+  ]
 
   const renderSeason = (sn: Season, full: boolean) => {
     const baseRows = seasons[sn] ?? []
@@ -1968,7 +1975,10 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
       }
       return { ...r, LoadTotal: native + storageChg + storesChg + convOut + sink }
     })
-    const presentNonGen = NON_GEN_STACK_KEYS.filter(
+    const presentPosNonGen = POS_NON_GEN_KEYS.filter(
+      k => rows.some(r => r[k] != null && r[k] !== 0),
+    )
+    const presentNegNonGen = NEG_NON_GEN_KEYS.filter(
       k => rows.some(r => r[k] != null && r[k] !== 0),
     )
     const presentGenCarriers = genCarriers.filter(
@@ -1978,7 +1988,9 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
       }),
     )
     const hasLoadTotal = rows.some(r => (r.LoadTotal ?? 0) !== 0)
-    const hasAnything = presentNonGen.length > 0 || presentGenCarriers.length > 0 || hasLoadTotal
+    const hasAnything =
+      presentPosNonGen.length > 0 || presentNegNonGen.length > 0
+      || presentGenCarriers.length > 0 || hasLoadTotal
     return (
       <div key={sn}
         className="rounded-[10px] border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
@@ -2015,25 +2027,38 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
                   formatter={(v: string) =>
                     typeof v === 'string' && v.startsWith('Gen:') ? v.slice(4) : v
                   } />
-                {/* Per-fuel generation Areas — bottom of the positive stack.
-                    Same carrier-resolved palette as horizon DispatchStack. */}
-                {presentGenCarriers.map((gc, idx) => (
-                  <Area key={`Gen:${gc}`} type="monotone" dataKey={`Gen:${gc}`}
-                    name={`Gen:${gc}`} stackId="dispatch"
-                    stroke={colourForCarrier(gc, idx)}
-                    fill={colourForCarrier(gc, idx)}
-                    fillOpacity={0.6}
-                    strokeWidth={0.5} connectNulls />
-                ))}
-                {presentNonGen.map(k => {
+                {/* Stack order (bottom → top): storage/conversion ▲, then
+                    per-fuel generation, then charge/conversion ▼ below zero.
+                    strokeWidth=0 avoids Recharts drawing vertical edges when
+                    a spiky series drops to 0 through the bands above it. */}
+                {presentPosNonGen.map(k => {
                   const base = carrierBaseGroup(k)
                   return (
                     <Area key={k} type="monotone" dataKey={k}
                       name={carrierSeriesLabel(k)} stackId="dispatch"
                       stroke={CARRIER_GROUP_STYLE[base].color}
                       fill={CARRIER_GROUP_STYLE[base].color}
-                      fillOpacity={k.endsWith(' ▼') ? 0.3 : 0.5}
-                      strokeWidth={0.75} connectNulls />
+                      fillOpacity={0.45}
+                      strokeWidth={0} connectNulls />
+                  )
+                })}
+                {presentGenCarriers.map((gc, idx) => (
+                  <Area key={`Gen:${gc}`} type="monotone" dataKey={`Gen:${gc}`}
+                    name={`Gen:${gc}`} stackId="dispatch"
+                    stroke={colourForCarrier(gc, idx)}
+                    fill={colourForCarrier(gc, idx)}
+                    fillOpacity={0.7}
+                    strokeWidth={0} connectNulls />
+                ))}
+                {presentNegNonGen.map(k => {
+                  const base = carrierBaseGroup(k)
+                  return (
+                    <Area key={k} type="monotone" dataKey={k}
+                      name={carrierSeriesLabel(k)} stackId="dispatch"
+                      stroke={CARRIER_GROUP_STYLE[base].color}
+                      fill={CARRIER_GROUP_STYLE[base].color}
+                      fillOpacity={0.3}
+                      strokeWidth={0} connectNulls />
                   )
                 })}
                 {hasLoadTotal && (
@@ -2053,7 +2078,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
       <header className="flex items-center gap-2 mb-2">
         <span className="text-[12px] font-semibold text-text">{carrierDisplayLabel(carrier)} — averaged {mode === 'weekly' ? 'week' : 'month'}</span>
         <span className="text-[10px] text-muted">
-          generation by carrier + storage discharge + conversion in (above zero) vs storage charge + conversion out + load (dashed line)
+          storage/conversion under generation (above zero) vs charge/conversion out below; load as dashed line
         </span>
       </header>
       {season === 'all' ? (
