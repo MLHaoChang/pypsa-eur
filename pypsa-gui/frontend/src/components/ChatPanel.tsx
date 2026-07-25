@@ -990,16 +990,36 @@ export default function ChatPanel() {
     window.addEventListener('mouseup', onUp)
   }, [promptHeight])
 
-  // Auto-scroll to bottom on new message OR when a confirmation card lands.
-  // The confirmation card creates no new message (it's a separate `pending`
-  // slice), so without `pending` in the deps the card silently lands below
-  // the viewport — Approve/Deny invisible until the user manually scrolls.
-  // We watch the token, not the whole object, so re-renders that don't
-  // actually open a new card don't re-trigger the scroll.
+  // Lock-to-bottom autoscroll: only follow new messages when the user is
+  // already near the bottom. Scrolling up mid-stream must not yank the view
+  // back down on every token/tool batch.
+  const [stickToBottom, setStickToBottom] = useState(true)
+  const [showJumpLatest, setShowJumpLatest] = useState(false)
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null)
   const pendingTokenForScroll = useChatStore((s) => s.pending?.confirmation_token ?? null)
-  useEffect(() => {
+
+  const scrollToLatest = useCallback(() => {
+    setStickToBottom(true)
+    setShowJumpLatest(false)
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages.length, pendingTokenForScroll])
+  }, [])
+
+  const onMessagesScroll = useCallback(() => {
+    const el = messagesScrollRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    setStickToBottom(nearBottom)
+    if (nearBottom) setShowJumpLatest(false)
+  }, [])
+
+  useEffect(() => {
+    if (stickToBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      setShowJumpLatest(false)
+    } else {
+      setShowJumpLatest(true)
+    }
+  }, [messages.length, pendingTokenForScroll, stickToBottom])
 
   // Frame handler — translates SSE frames into chatStore updates.
   const handleFrame = useCallback((frame: ChatFrame) => {
@@ -1351,7 +1371,13 @@ export default function ChatPanel() {
         )}
       </div>
       <ErrorBanner />
-      <div className="flex-1 min-h-0 overflow-y-auto" data-testid="chat-messages">
+      <div className="relative flex-1 min-h-0 flex flex-col">
+        <div
+          ref={messagesScrollRef}
+          className="flex-1 min-h-0 overflow-y-auto"
+          data-testid="chat-messages"
+          onScroll={onMessagesScroll}
+        >
         {/* Phase D polish #1 — empty-state primer. Renders only when no
             project is active AND there are no messages yet so a returning
             user with stale chat replay isn't double-primed. */}
@@ -1385,6 +1411,17 @@ export default function ChatPanel() {
         ))}
         <ConfirmationCard />
         <div ref={messagesEndRef} />
+        </div>
+        {showJumpLatest && (
+          <button
+            type="button"
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 px-2.5 py-1 text-[11px] rounded border border-border bg-bg-2/95 text-text shadow-sm hover:bg-bg-3"
+            onClick={scrollToLatest}
+            data-testid="chat-jump-latest"
+          >
+            ↓ Latest
+          </button>
+        )}
       </div>
       {/* Phase D polish #5 — touch-device fallback hint. Shows once on first
           coarse-pointer mount; auto-dismisses after 5 s OR on click. */}
