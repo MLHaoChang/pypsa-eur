@@ -122,7 +122,7 @@ def test_metrics_endpoint_shape(client):
     assert set(body["cumulative_tokens"]) == {"input", "output"}
 
 
-def test_metrics_increments_on_turn(install_network):
+def test_metrics_increments_on_turn(tmp_projects_dir, install_network):
     """A happy-path turn bumps `turns` and accrues cumulative tokens + duration."""
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1")
@@ -143,7 +143,7 @@ def test_metrics_increments_on_turn(install_network):
     assert snap["samples"] >= 1  # one duration recorded
 
 
-def test_metrics_records_error_kind(monkeypatch, install_network):
+def test_metrics_records_error_kind(tmp_projects_dir, monkeypatch, install_network):
     """A missing-API-key turn records errors_by_kind['missing_api_key']."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     import pypsa

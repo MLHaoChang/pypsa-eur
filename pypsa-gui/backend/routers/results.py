@@ -22,6 +22,7 @@ from typing import Any
 from fastapi import APIRouter, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
+from services.economics import co2_intensity_map
 from services.pypsa_service import PyPSAService
 from services.serialization import (
     df_to_json,
@@ -38,8 +39,15 @@ from services.solver_service import (
 )
 # Multi-period years-weighting helpers (the unified `_years_for_period` /
 # `period_years` map + the bare-year-row filter). `is_period_only` is aliased to
-# the legacy underscore name so call sites are unchanged; `is_multi_period` is
-# NOT imported because this module uses that name as a LOCAL variable.
+# the legacy underscore name so call sites are unchanged.
+#
+# `is_multi_period` used to be excluded here because get_emissions and
+# get_asset_economics each bound the same name to a LOCAL bool, which would
+# shadow the callable inside those two functions — anyone writing
+# `is_multi_period(n)` there would have hit "bool object is not callable".
+# Those locals are now named `is_multi`, matching the convention used
+# everywhere else in this module, so the import is safe. The two response
+# payloads still emit the "is_multi_period" JSON key; only the variable moved.
 from services.period_utils import (
     is_multi_period,
     is_period_only as _is_period_only,
@@ -1010,11 +1018,10 @@ def get_lcoh():
         try:
             unique_periods = sorted({int(p) for p in sns.get_level_values(0)})
             period_level = sns.get_level_values(0)
-            try:
-                ipw2 = n.investment_period_weightings["years"]
-                period_year_factor = {int(p): float(ipw2.get(int(p), 1.0)) for p in unique_periods}
-            except Exception:
-                period_year_factor = {int(p): 1.0 for p in unique_periods}
+            _years_map = period_years_map(n)
+            period_year_factor = {
+                int(p): years_for_period(_years_map, p) for p in unique_periods
+            }
         except Exception:
             unique_periods = []
             period_level = None
@@ -1665,7 +1672,7 @@ def get_emissions(source: str = "lopf"):
     # PyPSA multi-period scaling = snapshot_weight × investment_period_years.
     # The previous implementation skipped years scaling, under-reporting on
     # any horizon with non-unit period weights. Apply both consistently here.
-    is_multi_period = isinstance(n.snapshots, _pd.MultiIndex)
+    is_multi = isinstance(n.snapshots, _pd.MultiIndex)
     period_years = period_years_map(n)
 
     def _years_for(p_val) -> float:
@@ -1679,7 +1686,7 @@ def get_emissions(source: str = "lopf"):
                 w = w.multiply(weights.reindex(snapshots).fillna(1.0), axis=0)
             except Exception:
                 pass
-        if is_multi_period and period_years:
+        if is_multi and period_years:
             try:
                 period_lvl = snapshots.get_level_values(0)
                 years_series = _pd.Series(
@@ -1699,7 +1706,7 @@ def get_emissions(source: str = "lopf"):
     # so downstream code can iterate uniformly).
     def _energy_by_period(p_df: _pd.DataFrame) -> dict:
         weighted = p_df.multiply(w_series.reindex(p_df.index).fillna(0.0), axis=0)
-        if not is_multi_period:
+        if not is_multi:
             return {None: weighted.sum(axis=0)}
         period_lvl = p_df.index.get_level_values(0)
         out: dict = {}
@@ -1715,20 +1722,14 @@ def get_emissions(source: str = "lopf"):
     # Flat-horizon convenience: also produce a horizon-total Series so the
     # per-generator row can pin its energy_mwh column without per-period
     # bookkeeping.
-    gen_energy_horizon = sum(gen_energy_per_period.values()) if not is_multi_period else (
+    gen_energy_horizon = sum(gen_energy_per_period.values()) if not is_multi else (
         p.multiply(w_series, axis=0).sum(axis=0)
     )
 
     # Carrier intensity lookup. PyPSA's primary-energy constraint reads
     # carriers.co2_emissions × dispatched_energy / efficiency. Lower-case
     # keys to match the lowercase comp.carrier values we look up with.
-    if n.carriers.empty or "co2_emissions" not in n.carriers.columns:
-        co2_by_carrier: dict[str, float] = {}
-    else:
-        co2_by_carrier = {
-            str(k).lower(): float(v) for k, v in n.carriers["co2_emissions"].items()
-            if isinstance(v, (int, float)) and not (_math.isnan(v) or _math.isinf(v))
-        }
+    co2_by_carrier: dict[str, float] = co2_intensity_map(n)
 
     gens = n.generators
 
@@ -1866,7 +1867,7 @@ def get_emissions(source: str = "lopf"):
     # Build by_period[] = [{period, total_tCO2, by_carrier, by_generator}]
     # sorted by period. Flat networks emit an empty list.
     by_period_payload: list[dict] = []
-    if is_multi_period:
+    if is_multi:
         sorted_periods = sorted(
             [p_key for p_key in period_totals.keys() if p_key is not None],
             key=lambda x: (0, int(x)) if hasattr(x, "__int__") else (1, str(x)),
@@ -1966,7 +1967,7 @@ def get_emissions(source: str = "lopf"):
         "by_generator": rows_by_gen,
         "cap": cap_info,
         "caps": caps,
-        "is_multi_period": is_multi_period,
+        "is_multi_period": is_multi,
         "by_period": by_period_payload,
     }
 
@@ -3050,8 +3051,8 @@ def get_asset_economics():
         if period_years_lookup else 1.0
     )
 
-    is_multi_period = isinstance(n.snapshots, _pd.MultiIndex)
-    if is_multi_period:
+    is_multi = isinstance(n.snapshots, _pd.MultiIndex)
+    if is_multi:
         try:
             period_lvl = n.snapshots.get_level_values(0)
         except Exception:
@@ -3092,7 +3093,7 @@ def get_asset_economics():
     w_series_energy = _weight_series_for(snapshots, sw_gen)
     w_vals_energy = w_series_energy.values
     # Period vector (same length as snapshots) for grouping later.
-    if is_multi_period and period_lvl is not None:
+    if is_multi and period_lvl is not None:
         period_keys = [
             (int(p) if hasattr(p, "__int__") else p) for p in period_lvl
         ]
@@ -3117,7 +3118,7 @@ def get_asset_economics():
         finite_mask = _np.isfinite(vals) & _np.isfinite(weights)
         weighted = _np.where(finite_mask, vals * weights, 0.0)
         total = float(weighted.sum())
-        if not is_multi_period:
+        if not is_multi:
             return total, {}
         by_p: dict = {}
         for i, p in enumerate(period_keys):
@@ -3324,7 +3325,7 @@ def get_asset_economics():
 
             # Per-period roll-up. Each period gets its own LCOE / avg-price.
             by_period_rows: list[dict] = []
-            if is_multi_period and energy_per_p:
+            if is_multi and energy_per_p:
                 # Per-period fixed cost is fixed_cost × years[p] / Σ years —
                 # i.e. distribute the annualised CAPEX across periods in
                 # proportion to their years weight. This matches what PyPSA's
@@ -3463,7 +3464,7 @@ def get_asset_economics():
                 rte = None
 
             by_period_rows: list[dict] = []
-            if is_multi_period and discharge_mwh_pp:
+            if is_multi and discharge_mwh_pp:
                 total_years = sum(period_years_lookup.values()) or 1.0
                 periods_set = sorted(set(
                     list(discharge_mwh_pp.keys())
@@ -3594,7 +3595,7 @@ def get_asset_economics():
                 spread = avg_discharge_price - avg_charge_price
 
             by_period_rows: list[dict] = []
-            if is_multi_period and discharge_mwh_pp:
+            if is_multi and discharge_mwh_pp:
                 total_years = sum(period_years_lookup.values()) or 1.0
                 periods_set = sorted(set(
                     list(discharge_mwh_pp.keys())
@@ -3654,7 +3655,7 @@ def get_asset_economics():
 
     # Periods list (sorted) for the frontend's period selector.
     periods_list: list = []
-    if is_multi_period:
+    if is_multi:
         seen = set()
         for p_key in period_keys:
             if p_key is not None and p_key not in seen:
@@ -3667,7 +3668,7 @@ def get_asset_economics():
 
     return {
         "currency": "EUR",
-        "is_multi_period": is_multi_period,
+        "is_multi_period": is_multi,
         "periods": periods_list,
         "generators": gen_rows,
         "storage_units": su_rows,

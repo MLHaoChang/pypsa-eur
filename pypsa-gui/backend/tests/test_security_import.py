@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 from fastapi import HTTPException
 
-from conftest import build_network
+from tests.conftest import build_network
 from routers.projects import _safe_unpickle_results
 from services.upload_guard import read_capped, safe_extract
 

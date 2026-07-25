@@ -24,7 +24,7 @@ import pathlib
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from services import period_utils
+from services import economics, period_utils
 from models.schemas import (
     AssetLCOHEntry,
     CapacityComparison,
@@ -57,6 +57,12 @@ from routers.projects import (
     _safe_unpickle_results,
     _unwrap_results_state,
 )
+# Shared with the single-network Results endpoints. These were previously
+# imported inside four separate function bodies to dodge a suspected import
+# cycle; there is none — verified that `compare -> results` and
+# `results -> compare` both import cleanly in either order. Hoisted so the
+# dependency is visible at the top of the file like every other one.
+from routers.results import corrected_marginal_prices, lp_scaled_load_frame
 
 router = APIRouter()
 
@@ -152,9 +158,8 @@ def get_compare_state(name: str) -> CompareState:
         # not the live network's cached result snapshot.
         try:
             from routers.simulation import _state as _sim_state2
-            from routers.results import lp_scaled_load_frame as _lp_scaled
             _cfg2 = _sim_state2.get("solver_config")
-            loads_t_p = _lp_scaled(temp_n, _cfg2, from_state=False)
+            loads_t_p = lp_scaled_load_frame(temp_n, _cfg2, from_state=False)
             if loads_t_p is None:
                 loads_t_p = temp_n.loads_t.p_set
         except Exception:
@@ -970,8 +975,7 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchCompar
     p_set_t = None
     try:
         from routers.simulation import _state as _sim_state3
-        from routers.results import lp_scaled_load_frame as _lp_scaled3
-        p_set_t = _lp_scaled3(n, _sim_state3.get("solver_config"), from_state=False)
+        p_set_t = lp_scaled_load_frame(n, _sim_state3.get("solver_config"), from_state=False)
     except Exception:
         p_set_t = None
     if p_set_t is None:
@@ -1178,7 +1182,6 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
     # Prices tab applies), so the duration curve / mean / max / min match.
     # from_state=False → read this bundle's own buses_t, not the live snapshot.
     try:
-        from routers.results import corrected_marginal_prices
         p_t = corrected_marginal_prices(n, from_state=False)
     except Exception:
         p_t = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
@@ -1352,26 +1355,13 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
 def _co2_intensity_map(n) -> dict[str, float]:
     """
     Return ``carrier_name_lower → co2_emissions (tCO2/MWh_th)`` for every
-    carrier whose ``co2_emissions`` is finite. Empty if the network has no
-    carriers DataFrame, or no ``co2_emissions`` column.
+    carrier whose ``co2_emissions`` is finite.
+
+    Thin wrapper kept for this module's call sites; the implementation moved
+    to `services.economics.co2_intensity_map` so the Results tab and the
+    Compare rail read the same carrier intensities.
     """
-    import math as _math
-    out: dict[str, float] = {}
-    carriers = getattr(n, "carriers", None)
-    if carriers is None or carriers.empty or "co2_emissions" not in carriers.columns:
-        return out
-    try:
-        for k, v in carriers["co2_emissions"].items():
-            try:
-                fv = float(v)
-            except (TypeError, ValueError):
-                continue
-            if not _math.isfinite(fv):
-                continue
-            out[str(k).lower()] = fv
-    except Exception:
-        pass
-    return out
+    return economics.co2_intensity_map(n)
 
 
 def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComparison:
@@ -1527,7 +1517,6 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # `_state` snapshot, matching asset_economics); False for a loaded Compare
     # bundle (read temp_n's own duals, never the live network's cached snapshot).
     try:
-        from routers.results import corrected_marginal_prices
         bus_prices = corrected_marginal_prices(n, from_state=prices_from_state)
     except Exception:
         bus_prices = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
@@ -1543,14 +1532,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # Investment-period weightings — years × period. Default 1.0 each. Used
     # to scale annuitised CAPEX commitment from a single-year cost to the
     # period's total commitment (annual_cost × years_in_period).
-    ipw_years: dict[int, float] = {}
-    if is_multi and periods:
-        try:
-            ipw_series = n.investment_period_weightings["years"]
-            for p in periods:
-                ipw_years[p] = float(ipw_series.get(int(p), 1.0))
-        except Exception:
-            ipw_years = {p: 1.0 for p in periods}
+    ipw_years: dict = period_utils.period_years_map(n)
 
     # Same vintage_results dict that the capacity summary consumes — gives
     # us per-period p_nom_opt attribution that the collapsed dataframe row
@@ -1625,7 +1607,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         total = 0.0
         pp: dict[str, float] = {}
         for P in periods:
-            years_in_P = ipw_years.get(P, 1.0)
+            years_in_P = period_utils.years_for_period(ipw_years, P)
             commitment = annual * years_in_P
             pp[str(P)] = commitment
             total += commitment

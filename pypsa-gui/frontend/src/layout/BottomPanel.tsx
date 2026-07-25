@@ -7,6 +7,7 @@ import { networkApi } from '../api/network'
 import { changelogApi, type ChangeLogEntry } from '../api/changelog'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { coerceForColumn } from '../utils/coerce'
 import { useSimulationStore } from '../store/simulationStore'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -117,29 +118,8 @@ interface AssetTableProps {
 // so the user typing nothing applies an intentional "unset" rather than a
 // silent zero.
 //
-// When `sample` is null/undefined (every existing row has no value), we can't
-// type-sniff. The backend coerces against the column's pandas dtype too, so
-// here we just try numeric first — that matches the overwhelming majority of
-// PyPSA fields. Boolean strings are still recognised. If neither parses, we
-// return the raw string and let the backend reject it cleanly.
-function coerceForColumn(raw: string, sample: unknown): unknown {
-  if (raw === '') return null
-  if (typeof sample === 'number') {
-    const n = Number(raw)
-    return Number.isFinite(n) ? n : null
-  }
-  if (typeof sample === 'boolean') {
-    if (raw === 'true' || raw === '1' || raw === 'yes') return true
-    if (raw === 'false' || raw === '0' || raw === 'no') return false
-    return raw
-  }
-  if (sample === undefined || sample === null) {
-    if (/^(true|false)$/i.test(raw)) return raw.toLowerCase() === 'true'
-    const n = Number(raw)
-    if (Number.isFinite(n) && raw.trim() !== '') return n
-  }
-  return raw
-}
+// coerceForColumn moved to utils/coerce.ts so it can be unit-tested without
+// mounting this panel. Imported at the top of the file.
 
 function AssetTable({
   tab, componentClass, data, defaultColumns, selectedName, onRowClick,

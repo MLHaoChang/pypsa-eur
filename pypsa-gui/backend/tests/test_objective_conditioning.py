@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pypsa
 
-from conftest import build_network
+from tests.conftest import build_network
 from routers import simulation as sim_router
 from services.solver_service import SolverConfig, _objective_conditioning
 
