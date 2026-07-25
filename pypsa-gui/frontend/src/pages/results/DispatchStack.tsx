@@ -93,8 +93,8 @@ export default function DispatchStack({
   const hasGenFilter = genNames !== undefined
 
   // Map every generator/load/storage column to its carrier. Generators
-  // without a carrier get an "other" bucket. Sorted carriers (thermal first,
-  // renewables next, then storage) make the stack visually consistent across
+  // without a carrier get an "other" bucket. Sorted carriers (renewables,
+  // then storage, then thermal) make the stack visually consistent across
   // runs — the bottom of every bar is always the same carrier.
   const { genCarriers, loadCarriers, stackOrder, colourByCarrier } = useMemo(() => {
     const carrierByGen = new Map<string, string>()
