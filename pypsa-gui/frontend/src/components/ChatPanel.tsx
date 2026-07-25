@@ -38,7 +38,9 @@ import {
 import { deriveCostEur, useChatStore, type UploadMetaUI } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
+import { useSpeechToText } from '../hooks/useSpeechToText'
 import { isNearBottom } from '../utils/chatUi'
+import { insertAtCursor } from '../utils/speechToText'
 import ChatMarkdown from './ChatMarkdown'
 import { UploadProgressToast } from './UploadProgressToast'
 
@@ -954,6 +956,46 @@ export default function ChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  const onSpeechFinal = useCallback((text: string) => {
+    setInput((prev) => {
+      const el = textareaRef.current
+      const start = el?.selectionStart ?? prev.length
+      const end = el?.selectionEnd ?? prev.length
+      const next = insertAtCursor(prev, start, end, text, { padSpace: true })
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current
+        if (!ta) return
+        ta.focus()
+        ta.setSelectionRange(next.selectionStart, next.selectionEnd)
+      })
+      return next.value
+    })
+  }, [])
+
+  const speech = useSpeechToText({
+    enabled: !streaming,
+    onFinal: onSpeechFinal,
+    onError: (msg) => toast.error(msg),
+  })
+
+  // Stop the mic across project switches and while a turn is streaming.
+  useEffect(() => {
+    speech.stop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to project identity
+  }, [currentProject])
+
+  useEffect(() => {
+    if (!speech.listening) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        speech.stop()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [speech.listening, speech.stop])
+
   // Prompt-area height: user-resizable via the top drag handle, persisted to
   // localStorage so it survives page reloads. The min/max guardrails keep the
   // panel usable even if a careless drag would shrink it to 0 or grow it past
@@ -1502,22 +1544,64 @@ export default function ChatPanel() {
             >
               📋
             </button>
-          </div>
-          <textarea
-            ref={textareaRef}
-            className="flex-1 bg-bg border border-border rounded px-2 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] resize-none focus:outline-none focus:border-accent/60"
-            placeholder={streaming ? 'streaming…' : 'message…   (Shift+Enter for newline)'}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                onSend()
+            <button
+              className={
+                (isCoarsePointer
+                  ? 'min-w-[44px] min-h-[44px] text-lg '
+                  : 'px-2 py-1 text-[10px] ') +
+                'rounded border ' +
+                (speech.listening
+                  ? 'bg-accent/15 border-accent text-accent'
+                  : 'bg-bg-3/40 hover:bg-bg-3 border-border text-muted') +
+                (speech.supported && !streaming ? '' : ' opacity-50')
               }
-            }}
-            disabled={streaming}
-            data-testid="chat-input"
-          />
+              onClick={speech.toggle}
+              disabled={!speech.supported || streaming}
+              title={
+                !speech.supported
+                  ? 'Voice input needs Chrome or Edge'
+                  : speech.listening
+                    ? 'Stop voice input (Esc)'
+                    : 'Start voice input (English)'
+              }
+              aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
+              aria-pressed={speech.listening}
+              data-testid="chat-mic"
+            >
+              {speech.listening ? '■' : '🎙'}
+            </button>
+          </div>
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+            <textarea
+              ref={textareaRef}
+              className="flex-1 min-h-0 bg-bg border border-border rounded px-2 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] resize-none focus:outline-none focus:border-accent/60"
+              placeholder={streaming ? 'streaming…' : 'message…   (Shift+Enter for newline)'}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && speech.listening) {
+                  e.preventDefault()
+                  speech.stop()
+                  return
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  onSend()
+                }
+              }}
+              disabled={streaming}
+              data-testid="chat-input"
+            />
+            {speech.listening && (
+              <div
+                className="text-[11px] text-muted px-1 pt-0.5 truncate"
+                data-testid="chat-speech-interim"
+                aria-live="polite"
+              >
+                {speech.interim ? `…${speech.interim}` : 'Listening…'}
+              </div>
+            )}
+          </div>
           <button
             className="self-end px-3 py-1.5 text-xs rounded bg-accent text-bg disabled:opacity-50 max-w-[260px]"
             onClick={onSend}

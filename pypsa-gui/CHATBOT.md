@@ -23,6 +23,19 @@ explaining the gap. Setting the key requires no restart of the frontend.
 The `/api/chat/health` endpoint reports `anthropic_api_key_present` without
 ever echoing the key value, so you can probe the backend's view safely.
 
+## Voice input
+
+The composer mic button uses the browser **Web Speech API** (English,
+`en-US`) to dictate into the prompt box. It does **not** auto-send — review
+the text and press Send as usual.
+
+- Supported primarily in **Chrome / Edge** (Safari best-effort). Unsupported
+  browsers show a disabled mic with a tooltip.
+- Audio is handled by the browser / OS speech service (Chromium may use a
+  cloud speech backend depending on settings). No audio is uploaded to the
+  pypsa-gui FastAPI process.
+- Toggle the mic to start/stop; **Esc** also stops listening.
+
 ## Models
 
 The header dropdown selects the model used for the next turn:
