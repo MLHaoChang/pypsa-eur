@@ -461,6 +461,40 @@ function UploadChipStrip({
 }
 
 /**
+ * Collapsible live log for long-running tools (solver PHASE/VALIDATION
+ * lines, import progress). Progress is retained after the tool completes
+ * so users can re-open the panel under a ✓ row; the Zustand slice caps
+ * lines per tool_use_id (see appendToolProgress).
+ */
+function ToolProgressDetails({ toolUseId }: { toolUseId: string }) {
+  const lines = useChatStore((s) => s.toolProgress[toolUseId] ?? EMPTY_TOOL_PROGRESS)
+  if (lines.length === 0) return null
+  return (
+    <details
+      className="mt-1 rounded border border-border/60 bg-bg-2/30"
+      data-testid="chat-tool-progress"
+      data-tool-use-id={toolUseId}
+    >
+      <summary className="cursor-pointer select-none px-2 py-1 text-[10px] text-muted hover:text-text">
+        Progress ({lines.length} line{lines.length === 1 ? '' : 's'})
+      </summary>
+      <pre
+        className="max-h-48 overflow-y-auto px-2 pb-2 text-[10px] leading-snug text-muted whitespace-pre-wrap break-all"
+        data-testid="chat-tool-progress-lines"
+      >
+        {lines.map((row, i) => (
+          <div key={`${i}-${row.kind}`}>
+            {row.kind ? `[${row.kind}] ` : ''}{row.line}
+          </div>
+        ))}
+      </pre>
+    </details>
+  )
+}
+
+const EMPTY_TOOL_PROGRESS: { kind: string; line: string }[] = []
+
+/**
  * Phase D polish #1 — empty-state primer shown when no project is loaded
  * AND no messages have been streamed yet. Two buttons dispatch
  * decoupled CustomEvents that Sidebar listens for to open the appropriate
@@ -1341,6 +1375,9 @@ export default function ChatPanel() {
             {m.role === 'assistant'
               ? <ChatMarkdown>{m.content}</ChatMarkdown>
               : <span className="whitespace-pre-wrap">{m.content}</span>}
+            {m.role === 'tool' && m.tool_use_id && (
+              <ToolProgressDetails toolUseId={m.tool_use_id} />
+            )}
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />
             )}

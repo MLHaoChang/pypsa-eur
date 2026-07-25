@@ -250,10 +250,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setPending: (c) => set({ pending: c }),
   appendToolProgress: (toolUseId, frame) => set((s) => {
     const prev = s.toolProgress[toolUseId] ?? []
+    // Cap retained lines so long solves (PHASE/VALIDATION spam) cannot
+    // unbounded-grow the Zustand slice; keep the newest 500 for the
+    // collapsible progress panel under the tool row.
     return {
       toolProgress: {
         ...s.toolProgress,
-        [toolUseId]: [...prev.slice(-200), frame],
+        [toolUseId]: [...prev.slice(-499), frame],
       },
     }
   }),
