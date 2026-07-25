@@ -154,3 +154,68 @@ def test_rotation_under_same_lock_as_append(tmp_projects_dir, monkeypatch):
         f"v4-MINOR-2 violation: rotation call not between lock-open and "
         f"file-open. open={open_idx} rotate={rotate_idx} write={write_idx}"
     )
+
+
+def test_read_all_turns_holds_chat_state_lock():
+    """A5 — history reads must share the rotation lock with append_turn."""
+    import inspect
+    src = inspect.getsource(chat_service.read_all_turns)
+    assert "with ctx.chat_state.lock:" in src
+    lock_idx = src.find("with ctx.chat_state.lock:")
+    resolve_idx = src.find("get_persist_path(ctx)")
+    read_idx = src.find("read_text")
+    assert 0 < lock_idx < resolve_idx < read_idx, (
+        f"A5 violation: path resolve/read must sit inside the lock. "
+        f"lock={lock_idx} resolve={resolve_idx} read={read_idx}"
+    )
+
+
+def test_concurrent_read_during_rotation_never_empty_spuriously(
+    tmp_projects_dir, monkeypatch,
+):
+    """
+    A5 — while writers rotate, readers via read_all_turns must not observe an
+    empty union once at least one turn has been persisted.
+    """
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    monkeypatch.setattr(chat_service, "ROTATE_BYTES", 8 * 1024)
+
+    ctx = _make_bound_ctx("readrace", tmp_projects_dir)
+    PAD = "y" * 4000
+    stop = threading.Event()
+    errors: list[str] = []
+    saw_nonempty = threading.Event()
+
+    def writer() -> None:
+        for i in range(40):
+            chat_service.append_turn(ctx, {"i": i, "content": PAD})
+            saw_nonempty.set()
+        stop.set()
+
+    def reader() -> None:
+        while not stop.is_set():
+            turns = chat_service.read_all_turns(ctx)
+            if saw_nonempty.is_set() and len(turns) == 0:
+                # Allow a brief window before the first append lands under the
+                # lock; once we've seen a write signal, empty is a bug.
+                errors.append("read_all_turns returned [] after writes started")
+                break
+            for rec in turns:
+                if not isinstance(rec, dict):
+                    errors.append(f"non-dict turn: {rec!r}")
+                    break
+
+    t_w = threading.Thread(target=writer)
+    t_r = threading.Thread(target=reader)
+    t_r.start()
+    t_w.start()
+    t_w.join(timeout=30.0)
+    stop.set()
+    t_r.join(timeout=30.0)
+    assert not errors, errors
+    final = chat_service.read_all_turns(ctx)
+    # Aggressive ROTATE_BYTES means only current + one backup survive — we
+    # only require a non-empty well-formed union after the writer finishes.
+    assert len(final) >= 1
+    assert all(isinstance(rec, dict) and "i" in rec for rec in final)

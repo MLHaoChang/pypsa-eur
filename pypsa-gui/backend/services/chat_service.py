@@ -773,27 +773,35 @@ def read_all_turns(ctx: ProjectContext) -> list[dict[str, Any]]:
     turns — it does NOT rebuild any session (that side-effect stays in
     chat_history so callers like the cap / export don't accidentally trigger it).
     Empty list when the context is unbound (no persist path).
+
+    Holds `ctx.chat_state.lock` for path resolution + reads so a concurrent
+    `append_turn` rotation (rename chat.jsonl → chat.jsonl.1) cannot expose a
+    missing/empty file mid-read.
     """
-    path = get_persist_path(ctx)
-    if path is None or not path.exists():
+    # Unbound: no files to touch — skip the lock.
+    if ctx.loaded_project is None and ctx.chat_state.persist_path is None:
         return []
-    rotated = path.with_suffix(path.suffix + ".1")
-    sources = [rotated, path] if rotated.exists() else [path]
-    turns: list[dict[str, Any]] = []
-    for src in sources:
-        try:
-            for line in src.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    turns.append(json.loads(line))
-                except json.JSONDecodeError:
-                    # Trailing partial line from a concurrent write — skip.
-                    continue
-        except OSError:
-            continue
-    return turns
+    with ctx.chat_state.lock:
+        path = get_persist_path(ctx)
+        if path is None or not path.exists():
+            return []
+        rotated = path.with_suffix(path.suffix + ".1")
+        sources = [rotated, path] if rotated.exists() else [path]
+        turns: list[dict[str, Any]] = []
+        for src in sources:
+            try:
+                for line in src.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        turns.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        # Trailing partial line from a concurrent write — skip.
+                        continue
+            except OSError:
+                continue
+        return turns
 
 
 def _today_token_spend(ctx: ProjectContext) -> int:
