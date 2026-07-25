@@ -485,7 +485,7 @@ Each PLAN phase (1–10) = one task group below. Stop for review after Phases 3,
 
 1. [x] Review loop clears §0 → `CLEARED`
 2. [x] A1 → A2 → A3 (frontend quick wins) — done on this branch
-3. [ ] A4 → A5 → A6 → A7 → A8 (backend reliability)
+3. [x] A4 → A5 → A6 → A7 → A8 (backend reliability) — done on this branch
 4. [ ] A9a → A9b → A9c
 5. [ ] A10 → A11 (polish; A12 may slip after B1)
 6. [ ] B1 → B2 → B3 *(review)* → B4 → B5 *(review)* → B6 → B7 *(review)* → B8 → B9/B-I1 *(review)* → B10
