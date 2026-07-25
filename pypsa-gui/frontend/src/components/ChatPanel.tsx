@@ -1153,11 +1153,20 @@ export default function ChatPanel() {
         ].includes(d.error_kind)) {
           setError({ error_kind: d.error_kind, message: d.message })
         }
-        appendMessage({
-          role: 'tool',
-          content: `✗ ${d.tool_name ?? '?'} — ${d.error_kind}`,
-          tool_use_id: d.tool_use_id, tool_name: d.tool_name,
-        })
+        {
+          // Generic tool_error used to show only the kind label, which hid the
+          // real reason (e.g. Pydantic "bus Field required" on partial updates).
+          const detail = (d.message || '').trim()
+          const short =
+            detail.length > 160 ? `${detail.slice(0, 157)}…` : detail
+          appendMessage({
+            role: 'tool',
+            content: short
+              ? `✗ ${d.tool_name ?? '?'} — ${d.error_kind}: ${short}`
+              : `✗ ${d.tool_name ?? '?'} — ${d.error_kind}`,
+            tool_use_id: d.tool_use_id, tool_name: d.tool_name,
+          })
+        }
         break
       }
       case 'project_rebound': {

@@ -62,6 +62,52 @@ def _install_minimal_network(install_network):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def test_update_component_partial_attrs_without_bus(install_network):
+    """
+    Agents routinely send only the fields they change (e.g. p_nom_max).
+    Create schemas require bus/bus0 — update_component must prefill those
+    from the live row instead of failing with a cryptic ValidationError.
+    """
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    n.add("Bus", "B3")
+    n.add(
+        "StorageUnit", "BESS_B3", bus="B3", p_nom=100.0,
+        p_nom_extendable=False, p_nom_max=float("inf"),
+    )
+    n.add("Generator", "PV_B3", bus="B3", p_nom=300.0, p_nom_extendable=True)
+    n.add(
+        "Line", "L1", bus0="B3", bus1="B1", x=0.1, r=0.01, s_nom=500.0,
+        s_nom_extendable=True,
+    )
+    install_network(n, name=None)
+
+    chat_tools.update_component(
+        "StorageUnit", "BESS_B3",
+        attrs={
+            "p_nom_extendable": True,
+            "p_nom_min": 100.0,
+            "p_nom_max": 500.0,
+            "capital_cost": 22000.0,
+        },
+    )
+    assert bool(n.storage_units.at["BESS_B3", "p_nom_extendable"]) is True
+    assert float(n.storage_units.at["BESS_B3", "p_nom_max"]) == 500.0
+    assert n.storage_units.at["BESS_B3", "bus"] == "B3"
+
+    chat_tools.update_component(
+        "Generator", "PV_B3", attrs={"p_nom_max": 1500.0},
+    )
+    assert float(n.generators.at["PV_B3", "p_nom_max"]) == 1500.0
+    assert n.generators.at["PV_B3", "bus"] == "B3"
+
+    chat_tools.update_component(
+        "Line", "L1", attrs={"s_nom_max": 2000.0},
+    )
+    assert float(n.lines.at["L1", "s_nom_max"]) == 2000.0
+    assert n.lines.at["L1", "bus0"] == "B3"
+
+
 def test_update_component_bus_rename_routes_to_rename_bus(install_network):
     """
     F1: update_component({Bus, B1, new_name:B2}) MUST route through

@@ -92,6 +92,61 @@ def _get_schema(class_name: str):
     return getattr(s, class_name)
 
 
+# Create schemas require identity fields (bus / bus0 / bus1 / …) that agents
+# routinely omit on partial updates. Prefill those from the live row so
+# `update_component({attrs: {p_nom_max: 500}})` validates like a real PUT
+# that already knows the asset's topology.
+_UPDATE_IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
+    "Line": ("bus0", "bus1"),
+    "Link": ("bus0", "bus1"),
+    "Transformer": ("bus0", "bus1"),
+    "Generator": ("bus",),
+    "StorageUnit": ("bus",),
+    "Store": ("bus",),
+    "Load": ("bus",),
+    "ShuntImpedance": ("bus",),
+}
+
+
+def _identity_prefill(component_class: str, name: str) -> dict[str, Any]:
+    """Return required identity attrs from the existing component row."""
+    fields = _UPDATE_IDENTITY_FIELDS.get(component_class)
+    if not fields:
+        return {}
+    attr = _GENERIC_CRUD_ATTRS.get(component_class)
+    if not attr:
+        return {}
+    n = PyPSAService.get_network()
+    df = getattr(n, attr, None)
+    if df is None or name not in df.index:
+        return {}
+    row = df.loc[name]
+    out: dict[str, Any] = {}
+    for f in fields:
+        if f in df.columns:
+            val = row[f]
+            # pandas / numpy scalars → plain Python for Pydantic
+            out[f] = val.item() if hasattr(val, "item") else val
+    return out
+
+
+def _validated_update_payload(
+    component_class: str, name: str, attrs: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Coerce `attrs` through the Create schema without requiring the agent to
+    re-send identity fields. Only user-supplied keys land in the payload so
+    `_update_component`'s exclude_unset merge still preserves other columns.
+    """
+    schema_name = _COMPONENT_CREATE_SCHEMAS[component_class]
+    Schema = _get_schema(schema_name)
+    prefill = _identity_prefill(component_class, name)
+    # Prefill first; agent attrs win on conflict.
+    instance = Schema(name=name, **{**prefill, **attrs})
+    dumped = instance.model_dump()
+    return {k: dumped[k] for k in attrs if k in dumped}
+
+
 def _sync(value):
     """
     If `value` is a coroutine, drive it to completion and return its result;
@@ -475,12 +530,9 @@ def update_component(
     if component_class not in _GENERIC_CRUD_ATTRS:
         raise HTTPException(400, f"Unknown component_class: {component_class!r}")
     from routers.network import _update_component
-    # Mirror the route handlers' exclude_unset behaviour by building a
-    # Pydantic instance, then dumping exclude_unset=True.
-    schema_name = _COMPONENT_CREATE_SCHEMAS[component_class]
-    Schema = _get_schema(schema_name)
-    instance = Schema(name=name, **attrs)
-    payload = instance.model_dump(exclude_unset=True)
+    # Partial agent updates omit required Create fields (bus / bus0…). Prefill
+    # those from the live row, then keep only the keys the agent sent.
+    payload = _validated_update_payload(component_class, name, attrs)
     return _update_component(
         component_class, _GENERIC_CRUD_ATTRS[component_class], name, payload,
     )

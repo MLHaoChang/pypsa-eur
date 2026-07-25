@@ -2454,6 +2454,10 @@ def _dispatch_real_tool_call(
         detail = getattr(exc, "detail", None)
         if isinstance(detail, dict) and "error_kind" in detail:
             error_kind = detail["error_kind"]
+        elif type(exc).__name__ == "ValidationError":
+            # Pydantic failures used to surface as opaque "tool_error" with a
+            # multi-line body the UI truncated away — keep a short kind.
+            error_kind = "validation_error"
         msg = _redact_for_log(detail or exc)
         yield "tool_error", {
             "tool_use_id": tool_use_id,
