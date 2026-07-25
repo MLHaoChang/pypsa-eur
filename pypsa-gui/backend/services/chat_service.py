@@ -1500,15 +1500,48 @@ _UNTRUSTED_DATA_CLAUSE = (
 )
 
 
-def _build_system_prompt(session: ChatSession) -> str:
+def _format_live_network_meta(ctx: Any) -> str | None:
+    """
+    One-line orientation for the system prompt: project binding + size +
+    solved flag. Returns None when unbound or on any read failure so a
+    flaky meta lookup never aborts the turn.
+    """
+    try:
+        project = getattr(ctx, "loaded_project", None)
+        if not project:
+            return None
+        n = getattr(ctx, "network", None)
+        if n is None:
+            return None
+        buses = int(len(n.buses))
+        lines = int(len(n.lines))
+        snapshots = int(len(n.snapshots))
+        solved = bool(getattr(n, "is_solved", False))
+        if not solved:
+            solved = getattr(n, "_objective", None) is not None
+        return (
+            f"Working with {project}: {buses} buses, {lines} lines, "
+            f"{snapshots} snapshots, solved={solved}."
+        )
+    except Exception:
+        return None
+
+
+def _build_system_prompt(
+    session: ChatSession,
+    live_meta: str | None = None,
+) -> str:
     """
     Build the system prompt for one turn. Kept small — the agent learns the
     full tool surface from `tools=`. The system prompt carries policy (safety
     rules + session identity + the audit-log action prefix) plus the domain /
     solver-error / price-congestion / next-step / untrusted-data guides that
     shape how the agent reads results and stays safe against injected text.
+
+    Optional `live_meta` (from `_format_live_network_meta`) is appended so the
+    model knows the bound project + network size without a get_meta round-trip.
     """
-    return (
+    parts = [
         "You are the pypsa-gui assistant, an in-app copilot embedded next to "
         "an open energy-system optimisation model. Use the provided tools to "
         "answer questions and make changes; do NOT hallucinate component "
@@ -1520,13 +1553,16 @@ def _build_system_prompt(session: ChatSession) -> str:
         "audit entry will carry the prefix "
         f"'agent:<verb>:{session.session6()}' automatically. Be terse, "
         "cite component names verbatim, prefer plain prose over markdown "
-        "headers, and end with a one-sentence summary of what changed."
-        "\n\n" + _DOMAIN_GUIDE
-        + "\n\n" + _SOLVER_ERROR_DECODER
-        + "\n\n" + _PRICE_CONGESTION_GUIDE
-        + "\n\n" + _NEXT_STEP_RUBRIC
-        + "\n\n" + _UNTRUSTED_DATA_CLAUSE
-    )
+        "headers, and end with a one-sentence summary of what changed.",
+        _DOMAIN_GUIDE,
+        _SOLVER_ERROR_DECODER,
+        _PRICE_CONGESTION_GUIDE,
+        _NEXT_STEP_RUBRIC,
+        _UNTRUSTED_DATA_CLAUSE,
+    ]
+    if live_meta:
+        parts.append(live_meta)
+    return "\n\n".join(parts)
 
 
 def _serialise_for_anthropic(content_block: Any) -> dict[str, Any]:
@@ -1843,7 +1879,12 @@ def _run_turn_body(
 
     tool_call_count = 0
     tools = _tools_payload()
-    system_prompt = _build_system_prompt(session)
+    # A4 — orient the model on the P0-pinned turn context (not a later
+    # active switch). Failure → omit; never abort the turn for meta.
+    system_prompt = _build_system_prompt(
+        session,
+        live_meta=_format_live_network_meta(turn_ctx),
+    )
 
     while True:
         if session.abort_event.is_set():
