@@ -77,6 +77,64 @@ def years_for_period(years_map: dict, p: Any) -> float:
         return years_map.get(p, 1.0)
 
 
+def snapshot_weights(n, column: str = "objective", sns=None) -> pd.Series:
+    """
+    Σ-weight per snapshot = ``snapshot_weightings[column]`` × that snapshot's
+    ``investment_period_weightings.years``.
+
+    ``sns`` defaults to ``n.snapshots`` but may be an explicit SUBSET of them.
+    That matters for the solver: myopic foresight and the SCLOPF path weight
+    only the snapshots the current LP actually spans
+    (``sns[period_level == current_period]``), and silently substituting the
+    full horizon there would inflate every reported cost.
+
+    This is THE weighting basis for turning per-snapshot quantities into
+    horizon totals. Getting it wrong is the "~5× too small" bug class this
+    module exists to prevent: `snapshot_weightings` alone omits the per-period
+    years multiplier, so a 2026+2031 horizon with years=5+5 under-reports by 5×.
+
+    ``column`` stays a caller parameter because the cost-vs-energy choice is
+    domain logic, not mechanical lookup (see the module docstring):
+      * ``"objective"`` — COST quantities (OPEX, revenue, CAPEX commitment).
+      * ``"generators"`` — ENERGY quantities (dispatch GWh, served load,
+        emissions). This is the column PyPSA's ``n.statistics()`` and the
+        Results-tab energy KPIs use; summing energy on the ``objective``
+        column diverges from the Results tab whenever the two differ (e.g.
+        representative-week runs).
+
+    Degrades in three steps so a malformed netcdf can't take a view down:
+    requested column → ``"objective"`` → 1.0 per snapshot. A flat network
+    returns the unscaled snapshot weights.
+    """
+    if sns is None:
+        sns = getattr(n, "snapshots", None)
+    if sns is None:
+        return pd.Series(dtype=float)
+    try:
+        sw = n.snapshot_weightings.loc[sns, column].astype(float)
+    except Exception:
+        # Requested column missing (e.g. an older netcdf with no "generators"
+        # column) — fall back to "objective" before the all-1.0 last resort so
+        # a representative-week weighting isn't silently dropped.
+        try:
+            sw = n.snapshot_weightings.loc[sns, "objective"].astype(float)
+        except Exception:
+            sw = pd.Series(1.0, index=sns, dtype=float)
+    if not isinstance(sns, pd.MultiIndex):
+        return sw
+    years_map = period_years_map(n)
+    if not years_map:
+        return sw
+    try:
+        years_s = pd.Series(
+            [years_for_period(years_map, p) for p in sns.get_level_values(0)],
+            index=sns, dtype=float,
+        )
+        return sw * years_s
+    except Exception:
+        return sw
+
+
 def is_period_only(x: Any) -> bool:
     """
     True when `x` is a bare period/year key (e.g. `2025`) rather than a real

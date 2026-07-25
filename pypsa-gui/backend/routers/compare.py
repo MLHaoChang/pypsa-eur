@@ -24,6 +24,7 @@ import pathlib
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
+from services import period_utils
 from models.schemas import (
     AssetLCOHEntry,
     CapacityComparison,
@@ -419,31 +420,12 @@ def _build_snapshot_weights(n, column: str = "objective") -> pd.Series:
     requested column is missing or misshapen — so an older netcdf without a
     ``generators`` column behaves exactly as before, and a malformed netcdf
     still can't take the comparison view down.
+
+    Thin wrapper kept for its many call sites in this module; the
+    implementation lives in `services.period_utils.snapshot_weights` so
+    results.py shares one weighting basis with the comparison view.
     """
-    import pandas as pd
-    sns = n.snapshots
-    try:
-        sw = n.snapshot_weightings.loc[sns, column].astype(float)
-    except Exception:
-        # Requested column missing (e.g. older netcdf without "generators") —
-        # fall back to "objective" before the all-1.0 last resort, so a
-        # representative-week weighting isn't silently dropped.
-        try:
-            sw = n.snapshot_weightings.loc[sns, "objective"].astype(float)
-        except Exception:
-            sw = pd.Series(1.0, index=sns, dtype=float)
-    if not isinstance(sns, pd.MultiIndex):
-        return sw
-    try:
-        ipw = n.investment_period_weightings["years"]
-        period_lvl = sns.get_level_values(0)
-        years_s = pd.Series(
-            [float(ipw.get(int(p), 1.0)) for p in period_lvl],
-            index=sns, dtype=float,
-        )
-        return sw * years_s
-    except Exception:
-        return sw
+    return period_utils.snapshot_weights(n, column)
 
 
 def _per_period_groupby(series, sns, is_multi):
@@ -495,17 +477,9 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
     default_dr, default_lt = _resolve_project_cost_defaults(n)
 
     # ipw.years per period — multiplier for annuitised €/yr → period total.
-    period_years_map: dict[int, float] = {}
-    if is_multi:
-        try:
-            ipw = n.investment_period_weightings["years"]
-            for p in periods:
-                try:
-                    period_years_map[int(p)] = float(ipw.get(int(p), 1.0))
-                except (TypeError, ValueError):
-                    period_years_map[int(p)] = 1.0
-        except Exception:
-            period_years_map = {int(p): 1.0 for p in periods}
+    # Empty on a flat network; `years_for_period` then answers 1.0 for every
+    # lookup, which is the flat-network semantic.
+    years_map = period_utils.period_years_map(n)
 
     # Generator total capacity (brownfield + built), keyed by carrier. Links
     # used to land here too, but that conflated link MW with generator MW in
@@ -735,7 +709,7 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
     # The single-period case collapses to one total entry with no by_period
     # split.
     total_capex_by_carrier: dict = _compute_total_annuitised_capex(
-        n, periods, is_multi, period_years_map, default_dr, default_lt,
+        n, periods, is_multi, years_map, default_dr, default_lt,
     )
 
     return CapacityComparison(
@@ -774,7 +748,7 @@ def _resolve_project_cost_defaults(n) -> tuple[float, float]:
 
 
 def _compute_total_annuitised_capex(
-    n, periods, is_multi, period_years_map, default_dr, default_lt,
+    n, periods, is_multi, years_map, default_dr, default_lt,
 ) -> dict:
     """
     Walk every cost-bearing component, accumulate ``p_nom_opt × cc_per_MW``
@@ -815,7 +789,7 @@ def _compute_total_annuitised_capex(
                 # (period-aware costing happens at LP time, not at stats
                 # time). The horizon total is the sum across periods.
                 for p in periods:
-                    years = period_years_map.get(int(p), 1.0)
+                    years = period_utils.years_for_period(years_map, p)
                     contrib = per_year_meur * years
                     b["by_period"][str(p)] = b["by_period"].get(str(p), 0.0) + contrib
                 b["total"] = sum(b["by_period"].values())
@@ -1593,14 +1567,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # Investment-period weightings — years × period. Default 1.0 each. Used
     # to scale annuitised CAPEX commitment from a single-year cost to the
     # period's total commitment (annual_cost × years_in_period).
-    ipw_years: dict[int, float] = {}
-    if is_multi and periods:
-        try:
-            ipw_series = n.investment_period_weightings["years"]
-            for p in periods:
-                ipw_years[p] = float(ipw_series.get(int(p), 1.0))
-        except Exception:
-            ipw_years = {p: 1.0 for p in periods}
+    ipw_years: dict = period_utils.period_years_map(n)
 
     # Same vintage_results dict that the capacity summary consumes — gives
     # us per-period p_nom_opt attribution that the collapsed dataframe row
@@ -1675,7 +1642,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         total = 0.0
         pp: dict[str, float] = {}
         for P in periods:
-            years_in_P = ipw_years.get(P, 1.0)
+            years_in_P = period_utils.years_for_period(ipw_years, P)
             commitment = annual * years_in_P
             pp[str(P)] = commitment
             total += commitment
