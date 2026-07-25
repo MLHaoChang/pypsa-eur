@@ -911,7 +911,7 @@ export default function CapacityExpansion() {
           <KPI
             label="Storage charge cost"
             value={Math.abs(storageChargeCostEur) > 1e-3 ? fmtCurrency(storageChargeCostEur) : '—'}
-            hint="Market accounting: Σ bus_price × |storage charge| × weights (same as Dispatch → Storage charge cost). Not part of LP variable OPEX — adding it to OPEX (horizon) recovers Dispatch's broader OPEX (total) when gen cost is the only other term."} />
+            hint="Market accounting: bus_price × |storage charge| × weights (same as Dispatch Storage charge cost). Not part of LP variable OPEX — adding it to OPEX (horizon) recovers Dispatch OPEX (total) when gen cost is the only other term." />
           <KPI
             label="Curtailment cost"
             value={cost.curtailment_cost > 0 ? fmtCurrency(cost.curtailment_cost) : '—'}
