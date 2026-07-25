@@ -483,8 +483,8 @@ Each PLAN phase (1–10) = one task group below. Stop for review after Phases 3,
 
 ## 9. Execution order (checklist)
 
-1. [ ] Review loop clears §0 → `CLEARED`
-2. [ ] A1 → A2 → A3 (frontend quick wins)
+1. [x] Review loop clears §0 → `CLEARED`
+2. [x] A1 → A2 → A3 (frontend quick wins) — done on this branch
 3. [ ] A4 → A5 → A6 → A7 → A8 (backend reliability)
 4. [ ] A9a → A9b → A9c
 5. [ ] A10 → A11 (polish; A12 may slip after B1)
