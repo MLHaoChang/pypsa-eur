@@ -159,7 +159,7 @@ def _reset_chat_sessions():
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_read_tier_tool_executes_and_emits_tool_result(install_network):
+def test_read_tier_tool_executes_and_emits_tool_result(tmp_projects_dir, install_network):
     """The agent emits a list_components tool_use; the run_turn dispatches it."""
     import pypsa
     n = pypsa.Network()
@@ -209,7 +209,7 @@ def test_read_tier_tool_executes_and_emits_tool_result(install_network):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_destructive_tool_blocks_until_approve(install_network, monkeypatch):
+def test_destructive_tool_blocks_until_approve(tmp_projects_dir, install_network, monkeypatch):
     """The agent emits a delete_component; the test approves via record_decision."""
     import pypsa
     n = pypsa.Network()
@@ -283,7 +283,7 @@ def test_destructive_tool_blocks_until_approve(install_network, monkeypatch):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_two_destructives_in_one_turn_yield_two_tool_errors(install_network):
+def test_two_destructives_in_one_turn_yield_two_tool_errors(tmp_projects_dir, install_network):
     """Model emits two destructive tool_use blocks in ONE assistant message → reject both."""
     import pypsa
     n = pypsa.Network()
@@ -331,7 +331,7 @@ def test_two_destructives_in_one_turn_yield_two_tool_errors(install_network):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_project_exists_propagates_to_tool_error_kind(install_network, monkeypatch):
+def test_project_exists_propagates_to_tool_error_kind(tmp_projects_dir, install_network, monkeypatch):
     """
     The save_project_as M1 pre-check raises HTTPException(409, ...); the agent
     propagates the structured error_kind into the tool_error frame.
@@ -404,7 +404,7 @@ def test_project_exists_propagates_to_tool_error_kind(install_network, monkeypat
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_descendants_exist_propagates_to_tool_error_kind(install_network, monkeypatch):
+def test_descendants_exist_propagates_to_tool_error_kind(tmp_projects_dir, install_network, monkeypatch):
     """delete_project with descendants → 409 error_kind='descendants_exist'."""
     import pypsa
     from fastapi import HTTPException
@@ -469,7 +469,7 @@ def test_descendants_exist_propagates_to_tool_error_kind(install_network, monkey
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_cold_path_activate_renders_as_success(install_network, monkeypatch):
+def test_cold_path_activate_renders_as_success(tmp_projects_dir, install_network, monkeypatch):
     """
     activate_project on a non-resident project (cold path) emits a normal
     tool_result, NOT a tool_error. activate_project is `write` tier (not
@@ -523,7 +523,7 @@ def test_cold_path_activate_renders_as_success(install_network, monkeypatch):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_session_output_cap_refuses_new_turn(install_network):
+def test_session_output_cap_refuses_new_turn(tmp_projects_dir, install_network):
     session = chat_service.ChatSession()
     # Pre-fill usage to the cap
     session.usage_acc["output_tokens"] = chat_service.MAX_OUTPUT_TOKENS_PER_SESSION
@@ -542,7 +542,7 @@ def test_session_output_cap_refuses_new_turn(install_network):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_tool_call_per_turn_cap_emits_error(install_network, monkeypatch):
+def test_tool_call_per_turn_cap_emits_error(tmp_projects_dir, install_network, monkeypatch):
     """
     If the model issues > MAX_TOOL_CALLS_PER_TURN tool_use blocks, the
     agent loop emits a tool_error and bails.
@@ -611,7 +611,7 @@ def fake_anthropic_module():
         sys.modules["anthropic"] = prev
 
 
-def test_sdk_authentication_error_emits_unauthorized_frame(fake_anthropic_module, install_network):
+def test_sdk_authentication_error_emits_unauthorized_frame(tmp_projects_dir, fake_anthropic_module, install_network):
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
 
@@ -627,8 +627,7 @@ def test_sdk_authentication_error_emits_unauthorized_frame(fake_anthropic_module
     assert any(ev == "session_done" for ev, _ in events)
 
 
-def test_sdk_rate_limit_error_emits_rate_limited_frame(
-    fake_anthropic_module, install_network, monkeypatch
+def test_sdk_rate_limit_error_emits_rate_limited_frame(tmp_projects_dir, fake_anthropic_module, install_network, monkeypatch
 ):
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
@@ -680,8 +679,7 @@ class _RaiseNThenSucceedClient:
         return _FakeStream(events, final)
 
 
-def test_transient_rate_limit_retries_then_succeeds(
-    fake_anthropic_module, install_network, monkeypatch
+def test_transient_rate_limit_retries_then_succeeds(tmp_projects_dir, fake_anthropic_module, install_network, monkeypatch
 ):
     """
     A rate-limit that clears within the retry budget yields a NORMAL turn —
@@ -709,8 +707,7 @@ def test_transient_rate_limit_retries_then_succeeds(
     assert len(client.calls) == 3                    # 2 failures + 1 success
 
 
-def test_transient_rate_limit_retries_then_exhausts(
-    fake_anthropic_module, install_network, monkeypatch
+def test_transient_rate_limit_retries_then_exhausts(tmp_projects_dir, fake_anthropic_module, install_network, monkeypatch
 ):
     """
     A persistent rate-limit exhausts the budget then surfaces a SINGLE
@@ -731,8 +728,7 @@ def test_transient_rate_limit_retries_then_exhausts(
     assert len(client.calls) == 4                    # 1 initial + 3 retries
 
 
-def test_unauthorized_is_not_retried(
-    fake_anthropic_module, install_network, monkeypatch
+def test_unauthorized_is_not_retried(tmp_projects_dir, fake_anthropic_module, install_network, monkeypatch
 ):
     """A NON-retryable error (unauthorized) fails immediately — no retries."""
     import pypsa
@@ -781,8 +777,7 @@ class _SingleStreamClient:
         return self._stream
 
 
-def test_no_retry_after_partial_output(
-    fake_anthropic_module, install_network, monkeypatch
+def test_no_retry_after_partial_output(tmp_projects_dir, fake_anthropic_module, install_network, monkeypatch
 ):
     """
     A transient error AFTER a token was already streamed must NOT retry
@@ -890,7 +885,7 @@ def test_api_key_redacted_from_log_when_exception_carries_it(monkeypatch, caplog
     assert "[REDACTED-API-KEY]" in redacted2
 
 
-def test_run_turn_error_frame_redacts_api_key(install_network, monkeypatch, fake_anthropic_module):
+def test_run_turn_error_frame_redacts_api_key(tmp_projects_dir, install_network, monkeypatch, fake_anthropic_module):
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
 
@@ -917,7 +912,7 @@ def test_run_turn_error_frame_redacts_api_key(install_network, monkeypatch, fake
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_missing_api_key_emits_clean_error(monkeypatch, install_network):
+def test_missing_api_key_emits_clean_error(tmp_projects_dir, monkeypatch, install_network):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
@@ -932,8 +927,7 @@ def test_missing_api_key_emits_clean_error(monkeypatch, install_network):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_agent_rebinding_tool_does_not_trigger_mid_turn_guard(
-    install_network, monkeypatch,
+def test_agent_rebinding_tool_does_not_trigger_mid_turn_guard(tmp_projects_dir, install_network, monkeypatch,
 ):
     """
     Regression for the 2026-06-08 incident: when the agent emits
@@ -1016,7 +1010,7 @@ def test_agent_rebinding_tool_does_not_trigger_mid_turn_guard(
     assert update_calls[0]["name"] == "L1"
 
 
-def test_agent_rebind_emits_project_rebound_frame(install_network, monkeypatch):
+def test_agent_rebind_emits_project_rebound_frame(tmp_projects_dir, install_network, monkeypatch):
     """
     Companion to the mid-turn-guard fix: after the agent dispatches a
     rebinding tool that changes the backend's `loaded_project`, the SSE
@@ -1069,7 +1063,7 @@ def test_agent_rebind_emits_project_rebound_frame(install_network, monkeypatch):
     assert rebound_frames[0]["via_tool"] == "activate_project"
 
 
-def test_external_project_switch_still_blocks(install_network, monkeypatch):
+def test_external_project_switch_still_blocks(tmp_projects_dir, install_network, monkeypatch):
     """
     Counter-test for the rebinding fix: an EXTERNAL switch (e.g. another
     browser tab) must STILL be blocked. The fix only relaxes the guard
@@ -1344,7 +1338,7 @@ def test_chat_health_reports_api_key_presence(client, monkeypatch):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_abort_event_cleared_at_run_turn_start(install_network):
+def test_abort_event_cleared_at_run_turn_start(tmp_projects_dir, install_network):
     """
     E2E QA INT-004: abort_event was never cleared, so the FIRST /abort
     froze the session forever. Verify it's now cleared at the top of run_turn.
@@ -1377,7 +1371,7 @@ def test_abort_event_cleared_at_run_turn_start(install_network):
     )
 
 
-def test_message_history_threaded_across_turns(install_network):
+def test_message_history_threaded_across_turns(tmp_projects_dir, install_network):
     """
     E2E QA INT-001: multi-turn conversation context. run_turn must seed
     from session.messages and append user/assistant/tool_result entries so
@@ -2084,8 +2078,7 @@ def test_run_turn_redacts_secrets_in_persisted_chat_jsonl(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_tool_timeout_emits_tool_timeout_and_is_error_result(
-    install_network, monkeypatch,
+def test_tool_timeout_emits_tool_timeout_and_is_error_result(tmp_projects_dir, install_network, monkeypatch,
 ):
     """A hung non-solver tool emits tool_timeout + an is_error tool_result."""
     import time as _t
@@ -2150,7 +2143,7 @@ def test_solver_tools_excluded_from_timeout_wrapper():
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_auto_approve_tier_skips_confirmation(install_network, monkeypatch):
+def test_auto_approve_tier_skips_confirmation(tmp_projects_dir, install_network, monkeypatch):
     """With 'destructive' auto-approved, a delete runs with no confirmation card."""
     import pypsa
     n = pypsa.Network()
@@ -2186,7 +2179,7 @@ def test_auto_approve_tier_skips_confirmation(install_network, monkeypatch):
     assert "B2" not in n.buses.index  # actually deleted
 
 
-def test_default_empty_auto_approve_still_confirms(install_network, monkeypatch):
+def test_default_empty_auto_approve_still_confirms(tmp_projects_dir, install_network, monkeypatch):
     """With the default empty set, a destructive tool still shows a card."""
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1"); n.add("Bus", "B2")
@@ -2215,8 +2208,7 @@ def test_default_empty_auto_approve_still_confirms(install_network, monkeypatch)
     assert "tool_pending_confirmation" in event_names
 
 
-def test_auto_approve_does_not_bypass_parallel_destructive(
-    install_network, monkeypatch,
+def test_auto_approve_does_not_bypass_parallel_destructive(tmp_projects_dir, install_network, monkeypatch,
 ):
     """Auto-approve relaxes the human round-trip, NOT the M7 serialisation."""
     import pypsa
@@ -2255,7 +2247,7 @@ def test_auto_approve_does_not_bypass_parallel_destructive(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_second_concurrent_turn_rejected_in_flight(install_network, monkeypatch):
+def test_second_concurrent_turn_rejected_in_flight(tmp_projects_dir, install_network, monkeypatch):
     """A 2nd run_turn while turn #1 is in flight is rejected immediately."""
     import threading
     import time as _t
@@ -2322,7 +2314,7 @@ def test_second_concurrent_turn_rejected_in_flight(install_network, monkeypatch)
         assert session._turn_in_flight is False
 
 
-def test_in_flight_flag_cleared_after_normal_turn(install_network):
+def test_in_flight_flag_cleared_after_normal_turn(tmp_projects_dir, install_network):
     """A completed happy-path turn leaves _turn_in_flight False."""
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
@@ -2338,7 +2330,7 @@ def test_in_flight_flag_cleared_after_normal_turn(install_network):
         assert session._turn_in_flight is False
 
 
-def test_in_flight_flag_cleared_on_error_exit(install_network, monkeypatch):
+def test_in_flight_flag_cleared_on_error_exit(tmp_projects_dir, install_network, monkeypatch):
     """A turn that errors out (missing API key) still clears the flag."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     import pypsa

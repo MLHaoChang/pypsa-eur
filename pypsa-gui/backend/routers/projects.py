@@ -1806,6 +1806,31 @@ def delete_project(name: str, cascade: bool = False) -> dict:
             summary += f" + {len(deleted) - 1} descendant scenario(s)"
         change_log_service.log("delete_project", "Project", name, summary)
 
+    # Evict each deleted project's RESIDENT in-memory context.
+    #
+    # Removing the directory is not enough. `activate_project` has a resident
+    # fast path — if a ctx for that project_id is still in the registry it does
+    # a pure pointer swap with NO disk I/O. So delete → recreate the same name
+    # from a template → activate served the DELETED project's network: the new
+    # project appeared with ghost components that were never in its template,
+    # and the next save persisted them to disk.
+    #
+    # Reproduced end-to-end: create from 3bus (Bus 0/1/2), add 'qa_bus',
+    # delete, recreate the same name from 3bus, activate → four buses
+    # including 'qa_bus'.
+    #
+    # `drop` is a no-op for a name that was never resident, so this is safe for
+    # every deleted entry. It deliberately does not touch `_active`: if the
+    # deleted project was the active one the in-memory network stays put, which
+    # is the pre-existing contract the frontend relies on (it clears
+    # `currentProject` from the returned `deleted` list — see the docstring).
+    for gone in deleted:
+        try:
+            PyPSAService.drop(gone)
+        except Exception as exc:                       # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "could not evict resident context for '%s': %s", gone, exc)
+
     if failed and not deleted:
         # Nothing actually got removed — surface a hard error rather than a
         # misleading 200 with an empty `deleted` list.
