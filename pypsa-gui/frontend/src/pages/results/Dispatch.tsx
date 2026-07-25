@@ -1991,7 +1991,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
       presentPosNonGen.length > 0 || presentNegNonGen.length > 0
       || presentGenCarriers.length > 0 || hasLoadTotal
     const renderGenArea = (gc: string, idx: number) => (
-      <Area key={`Gen:${gc}`} type="stepAfter" dataKey={`Gen:${gc}`}
+      <Area key={`Gen:${gc}`} type="monotone" dataKey={`Gen:${gc}`}
         name={`Gen:${gc}`} stackId="dispatch"
         stroke={colourForCarrier(gc, idx)}
         fill={colourForCarrier(gc, idx)}
@@ -2035,12 +2035,12 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
                     typeof v === 'string' && v.startsWith('Gen:') ? v.slice(4) : v
                   } />
                 {/* Bottom → top: renewables, storage/conversion ▲, thermal.
-                    Charge/conversion ▼ below zero. stepAfter matches hourly bins. */}
+                    Charge/conversion ▼ below zero. monotone curves for readability. */}
                 {renewGens.map((gc, idx) => renderGenArea(gc, idx))}
                 {presentPosNonGen.map(k => {
                   const base = carrierBaseGroup(k)
                   return (
-                    <Area key={k} type="stepAfter" dataKey={k}
+                    <Area key={k} type="monotone" dataKey={k}
                       name={carrierSeriesLabel(k)} stackId="dispatch"
                       stroke={CARRIER_GROUP_STYLE[base].color}
                       fill={CARRIER_GROUP_STYLE[base].color}
@@ -2052,7 +2052,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
                 {presentNegNonGen.map(k => {
                   const base = carrierBaseGroup(k)
                   return (
-                    <Area key={k} type="stepAfter" dataKey={k}
+                    <Area key={k} type="monotone" dataKey={k}
                       name={carrierSeriesLabel(k)} stackId="dispatch"
                       stroke={CARRIER_GROUP_STYLE[base].color}
                       fill={CARRIER_GROUP_STYLE[base].color}
@@ -2061,7 +2061,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
                   )
                 })}
                 {hasLoadTotal && (
-                  <Line type="stepAfter" dataKey="LoadTotal" name="Total demand"
+                  <Line type="monotone" dataKey="LoadTotal" name="Total demand"
                     stroke={CARRIER_GROUP_STYLE.Load.color} strokeWidth={1.6}
                     strokeDasharray="4 3" dot={false} connectNulls
                     isAnimationActive={false} />

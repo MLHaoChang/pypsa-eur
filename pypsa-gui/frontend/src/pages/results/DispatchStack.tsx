@@ -11,7 +11,7 @@ import { type TSPayload, shortStamp, stampWithPeriod, fmtPower, isRenewableCarri
 // ── Per-period generation dispatch stack ────────────────────────────────────
 // Carrier-stacked area chart showing hourly generation by fuel type, with the
 // system load drawn on top as a dashed line. Energy-charts order (bottom→top):
-// renewables → storage discharge → thermal. Hourly series use stepAfter.
+// renewables → storage discharge → thermal. Curves use monotone smoothing.
 // Storage charge is a separate negative stack below zero.
 //
 // Renders only when `selectedPeriod` is set (the parent Dispatch tab gates
@@ -389,7 +389,7 @@ export default function DispatchStack({
             <Legend {...CHART_LEGEND} />
             {/* Carrier stack — order matters: bottom first. */}
             {stackOrder.map(carrier => (
-              <Area key={carrier} type="stepAfter" dataKey={carrier}
+              <Area key={carrier} type="monotone" dataKey={carrier}
                 stackId="gen"
                 stroke={colourByCarrier[carrier]}
                 fill={colourByCarrier[carrier]}
@@ -401,7 +401,7 @@ export default function DispatchStack({
                 on the heat bus. Same stackId as carrier gens so they stack
                 on top of native generation. */}
             {hasLinkContribs && (
-              <Area type="stepAfter" dataKey="link_inflows"
+              <Area type="monotone" dataKey="link_inflows"
                 stackId="gen"
                 stroke={colourByCarrier['link_inflows']}
                 fill={colourByCarrier['link_inflows']}
@@ -414,7 +414,7 @@ export default function DispatchStack({
                 stackOffset="sign" lets positive + negative coexist when
                 stackIds differ. */}
             {hasStorage && (
-              <Area type="stepAfter" dataKey="storage_charge"
+              <Area type="monotone" dataKey="storage_charge"
                 stackId="charge"
                 stroke={colourByCarrier['storage_charge']}
                 fill={colourByCarrier['storage_charge']}
@@ -428,7 +428,7 @@ export default function DispatchStack({
                 series when the parent passes busNames (general logic
                 supersedes the special case). */}
             {hasLinkContribs && (
-              <Area type="stepAfter" dataKey="link_outflows"
+              <Area type="monotone" dataKey="link_outflows"
                 stackId="charge"
                 stroke={colourByCarrier['link_outflows']}
                 fill={colourByCarrier['link_outflows']}
@@ -441,7 +441,7 @@ export default function DispatchStack({
                 networks. When busNames is provided, link_outflows above
                 supersedes this series (avoids double-counting). */}
             {hasElectrolyzer && !hasLinkContribs && (
-              <Area type="stepAfter" dataKey="electrolyzer_consume"
+              <Area type="monotone" dataKey="electrolyzer_consume"
                 stackId="charge"
                 stroke={colourByCarrier['electrolyzer_consume']}
                 fill={colourByCarrier['electrolyzer_consume']}
@@ -452,7 +452,7 @@ export default function DispatchStack({
             )}
             {/* System load — drawn as a dashed line ON TOP of the stack so
                 operators can read at a glance where dispatch covers demand. */}
-            <Line type="stepAfter" dataKey="load_total"
+            <Line type="monotone" dataKey="load_total"
               stroke="var(--color-text)"
               strokeDasharray="4 3"
               strokeWidth={1.4}
