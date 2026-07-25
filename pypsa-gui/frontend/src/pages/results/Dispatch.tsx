@@ -102,17 +102,13 @@ const CARRIER_GROUPS: CarrierGroupKey[] = [
   'Load', 'Generation', 'Storage', 'Stores', 'Conversion in', 'Conversion out',
 ]
 const CARRIER_SPLIT_GROUPS: CarrierGroupKey[] = ['Storage', 'Stores', 'Conversion in', 'Conversion out']
-// Both ▲ and ▼ branches must be in the stack for every split group — without
+// Both ▲ and ▼ branches must be rendered for every split group — without
 // them, a multi-port Link with eff_i < 0 (heat-pump bus2 drawing low-T heat)
 // silently disappears from the seasonal grid. Symptom: heat chart shows
 // dc_heatpump producing 95 MW to high-T (Conversion in ▲) but not the 47.5 MW
 // it draws from low-T (Conversion in ▼) — mass balance breaks visually.
-// Same logic the horizon-view DispatchStack fix applied.
-const CARRIER_STACK_KEYS = [
-  'Generation',
-  'Storage ▲', 'Stores ▲', 'Conversion in ▲', 'Conversion out ▲',
-  'Storage ▼', 'Stores ▼', 'Conversion in ▼', 'Conversion out ▼',
-]
+// Same logic the horizon-view DispatchStack fix applied. Keys are listed in
+// CarrierSeasonalSection (POS_NON_GEN_KEYS / NEG_NON_GEN_KEYS).
 const CARRIER_GROUP_STYLE: Record<CarrierGroupKey, { color: string }> = {
   Generation:        { color: '#16a34a' },
   Storage:           { color: '#7c3aed' },
@@ -2491,11 +2487,11 @@ function CarrierKpiPanel({
             return (
               <>
                 <KPI accent label="OPEX (total)" value={fmtCurrency(opexEur)}
-                     hint="Σ gen + link + storage-charge + curtailment + lost-load costs across components touching this carrier's buses (from backend economics_by_carrier)" />
+                     hint="Broader than Capacity Expansion's OPEX (horizon): Σ gen/link marginal cost + storage charge at bus price + curtailment + lost-load (economics_by_carrier). For this run, gen cost alone matches Capacity Expansion; the extra is mainly Storage charge cost." />
                 <KPI label="Gen cost" value={fmtCurrency(genCostEur)}
-                     hint={`Σ marginal_cost × |dispatch| × weights over gens / links producing on this carrier. Link costs (e.g. electrolyzer / P2H marginal_cost × |p0|) are already included by the backend.${scaleHint}`} />
+                     hint={`Σ marginal_cost × |dispatch| × weights over gens / links producing on this carrier — this is what Capacity Expansion labels OPEX (horizon). Link costs (e.g. electrolyzer / P2H marginal_cost × |p0|) are already included by the backend.${scaleHint}`} />
                 <KPI label="Storage charge cost" value={Math.abs(econ.charge) > 1e-6 ? fmtCurrency(econ.charge * 1e6) : '—'}
-                     hint="What storage paid (or earned, if negative) to charge — bus_price × |charge| × weights" />
+                     hint="What storage paid (or earned, if negative) to charge — bus_price × |charge| × weights. Included in OPEX (total) here, but NOT in Capacity Expansion OPEX (horizon)." />
                 <KPI label="Curtailment cost" value={econ.curt > 1e-6 ? fmtCurrency(econ.curt * 1e6) : '—'}
                      hint="Σ curtailment_cost × curtailed-energy × weights" />
                 <KPI label="Lost-load cost" value={(econ.lost > 1e-6 || lostLoadCostFromCarrier > 1e-3)

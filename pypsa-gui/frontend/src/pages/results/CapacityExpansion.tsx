@@ -92,6 +92,13 @@ export default function CapacityExpansion() {
     queryKey: nk(currentProject, 'results', 'cost_breakdown'),
     queryFn: resultsApi.getCostBreakdown,
   })
+  // Market-accounting storage charge cost (bus_price × |charge|) — not in
+  // PyPSA statistics OPEX. Same source as Dispatch's "Storage charge cost"
+  // so the two tabs can be reconciled without merging definitions.
+  const { data: econByCarrier } = useQuery({
+    queryKey: nk(currentProject, 'results', 'economics_by_carrier'),
+    queryFn: resultsApi.getEconomicsByCarrier,
+  })
 
   const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
   const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
@@ -811,6 +818,24 @@ export default function CapacityExpansion() {
     ? (cost.capex_lifetime ?? 0)
     : (periodEntry?.capex ?? cost.capex)
   const scopeLabel = periodEntry ? `period ${filter.selectedPeriod}` : 'horizon (all periods)'
+  // Sum storage-charge market cost across carriers (Meur → eur). Period
+  // selector applies when by_period is populated; otherwise horizon total.
+  const storageChargeCostEur = (() => {
+    const carriers = econByCarrier?.by_carrier
+    if (!carriers) return 0
+    const periodKey = filter.selectedPeriod != null ? String(filter.selectedPeriod) : null
+    let sumMeur = 0
+    for (const e of Object.values(carriers)) {
+      const bucket = e.storage_charge_cost_meur
+      if (!bucket) continue
+      if (periodKey && bucket.by_period && periodKey in bucket.by_period) {
+        sumMeur += bucket.by_period[periodKey] ?? 0
+      } else {
+        sumMeur += bucket.total ?? 0
+      }
+    }
+    return sumMeur * 1e6
+  })()
 
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full [&>*]:shrink-0">
@@ -871,20 +896,22 @@ export default function CapacityExpansion() {
                 : 'Annualised cost of ALL installed capacity — existing + new, summed across periods (PyPSA n.statistics()).'} />
           <KPI label={periodEntry ? 'OPEX (period)' : 'OPEX (horizon)'} value={fmtCurrency(displayOpex)}
             hint={periodEntry
-              ? `Σ marginal_cost × dispatch in period ${filter.selectedPeriod}. Matches the Dispatch tab for this period.`
-              : 'Σ marginal_cost × dispatch, weighted and summed across all investment periods. Matches the Dispatch tab when aggregated.'} />
+              ? `LP variable OPEX in period ${filter.selectedPeriod}: Σ marginal_cost × dispatch (PyPSA n.statistics operational expenditure). Does NOT include storage charge at bus price — see Storage charge cost below. Dispatch "OPEX (total)" = this + storage charge + curtailment + lost-load.`
+              : 'LP variable OPEX over the horizon: Σ marginal_cost × dispatch (PyPSA n.statistics). Does NOT include storage charge at bus price — see Storage charge cost below. Dispatch "OPEX (total)" = this + storage charge + curtailment + lost-load.'} />
           <KPI
             label="Total system cost"
             value={fmtCurrency(displayCapex + displayOpex)}
             hint={costMode === 'lifetime'
-              ? 'PV of upfront investment + OPEX. Mixed-horizon by design — toggle to Annualised for an apples-to-apples comparison.'
+              ? 'PV of upfront investment + LP OPEX. Mixed-horizon by design — toggle to Annualised for an apples-to-apples comparison.'
               : periodEntry
-                ? `Annualised CAPEX (installed) + OPEX for period ${filter.selectedPeriod}.`
-                : 'Annualised CAPEX (installed) + OPEX, summed across periods.'} />
-          {/* Curtailment penalty and storage-investment slice — these surface
-              two numbers the user always wants to see at a glance: the cost
-              the LP is paying for spilled renewables, and how much of the
-              new investment is going into storage specifically. */}
+                ? `Annualised CAPEX (installed) + LP OPEX for period ${filter.selectedPeriod}.`
+                : 'Annualised CAPEX (installed) + LP OPEX, summed across periods.'} />
+          {/* Curtailment / storage-charge / storage-investment — market or
+              investment slices that are NOT folded into LP OPEX above. */}
+          <KPI
+            label="Storage charge cost"
+            value={Math.abs(storageChargeCostEur) > 1e-3 ? fmtCurrency(storageChargeCostEur) : '—'}
+            hint="Market accounting: Σ bus_price × |storage charge| × weights (same as Dispatch → Storage charge cost). Not part of LP variable OPEX — adding it to OPEX (horizon) recovers Dispatch's broader OPEX (total) when gen cost is the only other term."} />
           <KPI
             label="Curtailment cost"
             value={cost.curtailment_cost > 0 ? fmtCurrency(cost.curtailment_cost) : '—'}
