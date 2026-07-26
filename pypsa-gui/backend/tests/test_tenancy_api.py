@@ -172,6 +172,43 @@ def test_admin_creates_user_and_issues_token(admin_client, auth_session_local, m
     assert token.used_at is None
 
 
+def test_member_lists_org_members(member_client, auth_session_local) -> None:
+    # The logged-in member and a second member of the SAME org should both be
+    # returned by the non-admin directory. A user in a DIFFERENT org must not.
+    with auth_session_local() as db:
+        me = db.scalar(select(User).where(User.is_super_admin.is_(False)))
+        assert me is not None
+        my_membership = db.scalar(select(OrgMembership).where(OrgMembership.user_id == me.id))
+        assert my_membership is not None
+        my_org_id = my_membership.org_id
+
+    colleague = _create_user(auth_session_local, email="colleague@example.com")
+    _add_membership(auth_session_local, user_id=colleague.id, org_id=my_org_id, role="admin")
+
+    other_org = _create_org(auth_session_local)
+    outsider = _create_user(auth_session_local, email="outsider@example.com")
+    _add_membership(auth_session_local, user_id=outsider.id, org_id=other_org.id, role="member")
+
+    response = member_client.get("/api/auth/org-members")
+
+    assert response.status_code == 200
+    rows = response.json()
+    emails = {row["email"] for row in rows}
+    assert emails == {me.email, "colleague@example.com"}
+    assert "outsider@example.com" not in emails
+    for row in rows:
+        assert set(row.keys()) == {"id", "email", "role"}
+    by_email = {row["email"]: row for row in rows}
+    assert by_email["colleague@example.com"]["role"] == "admin"
+
+
+def test_org_members_requires_authentication(auth_session_local) -> None:
+    with TestClient(main.app) as client:
+        response = client.get("/api/auth/org-members")
+
+    assert response.status_code == 401
+
+
 def test_super_admin_creates_organization(super_admin_client, auth_session_local) -> None:
     response = super_admin_client.post(
         "/api/admin/organizations",

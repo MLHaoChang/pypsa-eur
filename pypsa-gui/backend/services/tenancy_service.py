@@ -144,6 +144,37 @@ def list_organizations(db: DBSession, actor: User) -> list[Organization]:
     return [organization] if organization is not None else []
 
 
+def list_org_members(db: DBSession, actor: User) -> list[tuple[User, OrgMembership]]:
+    """
+    Member directory for the actor's own organization.
+
+    Unlike ``list_users`` (admin-only), this is available to ANY authenticated
+    org member — it powers the non-admin "assign members" picker so a project
+    creator can find the colleagues to grant access to. It only ever returns
+    users within the actor's own org, so it leaks nothing cross-tenant.
+
+    A super-admin without a membership sees an empty directory (there is no
+    single "own org" to enumerate); a super-admin who also belongs to an org
+    sees that org's members.
+    """
+    actor_membership = get_user_membership(db, actor.id)
+    if actor_membership is None:
+        return []
+
+    memberships = db.scalars(
+        select(OrgMembership)
+        .where(OrgMembership.org_id == actor_membership.org_id)
+        .order_by(OrgMembership.user_id)
+    ).all()
+
+    members: list[tuple[User, OrgMembership]] = []
+    for membership in memberships:
+        user = db.get(User, membership.user_id)
+        if user is not None:
+            members.append((user, membership))
+    return members
+
+
 def list_users(db: DBSession, actor: User) -> list[tuple[User, OrgMembership]]:
     if actor.is_super_admin:
         memberships = db.scalars(

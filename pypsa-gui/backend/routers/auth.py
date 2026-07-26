@@ -19,7 +19,7 @@ from services.auth_service import (
     set_password_from_token,
     verify_password,
 )
-from services.tenancy_service import get_user_membership
+from services.tenancy_service import get_user_membership, list_org_members
 from settings import get_settings
 
 router = APIRouter()
@@ -144,6 +144,28 @@ def me(
         org_id=str(membership.org_id) if membership is not None else None,
         role=membership.role if membership is not None else None,
     )
+
+
+@router.get("/org-members")
+def org_members(
+    user: User = Depends(require_user),
+    db: DBSession = Depends(get_db),
+) -> list[dict[str, str | None]]:
+    """
+    Member directory for the current user's organization.
+
+    Available to ANY authenticated org member (not just admins) so a project
+    creator can pick the colleagues to assign to their project. Returns only
+    users within the caller's own org — id, email, and role.
+    """
+    return [
+        {
+            "id": str(member.id),
+            "email": member.email,
+            "role": membership.role,
+        }
+        for member, membership in list_org_members(db, user)
+    ]
 
 
 @router.post("/forgot-password")
