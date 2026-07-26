@@ -1,3 +1,4 @@
+import axios from 'axios'
 import client from './client'
 import type {
   ProjectInfo, ImportSummary, SaveResult, BundleImportResult,
@@ -47,8 +48,50 @@ export interface ProjectMember {
   email: string | null
 }
 
+// ── Unclaimed (pre-multi-user) projects ───────────────────────────────────
+// Projects saved to disk before tenancy existed have no owning organization,
+// so they are invisible to /projects/. `listUnclaimed` surfaces them to the
+// signed-in user; `importUnclaimed` adopts one root (plus its scenario
+// descendants) into the caller's workspace.
+export interface UnclaimedProject {
+  name: string
+  parent_project: string | null
+  scenario_description: string | null
+  // False when the bundle directory has metadata but no network file — the
+  // import still succeeds, but the project opens empty.
+  has_network: boolean
+  descendant_names: string[]
+}
+
+export interface ImportedProjectRef {
+  id: string
+  name: string
+  org_id: string
+  parent_project_id: string | null
+}
+
+export interface ImportUnclaimedResult {
+  root: ImportedProjectRef
+  claimed: ImportedProjectRef[]
+  warnings: string[]
+}
+
 interface ListProjectsOptions {
   rootsOnly?: boolean
+}
+
+// 404 means the backend runs with auth disabled, where "unclaimed" has no
+// meaning — the caller renders nothing rather than an error.
+function listUnclaimedProjects(): Promise<UnclaimedProject[]> {
+  return client
+    .get<UnclaimedProject[]>('/projects/unclaimed', { skipErrorToast: true })
+    // A non-array body means `/unclaimed` got shadowed by the dynamic
+    // `GET /projects/{name}` route — treat it as "nothing to import".
+    .then(r => (Array.isArray(r.data) ? r.data : []))
+    .catch((error: unknown) => {
+      if (axios.isAxiosError(error) && error.response?.status === 404) return []
+      throw error
+    })
 }
 
 function listProjects(): Promise<ProjectInfo[]>
@@ -66,6 +109,15 @@ function listProjects(options?: ListProjectsOptions): Promise<ProjectInfo[]> {
 
 export const projectsApi = {
   list: listProjects,
+  listUnclaimed: listUnclaimedProjects,
+  // 400/403/409 carry a `{detail}` the caller renders inline next to the row,
+  // so the global error toast is suppressed.
+  importUnclaimed: (name: string) =>
+    client.post<ImportUnclaimedResult>(
+      `/projects/unclaimed/${encodeURIComponent(name)}/import`,
+      null,
+      { skipErrorToast: true },
+    ).then(r => r.data),
   // Phase 8 scenarios. A scenario is a normal project with metadata
   // `parent_project=<base>`. `createScenario` saves the current in-memory
   // network to a new project keyed by `name`, branched off `base`. Caller
