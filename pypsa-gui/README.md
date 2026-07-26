@@ -302,22 +302,24 @@ reloads `.env.development`. A hard refresh alone will not enable the login page.
 
 ### Hard reset if the preview is stuck on the workbench
 
-Cursor’s in-app browser preview can keep a **stale React session** alive that
-never reloads new JS (you keep seeing “Unnamed” + “Authentication required”
-even after code fixes). Do this:
+`frontend/index.html` is now the **static login page** (it does not load React).
+The React workbench only boots from `spa.html` after a valid session cookie.
 
-1. **Close** the preview panel completely (don’t just refresh).
-2. Open a **new** preview tab to exactly:
-   `http://localhost:5173/`
-3. You must see a dark green badge: **“Auth gate · not the workbench”** and a
-   Sign in form. If you still see “Unnamed”, the preview is not talking to this
-   Vite server — close it and reopen port **5173** (not 8000).
-4. Sign in with the bootstrapped super-admin
-   (`admin@example.com` / your bootstrap password).
-5. You should land on `/projects`.
+1. Stop any old Vite on your machine (`Ctrl+C` in that terminal).
+2. From this branch: `cd pypsa-gui/frontend && npm run dev`
+3. Open `http://localhost:5173/` (port **5173**, not 8000).
+4. You must see a dark green badge: **“Auth gate · not the workbench”**.
+5. Sign in: `admin@example.com` / your bootstrap password → `/projects`.
 
-Unauthenticated visits to `/`, `/app`, and `/projects` are **rewritten** to the
-static login page (HTTP 200, no React). That bypasses a stuck SPA bundle.
+Verify locally anytime:
+
+```bash
+cd pypsa-gui/frontend
+npm run test:auth-gate
+```
+
+That fails if `/`, `/app`, or `/projects` would still serve the React workbench
+to anonymous users.
 
 #### 2) Create the platform super-admin (CLI — no signup UI)
 
