@@ -35,6 +35,9 @@ const quietAuthRequest = {
   skipErrorToast: true,
 }
 
+const forgotPassword = (payload: ForgotPasswordPayload) =>
+  client.post<OkResponse>('/auth/forgot-password', payload).then(r => r.data)
+
 export const authApi = {
   login: (payload: LoginPayload) =>
     client.post<LoginResponse>('/auth/login', payload).then(r => r.data),
@@ -42,8 +45,8 @@ export const authApi = {
     client.post<OkResponse>('/auth/logout', undefined, quietAuthRequest).then(r => r.data),
   me: () =>
     client.get<AuthUser>('/auth/me', quietAuthRequest).then(r => r.data),
-  forgot: (payload: ForgotPasswordPayload) =>
-    client.post<OkResponse>('/auth/forgot-password', payload).then(r => r.data),
+  forgotPassword,
+  forgot: forgotPassword,
   setPassword: (payload: PasswordTokenPayload) =>
     client.post<OkResponse>('/auth/set-password', payload).then(r => r.data),
   resetPassword: (payload: PasswordTokenPayload) =>

@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { authApi, type AuthUser } from '../api/auth'
+import { loginWithPassword } from './requests'
 import { authEnabled } from './config'
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const login = useCallback(async (email: string, password: string): Promise<AuthUser> => {
-    const response = await authApi.login({ email, password })
+    const response = await loginWithPassword(email, password)
     setUser(response.user)
     setStatus('authenticated')
     return response.user
