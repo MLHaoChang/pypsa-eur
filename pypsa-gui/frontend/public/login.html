@@ -120,11 +120,24 @@
         msg.className = ok ? 'msg ok' : 'msg error'
       }
 
-      // If a stale SPA somehow still owns this tab, force a full document load
-      // of this static page once.
-      if (window.__PYPSA_REACT_APP__) {
-        location.replace('/login.html?force=' + Date.now())
-      }
+      const BACKEND_DOWN_HELP =
+        'Backend API is not running on port 8000. Start it first: '
+        + 'cd pypsa-gui/backend && pixi run python -m uvicorn main:app --port 8000 --reload'
+
+      // Surface a stopped backend immediately — otherwise "Sign in" just fails
+      // with an opaque network error.
+      ;(async function checkBackend() {
+        try {
+          const res = await fetch('/api/health', { credentials: 'include' })
+          if (!res.ok) throw new Error('health ' + res.status)
+          const body = await res.json()
+          if (body && body.auth_enabled === false) {
+            show('Backend auth is disabled (PYPSA_GUI_AUTH_ENABLED). Sign-in is not required.', true)
+          }
+        } catch (err) {
+          show(BACKEND_DOWN_HELP, false)
+        }
+      })()
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault()
@@ -148,11 +161,15 @@
             )
           }
           show('Signed in. Opening projects…', true)
-          // Full navigation with cache-buster so Cursor preview cannot keep
-          // the old workbench document.
           window.location.href = '/projects?signed_in=' + Date.now()
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Login failed', false)
+          const isNetworkError = error instanceof TypeError
+          show(
+            isNetworkError
+              ? BACKEND_DOWN_HELP
+              : (error instanceof Error ? error.message : 'Login failed'),
+            false,
+          )
           submit.disabled = false
         }
       })

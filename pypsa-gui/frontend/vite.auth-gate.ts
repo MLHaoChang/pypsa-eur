@@ -5,29 +5,17 @@ import type { Connect, Plugin } from 'vite'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-async function hasSession(cookieHeader: string | undefined): Promise<boolean> {
-  try {
-    const res = await fetch('http://127.0.0.1:8000/api/auth/me', {
-      headers: cookieHeader ? { cookie: cookieHeader } : {},
-    })
-    return res.ok
-  } catch {
-    return false
-  }
-}
+const API_ORIGIN = process.env.PYPSA_GUI_API_ORIGIN ?? 'http://127.0.0.1:8000'
 
-async function backendAuthEnabled(): Promise<boolean> {
-  try {
-    const res = await fetch('http://127.0.0.1:8000/api/health')
-    if (!res.ok) return false
-    const body = (await res.json()) as { auth_enabled?: boolean }
-    return Boolean(body.auth_enabled)
-  } catch {
-    return false
-  }
-}
+export type BackendState = 'auth-on' | 'auth-off' | 'unreachable'
 
-function isStaticAsset(urlPath: string): boolean {
+export type GateDecision =
+  | { kind: 'pass' }
+  | { kind: 'serve-spa' }
+  | { kind: 'serve-login' }
+  | { kind: 'redirect'; location: string }
+
+export function isStaticAsset(urlPath: string): boolean {
   if (urlPath.startsWith('/src/')) return true
   if (urlPath.startsWith('/@')) return true
   if (urlPath.startsWith('/node_modules/')) return true
@@ -39,6 +27,64 @@ function isStaticAsset(urlPath: string): boolean {
   return false
 }
 
+/**
+ * Pure routing decision so the behaviour is unit-testable.
+ *
+ * Fail closed: when the backend is unreachable we cannot know whether auth is
+ * required, so we serve the static login page rather than the workbench. This
+ * is what previously dumped reviewers into the workbench whenever uvicorn was
+ * not running.
+ */
+export function decideGateRoute(input: {
+  urlPath: string
+  backend: BackendState
+  authed: boolean
+}): GateDecision {
+  const { urlPath, backend, authed } = input
+
+  if (isStaticAsset(urlPath)) return { kind: 'pass' }
+  if (urlPath === '/login.html') return { kind: 'pass' }
+
+  if (backend === 'auth-off') return { kind: 'serve-spa' }
+
+  if (backend === 'unreachable') {
+    if (urlPath === '/spa.html') return { kind: 'redirect', location: '/' }
+    return { kind: 'serve-login' }
+  }
+
+  if (authed) {
+    if (urlPath === '/' || urlPath === '/index.html') {
+      return { kind: 'redirect', location: '/projects' }
+    }
+    return { kind: 'serve-spa' }
+  }
+
+  if (urlPath === '/spa.html') return { kind: 'redirect', location: '/' }
+  return { kind: 'serve-login' }
+}
+
+async function readBackendState(): Promise<BackendState> {
+  try {
+    const res = await fetch(`${API_ORIGIN}/api/health`)
+    if (!res.ok) return 'unreachable'
+    const body = (await res.json()) as { auth_enabled?: boolean }
+    return body.auth_enabled ? 'auth-on' : 'auth-off'
+  } catch {
+    return 'unreachable'
+  }
+}
+
+async function hasSession(cookieHeader: string | undefined): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_ORIGIN}/api/auth/me`, {
+      headers: cookieHeader ? { cookie: cookieHeader } : {},
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 function createAuthGateMiddleware(): Connect.NextHandleFunction {
   return async (req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -47,49 +93,34 @@ function createAuthGateMiddleware(): Connect.NextHandleFunction {
     }
 
     const urlPath = (req.url ?? '/').split('?')[0] || '/'
-    if (isStaticAsset(urlPath)) {
+    if (isStaticAsset(urlPath) || urlPath === '/login.html') {
       next()
       return
     }
 
-    if (urlPath === '/login.html') {
-      next()
-      return
-    }
+    const backend = await readBackendState()
+    const authed = backend === 'auth-on' ? await hasSession(req.headers.cookie) : false
+    const decision = decideGateRoute({ urlPath, backend, authed })
 
-    const authOn = await backendAuthEnabled()
-    if (!authOn) {
-      if (urlPath !== '/spa.html') {
-        req.url = '/spa.html'
-      }
-      next()
-      return
-    }
-
-    const authed = await hasSession(req.headers.cookie)
-    if (authed) {
-      if (urlPath === '/' || urlPath === '/index.html' || urlPath === '/login.html') {
+    switch (decision.kind) {
+      case 'pass':
+        next()
+        return
+      case 'redirect':
         res.statusCode = 302
-        res.setHeader('Location', '/projects')
+        res.setHeader('Location', decision.location)
         res.setHeader('Cache-Control', 'no-store')
         res.end()
         return
-      }
-      req.url = '/spa.html'
-      next()
-      return
+      case 'serve-spa':
+        req.url = '/spa.html'
+        next()
+        return
+      case 'serve-login':
+        req.url = '/index.html'
+        next()
+        return
     }
-
-    if (urlPath === '/spa.html') {
-      res.statusCode = 302
-      res.setHeader('Location', '/')
-      res.setHeader('Cache-Control', 'no-store')
-      res.end()
-      return
-    }
-
-    req.url = '/index.html'
-    next()
   }
 }
 

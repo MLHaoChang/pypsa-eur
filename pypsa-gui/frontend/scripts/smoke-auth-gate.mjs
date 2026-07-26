@@ -61,6 +61,12 @@ const loc = spaRes.headers.get('location') || ''
 if (!loc.endsWith('/') && loc !== '/') fail(`GET /spa.html redirect location=${loc}`)
 ok('GET /spa.html redirects anonymous users')
 
+const { text: backendDownHelp } = await get('/')
+if (!backendDownHelp.includes('Backend API is not running')) {
+  fail('login page missing backend-down guidance')
+}
+ok('login page explains a stopped backend')
+
 // Login and confirm authenticated documents can reach the SPA entry.
 const loginRes = await fetch(`${base}/api/auth/login`, {
   method: 'POST',
