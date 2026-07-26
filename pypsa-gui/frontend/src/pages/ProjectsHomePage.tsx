@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { projectsApi, type UnclaimedProject } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 import { useAuth } from '../auth/AuthProvider'
+import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { getPostLoginPath } from '../auth/resume'
 import { useUIStore } from '../store/uiStore'
 import { formatRelativeTime } from '../utils/projectActions'
@@ -250,7 +251,7 @@ export default function ProjectsHomePage() {
 
   async function handleLogout() {
     await logout()
-    navigate('/login', { replace: true })
+    redirectAfterLogout()
   }
 
   return (

@@ -1,5 +1,10 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 
+// Shared chrome for the React auth routes (set-password / reset-password, and
+// /login when it is reached by client-side navigation). Deliberately mirrors
+// the static sign-in document in `frontend/index.html` — same photo backdrop,
+// glass card, and mint accent — so an emailed token link does not look like a
+// different product than the page the user signed in from.
 export function AuthSplitLayout({
   title,
   subtitle,
@@ -10,49 +15,78 @@ export function AuthSplitLayout({
   children: ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-[#f3f7f2] text-slate-950 md:grid md:grid-cols-[minmax(320px,1fr)_minmax(480px,1.05fr)]">
-      <section className="relative overflow-hidden bg-gradient-to-br from-[#173426] via-[#244b36] to-[#3f6d4f] px-8 py-12 text-white md:px-12 md:py-16">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(196,246,214,0.18),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(255,255,255,0.08),_transparent_28%)]" />
-        <div className="relative flex h-full flex-col justify-between gap-16">
-          <div className="space-y-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#dff6e7]">PyPSA GUI</p>
-            <div className="space-y-3">
-              <h1 className="max-w-md text-4xl font-semibold tracking-[-0.03em] md:text-5xl">
-                Model, solve, and compare energy networks with your team.
-              </h1>
-              <p className="max-w-lg text-sm leading-6 text-[#d6ecd9] md:text-base">
-                Secure project access, shared workspaces, and a clean path back into the studies you were
-                running before you signed out.
-              </p>
-            </div>
-          </div>
-          <div className="grid gap-3 text-sm text-[#e2f2e6] sm:grid-cols-3">
-            <div className="rounded-2xl border border-white/12 bg-white/6 p-4 backdrop-blur-sm">
-              <div className="font-medium text-white">Shared projects</div>
-              <p className="mt-1 text-xs leading-5 text-[#d6ecd9]">Work across organizations without losing ownership context.</p>
-            </div>
-            <div className="rounded-2xl border border-white/12 bg-white/6 p-4 backdrop-blur-sm">
-              <div className="font-medium text-white">Secure recovery</div>
-              <p className="mt-1 text-xs leading-5 text-[#d6ecd9]">Reset or set your password directly from the email token flow.</p>
-            </div>
-            <div className="rounded-2xl border border-white/12 bg-white/6 p-4 backdrop-blur-sm">
-              <div className="font-medium text-white">Fast resume</div>
-              <p className="mt-1 text-xs leading-5 text-[#d6ecd9]">Return to the last project you touched after sign-in.</p>
-            </div>
-          </div>
-        </div>
-      </section>
+    <div className="relative min-h-dvh overflow-y-auto bg-[#07130f] text-[#eaf3ee]">
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 bg-[url('/img/login-bg.jpg')] bg-cover bg-[center_55%]"
+        style={{ filter: 'saturate(1.15) contrast(1.08) brightness(1.12)' }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0"
+        style={{
+          background: [
+            'radial-gradient(1100px 720px at 8% 45%, rgba(5,15,12,0.92) 0%, rgba(5,15,12,0.62) 34%, rgba(5,15,12,0.18) 62%, transparent 100%)',
+            'linear-gradient(90deg, rgba(5,15,12,0.86) 0%, rgba(5,15,12,0.28) 42%, rgba(5,15,12,0.12) 62%, rgba(5,15,12,0.55) 100%)',
+            'linear-gradient(180deg, rgba(5,15,12,0.42) 0%, transparent 26%, transparent 62%, rgba(5,15,12,0.6) 100%)',
+          ].join(','),
+        }}
+      />
 
-      <section className="flex items-center justify-center px-6 py-10 md:px-10 md:py-14">
-        <div className="w-full max-w-md rounded-3xl border border-[#d6e1d8] bg-white p-8 shadow-[0_20px_60px_rgba(23,52,38,0.10)] md:p-10">
-          <div className="mb-8 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#315840]">Account access</p>
-            <h2 className="text-3xl font-semibold tracking-[-0.02em] text-slate-950">{title}</h2>
-            <p className="text-sm leading-6 text-slate-600">{subtitle}</p>
+      <div className="relative grid min-h-dvh gap-6 px-6 py-10 md:grid-cols-[1.15fr_0.85fr] md:px-10 md:py-14">
+        <section className="flex flex-col justify-between gap-10">
+          <div className="inline-flex items-center gap-3 text-[15px] font-bold tracking-[-0.01em]">
+            <span
+              className="grid h-[34px] w-[34px] place-items-center rounded-[11px] text-[15px] font-black text-[#04140e]"
+              style={{
+                background: 'linear-gradient(140deg,#35d39a,#0e8f66 70%)',
+                boxShadow: '0 8px 28px rgba(53,211,154,0.35)',
+              }}
+            >
+              P
+            </span>
+            <span>PyPSA Studio</span>
           </div>
-          <div className="space-y-5">{children}</div>
-        </div>
-      </section>
+
+          <div className="max-w-[30ch]">
+            <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/14 bg-[#091813]/55 px-3 py-1.5 text-[0.72rem] uppercase tracking-[0.14em] text-[#9fb4a9] backdrop-blur">
+              <span className="h-[7px] w-[7px] rounded-full bg-[#35d39a]" />
+              Energy system planning
+            </span>
+            <h1 className="text-[clamp(2.1rem,4.4vw,3.6rem)] font-bold leading-[1.04] tracking-[-0.035em]">
+              Plan the grid behind{' '}
+              <span className="bg-gradient-to-r from-[#7ef0c0] via-[#35d39a] to-[#6fd8ff] bg-clip-text text-transparent">
+                tomorrow&apos;s cities
+              </span>
+              .
+            </h1>
+            <p className="mt-4 max-w-[48ch] text-[clamp(0.96rem,1.15vw,1.08rem)] leading-relaxed text-[#9fb4a9]">
+              Model megacity demand, data-center load growth, and transmission
+              build-out — then compare scenarios side by side with your team.
+            </p>
+          </div>
+
+          <div className="text-[0.74rem] tracking-[0.02em] text-[#9fb4a9]/75">
+            Built on PyPSA · Powered by open optimisation
+          </div>
+        </section>
+
+        <section className="flex items-center justify-center">
+          <div
+            className="w-full max-w-[440px] rounded-3xl border border-white/14 bg-[#081410]/[0.78] p-7 backdrop-blur-[26px] md:p-8"
+            style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)' }}
+          >
+            <div className="mb-7 space-y-2">
+              <p className="text-[0.72rem] font-semibold uppercase tracking-[0.2em] text-[#9fb4a9]">
+                Account access
+              </p>
+              <h2 className="text-[1.6rem] font-semibold tracking-[-0.02em] text-[#eaf3ee]">{title}</h2>
+              <p className="text-sm leading-6 text-[#9fb4a9]">{subtitle}</p>
+            </div>
+            <div className="space-y-5">{children}</div>
+          </div>
+        </section>
+      </div>
     </div>
   )
 }
@@ -65,9 +99,13 @@ export function AuthMessage({
   tone?: 'info' | 'error'
 }) {
   const classes = tone === 'error'
-    ? 'rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800'
-    : 'rounded-2xl border border-[#d6e1d8] bg-[#f6faf5] px-4 py-3 text-sm leading-6 text-slate-700'
-  return <div className={classes}>{children}</div>
+    ? 'rounded-2xl border border-[#ff8b8b]/40 bg-[#782020]/30 px-4 py-3 text-sm leading-6 text-[#ff8b8b]'
+    : 'rounded-2xl border border-[#35d39a]/45 bg-[#185c42]/35 px-4 py-3 text-sm leading-6 text-[#8ff0c5]'
+  return (
+    <div aria-live="polite" className={classes} role="status">
+      {children}
+    </div>
+  )
 }
 
 export function AuthInput(
@@ -76,10 +114,10 @@ export function AuthInput(
   const { label, className, ...inputProps } = props
   return (
     <label className="block space-y-2">
-      <span className="text-sm font-medium text-slate-800">{label}</span>
+      <span className="text-[0.82rem] font-semibold tracking-[0.02em] text-[#9fb4a9]">{label}</span>
       <input
         {...inputProps}
-        className={`w-full rounded-2xl border border-[#cfd9d1] bg-white px-4 py-3 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-[#315840] focus:ring-4 focus:ring-[#dff1e5] ${className ?? ''}`}
+        className={`w-full rounded-2xl border border-white/14 bg-[#040e0b]/60 px-4 py-3 text-sm text-[#eaf3ee] outline-none transition placeholder:text-[#9fb4a9]/60 focus:border-[#35d39a]/65 focus:bg-[#061410]/85 focus:ring-4 focus:ring-[#35d39a]/16 ${className ?? ''}`}
       />
     </label>
   )
@@ -92,7 +130,11 @@ export function AuthButton(
   return (
     <button
       {...buttonProps}
-      className={`inline-flex w-full items-center justify-center rounded-2xl bg-[#234631] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#1b3928] disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
+      className={`inline-flex w-full items-center justify-center rounded-2xl px-4 py-3.5 text-sm font-bold text-[#04140e] transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#35d39a]/35 disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
+      style={{
+        background: 'linear-gradient(135deg,#7ef0c0,#23c78d 55%,#12a774)',
+        boxShadow: '0 14px 34px rgba(35,199,141,0.28)',
+      }}
     >
       {children}
     </button>
@@ -106,7 +148,7 @@ export function AuthSecondaryButton(
   return (
     <button
       {...buttonProps}
-      className={`inline-flex w-full items-center justify-center rounded-2xl border border-[#cfd9d1] bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-[#9db4a6] hover:bg-[#f7faf7] disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
+      className={`inline-flex w-full items-center justify-center rounded-2xl border border-white/14 bg-white/[0.04] px-4 py-3 text-sm font-medium text-[#eaf3ee] transition hover:border-white/25 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#35d39a]/25 disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
     >
       {children}
     </button>

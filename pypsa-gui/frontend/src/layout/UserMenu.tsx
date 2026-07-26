@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, FolderOpen, LogOut, User as UserIcon, Users } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
+import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { useUIStore } from '../store/uiStore'
 import { releaseProjectLock } from '../utils/projectActions'
 import AssignMembersDialog from './AssignMembersDialog'
@@ -40,7 +41,7 @@ export default function UserMenu() {
     setOpen(false)
     if (currentProject) void releaseProjectLock(currentProject)
     await logout()
-    navigate('/login', { replace: true })
+    redirectAfterLogout()
   }
 
   const email = user?.email ?? 'account'
