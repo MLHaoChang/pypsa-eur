@@ -45,6 +45,7 @@ import_matpower,ImportSummary,loads,loads,True
 import_matpower,ImportSummary,transformers,transformers,True
 import_matpower,ImportSummary,snapshots,snapshots,True
 list_projects,ProjectInfo,name,name,True
+list_projects,ProjectInfo,id,id,True
 list_projects,ProjectInfo,created_at,created_at,True
 list_projects,ProjectInfo,has_solver_config,has_solver_config,True
 list_projects,ProjectInfo,bus_count,bus_count,True
@@ -54,6 +55,7 @@ list_projects,ProjectInfo,has_orphan_tmp,has_orphan_tmp,True
 list_projects,ProjectInfo,parent_project,parent_project,True
 list_projects,ProjectInfo,scenario_description,scenario_description,True
 list_scenarios,ProjectInfo,name,name,True
+list_scenarios,ProjectInfo,id,id,True
 list_scenarios,ProjectInfo,created_at,created_at,True
 list_scenarios,ProjectInfo,has_solver_config,has_solver_config,True
 list_scenarios,ProjectInfo,bus_count,bus_count,True

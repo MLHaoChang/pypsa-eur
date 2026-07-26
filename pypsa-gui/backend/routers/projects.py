@@ -15,7 +15,12 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
+from sqlalchemy.orm import Session as DBSession
+from db.models import User
+from db.session import get_db
+from deps import optional_user
 from models.schemas import (
     CreateScenarioRequest,
     ImportSummary,
@@ -26,11 +31,22 @@ from services import change_log_service
 from services.dispatch_status import network_has_dispatch
 from services.project_context import RESULT_STATE_KEYS
 from services.pypsa_service import PyPSAService
+from settings import get_settings
 from starlette.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class MembersRequest(BaseModel):
+    """Body for PUT /{id_or_name}/members — the desired member user-id set."""
+
+    user_ids: list[str] = []
+
+
+def _auth_enabled() -> bool:
+    return get_settings().pypsa_gui_auth_enabled
 
 PROJECTS_DIR = pathlib.Path(__file__).parent.parent / "projects"
 
@@ -510,8 +526,55 @@ def _project_info(project_dir: pathlib.Path) -> ProjectInfo:
     )
 
 
+def _project_info_db(db, project) -> ProjectInfo:
+    """
+    Build a ProjectInfo for a DB-registry project (auth mode). Counts come from
+    the on-disk bundle at ``storage_path`` when present, but the identity
+    (``id`` / ``name`` / ``parent_project`` / ``scenario_description``) is
+    authoritative from the DB row — the storage dir is UUID-keyed so its own
+    ``metadata.json`` name/parent pointers are only kept in sync for bundle
+    export/import round-trips.
+    """
+    from db.models import Project as _Project
+
+    d = pathlib.Path(project.storage_path)
+    if (d / "network.nc").exists():
+        info = _project_info(d)
+    else:
+        info = ProjectInfo(
+            name=project.name,
+            created_at=(
+                project.created_at.isoformat()
+                if project.created_at is not None
+                else datetime.now(tz=timezone.utc).isoformat()
+            ),
+            has_solver_config=(d / "solver_config.json").exists(),
+            bus_count=0,
+            snapshot_count=0,
+        )
+    info.name = project.name
+    info.id = str(project.id)
+    info.scenario_description = project.scenario_description
+    parent_name = None
+    if project.parent_project_id is not None:
+        parent = db.get(_Project, project.parent_project_id)
+        parent_name = parent.name if parent is not None else None
+    info.parent_project = parent_name
+    return info
+
+
 @router.get("/")
-def list_projects() -> list[ProjectInfo]:
+def list_projects(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> list[ProjectInfo]:
+    if _auth_enabled():
+        from services import project_acl, project_registry
+
+        project_registry.require_user(user)
+        projects = project_acl.list_accessible_projects(db, user)
+        return [_project_info_db(db, p) for p in projects]
+
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
     result = []
     for d in sorted(PROJECTS_DIR.iterdir()):
@@ -524,7 +587,12 @@ def list_projects() -> list[ProjectInfo]:
 
 
 @router.post("/import_bundle")
-async def import_bundle(file: UploadFile = File(...), name: str | None = None):
+async def import_bundle(
+    file: UploadFile = File(...),
+    name: str | None = None,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
     """
     Restore a project from a .pypsaproj.zip bundle.
 
@@ -562,8 +630,16 @@ async def import_bundle(file: UploadFile = File(...), name: str | None = None):
 
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
-    dest = _safe_project_dir(target_name)
-    dest.mkdir(parents=True, exist_ok=True)
+    if _auth_enabled():
+        from services import project_registry
+
+        project_registry.require_user(user)
+        _imported_project = project_registry.create_root(db, user, target_name)
+        target_name = _imported_project.name
+        dest = project_registry.project_dir(_imported_project)
+    else:
+        dest = _safe_project_dir(target_name)
+        dest.mkdir(parents=True, exist_ok=True)
     for fname in _BUNDLE_FILES:
         if fname in members:
             (dest / fname).write_bytes(zf.read(fname))
@@ -745,7 +821,12 @@ def _unique_project_name(base: str) -> str:
 
 
 @router.post("/from_template/{template_id}")
-def create_from_template(template_id: str, name: str | None = None):
+def create_from_template(
+    template_id: str,
+    name: str | None = None,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
     """
     Create a new project from a bundled starter network.
 
@@ -773,10 +854,18 @@ def create_from_template(template_id: str, name: str | None = None):
     # `name` is optional — default to the template's friendly name, then
     # uniquify so clicking the same template twice doesn't clobber the first.
     requested = (name or "").strip() or _TEMPLATE_DEFAULT_NAMES[template_id]
-    _safe_project_dir(requested)  # validate the requested name (raises 400)
-    target_name = _unique_project_name(requested)
-    dest = _safe_project_dir(target_name)
-    dest.mkdir(parents=True, exist_ok=True)
+    if _auth_enabled():
+        from services import project_registry
+
+        project_registry.require_user(user)
+        _created_project = project_registry.create_root(db, user, requested)
+        target_name = _created_project.name
+        dest = project_registry.project_dir(_created_project)
+    else:
+        _safe_project_dir(requested)  # validate the requested name (raises 400)
+        target_name = _unique_project_name(requested)
+        dest = _safe_project_dir(target_name)
+        dest.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src_nc, dest / "network.nc")
 
     # Reset + load, mirroring import_bundle / load_project.
@@ -854,6 +943,8 @@ def save_project(
     parent_project_override: str | None = None,
     scenario_description_override: str | None = None,
     apply_overrides: bool = False,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
     """
     Persist the ACTIVE project's in-memory network to ``projects/<name>/``.
@@ -872,6 +963,21 @@ def save_project(
     keep it intact. A background save (dispatcher) must NOT touch the foreground's
     undo at all, which is exactly what calling `_save_context` directly achieves.
     """
+    storage_dir = None
+    if _auth_enabled():
+        from services import project_acl, project_registry
+
+        project_registry.require_user(user)
+        project = project_registry.find_project(db, user, name)
+        if project is None:
+            # First save of a new project — register a root row in the DB.
+            project = project_registry.create_root(
+                db, user, name, scenario_description=scenario_description_override
+            )
+        else:
+            project_acl.ensure_project_access(db, user, project)
+        storage_dir = project_registry.project_dir(project)
+        name = project.name
     result = _save_context(
         PyPSAService.get_active_context(),
         name,
@@ -882,6 +988,7 @@ def save_project(
         parent_project_override=parent_project_override,
         scenario_description_override=scenario_description_override,
         apply_overrides=apply_overrides,
+        storage_dir=storage_dir,
     )
     # Saved state is the new baseline — explicit user-triggered saves discard
     # the undo stack so revert can't roll back across the checkpoint. Autosave
@@ -904,6 +1011,7 @@ def _save_context(
     scenario_description_override: str | None = None,
     apply_overrides: bool = False,
     persist_user_ts: bool = True,
+    storage_dir: pathlib.Path | None = None,
 ):
     """
     Persist `ctx`'s in-memory network to ``projects/<name>/``.
@@ -976,7 +1084,9 @@ def _save_context(
             },
         )
 
-    dest = _safe_project_dir(name)
+    # `storage_dir` (auth mode) is a pre-resolved org-scoped path; legacy mode
+    # falls back to the flat `PROJECTS_DIR / name`.
+    dest = storage_dir if storage_dir is not None else _safe_project_dir(name)
     dest.mkdir(parents=True, exist_ok=True)
     nc_path = dest / "network.nc"
     from routers.network import (
@@ -1402,7 +1512,11 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
 
 
 @router.post("/{project_id}/activate")
-def activate_project(project_id: str) -> dict:
+def activate_project(
+    project_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Make ``project_id`` the active context — the B8 instant in-memory switch.
 
@@ -1424,7 +1538,17 @@ def activate_project(project_id: str) -> dict:
     ``_solver_in_flight()`` (which keys on the active ctx), so switching away
     while the queue solves a DIFFERENT project is allowed — that is the payoff.
     """
-    src = _safe_project_dir(project_id)  # 400 on bad id
+    if _auth_enabled():
+        from services import project_registry
+
+        project_registry.require_user(user)
+        project = project_registry.resolve_project(db, user, project_id)
+        src = project_registry.project_dir(project)
+        # Reuse the project NAME as the process-global registry key / binding
+        # (names are unique within an org; the singleton is process-global).
+        project_id = project.name
+    else:
+        src = _safe_project_dir(project_id)  # 400 on bad id
     if not (src / "network.nc").exists():
         raise HTTPException(404, f"Project '{project_id}' not found")
 
@@ -1480,8 +1604,20 @@ def activate_project(project_id: str) -> dict:
 
 
 @router.get("/{name}")
-def load_project(name: str) -> ImportSummary:
-    src = _safe_project_dir(name)
+def load_project(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> ImportSummary:
+    if _auth_enabled():
+        from services import project_registry
+
+        project_registry.require_user(user)
+        project = project_registry.resolve_project(db, user, name)
+        src = project_registry.project_dir(project)
+        name = project.name
+    else:
+        src = _safe_project_dir(name)
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
@@ -1630,8 +1766,72 @@ def load_project(name: str) -> ImportSummary:
     )
 
 
+def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
+    """
+    Auth-mode scenario create. Unlike the legacy path (which serialises the
+    live in-memory singleton), this copies ``base``'s on-disk bundle into the
+    child's org-scoped storage dir and records ``parent_project_id`` in the DB
+    — so a member can branch a project they have tree access to without first
+    loading it into the process-global network.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    base_project = project_registry.resolve_project(db, user, base)
+    base_dir = project_registry.project_dir(base_project)
+
+    if project_registry.find_project(db, user, req.name) is not None:
+        raise HTTPException(409, f"Project '{req.name}' already exists")
+
+    desc = (req.description or "").strip() or None
+    child = project_registry.create_scenario(
+        db, user, base_project, req.name, scenario_description=desc
+    )
+    child_dir = project_registry.project_dir(child)
+
+    try:
+        for fname in _BUNDLE_FILES:
+            src_file = base_dir / fname
+            if src_file.exists():
+                (child_dir / fname).write_bytes(src_file.read_bytes())
+        _copy_bundle_dirs(base_dir, child_dir)
+
+        # Keep metadata.json's NAME pointer in sync with the DB parent id so
+        # bundle export/import (which only carries the flat metadata) round-trips
+        # the scenario tree. The DB parent_project_id remains authoritative.
+        meta = _read_meta(child_dir)
+        now = datetime.now(tz=timezone.utc).isoformat()
+        meta["parent_project"] = base_project.name
+        meta["scenario_description"] = desc
+        meta.setdefault("created_at", now)
+        meta["last_saved"] = now
+        _write_meta(child_dir, meta)
+    except Exception:
+        try:
+            project_registry.delete_project_row(db, child)
+        except Exception:
+            pass
+        try:
+            _force_rmtree(child_dir)
+        except OSError:
+            pass
+        raise
+
+    change_log_service.log(
+        "scenario_create", "Project", req.name,
+        f"Created scenario '{req.name}' from base '{base_project.name}'"
+        + (f": {desc[:80]}" if desc else ""),
+    )
+    return _project_info_db(db, child)
+
+
 @router.post("/{base}/scenarios", status_code=201)
-def create_scenario(base: str, req: CreateScenarioRequest) -> ProjectInfo:
+def create_scenario(
+    base: str,
+    req: CreateScenarioRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> ProjectInfo:
     """
     Create a scenario branched off ``base``.
 
@@ -1644,6 +1844,9 @@ def create_scenario(base: str, req: CreateScenarioRequest) -> ProjectInfo:
     Status: 201 on success, 400 for invalid name / self-parent, 404 if base
     is missing, 409 if the target name already exists.
     """
+    if _auth_enabled():
+        return _create_scenario_db(db, user, base, req)
+
     # 1. Validate base
     base_dir = _safe_project_dir(base)
     if not base_dir.exists() or not (base_dir / "network.nc").exists():
@@ -1691,10 +1894,10 @@ def create_scenario(base: str, req: CreateScenarioRequest) -> ProjectInfo:
     # orphan-root in list_projects.
     try:
         with PyPSAService.get_lock():
-            save_project(
+            _save_context(
+                PyPSAService.get_active_context(),
                 req.name,
                 force=True,
-                clear_undo=False,
                 parent_project_override=base,
                 scenario_description_override=desc,
                 apply_overrides=True,
@@ -1719,8 +1922,74 @@ def create_scenario(base: str, req: CreateScenarioRequest) -> ProjectInfo:
     return _project_info(new_dir)
 
 
+def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
+    """
+    Auth-mode delete. Access is gated by ``can_delete_project`` (org admin,
+    tree-root creator, or the scenario's own creator); descendants come from
+    the DB parent graph and are removed leaves-first with their storage dirs.
+    """
+    from services import project_acl, project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    if not project_acl.can_delete_project(db, user, project):
+        raise HTTPException(403, f"You do not have permission to delete '{project.name}'")
+
+    child_projects = project_registry.descendants(db, project)
+    if child_projects and not cascade:
+        names = [c.name for c in child_projects]
+        preview = ", ".join(names[:5])
+        ellipsis = "…" if len(names) > 5 else ""
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "descendants_exist",
+                "message": (
+                    f"Cannot delete '{project.name}' — it has {len(names)} "
+                    f"child scenario(s): {preview}{ellipsis}. Pass "
+                    f"?cascade=true to delete recursively."
+                ),
+                "descendants": names,
+            },
+        )
+
+    deleted: list[str] = []
+    failed: list[str] = []
+    # Leaves-first: reverse the BFS order so a child is always removed before
+    # its parent, keeping the DB parent graph consistent at every step.
+    targets = list(reversed(child_projects)) + [project]
+    for target in targets:
+        target_dir = pathlib.Path(target.storage_path)
+        try:
+            if target_dir.exists():
+                _force_rmtree(target_dir)
+        except OSError as exc:  # noqa: BLE001
+            failed.append(target.name)
+            change_log_service.log(
+                "warn", "Project", target.name,
+                f"Could not fully delete '{target.name}': {exc}.",
+            )
+            continue
+        project_registry.delete_project_row(db, target)
+        deleted.append(target.name)
+        try:
+            PyPSAService.drop(target.name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("could not evict resident context for '%s': %s", target.name, exc)
+
+    change_log_service.log("delete_project", "Project", project.name, f"Deleted project '{project.name}'")
+    if failed and not deleted:
+        raise HTTPException(500, f"Failed to delete '{project.name}': {', '.join(failed)}.")
+    return {"deleted": deleted, "failed": failed}
+
+
 @router.delete("/{name}")
-def delete_project(name: str, cascade: bool = False) -> dict:
+def delete_project(
+    name: str,
+    cascade: bool = False,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Delete a project. By default, refuses if the project has children
     (scenarios pointing to it as their parent). Pass ``?cascade=true`` to
@@ -1736,6 +2005,9 @@ def delete_project(name: str, cascade: bool = False) -> dict:
     deleted set, otherwise the autosave loop would resurrect the deleted
     project directory on its next tick.
     """
+    if _auth_enabled():
+        return _delete_project_db(db, user, name, cascade)
+
     dest = _safe_project_dir(name)
     if not dest.exists():
         raise HTTPException(404, f"Project '{name}' not found")
@@ -1842,8 +2114,73 @@ def delete_project(name: str, cascade: bool = False) -> dict:
     return {"deleted": deleted, "failed": failed}
 
 
+def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> ProjectInfo:
+    """
+    Auth-mode rename. The storage dir is UUID-keyed so it never moves — only
+    the DB ``name`` (and the metadata.json name/parent pointers used for bundle
+    round-trips) change. Permission mirrors delete (org admin, tree-root
+    creator, or the scenario's own creator).
+    """
+    from services import project_acl, project_registry
+
+    project_registry.require_user(user)
+    new_name = req.new_name.strip()
+    if not new_name:
+        raise HTTPException(400, "new_name is required")
+
+    project = project_registry.resolve_project(db, user, name)
+    if not project_acl.can_delete_project(db, user, project):
+        raise HTTPException(403, f"You do not have permission to rename '{project.name}'")
+    old_name = project.name
+    if new_name == old_name:
+        raise HTTPException(400, "new_name must differ from the current name")
+    if project_registry.find_project(db, user, new_name) is not None:
+        raise HTTPException(409, f"Project '{new_name}' already exists")
+
+    children = project_registry.direct_children(db, project)
+    project = project_registry.rename_project(db, project, new_name)
+
+    # Sync metadata.json name pointer on the renamed project + parent pointer
+    # on direct children (best-effort; DB is authoritative).
+    dest = pathlib.Path(project.storage_path)
+    meta = _read_meta(dest)
+    if meta:
+        meta["name"] = new_name
+        meta["last_saved"] = datetime.now(tz=timezone.utc).isoformat()
+        try:
+            _write_meta(dest, meta)
+        except OSError:
+            pass
+    for child in children:
+        child_dir = pathlib.Path(child.storage_path)
+        child_meta = _read_meta(child_dir)
+        if child_meta.get("parent_project") == old_name:
+            child_meta["parent_project"] = new_name
+            try:
+                _write_meta(child_dir, child_meta)
+            except OSError:
+                pass
+
+    with PyPSAService.get_lock():
+        if PyPSAService.get_loaded_project() == old_name:
+            n = PyPSAService.get_network()
+            try:
+                n.name = new_name
+            except Exception:
+                pass
+            PyPSAService.set_loaded_project(new_name)
+
+    change_log_service.log("rename_project", "Project", new_name, f"Renamed project '{old_name}' → '{new_name}'")
+    return _project_info_db(db, project)
+
+
 @router.post("/{name}/rename")
-def rename_project(name: str, req: RenameProjectRequest) -> ProjectInfo:
+def rename_project(
+    name: str,
+    req: RenameProjectRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> ProjectInfo:
     """
     Rename a project on disk and reparent any child scenarios.
 
@@ -1869,6 +2206,9 @@ def rename_project(name: str, req: RenameProjectRequest) -> ProjectInfo:
       409 — target name already exists
       500 — directory rename failed (file lock, AV, OneDrive sync handle)
     """
+    if _auth_enabled():
+        return _rename_project_db(db, user, name, req)
+
     new_name = req.new_name.strip()
     if not new_name:
         raise HTTPException(400, "new_name is required")
@@ -2167,7 +2507,7 @@ def put_layout(name: str, layout: dict) -> dict:
     return {"saved": name}
 
 
-def _project_bundle_bytes(name: str) -> bytes:
+def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
     """
     Materialise a zipped project bundle (.pypsaproj.zip) as bytes.
 
@@ -2178,9 +2518,11 @@ def _project_bundle_bytes(name: str) -> bytes:
 
     Split out from `download_bundle` so the chat-tool layer can persist the
     bytes as a downloadable `agent_export` artifact (a StreamingResponse can't
-    be returned as a chat-tool result).
+    be returned as a chat-tool result). ``src`` lets an auth-mode caller pass a
+    pre-resolved (ACL-gated, org-scoped) storage dir instead of the flat path.
     """
-    src = _safe_project_dir(name)
+    if src is None:
+        src = _safe_project_dir(name)
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
@@ -2211,13 +2553,79 @@ def _project_bundle_bytes(name: str) -> bytes:
 
 
 @router.get("/{name}/bundle")
-def download_bundle(name: str):
+def download_bundle(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
     """Stream a zipped project bundle (.pypsaproj.zip) to the browser."""
+    src = None
+    if _auth_enabled():
+        from services import project_registry
+
+        project_registry.require_user(user)
+        project = project_registry.resolve_project(db, user, name)
+        src = project_registry.project_dir(project)
+        name = project.name
     return StreamingResponse(
-        io.BytesIO(_project_bundle_bytes(name)),
+        io.BytesIO(_project_bundle_bytes(name, src)),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{name}.pypsaproj.zip"'},
     )
+
+
+@router.get("/{name}/members")
+def get_project_members(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> list[dict]:
+    """
+    List the members assigned to a project's tree root (auth mode only).
+
+    Membership always attaches to the tree ROOT — the ACL grants access to
+    every project in a tree via a single root membership — so this returns the
+    root's assignment list regardless of which node in the tree is addressed.
+    """
+    if not _auth_enabled():
+        raise HTTPException(404, "Project membership requires authentication to be enabled")
+    from services import project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    return project_registry.list_root_members(db, project)
+
+
+@router.put("/{name}/members")
+def put_project_members(
+    name: str,
+    body: MembersRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> list[dict]:
+    """
+    Replace the member set on a project's tree root (auth mode only).
+
+    Requires manage permission (org admin or the tree-root creator). Each
+    supplied user id must belong to the project's organization.
+    """
+    if not _auth_enabled():
+        raise HTTPException(404, "Project membership requires authentication to be enabled")
+    import uuid as _uuid
+
+    from services import project_acl, project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    if not project_acl.can_manage_membership(db, user, project):
+        raise HTTPException(403, "You do not have permission to manage members on this project")
+
+    try:
+        user_ids = [_uuid.UUID(str(uid)) for uid in body.user_ids]
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "user_ids must be valid UUID strings") from exc
+
+    return project_registry.set_root_members(db, user, project, user_ids)
 
 
 @router.get("/{name}/statistics")
