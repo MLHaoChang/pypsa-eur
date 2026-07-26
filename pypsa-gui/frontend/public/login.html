@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PyPSA Studio — Sign in</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #eef3ef;
+        --panel: #ffffff;
+        --text: #14231a;
+        --muted: #5b6b61;
+        --accent: #234631;
+        --border: #cfd9d1;
+        --danger: #9b1c1c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+        background:
+          radial-gradient(circle at top left, #d9ebe0 0%, transparent 45%),
+          linear-gradient(160deg, #f7faf7 0%, var(--bg) 55%, #e4ece6 100%);
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(420px, 100%);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 18px 50px rgba(20, 35, 26, 0.08);
+      }
+      h1 { margin: 0 0 8px; font-size: 1.75rem; letter-spacing: -0.03em; }
+      p { margin: 0 0 20px; color: var(--muted); line-height: 1.5; font-size: 0.95rem; }
+      label { display: grid; gap: 8px; margin-bottom: 14px; font-size: 0.9rem; font-weight: 600; }
+      input {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 12px 14px;
+        font: inherit;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 14px;
+        padding: 12px 14px;
+        background: var(--accent);
+        color: white;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.6; cursor: not-allowed; }
+      .msg {
+        display: none;
+        margin-bottom: 14px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+      .msg.error { display: block; background: #fdecec; color: var(--danger); border: 1px solid #f3c1c1; }
+      .msg.ok { display: block; background: #eef8f1; color: var(--accent); border: 1px solid #cfe5d7; }
+      .hint { margin-top: 16px; font-size: 0.8rem; color: var(--muted); }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Sign in</h1>
+      <p>
+        Static login page (bypasses the React workbench). Use this if the SPA is
+        stuck showing “Authentication required”.
+      </p>
+      <div id="msg" class="msg" role="status"></div>
+      <form id="form">
+        <label>
+          Email
+          <input autocomplete="username" id="email" name="email" required type="email" value="admin@example.com" />
+        </label>
+        <label>
+          Password
+          <input autocomplete="current-password" id="password" name="password" required type="password" value="admin-pass-123" />
+        </label>
+        <button id="submit" type="submit">Sign in</button>
+      </form>
+      <p class="hint">
+        After a successful sign-in you will be sent to <code>/projects</code>.
+        If that still shows the old workbench, close the Cursor preview entirely
+        and reopen <code>http://localhost:5173/login.html</code>.
+      </p>
+    </main>
+    <script>
+      const form = document.getElementById('form')
+      const msg = document.getElementById('msg')
+      const submit = document.getElementById('submit')
+
+      function show(text, ok) {
+        msg.textContent = text
+        msg.className = ok ? 'msg ok' : 'msg error'
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        submit.disabled = true
+        msg.className = 'msg'
+        try {
+          const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: document.getElementById('email').value.trim(),
+              password: document.getElementById('password').value,
+            }),
+          })
+          const body = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(body.detail || `Login failed (${response.status})`)
+          }
+          show('Signed in. Opening projects…', true)
+          window.location.replace('/projects')
+        } catch (error) {
+          show(error instanceof Error ? error.message : 'Login failed', false)
+          submit.disabled = false
+        }
+      })
+    </script>
+  </body>
+</html>

@@ -180,6 +180,9 @@ async def undo_snapshot_middleware(request: Request, call_next):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Authentication required"},
+                # Nudge stale Cursor preview sessions to drop cached SPA modules
+                # so the next real navigation picks up the login gate.
+                headers={"Clear-Site-Data": '"cache"'},
             )
 
     # ── Solver-in-flight gate ─────────────────────────────────────────

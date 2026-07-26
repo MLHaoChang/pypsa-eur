@@ -300,6 +300,22 @@ go to SMTP `:1025`. Links use `PUBLIC_BASE_URL` (default `http://localhost:5173`
 **Important:** after pulling this branch, fully restart `npm run dev` so Vite
 reloads `.env.development`. A hard refresh alone will not enable the login page.
 
+### Hard reset if the preview is stuck on the workbench
+
+Cursor’s in-app browser preview can keep a **stale React session** alive that
+never reloads new JS (you keep seeing “Unnamed” + “Authentication required”
+even after code fixes). Do this:
+
+1. **Close** the preview panel completely (don’t just refresh).
+2. Open a **new** preview tab to exactly:
+   `http://localhost:5173/login.html`
+3. Sign in with the bootstrapped super-admin
+   (`admin@example.com` / your bootstrap password).
+4. You should land on `/projects`.
+
+Unauthenticated visits to `/` now **HTTP 302** to `/login.html` (static page,
+no React). That bypasses a stuck SPA bundle.
+
 #### 2) Create the platform super-admin (CLI — no signup UI)
 
 There is **no self-registration**. The first account is created with:

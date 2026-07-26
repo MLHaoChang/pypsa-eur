@@ -79,6 +79,7 @@ merger-todos.md
 
 *.html
 !pypsa-gui/frontend/index.html
+!pypsa-gui/frontend/public/login.html
 
 # private dev folder
 dev/*

@@ -1,12 +1,6 @@
-// Multi-user auth UI.
-//
-// Default ON for this branch (login / projects / admin). Set
-// `VITE_AUTH_ENABLED=false` in `.env.local` to force the classic single-user
-// workbench. Backend auth is still gated by `PYPSA_GUI_AUTH_ENABLED`.
-//
-// `authEnabled` is a live binding — when the API reports auth is required we
-// upgrade it at runtime so a stale Vite env / HMR session cannot leave the
-// reviewer stuck on the workbench with "Authentication required" toasts.
+// Multi-user auth UI is always on for this branch.
+// Set VITE_AUTH_ENABLED=false only if you intentionally need the classic
+// single-user workbench (not supported while backend auth is enabled).
 
 const flag = import.meta.env.VITE_AUTH_ENABLED
 

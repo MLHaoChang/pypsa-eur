@@ -2,9 +2,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { authHtmlGatePlugin } from './vite.auth-gate'
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), authHtmlGatePlugin()],
   test: {
     // `node` (not jsdom) on purpose: this suite covers PURE helpers only —
     // no component rendering, so there is nothing to gain from a DOM and a
@@ -20,6 +21,7 @@ export default defineConfig({
     // 127.0.0.1:5173 (curl, smoke scripts, the e2e walkthroughs) gets a
     // connection refused. Binding explicitly keeps both services on IPv4 and
     // matches the proxy target below.
+    // Cloud/agent previews override with `--host 0.0.0.0`.
     host: '127.0.0.1',
     port: 5173,
     proxy: {

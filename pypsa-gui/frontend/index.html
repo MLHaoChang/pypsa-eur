@@ -3,10 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PyPSA Studio</title>
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <title>PyPSA Studio — Auth build</title>
+    <script>
+      // Runs before React. If the backend requires auth and this tab has no
+      // session, leave the workbench immediately — even when a stale SPA
+      // bundle is still in memory from an old Cursor preview session.
+      window.__PYPSA_AUTH_BOOT__ = (async function pypsaAuthBoot() {
+        var authPages = { '/login': 1, '/login.html': 1, '/set-password': 1, '/reset-password': 1 }
+        if (authPages[location.pathname]) return 'auth-page'
+        try {
+          var healthRes = await fetch('/api/health', { credentials: 'same-origin' })
+          if (!healthRes.ok) return 'health-failed'
+          var health = await healthRes.json()
+          if (!health.auth_enabled) return 'single-user'
+          var meRes = await fetch('/api/auth/me', { credentials: 'same-origin' })
+          if (meRes.status === 401 || meRes.status === 403) {
+            location.replace('/login.html')
+            return 'redirect-login'
+          }
+        } catch (err) {
+          return 'boot-error'
+        }
+        return 'ok'
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx?v=auth-login-3"></script>
+    <script type="module" src="/src/main.tsx?v=auth-login-4"></script>
   </body>
 </html>
