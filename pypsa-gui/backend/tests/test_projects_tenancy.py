@@ -17,6 +17,7 @@ import pandas as pd
 import pypsa
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 import main
@@ -328,3 +329,190 @@ def test_member_cannot_manage_members(session_local):
             json={"user_ids": [str(member.id)]},
         )
         assert resp.status_code == 403
+
+
+# ── Read-only sub-resource ACL gating (Task 7 review — must-fix #1) ───────────
+# layout / statistics / results_bundle used to resolve a project via the flat
+# `_safe_project_dir(name)` alone, bypassing the org-scoped registry + ACL. In
+# auth mode they must now 404 for another org/user's project and succeed for an
+# authorized one — the same resolution as every other project-scoped route.
+
+
+def test_layout_get_isolation(session_local):
+    org_a = _create_org(session_local, name="Org A")
+    org_b = _create_org(session_local, name="Org B")
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org_a.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org_b.id, role="admin")
+    project_a = _create_project(session_local, org=org_a, creator=user_a, name="Alpha")
+
+    # Another org's user cannot read the layout — 404 (existence not leaked).
+    with _client_for("b@example.com") as client_b:
+        assert client_b.get(f"/api/projects/{project_a.id}/layout").status_code == 404
+
+    # The owner reads the layout fine — empty ({}) since none was saved.
+    with _client_for("a@example.com") as client_a:
+        resp = client_a.get(f"/api/projects/{project_a.id}/layout")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {}
+
+
+def test_layout_put_then_get_roundtrip_for_owner(session_local):
+    org = _create_org(session_local, name="Org")
+    admin = _create_user(session_local, email="admin@example.com")
+    _add_membership(session_local, user_id=admin.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=admin, name="Root")
+
+    with _client_for("admin@example.com") as client:
+        put = client.put(
+            f"/api/projects/{project.id}/layout", json={"nodes": {"B1": [1, 2]}}
+        )
+        assert put.status_code == 200, put.text
+        got = client.get(f"/api/projects/{project.id}/layout")
+        assert got.status_code == 200
+        assert got.json() == {"nodes": {"B1": [1, 2]}}
+
+    # The layout landed in the org-scoped storage dir, not a flat path.
+    layout_file = storage_path_for(org.id, project.id) / "layout.json"
+    assert layout_file.exists()
+
+
+def test_layout_put_isolation(session_local):
+    org_a = _create_org(session_local, name="Org A")
+    org_b = _create_org(session_local, name="Org B")
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org_a.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org_b.id, role="admin")
+    project_a = _create_project(session_local, org=org_a, creator=user_a, name="Alpha")
+
+    with _client_for("b@example.com") as client_b:
+        resp = client_b.put(
+            f"/api/projects/{project_a.id}/layout", json={"nodes": {}}
+        )
+        assert resp.status_code == 404
+
+
+def test_statistics_isolation(session_local):
+    org_a = _create_org(session_local, name="Org A")
+    org_b = _create_org(session_local, name="Org B")
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org_a.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org_b.id, role="admin")
+    project_a = _create_project(session_local, org=org_a, creator=user_a, name="Alpha")
+
+    # Another org's user cannot read statistics — 404.
+    with _client_for("b@example.com") as client_b:
+        assert client_b.get(f"/api/projects/{project_a.id}/statistics").status_code == 404
+
+    # Owner gets real statistics from the seeded network (1 bus, 3 snapshots).
+    with _client_for("a@example.com") as client_a:
+        resp = client_a.get(f"/api/projects/{project_a.id}/statistics")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["buses"] == 1
+        assert body["snapshots"] == 3
+        assert body["name"] == "Alpha"
+
+
+def test_results_bundle_isolation(session_local):
+    org_a = _create_org(session_local, name="Org A")
+    org_b = _create_org(session_local, name="Org B")
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org_a.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org_b.id, role="admin")
+    project_a = _create_project(session_local, org=org_a, creator=user_a, name="Alpha")
+
+    # Another org's user cannot read the results bundle — 404, not a leak.
+    with _client_for("b@example.com") as client_b:
+        assert client_b.get(f"/api/projects/{project_a.id}/results_bundle").status_code == 404
+
+    # Owner is authorized; the seeded network was never solved so the bundle is
+    # empty → 204 (authorization succeeded, there's just no dispatch to return).
+    with _client_for("a@example.com") as client_a:
+        assert client_a.get(f"/api/projects/{project_a.id}/results_bundle").status_code == 204
+
+
+# ── UUID-shaped names (Task 7 review — must-fix #3) ───────────────────────────
+
+
+def test_uuid_shaped_name_resolves_by_name(session_local):
+    """A project *named* like a UUID (that is NOT any project's id) must still
+    resolve by name — the resolver falls back to a name lookup when the UUID
+    parse succeeds but matches no id in the org."""
+    org = _create_org(session_local, name="Org")
+    admin = _create_user(session_local, email="admin@example.com")
+    _add_membership(session_local, user_id=admin.id, org_id=org.id, role="admin")
+
+    uuid_name = str(uuid.uuid4())  # a valid UUID string used as the NAME
+    project = _create_project(session_local, org=org, creator=admin, name=uuid_name)
+    assert str(project.id) != uuid_name  # distinct from its own id
+
+    with _client_for("admin@example.com") as client:
+        # Addressed by the UUID-shaped NAME (no row has this as an id).
+        assert client.get(f"/api/projects/{uuid_name}").status_code == 200
+        assert client.get(f"/api/projects/{uuid_name}/statistics").status_code == 200
+        # The real id still resolves too.
+        assert client.get(f"/api/projects/{project.id}").status_code == 200
+
+
+def test_find_project_uuid_fallback_unit(session_local):
+    """Unit-level: find_project returns the row when addressed by a UUID-shaped
+    name with no matching id, and None for a genuinely absent UUID."""
+    from services import project_registry
+
+    org = _create_org(session_local, name="Org")
+    admin = _create_user(session_local, email="admin@example.com")
+    _add_membership(session_local, user_id=admin.id, org_id=org.id, role="admin")
+
+    uuid_name = str(uuid.uuid4())
+    project = _create_project(session_local, org=org, creator=admin, name=uuid_name)
+
+    with session_local() as db:
+        db_user = db.get(User, admin.id)
+        # UUID-shaped name, no id match → falls back to name lookup.
+        found = project_registry.find_project(db, db_user, uuid_name)
+        assert found is not None
+        assert found.id == project.id
+        # A UUID that matches neither an id nor a name → None.
+        assert project_registry.find_project(db, db_user, str(uuid.uuid4())) is None
+        # The real id resolves directly.
+        assert project_registry.find_project(db, db_user, str(project.id)).id == project.id
+
+
+# ── Save-As copies uploads from the auth storage path (review — must-fix #2) ──
+
+
+def test_save_as_copies_uploads_from_auth_storage(session_local):
+    """Save-As (save the active project under a new name) must copy the
+    `uploads/` dir from the SOURCE project's org-scoped storage_path into the
+    new project's storage_path — not from a flat `_safe_project_dir(loaded)`."""
+    org = _create_org(session_local, name="Org")
+    admin = _create_user(session_local, email="admin@example.com")
+    _add_membership(session_local, user_id=admin.id, org_id=org.id, role="admin")
+    source = _create_project(session_local, org=org, creator=admin, name="Source")
+
+    # Seed an upload under the SOURCE project's org-scoped storage dir.
+    uploads = storage_path_for(org.id, source.id) / "uploads" / "file-1"
+    uploads.mkdir(parents=True, exist_ok=True)
+    (uploads / "ref.csv").write_text("a,b\n1,2\n")
+
+    with _client_for("admin@example.com") as client:
+        # Load the source so the active singleton is bound to "Source".
+        assert client.get(f"/api/projects/{source.id}").status_code == 200
+        # Save-As to a brand-new name → create the root row + copy the bundle.
+        resp = client.post("/api/projects/Copy", params={"rebind": "true"})
+        assert resp.status_code == 200, resp.text
+
+    # The new project's org-scoped storage dir received the uploads copy.
+    with session_local() as db:
+        copy_row = db.scalar(
+            select(Project).where(Project.org_id == org.id, Project.name == "Copy")
+        )
+    assert copy_row is not None
+    copied = storage_path_for(org.id, copy_row.id) / "uploads" / "file-1" / "ref.csv"
+    assert copied.exists(), "uploads/ was not copied from the source storage_path"
+    assert copied.read_text() == "a,b\n1,2\n"
