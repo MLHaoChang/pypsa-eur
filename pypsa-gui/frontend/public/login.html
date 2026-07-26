@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-store" />
-    <meta name="theme-color" content="#0a0708" />
+    <meta name="theme-color" content="#151112" />
     <title>PyPSA Studio — Sign in</title>
     <link rel="preload" as="image" href="/img/login-bg.jpg" />
     <!-- Identity palette. Single source of truth for the red/black brand
@@ -62,9 +62,9 @@
         position: absolute;
         inset: 0;
         background:
-          radial-gradient(1100px 720px at 8% 45%, rgba(6, 4, 5, 0.92) 0%, rgba(6, 4, 5, 0.62) 34%, rgba(6, 4, 5, 0.18) 62%, transparent 100%),
-          linear-gradient(90deg, rgba(6, 4, 5, 0.86) 0%, rgba(6, 4, 5, 0.28) 42%, rgba(6, 4, 5, 0.12) 62%, rgba(6, 4, 5, 0.55) 100%),
-          linear-gradient(180deg, rgba(6, 4, 5, 0.42) 0%, transparent 26%, transparent 62%, rgba(6, 4, 5, 0.6) 100%);
+          radial-gradient(1100px 720px at 8% 45%, rgba(21, 17, 18, 0.78) 0%, rgba(21, 17, 18, 0.62) 34%, rgba(21, 17, 18, 0.18) 62%, transparent 100%),
+          linear-gradient(90deg, rgba(21, 17, 18, 0.78) 0%, rgba(21, 17, 18, 0.28) 42%, rgba(21, 17, 18, 0.12) 62%, rgba(21, 17, 18, 0.55) 100%),
+          linear-gradient(180deg, rgba(21, 17, 18, 0.42) 0%, transparent 26%, transparent 62%, rgba(21, 17, 18, 0.6) 100%);
       }
 
       .grid-lines {
@@ -113,7 +113,12 @@
          split the SPA header and the projects home use. */
       .mark .pypsa { color: var(--brand-red); }
 
-      .headline { max-width: 30ch; }
+      /* `ch` resolves against THIS element's font-size (16px inherited), not
+         the h1's clamped 3.6rem — so 30ch was a ~270px column and the headline
+         broke into five short lines. A px measure sized to the brand column
+         lets the h1 set its own rhythm; the lede's own 48ch still governs body
+         measure inside it. */
+      .headline { max-width: min(620px, 100%); }
 
       .eyebrow {
         display: inline-flex;
@@ -122,7 +127,7 @@
         padding: 6px 12px;
         border: 1px solid var(--line);
         border-radius: 999px;
-        background: rgba(20, 13, 15, 0.55);
+        background: rgba(33, 27, 28, 0.62);
         backdrop-filter: blur(8px);
         font-size: 0.72rem;
         letter-spacing: 0.14em;
@@ -235,7 +240,7 @@
       input {
         width: 100%;
         border: 1px solid var(--line);
-        background: rgba(8, 5, 6, 0.6);
+        background: rgba(16, 13, 14, 0.66);
         color: var(--ink);
         border-radius: 14px;
         padding: 13px 15px;
@@ -249,7 +254,7 @@
       input:focus {
         outline: none;
         border-color: rgba(255, 82, 82, 0.65);
-        background: rgba(14, 9, 10, 0.85);
+        background: rgba(24, 19, 20, 0.88);
         box-shadow: 0 0 0 4px rgba(255, 82, 82, 0.16);
       }
 
@@ -348,10 +353,10 @@
 
         <div class="headline">
           <span class="eyebrow"><span class="pulse"></span> Energy system planning</span>
-          <h1>Plan the grid behind <span class="grad">tomorrow's cities</span>.</h1>
+          <h1>Advanced modelling for the <span class="grad">energy portfolio</span>.</h1>
           <p class="lede">
-            Model megacity demand, data-center load growth, and transmission
-            build-out — then compare scenarios side by side with your team.
+            Build, solve and compare whole-system scenarios — from a single asset to
+            an entire continent — on open data and an optimisation engine you can audit.
           </p>
         </div>
 

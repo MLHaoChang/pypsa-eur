@@ -141,17 +141,21 @@
    Custom properties cascade, so redeclaring them on a subtree is enough. */
 :root[data-theme="dark"],
 [data-pypsa-surface="brand-dark"] {
-  --color-bg: #0a0708;
-  --color-bg-2: #120c0e;
-  --color-panel: #170f11;
-  --color-panel-2: #1f1417;
-  --color-canvas: #070405;
-  --color-canvas-dot: #332124;
+  /* Surface ramp. --color-bg sits at Material's dark-theme baseline luminance
+     (#121212 = 0.0061; this is 0.0060), warmed toward red. Each step above it
+     is a visible lift so cards read as elevated rather than as flat regions of
+     the same black — which is what the previous, much darker ramp did. */
+  --color-bg: #151112;
+  --color-bg-2: #1b1617;
+  --color-panel: #211b1c;
+  --color-panel-2: #282122;
+  --color-canvas: #100d0e;
+  --color-canvas-dot: #3a3133;
 
-  --color-border: #271a1d;
-  --color-border-2: #372528;
-  --color-border-3: #4d363a;
-  --color-grid: #271a1d;
+  --color-border: #2e2729;
+  --color-border-2: #3d3437;
+  --color-border-3: #514649;
+  --color-grid: #2e2729;
 
   --color-ink-900: #f4eaea;
   --color-ink-800: #e2d3d4;
@@ -174,8 +178,8 @@
   --color-accent-50: #260c0e;
   --color-on-accent: #14090a;
 
-  --color-nav: #0c0809;
-  --color-nav-hover: #170f11;
+  --color-nav: #131011;
+  --color-nav-hover: #211b1c;
 
   /* Deeper, softer shadows — on a near-black surface the light-theme shadows
      are invisible, so lean on spread plus a hairline top inset for lift. */

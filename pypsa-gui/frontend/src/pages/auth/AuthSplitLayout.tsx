@@ -30,9 +30,9 @@ export function AuthSplitLayout({
         className="pointer-events-none fixed inset-0"
         style={{
           background: [
-            'radial-gradient(1100px 720px at 8% 45%, rgba(6,4,5,0.92) 0%, rgba(6,4,5,0.62) 34%, rgba(6,4,5,0.18) 62%, transparent 100%)',
-            'linear-gradient(90deg, rgba(6,4,5,0.86) 0%, rgba(6,4,5,0.28) 42%, rgba(6,4,5,0.12) 62%, rgba(6,4,5,0.55) 100%)',
-            'linear-gradient(180deg, rgba(6,4,5,0.42) 0%, transparent 26%, transparent 62%, rgba(6,4,5,0.6) 100%)',
+            'radial-gradient(1100px 720px at 8% 45%, rgba(21,17,18,0.78) 0%, rgba(21,17,18,0.62) 34%, rgba(21,17,18,0.18) 62%, transparent 100%)',
+            'linear-gradient(90deg, rgba(21,17,18,0.78) 0%, rgba(21,17,18,0.28) 42%, rgba(21,17,18,0.12) 62%, rgba(21,17,18,0.55) 100%)',
+            'linear-gradient(180deg, rgba(21,17,18,0.42) 0%, transparent 26%, transparent 62%, rgba(21,17,18,0.6) 100%)',
           ].join(','),
         }}
       />
@@ -54,21 +54,21 @@ export function AuthSplitLayout({
             </span>
           </div>
 
-          <div className="max-w-[30ch]">
-            <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/14 bg-[rgba(20,13,15,0.55)] px-3 py-1.5 text-[0.72rem] uppercase tracking-[0.14em] text-[var(--brand-ink-dim)] backdrop-blur">
+          <div className="max-w-[min(620px,100%)]">
+            <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/14 bg-[rgba(33,27,28,0.62)] px-3 py-1.5 text-[0.72rem] uppercase tracking-[0.14em] text-[var(--brand-ink-dim)] backdrop-blur">
               <span className="h-[7px] w-[7px] rounded-full bg-[var(--brand-red)]" />
               Energy system planning
             </span>
             <h1 className="text-[clamp(2.1rem,4.4vw,3.6rem)] font-bold leading-[1.04] tracking-[-0.035em]">
-              Plan the grid behind{' '}
+              Advanced modelling for the{' '}
               <span className="bg-gradient-to-r from-[var(--brand-red-soft)] via-[var(--brand-red)] to-[var(--brand-red-deep)] bg-clip-text text-transparent">
-                tomorrow&apos;s cities
+                energy portfolio
               </span>
               .
             </h1>
             <p className="mt-4 max-w-[48ch] text-[clamp(0.96rem,1.15vw,1.08rem)] leading-relaxed text-[var(--brand-ink-dim)]">
-              Model megacity demand, data-center load growth, and transmission
-              build-out — then compare scenarios side by side with your team.
+              Build, solve and compare whole-system scenarios — from a single asset to
+              an entire continent — on open data and an optimisation engine you can audit.
             </p>
           </div>
 
@@ -125,7 +125,7 @@ export function AuthInput(
       <span className="text-[0.82rem] font-semibold tracking-[0.02em] text-[var(--brand-ink-dim)]">{label}</span>
       <input
         {...inputProps}
-        className={`w-full rounded-2xl border border-white/14 bg-[rgba(8,5,6,0.6)] px-4 py-3 text-sm text-[var(--brand-ink)] outline-none transition placeholder:text-[var(--brand-ink-dim)]/60 focus:border-[var(--brand-red)]/65 focus:bg-[rgba(14,9,10,0.85)] focus:ring-4 focus:ring-[var(--brand-red)]/16 ${className ?? ''}`}
+        className={`w-full rounded-2xl border border-white/14 bg-[rgba(16,13,14,0.66)] px-4 py-3 text-sm text-[var(--brand-ink)] outline-none transition placeholder:text-[var(--brand-ink-dim)]/60 focus:border-[var(--brand-red)]/65 focus:bg-[rgba(24,19,20,0.88)] focus:ring-4 focus:ring-[var(--brand-red)]/16 ${className ?? ''}`}
       />
     </label>
   )

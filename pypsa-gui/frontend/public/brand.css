@@ -13,21 +13,26 @@
    both files and fails if they drift — treat that test as the contract, not
    the comment.
 
-   Contrast (all against --brand-black #0a0708):
-     --brand-red        #ff5252  6.3:1  ✓ AA for body text
-     --brand-red-soft   #ff8a8a  9.4:1  ✓
-     --brand-ink        #f4eaea 17.6:1  ✓
-     --brand-ink-dim    #b9a7a9  8.9:1  ✓
+   Contrast (all against --brand-black #151112):
+     --brand-red        #ff5252  5.9:1  ✓ AA for body text
+     --brand-red-soft   #ff8a8a  8.3:1  ✓
+     --brand-ink        #f4eaea 15.9:1  ✓
+     --brand-ink-dim    #b9a7a9  8.2:1  ✓
    and --brand-on-red (#14090a) on --brand-red is 6.3:1, which is why filled
    red surfaces carry near-black text rather than white (white would be 3.2:1).
    ══════════════════════════════════════════════════════════════════════════ */
 :root {
-  /* Surfaces — neutral black warmed a few degrees toward red so it reads as a
-     deliberate choice rather than an unstyled grey. */
-  --brand-black: #0a0708;
-  --brand-surface: #150e10;
-  --brand-surface-2: #1d1316;
-  --brand-panel: rgba(18, 11, 13, 0.78);
+  /* Surfaces — near-black warmed a few degrees toward red so it reads as a
+     deliberate choice rather than an unstyled grey.
+     --brand-black sits at relative luminance 0.0060, which is Material's
+     dark-theme baseline (#121212 = 0.0061) to three decimals. The first cut of
+     this palette used #0a0708 (0.0023, ~2.6x darker); that is below every
+     mainstream dark UI and it flattened the surface ramp, because a surface
+     that dark leaves nowhere for panels and shadows to sit ABOVE it. */
+  --brand-black: #151112;
+  --brand-surface: #211b1c;
+  --brand-surface-2: #282122;
+  --brand-panel: rgba(33, 27, 28, 0.80);
 
   /* Red ramp */
   --brand-red: #ff5252;
