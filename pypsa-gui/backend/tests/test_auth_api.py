@@ -138,6 +138,9 @@ def test_login_allows_me_and_logout_revokes_session(
     )
 
     assert login_response.status_code == 200
+    # Step 0a: `POST /api/auth/logout` is state-changing and carries a session
+    # cookie, so it needs the double-submit token like any other write.
+    auth_client.headers["X-CSRF-Token"] = login_response.json()["csrf_token"]
 
     me_response = auth_client.get("/api/auth/me")
 

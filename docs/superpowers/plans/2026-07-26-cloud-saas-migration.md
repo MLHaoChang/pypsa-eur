@@ -124,7 +124,38 @@ do not). v2 specified one undifferentiated dependency and was wrong: measured,
 **0a-eligible route count: 14** — `uploads` 6, `snapshots` 4, `compare` 2,
 `project_network` 2. Everything else is 0b.
 
-### Step 0a — authorize what can be authorized
+### Step 0a — authorize what can be authorized  ✅ **LANDED**
+
+> **Implemented.** Backend suite re-pinned at **1143 passed / 1 skipped** (was
+> 1117; the old baseline did not survive, exactly as this plan warned). Frontend:
+> tsc clean, **132** vitest (was 123), production build OK. All 14 E2E cases in
+> `backend/tests/test_qa_step0a.py` pass, and the login → workbench journey was
+> verified in headless Chrome (10/10, including a forged write refused with 403
+> and the same write accepted with the token).
+>
+> **Two things this step found that the plan did not predict:**
+>
+> 1. **`POST /api/simulation/queue` was the widest hole, and it is not in the
+>    route inventory.** It takes its project in the BODY, so a path-parameter
+>    census cannot see it. It resolved through `_safe_project_dir` — any org's
+>    project by name — then handed that directory to a background thread that
+>    solves it *and saves it back*. Now resolved through the caller's org+ACL,
+>    with the authorized directory travelling on the job (the dispatcher runs
+>    with no request and no user and cannot authorize anything itself).
+> 2. **Re-keying the registry needs `set_loaded_project` to CLEAR tenant
+>    identity.** Rebinding only the NAME leaves a context whose `registry_key`
+>    points at one project and whose `loaded_project` names another. A
+>    background solve then believed it owned the foreground context and refused
+>    its own save with a 409. `get_binding`/`set_binding` now move all four
+>    fields together, and the three reset-then-rebind paths (undo restore,
+>    snapshot restore, rename) use them.
+>
+> **403 → 404 sweep, narrowed with a rule.** Only `_org_id_for` on the LOOKUP
+> path was an oracle; it now degrades to "no match" so an orgless caller gets
+> the same 404 as anyone else. The three remaining 403s (delete/rename/manage
+> members) all sit *after* `resolve_project`, so the caller has already proved
+> read access and 403 is the honest answer — 404 there would be a lie, not a
+> defence.
 
 - `require_project_access(project_id)` on the **14** routes that carry a real
   project path param (`uploads`, `snapshots`, `compare`, `project_network`).

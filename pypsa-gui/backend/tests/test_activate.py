@@ -52,41 +52,47 @@ def _put_A_and_B_on_disk(client, install_network):
     return "A_BUS", "B_BUS"
 
 
-def test_activate_resident_swaps_active(client, install_network, tmp_projects_dir):
+def test_activate_resident_swaps_active(
+    client, install_network, tmp_projects_dir, registry_key_for
+):
     _put_A_and_B_on_disk(client, install_network)
+    key_a, key_b = registry_key_for("A"), registry_key_for("B")
     # A path-scoped read makes B resident WITHOUT moving the active slot.
     client.get("/api/projects/B/network/buses")
-    assert PyPSAService.get_context("B") is not None
-    assert PyPSAService.get_active_id() == "A"
-    ctx_b = PyPSAService.get_context("B")
+    assert PyPSAService.get_context(key_b) is not None
+    assert PyPSAService.get_active_id() == key_a
+    ctx_b = PyPSAService.get_context(key_b)
 
     r = client.post("/api/projects/B/activate")
     assert r.status_code == 200, r.text
     # B9: the response carries an `evicted` list (empty here — well below cap).
-    assert r.json() == {"activated": "B", "evicted": []}
+    # `activated`/`evicted` stay DISPLAY NAMES even though the registry key is
+    # now `org:uuid` — the frontend's caches are keyed by name.
+    assert r.json() == {"activated": "B", "evicted": [], "lock": None}
 
     # Active flipped to B; the swap reused the SAME resident ctx (no re-hydrate).
-    assert PyPSAService.get_active_id() == "B"
+    assert PyPSAService.get_active_id() == key_b
     assert PyPSAService.get_active_context() is ctx_b
     assert PyPSAService.get_network() is ctx_b.network
     assert [b["name"] for b in client.get("/api/network/buses").json()] == ["B_BUS"]
 
 
 def test_activate_non_resident_loads_and_registers(
-    client, install_network, tmp_projects_dir
+    client, install_network, tmp_projects_dir, registry_key_for
 ):
     _put_A_and_B_on_disk(client, install_network)
+    key_a, key_b = registry_key_for("A"), registry_key_for("B")
     # B is on disk but NOT resident (save doesn't register into _contexts).
-    assert PyPSAService.get_context("B") is None
-    assert PyPSAService.get_active_id() == "A"
+    assert PyPSAService.get_context(key_b) is None
+    assert PyPSAService.get_active_id() == key_a
 
     r = client.post("/api/projects/B/activate")
     assert r.status_code == 200, r.text
 
     # B is now active AND resident (built + hydrated + registered).
-    assert PyPSAService.get_active_id() == "B"
-    assert PyPSAService.get_context("B") is not None
-    assert PyPSAService.get_context("B").loaded_project == "B"
+    assert PyPSAService.get_active_id() == key_b
+    assert PyPSAService.get_context(key_b) is not None
+    assert PyPSAService.get_context(key_b).loaded_project == "B"
     assert [b["name"] for b in client.get("/api/network/buses").json()] == ["B_BUS"]
 
 
@@ -97,19 +103,32 @@ def test_activate_unknown_returns_404(client, install_network, tmp_projects_dir)
     assert r.status_code == 404, r.text
 
 
-def test_activate_bad_id_returns_400(client, install_network, tmp_projects_dir):
+def test_activate_hostile_id_returns_404_not_400(client, install_network, tmp_projects_dir):
+    """
+    Step 0a changed this from 400 to 404, deliberately.
+
+    Activation used to resolve through `_safe_project_dir`, whose name regex
+    rejected `$evil` with a 400 BEFORE any ownership question was asked. That
+    made the status code a probe oracle: 400 meant "malformed", 404 meant
+    "well-formed but absent", and — on the old code — a well-formed name owned
+    by another org resolved to 200. Resolution now goes through the DB inside
+    the caller's org, so every id the caller is not entitled to looks the same.
+    """
     install_network(_bus_network("A_BUS"), name="A")
     _save_project(client, "A")
-    # `%24evil` decodes to `$evil` — one path segment, fails the name regex → 400.
+    # `%24evil` decodes to `$evil` — no such project in this org.
     r = client.post("/api/projects/%24evil/activate")
-    assert r.status_code == 400, r.text
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == client.post(
+        "/api/projects/DoesNotExist/activate"
+    ).json()["detail"]
 
 
 def test_activate_blocked_by_foreground_solve(
     client, install_network, tmp_projects_dir, monkeypatch
 ):
     _put_A_and_B_on_disk(client, install_network)
-    assert PyPSAService.get_active_id() == "A"
+    active_before = PyPSAService.get_active_id()
     # Simulate a live foreground solve on the active (A) ctx by parking a real,
     # alive thread handle in its solver_state — `_solver_in_flight()` reads the
     # active ctx's thread under its lock and calls `.is_alive()`.
@@ -131,7 +150,7 @@ def test_activate_blocked_by_foreground_solve(
         r = client.post("/api/projects/B/activate")
         assert r.status_code == 409, r.text
         # The block left the active slot untouched.
-        assert PyPSAService.get_active_id() == "A"
+        assert PyPSAService.get_active_id() == active_before
     finally:
         release.set()
         t.join(timeout=5)
@@ -147,7 +166,6 @@ def test_activate_allowed_when_active_solve_is_a_queue_job(
     present, but a RUNNING queue job for the active project makes the switch safe.
     """
     _put_A_and_B_on_disk(client, install_network)
-    assert PyPSAService.get_active_id() == "A"
 
     import threading
 
@@ -166,22 +184,27 @@ def test_activate_allowed_when_active_solve_is_a_queue_job(
     # Report a RUNNING queue job for the active project A — this is the signal
     # the activate guard uses to permit switching away from a queue solve.
     from services import solve_queue as sq_mod
+    # The activate guard keys on `project_key` (the `org:uuid` registry key)
+    # since Step 0a — `project_id` remains the display name for the UI.
+    active_key = PyPSAService.get_active_id()
     monkeypatch.setattr(
         sq_mod.solve_queue, "list_jobs",
-        lambda: [{"project_id": "A", "status": "running"}],
+        lambda: [
+            {"project_id": "A", "project_key": active_key, "status": "running"}
+        ],
     )
     try:
         assert sim_router._solver_in_flight() is True
         r = client.post("/api/projects/B/activate")
         assert r.status_code == 200, r.text  # allowed — A solves in background
-        assert PyPSAService.get_active_id() == "B"
+        assert PyPSAService.get_active_context().loaded_project == "B"
     finally:
         release.set()
         t.join(timeout=5)
 
 
 def test_load_project_registers_bound_ctx(
-    client, install_network, tmp_projects_dir
+    client, install_network, tmp_projects_dir, registry_key_for
 ):
     """
     A foreground load (GET /{name}) makes the project resident for instant
@@ -189,14 +212,15 @@ def test_load_project_registers_bound_ctx(
     """
     install_network(_bus_network("X_BUS"), name="X")
     _save_project(client, "X")
+    key_x = registry_key_for("X")
     # Drop the registry so the only way X becomes resident is load registering it.
     PyPSAService._contexts.clear()
-    assert PyPSAService.get_context("X") is None
+    assert PyPSAService.get_context(key_x) is None
 
     r = client.get("/api/projects/X")
     assert r.status_code == 200, r.text
 
-    ctx = PyPSAService.get_context("X")
+    ctx = PyPSAService.get_context(key_x)
     assert ctx is not None
     assert ctx.loaded_project == "X"
     # The registered ctx IS the active one (load binds the active ctx to X).

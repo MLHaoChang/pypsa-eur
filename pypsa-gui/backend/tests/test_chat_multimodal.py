@@ -244,15 +244,26 @@ class TestBuildMultimodalContentBlocks:
 # ─────────────────────────────────────────────────────────────────────────
 
 
+# Step 0a: the upload/signature ROUTES resolve `{name}` through the project
+# registry inside the caller's org, so they need an authenticated client and a
+# real project row — a bare directory under the projects root is no longer a
+# project. The service-level tests below keep using `demo_project` (a flat dir),
+# which still works: `upload_service._resolve_paths` falls back to the flat
+# layout for callers that are not routes. Step 1 retires that fallback.
+@pytest.fixture
+def route_project(api_project):
+    return api_project("demo")
+
+
 class TestSignatureEndpoint:
-    def test_signature_shape(self, app_client, demo_project):
-        post = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+    def test_signature_shape(self, client, route_project):
+        post = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("x.png", _TINY_PNG, "image/png")},
         )
         fid = post.json()["file_id"]
-        r = app_client.get(
-            f"/api/projects/{demo_project}/uploads/{fid}/signature",
+        r = client.get(
+            f"/api/projects/{route_project}/uploads/{fid}/signature",
             params={"session_id": "sess123"},
         )
         assert r.status_code == 200
@@ -267,27 +278,27 @@ class TestSignatureEndpoint:
         assert body["version"] >= 1
         assert len(body["sha256"]) == 64
 
-    def test_missing_file_returns_404(self, app_client, demo_project):
-        r = app_client.get(
-            f"/api/projects/{demo_project}/uploads/deadbeef00000000/signature",
+    def test_missing_file_returns_404(self, client, route_project):
+        r = client.get(
+            f"/api/projects/{route_project}/uploads/deadbeef00000000/signature",
             params={"session_id": "sess"},
         )
         assert r.status_code == 404
         assert r.json()["detail"]["error_kind"] == "upload_not_found"
 
-    def test_signatures_are_session_scoped(self, app_client, demo_project):
+    def test_signatures_are_session_scoped(self, client, route_project):
         """Same file + different session_ids → different signatures."""
-        post = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+        post = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("x.png", _TINY_PNG, "image/png")},
         )
         fid = post.json()["file_id"]
-        s1 = app_client.get(
-            f"/api/projects/{demo_project}/uploads/{fid}/signature",
+        s1 = client.get(
+            f"/api/projects/{route_project}/uploads/{fid}/signature",
             params={"session_id": "alice"},
         ).json()["signature"]
-        s2 = app_client.get(
-            f"/api/projects/{demo_project}/uploads/{fid}/signature",
+        s2 = client.get(
+            f"/api/projects/{route_project}/uploads/{fid}/signature",
             params={"session_id": "bob"},
         ).json()["signature"]
         assert s1 != s2

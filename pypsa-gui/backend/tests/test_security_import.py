@@ -98,7 +98,9 @@ def test_safe_unpickle_loads_legit_results_state():
     assert out["data"]["last_lost_load"]["lost_load_total_mwh"] == 5.0
 
 
-def test_load_path_does_not_execute_malicious_pkl(client, install_network, tmp_projects_dir, tmp_path):
+def test_load_path_does_not_execute_malicious_pkl(
+    client, install_network, tmp_projects_dir, tmp_path, project_storage_dir
+):
     # End-to-end: a malicious results_state.pkl persisted in a project dir must
     # NOT execute when the project is loaded — the safe unpickler rejects it and
     # the load degrades gracefully (results dropped, project still opens).
@@ -113,7 +115,7 @@ def test_load_path_does_not_execute_malicious_pkl(client, install_network, tmp_p
     r = client.post("/api/projects/VICTIM", params={"force": True, "rebind": True})
     assert r.status_code == 200, r.text
     # Plant the hostile pickle where the loader reads it.
-    (tmp_projects_dir / "VICTIM" / "results_state.pkl").write_bytes(
+    (project_storage_dir("VICTIM") / "results_state.pkl").write_bytes(
         pickle.dumps(_FileWriteGadget())
     )
 

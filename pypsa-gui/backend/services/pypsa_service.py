@@ -193,6 +193,9 @@ class PyPSAService:
         cls._active = ProjectContext(
             network=n,
             loaded_project=prev.loaded_project,
+            org_id=prev.org_id,
+            project_uuid=prev.project_uuid,
+            storage_dir=prev.storage_dir,
             solver_state=prev.solver_state,
             solver_state_lock=prev.solver_state_lock,
             undo=prev.undo,
@@ -254,15 +257,15 @@ class PyPSAService:
         with cls._registry_lock:
             ctx.last_interacted_at = time.monotonic()
             cls._active = ctx
-            if register and ctx.loaded_project is not None:
-                cls._contexts[ctx.loaded_project] = ctx
+            if register and ctx.registry_key is not None:
+                cls._contexts[ctx.registry_key] = ctx
         # Run the cap check AFTER releasing `_registry_lock` so eviction's heavy
         # per-victim save (mutation_lock + io-lock) never nests under it. The
         # just-activated ctx is protected (it's the new active id) so it can
         # never be its own victim. Skip entirely when not registering.
         cls._clear_swap_caches()
-        if register and ctx.loaded_project is not None:
-            return cls._evict_if_over_cap(protected_ids={ctx.loaded_project})
+        if register and ctx.registry_key is not None:
+            return cls._evict_if_over_cap(protected_ids={ctx.registry_key})
         return []
 
     @classmethod
@@ -400,7 +403,12 @@ class PyPSAService:
             from services.solve_queue import solve_queue
             for j in solve_queue.list_jobs():
                 if j.get("status") in ("queued", "running"):
-                    pid = j.get("project_id")
+                    # `project_key` (`org:uuid`), NOT `project_id` (the display
+                    # name) — the registry is keyed by the former since Step 0a.
+                    # Reading the name here would protect nothing and let a
+                    # mid-solve context be evicted AND written back over a newer
+                    # on-disk copy.
+                    pid = j.get("project_key")
                     if pid is not None:
                         protected.add(pid)
         except Exception:  # noqa: BLE001 — never let a probe failure strand the cap
@@ -439,7 +447,11 @@ class PyPSAService:
         evicted: list[str] = []
         for victim_id, victim_ctx in detached:
             cls._save_evicted_ctx(victim_id, victim_ctx)
-            evicted.append(victim_id)
+            # Report the DISPLAY NAME, not the `org:uuid` registry key. The
+            # caller is the /activate endpoint, which hands this list to the
+            # frontend so it can drop those projects' retained React Query
+            # caches — and those caches are keyed by project name.
+            evicted.append(victim_ctx.loaded_project or victim_id)
         return evicted
 
     @staticmethod
@@ -466,9 +478,25 @@ class PyPSAService:
         if victim_ctx.loaded_project is None or victim_ctx.network.buses.empty:
             return
         try:
+            import pathlib
+
             from routers.projects import _save_context
+            # Save under the ctx's own NAME and its own org-scoped storage
+            # directory — NOT under `victim_id`, which since Step 0a is the
+            # composite `org:uuid` registry key. Passing `storage_dir` also
+            # removes the last name→path derivation on this path: re-deriving
+            # it from the display name would resolve to the wrong org's folder
+            # the moment two tenants share a project name.
             _save_context(
-                victim_ctx, victim_id, expect=victim_id, persist_user_ts=False,
+                victim_ctx,
+                victim_ctx.loaded_project,
+                expect=victim_ctx.loaded_project,
+                persist_user_ts=False,
+                storage_dir=(
+                    pathlib.Path(victim_ctx.storage_dir)
+                    if victim_ctx.storage_dir
+                    else None
+                ),
             )
             # Chat history flush. Phase 0: no-op (append_turn writes
             # synchronously, no in-memory buffer). Phase 1+ may add a buffered
@@ -532,7 +560,7 @@ class PyPSAService:
         when the active context is unbound (fresh / New Project). Derived rather
         than stored so it can never drift from `_active`.
         """
-        return cls._active.loaded_project if cls._active is not None else None
+        return cls._active.registry_key if cls._active is not None else None
 
     # ── Loaded-project identity ──────────────────────────────────────────────
     # Authoritative identity of the project the in-memory network was loaded
@@ -560,7 +588,74 @@ class PyPSAService:
         `get_lock()` by callers that also swap the network, so the binding is
         atomic with respect to the swap.
         """
-        cls._ensure_active().loaded_project = name
+        ctx = cls._ensure_active()
+        ctx.loaded_project = name
+        # Clear the tenant identity along with the name. Leaving a stale
+        # `org_id`/`project_uuid` behind while the NAME moves produces a
+        # context whose `registry_key` points at one project and whose
+        # `loaded_project` names another — which is exactly how a background
+        # solve came to believe it owned the foreground context and refused its
+        # own save with a 409. Callers that DO know the row (rename, restore)
+        # must use `bind_project` / `project_registry.bind_context`.
+        ctx.org_id = None
+        ctx.project_uuid = None
+        ctx.storage_dir = None
+
+    @classmethod
+    def get_binding(cls) -> dict[str, str | None]:
+        """
+        Snapshot the active context's full identity (name + tenant + storage).
+
+        Paired with `set_binding` by the flows that `reset_network()` and then
+        re-bind the SAME project — undo restore, snapshot restore. `reset` drops
+        identity deliberately (a half-imported network must not stay bound), so
+        those callers have to put all four fields back, not just the name.
+        """
+        ctx = cls._ensure_active()
+        return {
+            "name": ctx.loaded_project,
+            "org_id": ctx.org_id,
+            "project_uuid": ctx.project_uuid,
+            "storage_dir": ctx.storage_dir,
+        }
+
+    @classmethod
+    def set_binding(cls, binding: dict[str, str | None]) -> None:
+        """Restore a `get_binding()` snapshot onto the active context."""
+        cls.bind_project(
+            binding.get("name"),
+            org_id=binding.get("org_id"),
+            project_uuid=binding.get("project_uuid"),
+            storage_dir=binding.get("storage_dir"),
+        )
+
+    @classmethod
+    def bind_project(
+        cls,
+        name: str | None,
+        *,
+        org_id: str | None = None,
+        project_uuid: str | None = None,
+        storage_dir: str | None = None,
+        ctx: ProjectContext | None = None,
+    ) -> None:
+        """
+        Bind a context to a DB-backed project: display name plus tenant identity.
+
+        `set_loaded_project` binds only the name and is kept for the paths that
+        genuinely have nothing else (rename, which moves a name under an
+        unchanged row). Every load-class op should call THIS instead, because
+        the name alone no longer identifies a project: it is unique per org, and
+        the resident registry is per process. A context bound by name only falls
+        back to name-keying in `registry_key`, which is exactly the collision
+        Step 0a exists to remove — so binding without the ids is a bug, not a
+        shortcut.
+        """
+        target = ctx if ctx is not None else cls._ensure_active()
+        target.loaded_project = name
+        target.org_id = str(org_id) if org_id is not None else None
+        target.project_uuid = str(project_uuid) if project_uuid is not None else None
+        target.storage_dir = str(storage_dir) if storage_dir is not None else None
 
     # ── Transient-row registry ──────────────────────────────────────────────
     # Rows that the solver's `_apply_modelling_assumptions` adds to a

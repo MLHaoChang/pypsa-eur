@@ -299,10 +299,21 @@ class TestDeleteUploadResponse:
 # ─────────────────────────────────────────────────────────────────────────
 
 
+# Step 0a: the upload/signature ROUTES resolve `{name}` through the project
+# registry inside the caller's org, so they need an authenticated client and a
+# real project row — a bare directory under the projects root is no longer a
+# project. The service-level tests below keep using `demo_project` (a flat dir),
+# which still works: `upload_service._resolve_paths` falls back to the flat
+# layout for callers that are not routes. Step 1 retires that fallback.
+@pytest.fixture
+def route_project(api_project):
+    return api_project("demo")
+
+
 class TestUploadsEndpoints:
-    def test_post_upload_success(self, app_client, demo_project):
-        r = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+    def test_post_upload_success(self, client, route_project):
+        r = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("x.csv", b"col1,col2\n1,2\n", "text/csv")},
         )
         assert r.status_code == 200, r.text
@@ -310,18 +321,18 @@ class TestUploadsEndpoints:
         assert body["filename"] == "x.csv"
         assert body["blob_ready"] is True
 
-    def test_post_too_large_returns_413(self, app_client, demo_project, monkeypatch):
+    def test_post_too_large_returns_413(self, client, route_project, monkeypatch):
         # Temporarily shrink the cap to make a small payload look "big".
         monkeypatch.setattr(upload_service, "MAX_FILE_BYTES", 100)
-        r = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+        r = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("big.csv", b"x" * 500, "text/csv")},
         )
         assert r.status_code == 413
         assert r.json()["detail"]["error_kind"] == "file_too_large"
 
     def test_post_real_xlsx_accepted_via_zip_extension_upgrade(
-        self, app_client, demo_project,
+        self, client, route_project,
     ):
         """
         Office Open XML files (xlsx, docx, …) are zip archives — libmagic
@@ -343,8 +354,8 @@ class TestUploadsEndpoints:
         wb.save(buf)
         xlsx_bytes = buf.getvalue()
 
-        r = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+        r = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={
                 "file": (
                     "load_H2_Demand_template (1).xlsx",
@@ -363,7 +374,7 @@ class TestUploadsEndpoints:
         )
         assert body["filename"] == "load_H2_Demand_template (1).xlsx"
 
-    def test_post_docx_zip_upgrade(self, app_client, demo_project):
+    def test_post_docx_zip_upgrade(self, client, route_project):
         """Same upgrade path for .docx so Word files drag-and-drop too."""
         # Minimum-viable Office zip — just the structural zip layout.
         # python-magic only sees the magic bytes (`PK\x03\x04`); the
@@ -373,8 +384,8 @@ class TestUploadsEndpoints:
         buf = _io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("[Content_Types].xml", "<x/>")
-        r = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+        r = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={
                 "file": (
                     "memo.docx",
@@ -390,7 +401,7 @@ class TestUploadsEndpoints:
         )
 
     def test_post_renamed_exe_as_xlsx_still_rejected(
-        self, app_client, demo_project,
+        self, client, route_project,
     ):
         """
         Defence: the extension upgrade ONLY fires when libmagic sniffs
@@ -406,8 +417,8 @@ class TestUploadsEndpoints:
             b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00"
             + b"\x00" * 200
         )
-        r = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+        r = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={
                 "file": (
                     "report.xlsx", exe_bytes,
@@ -418,23 +429,23 @@ class TestUploadsEndpoints:
         assert r.status_code == 400
         assert r.json()["detail"]["error_kind"] == "unsupported_mime"
 
-    def test_post_zero_byte_returns_400(self, app_client, demo_project):
-        r = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+    def test_post_zero_byte_returns_400(self, client, route_project):
+        r = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("empty.txt", b"", "text/plain")},
         )
         assert r.status_code == 400
         assert r.json()["detail"]["error_kind"] == "empty_file"
 
-    def test_post_path_traversal_filename_rejected(self, app_client, demo_project):
-        r = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+    def test_post_path_traversal_filename_rejected(self, client, route_project):
+        r = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("../etc/passwd", b"data", "text/plain")},
         )
         assert r.status_code == 400
         assert r.json()["detail"]["error_kind"] == "invalid_filename"
 
-    def test_post_unsupported_mime_rejected(self, app_client, demo_project):
+    def test_post_unsupported_mime_rejected(self, client, route_project):
         # Payload must be a binary libmagic recognises as NON-text on every
         # platform. The previous `b"MZ" + b"\x00" * 100` stub was too degenerate:
         # libmagic 5.47 (macOS/conda-forge) declines to call two bytes a DOS
@@ -453,8 +464,8 @@ class TestUploadsEndpoints:
             + b"\x01\x00\x00\x00"             # e_version
             + b"\x00" * 64
         )
-        r = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+        r = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("malware.exe", elf_header, "application/octet-stream")},
         )
         assert r.status_code == 400
@@ -463,60 +474,60 @@ class TestUploadsEndpoints:
         # depending on libmagic version; neither is in ALLOWED_MIME_TYPES.
         assert r.json()["detail"]["error_kind"] in {"unsupported_mime", "mime_type_mismatch"}
 
-    def test_get_list_after_post(self, app_client, demo_project):
-        app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+    def test_get_list_after_post(self, client, route_project):
+        client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("a.csv", b"a,b\n", "text/csv")},
         )
-        r = app_client.get(f"/api/projects/{demo_project}/uploads")
+        r = client.get(f"/api/projects/{route_project}/uploads")
         assert r.status_code == 200
         items = r.json()
         assert len(items) == 1
         assert items[0]["filename"] == "a.csv"
 
-    def test_get_blob_returns_bytes(self, app_client, demo_project):
-        post = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+    def test_get_blob_returns_bytes(self, client, route_project):
+        post = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("a.csv", b"hello,world\n", "text/csv")},
         )
         fid = post.json()["file_id"]
-        r = app_client.get(f"/api/projects/{demo_project}/uploads/{fid}/blob")
+        r = client.get(f"/api/projects/{route_project}/uploads/{fid}/blob")
         assert r.status_code == 200
         assert r.content == b"hello,world\n"
 
-    def test_get_meta(self, app_client, demo_project):
-        post = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+    def test_get_meta(self, client, route_project):
+        post = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("a.csv", b"col1,col2\n1,2\n", "text/csv")},
         )
         fid = post.json()["file_id"]
-        r = app_client.get(f"/api/projects/{demo_project}/uploads/{fid}/meta")
+        r = client.get(f"/api/projects/{route_project}/uploads/{fid}/meta")
         assert r.status_code == 200
         assert r.json()["file_id"] == fid
 
-    def test_delete_existing_returns_200_deleted_true(self, app_client, demo_project):
-        post = app_client.post(
-            f"/api/projects/{demo_project}/uploads",
+    def test_delete_existing_returns_200_deleted_true(self, client, route_project):
+        post = client.post(
+            f"/api/projects/{route_project}/uploads",
             files={"file": ("a.csv", b"col1,col2\n1,2\n", "text/csv")},
         )
         fid = post.json()["file_id"]
-        r = app_client.delete(f"/api/projects/{demo_project}/uploads/{fid}")
+        r = client.delete(f"/api/projects/{route_project}/uploads/{fid}")
         assert r.status_code == 200
         body = r.json()
         assert body == {"deleted": True, "file_id": fid}
 
-    def test_delete_missing_returns_200_not_found(self, app_client, demo_project):
-        r = app_client.delete(
-            f"/api/projects/{demo_project}/uploads/deadbeef00000000",
+    def test_delete_missing_returns_200_not_found(self, client, route_project):
+        r = client.delete(
+            f"/api/projects/{route_project}/uploads/deadbeef00000000",
         )
         assert r.status_code == 200
         body = r.json()
         assert body["deleted"] is False
         assert body["reason"] == "not_found"
 
-    def test_get_blob_missing_returns_404(self, app_client, demo_project):
-        r = app_client.get(
-            f"/api/projects/{demo_project}/uploads/deadbeef00000000/blob",
+    def test_get_blob_missing_returns_404(self, client, route_project):
+        r = client.get(
+            f"/api/projects/{route_project}/uploads/deadbeef00000000/blob",
         )
         assert r.status_code == 404
         assert r.json()["detail"]["error_kind"] == "upload_not_found"

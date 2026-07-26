@@ -48,14 +48,28 @@ def require_user(user: User | None) -> User:
     return user
 
 
-def _org_id_for(db: DBSession, user: User) -> uuid.UUID:
+def _org_id_or_none(db: DBSession, user: User) -> uuid.UUID | None:
     membership = get_user_membership(db, user.id)
-    if membership is None:
+    return membership.org_id if membership is not None else None
+
+
+def _org_id_for(db: DBSession, user: User) -> uuid.UUID:
+    """
+    The caller's org, or 403.
+
+    403 is correct HERE because this is the CREATE path: the caller is trying
+    to make a new project and genuinely lacks the capability, and no existing
+    resource is implied by the answer. LOOKUP paths must not use it — see
+    `find_project`, which degrades a missing membership to "no match" so it
+    ends in the same 404 as a project that does not exist.
+    """
+    org_id = _org_id_or_none(db, user)
+    if org_id is None:
         raise HTTPException(
             status_code=403,
             detail="User is not a member of any organization",
         )
-    return membership.org_id
+    return org_id
 
 
 def _try_uuid(value: str) -> uuid.UUID | None:
@@ -70,8 +84,18 @@ def find_project(db: DBSession, user: User, id_or_name: str) -> Project | None:
     Resolve ``id_or_name`` to a Project in the caller's org — WITHOUT the
     access check. Accepts a UUID string (exact id match) or a project name
     (unique within an org). Returns None when nothing matches in the org.
+
+    A caller with no org membership resolves to None rather than 403. Every
+    lookup outcome the caller is not entitled to must be INDISTINGUISHABLE:
+    "no such project", "exists in another org", and "you belong to no org" all
+    end as the same 404 with the same body. A 403 on any of them is an
+    existence oracle — it tells the caller their probe was well-formed enough
+    to reach an authorization decision, which is information about another
+    tenant's data.
     """
-    org_id = _org_id_for(db, user)
+    org_id = _org_id_or_none(db, user)
+    if org_id is None:
+        return None
 
     as_uuid = _try_uuid(id_or_name)
     if as_uuid is not None:
@@ -100,6 +124,26 @@ def resolve_project(db: DBSession, user: User, id_or_name: str) -> Project:
         raise HTTPException(status_code=404, detail="Project not found")
     # ensure_project_access raises 404 when access is denied.
     return project_acl.ensure_project_access(db, user, project)
+
+
+def registry_key(project: Project) -> str:
+    """
+    Key for the process-global resident-context registry (Step 0a).
+
+    Must match `ProjectContext.registry_key`, which is the accessor the service
+    layer uses; this function is the DB-side producer of the same string. The
+    old key was the project name — unique per org, but the registry is per
+    process, so two orgs' `Baseline` shared one slot.
+    """
+    return f"{project.org_id}:{project.id}"
+
+
+def bind_context(ctx, project: Project) -> None:
+    """Stamp a `ProjectContext` with this project's name + tenant identity."""
+    ctx.loaded_project = project.name
+    ctx.org_id = str(project.org_id)
+    ctx.project_uuid = str(project.id)
+    ctx.storage_dir = str(project.storage_path)
 
 
 def project_dir(project: Project) -> Path:

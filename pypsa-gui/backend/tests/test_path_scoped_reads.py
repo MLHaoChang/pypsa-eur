@@ -59,10 +59,10 @@ def _put_A_and_B_on_disk(client, install_network):
 
 
 def test_path_scoped_read_targets_named_project_not_active(
-    client, install_network, tmp_projects_dir
+    client, install_network, tmp_projects_dir, registry_key_for
 ):
     a_bus, b_bus = _put_A_and_B_on_disk(client, install_network)
-    assert PyPSAService.get_active_id() == "A"
+    assert PyPSAService.get_active_id() == registry_key_for("A")
 
     # B's buses via the path-scoped route — must be B's, not the active A's.
     rb = client.get("/api/projects/B/network/buses")
@@ -78,14 +78,15 @@ def test_path_scoped_read_targets_named_project_not_active(
 
 
 def test_path_scoped_reads_do_not_move_active(
-    client, install_network, tmp_projects_dir
+    client, install_network, tmp_projects_dir, registry_key_for
 ):
     _put_A_and_B_on_disk(client, install_network)
-    assert PyPSAService.get_active_id() == "A"
+    key_a = registry_key_for("A")
+    assert PyPSAService.get_active_id() == key_a
 
     # Reading B (a not-yet-resident project) must NOT change the foreground.
     client.get("/api/projects/B/network/buses")
-    assert PyPSAService.get_active_id() == "A"
+    assert PyPSAService.get_active_id() == key_a
     # The active network is still A's (B_BUS must not appear).
     active_buses = [row["name"] for row in client.get("/api/network/buses").json()]
     assert active_buses == ["A_BUS"]
@@ -93,31 +94,32 @@ def test_path_scoped_reads_do_not_move_active(
     # Repeat reads (now resident) still don't move it.
     client.get("/api/projects/B/network/meta")
     client.get("/api/projects/A/network/links")
-    assert PyPSAService.get_active_id() == "A"
+    assert PyPSAService.get_active_id() == key_a
 
 
 def test_path_scoped_read_makes_target_resident(
-    client, install_network, tmp_projects_dir
+    client, install_network, tmp_projects_dir, registry_key_for
 ):
     _put_A_and_B_on_disk(client, install_network)
+    key_a, key_b = registry_key_for("A"), registry_key_for("B")
     # B is on disk but not resident yet (save doesn't register into _contexts).
-    assert PyPSAService.get_context("B") is None
+    assert PyPSAService.get_context(key_b) is None
 
     r = client.get("/api/projects/B/network/buses")
     assert r.status_code == 200, r.text
 
     # After the read B is resident, but _active is unchanged (still A).
-    ctx_b = PyPSAService.get_context("B")
+    ctx_b = PyPSAService.get_context(key_b)
     assert ctx_b is not None
     assert ctx_b.loaded_project == "B"
-    assert PyPSAService.get_active_id() == "A"
+    assert PyPSAService.get_active_id() == key_a
     # A second read returns the SAME resident ctx (registry hit, no re-hydrate).
     client.get("/api/projects/B/network/buses")
-    assert PyPSAService.get_context("B") is ctx_b
+    assert PyPSAService.get_context(key_b) is ctx_b
 
 
 def test_path_scoped_meta_reflects_target_project(
-    client, install_network, tmp_projects_dir
+    client, install_network, tmp_projects_dir, registry_key_for
 ):
     _put_A_and_B_on_disk(client, install_network)
 
@@ -131,7 +133,7 @@ def test_path_scoped_meta_reflects_target_project(
     # The active foreground is still A; the shim meta proves it.
     shim = client.get("/api/network/meta").json()
     assert shim["loaded_project"] == "A"
-    assert PyPSAService.get_active_id() == "A"
+    assert PyPSAService.get_active_id() == registry_key_for("A")
 
 
 def test_shim_reads_stay_active(client, install_network, tmp_projects_dir):
@@ -152,17 +154,31 @@ def test_unknown_project_returns_404(client, install_network, tmp_projects_dir):
     assert rm.status_code == 404, rm.text
 
 
-def test_bad_project_id_returns_400(client, install_network, tmp_projects_dir):
+def test_hostile_project_id_is_indistinguishable_from_absent(
+    client, install_network, tmp_projects_dir
+):
+    """
+    Was `test_bad_project_id_returns_400`; Step 0a changed the contract.
+
+    `ProjectDep` used to resolve through `_safe_project_dir`, whose name regex
+    rejected `$evil` with 400 before asking any ownership question. That split
+    the response space three ways — 400 malformed / 404 absent / 200 present —
+    and on the old code a well-formed name belonging to ANOTHER org landed in
+    the 200 bucket. Resolution now happens in the DB within the caller's org,
+    so hostile, absent, and other-tenant ids are one indistinguishable 404.
+
+    Path traversal is still refused: `%24evil` is a single decoded segment that
+    matches the route template, and a slash-based `../evil` is normalised by
+    Starlette before routing, so neither reaches a filesystem join.
+    """
     install_network(_bus_network("A_BUS"), name="A")
     _save_project(client, "A")
-    # An id with a character outside _PROJECT_NAME_RE must be rejected by
-    # _safe_project_dir (400), not 404. `%24evil` decodes to `$evil` — a SINGLE
-    # path segment (no slash) so it still matches the `{project_id}/network/...`
-    # template, but `$` fails the name regex → the dependency raises 400. (A
-    # slash-based traversal like `../evil` is path-normalised by Starlette
-    # before routing and wouldn't reach the dependency at all.)
-    r = client.get("/api/projects/%24evil/network/buses")
-    assert r.status_code == 400, r.text
+
+    hostile = client.get("/api/projects/%24evil/network/buses")
+    absent = client.get("/api/projects/NoSuchProject/network/buses")
+    assert hostile.status_code == 404, hostile.text
+    assert absent.status_code == 404, absent.text
+    assert hostile.json() == absent.json()
 
 
 def test_unknown_component_class_returns_4xx(

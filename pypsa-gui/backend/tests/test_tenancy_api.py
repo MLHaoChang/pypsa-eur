@@ -98,6 +98,10 @@ def _add_membership(
 def _login(client: TestClient, *, email: str, password: str = "secret-pass") -> None:
     response = client.post("/api/auth/login", json={"email": email, "password": password})
     assert response.status_code == 200
+    # Step 0a: state-changing routes require the double-submit CSRF token. The
+    # login response carries it in the body precisely so a non-browser client
+    # can echo it back without parsing cookies.
+    client.headers["X-CSRF-Token"] = response.json()["csrf_token"]
 
 
 @pytest.fixture

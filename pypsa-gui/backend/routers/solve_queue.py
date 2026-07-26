@@ -12,10 +12,13 @@ Endpoints:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session as DBSession
 
-from routers.projects import _safe_project_dir
+from db.models import User
+from db.session import get_db
+from deps import optional_user
 from services.solve_queue import solve_queue
 
 router = APIRouter()
@@ -26,24 +29,42 @@ class EnqueueRequest(BaseModel):
 
 
 @router.post("")
-def enqueue_solve(req: EnqueueRequest):
+def enqueue_solve(
+    req: EnqueueRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
     """
     Queue a project to solve. The dispatcher loads the SAVED version from disk,
     so the project must already exist on disk with a network — the caller (the
     frontend) saves the foreground project before enqueuing it. Returns the
     created job, including its queue position.
+
+    AUTHORIZATION (Step 0a): the project arrives in the BODY, not the path, so
+    this route is invisible to a path-parameter inventory — it was not among
+    the 14 the plan counted, and it was the widest remaining hole: it used
+    `_safe_project_dir(name)`, which resolves any org's project under the
+    shared root, and then handed that path to a background thread that solves
+    and SAVES it. Resolution now goes through the caller's org and ACL, and the
+    authorized directory travels with the job, because the dispatcher runs with
+    no request and no user and cannot authorize anything itself.
     """
-    name = req.project_id
-    # _safe_project_dir rejects traversal / unsafe names (raises 400/404 itself)
-    # and resolves the on-disk dir. A project with no network.nc was never saved.
-    project_dir = _safe_project_dir(name)
+    from services import project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, req.project_id)
+    project_dir = project_registry.project_dir(project)
     if not (project_dir / "network.nc").exists():
         raise HTTPException(
             404,
-            f"Project '{name}' has no saved network on disk. Save the project "
-            "before queuing it to solve.",
+            f"Project '{project.name}' has no saved network on disk. Save the "
+            "project before queuing it to solve.",
         )
-    job = solve_queue.enqueue(name)
+    job = solve_queue.enqueue(
+        project.name,
+        project_key=project_registry.registry_key(project),
+        storage_dir=str(project_dir),
+    )
     return solve_queue.get_job(job.id)
 
 

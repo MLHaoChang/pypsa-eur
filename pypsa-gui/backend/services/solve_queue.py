@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import pathlib
 import queue
 import threading
 import time
@@ -61,7 +62,20 @@ class SolveJob:
     """One queued solve of a single saved project."""
 
     id: int
+    # Human-readable project NAME. What the UI shows and what the API has
+    # always called `project_id`; kept under that key in `to_public` so the
+    # frontend contract is unchanged.
     project_id: str
+    # Resident-registry key (`org:uuid`) for the same project — the identity
+    # the eviction protected-set and the activate guard compare against. Step 0a
+    # split the two: names are unique per ORG, the registry is per PROCESS, so a
+    # name is no longer an identity here.
+    project_key: str | None = None
+    # Authorized org-scoped storage directory, resolved at enqueue time by the
+    # route that checked the caller's ACL. The dispatcher must NOT re-derive a
+    # path from the name — it runs on a worker thread with no request, no user,
+    # and no way to authorize anything.
+    storage_dir: str | None = None
     status: str = "queued"          # queued | running | completed | failed | aborted
     objective: Any = None
     solve_time: Any = None
@@ -83,6 +97,7 @@ class SolveJob:
         return {
             "id": self.id,
             "project_id": self.project_id,
+            "project_key": self.project_key,
             "status": self.status,
             "position": position,
             "objective": self.objective,
@@ -111,11 +126,23 @@ class SolveQueue:
         self._dispatcher: threading.Thread | None = None
 
     # ── public API ──────────────────────────────────────────────────────────
-    def enqueue(self, project_id: str) -> SolveJob:
+    def enqueue(
+        self,
+        project_id: str,
+        *,
+        project_key: str | None = None,
+        storage_dir: str | None = None,
+    ) -> SolveJob:
         """Append a job for `project_id` and ensure the dispatcher is running."""
         with self._lock:
             jid = next(self._counter)
-            job = SolveJob(id=jid, project_id=project_id, enqueued_at=time.time())
+            job = SolveJob(
+                id=jid,
+                project_id=project_id,
+                project_key=project_key,
+                storage_dir=storage_dir,
+                enqueued_at=time.time(),
+            )
             self._jobs[jid] = job
             self._order.append(jid)
             self._q.put(jid)
@@ -321,11 +348,24 @@ class SolveQueue:
             #    from disk — its own network + mutation_lock + solver_state, so
             #    the foreground active ctx (a different project) is never touched.
             active_id = PyPSAService.get_active_id()
-            if project_id == active_id:
+            is_foreground = job.project_key is not None and job.project_key == active_id
+            if is_foreground:
                 ctx = PyPSAService.get_active_context()
             else:
                 ctx = PyPSAService.build_context()
-                _hydrate_context_from_disk(ctx, _safe_project_dir(project_id), project_id)
+                # Use the directory the ENQUEUING request authorized. Falling
+                # back to a name-derived path would resolve under the shared
+                # projects root and could land on another org's project.
+                src = (
+                    pathlib.Path(job.storage_dir)
+                    if job.storage_dir
+                    else _safe_project_dir(project_id)
+                )
+                _hydrate_context_from_disk(ctx, src, project_id)
+                if job.project_key and job.storage_dir:
+                    org, _, uuid_part = job.project_key.partition(":")
+                    ctx.org_id, ctx.project_uuid = org, uuid_part
+                    ctx.storage_dir = job.storage_dir
 
             n = ctx.network
             lock = ctx.mutation_lock
@@ -411,7 +451,10 @@ class SolveQueue:
                     # already correct, so we leave user_ts.json untouched there.
                     _save_context(
                         ctx, project_id, expect=project_id,
-                        persist_user_ts=(project_id == active_id),
+                        persist_user_ts=is_foreground,
+                        storage_dir=(
+                            pathlib.Path(job.storage_dir) if job.storage_dir else None
+                        ),
                     )
         except Exception as exc:  # noqa: BLE001 — record + continue draining
             final_status = "failed"

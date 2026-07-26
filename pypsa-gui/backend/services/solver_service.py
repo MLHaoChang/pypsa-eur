@@ -632,6 +632,43 @@ class _RollingWindowFailureCatcher(logging.Handler):
             self.failures.append((st, cond))
 
 
+class _ThreadScopedQueueHandler(logging.handlers.QueueHandler):
+    """
+    Root-logger → SSE bridge that only forwards THIS solve's records.
+
+    The plain ``QueueHandler`` this replaced was attached to the **root**
+    logger, so on a shared process every log record produced by every other
+    tenant's request — 500 tracebacks included — was streamed into whichever
+    tenant happened to be solving. That is a cross-tenant disclosure, not a
+    cosmetic one.
+
+    The fix is NOT to attach to a narrower logger. Attaching to, say, the
+    solver's own logger would EMPTY the stream: the root attachment is
+    deliberate, because the log the user reads *is* ``pypsa.*`` / ``linopy.*`` /
+    HiGHS output emitted under those third-party logger names. Instead, filter
+    on the emitting thread, which is exactly the pattern
+    ``_RollingWindowFailureCatcher`` above already uses for the same reason —
+    PyPSA emits synchronously inside the solving thread, so the ident captured
+    at construction identifies this solve's records and no one else's.
+
+    STEP 2 CAVEAT: this holds only while one job runs per thread. If the worker
+    ever runs jobs asyncio-concurrently on a single event loop, ``thread``
+    degenerates to a constant and cross-job contamination returns *silently*.
+    Switch to a ``contextvars.ContextVar`` at that point — it survives both
+    threads and tasks — and keep the S0.6 assertion that pypsa/linopy lines are
+    still present, so the fix cannot regress into the bug it replaced.
+    """
+
+    def __init__(self, log_queue) -> None:
+        super().__init__(log_queue)
+        self._owner_tid = threading.get_ident()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if getattr(record, "thread", None) != self._owner_tid:
+            return
+        super().emit(record)
+
+
 def run_simulation(
     config: SolverConfig,
     network: pypsa.Network,
@@ -651,7 +688,7 @@ def run_simulation(
     def _emit_state(**kw) -> None:
         if state_update is not None:
             state_update(**kw)
-    queue_handler = logging.handlers.QueueHandler(log_queue)
+    queue_handler = _ThreadScopedQueueHandler(log_queue)
     root_logger = logging.getLogger()
     root_logger.addHandler(queue_handler)
 

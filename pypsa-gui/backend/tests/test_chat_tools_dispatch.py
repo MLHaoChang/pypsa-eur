@@ -231,18 +231,27 @@ def test_update_component_global_constraint_partial_put_mitigation(install_netwo
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_save_project_as_blocks_overwrite_via_pre_check(install_network, tmp_projects_dir):
+def test_save_project_as_blocks_overwrite_via_pre_check(
+    client, install_network, tmp_projects_dir, project_storage_dir
+):
     """
     M1: save_project_as MUST refuse with 409 when target name already exists
     AND active ctx.loaded_project != name. The pre-check uses list_projects
     BEFORE issuing the destructive POST.
     """
     from fastapi import HTTPException
-    # Seed an existing project "B" on disk
-    proj_b = tmp_projects_dir / "B"
-    proj_b.mkdir()
-    (proj_b / "network.nc").write_bytes(b"placeholder")
-    (proj_b / "metadata.json").write_text('{"name": "B"}', encoding="utf-8")
+
+    # Seed "B" as a REAL project. The pre-check reads `list_projects`, which is
+    # DB-backed since Step 0a — a bare directory under the projects root is no
+    # longer a project and would make this test pass for the wrong reason.
+    n_b = pypsa.Network()
+    n_b.add("Bus", "B1")
+    install_network(n_b, name="B")
+    assert client.post(
+        "/api/projects/B", params={"force": True, "rebind": True}
+    ).status_code == 200
+    stored_b = project_storage_dir("B") / "network.nc"
+    before = stored_b.read_bytes()
 
     # Set active context to a DIFFERENT loaded_project so the predicate fires
     n = pypsa.Network()
@@ -254,8 +263,8 @@ def test_save_project_as_blocks_overwrite_via_pre_check(install_network, tmp_pro
     assert exc.value.status_code == 409
     detail = str(exc.value.detail)
     assert "already exists" in detail or "exists" in detail
-    # network.nc should still be the placeholder we wrote (POST was NEVER issued)
-    assert (proj_b / "network.nc").read_bytes() == b"placeholder"
+    # B's stored network is untouched (the POST was NEVER issued)
+    assert stored_b.read_bytes() == before
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -343,8 +352,11 @@ def test_delete_project_passes_cascade_param(tmp_projects_dir, monkeypatch):
     """
     call_log: list[dict] = []
 
-    def fake_delete(name, cascade=False):
+    # `db`/`user` are injected by `chat_tools._route` since Step 0a — the tool
+    # layer supplies the acting identity the handler now authorizes against.
+    def fake_delete(name, cascade=False, db=None, user=None):
         call_log.append({"name": name, "cascade": cascade})
+        assert user is not None, "delete_project must be called with an identity"
         return {"deleted": [name]}
 
     from routers import projects as projects_router

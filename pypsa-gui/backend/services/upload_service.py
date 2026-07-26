@@ -123,18 +123,42 @@ class _ProjectPaths:
     uploads_dir: pathlib.Path
 
 
-def _resolve_paths(name: str) -> _ProjectPaths:
+def _resolve_paths(
+    name: str, project_dir: pathlib.Path | None = None
+) -> _ProjectPaths:
     """
-    Locate `projects/<name>/uploads/`. Reuses the existing project-dir
-    safety guard from routers.projects so this module doesn't duplicate
-    the path-traversal regex.
+    Locate a project's ``uploads/`` directory.
+
+    Resolution order, most-trusted first:
+
+      1. **Explicit ``project_dir``** — the caller (an HTTP route) already
+         resolved the project through `require_project_access`, so this is an
+         *authorized* org-scoped path. Every route in `routers/uploads.py`
+         passes it.
+      2. **The active context's ``storage_dir``** when ``name`` is what the
+         active context is bound to. This is the chat-tool path: the agent acts
+         on the project the user activated, and activation is itself
+         ACL-checked, so the directory inherits that authorization.
+      3. ``PROJECTS_DIR / name`` via `_safe_project_dir`. A path-traversal
+         guard, NOT an authorization check — the projects root is shared, so
+         this resolves any org's project by name. It survives only for
+         unbound/legacy callers and tests; nothing reachable from an HTTP route
+         lands here any more. Step 1 retires it with the legacy-flat readers.
     """
+    if project_dir is not None:
+        return _ProjectPaths(project_dir=project_dir, uploads_dir=project_dir / "uploads")
+
+    from services.pypsa_service import PyPSAService
+    ctx = PyPSAService.get_active_context()
+    if name and ctx.loaded_project == name and ctx.storage_dir:
+        base = pathlib.Path(ctx.storage_dir)
+        return _ProjectPaths(project_dir=base, uploads_dir=base / "uploads")
+
     # Lazy import — routers/projects imports this module's parent service
     # chain in turn, so a top-level import here would create a cycle.
     from routers.projects import _safe_project_dir
-    project_dir = _safe_project_dir(name)
-    uploads_dir = project_dir / "uploads"
-    return _ProjectPaths(project_dir=project_dir, uploads_dir=uploads_dir)
+    resolved = _safe_project_dir(name)
+    return _ProjectPaths(project_dir=resolved, uploads_dir=resolved / "uploads")
 
 
 def _file_id_for(blob_bytes: bytes) -> tuple[str, str]:
@@ -228,6 +252,7 @@ def add_upload(
     sniffed_mime: str,
     kind: UploadKind = "user_upload",
     quota_bytes: int = DEFAULT_QUOTA_BYTES,
+    project_dir: pathlib.Path | None = None,
 ) -> UploadMeta:
     """
     Add `file_bytes` to `name`'s uploads dir. Idempotent on bytes — same
@@ -241,7 +266,7 @@ def add_upload(
             hash-collision-style dedup mismatch (effectively impossible
             in practice but caught to fail loudly).
     """
-    paths = _resolve_paths(name)
+    paths = _resolve_paths(name, project_dir)
     paths.uploads_dir.mkdir(parents=True, exist_ok=True)
     file_id, sha256_full = _file_id_for(file_bytes)
     file_dir = paths.uploads_dir / file_id
@@ -323,14 +348,14 @@ def add_upload(
         return meta
 
 
-def list_uploads(name: str) -> list[UploadMeta]:
+def list_uploads(name: str, *, project_dir: pathlib.Path | None = None) -> list[UploadMeta]:
     """
     Return all blob_ready=true uploads for `name`, newest first by
     uploaded_at. Missing uploads/ dir → []. Holds the per-project lock
     for the read so a concurrent delete can't surface a half-removed
     entry.
     """
-    paths = _resolve_paths(name)
+    paths = _resolve_paths(name, project_dir)
     if not paths.uploads_dir.exists():
         return []
 
@@ -353,12 +378,12 @@ def list_uploads(name: str) -> list[UploadMeta]:
         return out
 
 
-def get_upload_meta(name: str, file_id: str) -> UploadMeta:
+def get_upload_meta(name: str, file_id: str, *, project_dir: pathlib.Path | None = None) -> UploadMeta:
     """
     Return the UploadMeta for `file_id`. Raises 404 with
     error_kind=upload_not_found on missing.
     """
-    paths = _resolve_paths(name)
+    paths = _resolve_paths(name, project_dir)
     with _project_upload_lock(name):
         meta = _read_meta(paths.uploads_dir / file_id / "meta.json")
         if meta is None or not meta.blob_ready:
@@ -372,16 +397,17 @@ def get_upload_meta(name: str, file_id: str) -> UploadMeta:
         return meta
 
 
-def get_upload_path(name: str, file_id: str) -> pathlib.Path:
+def get_upload_path(name: str, file_id: str, *, project_dir: pathlib.Path | None = None) -> pathlib.Path:
     """
     Return the absolute path to the blob for `file_id`. Validates the
     meta is present and blob_ready. Used by the streaming download
     endpoint to keep the path-construction logic centralised.
     """
-    paths = _resolve_paths(name)
+    paths = _resolve_paths(name, project_dir)
     blob = paths.uploads_dir / file_id / "blob"
-    # Validate via meta read (raises 404 on missing).
-    get_upload_meta(name, file_id)
+    # Validate via meta read (raises 404 on missing). Forward `project_dir` or
+    # the check would resolve a DIFFERENT directory than the blob path above.
+    get_upload_meta(name, file_id, project_dir=project_dir)
     if not blob.exists():
         raise HTTPException(
             status_code=404,
@@ -393,17 +419,17 @@ def get_upload_path(name: str, file_id: str) -> pathlib.Path:
     return blob
 
 
-def get_upload_bytes(name: str, file_id: str) -> bytes:
+def get_upload_bytes(name: str, file_id: str, *, project_dir: pathlib.Path | None = None) -> bytes:
     """Convenience wrapper for tools that need the raw bytes (Phase C)."""
-    return get_upload_path(name, file_id).read_bytes()
+    return get_upload_path(name, file_id, project_dir=project_dir).read_bytes()
 
 
-def delete_upload(name: str, file_id: str) -> DeleteUploadResponse:
+def delete_upload(name: str, file_id: str, *, project_dir: pathlib.Path | None = None) -> DeleteUploadResponse:
     """
     Remove the upload dir. Idempotent — missing file → not_found
     response with HTTP 200 (caller switches on `deleted` field).
     """
-    paths = _resolve_paths(name)
+    paths = _resolve_paths(name, project_dir)
     file_dir = paths.uploads_dir / file_id
     with _project_upload_lock(name):
         if not file_dir.exists():
@@ -538,7 +564,12 @@ def build_multimodal_content_blocks(
     return blocks
 
 
-def prune_orphans(name: str, grace_seconds: float = 60.0) -> int:
+def prune_orphans(
+    name: str,
+    grace_seconds: float = 60.0,
+    *,
+    project_dir: pathlib.Path | None = None,
+) -> int:
     """
     Reap upload subdirs whose meta.json is missing OR whose blob_ready
     is False AND whose dir mtime is older than `grace_seconds`. The
@@ -547,7 +578,7 @@ def prune_orphans(name: str, grace_seconds: float = 60.0) -> int:
 
     Returns the number of subdirs removed.
     """
-    paths = _resolve_paths(name)
+    paths = _resolve_paths(name, project_dir)
     if not paths.uploads_dir.exists():
         return 0
     cutoff = time.time() - grace_seconds

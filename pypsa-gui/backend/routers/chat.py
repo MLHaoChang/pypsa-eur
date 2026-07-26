@@ -253,6 +253,15 @@ def chat_stream(body: StreamRequest, request: Request) -> StreamingResponse:
     StreamingResponse generator runs in the standard threadpool without
     needing `asyncio.run` from a worker thread.
     """
+    # Bind the acting identity for this turn's tools (Step 0a). The project
+    # tools call `routers.projects` handlers in-process and must authorize
+    # against the same user the request did; `chat_tools` reads this contextvar
+    # and opens its own short-lived DB session per call, because this request's
+    # session is closed the moment the handler returns and the SSE generator
+    # outlives it. STEP 0b: this becomes the session row's own identity.
+    from services import chat_tools as _chat_tools
+    _chat_tools.set_acting_user(getattr(getattr(request.state, "auth_user", None), "id", None))
+
     session = chat_service.get_or_create_session(
         body.session_id, model=body.model or chat_service.DEFAULT_MODEL,
     )

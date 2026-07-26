@@ -38,8 +38,11 @@ lists which Phase 2 turns into Messages-API content blocks.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
+import uuid
+from contextvars import ContextVar
 from typing import Any
 
 from fastapi import HTTPException
@@ -1004,6 +1007,79 @@ def solve_queue_clear_finished() -> dict:
 
 # ── Project management (21) ─────────────────────────────────────────────────
 
+# ── Acting identity for project-scoped tools (Step 0a) ──────────────────────
+# Every `routers.projects` handler now takes `db` + `user` and authorizes the
+# project against the caller's org. The chat tools call those handlers DIRECTLY
+# (in-process, not over HTTP), so they have to supply the same identity — a
+# direct call gets no dependency injection, and before this the unresolved
+# `Depends` sentinel reached `user.id` and raised
+# `AttributeError: 'Depends' object has no attribute 'id'`.
+#
+# The identity travels as a contextvar holding the USER ID, not a Session: the
+# chat stream is an SSE generator that outlives its request, and the request's
+# `Depends(get_db)` session is closed the moment the handler returns. Each tool
+# therefore opens its own short-lived session.
+#
+# Tools run on `chat_service._TOOL_EXECUTOR`, and contextvars do NOT propagate
+# into executor threads by themselves — the submit site copies the context.
+# STEP 0b replaces this with the session-bound active project, at which point
+# the identity comes from the session row rather than a contextvar.
+
+_ACTING_USER_ID: ContextVar[str | None] = ContextVar("chat_acting_user_id", default=None)
+
+
+def set_acting_user(user_id: str | None) -> None:
+    """Bind the user whose authority the tools in this context act with."""
+    _ACTING_USER_ID.set(str(user_id) if user_id is not None else None)
+
+
+def acting_user_id() -> str | None:
+    return _ACTING_USER_ID.get()
+
+
+@contextlib.contextmanager
+def _acting():
+    """Yield ``(db, user)`` for one project-scoped call."""
+    user_id = _ACTING_USER_ID.get()
+    if user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_kind": "no_acting_user",
+                "message": (
+                    "This tool acts on projects and needs an authenticated "
+                    "session. Reload the workbench and retry."
+                ),
+            },
+        )
+    from db.models import User
+    from db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        user = db.get(User, uuid.UUID(user_id))
+        if user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        yield db, user
+    finally:
+        db.close()
+
+
+def _route(handler, *args, **kwargs):
+    """Call a project-router handler with the acting identity injected."""
+    with _acting() as (db, user):
+        return handler(*args, db=db, user=user, **kwargs)
+
+
+def _authorized_project(name: str):
+    """Resolve `name` to the `AuthorizedProject` the compare routes take."""
+    from routers.deps import require_project_access
+
+    with _acting() as (db, user):
+        return require_project_access(name, db=db, user=user)
+
+
+
 
 def list_projects() -> list[dict]:
     """
@@ -1013,7 +1089,7 @@ def list_projects() -> list[dict]:
     automatically in that case (projects.py:1319-1326), both still succeed.
     """
     from routers.projects import list_projects as _h
-    result = _h()
+    result = _route(_h)
     # Augment with resident: bool (snapshot-at-read-time per v6-F2).
     resident_set = set(PyPSAService._contexts.keys())
     if isinstance(result, list):
@@ -1035,7 +1111,7 @@ def load_project(name: str) -> dict:
     stores, loads, transformers, snapshots}.
     """
     from routers.projects import load_project as _h
-    return _h(name)
+    return _route(_h, name)
 
 
 def activate_project(project_id: str) -> dict:
@@ -1044,7 +1120,7 @@ def activate_project(project_id: str) -> dict:
     v6-F2: tolerates concurrent eviction (cold path at projects.py:1319-1326).
     """
     from routers.projects import activate_project as _h
-    return _h(project_id)
+    return _route(_h, project_id)
 
 
 def save_project(name: str, force: bool = False, expect: str | None = None) -> dict:
@@ -1055,7 +1131,7 @@ def save_project(name: str, force: bool = False, expect: str | None = None) -> d
     asserting same-name autosave / first-save semantics).
     """
     from routers.projects import save_project as _h
-    return _h(name, force=force, expect=expect)
+    return _route(_h, name, force=force, expect=expect)
 
 
 def save_project_as(name: str) -> dict:
@@ -1087,20 +1163,20 @@ def save_project_as(name: str) -> dict:
             },
         )
     from routers.projects import save_project as _h
-    return _h(name, rebind=True)
+    return _route(_h, name, rebind=True)
 
 
 def save_project_a_copy(name: str) -> dict:
     """POST /api/projects/{name} with rebind=False — branches on disk."""
     from routers.projects import save_project as _h
-    return _h(name, rebind=False)
+    return _route(_h, name, rebind=False)
 
 
 def rename_project(name: str, new_name: str) -> dict:
     from routers.projects import rename_project as _h
     from models.schemas import RenameProjectRequest
     body = RenameProjectRequest(new_name=new_name)
-    return _h(name, body)
+    return _route(_h, name, body)
 
 
 def delete_project(name: str, cascade: bool = False) -> dict:
@@ -1109,7 +1185,7 @@ def delete_project(name: str, cascade: bool = False) -> dict:
     the descendant list in the Confirmation Card; the agent must NOT auto-cascade.
     """
     from routers.projects import delete_project as _h
-    return _h(name, cascade=cascade)
+    return _route(_h, name, cascade=cascade)
 
 
 def create_scenario(base: str, new_name: str, description: str | None = None) -> dict:
@@ -1121,7 +1197,7 @@ def create_scenario(base: str, new_name: str, description: str | None = None) ->
     from routers.projects import create_scenario as _h
     from models.schemas import CreateScenarioRequest
     body = CreateScenarioRequest(name=new_name, description=description or "")
-    return _h(base, body)
+    return _route(_h, base, body)
 
 
 def list_scenarios(name: str) -> list[dict]:
@@ -1140,29 +1216,32 @@ def list_scenarios(name: str) -> list[dict]:
 
 def get_project_results_bundle(name: str) -> dict:
     from routers.projects import get_results_bundle as _h
-    return _h(name)
+    return _route(_h, name)
 
 
 def get_project_layout(name: str) -> dict:
     from routers.projects import get_layout as _h
-    return _h(name)
+    return _route(_h, name)
 
 
 def update_project_layout(name: str, layout: dict) -> dict:
     from routers.projects import put_layout as _h
-    return _h(name, layout)
+    return _route(_h, name, layout)
 
 
 def download_project_bundle(name: str) -> dict:
     from routers.projects import _project_bundle_bytes
+    proj = _authorized_project(name)
     return _save_agent_export(
-        _project_bundle_bytes(name), f"{name}.pypsaproj.zip", "application/zip",
+        _project_bundle_bytes(proj.name, proj.directory),
+        f"{proj.name}.pypsaproj.zip",
+        "application/zip",
     )
 
 
 def get_project_statistics(name: str) -> dict:
     from routers.projects import project_statistics as _h
-    return _h(name)
+    return _route(_h, name)
 
 
 def get_project_network_meta(project_id: str) -> dict:
@@ -1173,7 +1252,8 @@ def get_project_network_meta(project_id: str) -> dict:
     # the active slot) and pass it explicitly.
     from routers.deps import resolve_project_context
     from routers.project_network import get_project_meta as _h
-    return _h(ctx=resolve_project_context(project_id))
+    with _acting() as (db, user):
+        return _h(ctx=resolve_project_context(project_id, db=db, user=user))
 
 
 def list_project_network_component(project_id: str, component_class: str) -> list[dict]:
@@ -1188,7 +1268,11 @@ def list_project_network_component(project_id: str, component_class: str) -> lis
     # only — GlobalConstraint/carriers will 404 there, by its allow-list.)
     from routers.deps import resolve_project_context
     from routers.project_network import get_project_component as _h
-    return _h(component_class=attr, ctx=resolve_project_context(project_id))
+    with _acting() as (db, user):
+        return _h(
+            component_class=attr,
+            ctx=resolve_project_context(project_id, db=db, user=user),
+        )
 
 
 def import_project_bundle(bundle_bytes_b64: str, filename: str = "bundle.zip") -> dict:
@@ -1199,7 +1283,8 @@ def import_project_bundle(bundle_bytes_b64: str, filename: str = "bundle.zip") -
     from routers.projects import import_bundle as _h
     data = base64.b64decode(bundle_bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    with _acting() as (db, user):
+        return _sync(_h(upload, db=db, user=user))
 
 
 def create_project_from_template(template_id: str, new_name: str) -> dict:
@@ -1207,17 +1292,17 @@ def create_project_from_template(template_id: str, new_name: str) -> dict:
     # Handler is create_from_template(template_id, name: str | None) — pass the
     # NAME STRING, not a dict (it does (name or "").strip() on the 2nd arg).
     from routers.projects import create_from_template as _h
-    return _h(template_id, new_name)
+    return _route(_h, template_id, new_name)
 
 
 def get_project_compare_state(name: str) -> dict:
     from routers.compare import get_compare_state as _h
-    return _h(name)
+    return _h(project=_authorized_project(name))
 
 
 def get_project_results_summary(name: str) -> dict:
     from routers.compare import get_results_summary as _h
-    return _h(name)
+    return _h(project=_authorized_project(name))
 
 
 _COMPARE_FOCUS_TO_TAB = {

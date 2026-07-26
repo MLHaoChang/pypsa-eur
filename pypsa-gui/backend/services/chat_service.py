@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import collections
 import concurrent.futures
+import contextvars
 import datetime
 import json
 import logging
@@ -2427,7 +2428,15 @@ def _dispatch_real_tool_call(
         if tool_name in ("run_simulation", "run_ac_pf_stage"):
             result = handler(**(args or {}))
         else:
-            future = _TOOL_EXECUTOR.submit(lambda: handler(**(args or {})))
+            # Copy the calling context into the worker thread. Tool handlers
+            # read `chat_tools._ACTING_USER_ID` to authorize project routes,
+            # and a ThreadPoolExecutor worker does NOT inherit contextvars —
+            # without this every project tool would raise 401 no matter who is
+            # signed in.
+            _ctx_snapshot = contextvars.copy_context()
+            future = _TOOL_EXECUTOR.submit(
+                lambda: _ctx_snapshot.run(lambda: handler(**(args or {})))
+            )
             try:
                 result = future.result(timeout=PER_TOOL_TIMEOUT_SECONDS)
             except concurrent.futures.TimeoutError:

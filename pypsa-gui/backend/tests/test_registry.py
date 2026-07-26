@@ -19,6 +19,16 @@ from services.project_context import ProjectContext
 from services.pypsa_service import PyPSAService
 
 
+def _bus_network() -> pypsa.Network:
+    """Minimal saveable network — `_save_context` skips empty ones."""
+    import pandas as pd
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=2, freq="h"))
+    n.add("Bus", "B1")
+    return n
+
+
 def _ctx(name: str) -> ProjectContext:
     n = pypsa.Network()
     n.name = name
@@ -82,7 +92,7 @@ def test_get_active_id_none_when_unbound():
     assert PyPSAService.get_active_id() is None
 
 
-def test_delete_project_evicts_resident_context(tmp_projects_dir):
+def test_delete_project_evicts_resident_context(client, install_network, registry_key_for):
     """
     Deleting a project must ALSO evict its resident context.
 
@@ -93,49 +103,43 @@ def test_delete_project_evicts_resident_context(tmp_projects_dir):
     project from a template came up carrying ghost components that were never
     in that template, and the next save persisted them.
 
-    Reproduced end-to-end against the live backend: create from the 3bus
-    template (Bus 0/1/2), add 'qa_bus', delete, recreate the same name from
-    3bus, activate -> four buses including 'qa_bus'.
+    Driven over HTTP since Step 0a: `delete_project` is now an authorized route
+    with `db`/`user` dependencies, and the registry key is `org:uuid` rather
+    than the name — so the eviction this guards can only be observed through
+    the same resolution path production uses.
     """
-    from routers.projects import delete_project
+    n = pypsa.Network()
+    n.add("Bus", "ghost_bus", v_nom=380.0)
+    install_network(n, name="ghost_probe")
+    assert client.post(
+        "/api/projects/ghost_probe", params={"force": True, "rebind": True}
+    ).status_code == 200
 
-    name = "ghost_probe"
-    # A resident context whose network carries a component the template lacks.
-    ctx = _ctx(name)
-    ctx.network.add("Bus", "ghost_bus", v_nom=380.0)
-    PyPSAService.register(name, ctx)
-    assert name in PyPSAService.list_ids()
+    key = registry_key_for("ghost_probe")
+    assert client.post("/api/projects/ghost_probe/activate").status_code == 200
+    assert key in PyPSAService.list_ids()
 
-    # Minimal on-disk project so delete_project gets past its existence check.
-    d = tmp_projects_dir / name
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "network.nc").write_bytes(b"")
-    (d / "metadata.json").write_text('{"name": "ghost_probe"}', encoding="utf-8")
-
-    out = delete_project(name, cascade=True)
-
-    assert name in out["deleted"]
-    assert not d.exists(), "directory should be gone"
-    assert name not in PyPSAService.list_ids(), (
+    out = client.delete("/api/projects/ghost_probe", params={"cascade": True})
+    assert out.status_code == 200, out.text
+    assert "ghost_probe" in out.json()["deleted"]
+    assert key not in PyPSAService.list_ids(), (
         "resident context survived deletion — a project recreated under this "
         "name would activate onto the deleted project's network"
     )
-    assert PyPSAService.get_context(name) is None
+    assert PyPSAService.get_context(key) is None
 
 
-def test_delete_project_eviction_is_safe_for_never_resident_names(tmp_projects_dir):
+def test_delete_project_eviction_is_safe_for_never_resident_names(client, install_network):
     """
-    `drop` is a no-op for a name that was never registered — deleting a
-    project that was never activated must not raise.
+    `drop` is a no-op for a key that was never registered — deleting a project
+    that was never activated must not raise.
     """
-    from routers.projects import delete_project
+    install_network(_bus_network(), name="never_resident")
+    assert client.post(
+        "/api/projects/never_resident", params={"force": True, "rebind": True}
+    ).status_code == 200
+    PyPSAService._contexts.clear()
 
-    name = "never_resident"
-    d = tmp_projects_dir / name
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "network.nc").write_bytes(b"")
-    (d / "metadata.json").write_text('{"name": "never_resident"}', encoding="utf-8")
-
-    assert name not in PyPSAService.list_ids()
-    out = delete_project(name, cascade=True)
-    assert name in out["deleted"]
+    out = client.delete("/api/projects/never_resident", params={"cascade": True})
+    assert out.status_code == 200, out.text
+    assert "never_resident" in out.json()["deleted"]

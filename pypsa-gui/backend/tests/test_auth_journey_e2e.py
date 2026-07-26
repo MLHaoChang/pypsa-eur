@@ -104,6 +104,9 @@ def test_auth_journey_landing_to_invited_member(
     )
     assert login.status_code == 200, login.text
     assert "pypsa_gui_session" in login.cookies
+    # Step 0a: every subsequent write in this journey is state-changing and
+    # rides a session cookie, so it needs the double-submit CSRF token.
+    client.headers["X-CSRF-Token"] = login.json()["csrf_token"]
 
     me = client.get("/api/auth/me")
     assert me.status_code == 200
@@ -169,6 +172,7 @@ def test_auth_journey_landing_to_invited_member(
         json={"email": member_email, "password": member_password},
     )
     assert member_login.status_code == 200, member_login.text
+    client.headers["X-CSRF-Token"] = member_login.json()["csrf_token"]
 
     member_me = client.get("/api/auth/me")
     assert member_me.status_code == 200

@@ -115,6 +115,10 @@ def _client_for(email: str):
     with TestClient(main.app) as client:
         resp = client.post("/api/auth/login", json={"email": email, "password": "secret-pass"})
         assert resp.status_code == 200, resp.text
+        # Step 0a: state-changing routes require the double-submit CSRF
+        # token. The login response carries it in the body precisely so a
+        # non-browser client can echo it back without parsing cookies.
+        client.headers["X-CSRF-Token"] = resp.json()["csrf_token"]
         yield client
 
 
@@ -154,17 +158,17 @@ def test_uuid_named_dir_is_not_listed(session_local, projects_root):
     assert [row["name"] for row in resp.json()] == ["Flat One"]
 
 
-def test_unclaimed_requires_auth_enabled(tmp_path, monkeypatch):
-    monkeypatch.setenv("PYPSA_GUI_AUTH_ENABLED", "false")
-    monkeypatch.setenv("PROJECTS_ROOT", str(tmp_path / "tenant-projects"))
-    get_settings.cache_clear()
-    try:
-        with TestClient(main.app) as client:
-            assert client.get("/api/projects/unclaimed").status_code == 404
-            resp = client.post("/api/projects/unclaimed/Whatever/import")
-            assert resp.status_code == 404
-    finally:
-        get_settings.cache_clear()
+def test_unclaimed_requires_authentication(anon_client):
+    """
+    Replaces `test_unclaimed_requires_auth_enabled` (Step 0a).
+
+    That test asserted the routes 404 when `PYPSA_GUI_AUTH_ENABLED=false`. The
+    flag is deleted and single-user mode with it, so the property worth keeping
+    is the one that still means something: an ANONYMOUS caller cannot enumerate
+    or claim pre-auth projects.
+    """
+    assert anon_client.get("/api/projects/unclaimed").status_code == 401
+    assert anon_client.post("/api/projects/unclaimed/Whatever/import").status_code == 401
 
 
 # ── Import ───────────────────────────────────────────────────────────────────

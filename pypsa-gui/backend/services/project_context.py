@@ -104,7 +104,21 @@ class ProjectContext:
     # None when fresh/unbound. DECOUPLED from the mutable `network.name` display
     # title — the save path's `expect`/`rebind` identity guard trusts this, not
     # the title. Set only by load-class ops + the first-save claim.
+    #
+    # This is the human-readable NAME and is what the client sends and sees. It
+    # is deliberately NOT the registry key any more — see `registry_key` below.
     loaded_project: str | None = None
+
+    # ── Tenant identity (Step 0a) ───────────────────────────────────────────
+    # Which org's project this is, and its immutable row id. Set together by
+    # `PyPSAService.bind_project`; both None on an unbound context.
+    org_id: str | None = None
+    project_uuid: str | None = None
+    # Absolute org-scoped storage directory (`Project.storage_path`). Held on
+    # the context so an eviction save writes to the row's real location instead
+    # of re-deriving a path from the display name — which was wrong the moment
+    # two orgs owned the same name.
+    storage_dir: str | None = None
 
     # Transient LP-scaffolding rows the solver adds for the duration of one solve
     # (vintage clones `parent@<year>`, VOLL slacks `__voll_<bus>`) and reverts in
@@ -160,6 +174,28 @@ class ProjectContext:
     # `chat_service.flush_to_disk` from `_save_evicted_ctx` (B9 eviction)
     # before the context is dropped. See ChatState above for field details.
     chat_state: ChatState = field(default_factory=ChatState)
+
+    @property
+    def registry_key(self) -> str | None:
+        """
+        Key under which this context is resident in `PyPSAService._contexts`.
+
+        Until Step 0a the registry was keyed by the project NAME. Names are
+        unique *within an org*, but the registry is *per process*, so two orgs
+        that both had a project called `Baseline` shared one slot: whichever
+        org activated second either got the other's resident network back or
+        evicted it. Keying on `(org_id, project_uuid)` removes the collision at
+        the source — a uuid belongs to exactly one org, and the org prefix
+        keeps the key legible in logs and eviction messages.
+
+        Falls back to the name for an UNBOUND context (`New Project` before its
+        first save, which has no row to point at yet). That fallback is what
+        Step 0b replaces with a per-session scratch identity; on one process
+        with one active project it is still correct today.
+        """
+        if self.org_id and self.project_uuid:
+            return f"{self.org_id}:{self.project_uuid}"
+        return self.loaded_project
 
 
 # ── Solver lifecycle + result state ──────────────────────────────────────────

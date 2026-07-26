@@ -25,6 +25,7 @@ import pypsa
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import security
 from db import session as db_session_module
 from deps import resolve_request_user
 from routers import (
@@ -127,18 +128,73 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PyPSA GUI API", version="1.0.0", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    # Local Vite + Cursor cloud/mobile HTTPS preview tunnels.
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_origin_regex=r"https://.*\.cursorusercontent\.com",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def _csrf_rejection(request: Request) -> JSONResponse | None:
+    """
+    Refuse a state-changing request that cannot prove same-origin intent.
+
+    Two independent checks, both required — either alone is bypassable:
+
+      1. **Origin/Referer must be allowlisted when present.** A browser always
+         attaches one to a cross-origin state-changing request. A request with
+         neither header did not come from a cross-site browser context, so it
+         is allowed through to check 2; that is not a hole, because the CSRF
+         threat model is specifically "attacker page drives the victim's
+         browser", and a non-browser client attacking directly has no victim
+         cookie to ride on.
+      2. **Double-submit token.** The `X-CSRF-Token` header must equal the
+         CSRF cookie. An attacker page can make the browser *send* the cookie
+         (`SameSite=None`) but cannot *read* it to copy into a header — unless
+         its origin is allowlisted and credentialed, which is exactly why
+         check 1 and the CORS allowlist are the same decision.
+
+    Requests carrying no session cookie are exempt: there is no authority to
+    forge, and refusing them would turn every anonymous 401 into a confusing
+    403.
+    """
+    settings = get_settings()
+    if not request.cookies.get(settings.session_cookie_name):
+        return None
+
+    origin = request.headers.get("origin")
+    if origin is None:
+        origin = security.origin_of_referer(request.headers.get("referer"))
+    if origin is not None and not security.is_allowed_origin(origin):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "Cross-origin request rejected.",
+                "code": "csrf_origin_rejected",
+            },
+        )
+
+    if not security.csrf_tokens_match(
+        request.cookies.get(settings.csrf_cookie_name),
+        request.headers.get(settings.csrf_header_name),
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": (
+                    "Missing or invalid CSRF token. Reload the page to obtain a "
+                    "fresh token, then retry."
+                ),
+                "code": "csrf_token_invalid",
+            },
+        )
+    return None
+
+
+# NOTE ON MIDDLEWARE ORDER — Starlette makes the LAST-added middleware the
+# OUTERMOST. The three below are therefore declared innermost-first:
+#
+#   CORS  →  replica id  →  auth + CSRF + undo  →  routes
+#
+# That order is load-bearing in both directions. CORS must be outermost or a
+# 401 from the auth gate returns with no `Access-Control-Allow-Origin` and the
+# browser reports it as an opaque CORS failure instead of "log in" (it did,
+# before this note). The replica header must sit outside the auth gate so that
+# a rejected request still identifies which replica rejected it — otherwise the
+# multi-replica QA cases cannot attribute a failure.
 
 
 @app.middleware("http")
@@ -157,10 +213,25 @@ async def undo_snapshot_middleware(request: Request, call_next):
     normalized_path = path.rstrip("/") or "/"
     is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
 
+    is_api = normalized_path == "/api" or normalized_path.startswith("/api/")
+
+    # ── CSRF: Origin/Referer check + double-submit token ──────────────────
+    # Runs BEFORE session resolution so a forged request is refused without
+    # touching the database. Scoped to state-changing methods on /api; safe
+    # methods and the public auth paths (login/reset, which have no session to
+    # ride on) are exempt.
+    if (
+        is_api
+        and request.method not in security.CSRF_SAFE_METHODS
+        and normalized_path not in _AUTH_PUBLIC_PATHS
+    ):
+        rejection = _csrf_rejection(request)
+        if rejection is not None:
+            return rejection
+
     if (
         request.method != "OPTIONS"
-        and get_settings().pypsa_gui_auth_enabled
-        and (normalized_path == "/api" or normalized_path.startswith("/api/"))
+        and is_api
         and normalized_path not in _AUTH_PUBLIC_PATHS
     ):
         try:
@@ -327,6 +398,41 @@ async def undo_snapshot_middleware(request: Request, call_next):
 
     return response
 
+
+@app.middleware("http")
+async def replica_identity_middleware(request: Request, call_next):
+    """
+    Stamp every response with an opaque per-process id.
+
+    Mandated test infrastructure, not diagnostics: without it a sticky proxy
+    makes every multi-replica assertion pass while state is still process-local
+    — the exact failure mode `smoke/qa_e2e.py` already had when it asserted on
+    HTTP 200 alone. Opaque (keyed hash of pid + boot nonce) so it cannot be
+    read as topology.
+    """
+    response = await call_next(request)
+    response.headers[security.REPLICA_HEADER] = security.replica_id()
+    return response
+
+
+app.add_middleware(
+    CORSMiddleware,
+    # Explicit allowlist, env-driven via `cors_allowed_origins`.
+    #
+    # This replaced `allow_origin_regex=r"https://.*\.cursorusercontent\.com"`,
+    # and the replacement had to ship together with the CSRF check above. Under
+    # the wildcard, ANY page on that domain was an allowlisted *credentialed*
+    # origin: it passed the Origin/Referer check, CORS let it read the response,
+    # and it could therefore read the double-submit token and forge with it.
+    # `SameSite=None` means the session cookie rides along. Adding an origin
+    # here grants it CSRF-forging capability — review the two together.
+    allow_origins=sorted(security.allowed_origins()),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=[security.REPLICA_HEADER],
+)
+
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
@@ -393,7 +499,10 @@ def health():
     return {
         "status": "ok",
         "pypsa_version": pypsa.__version__,
-        # Lets the SPA detect "backend auth on / frontend auth off" and show a
-        # setup gate instead of an opaque workbench + 401/500 toast storm.
-        "auth_enabled": get_settings().pypsa_gui_auth_enabled,
+        # Retained as a constant `true`. Single-user mode is gone (Step 0a), but
+        # the field is part of the SPA's boot contract — `AuthModeProvider`
+        # reads it — and dropping it would make an older cached bundle fall
+        # back to "auth off" and render the workbench without a login gate.
+        # Remove it only together with the frontend read.
+        "auth_enabled": True,
     }

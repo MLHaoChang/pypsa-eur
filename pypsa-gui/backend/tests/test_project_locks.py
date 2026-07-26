@@ -127,6 +127,8 @@ def _client_for(email: str):
     with TestClient(main.app) as client:
         response = client.post("/api/auth/login", json={"email": email, "password": "secret-pass"})
         assert response.status_code == 200, response.text
+        # Step 0a: state-changing routes require the double-submit CSRF token.
+        client.headers["X-CSRF-Token"] = response.json()["csrf_token"]
         yield client
 
 

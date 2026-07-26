@@ -30,6 +30,7 @@ import time
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from starlette.responses import FileResponse, JSONResponse
 
+from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import upload_service
 from services.upload_guard import read_capped
 
@@ -135,11 +136,20 @@ def _validate_filename(filename: str | None) -> str:
 
 
 @router.post("/{name}/uploads")
-async def post_upload(name: str, file: UploadFile = File(...)) -> JSONResponse:
+async def post_upload(
+    file: UploadFile = File(...),
+    project: AuthorizedProject = ProjectAccessDep,
+) -> JSONResponse:
     """
-    Upload a file to ``projects/<name>/uploads/``. Idempotent on bytes
+    Upload a file to the project's ``uploads/`` directory. Idempotent on bytes
     (same SHA256 returns the existing entry's meta). Validates size,
     MIME (sniffed from bytes), and quota before writing.
+
+    The ``{name}`` path parameter is consumed by `ProjectAccessDep`, which
+    resolves it inside the caller's org and ACL-gates it (404 otherwise). The
+    handler never touches the raw parameter — it writes into
+    ``project.directory``, so a name that belongs to another org cannot be
+    addressed at all.
     """
     filename = _validate_filename(file.filename)
 
@@ -190,7 +200,8 @@ async def post_upload(name: str, file: UploadFile = File(...)) -> JSONResponse:
         )
 
     meta = upload_service.add_upload(
-        name=name,
+        name=project.name,
+        project_dir=project.directory,
         file_bytes=blob_bytes,
         filename=filename,
         sniffed_mime=sniffed_mime,
@@ -199,26 +210,41 @@ async def post_upload(name: str, file: UploadFile = File(...)) -> JSONResponse:
 
 
 @router.get("/{name}/uploads")
-def get_uploads(name: str) -> list[dict]:
-    """List uploads for `name`, newest first."""
-    return [m.model_dump() for m in upload_service.list_uploads(name)]
+def get_uploads(project: AuthorizedProject = ProjectAccessDep) -> list[dict]:
+    """List uploads for the project, newest first."""
+    return [
+        m.model_dump()
+        for m in upload_service.list_uploads(
+            project.name, project_dir=project.directory
+        )
+    ]
 
 
 @router.get("/{name}/uploads/{file_id}/meta")
-def get_upload_meta_route(name: str, file_id: str) -> dict:
-    return upload_service.get_upload_meta(name, file_id).model_dump()
+def get_upload_meta_route(
+    file_id: str, project: AuthorizedProject = ProjectAccessDep
+) -> dict:
+    return upload_service.get_upload_meta(
+        project.name, file_id, project_dir=project.directory
+    ).model_dump()
 
 
 @router.get("/{name}/uploads/{file_id}/blob")
-def get_upload_blob(name: str, file_id: str) -> FileResponse:
+def get_upload_blob(
+    file_id: str, project: AuthorizedProject = ProjectAccessDep
+) -> FileResponse:
     """
     Stream the blob. Content-Disposition: inline so a browser previews
     images/PDFs in a new tab instead of forcing a download dialog. The
     UI's download button on agent_export chips sets ?download=1 to
     flip it to attachment.
     """
-    path = upload_service.get_upload_path(name, file_id)
-    meta = upload_service.get_upload_meta(name, file_id)
+    path = upload_service.get_upload_path(
+        project.name, file_id, project_dir=project.directory
+    )
+    meta = upload_service.get_upload_meta(
+        project.name, file_id, project_dir=project.directory
+    )
     return FileResponse(
         path=str(path),
         media_type=meta.mime,
@@ -228,17 +254,25 @@ def get_upload_blob(name: str, file_id: str) -> FileResponse:
 
 
 @router.delete("/{name}/uploads/{file_id}")
-def delete_upload_route(name: str, file_id: str) -> JSONResponse:
+def delete_upload_route(
+    file_id: str, project: AuthorizedProject = ProjectAccessDep
+) -> JSONResponse:
     """
     Idempotent delete. Always returns HTTP 200 — the JSON body's
     `deleted` field distinguishes success vs not_found / in_use.
     """
-    resp = upload_service.delete_upload(name, file_id)
+    resp = upload_service.delete_upload(
+        project.name, file_id, project_dir=project.directory
+    )
     return JSONResponse(content=resp.model_dump(exclude_none=True), status_code=200)
 
 
 @router.get("/{name}/uploads/{file_id}/signature")
-def get_upload_signature(name: str, file_id: str, session_id: str) -> dict:
+def get_upload_signature(
+    file_id: str,
+    session_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+) -> dict:
     """
     Phase C — return an HMAC token binding ``(session_id, project, file_id,
     sha256, version)`` to a 5-minute expiry. The chat panel attaches the
@@ -259,11 +293,13 @@ def get_upload_signature(name: str, file_id: str, session_id: str) -> dict:
     Refresh by re-requesting before the expiry — the secret rotates on
     server restart, so a long-lived token from a previous boot is rejected.
     """
-    meta = upload_service.get_upload_meta(name, file_id)
+    meta = upload_service.get_upload_meta(
+        project.name, file_id, project_dir=project.directory
+    )
     expires_at = int(time.time()) + _UPLOAD_SIG_TTL_SECONDS
     sig = _make_upload_signature(
         session_id=session_id,
-        project=name,
+        project=project.name,
         file_id=file_id,
         sha256=meta.sha256,
         version=meta.version,

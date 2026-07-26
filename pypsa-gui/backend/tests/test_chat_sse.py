@@ -379,16 +379,13 @@ def test_parallel_destructive_batch_rejects_both(client):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_abort_endpoint_sets_abort_event():
+def test_abort_endpoint_sets_abort_event(client):
     """Synthetic abort_event check — POST /abort sets the flag."""
     sess = chat_service.get_or_create_session("sess-abort")
     assert not sess.abort_event.is_set()
-    from fastapi.testclient import TestClient
-    import main
-    with TestClient(main.app) as c:
-        r = c.post("/api/chat/sess-abort/abort")
-        assert r.status_code == 200
-        assert r.json()["ok"] is True
+    r = client.post("/api/chat/sess-abort/abort")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
     assert sess.abort_event.is_set()
 
 

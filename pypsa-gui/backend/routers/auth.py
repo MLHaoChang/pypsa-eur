@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
+import security
 from db.models import User
 from db.session import get_db
 from deps import require_user
@@ -82,12 +83,45 @@ def _set_session_cookie(response: Response, raw_token: str, request: Request | N
     )
 
 
+def issue_csrf_cookie(response: Response, request: Request | None = None) -> str:
+    """
+    Mint a double-submit CSRF token and return it.
+
+    Deliberately **not** httponly — the SPA has to read it to echo it back in
+    the `X-CSRF-Token` header, which is the entire mechanism: an attacker page
+    can make the browser *send* a `SameSite=None` cookie but cannot *read* it
+    across origins. `httponly=True` here would break the client without adding
+    protection, since the threat is cross-origin reads, not script access on
+    our own origin (a same-origin XSS can call the API directly regardless).
+    """
+    settings = get_settings()
+    samesite, secure = _cookie_flags(request)
+    token = security.new_csrf_token()
+    response.set_cookie(
+        key=settings.csrf_cookie_name,
+        value=token,
+        httponly=False,
+        samesite=samesite,
+        secure=secure,
+        max_age=settings.session_ttl_hours * 60 * 60,
+        path="/",
+    )
+    return token
+
+
 def _clear_session_cookie(response: Response, request: Request | None = None) -> None:
     settings = get_settings()
     samesite, secure = _cookie_flags(request)
     response.delete_cookie(
         key=settings.session_cookie_name,
         httponly=True,
+        samesite=samesite,
+        secure=secure,
+        path="/",
+    )
+    response.delete_cookie(
+        key=settings.csrf_cookie_name,
+        httponly=False,
         samesite=samesite,
         secure=secure,
         path="/",
@@ -112,6 +146,19 @@ def login(
     response: Response,
     db: DBSession = Depends(get_db),
 ) -> dict[str, object]:
+    # Throttle BEFORE the password check. `/api/auth/login` is in
+    # `_AUTH_PUBLIC_PATHS`, so nothing upstream limits it and credential
+    # stuffing was previously unimpeded — the only rate limiter in the codebase
+    # (`chat_service._RATE_BUCKETS`) covers chat.
+    ip = security.client_ip(request)
+    retry_after = security.login_retry_after(ip, payload.email)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed sign-in attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = db.scalar(select(User).where(User.email == _normalize_email(payload.email)))
     if (
         user is None
@@ -119,13 +166,20 @@ def login(
         or user.status != "active"
         or not verify_password(payload.password, user.password_hash)
     ):
+        security.record_failed_login(ip, payload.email)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    security.clear_login_attempts(ip, payload.email)
     raw_token, _session = create_session(db, user.id)
     _set_session_cookie(response, raw_token, request)
+    csrf_token = issue_csrf_cookie(response, request)
     membership = get_user_membership(db, user.id)
     return {
         "ok": True,
+        # Returned in the body as well as the cookie so a client that cannot
+        # read cookies (native app, test harness) can still satisfy the
+        # double-submit check without a second round-trip.
+        "csrf_token": csrf_token,
         "user": _serialize_user(
             user,
             org_id=str(membership.org_id) if membership is not None else None,
@@ -157,15 +211,31 @@ def logout(
 
 @router.get("/me")
 def me(
+    request: Request,
+    response: Response,
     user: User = Depends(require_user),
     db: DBSession = Depends(get_db),
 ) -> dict[str, str | bool | None]:
+    # Top up the CSRF cookie when it is missing but the session is still valid
+    # — the session cookie outlives the tab, and a session that predates the
+    # CSRF change (or whose token cookie was cleared) would otherwise have
+    # every write rejected with no way to recover short of signing out.
+    # Only when ABSENT: re-minting on every `/me` would race a concurrent
+    # mutation holding the previous value in its header.
+    settings = get_settings()
+    csrf_token = request.cookies.get(settings.csrf_cookie_name)
+    if not csrf_token:
+        csrf_token = issue_csrf_cookie(response, request)
+
     membership = get_user_membership(db, user.id)
-    return _serialize_user(
-        user,
-        org_id=str(membership.org_id) if membership is not None else None,
-        role=membership.role if membership is not None else None,
-    )
+    return {
+        **_serialize_user(
+            user,
+            org_id=str(membership.org_id) if membership is not None else None,
+            role=membership.role if membership is not None else None,
+        ),
+        "csrf_token": csrf_token,
+    }
 
 
 @router.get("/org-members")

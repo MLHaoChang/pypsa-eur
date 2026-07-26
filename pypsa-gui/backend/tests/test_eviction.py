@@ -119,9 +119,12 @@ def test_queued_running_solve_is_protected(cap2, tmp_projects_dir, monkeypatch):
     # (Y) is evicted instead. Monkeypatch the queue to report X running.
     from services import solve_queue as sq_mod
 
+    # The protected set keys on `project_key` (the `org:uuid` registry key)
+    # since Step 0a — `project_id` stays the display name for the UI. These
+    # contexts are registered under bare names, so key == name here.
     monkeypatch.setattr(
         sq_mod.solve_queue, "list_jobs",
-        lambda: [{"project_id": "X", "status": "running"}],
+        lambda: [{"project_id": "X", "project_key": "X", "status": "running"}],
     )
 
     x = _bound_ctx("X", stamp=1.0)
@@ -148,8 +151,8 @@ def test_eviction_stops_when_all_protected(cap2, tmp_projects_dir, monkeypatch):
     monkeypatch.setattr(
         sq_mod.solve_queue, "list_jobs",
         lambda: [
-            {"project_id": "RUN1", "status": "running"},
-            {"project_id": "RUN2", "status": "queued"},
+            {"project_id": "RUN1", "project_key": "RUN1", "status": "running"},
+            {"project_id": "RUN2", "project_key": "RUN2", "status": "queued"},
         ],
     )
     active = _bound_ctx("ACTIVE", stamp=0.0)

@@ -49,11 +49,14 @@ def _save_project(client, name: str) -> None:
     assert r.status_code == 200, r.text
 
 
-def test_enqueue_solves_and_persists(client, install_network, tmp_projects_dir):
-    # A saved, feasible single-bus project on disk.
+def test_enqueue_solves_and_persists(
+    client, install_network, tmp_projects_dir, project_storage_dir
+):
+    # A saved, feasible single-bus project on disk. Storage is org-scoped since
+    # Step 0a — `projects_root/<org>/<uuid>/`, not the flat `projects/<name>/`.
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
-    assert (tmp_projects_dir / "P1" / "network.nc").exists()
+    assert (project_storage_dir("P1") / "network.nc").exists()
 
     # Enqueue -> dispatcher loads from disk, solves, saves back.
     r = client.post("/api/simulation/queue", json={"project_id": "P1"})
@@ -70,7 +73,7 @@ def test_enqueue_solves_and_persists(client, install_network, tmp_projects_dir):
 
     # The headline guarantee: LOPF dispatch persisted to disk without the
     # project ever being saved by a foreground action.
-    n = pypsa.Network(str(tmp_projects_dir / "P1" / "network.nc"))
+    n = pypsa.Network(str(project_storage_dir("P1") / "network.nc"))
     assert not n.generators_t.p.empty, "solved dispatch was not persisted to network.nc"
     assert n.generators_t.p.to_numpy().sum() > 0
 
@@ -216,10 +219,19 @@ def test_abort_running_solve_is_fast_and_next_job_starts(
     assert isinstance(db["objective"], (int, float)), db
 
 
-def test_enqueue_unsafe_name_is_400(client, tmp_projects_dir):
-    # _safe_project_dir rejects traversal/unsafe tokens BEFORE any queuing.
+def test_enqueue_unsafe_name_is_404(client, tmp_projects_dir):
+    """
+    Was `..._is_400`; Step 0a changed the contract deliberately.
+
+    Enqueue used to resolve through `_safe_project_dir`, whose name regex
+    rejected traversal tokens with 400 before asking whose project it was — and
+    accepted any WELL-FORMED name, including another org's, then handed the
+    resolved path to a background thread that solves and SAVES it. Resolution
+    now runs through the caller's org and ACL, so hostile and absent ids are
+    one indistinguishable 404 and nothing is queued either way.
+    """
     r = client.post("/api/simulation/queue", json={"project_id": "../evil"})
-    assert r.status_code == 400, r.text
+    assert r.status_code == 404, r.text
     assert solve_queue.list_jobs() == []
 
 
@@ -417,7 +429,9 @@ def test_results_bundle_invalid_source_coerces_to_lopf(client, install_network, 
 
 
 # ── B4.3: dispatcher solves on its OWN ProjectContext (per-project isolation) ──
-def test_background_solve_does_not_touch_foreground(client, install_network, tmp_projects_dir):
+def test_background_solve_does_not_touch_foreground(
+    client, install_network, tmp_projects_dir, project_storage_dir
+):
     """
     Enqueue project B while project A is the foreground (active) ctx with UNSAVED
     in-memory edits. The background solve of B must leave A's active ctx — its
@@ -427,7 +441,7 @@ def test_background_solve_does_not_touch_foreground(client, install_network, tmp
     # B exists on disk (saved, then we move the foreground off it).
     install_network(build_network(), name="B")
     _save_project(client, "B")
-    assert (tmp_projects_dir / "B" / "network.nc").exists()
+    assert (project_storage_dir("B") / "network.nc").exists()
 
     # A becomes the active foreground ctx; mutate it in memory WITHOUT saving.
     install_network(build_network(), name="A")
@@ -452,12 +466,14 @@ def test_background_solve_does_not_touch_foreground(client, install_network, tmp
     assert not PyPSAService.has_any_transient_rows()
 
     # B's on-disk network carries the solved dispatch.
-    nb = pypsa.Network(str(tmp_projects_dir / "B" / "network.nc"))
+    nb = pypsa.Network(str(project_storage_dir("B") / "network.nc"))
     assert not nb.generators_t.p.empty, "B's solved dispatch was not persisted"
     assert nb.generators_t.p.to_numpy().sum() > 0
 
 
-def test_two_independent_projects_each_persist_own_results(client, install_network, tmp_projects_dir):
+def test_two_independent_projects_each_persist_own_results(
+    client, install_network, tmp_projects_dir, project_storage_dir
+):
     """Two distinct saved projects each solve on their own ctx and persist."""
     install_network(build_network(gens_weight=1.0), name="P1")
     _save_project(client, "P1")
@@ -474,7 +490,7 @@ def test_two_independent_projects_each_persist_own_results(client, install_netwo
     assert d2["objective"] is not None
 
     for name in ("P1", "P2"):
-        n = pypsa.Network(str(tmp_projects_dir / name / "network.nc"))
+        n = pypsa.Network(str(project_storage_dir(name) / "network.nc"))
         assert not n.generators_t.p.empty, f"{name}: dispatch not persisted"
         assert n.generators_t.p.to_numpy().sum() > 0
 
@@ -500,7 +516,7 @@ def test_enqueue_resident_foreground_solves_in_place(client, install_network, tm
 
 
 def test_enqueue_foreground_surfaces_status_for_run_button(
-    client, install_network, tmp_projects_dir
+    client, install_network, tmp_projects_dir, registry_key_for
 ):
     """
     The "Run = enqueue the foreground" UX: clicking Run enqueues the ACTIVE
@@ -514,11 +530,13 @@ def test_enqueue_foreground_surfaces_status_for_run_button(
     """
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
-    assert PyPSAService.get_active_id() == "P1"
+    # The registry key is `org:uuid` since Step 0a; the NAME is what a client
+    # sends, so that is what this enqueues — mirroring the Run button.
+    assert PyPSAService.get_active_id() == registry_key_for("P1")
 
-    # Enqueue the FOREGROUND project — the same id the active ctx is bound to.
+    # Enqueue the FOREGROUND project — the project the active ctx is bound to.
     job = client.post(
-        "/api/simulation/queue", json={"project_id": PyPSAService.get_active_id()}
+        "/api/simulation/queue", json={"project_id": "P1"}
     ).json()
     assert job["project_id"] == "P1"
     done = _wait_for_terminal(job["id"])

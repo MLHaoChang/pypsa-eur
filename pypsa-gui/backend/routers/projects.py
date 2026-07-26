@@ -45,9 +45,6 @@ class MembersRequest(BaseModel):
     user_ids: list[str] = []
 
 
-def _auth_enabled() -> bool:
-    return get_settings().pypsa_gui_auth_enabled
-
 PROJECTS_DIR = pathlib.Path(__file__).parent.parent / "projects"
 
 # Files that make up a project bundle (.pypsaproj.zip).
@@ -213,13 +210,11 @@ def _resolve_project_src(
     row's name in auth mode (so a caller that addressed the project by UUID
     still gets human-readable messages) or the passed ``name`` in legacy mode.
     """
-    if _auth_enabled():
-        from services import project_registry
+    from services import project_registry
 
-        project_registry.require_user(user)
-        project = project_registry.resolve_project(db, user, name)
-        return project_registry.project_dir(project), project.name
-    return _safe_project_dir(name), name
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    return project_registry.project_dir(project), project.name
 
 
 def _meta_path(project_dir: pathlib.Path) -> pathlib.Path:
@@ -637,22 +632,16 @@ def list_projects(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ) -> list[ProjectInfo]:
-    if _auth_enabled():
-        from services import project_acl, project_registry
+    from services import project_acl, project_registry
 
-        project_registry.require_user(user)
-        projects = project_acl.list_accessible_projects(db, user)
-        return [_project_info_db(db, p) for p in projects]
-
-    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
-    result = []
-    for d in sorted(PROJECTS_DIR.iterdir()):
-        if not d.is_dir():
-            continue
-        if not (d / "network.nc").exists():
-            continue
-        result.append(_project_info(d))
-    return result
+    # The DB is the sole source of truth for what projects exist. The
+    # `PROJECTS_DIR.iterdir()` scan that used to follow was the single-user
+    # fallback and was already unreachable whenever auth was on; a storage key
+    # with no row is now invisible here by design, and `tools/reconcile_storage`
+    # (Step 1) is the channel that surfaces such drift.
+    project_registry.require_user(user)
+    projects = project_acl.list_accessible_projects(db, user)
+    return [_project_info_db(db, p) for p in projects]
 
 
 # NOTE: `/unclaimed` and `/unclaimed/{legacy_name}/import` MUST stay ahead of
@@ -672,8 +661,6 @@ def list_unclaimed_projects(
     left behind, which become invisible the moment auth is switched on. Any
     authenticated user may enumerate them; importing one is a separate call.
     """
-    if not _auth_enabled():
-        raise HTTPException(404, "Importing pre-auth projects requires authentication to be enabled")
     from services import project_registry
     from services.legacy_migrate import list_legacy_projects
 
@@ -702,8 +689,6 @@ def import_unclaimed_project(
     The caller gets a personal organization created on the spot if they don't
     have one, so a fresh super-admin can import in a single click.
     """
-    if not _auth_enabled():
-        raise HTTPException(404, "Importing pre-auth projects requires authentication to be enabled")
     from services import project_registry
     from services.legacy_migrate import claim_legacy_project
     from services.tenancy_service import (
@@ -778,16 +763,12 @@ async def import_bundle(
 
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
-    if _auth_enabled():
-        from services import project_registry
+    from services import project_registry
 
-        project_registry.require_user(user)
-        _imported_project = project_registry.create_root(db, user, target_name)
-        target_name = _imported_project.name
-        dest = project_registry.project_dir(_imported_project)
-    else:
-        dest = _safe_project_dir(target_name)
-        dest.mkdir(parents=True, exist_ok=True)
+    project_registry.require_user(user)
+    _imported_project = project_registry.create_root(db, user, target_name)
+    target_name = _imported_project.name
+    dest = project_registry.project_dir(_imported_project)
     for fname in _BUNDLE_FILES:
         if fname in members:
             (dest / fname).write_bytes(zf.read(fname))
@@ -818,7 +799,9 @@ async def import_bundle(
             n.import_from_netcdf(str(nc_path))
         # Bind identity atomically with the swap (see load_project for the
         # rationale on why this must be inside the lock, not after).
-        PyPSAService.set_loaded_project(target_name)
+        project_registry.bind_context(
+            PyPSAService.get_active_context(), _imported_project
+        )
 
     cfg_path = dest / "solver_config.json"
     if cfg_path.exists():
@@ -1002,18 +985,12 @@ def create_from_template(
     # `name` is optional — default to the template's friendly name, then
     # uniquify so clicking the same template twice doesn't clobber the first.
     requested = (name or "").strip() or _TEMPLATE_DEFAULT_NAMES[template_id]
-    if _auth_enabled():
-        from services import project_registry
+    from services import project_registry
 
-        project_registry.require_user(user)
-        _created_project = project_registry.create_root(db, user, requested)
-        target_name = _created_project.name
-        dest = project_registry.project_dir(_created_project)
-    else:
-        _safe_project_dir(requested)  # validate the requested name (raises 400)
-        target_name = _unique_project_name(requested)
-        dest = _safe_project_dir(target_name)
-        dest.mkdir(parents=True, exist_ok=True)
+    project_registry.require_user(user)
+    _created_project = project_registry.create_root(db, user, requested)
+    target_name = _created_project.name
+    dest = project_registry.project_dir(_created_project)
     shutil.copy2(src_nc, dest / "network.nc")
 
     # Reset + load, mirroring import_bundle / load_project.
@@ -1025,7 +1002,9 @@ def create_from_template(
         with PyPSAService.get_netcdf_io_lock():
             n.import_from_netcdf(str(dest / "network.nc"))
         # Bind identity atomically with the swap (see load_project rationale).
-        PyPSAService.set_loaded_project(target_name)
+        project_registry.bind_context(
+            PyPSAService.get_active_context(), _created_project
+        )
 
     # Templates ship without user_ts / solver_config — reset both to defaults
     # so no stale state from a previously-open project leaks into the new one.
@@ -1111,24 +1090,23 @@ def save_project(
     keep it intact. A background save (dispatcher) must NOT touch the foreground's
     undo at all, which is exactly what calling `_save_context` directly achieves.
     """
-    storage_dir = None
-    if _auth_enabled():
-        from services import project_acl, project_registry
+    from services import project_acl, project_registry
 
-        project_registry.require_user(user)
-        project = project_registry.find_project(db, user, name)
-        if project is None:
-            # First save of a new project — register a root row in the DB.
-            project = project_registry.create_root(
-                db, user, name, scenario_description=scenario_description_override
-            )
-        else:
-            project_acl.ensure_project_access(db, user, project)
-        storage_dir = project_registry.project_dir(project)
-        name = project.name
+    project_registry.require_user(user)
+    project = project_registry.find_project(db, user, name)
+    if project is None:
+        # First save of a new project — register a root row in the DB.
+        project = project_registry.create_root(
+            db, user, name, scenario_description=scenario_description_override
+        )
+    else:
+        project_acl.ensure_project_access(db, user, project)
+    storage_dir = project_registry.project_dir(project)
+    name = project.name
     result = _save_context(
         PyPSAService.get_active_context(),
         name,
+        project_row=project,
         objective=objective,
         force=force,
         expect=expect,
@@ -1164,6 +1142,7 @@ def _save_context(
     storage_dir: pathlib.Path | None = None,
     db: DBSession | None = None,
     user: User | None = None,
+    project_row=None,
 ):
     """
     Persist `ctx`'s in-memory network to ``projects/<name>/``.
@@ -1367,7 +1346,15 @@ def _save_context(
         # scenario name) leaves the binding untouched — the live network still
         # belongs to its original project, the only valid autosave target.
         if loaded is None or rebind:
-            ctx.loaded_project = name
+            if project_row is not None:
+                # Bind the full tenant identity, not just the name. The resident
+                # registry is keyed `org:uuid`; a name-only bind would leave the
+                # ctx keyed by its display name and reintroduce the cross-org
+                # collision Step 0a removes.
+                from services import project_registry as _registry
+                _registry.bind_context(ctx, project_row)
+            else:
+                ctx.loaded_project = name
             try:
                 n.name = name
             except Exception:
@@ -1562,7 +1549,7 @@ def _save_context(
             # `_safe_project_dir(loaded)` that would point at the wrong (or a
             # nonexistent) directory.
             src_dir = _safe_project_dir(loaded)
-            if _auth_enabled() and db is not None and user is not None:
+            if db is not None and user is not None:
                 from services import project_registry
 
                 src_project = project_registry.find_project(db, user, loaded)
@@ -1702,19 +1689,13 @@ def activate_project(
     ``_solver_in_flight()`` (which keys on the active ctx), so switching away
     while the queue solves a DIFFERENT project is allowed — that is the payoff.
     """
-    lock_info = None
-    if _auth_enabled():
-        from services import project_registry
+    from services import project_registry
 
-        project_registry.require_user(user)
-        project = project_registry.resolve_project(db, user, project_id)
-        src = project_registry.project_dir(project)
-        lock_info = _serialize_project_lock(db, project.id, user)
-        # Reuse the project NAME as the process-global registry key / binding
-        # (names are unique within an org; the singleton is process-global).
-        project_id = project.name
-    else:
-        src = _safe_project_dir(project_id)  # 400 on bad id
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, project_id)
+    src = project_registry.project_dir(project)
+    lock_info = _serialize_project_lock(db, project.id, user)
+    registry_id = project_registry.registry_key(project)
     if not (src / "network.nc").exists():
         raise HTTPException(404, f"Project '{project_id}' not found")
 
@@ -1733,7 +1714,7 @@ def activate_project(
         from services.solve_queue import solve_queue
         active_id = PyPSAService.get_active_id()
         queue_solving_active = active_id is not None and any(
-            j.get("project_id") == active_id and j.get("status") == "running"
+            j.get("project_key") == active_id and j.get("status") == "running"
             for j in solve_queue.list_jobs()
         )
         if not queue_solving_active:
@@ -1751,25 +1732,25 @@ def activate_project(
             )
 
     evicted: list[str] = []
-    if PyPSAService.get_context(project_id) is not None:
+    if PyPSAService.get_context(registry_id) is not None:
         # Resident → instant pointer swap. Already in the registry, so no new
         # registration and no eviction can fire.
-        PyPSAService.set_active(project_id)
+        PyPSAService.set_active(registry_id)
     else:
         # Cold: build, hydrate from disk, then publish + register atomically.
         # activate_context(register=True) runs the B9 cap check and returns any
-        # project_ids evicted to make room — the freshly-activated project is
+        # projects evicted to make room — the freshly-activated project is
         # protected (it's the new active id) so it's never its own victim.
         ctx = PyPSAService.build_context()
-        _hydrate_context_from_disk(ctx, src, project_id)
+        _hydrate_context_from_disk(ctx, src, project.name)
+        project_registry.bind_context(ctx, project)
         evicted = PyPSAService.activate_context(ctx, register=True)
 
-    # `evicted` lets the frontend drop the evicted projects' retained React Query
-    # caches (the RAM the eviction reclaimed server-side has a UI mirror).
-    response = {"activated": project_id, "evicted": evicted}
-    if _auth_enabled():
-        response["lock"] = lock_info
-    return response
+    # `activated` is the DISPLAY NAME: the caller may have addressed the project
+    # by uuid, but everything downstream (frontend `currentProject`, autosave
+    # `expect=`, chat.jsonl path) speaks names. `evicted` likewise — it lets the
+    # frontend drop those projects' retained React Query caches.
+    return {"activated": project.name, "evicted": evicted, "lock": lock_info}
 
 
 @router.post("/{project_id}/lock")
@@ -1778,9 +1759,6 @@ def acquire_project_lock(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ) -> dict[str, object]:
-    if not _auth_enabled():
-        raise HTTPException(status_code=404, detail="Not found")
-
     from services import project_locks, project_registry
 
     user = project_registry.require_user(user)
@@ -1804,9 +1782,6 @@ def heartbeat_project_lock(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ) -> dict[str, object]:
-    if not _auth_enabled():
-        raise HTTPException(status_code=404, detail="Not found")
-
     from services import project_locks, project_registry
 
     user = project_registry.require_user(user)
@@ -1829,9 +1804,6 @@ def release_project_lock(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ) -> dict[str, bool]:
-    if not _auth_enabled():
-        raise HTTPException(status_code=404, detail="Not found")
-
     from services import project_locks, project_registry
 
     user = project_registry.require_user(user)
@@ -1846,17 +1818,13 @@ def load_project(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ) -> ImportSummary | dict[str, object]:
-    lock_info = None
-    if _auth_enabled():
-        from services import project_registry
+    from services import project_registry
 
-        project_registry.require_user(user)
-        project = project_registry.resolve_project(db, user, name)
-        src = project_registry.project_dir(project)
-        lock_info = _serialize_project_lock(db, project.id, user)
-        name = project.name
-    else:
-        src = _safe_project_dir(name)
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    src = project_registry.project_dir(project)
+    lock_info = _serialize_project_lock(db, project.id, user)
+    name = project.name
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
@@ -1891,7 +1859,7 @@ def load_project(
         # observe the transient unbound state (loaded is None) and wrongly
         # claim/overwrite. `n.name` (display) is set below; this binding is the
         # authoritative signal the save-time `expect` guard enforces against.
-        PyPSAService.set_loaded_project(name)
+        project_registry.bind_context(PyPSAService.get_active_context(), project)
 
     cfg_path = src / "solver_config.json"
     if cfg_path.exists():
@@ -1987,7 +1955,9 @@ def load_project(
     # tab switch back to this project finds it resident and does an INSTANT
     # in-memory pointer swap instead of re-loading from disk. Opening a project
     # the old (foreground) way therefore makes it switchable instantly next time.
-    PyPSAService.register(name, PyPSAService.get_active_context())
+    PyPSAService.register(
+        project_registry.registry_key(project), PyPSAService.get_active_context()
+    )
     change_log_service.log(
         "load", "Project", name,
         f"Loaded project '{name}' ({len(n.buses)} buses, {len(n.generators)} generators, {len(n.snapshots)} snapshots)",
@@ -2003,9 +1973,7 @@ def load_project(
         transformers=len(n.transformers),
         snapshots=len(n.snapshots),
     )
-    if _auth_enabled():
-        return {**summary.model_dump(), "lock": lock_info}
-    return summary
+    return {**summary.model_dump(), "lock": lock_info}
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
@@ -2086,82 +2054,7 @@ def create_scenario(
     Status: 201 on success, 400 for invalid name / self-parent, 404 if base
     is missing, 409 if the target name already exists.
     """
-    if _auth_enabled():
-        return _create_scenario_db(db, user, base, req)
-
-    # 1. Validate base
-    base_dir = _safe_project_dir(base)
-    if not base_dir.exists() or not (base_dir / "network.nc").exists():
-        raise HTTPException(404, f"Base project '{base}' not found")
-
-    # 2. Self-parent check first (clearer error semantics than 'already
-    # exists' when names match), then name validity / collision.
-    if req.name == base:
-        raise HTTPException(400, "Scenario name cannot match its base project name")
-    new_dir = _safe_project_dir(req.name)
-    if new_dir.exists():
-        raise HTTPException(409, f"Project '{req.name}' already exists")
-
-    # 3. The scenario branches FROM `base` — so the in-memory network we're
-    # about to serialise MUST actually be `base`'s state. `save_project`
-    # writes `PyPSAService.get_network()`, the live singleton; if the user
-    # is on a *different* project, the new scenario would get `base`'s
-    # parent pointer but a *foreign* topology. `load_project` stamps
-    # `n.name = <project>` so the in-memory name is the reliable signal.
-    # Reject the mismatch and tell the UI to load the base first.
-    n_check = PyPSAService.get_network()
-    if n_check.buses.empty:
-        raise HTTPException(
-            400,
-            "Cannot create scenario from an empty in-memory network. "
-            f"Load '{base}' first, then branch.",
-        )
-    if getattr(n_check, "name", None) != base:
-        raise HTTPException(
-            409,
-            f"Active project is '{getattr(n_check, 'name', '?')}', not '{base}'. "
-            f"Load '{base}' as the active project before branching a scenario "
-            f"from it — otherwise the scenario would carry the wrong topology.",
-        )
-
-    desc = (req.description or "").strip() or None
-
-    # 4. Save current state under the new name. By passing the scenario-tree
-    # fields via the `*_override` kwargs, save_project writes them in a
-    # SINGLE atomic metadata-write — no half-state where a concurrent
-    # GET /api/projects would observe the new project as a root.
-    # The RLock allows save_project's own `with get_lock():` to no-op
-    # rather than deadlock. A `try/except → rmtree` cleans up the directory
-    # on partial failure so a dangling half-create can't appear as an
-    # orphan-root in list_projects.
-    try:
-        with PyPSAService.get_lock():
-            _save_context(
-                PyPSAService.get_active_context(),
-                req.name,
-                force=True,
-                parent_project_override=base,
-                scenario_description_override=desc,
-                apply_overrides=True,
-            )
-    except Exception:
-        if new_dir.exists():
-            # Best-effort cleanup of a half-created project dir. `_force_rmtree`
-            # handles read-only/locked files; swallow a final failure so the
-            # original error (not the cleanup's) is what propagates.
-            try:
-                _force_rmtree(new_dir)
-            except OSError:
-                pass
-        raise
-
-    change_log_service.log(
-        "scenario_create", "Project", req.name,
-        f"Created scenario '{req.name}' from base '{base}'"
-        + (f": {desc[:80]}" if desc else ""),
-    )
-
-    return _project_info(new_dir)
+    return _create_scenario_db(db, user, base, req)
 
 
 def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
@@ -2212,10 +2105,13 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
                 f"Could not fully delete '{target.name}': {exc}.",
             )
             continue
+        # Capture the registry key BEFORE the row is deleted — it is derived
+        # from `(org_id, id)`, which a deleted/expired row can no longer supply.
+        target_key = project_registry.registry_key(target)
         project_registry.delete_project_row(db, target)
         deleted.append(target.name)
         try:
-            PyPSAService.drop(target.name)
+            PyPSAService.drop(target_key)
         except Exception as exc:  # noqa: BLE001
             logger.warning("could not evict resident context for '%s': %s", target.name, exc)
 
@@ -2247,113 +2143,7 @@ def delete_project(
     deleted set, otherwise the autosave loop would resurrect the deleted
     project directory on its next tick.
     """
-    if _auth_enabled():
-        return _delete_project_db(db, user, name, cascade)
-
-    dest = _safe_project_dir(name)
-    if not dest.exists():
-        raise HTTPException(404, f"Project '{name}' not found")
-
-    descendants = _find_descendants(name)
-    if descendants and not cascade:
-        preview = ", ".join(descendants[:5])
-        ellipsis = "…" if len(descendants) > 5 else ""
-        # Structured detail dict so the chat agent's _dispatch_real_tool_call
-        # can extract error_kind='descendants_exist' and surface the cascade
-        # confirmation flow (v4-MINOR-1). The `descendants` list is included
-        # so the ChatPanel can render the full preview in the error banner.
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error_kind": "descendants_exist",
-                "message": (
-                    f"Cannot delete '{name}' — it has {len(descendants)} "
-                    f"child scenario(s): {preview}{ellipsis}. Pass "
-                    f"?cascade=true to delete recursively."
-                ),
-                "descendants": descendants,
-            },
-        )
-
-    # `deleted` accumulates only names whose directory was ACTUALLY removed —
-    # a name is appended after its `rmtree` succeeds, never before. The
-    # frontend uses this list to reconcile `currentProject`; a name that
-    # claims deletion but is still on disk would wrongly clear the active
-    # project. rmtree is wrapped because on Windows a file lock (OneDrive
-    # sync handle, AV scan, an open netcdf) can make it raise mid-tree.
-    deleted: list[str] = []
-    failed: list[str] = []
-
-    def _rmtree(d: pathlib.Path, label: str) -> bool:
-        # `_force_rmtree` clears read-only attributes and retries with a short
-        # backoff — handles the Windows / OneDrive locks that made a plain
-        # `shutil.rmtree` raise WinError 5 mid-tree.
-        try:
-            _force_rmtree(d)
-            return True
-        except OSError as exc:  # noqa: BLE001 — genuinely-locked file/dir
-            failed.append(label)
-            change_log_service.log(
-                "warn", "Project", label,
-                f"Could not fully delete '{label}': {exc}. Retry, or remove "
-                f"the directory manually.",
-            )
-            return False
-
-    if cascade and descendants:
-        # Reverse so leaves (last appended in BFS) get deleted first — a
-        # crash mid-cascade leaves a valid (smaller) tree, not orphans.
-        for child in reversed(descendants):
-            child_dir = PROJECTS_DIR / child
-            if child_dir.is_dir():
-                if _rmtree(child_dir, child):
-                    deleted.append(child)
-                    change_log_service.log(
-                        "delete_project", "Project", child,
-                        f"Cascade-deleted scenario '{child}' (descendant of '{name}')",
-                    )
-
-    if _rmtree(dest, name):
-        deleted.append(name)
-        summary = f"Deleted project '{name}'"
-        if cascade and descendants:
-            summary += f" + {len(deleted) - 1} descendant scenario(s)"
-        change_log_service.log("delete_project", "Project", name, summary)
-
-    # Evict each deleted project's RESIDENT in-memory context.
-    #
-    # Removing the directory is not enough. `activate_project` has a resident
-    # fast path — if a ctx for that project_id is still in the registry it does
-    # a pure pointer swap with NO disk I/O. So delete → recreate the same name
-    # from a template → activate served the DELETED project's network: the new
-    # project appeared with ghost components that were never in its template,
-    # and the next save persisted them to disk.
-    #
-    # Reproduced end-to-end: create from 3bus (Bus 0/1/2), add 'qa_bus',
-    # delete, recreate the same name from 3bus, activate → four buses
-    # including 'qa_bus'.
-    #
-    # `drop` is a no-op for a name that was never resident, so this is safe for
-    # every deleted entry. It deliberately does not touch `_active`: if the
-    # deleted project was the active one the in-memory network stays put, which
-    # is the pre-existing contract the frontend relies on (it clears
-    # `currentProject` from the returned `deleted` list — see the docstring).
-    for gone in deleted:
-        try:
-            PyPSAService.drop(gone)
-        except Exception as exc:                       # noqa: BLE001
-            logging.getLogger(__name__).warning(
-                "could not evict resident context for '%s': %s", gone, exc)
-
-    if failed and not deleted:
-        # Nothing actually got removed — surface a hard error rather than a
-        # misleading 200 with an empty `deleted` list.
-        raise HTTPException(
-            500,
-            f"Failed to delete '{name}': {', '.join(failed)} could not be "
-            f"removed (file lock?). Nothing was deleted.",
-        )
-    return {"deleted": deleted, "failed": failed}
+    return _delete_project_db(db, user, name, cascade)
 
 
 def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> ProjectInfo:
@@ -2410,7 +2200,12 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
                 n.name = new_name
             except Exception:
                 pass
-            PyPSAService.set_loaded_project(new_name)
+            # `project` is the same row with its name already updated, so this
+            # rebinds the name AND keeps the tenant identity/storage path — a
+            # name-only rebind would drop them and re-key the resident context.
+            project_registry.bind_context(
+                PyPSAService.get_active_context(), project
+            )
 
     change_log_service.log("rename_project", "Project", new_name, f"Renamed project '{old_name}' → '{new_name}'")
     return _project_info_db(db, project)
@@ -2448,135 +2243,7 @@ def rename_project(
       409 — target name already exists
       500 — directory rename failed (file lock, AV, OneDrive sync handle)
     """
-    if _auth_enabled():
-        return _rename_project_db(db, user, name, req)
-
-    new_name = req.new_name.strip()
-    if not new_name:
-        raise HTTPException(400, "new_name is required")
-    if new_name == name:
-        raise HTTPException(400, "new_name must differ from the current name")
-
-    src = _safe_project_dir(name)
-    if not src.exists():
-        raise HTTPException(404, f"Project '{name}' not found")
-    # _safe_project_dir validates `new_name` (charset, length, no traversal).
-    dest = _safe_project_dir(new_name)
-    if dest.exists():
-        raise HTTPException(409, f"Project '{new_name}' already exists")
-
-    # Snapshot the child list BEFORE the rename — once the parent's name
-    # changes, _find_direct_children couldn't find them by the old name.
-    children = _find_direct_children(name)
-
-    # 1) Directory rename. pathlib.Path.rename is atomic within the same FS
-    # — the most likely failure mode on Windows is a sync handle (OneDrive)
-    # or AV scan holding a file inside; we surface that as a 500.
-    try:
-        src.rename(dest)
-    except OSError as exc:  # noqa: BLE001
-        raise HTTPException(
-            500,
-            f"Could not rename '{name}' → '{new_name}': {exc}. "
-            f"A file inside the project directory may be locked (AV / OneDrive). "
-            f"Retry, or close any open netcdf reader and try again.",
-        )
-
-    # 2) Refresh metadata at the new location.
-    meta_path = _meta_path(dest)
-    if meta_path.exists():
-        try:
-            existing_meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            if not isinstance(existing_meta, dict):
-                existing_meta = {}
-        except Exception:
-            existing_meta = {}
-        existing_meta["name"] = new_name
-        existing_meta["last_saved"] = datetime.now(timezone.utc).isoformat()
-        try:
-            _atomic_write_text(meta_path, json.dumps(existing_meta, indent=2))
-        except OSError as exc:
-            # The rename already succeeded — best-effort metadata fix; warn
-            # but don't roll back, since the project IS at the new path.
-            change_log_service.log(
-                "warn", "Project", new_name,
-                f"Renamed but could not refresh metadata.json ({exc}); "
-                f"next save will rewrite it.",
-            )
-
-    # 3) Sync the in-memory n.name AND the authoritative loaded-project
-    # identity if the renamed project is the active one. Without the n.name
-    # sync, the next autosave would persist into a project DIRECTORY named
-    # `new_name` but with `n.name == old_name` baked into the netcdf — an
-    # inconsistency that surfaces months later when `load_project` stamps
-    # `n.name = <dir_name>` and the user wonders why exports show "old_name".
-    # Re-binding `_loaded_project` keeps the save-time `expect` guard accepting
-    # the new name (the on-disk folder moved); without it, an autosave under
-    # `new_name` would 409 against the stale `old_name` binding.
-    with PyPSAService.get_lock():
-        n = PyPSAService.get_network()
-        # Key off the AUTHORITATIVE binding, not the mutable display `n.name`.
-        # If the renamed project is the loaded one, follow both the binding and
-        # the display title to the new name. Gating on `n.name == name` too
-        # would wrongly rebind an UNBOUND network (e.g. a raw netcdf import)
-        # whose display title happened to match the renamed folder.
-        if PyPSAService.get_loaded_project() == name:
-            try:
-                n.name = new_name
-            except Exception:
-                pass
-            PyPSAService.set_loaded_project(new_name)
-
-    # 4) Reparent direct children. We only touch direct children because
-    # `parent_project` is a single-level pointer — descendants reference
-    # their immediate parent, not the root.
-    reparented: list[str] = []
-    for child in children:
-        child_dir = PROJECTS_DIR / child
-        child_meta_path = _meta_path(child_dir)
-        if not child_meta_path.exists():
-            continue
-        try:
-            child_meta = json.loads(child_meta_path.read_text(encoding="utf-8"))
-            if not isinstance(child_meta, dict):
-                continue
-        except Exception:
-            continue
-        if child_meta.get("parent_project") == name:
-            child_meta["parent_project"] = new_name
-            try:
-                _atomic_write_text(child_meta_path, json.dumps(child_meta, indent=2))
-                reparented.append(child)
-            except OSError:
-                # Non-fatal — surfaces in changelog so the user can re-link
-                # manually via the Scenarios panel.
-                change_log_service.log(
-                    "warn", "Project", child,
-                    f"Could not update parent_project pointer in '{child}' "
-                    f"after renaming '{name}' → '{new_name}'. "
-                    f"Re-link via Scenarios panel.",
-                )
-
-    summary = f"Renamed project '{name}' → '{new_name}'"
-    if reparented:
-        summary += f" + reparented {len(reparented)} child scenario(s)"
-    change_log_service.log("rename_project", "Project", new_name, summary)
-
-    # Chatbot integration v6 Phase 4 — invalidate the cached chat.jsonl
-    # persist_path so subsequent `chat_service.get_persist_path(ctx)` calls
-    # re-resolve under the new project directory. The filesystem directory
-    # has already been renamed above, so chat.jsonl follows automatically;
-    # only the per-context cache needs to be cleared. Closes Phase 3 Gate
-    # C-13 gap.
-    try:
-        active_ctx = PyPSAService.get_active_context()
-        if active_ctx.loaded_project == new_name:
-            from services import chat_service
-            chat_service.handle_rename_lineage(active_ctx, name, new_name)
-    except Exception:  # noqa: BLE001 — never abort rename on lineage failure
-        pass
-
-    return _project_info(dest)
+    return _rename_project_db(db, user, name, req)
 
 
 # Component dispatch frames surfaced in the background results bundle (A6) — the
@@ -2815,14 +2482,12 @@ def download_bundle(
     user: User | None = Depends(optional_user),
 ):
     """Stream a zipped project bundle (.pypsaproj.zip) to the browser."""
-    src = None
-    if _auth_enabled():
-        from services import project_registry
+    from services import project_registry
 
-        project_registry.require_user(user)
-        project = project_registry.resolve_project(db, user, name)
-        src = project_registry.project_dir(project)
-        name = project.name
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    src = project_registry.project_dir(project)
+    name = project.name
     return StreamingResponse(
         io.BytesIO(_project_bundle_bytes(name, src)),
         media_type="application/zip",
@@ -2843,8 +2508,6 @@ def get_project_members(
     every project in a tree via a single root membership — so this returns the
     root's assignment list regardless of which node in the tree is addressed.
     """
-    if not _auth_enabled():
-        raise HTTPException(404, "Project membership requires authentication to be enabled")
     from services import project_registry
 
     project_registry.require_user(user)
@@ -2865,8 +2528,6 @@ def put_project_members(
     Requires manage permission (org admin or the tree-root creator). Each
     supplied user id must belong to the project's organization.
     """
-    if not _auth_enabled():
-        raise HTTPException(404, "Project membership requires authentication to be enabled")
     import uuid as _uuid
 
     from services import project_acl, project_registry

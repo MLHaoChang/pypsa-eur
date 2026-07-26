@@ -2,6 +2,7 @@ import axios from 'axios'
 import toast from 'react-hot-toast'
 import { appLog } from '../store/simulationStore'
 import { getAuthEnabled, setAuthEnabled } from '../auth/config'
+import { CSRF_HEADER, needsCsrfHeader, readCsrfToken } from './csrf'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -110,6 +111,18 @@ function shouldRedirectToLogin(error: unknown): boolean {
   return false
 }
 
+// ── CSRF double-submit (backend Step 0a) ────────────────────────────────────
+// Every state-changing /api request from an authenticated session must echo the
+// CSRF cookie back in a header, or the backend refuses it with 403. See
+// `./csrf` for why the cookie is readable by script — that is the mechanism,
+// not an oversight.
+client.interceptors.request.use((config) => {
+  if (!needsCsrfHeader(config.method)) return config
+  const token = readCsrfToken()
+  if (token) config.headers.set(CSRF_HEADER, token)
+  return config
+})
+
 client.interceptors.response.use(
   (res) => {
     const method = (res.config.method ?? '').toUpperCase()
@@ -140,6 +153,19 @@ client.interceptors.response.use(
 
     if (shouldRedirectToLogin(err)) {
       forceLoginRedirect()
+      return Promise.reject(err)
+    }
+
+    // A missing/stale CSRF token is recoverable without signing out: `GET
+    // /auth/me` re-mints the cookie whenever it is absent. Fire it once and
+    // tell the user to retry, rather than surfacing a bare 403 that reads like
+    // a permissions problem — which is what a session predating the CSRF
+    // change, or one whose token cookie was cleared, would otherwise look like.
+    if (status === 403 && code === 'csrf_token_invalid') {
+      void client.get('/auth/me', { skipErrorToast: true, skipAuthRedirect: true })
+        .catch(() => undefined)
+      appLog('ERROR', `${method} ${url} — CSRF token missing; refreshed, retry the action`)
+      toast.error('Your session token expired. Please retry that action.')
       return Promise.reject(err)
     }
 

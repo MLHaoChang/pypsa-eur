@@ -36,6 +36,7 @@ from services.dispatch_status import (
     dispatch_status as _classify_dispatch,
     network_has_dispatch,
 )
+from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.pypsa_service import PyPSAService
 
 # Reuse the same path-validation pattern as projects.py — snapshots inherit the
@@ -224,13 +225,20 @@ def _prune_oldest(
 def _create_snapshot_internal(
     name: str, label: str, message: str,
     protect: frozenset[str] | None = None,
+    project_dir: pathlib.Path | None = None,
 ) -> SnapshotInfo:
     """
     Shared snapshot-creation core used by both the public endpoint and the
     restore safety net. Splits out so callers can pass a ``protect`` set for
     the at-cap-restore edge case.
+
+    ``project_dir`` is the AUTHORIZED org-scoped directory resolved by the
+    route's `ProjectAccessDep`. It is passed explicitly rather than re-derived
+    from ``name`` because `_safe_project_dir` is a path-traversal guard, not an
+    authorization check — it resolves any org's project under the shared root.
     """
-    project_dir = _safe_project_dir(name)
+    if project_dir is None:
+        project_dir = _safe_project_dir(name)
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
@@ -366,7 +374,10 @@ def _create_snapshot_internal(
 
 
 @router.post("/{name}/snapshots")
-def create_snapshot(name: str, req: CreateSnapshotRequest):
+def create_snapshot(
+    req: CreateSnapshotRequest,
+    project: AuthorizedProject = ProjectAccessDep,
+):
     """
     Snapshot the current on-disk project bundle.
 
@@ -375,19 +386,25 @@ def create_snapshot(name: str, req: CreateSnapshotRequest):
     This is the same semantics as git: you snapshot what's committed.
     Callers that want to capture in-memory state should Save first.
     """
-    return _create_snapshot_internal(name, req.label, req.message or "")
+    return _create_snapshot_internal(
+        project.name, req.label, req.message or "", project_dir=project.directory
+    )
 
 
 @router.get("/{name}/snapshots")
-def list_snapshots(name: str) -> list[SnapshotInfo]:
-    project_dir = _safe_project_dir(name)
+def list_snapshots(
+    project: AuthorizedProject = ProjectAccessDep,
+) -> list[SnapshotInfo]:
+    project_dir = project.directory
     if not (project_dir / "network.nc").exists():
-        raise HTTPException(404, f"Project '{name}' not found")
+        raise HTTPException(404, f"Project '{project.name}' not found")
     return [_to_info(d) for d in _list_snapshot_dirs(project_dir)]
 
 
 @router.post("/{name}/snapshots/{snapshot_id}/restore")
-def restore_snapshot(name: str, snapshot_id: str):
+def restore_snapshot(
+    snapshot_id: str, project: AuthorizedProject = ProjectAccessDep
+):
     """
     Restore a snapshot: overwrite the project files + reload in-memory.
 
@@ -401,7 +418,8 @@ def restore_snapshot(name: str, snapshot_id: str):
     Step 2 is the safety net: a careless restore can't lose work because the
     pre-restore state is itself saved as a snapshot named "before-restore-...".
     """
-    project_dir = _safe_project_dir(name)
+    name = project.name
+    project_dir = project.directory
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
@@ -419,6 +437,7 @@ def restore_snapshot(name: str, snapshot_id: str):
     try:
         _create_snapshot_internal(
             name,
+            project_dir=project_dir,
             label="before-restore",
             message=f"Auto-saved before restoring snapshot '{snapshot_id}'",
             protect=frozenset({snapshot_id}),
@@ -479,8 +498,14 @@ def restore_snapshot(name: str, snapshot_id: str):
             n.import_from_netcdf(str(project_dir / "network.nc"))
         # Bind identity atomically with the swap — inside the SAME lock that
         # reset it to None — so a concurrent save can't observe the transient
-        # unbound state and wrongly claim/overwrite (see load_project).
-        PyPSAService.set_loaded_project(name)
+        # unbound state and wrongly claim/overwrite (see load_project). Binds
+        # the TENANT identity too, from the already-authorized `project`.
+        PyPSAService.bind_project(
+            name,
+            org_id=project.org_id,
+            project_uuid=project.uuid,
+            storage_dir=str(project_dir),
+        )
 
     cfg_path = project_dir / "solver_config.json"
     if cfg_path.exists():
@@ -566,8 +591,11 @@ def restore_snapshot(name: str, snapshot_id: str):
 
 
 @router.delete("/{name}/snapshots/{snapshot_id}", status_code=204)
-def delete_snapshot(name: str, snapshot_id: str):
-    project_dir = _safe_project_dir(name)
+def delete_snapshot(
+    snapshot_id: str, project: AuthorizedProject = ProjectAccessDep
+):
+    name = project.name
+    project_dir = project.directory
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
     snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)

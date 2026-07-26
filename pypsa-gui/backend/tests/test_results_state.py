@@ -12,7 +12,9 @@ from routers import simulation as sim_router
 from routers.projects import _restore_results_state
 
 
-def test_save_writes_versioned_envelope(client, tmp_projects_dir, install_network):
+def test_save_writes_versioned_envelope(
+    client, tmp_projects_dir, install_network, project_storage_dir
+):
     install_network(build_network(), name="P")
     # Seed a side-result so the pickle is actually written (save skips it when
     # every results-state key is None).
@@ -21,7 +23,7 @@ def test_save_writes_versioned_envelope(client, tmp_projects_dir, install_networ
     resp = client.post("/api/projects/P", params={"expect": "P"})
     assert resp.status_code == 200
 
-    pkl = tmp_projects_dir / "P" / "results_state.pkl"
+    pkl = project_storage_dir("P") / "results_state.pkl"
     assert pkl.exists()
     payload = pickle.loads(pkl.read_bytes())
     assert payload["__schema__"] == 1

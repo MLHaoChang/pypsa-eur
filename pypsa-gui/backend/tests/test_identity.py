@@ -20,11 +20,15 @@ def test_save_with_mismatched_expect_returns_409(client, tmp_projects_dir, insta
     assert not (tmp_projects_dir / "B" / "network.nc").exists()
 
 
-def test_save_active_project_with_matching_expect_ok(client, tmp_projects_dir, install_network):
+def test_save_active_project_with_matching_expect_ok(
+    client, tmp_projects_dir, install_network, project_storage_dir
+):
     install_network(build_network(), name="A")
     resp = client.post("/api/projects/A", params={"expect": "A"})
     assert resp.status_code == 200
-    assert (tmp_projects_dir / "A" / "network.nc").exists()
+    # Files land under the ORG-SCOPED path (`projects_root/<org>/<uuid>/`), not
+    # the flat `projects/<name>/` layout — that layout was the single-user one.
+    assert (project_storage_dir("A") / "network.nc").exists()
 
 
 def test_first_save_claims_unbound_network(client, tmp_projects_dir, install_network):
@@ -46,10 +50,12 @@ def test_rebind_moves_binding_to_new_name(client, tmp_projects_dir, install_netw
     assert client.get("/api/network/meta").json()["loaded_project"] == "B"
 
 
-def test_save_a_copy_does_not_rebind(client, tmp_projects_dir, install_network):
+def test_save_a_copy_does_not_rebind(
+    client, tmp_projects_dir, install_network, project_storage_dir
+):
     install_network(build_network(), name="A")
     # Save a Copy: write under a new name WITHOUT rebind → live network stays "A".
     resp = client.post("/api/projects/CopyOfA")
     assert resp.status_code == 200
-    assert (tmp_projects_dir / "CopyOfA" / "network.nc").exists()
+    assert (project_storage_dir("CopyOfA") / "network.nc").exists()
     assert client.get("/api/network/meta").json()["loaded_project"] == "A"

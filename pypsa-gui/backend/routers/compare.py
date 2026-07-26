@@ -53,7 +53,6 @@ import numpy as np
 from routers.projects import (
     PROJECTS_DIR,
     _read_meta,
-    _safe_project_dir,
     _safe_unpickle_results,
     _unwrap_results_state,
 )
@@ -62,13 +61,16 @@ from routers.projects import (
 # cycle; there is none — verified that `compare -> results` and
 # `results -> compare` both import cleanly in either order. Hoisted so the
 # dependency is visible at the top of the file like every other one.
+from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.results import corrected_marginal_prices, lp_scaled_load_frame
 
 router = APIRouter()
 
 
 @router.get("/{name}/compare-state")
-def get_compare_state(name: str) -> CompareState:
+def get_compare_state(
+    project: AuthorizedProject = ProjectAccessDep,
+) -> CompareState:
     """
     Compact, read-only summary of a non-active project's state.
 
@@ -91,7 +93,11 @@ def get_compare_state(name: str) -> CompareState:
     import pypsa as _pypsa
     from services.dispatch_status import dispatch_status as _classify_dispatch
 
-    src = _safe_project_dir(name)
+    # Authorized, org-scoped directory from `ProjectAccessDep`. Never
+    # `_safe_project_dir(name)` — that is a path-traversal guard, and the
+    # projects root is shared across orgs, so it resolved any tenant's project.
+    name = project.name
+    src = project.directory
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
@@ -2593,7 +2599,9 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
 
 
 @router.get("/{name}/results-summary")
-def get_results_summary(name: str) -> ResultsSummary:
+def get_results_summary(
+    project: AuthorizedProject = ProjectAccessDep,
+) -> ResultsSummary:
     """
     Per-tab results summary for the Compare-Scenarios v2 view.
 
@@ -2610,7 +2618,11 @@ def get_results_summary(name: str) -> ResultsSummary:
     import pypsa as _pypsa
     from services.dispatch_status import dispatch_status as _classify_dispatch
 
-    src = _safe_project_dir(name)
+    # Authorized, org-scoped directory from `ProjectAccessDep`. Never
+    # `_safe_project_dir(name)` — that is a path-traversal guard, and the
+    # projects root is shared across orgs, so it resolved any tenant's project.
+    name = project.name
+    src = project.directory
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")

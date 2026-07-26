@@ -1957,12 +1957,17 @@ def undo_last():
             # re-import, all inside the lock, so a concurrent save never sees
             # the current project momentarily unbound (which would let its
             # `expect` guard fall through and its claim rebind wrongly).
-            prev_loaded = PyPSAService.get_loaded_project()
+            # Capture the WHOLE binding, not just the name: `reset_network()`
+            # drops the tenant identity too, and restoring the name alone would
+            # leave the ctx keyed by name in the resident registry — the
+            # cross-org collision Step 0a removed.
+            prev_binding = PyPSAService.get_binding()
+            prev_loaded = prev_binding["name"]
             PyPSAService.reset_network()
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
                 n.import_from_netcdf(str(tmp))
-            PyPSAService.set_loaded_project(prev_loaded)
+            PyPSAService.set_binding(prev_binding)
             if prev_loaded:
                 try:
                     n.name = prev_loaded

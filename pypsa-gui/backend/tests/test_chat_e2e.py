@@ -1213,7 +1213,7 @@ def test_sse_frame_default_str_fallback_for_pydantic_leak():
 
 
 def test_create_scenario_tool_result_is_json_serialisable(
-    install_network, tmp_projects_dir,
+    client, install_network, tmp_projects_dir,
 ):
     """
     End-to-end check at the dispatcher boundary: invoking the
@@ -1233,9 +1233,12 @@ def test_create_scenario_tool_result_is_json_serialisable(
     n = pypsa.Network()
     n.add("Bus", "B1")
     install_network(n, name="base")
-    (tmp_projects_dir / "base").mkdir(parents=True, exist_ok=True)
-    n.export_to_netcdf(str(tmp_projects_dir / "base" / "network.nc"))
-    PyPSAService.set_loaded_project("base")
+    # Save through the route so `base` gets a DB row: `create_scenario` resolves
+    # its base through the registry since Step 0a, and a hand-written directory
+    # under the projects root is no longer a project.
+    assert client.post(
+        "/api/projects/base", params={"force": True, "rebind": True}
+    ).status_code == 200
 
     result = chat_tools.DISPATCHERS["create_scenario"](
         base="base", new_name="scen1", description="regression",
