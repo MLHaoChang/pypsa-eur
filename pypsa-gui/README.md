@@ -251,12 +251,177 @@ This GUI lives inside a **PyPSA-Eur** checkout and reuses its toolchain.
    ```bash
    pixi run -- pip install -r pypsa-gui/backend/requirements.txt
    ```
-3. **Node.js + front-end packages** (bundled Node under `pypsa-gui/.nodeenv`,
-   or a system Node ≥ 18):
+3. **Node.js + front-end packages** (Node comes from the **pixi** env —
+   there is no separate global `npm` required):
    ```bash
+   # from the repo root
+   pixi install
    cd pypsa-gui/frontend
-   npm install
+   pixi run -- npm install
    ```
+   If a bare `npm` says “command not found”, always prefix with `pixi run --`.
+   Alternatively use the helper script (starts backend + frontend together):
+   ```bash
+   # from the repo root
+   ./pypsa-gui/start.sh
+   ```
+
+### Optional: enable multi-user auth locally
+
+Auth is **on by default on this branch** (`VITE_AUTH_ENABLED` treated as enabled
+unless set to `false`). A fresh `npm run dev` shows `/login`. To force the
+classic single-user workbench, put `VITE_AUTH_ENABLED=false` in
+`frontend/.env.local`.
+
+Backend auth remains opt-in via `PYPSA_GUI_AUTH_ENABLED` — when the API has
+auth on, the SPA also upgrades itself at runtime from `/api/health` so a stale
+browser session cannot stay stuck on the workbench toasting
+“Authentication required”.
+
+To exercise invited-user flows, org/project tenancy, edit locks, and password
+emails locally, wire the backend to Postgres (or SQLite), point SMTP at Mailpit,
+and keep frontend auth enabled.
+
+#### 1) One-time stack setup
+
+```bash
+# Backend env (Postgres + SMTP + auth flag)
+cp pypsa-gui/backend/.env.example pypsa-gui/backend/.env
+# Optional quick path without Docker: edit DATABASE_URL to
+#   sqlite+pysqlite:///./auth_dev.db
+
+# Frontend: `frontend/.env.development` already sets VITE_AUTH_ENABLED=true
+# for this branch. Override with frontend/.env.local if needed.
+
+# Postgres + Mailpit (requires Docker on your machine) — skip if using SQLite
+cd pypsa-gui
+docker compose -f docker-compose.auth.yml up -d
+
+# Schema (Postgres). For SQLite, bootstrap_super_admin creates tables automatically.
+cd backend
+pixi run alembic -c alembic.ini upgrade head   # Postgres only
+```
+
+Mailpit inbox UI: **http://localhost:8025**. Invite / set-password / reset emails
+go to SMTP `:1025`. Links use `PUBLIC_BASE_URL` (default `http://localhost:5173`).
+
+**Important:** after pulling this branch, fully restart `npm run dev` so Vite
+reloads `.env.development`. A hard refresh alone will not enable the login page.
+
+### Hard reset if the preview is stuck on the workbench
+
+`frontend/index.html` is now the **static login page** (it does not load React).
+The React workbench only boots from `spa.html` after a valid session cookie.
+
+1. Stop any old Vite on your machine (`Ctrl+C` in that terminal).
+2. From this branch (repo root), install once if needed, then start frontend:
+   ```bash
+   pixi install
+   cd pypsa-gui/frontend
+   pixi run -- npm install          # first time / after pull
+   pixi run -- npm run dev
+   ```
+   Or start both servers: `./pypsa-gui/start.sh` from the repo root.
+3. Open `http://localhost:5173/` (port **5173**, not 8000).
+4. You must see a dark green badge: **“Auth gate · not the workbench”**.
+5. Sign in: `admin@example.com` / your bootstrap password → `/projects`.
+
+Verify locally anytime:
+
+```bash
+cd pypsa-gui/frontend
+pixi run -- npm run test:auth-gate
+```
+
+That fails if `/`, `/app`, or `/projects` would still serve the React workbench
+to anonymous users.
+
+#### 2) Create the platform super-admin (CLI — no signup UI)
+
+There is **no self-registration**. The first account is created with:
+
+```bash
+cd pypsa-gui/backend
+pixi run python tools/bootstrap_super_admin.py \
+  --email admin@example.com \
+  --password 'your-secure-password'
+```
+
+This creates (or upgrades) an **active** `is_super_admin` user with that password.
+
+#### 3) Start the app
+
+```bash
+# Terminal 1 — backend
+cd pypsa-gui/backend
+pixi run python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+
+# Terminal 2 — frontend (npm comes from pixi — do not rely on a global npm)
+cd pypsa-gui/frontend
+pixi run -- npm run dev
+
+# Or both at once from the repo root:
+# ./pypsa-gui/start.sh
+```
+
+Open **http://localhost:5173** → you should see the split-brand **Sign in** page
+(not the bare workbench).
+
+#### 4) Browser walkthrough (landing → org → invite → member)
+
+1. **Sign in** at `/login` as `admin@example.com`.
+2. Open **Admin** (`/admin`). As super-admin:
+   - **Organizations** → create e.g. `Acme Energy`.
+   - **Users** → create a user with email + role (`admin` or `member`) + that org.
+3. Open Mailpit (**http://localhost:8025**) → open the invite email → click the
+   **set-password** link (`/set-password?token=…`).
+4. Choose a password → you should land on **Projects home** (`/projects`).
+5. Sign out; sign in as the invited user → `/projects` again.
+6. Confirm a **member** cannot manage orgs (Admin is hidden / `/admin` forbidden).
+7. Optional: create a project, open workbench (`/app`), assign members, verify
+   edit lock (second browser = read-only).
+
+#### 5) Automated checks
+
+API journey (in-memory SQLite — no Docker required):
+
+```bash
+cd pypsa-gui/backend
+pixi run python -m pytest -m auth_smoke
+# Includes test_auth_journey_e2e.py: login → org → invite → set-password → member login
+```
+
+Live API helper against a running stack (prints the set-password URL for browser finish):
+
+```bash
+cd pypsa-gui/backend
+pixi run python tools/auth_e2e_smoke.py \
+  --base-url http://127.0.0.1:8000 \
+  --super-email admin@example.com \
+  --super-password 'your-secure-password'
+```
+
+#### Known limitation (v1): process-global active network
+
+Persistent tenancy data (users, orgs, projects, saved scenarios, edit locks) is
+fully isolated per org/project in Postgres. However, the **in-memory active
+network** — the working PyPSA network behind the live `/api/network` edit
+endpoints — is **process-global** on a shared backend process. Full per-user
+resident context isolation is out of scope for v1.
+
+Practically, this means: when auth is enabled on a **single shared backend
+process**, concurrent users all edit the *same* in-memory active network for
+live `/api/network` operations. Edit locks reduce accidental collisions, but you
+must **not** treat this as strong isolation for concurrent live edits.
+
+Recommended v1 deployment:
+
+- One trusted organization / low concurrency on a shared process, **or**
+- A separate backend process per tenant (stronger isolation), which can later be
+  formalized into per-user resident contexts.
+
+Durable, per-project data (saved scenarios, results, tenancy) is unaffected by
+this limitation — the caveat applies only to the single live in-memory network.
 
 ### Run it
 
@@ -276,6 +441,9 @@ npm run dev
 
 Open **http://localhost:5173**. API + interactive docs at
 **http://localhost:8000** and **/docs**. Production build: `npm run build`.
+With `VITE_AUTH_ENABLED=true`, the SPA routes through `/login`, `/projects`,
+`/app`, and `/admin` instead of dropping straight into the single-user
+workbench.
 
 ---
 

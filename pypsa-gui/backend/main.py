@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,7 +24,12 @@ except ImportError:
 import pypsa
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from db import session as db_session_module
+from deps import resolve_request_user
 from routers import (
+    admin,
+    auth,
     changelog,
     chat,
     clustering,
@@ -40,6 +46,9 @@ from routers import (
     vintage,
 )
 from services.pypsa_service import PyPSAService
+from settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 # Prefixes whose non-GET mutations should be captured in the undo stack.
 _UNDO_PREFIXES = ("/api/network/", "/api/io/")
@@ -96,6 +105,13 @@ _SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
 # /api/projects/* router which also brings its own dispatch.
 _DISPATCH_INVALIDATE_PREFIXES = ("/api/network/",)
 _DISPATCH_INVALIDATE_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
+_AUTH_PUBLIC_PATHS = {
+    "/api/auth/forgot-password",
+    "/api/auth/login",
+    "/api/auth/reset-password",
+    "/api/auth/set-password",
+    "/api/health",
+}
 
 # Undo-snapshot push coalescing now lives in services.undo_service
 # (claim_push_slot) so the timer travels with the undo subsystem — the
@@ -113,7 +129,12 @@ app = FastAPI(title="PyPSA GUI API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    # Local Vite + Cursor cloud/mobile HTTPS preview tunnels.
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_origin_regex=r"https://.*\.cursorusercontent\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -133,7 +154,41 @@ async def undo_snapshot_middleware(request: Request, call_next):
     snapshot or a dispatch-invalidation probe.
     """
     path = request.url.path
+    normalized_path = path.rstrip("/") or "/"
     is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
+
+    if (
+        request.method != "OPTIONS"
+        and get_settings().pypsa_gui_auth_enabled
+        and (normalized_path == "/api" or normalized_path.startswith("/api/"))
+        and normalized_path not in _AUTH_PUBLIC_PATHS
+    ):
+        try:
+            with db_session_module.SessionLocal() as db:
+                request.state.auth_user = resolve_request_user(request, db)
+        except Exception:
+            # Misconfigured/unreachable DB must not surface as an opaque 500 on
+            # every /api call (that looked like a broken workbench to reviewers
+            # when auth was on without Postgres).
+            logger.exception("auth database unavailable while enforcing session")
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "Auth database unavailable. Start Postgres (or use a "
+                        "sqlite DATABASE_URL), run alembic upgrade head, then "
+                        "restart the backend."
+                    ),
+                },
+            )
+        if request.state.auth_user is None:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Authentication required"},
+                # Nudge stale Cursor preview sessions to drop cached SPA modules
+                # so the next real navigation picks up the login gate.
+                headers={"Clear-Site-Data": '"cache"'},
+            )
 
     # ── Solver-in-flight gate ─────────────────────────────────────────
     # Refuse writes to /api/network/* and /api/io/* while the LP worker
@@ -149,7 +204,6 @@ async def undo_snapshot_middleware(request: Request, call_next):
             and not any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES)):
         from routers.simulation import _solver_in_flight
         if _solver_in_flight():
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=409,
                 content={
@@ -273,6 +327,8 @@ async def undo_snapshot_middleware(request: Request, call_next):
 
     return response
 
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.
@@ -334,4 +390,10 @@ def _chatbot_startup_check() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "pypsa_version": pypsa.__version__}
+    return {
+        "status": "ok",
+        "pypsa_version": pypsa.__version__,
+        # Lets the SPA detect "backend auth on / frontend auth off" and show a
+        # setup gate instead of an opaque workbench + 401/500 toast storm.
+        "auth_enabled": get_settings().pypsa_gui_auth_enabled,
+    }

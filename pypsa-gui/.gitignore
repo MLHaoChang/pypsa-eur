@@ -29,6 +29,13 @@ backend/projects/
 .env.local
 .env.*
 !.env.example
+# Checked-in Vite dev default so `npm run dev` shows login on this branch
+# without requiring a local .env.local. Override with .env.local if needed.
+!.env.development
+
+# Local SQLite auth DB used for Docker-less review
+backend/auth_dev.db
+backend/*.db
 
 # ── Never commit pickles (deserialisation = code-exec risk on clone) ──
 *.pkl

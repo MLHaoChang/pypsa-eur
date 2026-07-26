@@ -78,6 +78,9 @@ d1gam3xoknrgr2.cloudfront.net/
 merger-todos.md
 
 *.html
+!pypsa-gui/frontend/index.html
+!pypsa-gui/frontend/spa.html
+!pypsa-gui/frontend/public/login.html
 
 # private dev folder
 dev/*
@@ -109,3 +112,6 @@ doc/img/intro-workflow.svg
 /response.json
 /tmp_audit/
 .pytest_cache/
+
+# Local brainstorm / visual companion session files
+.superpowers/

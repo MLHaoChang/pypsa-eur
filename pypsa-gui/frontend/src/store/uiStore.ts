@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { LockState } from '../utils/lockState'
 
 interface SelectedComponent { type: string; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
@@ -42,6 +43,7 @@ export type Density = 'comfortable' | 'compact'
 const SIDEBAR_MODE_KEY = 'network-diagram:sidebar-mode'
 const PROJECT_NAME_KEY = 'network-diagram:project-name'
 const CURRENT_PROJECT_KEY = 'network-diagram:current-project'
+const LAST_PROJECT_ID_KEY = 'network-diagram:last-project-id'
 const AUTOSAVE_KEY = 'network-diagram:autosave'
 const OPEN_TABS_KEY = 'network-diagram:open-tabs'
 const CANVAS_VIEW_KEY = 'network-diagram:canvas-view'
@@ -49,6 +51,16 @@ const RESULTS_OVERLAY_KEY = 'network-diagram:results-overlay'
 const LAST_SAVED_KEY = 'network-diagram:last-saved'
 const RECENTS_KEY = 'network-diagram:recents'
 const THEME_KEY = 'network-diagram:theme'
+// Generation marker for the persisted theme preference. The store predates
+// zustand's `persist` middleware (every preference is written to its own
+// localStorage key by hand), so there is no `version`/`migrate` pair to bump —
+// this is the minimal equivalent. Bump THEME_SCHEMA whenever the SHIPPED
+// DEFAULT theme changes: on the next load a stored value from an older
+// generation is dropped exactly once, so sessions that were silently sitting
+// on the old default pick up the new one instead of being pinned forever.
+// Generation 2 = the mint/dark identity that matches the sign-in page.
+const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
+const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
@@ -72,6 +84,10 @@ function storedProjectName(): string {
 
 function storedCurrentProject(): string | null {
   try { return localStorage.getItem(CURRENT_PROJECT_KEY) || null } catch { return null }
+}
+
+function storedLastProjectId(): string | null {
+  try { return localStorage.getItem(LAST_PROJECT_ID_KEY) || storedCurrentProject() || null } catch { return storedCurrentProject() }
 }
 
 function storedAutosave(): boolean {
@@ -120,16 +136,17 @@ function storedResultsOverlay(): boolean {
 
 function storedTheme(): Theme {
   try {
+    if (localStorage.getItem(THEME_SCHEMA_KEY) !== THEME_SCHEMA) {
+      localStorage.removeItem(THEME_KEY)
+      localStorage.setItem(THEME_SCHEMA_KEY, THEME_SCHEMA)
+    }
     const v = localStorage.getItem(THEME_KEY)
     if (v === 'light' || v === 'dark') return v
   } catch { /* noop */ }
-  // No persisted preference — respect the OS-level setting if available.
-  // `matchMedia` is undefined under SSR and on very old browsers; the
-  // optional chain falls through to `light` in that case.
-  try {
-    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
-  } catch { /* noop */ }
-  return 'light'
+  // Dark is the product identity — it is what the sign-in page hands off to,
+  // so the workbench opens in it regardless of the OS preference. The toggle
+  // (and its localStorage write) still lets anyone stay in light.
+  return 'dark'
 }
 
 function storedDensity(): Density {
@@ -253,7 +270,19 @@ interface UIStore {
   compareNavRequest: { a?: string; b?: string; tab?: string } | null
   // Chat / agent: open Import/Export modal ('import' | 'export').
   ioModalRequest: 'import' | 'export' | null
+  // Multi-user edit lock (Task 14). `readOnly` is true when another user holds
+  // the active project's lock (or acquisition failed) — every destructive /
+  // mutating affordance is gated on it. `lockHolderEmail` names the current
+  // holder for the read-only banner. In-memory only (a session concept); auth
+  // is required for either to ever be non-default, so the legacy single-user
+  // workbench is always writable.
+  readOnly: boolean
+  lockHolderEmail: string | null
   currentProject: string | null
+  // Resume target for auth / projects-home flows. Prefer a stable UUID when a
+  // caller knows it, but keep the project name as a compatible fallback so
+  // single-user mode and older persisted sessions still resume cleanly.
+  lastProjectId: string | null
   autosaveEnabled: boolean
   openTabs: OpenTab[]
   // ISO timestamp of the last save for each known project. UI consumers
@@ -306,7 +335,10 @@ interface UIStore {
   clearCompareNavRequest: () => void
   requestIoModal: (tab: 'import' | 'export') => void
   clearIoModalRequest: () => void
-  setCurrentProject: (name: string | null) => void
+  // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
+  setLockState: (s: LockState) => void
+  setCurrentProject: (name: string | null, preferredId?: string | null) => void
+  setLastProjectId: (id: string | null) => void
   setAutosaveEnabled: (v: boolean) => void
   addTab: (name: string) => void
   closeTab: (name: string) => void
@@ -351,7 +383,10 @@ export const useUIStore = create<UIStore>((set) => ({
   resultsTabRequest: null,
   compareNavRequest: null,
   ioModalRequest: null,
+  readOnly: false,
+  lockHolderEmail: null,
   currentProject: storedCurrentProject(),
+  lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(),
   openTabs: (() => {
     const tabs = storedOpenTabs()
@@ -456,10 +491,15 @@ export const useUIStore = create<UIStore>((set) => ({
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab) => set({ ioModalRequest: tab }),
   clearIoModalRequest: () => set({ ioModalRequest: null }),
-  setCurrentProject: (name) => {
+  setLockState: (s) => set({ readOnly: s.readOnly, lockHolderEmail: s.holderEmail }),
+  setCurrentProject: (name, preferredId) => {
     try {
-      if (name) localStorage.setItem(CURRENT_PROJECT_KEY, name)
-      else localStorage.removeItem(CURRENT_PROJECT_KEY)
+      if (name) {
+        localStorage.setItem(CURRENT_PROJECT_KEY, name)
+        localStorage.setItem(LAST_PROJECT_ID_KEY, preferredId ?? name)
+      } else {
+        localStorage.removeItem(CURRENT_PROJECT_KEY)
+      }
     } catch { /* noop */ }
     set(s => {
       // Clear selection on every project switch — the previous project's
@@ -477,6 +517,7 @@ export const useUIStore = create<UIStore>((set) => ({
         // Defaults to 'lopf' for a never-visited / fresh project.
         resultSource: name ? (s.resultSourceByProject[name] ?? 'lopf') : 'lopf',
       }
+      if (name) patch.lastProjectId = preferredId ?? name
       if (name && !s.openTabs.some(t => t.name === name)) {
         const nextTabs = [...s.openTabs, { name, lastInteractedAt: Date.now() }]
         persistOpenTabs(nextTabs)
@@ -491,6 +532,13 @@ export const useUIStore = create<UIStore>((set) => ({
       }
       return patch
     })
+  },
+  setLastProjectId: (id) => {
+    try {
+      if (id) localStorage.setItem(LAST_PROJECT_ID_KEY, id)
+      else localStorage.removeItem(LAST_PROJECT_ID_KEY)
+    } catch { /* noop */ }
+    set({ lastProjectId: id })
   },
   setAutosaveEnabled: (v) => {
     try { localStorage.setItem(AUTOSAVE_KEY, String(v)) } catch { /* noop */ }
@@ -524,6 +572,7 @@ export const useUIStore = create<UIStore>((set) => ({
   }),
   renameProject: (oldName, newName) => set(s => {
     const wasCurrent = s.currentProject === oldName
+    const nextLastProjectId = s.lastProjectId === oldName ? newName : s.lastProjectId
     // openTabs / recents — substitute the name in-place to preserve order
     // (and the tab's LRU timestamp).
     const nextTabs = s.openTabs.map(t => t.name === oldName ? { ...t, name: newName } : t)
@@ -544,11 +593,18 @@ export const useUIStore = create<UIStore>((set) => ({
     if (wasCurrent) {
       try { localStorage.setItem(CURRENT_PROJECT_KEY, newName) } catch { /* noop */ }
     }
+    if (nextLastProjectId !== s.lastProjectId) {
+      try {
+        if (nextLastProjectId) localStorage.setItem(LAST_PROJECT_ID_KEY, nextLastProjectId)
+        else localStorage.removeItem(LAST_PROJECT_ID_KEY)
+      } catch { /* noop */ }
+    }
     persistOpenTabs(nextTabs)
     persistRecents(nextRecents)
     persistLastSaved(nextLastSaved)
     return {
       currentProject: wasCurrent ? newName : s.currentProject,
+      lastProjectId: nextLastProjectId,
       openTabs: nextTabs,
       recents: nextRecents,
       lastSavedByProject: nextLastSaved,

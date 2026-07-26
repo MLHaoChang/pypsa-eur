@@ -1,3 +1,4 @@
+import axios from 'axios'
 import client from './client'
 import type {
   ProjectInfo, ImportSummary, SaveResult, BundleImportResult,
@@ -32,8 +33,91 @@ export interface RestoreResult {
   snapshot_count: number
 }
 
+// Multi-user edit lock (Task 8/14). `holder_email` names the current holder;
+// `yours` is true when that holder is the requesting user. `null` (top-level
+// `lock` field) means no lock exists on the project.
+export interface ProjectLockInfo {
+  holder_email: string
+  yours: boolean
+}
+
+// One row of a project tree-root's membership set (Task 7/14). `email` can be
+// null if the user record was removed but the membership row lingers.
+export interface ProjectMember {
+  user_id: string
+  email: string | null
+}
+
+// ── Unclaimed (pre-multi-user) projects ───────────────────────────────────
+// Projects saved to disk before tenancy existed have no owning organization,
+// so they are invisible to /projects/. `listUnclaimed` surfaces them to the
+// signed-in user; `importUnclaimed` adopts one root (plus its scenario
+// descendants) into the caller's workspace.
+export interface UnclaimedProject {
+  name: string
+  parent_project: string | null
+  scenario_description: string | null
+  // False when the bundle directory has metadata but no network file — the
+  // import still succeeds, but the project opens empty.
+  has_network: boolean
+  descendant_names: string[]
+}
+
+export interface ImportedProjectRef {
+  id: string
+  name: string
+  org_id: string
+  parent_project_id: string | null
+}
+
+export interface ImportUnclaimedResult {
+  root: ImportedProjectRef
+  claimed: ImportedProjectRef[]
+  warnings: string[]
+}
+
+interface ListProjectsOptions {
+  rootsOnly?: boolean
+}
+
+// 404 means the backend runs with auth disabled, where "unclaimed" has no
+// meaning — the caller renders nothing rather than an error.
+function listUnclaimedProjects(): Promise<UnclaimedProject[]> {
+  return client
+    .get<UnclaimedProject[]>('/projects/unclaimed', { skipErrorToast: true })
+    // A non-array body means `/unclaimed` got shadowed by the dynamic
+    // `GET /projects/{name}` route — treat it as "nothing to import".
+    .then(r => (Array.isArray(r.data) ? r.data : []))
+    .catch((error: unknown) => {
+      if (axios.isAxiosError(error) && error.response?.status === 404) return []
+      throw error
+    })
+}
+
+function listProjects(): Promise<ProjectInfo[]>
+function listProjects(options: ListProjectsOptions): Promise<ProjectInfo[]>
+function listProjects(options?: ListProjectsOptions): Promise<ProjectInfo[]> {
+  return client.get<ProjectInfo[]>('/projects/', {
+    params: options?.rootsOnly ? { roots_only: true } : undefined,
+  }).then((r) => {
+    const projects = r.data
+    return options?.rootsOnly
+      ? projects.filter(project => project.parent_project == null)
+      : projects
+  })
+}
+
 export const projectsApi = {
-  list: () => client.get<ProjectInfo[]>('/projects/').then(r => r.data),
+  list: listProjects,
+  listUnclaimed: listUnclaimedProjects,
+  // 400/403/409 carry a `{detail}` the caller renders inline next to the row,
+  // so the global error toast is suppressed.
+  importUnclaimed: (name: string) =>
+    client.post<ImportUnclaimedResult>(
+      `/projects/unclaimed/${encodeURIComponent(name)}/import`,
+      null,
+      { skipErrorToast: true },
+    ).then(r => r.data),
   // Phase 8 scenarios. A scenario is a normal project with metadata
   // `parent_project=<base>`. `createScenario` saves the current in-memory
   // network to a new project keyed by `name`, branched off `base`. Caller
@@ -182,4 +266,33 @@ export const projectsApi = {
     client.delete(
       `/projects/${encodeURIComponent(name)}/snapshots/${encodeURIComponent(snapshotId)}`,
     ),
+
+  // ── Multi-user edit lock (auth mode only; 404 otherwise) ──────────────────
+  // `id` may be a project UUID or name — the backend's resolver accepts either.
+  // Acquire/heartbeat use `skipErrorToast` because a 409 (someone else holds
+  // the lock, or ours expired) is EXPECTED and surfaced as the read-only
+  // banner, not as an error toast; the structured detail carries the current
+  // holder in `.detail.lock`.
+  acquireLock: (id: string) =>
+    client.post<{ lock: ProjectLockInfo | null }>(
+      `/projects/${encodeURIComponent(id)}/lock`, null, { skipErrorToast: true },
+    ).then(r => r.data),
+  heartbeatLock: (id: string) =>
+    client.post<{ lock: ProjectLockInfo | null }>(
+      `/projects/${encodeURIComponent(id)}/lock/heartbeat`, null, { skipErrorToast: true },
+    ).then(r => r.data),
+  releaseLock: (id: string) =>
+    client.delete<{ released: boolean }>(
+      `/projects/${encodeURIComponent(id)}/lock`, { skipErrorToast: true },
+    ).then(r => r.data),
+
+  // ── Membership (auth mode only; server resolves the id to the tree ROOT) ──
+  getMembers: (id: string) =>
+    client.get<ProjectMember[]>(
+      `/projects/${encodeURIComponent(id)}/members`,
+    ).then(r => r.data),
+  setMembers: (id: string, userIds: string[]) =>
+    client.put<ProjectMember[]>(
+      `/projects/${encodeURIComponent(id)}/members`, { user_ids: userIds },
+    ).then(r => r.data),
 }

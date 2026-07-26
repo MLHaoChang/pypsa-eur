@@ -1,14 +1,19 @@
 @import "tailwindcss";
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Design tokens — "Portfolio Optimizer / PyPSA Studio" design system.
-   Hitachi-inspired industrial red on warm-white surfaces, engineering-clean
+   Design tokens — "PyPSA Studio" design system.
+   Mint/teal accent shared with the sign-in landing page, engineering-clean
    (Linear / Vercel / Figma lineage), mono numerics.
 
-   Light theme is the @theme default; the dark theme overrides under
-   :root[data-theme="dark"]. Tailwind v4 emits every --color-* both as a
-   utility class (bg-bg-2, text-ink-700, border-border-2, …) AND as a real
-   CSS custom property, so component code can also use var(--color-ink-700).
+   Dark is the shipped default and carries the product identity: a green-tinted
+   near-black surface ramp with a #35d39a mint accent, mirroring index.html.
+   Light is the @theme default block (so it stays the Tailwind fallback) and
+   keeps its warm-white identity, with the accent pulled down to a deeper
+   emerald that stays legible as text on white.
+
+   Tailwind v4 emits every --color-* both as a utility class (bg-bg-2,
+   text-ink-700, border-border-2, …) AND as a real CSS custom property, so
+   component code can also use var(--color-ink-700).
    ══════════════════════════════════════════════════════════════════════════ */
 @theme {
   /* Surfaces */
@@ -41,11 +46,16 @@
   --color-axis: #97a0ae;
   --color-legend: #475061;
 
-  /* Industrial-red accent */
-  --color-accent: #e60012;
-  --color-accent-700: #b8000e;
-  --color-accent-100: #fde7e9;
-  --color-accent-50: #fef3f4;
+  /* Emerald accent — same family as the dark theme's mint, darkened so
+     `text-accent` on a white surface still clears WCAG AA (≈5.3:1). Bright
+     mint (#35d39a) is reserved for the dark theme, where it has the contrast. */
+  --color-accent: #0b7a53;
+  --color-accent-700: #075c3e;
+  --color-accent-100: #c6ecdb;
+  --color-accent-50: #edfaf4;
+  /* Foreground for anything FILLED with the accent. White works on the light
+     theme's deep emerald; the dark theme's bright mint needs ink instead. */
+  --color-on-accent: #ffffff;
 
   /* State colours */
   --color-success: #16a34a;
@@ -71,11 +81,11 @@
   --color-cat-storage: #7c3aed;
   --color-cat-load: #d97706;
 
-  /* Left sidebar — now a light warm-white surface (was a dark navy rail).
-     nav-hover is the row-hover tint; nav-active stays the industrial red. */
+  /* Left sidebar — a light warm-white surface (was a dark navy rail).
+     nav-hover is the row-hover tint; nav-active tracks the accent. */
   --color-nav: #f9fafb;
   --color-nav-hover: #f5f6f8;
-  --color-nav-active: #e60012;
+  --color-nav-active: #0b7a53;
 
   /* Typography */
   --font-family-sans: 'Inter', system-ui, sans-serif;
@@ -98,54 +108,69 @@
   --shadow: 0 2px 4px rgba(10, 14, 20, 0.04), 0 1px 2px rgba(10, 14, 20, 0.03);
   --shadow-md: 0 6px 16px rgba(10, 14, 20, 0.07), 0 2px 5px rgba(10, 14, 20, 0.04);
   --shadow-lg: 0 18px 40px rgba(10, 14, 20, 0.12), 0 4px 12px rgba(10, 14, 20, 0.06);
-  --ring-accent: 0 0 0 3px var(--color-accent-100);
-  /* Canvas signature — soft ambient red/purple radial gradients. */
+  --ring-accent: 0 0 0 3px rgba(11, 122, 83, 0.18);
+  /* Canvas signature — soft ambient mint/cyan radial gradients. */
   --ambient:
-    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(230, 0, 18, 0.04), transparent 60%),
-    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(124, 58, 237, 0.035), transparent 55%);
+    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(11, 122, 83, 0.05), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(56, 189, 248, 0.035), transparent 55%);
 }
 
 /* ── Dark theme overrides ──────────────────────────────────────────────────
-   Activated by `<html data-theme="dark">`. Mirrors the design's dark palette;
-   the accent shifts to a slightly hotter red, neutrals invert, and the
-   sidebar collapses back into the dark surface family. */
+   Activated by `<html data-theme="dark">` (the shipped default). Matches the
+   sign-in landing page in index.html: a green-tinted near-black surface ramp,
+   near-white text with a desaturated sage for secondary copy, and a mint
+   accent. Hairlines are the solid-hex equivalents of rgba(255,255,255,0.10)
+   → 0.18 composited over the surface ramp, so the existing border utilities
+   keep working without an alpha channel. */
 :root[data-theme="dark"] {
-  --color-bg: #0a0d12;
-  --color-bg-2: #0f131a;
-  --color-panel: #141821;
-  --color-panel-2: #1b212b;
-  --color-canvas: #0c1016;
-  --color-canvas-dot: #1d2129;
+  --color-bg: #07130f;
+  --color-bg-2: #0b1a15;
+  --color-panel: #101f19;
+  --color-panel-2: #16261f;
+  --color-canvas: #050f0c;
+  --color-canvas-dot: #1c3229;
 
-  --color-border: #232831;
-  --color-border-2: #2c3340;
-  --color-border-3: #3a4253;
-  --color-grid: #232831;
+  --color-border: #1d2e28;
+  --color-border-2: #2a3d36;
+  --color-border-3: #3b514a;
+  --color-grid: #1d2e28;
 
-  --color-ink-900: #f3f4f6;
-  --color-ink-800: #d6dae0;
-  --color-ink-700: #c4c9d0;
-  --color-ink-600: #a4abb4;
-  --color-ink-500: #7e8691;
-  --color-ink-400: #5d6470;
-  --color-ink-300: #3d434c;
-  --color-ink-200: #2b3038;
-  --color-text: #f3f4f6;
-  --color-muted: #7e8691;
-  --color-axis: #5d6470;
-  --color-legend: #a4abb4;
+  --color-ink-900: #eaf3ee;
+  --color-ink-800: #d3e3da;
+  --color-ink-700: #c0d3ca;
+  --color-ink-600: #b0c6bb;
+  --color-ink-500: #9fb4a9;
+  --color-ink-400: #74897f;
+  --color-ink-300: #46584f;
+  --color-ink-200: #2b3a34;
+  --color-text: #eaf3ee;
+  --color-muted: #9fb4a9;
+  --color-axis: #74897f;
+  --color-legend: #b0c6bb;
 
-  --color-accent: #ef4458;
-  --color-accent-700: #dc1730;
-  --color-accent-100: #3a1119;
-  --color-accent-50: #1f0a0d;
+  /* accent-100 / accent-50 back accent-coloured text (chips, rings, active
+     tool buttons), so in dark they have to be dark mint tints, not pastels. */
+  --color-accent: #35d39a;
+  --color-accent-700: #12a774;
+  --color-accent-100: #123a2c;
+  --color-accent-50: #0c261e;
+  --color-on-accent: #04140e;
 
-  --color-nav: #0f131a;
-  --color-nav-hover: #141821;
+  --color-nav: #091712;
+  --color-nav-hover: #101f19;
+
+  /* Deeper, softer shadows — on a near-black surface the light-theme shadows
+     are invisible, so lean on spread plus a hairline top inset for lift. */
+  --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 1px 1px rgba(0, 0, 0, 0.3);
+  --shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --ring-accent: 0 0 0 3px rgba(53, 211, 154, 0.22);
 
   --ambient:
-    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(239, 68, 88, 0.06), transparent 60%),
-    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(124, 58, 237, 0.05), transparent 55%);
+    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(53, 211, 154, 0.10), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(111, 216, 255, 0.055), transparent 55%);
 
   /* Tell the browser to render native form controls (date pickers, scrollbar
      thumbs, autofill rendering) in dark variants. */
@@ -159,6 +184,17 @@
   --row-padding-y: 2px;
   --row-padding-y-lg: 3px;
   --panel-padding: 8px;
+}
+
+/* Accent-filled surfaces across the app are written as `bg-accent text-white`.
+   That reads fine against the light theme's deep emerald, but white on the
+   dark theme's bright mint is ~1.9:1 — illegible. Rather than rewrite every
+   call site, re-point the foreground of accent FILLS (not the `bg-accent/10`
+   tints, which are separate class names and keep `text-accent`) at the
+   on-accent token. The `:root[data-theme]` prefix outranks the `text-white`
+   utility, and the light theme is deliberately left on the utility. */
+:root[data-theme="dark"] :is(.bg-accent, .bg-accent\/90, .bg-accent\/85, .bg-accent\/80) {
+  color: var(--color-on-accent);
 }
 
 * { box-sizing: border-box; }
@@ -179,14 +215,23 @@ body {
    is used (IDs, kV, MW, currencies, timestamps, table cells, kbd). */
 .font-mono { font-feature-settings: 'tnum', 'zero'; letter-spacing: 0.005em; }
 
+/* Scrollbars ride the palette rather than the UA default, so they stay in
+   family when the theme flips. Firefox gets the standard properties; Chromium
+   / WebKit get the -webkit- pseudo-elements. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-3) transparent;
+}
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border-2);
+  background: var(--color-border-3);
   border-radius: 4px;
-  border: 2px solid var(--color-bg);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--color-ink-400); }
+::-webkit-scrollbar-thumb:hover { background: var(--color-ink-400); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* Transparent — the canvas base colour + the design's ambient red/purple
    wash now live on the .react-flow root (viewport-anchored, see

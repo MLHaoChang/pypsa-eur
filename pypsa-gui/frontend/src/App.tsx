@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Toaster } from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FailureInfo } from './api/types'
 import AppHeader from './layout/AppHeader'
@@ -26,13 +25,16 @@ import SolveQueuePanel from './pages/SolveQueuePanel'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
+import LockBanner from './components/LockBanner'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import ChatPanel from './components/ChatPanel'
 import { useUIStore, type SlidePanel } from './store/uiStore'
+import { authEnabled } from './auth/config'
+import AuthMismatchGate from './auth/AuthMismatchGate'
 import { networkApi } from './api/network'
 import { projectsApi } from './api/projects'
 import { simulationApi, createLogStream } from './api/simulation'
-import { invalidateNetworkQueries } from './utils/projectActions'
+import { acquireProjectLock, invalidateNetworkQueries, stopLockHeartbeat, switchToProject } from './utils/projectActions'
 import { nk } from './utils/queryKeys'
 import { appLog, useSimulationStore } from './store/simulationStore'
 
@@ -164,7 +166,7 @@ function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: () => voi
 export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
-    lastSavedByProject, markProjectSaved, pruneRecents, recents,
+    lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
     theme, density, compareRailOpen, setCompareRailOpen,
   } = useUIStore()
 
@@ -185,6 +187,7 @@ export default function App() {
   const qc = useQueryClient()
   const [recoveryAttempted, setRecoveryAttempted] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const resumeProjectRef = useRef<string | null>(null)
 
   // Backend project list — used in two places: (1) prune recents of names that
   // no longer exist on disk (after a delete from another tab), (2) seed
@@ -221,6 +224,12 @@ export default function App() {
       if (lastSavedByProject[p.name]) continue
       if (p.created_at) markProjectSaved(p.name, p.created_at)
     }
+    if (currentProject) {
+      const currentInfo = backendProjects.find(p => p.name === currentProject)
+      if (currentInfo?.id && currentInfo.id !== lastProjectId) {
+        setLastProjectId(currentInfo.id)
+      }
+    }
   // recents intentionally NOT in deps — we only want to seed once per backend refresh, not loop.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendProjects])
@@ -243,6 +252,48 @@ export default function App() {
       window.history.replaceState({}, '', window.location.pathname)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Post-login resume: when auth routes bounce the user back to `/app` with a
+  // `?project=` query, activate that project once and strip the query param so
+  // refreshes don't keep replaying the handoff.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const resumeProject = params.get('project')
+    if (!resumeProject) return
+    if (resumeProjectRef.current === resumeProject) return
+    resumeProjectRef.current = resumeProject
+
+    const stripProjectParam = () => {
+      const nextParams = new URLSearchParams(window.location.search)
+      if (nextParams.get('project') !== resumeProject) return
+      nextParams.delete('project')
+      const query = nextParams.toString()
+      const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+      window.history.replaceState({}, '', nextUrl)
+    }
+
+    if (resumeProject === currentProject) {
+      stripProjectParam()
+      return
+    }
+
+    void switchToProject(resumeProject, qc).finally(stripProjectParam)
+  }, [currentProject, qc])
+
+  // Edit-lock acquisition on mount (auth mode). Covers the plain-reload path
+  // where `currentProject` is restored from localStorage but NO switch/resume
+  // fires (so switchToProject's own acquire never runs). Idempotent with the
+  // switch flow — re-acquiring the same lock just refreshes our TTL, so it's
+  // safe that StrictMode double-invokes this in dev (mount → unmount stops the
+  // heartbeat → mount re-acquires and restarts it). The heartbeat is a
+  // module-level singleton; stop it when the workbench unmounts so navigating
+  // to /projects or /login doesn't keep pinging.
+  useEffect(() => {
+    if (!authEnabled) return
+    const proj = useUIStore.getState().currentProject
+    if (proj) void acquireProjectLock(proj)
+    return () => { stopLockHeartbeat() }
   }, [])
 
   // Simulation reconnect: on mount, ask the backend whether a solve is in
@@ -482,101 +533,94 @@ export default function App() {
   }, [activeSlidePanel, setSlidePanel])
 
   return (
-    <AppErrorBoundary>
-    <div className="flex flex-col h-screen overflow-hidden bg-bg">
-      {/* ── Crash recovery banner ──────────────────────────────────── */}
-      {/* Renders only when a project has an orphaned `.tmp` sibling — a
-          tell-tale of a save killed before the atomic rename. Hidden
-          (returns null) the rest of the time so it doesn't take vertical
-          space. */}
-      <CrashRecoveryBanner />
+    <AuthMismatchGate>
+      <AppErrorBoundary>
+      <div className="flex flex-col h-screen overflow-hidden bg-bg">
+        {/* ── Crash recovery banner ──────────────────────────────────── */}
+        {/* Renders only when a project has an orphaned `.tmp` sibling — a
+            tell-tale of a save killed before the atomic rename. Hidden
+            (returns null) the rest of the time so it doesn't take vertical
+            space. */}
+        <CrashRecoveryBanner />
 
-      {/* ── App header ─────────────────────────────────────────────── */}
-      <AppHeader />
+        {/* ── Read-only lock banner ──────────────────────────────────── */}
+        {/* Renders only when another user holds this project's edit lock
+            (auth mode). Hidden otherwise so it takes no vertical space. */}
+        <LockBanner />
 
-      {/* ── Project tab strip ──────────────────────────────────────── */}
-      <ProjectTabs />
+        {/* ── App header ─────────────────────────────────────────────── */}
+        <AppHeader />
 
-      {/* ── Three-column body ──────────────────────────────────────── */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* ── Project tab strip ──────────────────────────────────────── */}
+        <ProjectTabs />
 
-        {/* Zone 0 — Sectioned nav sidebar */}
-        <Sidebar />
+        {/* ── Three-column body ──────────────────────────────────────── */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
 
-        {/* Zone 2 — Centre: the canvas (+ bottom panel). Most sidebar tabs
-            open alongside it as a HALF-WIDTH panel (the canvas stays visible,
-            shrunk to the other half); Results takes the whole area. */}
-        <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+          {/* Zone 0 — Sectioned nav sidebar */}
+          <Sidebar />
 
-          {/* Canvas column — full width normally, half beside a tab panel,
-              hidden while a full-screen tab (Results) occupies the area. Kept
-              mounted (display:none, not unmounted) so its zoom/pan + React
-              Flow state survive a tab open/close. */}
-          <div
-            className={`flex flex-col min-h-0 overflow-hidden ${
-              fullScreenTab ? 'hidden'
-                : activeSlidePanel ? 'w-1/2 min-w-0'
-                : 'flex-1 min-w-0'
-            }`}
-          >
-            <div className="relative flex-1 min-h-0 overflow-hidden">
-              <ErrorBoundary label="Canvas crashed">
-                {canvasView === 'blank'
-                  ? <TopologyCanvas />
-                  : <MapCanvas mode={canvasView} />}
-              </ErrorBoundary>
-              {/* Mode switcher floats over whichever canvas is active */}
-              <MapModeSwitcher />
-              {/* Snapshot picker / playback bar for the results overlay —
-                  shown on both the blank schematic and the satellite/hybrid map */}
-              <SnapshotPicker />
-            </div>
-            {/* Zone 4 — Bottom tabbed panel (canvas only) */}
-            <BottomPanel />
-          </div>
+          {/* Zone 2 — Centre: the canvas (+ bottom panel). Most sidebar tabs
+              open alongside it as a HALF-WIDTH panel (the canvas stays visible,
+              shrunk to the other half); Results takes the whole area. */}
+          <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
 
-          {/* Tab panel — half-width beside the canvas, full-width for Results. */}
-          {activeSlidePanel && (
+            {/* Canvas column — full width normally, half beside a tab panel,
+                hidden while a full-screen tab (Results) occupies the area. Kept
+                mounted (display:none, not unmounted) so its zoom/pan + React
+                Flow state survive a tab open/close. */}
             <div
-              ref={panelRef}
-              className={`min-w-0 flex flex-col min-h-0 overflow-hidden ${
-                fullScreenTab ? 'flex-1' : 'w-1/2 border-l border-border'
+              className={`flex flex-col min-h-0 overflow-hidden ${
+                fullScreenTab ? 'hidden'
+                  : activeSlidePanel ? 'w-1/2 min-w-0'
+                  : 'flex-1 min-w-0'
               }`}
             >
-              {/* Boundary keyed on panel + project so a crash in any full-page
-                  tab (Results/Compare/Economics/…) shows an inline fallback
-                  instead of whitescreening the app, and navigating to another
-                  tab or switching project remounts it (clearing the error). */}
-              <ErrorBoundary key={`${activeSlidePanel}-${currentProject ?? ''}`} label="This panel crashed">
-                <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
-              </ErrorBoundary>
+              <div className="relative flex-1 min-h-0 overflow-hidden">
+                <ErrorBoundary label="Canvas crashed">
+                  {canvasView === 'blank'
+                    ? <TopologyCanvas />
+                    : <MapCanvas mode={canvasView} />}
+                </ErrorBoundary>
+                {/* Mode switcher floats over whichever canvas is active */}
+                <MapModeSwitcher />
+                {/* Snapshot picker / playback bar for the results overlay —
+                    shown on both the blank schematic and the satellite/hybrid map */}
+                <SnapshotPicker />
+              </div>
+              {/* Zone 4 — Bottom tabbed panel (canvas only) */}
+              <BottomPanel />
             </div>
-          )}
+
+            {/* Tab panel — half-width beside the canvas, full-width for Results. */}
+            {activeSlidePanel && (
+              <div
+                ref={panelRef}
+                className={`min-w-0 flex flex-col min-h-0 overflow-hidden ${
+                  fullScreenTab ? 'flex-1' : 'w-1/2 border-l border-border'
+                }`}
+              >
+                {/* Boundary keyed on panel + project so a crash in any full-page
+                    tab (Results/Compare/Economics/…) shows an inline fallback
+                    instead of whitescreening the app, and navigating to another
+                    tab or switching project remounts it (clearing the error). */}
+                <ErrorBoundary key={`${activeSlidePanel}-${currentProject ?? ''}`} label="This panel crashed">
+                  <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+                </ErrorBoundary>
+              </div>
+            )}
+          </div>
+
+          {/* Zone 3 — Right properties panel. Only renders alongside the
+              Topology Canvas — hidden while a tab panel occupies the right half. */}
+          {!activeSlidePanel && <PropertiesPanel />}
         </div>
 
-        {/* Zone 3 — Right properties panel. Only renders alongside the
-            Topology Canvas — hidden while a tab panel occupies the right half. */}
-        {!activeSlidePanel && <PropertiesPanel />}
+        <StatusBar />
+        <CommandPalette />
+        <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       </div>
-
-      <StatusBar />
-      <div data-no-panel-close>
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            style: {
-              fontSize: 13,
-              background: 'var(--color-panel)',
-              color: 'var(--color-text)',
-              border: '1px solid var(--color-border)',
-            },
-          }}
-        />
-      </div>
-
-      <CommandPalette />
-      <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />
-    </div>
-    </AppErrorBoundary>
+      </AppErrorBoundary>
+    </AuthMismatchGate>
   )
 }

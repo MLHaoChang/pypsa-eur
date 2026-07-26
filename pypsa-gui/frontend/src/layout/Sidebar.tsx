@@ -31,6 +31,7 @@ import NewProjectWizard from './NewProjectWizard'
 import { H2Icon } from '../components/AssetIcons'
 import { useSolveQueue } from '../hooks/useSolveQueue'
 import { isActive } from '../api/solveQueue'
+import { evaluateMutation } from '../utils/mutationGuard'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED_W = 240
@@ -834,6 +835,7 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
+    readOnly,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -868,6 +870,14 @@ function ProjectSectionContent({
   })
   const networkHasBuses = (networkMeta?.bus_count ?? 0) > 0
 
+  const guardProjectMutation = useCallback((opts?: { silent?: boolean }) => {
+    const verdict = evaluateMutation(readOnly)
+    if (verdict.allowed) return true
+    if (opts?.silent) appLog('INFO', `Autosave skipped — ${verdict.blockedMessage}`)
+    else toast.error(verdict.blockedMessage!)
+    return false
+  }, [readOnly])
+
   // Save current network state to backend (under `name`), then offer the
   // resulting bundle as a download via the OS save-file picker (Chromium) or
   // the browser's default download mechanism (Firefox/Safari).
@@ -879,6 +889,9 @@ function ProjectSectionContent({
   ) => {
     const auto = !!opts?.auto
     const setAsCurrent = opts?.setAsCurrent !== false
+    const activeProject = useUIStore.getState().currentProject
+    const savingActiveProject = activeProject !== null && name === activeProject && setAsCurrent
+    if ((auto || savingActiveProject) && !guardProjectMutation({ silent: auto })) return
     try {
       // Identity assertion: when this save targets the ACTIVE project (autosave
       // or explicit Ctrl+S — name === currentProject), pass `expect` so the
@@ -983,7 +996,7 @@ function ProjectSectionContent({
       if (!auto) toast.error('Save failed')
       appLog('ERROR', `Save failed: ${String((e as Error)?.message ?? e)}`)
     }
-  }, [setCurrentProject, setSaveStatus, qc, markProjectSaved])
+  }, [setCurrentProject, setSaveStatus, qc, markProjectSaved, guardProjectMutation])
 
   // Autosave: every 5 minutes when enabled, a project is set, and the
   // in-memory network has at least one bus (guards against server restarts).
