@@ -78,7 +78,10 @@ def find_project(db: DBSession, user: User, id_or_name: str) -> Project | None:
         project = db.get(Project, as_uuid)
         if project is not None and project.org_id == org_id:
             return project
-        return None
+        # A parseable UUID that matches no row in this org is NOT necessarily a
+        # dangling id — a project may legitimately be *named* a UUID-shaped
+        # string. Fall through to a name lookup so such projects stay
+        # resolvable (rather than 404-ing on a valid name).
 
     return db.scalar(
         select(Project).where(Project.org_id == org_id, Project.name == id_or_name)
