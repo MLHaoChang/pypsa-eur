@@ -41,13 +41,21 @@ export function AuthModeProvider({ children }: { children: ReactNode }) {
         const res = await fetch('/api/health', { credentials: 'same-origin' })
         if (!cancelled && res.ok) {
           const body = (await res.json()) as { auth_enabled?: boolean }
-          if (body.auth_enabled) {
-            setAuthEnabled(true)
-            setEnabled(true)
+          // The backend is AUTHORITATIVE about its own mode, in BOTH
+          // directions. This used to be a one-way ratchet (only ever turning
+          // auth ON), which dead-ended every single-user install: the env flag
+          // defaults to enabled, so the SPA gated every route behind a login
+          // that a backend without an auth DB cannot serve — /api/auth/me 401s
+          // and /api/auth/login 500s. The env flag is only the pre-flight
+          // default for the window before health answers.
+          if (typeof body.auth_enabled === 'boolean') {
+            setAuthEnabled(body.auth_enabled)
+            setEnabled(body.auth_enabled)
           }
         }
       } catch {
-        // Keep env default if health is unreachable.
+        // Keep env default if health is unreachable. Failing closed here is
+        // deliberate — see vite.auth-gate.ts's `unreachable` branch.
       } finally {
         if (!cancelled) setReady(true)
       }

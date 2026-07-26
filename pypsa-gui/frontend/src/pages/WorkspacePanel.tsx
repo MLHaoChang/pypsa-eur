@@ -9,6 +9,7 @@ import toast from 'react-hot-toast'
 import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 import { useAuth } from '../auth/AuthProvider'
+import { useAuthMode } from '../auth/AuthModeProvider'
 import AssignMembersDialog from '../layout/AssignMembersDialog'
 import { useUIStore } from '../store/uiStore'
 import { switchToProject } from '../utils/projectActions'
@@ -41,6 +42,7 @@ export default function WorkspacePanel() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { user } = useAuth()
+  const { authEnabled } = useAuthMode()
   const currentProject = useUIStore(s => s.currentProject)
   const readOnly = useUIStore(s => s.readOnly)
   const lockHolderEmail = useUIStore(s => s.lockHolderEmail)
@@ -226,17 +228,20 @@ export default function WorkspacePanel() {
       {/* ── Band 3: people ────────────────────────────────────────────── */}
       <PageSection
         title="People"
-        right={(
+        right={authEnabled ? (
           <Btn
             onClick={() => setMembersFor(root?.id ?? root?.name ?? currentProject)}
             title="Add or remove members"
           >
             <Plus size={13} /> Members
           </Btn>
-        )}
+        ) : undefined}
       >
         <div className="px-4 py-3.5 flex flex-col gap-2">
-          <MemberList projectId={root?.id ?? root?.name ?? currentProject} />
+          <MemberList
+            enabled={authEnabled}
+            projectId={root?.id ?? root?.name ?? currentProject}
+          />
           <p className="flex items-start gap-1.5 text-[10.5px] leading-[1.5] text-ink-400">
             <Users className="mt-0.5 shrink-0" size={11} />
             <span>
@@ -330,21 +335,33 @@ function TreeRow({ node, current, onOpen }: {
   )
 }
 
-function MemberList({ projectId }: { projectId: string }) {
-  // `retry: false` — in single-user mode this endpoint 404s/403s and there is
-  // nothing to retry. Fail quiet: the band still renders its ACL explainer.
+function MemberList({ projectId, enabled }: { projectId: string; enabled: boolean }) {
+  // Gated on `enabled` rather than firing and handling the failure: with auth
+  // off the endpoint 400s, and the global axios interceptor toasts EVERY error
+  // it is not told to skip. Rendering this panel would pop "Project membership
+  // requires authentication to be enabled" at a user who never asked about
+  // membership. `retry: false` covers the auth-on-but-refused case.
   const { data: members, isError, isLoading } = useQuery({
     queryKey: ['project-members', projectId],
     queryFn: () => projectsApi.getMembers(projectId),
+    enabled,
     retry: false,
     staleTime: 15_000,
   })
 
+  if (!enabled) {
+    return (
+      <p className="text-[11px] text-muted">
+        This server runs in single-user mode — every project is yours alone.
+        Members appear here once the backend is started with auth enabled.
+      </p>
+    )
+  }
   if (isLoading) return <p className="text-[11px] text-muted">Loading members…</p>
   if (isError) {
     return (
       <p className="text-[11px] text-muted">
-        Membership is unavailable — this server is running in single-user mode.
+        Membership is unavailable for this project.
       </p>
     )
   }

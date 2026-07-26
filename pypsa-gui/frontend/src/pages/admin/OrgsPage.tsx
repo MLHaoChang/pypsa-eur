@@ -15,7 +15,7 @@ import {
 } from '../../components/PageKit'
 
 const ORGS_QUERY_KEY = ['admin', 'organizations']
-const INPUT_CLASS_NAME = 'w-full rounded-xl border border-[#d6e1d8] bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#8ca794] focus:ring-2 focus:ring-[#d8e6db]'
+const INPUT_CLASS_NAME = 'w-full rounded-xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-3 py-2 text-sm text-[var(--brand-ink)] outline-none transition focus:border-[var(--brand-red)] focus:ring-2 focus:ring-[rgba(255,82,82,0.28)]'
 
 export default function OrgsPage() {
   const queryClient = useQueryClient()
@@ -81,7 +81,7 @@ export default function OrgsPage() {
               </Btn>
             </form>
           ) : (
-            <div className="rounded-2xl border border-[#d6e1d8] bg-[#fbfdfb] px-5 py-4 text-sm text-slate-600">
+            <div className="rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-4 text-sm text-[var(--brand-ink-dim)]">
               Your account can inspect organization metadata but cannot create new organizations.
             </div>
           )}
@@ -89,11 +89,11 @@ export default function OrgsPage() {
 
         <PageSection title="Directory" count={sortedOrganizations.length}>
           {isLoading ? (
-            <div className="rounded-2xl border border-dashed border-[#d6e1d8] bg-[#fbfdfb] px-5 py-8 text-sm text-slate-500">
+            <div className="rounded-2xl border border-dashed border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
               Loading organizations…
             </div>
           ) : sortedOrganizations.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[#d6e1d8] bg-[#fbfdfb] px-5 py-8 text-sm text-slate-600">
+            <div className="rounded-2xl border border-dashed border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
               No organizations are visible to this account yet.
             </div>
           ) : (
@@ -101,14 +101,14 @@ export default function OrgsPage() {
               {sortedOrganizations.map((organization, index) => (
                 <article
                   key={organization.id}
-                  className="rounded-3xl border border-[#d6e1d8] bg-[#f8fbf8] px-5 py-4"
+                  className="rounded-3xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-5 py-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-950">
+                      <h2 className="text-lg font-semibold tracking-[-0.02em] text-[var(--brand-ink)]">
                         {organization.name}
                       </h2>
-                      <p className="mt-1 font-mono text-[11px] text-slate-500">{organization.id}</p>
+                      <p className="mt-1 font-mono text-[11px] text-[var(--brand-ink-dim)]">{organization.id}</p>
                     </div>
                     <Tag tone={index === 0 && !user?.is_super_admin ? 'purple' : 'neutral'}>
                       {user?.org_id === organization.id ? 'Current org' : 'Visible'}

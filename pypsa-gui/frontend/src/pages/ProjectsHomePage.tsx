@@ -41,7 +41,11 @@ const FOCUS_RING
 
 const PRIMARY_BUTTON
   = 'inline-flex items-center justify-center gap-2 rounded-[14px] '
-  + 'bg-[var(--brand-red-gradient)] px-4 py-2.5 text-sm font-bold '
+  // `image:` hint is load-bearing. Tailwind reads a bare `bg-[var(--x)]` as a
+  // background-COLOR, and a gradient is not a valid colour — so the button
+  // rendered with no fill at all (near-black label on transparent, plus the
+  // shadow glow). The hint forces background-image.
+  + 'bg-[image:var(--brand-red-gradient)] px-4 py-2.5 text-sm font-bold '
   + 'text-[var(--brand-on-red)] shadow-[0_14px_34px_rgba(255,82,82,0.28)] transition '
   + 'hover:brightness-105 motion-safe:hover:-translate-y-px '
   + 'disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none '

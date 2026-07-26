@@ -138,10 +138,14 @@ export default function LoginPage() {
         </AuthButton>
       </form>
 
-      <form className="space-y-4 border-t border-[#e5ece7] pt-5" onSubmit={handleForgotPassword}>
+      {/* Brand tokens, not slate/light-hairline utilities. This block was
+          authored for a light card and kept `text-slate-900` + a #e5ece7 rule
+          after the card became dark glass — near-black text on a near-black
+          panel, effectively invisible. */}
+      <form className="space-y-4 border-t border-white/14 pt-5" onSubmit={handleForgotPassword}>
         <div className="space-y-1">
-          <h3 className="text-sm font-medium text-slate-900">Forgot your password?</h3>
-          <p className="text-sm leading-6 text-slate-600">
+          <h3 className="text-sm font-medium text-[var(--brand-ink)]">Forgot your password?</h3>
+          <p className="text-sm leading-6 text-[var(--brand-ink-dim)]">
             Leave the field below blank to use the email you entered above, or type a different address.
           </p>
         </div>

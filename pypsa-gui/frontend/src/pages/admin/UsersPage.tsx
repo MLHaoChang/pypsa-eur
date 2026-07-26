@@ -17,7 +17,7 @@ import { sortAdminUsers } from './helpers'
 
 const USERS_QUERY_KEY = ['admin', 'users']
 const ORGS_QUERY_KEY = ['admin', 'organizations']
-const INPUT_CLASS_NAME = 'w-full rounded-xl border border-[#d6e1d8] bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#8ca794] focus:ring-2 focus:ring-[#d8e6db]'
+const INPUT_CLASS_NAME = 'w-full rounded-xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-3 py-2 text-sm text-[var(--brand-ink)] outline-none transition focus:border-[var(--brand-red)] focus:ring-2 focus:ring-[rgba(255,82,82,0.28)]'
 
 function roleTone(role: string | null): 'accent' | 'purple' | 'neutral' {
   if (role === 'admin') return 'purple'
@@ -165,7 +165,7 @@ export default function UsersPage() {
             </div>
           </form>
           {user?.is_super_admin && organizations.length === 0 && (
-            <p className="mt-3 text-sm text-slate-600">
+            <p className="mt-3 text-sm text-[var(--brand-ink-dim)]">
               Create an organization first before inviting users.
             </p>
           )}
@@ -177,18 +177,18 @@ export default function UsersPage() {
           hint="Rows reflect the backend tenancy filters for your account."
         >
           {isLoadingUsers ? (
-            <div className="rounded-2xl border border-dashed border-[#d6e1d8] bg-[#fbfdfb] px-5 py-8 text-sm text-slate-500">
+            <div className="rounded-2xl border border-dashed border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
               Loading users…
             </div>
           ) : sortedUsers.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[#d6e1d8] bg-[#fbfdfb] px-5 py-8 text-sm text-slate-600">
+            <div className="rounded-2xl border border-dashed border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
               No users are visible for this scope yet.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full border-separate border-spacing-y-2 text-sm">
                 <thead>
-                  <tr className="text-left text-xs uppercase tracking-[0.16em] text-slate-500">
+                  <tr className="text-left text-xs uppercase tracking-[0.16em] text-[var(--brand-ink-dim)]">
                     <th className="px-3 pb-1 font-semibold">Email</th>
                     <th className="px-3 pb-1 font-semibold">Organization</th>
                     <th className="px-3 pb-1 font-semibold">Role</th>
@@ -198,14 +198,14 @@ export default function UsersPage() {
                 </thead>
                 <tbody>
                   {sortedUsers.map(row => (
-                    <tr key={row.id} className="rounded-2xl bg-[#f8fbf8] shadow-[inset_0_0_0_1px_#e5ede7]">
+                    <tr key={row.id} className="rounded-2xl bg-[var(--brand-surface-2)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10)]">
                       <td className="rounded-l-2xl px-3 py-3 align-middle">
-                        <div className="font-medium text-slate-900">{row.email}</div>
+                        <div className="font-medium text-[var(--brand-ink)]">{row.email}</div>
                         {row.is_super_admin && (
-                          <div className="mt-1 text-xs text-slate-500">Super-admin</div>
+                          <div className="mt-1 text-xs text-[var(--brand-ink-dim)]">Super-admin</div>
                         )}
                       </td>
-                      <td className="px-3 py-3 align-middle text-slate-700">
+                      <td className="px-3 py-3 align-middle text-[var(--brand-ink-dim)]">
                         {row.org_id ? organizationsById.get(row.org_id) ?? row.org_id : '—'}
                       </td>
                       <td className="px-3 py-3 align-middle">

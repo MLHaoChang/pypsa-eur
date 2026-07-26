@@ -18,7 +18,7 @@ import { usersForOrganization } from './helpers'
 const LEGACY_QUERY_KEY = ['admin', 'legacy-projects']
 const USERS_QUERY_KEY = ['admin', 'users']
 const ORGS_QUERY_KEY = ['admin', 'organizations']
-const INPUT_CLASS_NAME = 'w-full rounded-xl border border-[#d6e1d8] bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#8ca794] focus:ring-2 focus:ring-[#d8e6db]'
+const INPUT_CLASS_NAME = 'w-full rounded-xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-3 py-2 text-sm text-[var(--brand-ink)] outline-none transition focus:border-[var(--brand-red)] focus:ring-2 focus:ring-[rgba(255,82,82,0.28)]'
 
 export default function LegacyMigratePage() {
   const queryClient = useQueryClient()
@@ -138,11 +138,11 @@ export default function LegacyMigratePage() {
         <div className="grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
           <PageSection title="Legacy inventory" count={legacyProjects.length}>
             {isLoadingLegacy ? (
-              <div className="rounded-2xl border border-dashed border-[#d6e1d8] bg-[#fbfdfb] px-5 py-8 text-sm text-slate-500">
+              <div className="rounded-2xl border border-dashed border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
                 Loading legacy projects…
               </div>
             ) : legacyProjects.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-[#d6e1d8] bg-[#fbfdfb] px-5 py-8 text-sm text-slate-600">
+              <div className="rounded-2xl border border-dashed border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
                 No unclaimed legacy projects were found.
               </div>
             ) : (
@@ -154,14 +154,14 @@ export default function LegacyMigratePage() {
                       key={project.name}
                       className={`rounded-3xl border px-5 py-4 text-left transition ${
                         isSelected
-                          ? 'border-[#8ca794] bg-[#f4faf4] shadow-[0_0_0_3px_rgba(140,167,148,0.14)]'
-                          : 'border-[#d6e1d8] bg-[#f8fbf8] hover:border-[#abc0b0]'
+                          ? 'border-[var(--brand-red)] bg-[var(--brand-surface-2)] shadow-[0_0_0_3px_rgba(140,167,148,0.14)]'
+                          : 'border-[var(--brand-line)] bg-[var(--brand-surface-2)] hover:border-[var(--brand-line)]'
                       }`}
                       onClick={() => setSelectedLegacyName(project.name)}
                       type="button"
                     >
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-950">
+                        <h2 className="text-lg font-semibold tracking-[-0.02em] text-[var(--brand-ink)]">
                           {project.name}
                         </h2>
                         <Tag tone={project.has_network ? 'ok' : 'warn'}>
@@ -171,7 +171,7 @@ export default function LegacyMigratePage() {
                           <Tag tone="purple">{project.descendant_names.length} descendants</Tag>
                         )}
                       </div>
-                      <div className="mt-2 space-y-1 text-sm text-slate-600">
+                      <div className="mt-2 space-y-1 text-sm text-[var(--brand-ink-dim)]">
                         <p>Parent: {project.parent_project ?? 'Root project'}</p>
                         {project.scenario_description && <p>{project.scenario_description}</p>}
                       </div>
@@ -184,14 +184,14 @@ export default function LegacyMigratePage() {
 
           <PageSection title="Claim selected project" hint="Owner and members must belong to the destination organization.">
             {!selectedLegacy ? (
-              <div className="rounded-2xl border border-dashed border-[#d6e1d8] bg-[#fbfdfb] px-5 py-8 text-sm text-slate-600">
+              <div className="rounded-2xl border border-dashed border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
                 Select a legacy project from the inventory to prepare the claim payload.
               </div>
             ) : (
               <form className="space-y-4" onSubmit={handleClaim}>
-                <div className="rounded-2xl border border-[#d6e1d8] bg-[#f8fbf8] px-4 py-3">
-                  <div className="text-sm font-medium text-slate-900">{selectedLegacy.name}</div>
-                  <div className="mt-1 text-sm text-slate-600">
+                <div className="rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-4 py-3">
+                  <div className="text-sm font-medium text-[var(--brand-ink)]">{selectedLegacy.name}</div>
+                  <div className="mt-1 text-sm text-[var(--brand-ink-dim)]">
                     Parent: {selectedLegacy.parent_project ?? 'Root project'} · Descendants: {selectedLegacy.descendant_names.length}
                   </div>
                 </div>
@@ -250,7 +250,7 @@ export default function LegacyMigratePage() {
                   </select>
                 </Field>
 
-                <label className="flex items-center gap-3 rounded-2xl border border-[#d6e1d8] bg-[#fbfdfb] px-4 py-3 text-sm text-slate-700">
+                <label className="flex items-center gap-3 rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-surface)] px-4 py-3 text-sm text-[var(--brand-ink-dim)]">
                   <input
                     checked={includeDescendants}
                     onChange={event => setIncludeDescendants(event.target.checked)}
@@ -260,7 +260,7 @@ export default function LegacyMigratePage() {
                 </label>
 
                 {targetOrgId && assignableUsers.length === 0 && (
-                  <div className="rounded-2xl border border-[#f1d2a3] bg-[#fff8ed] px-4 py-3 text-sm text-[#8a5a16]">
+                  <div className="rounded-2xl border border-[rgba(246,198,138,0.35)] bg-[rgba(246,198,138,0.10)] px-4 py-3 text-sm text-[var(--brand-warn)]">
                     No users are available in the target organization yet, so a claim owner cannot be chosen.
                   </div>
                 )}
@@ -272,15 +272,15 @@ export default function LegacyMigratePage() {
             )}
 
             {lastResult && (
-              <div className="mt-4 rounded-2xl border border-[#d6e1d8] bg-[#fbfdfb] px-4 py-4">
-                <div className="text-sm font-medium text-slate-900">
+              <div className="mt-4 rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-surface)] px-4 py-4">
+                <div className="text-sm font-medium text-[var(--brand-ink)]">
                   Last claim imported {lastResult.claimed.length} project{lastResult.claimed.length === 1 ? '' : 's'}.
                 </div>
-                <div className="mt-2 text-sm text-slate-600">
+                <div className="mt-2 text-sm text-[var(--brand-ink-dim)]">
                   Root: {lastResult.root.name}
                 </div>
                 {lastResult.warnings.length > 0 && (
-                  <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-[#8a5a16]">
+                  <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-[var(--brand-warn)]">
                     {lastResult.warnings.map(warning => (
                       <li key={warning}>{warning}</li>
                     ))}

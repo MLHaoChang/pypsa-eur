@@ -882,12 +882,12 @@ export default function AppHeader() {
       {/* Run simulation — smart Run/Queue/Cancel/Abort button. Clicking Run
           ENQUEUES the foreground project; the FIFO dispatcher solves it now if
           the slot is free, or queues it behind a running solve. Three states:
-            • idle           → green "Run LOPF/…", click enqueues
+            • idle           → red "Run LOPF/…", click enqueues
             • queued behind  → amber "Queued #N", click cancels the queued job
             • running        → amber "Abort", click aborts the solve
           Label's run mode tracks solver_config.mode (Solver Settings). */}
       {(() => {
-        // amber for both queued + running; green only at idle.
+        // amber for both queued + running; brand red only at idle.
         const amber = jobQueued || jobRunning || isRunning
         const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
         return (
@@ -903,14 +903,19 @@ export default function AppHeader() {
                 : `${runLabel}: ${MODE_DESC[mode] ?? ''} — queues the solve; runs now if the queue is free`}
             className="flex items-center gap-1.5 px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-wait"
             style={{
-              // Design system: 3-stop green gradient with layered + inset shadows;
-              // amber gradient while queued / running.
+              // Design system: 3-stop gradient with layered + inset shadows.
+              // Idle is the brand red (this is the primary CTA and was the last
+              // green surface in the chrome); amber still marks queued/running,
+              // so the state change stays a HUE change, not just a label swap.
+              // The ramp is deliberately deeper than --brand-red: this button
+              // keeps `text-white`, and white on #ff5252 is only 3.2:1 — on the
+              // #c81e26 midpoint it is 6.3:1.
               background: amber
                 ? 'linear-gradient(180deg, #f59e0b 0%, #d97706 50%, #b45309 100%)'
-                : 'linear-gradient(180deg, #22c55e 0%, #16a34a 50%, #15803d 100%)',
+                : 'linear-gradient(180deg, #e5484d 0%, #c81e26 50%, #a5161d 100%)',
               boxShadow: amber
                 ? '0 1px 0 rgba(180,80,0,0.35), 0 1px 3px rgba(180,80,0,0.2), inset 0 1px 0 rgba(255,255,255,0.22)'
-                : '0 1px 0 rgba(20,100,50,0.4), 0 1px 3px rgba(20,100,50,0.25), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.08)',
+                : '0 1px 0 rgba(120,20,25,0.45), 0 1px 3px rgba(120,20,25,0.3), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.08)',
             }}
           >
             {jobRunning || isRunning

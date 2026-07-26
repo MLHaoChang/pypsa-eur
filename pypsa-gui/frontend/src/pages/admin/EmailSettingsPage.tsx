@@ -14,7 +14,7 @@ import {
 } from '../../components/PageKit'
 
 const EMAIL_STATUS_QUERY_KEY = ['admin', 'email-status']
-const INPUT_CLASS_NAME = 'w-full rounded-xl border border-[#d6e1d8] bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#8ca794] focus:ring-2 focus:ring-[#d8e6db]'
+const INPUT_CLASS_NAME = 'w-full rounded-xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-3 py-2 text-sm text-[var(--brand-ink)] outline-none transition focus:border-[var(--brand-red)] focus:ring-2 focus:ring-[rgba(255,82,82,0.28)]'
 
 export default function EmailSettingsPage() {
   const [testRecipient, setTestRecipient] = useState('')
@@ -55,25 +55,25 @@ export default function EmailSettingsPage() {
 
         <PageSection title="Configuration snapshot">
           {isLoading || !status ? (
-            <div className="rounded-2xl border border-dashed border-[#d6e1d8] bg-[#fbfdfb] px-5 py-8 text-sm text-slate-500">
+            <div className="rounded-2xl border border-dashed border-[var(--brand-line)] bg-[var(--brand-surface)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
               Loading email status…
             </div>
           ) : (
             <dl className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border border-[#d6e1d8] bg-[#f8fbf8] px-4 py-3">
-                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Delivery mode</dt>
-                <dd className="mt-1 text-sm text-slate-900">{status.delivery_mode}</dd>
+              <div className="rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-4 py-3">
+                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--brand-ink-dim)]">Delivery mode</dt>
+                <dd className="mt-1 text-sm text-[var(--brand-ink)]">{status.delivery_mode}</dd>
               </div>
-              <div className="rounded-2xl border border-[#d6e1d8] bg-[#f8fbf8] px-4 py-3">
-                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">From address</dt>
-                <dd className="mt-1 text-sm text-slate-900">{status.smtp_from}</dd>
+              <div className="rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-4 py-3">
+                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--brand-ink-dim)]">From address</dt>
+                <dd className="mt-1 text-sm text-[var(--brand-ink)]">{status.smtp_from}</dd>
               </div>
-              <div className="rounded-2xl border border-[#d6e1d8] bg-[#f8fbf8] px-4 py-3">
-                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Host</dt>
-                <dd className="mt-1 text-sm text-slate-900">{status.smtp_host}:{status.smtp_port}</dd>
+              <div className="rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-4 py-3">
+                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--brand-ink-dim)]">Host</dt>
+                <dd className="mt-1 text-sm text-[var(--brand-ink)]">{status.smtp_host}:{status.smtp_port}</dd>
               </div>
-              <div className="rounded-2xl border border-[#d6e1d8] bg-[#f8fbf8] px-4 py-3">
-                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Configured</dt>
+              <div className="rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] px-4 py-3">
+                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--brand-ink-dim)]">Configured</dt>
                 <dd className="mt-1">
                   <Tag tone={status.configured ? 'ok' : 'warn'}>
                     {status.configured ? 'ready' : 'incomplete'}
