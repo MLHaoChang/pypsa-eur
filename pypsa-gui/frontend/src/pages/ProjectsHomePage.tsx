@@ -7,6 +7,7 @@ import { projectsApi, type UnclaimedProject } from '../api/projects'
 import { networkApi } from '../api/network'
 import type { ProjectInfo } from '../api/types'
 import { useAuth } from '../auth/AuthProvider'
+import { useAuthMode } from '../auth/AuthModeProvider'
 import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { getPostLoginPath } from '../auth/resume'
 import NewProjectWizard, { type NewProjectTab } from '../layout/NewProjectWizard'
@@ -175,6 +176,7 @@ export default function ProjectsHomePage() {
   const setProjectName = useUIStore(s => s.setProjectName)
   const addTab = useUIStore(s => s.addTab)
   const { logout, user } = useAuth()
+  const { authEnabled } = useAuthMode()
   const [launching, setLaunching] = useState<{ key: string; name: string } | null>(null)
   const [importing, setImporting] = useState<readonly string[]>([])
   const [feedback, setFeedback] = useState<Record<string, RowFeedback>>({})
@@ -369,9 +371,14 @@ export default function ProjectsHomePage() {
                 Open admin
               </Link>
             )}
-            <button className={GHOST_BUTTON} onClick={handleLogout} type="button">
-              Sign out
-            </button>
+            {/* Only when there IS a session. With auth off, logout() is a
+                no-op and redirectAfterLogout() lands back here — the button
+                just appeared broken. */}
+            {authEnabled && (
+              <button className={GHOST_BUTTON} onClick={handleLogout} type="button">
+                Sign out
+              </button>
+            )}
           </nav>
         </header>
 

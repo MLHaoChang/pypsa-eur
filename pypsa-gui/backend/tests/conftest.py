@@ -24,6 +24,21 @@ _BACKEND = pathlib.Path(__file__).resolve().parent.parent
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
+# Pin single-user mode BEFORE `import main`, which is what triggers
+# python-dotenv to read `backend/.env`.
+#
+# This suite must not depend on the developer's local .env. A machine set up for
+# multi-user review (PYPSA_GUI_AUTH_ENABLED=true) otherwise flips the whole
+# suite into auth mode, and tests that call registry helpers directly rather
+# than through FastAPI's dependency injection fail with the confusing
+# `AttributeError: 'Depends' object has no attribute 'id'` — the unresolved
+# Depends sentinel, not a real user.
+#
+# dotenv is loaded with `override=False`, so an already-present os.environ value
+# wins. The auth suites opt back IN per-test via
+# `monkeypatch.setenv(...) + get_settings.cache_clear()`, which still works.
+os.environ["PYPSA_GUI_AUTH_ENABLED"] = "false"
+
 import pandas as pd
 import pypsa
 import pytest

@@ -349,6 +349,41 @@ pixi run python tools/bootstrap_super_admin.py \
 
 This creates (or upgrades) an **active** `is_super_admin` user with that password.
 
+##### Fastest path — SQLite, no Docker
+
+For a local machine that only needs sign-in to work, skip Postgres and Mailpit
+entirely. Append to `pypsa-gui/backend/.env` (**append** — that file also holds
+`ANTHROPIC_API_KEY`; overwriting it drops the chatbot key):
+
+```bash
+PYPSA_GUI_AUTH_ENABLED=true
+DATABASE_URL=sqlite+pysqlite:///./auth_dev.db
+SECRET_KEY=local-dev-only-change-for-any-shared-deployment
+```
+
+Then seed the admin and **fully restart the backend** — `.env` is read once at
+import, so `uvicorn --reload` does not pick it up:
+
+```bash
+cd pypsa-gui/backend
+pixi run python tools/bootstrap_super_admin.py \
+  --email admin@example.com --password 'admin-pass-123'
+```
+
+`auth_dev.db` is gitignored (`pypsa-gui/.gitignore`: `backend/*.db`). No
+`alembic upgrade head` is needed — the bootstrap tool creates the tables.
+
+Caveats with no SMTP server running: invite / reset **emails** fail, so create
+users from the admin console (which surfaces the set-password link directly)
+rather than relying on the mail. Start Mailpit with
+`docker compose -f docker-compose.auth.yml up -d` if you want them delivered.
+
+To go back to single-user, set `PYPSA_GUI_AUTH_ENABLED=false` and restart. The
+SPA follows `/api/health` in both directions, so no frontend change is needed.
+The **test suite** is unaffected either way — `tests/conftest.py` pins
+single-user mode before importing `main`, and the auth suites opt back in
+per-test.
+
 #### 3) Start the app
 
 ```bash

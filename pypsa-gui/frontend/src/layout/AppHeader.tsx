@@ -11,7 +11,7 @@ import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore } from '../store/uiStore'
 import { evaluateMutation } from '../utils/mutationGuard'
-import { authEnabled } from '../auth/config'
+import { useAuthMode } from '../auth/AuthModeProvider'
 import UserMenu from './UserMenu'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
 import toast from 'react-hot-toast'
@@ -96,6 +96,10 @@ export default function AppHeader() {
   } = useUIStore()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  // Hook, not the raw module flag from auth/config: that export is a plain
+  // mutable binding, so reading it during render never re-renders when
+  // /api/health flips the mode.
+  const { authEnabled } = useAuthMode()
 
   // Platform-correct modifier label for the command-palette hint chip.
   // App.tsx binds both Ctrl+K and Cmd+K; we just display the right one.
