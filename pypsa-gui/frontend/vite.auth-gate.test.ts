@@ -3,6 +3,7 @@ import {
   assertLoginHtml,
   decideGateRoute,
   isStaticAsset,
+  LOGIN_PAGE_MARKER,
   readLoginIndexHtml,
   type BackendState,
 } from './vite.auth-gate'
@@ -17,9 +18,13 @@ describe('auth HTML gate', () => {
   it('keeps index.html as a static login page with no React entry', () => {
     const html = readLoginIndexHtml()
     expect(() => assertLoginHtml(html)).not.toThrow()
-    expect(html).toContain('Auth gate')
+    expect(html).toContain(LOGIN_PAGE_MARKER)
     expect(html).toContain('Sign in')
     expect(html).not.toMatch(/src\/main\.tsx/)
+  })
+
+  it('ships the landing page background image reference', () => {
+    expect(readLoginIndexHtml()).toContain('/img/login-bg.jpg')
   })
 
   it('serves the login page for anonymous document routes when auth is on', () => {

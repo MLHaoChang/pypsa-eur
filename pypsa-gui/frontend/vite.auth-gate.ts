@@ -7,6 +7,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const API_ORIGIN = process.env.PYPSA_GUI_API_ORIGIN ?? 'http://127.0.0.1:8000'
 
+/** Marker that identifies the static login document (no React entry). */
+export const LOGIN_PAGE_MARKER = 'data-pypsa-page="login"'
+
 export type BackendState = 'auth-on' | 'auth-off' | 'unreachable'
 
 export type GateDecision =
@@ -152,8 +155,8 @@ export function authHtmlGatePlugin(): Plugin {
             'index.html must remain the static login page and must not load /src/main.tsx',
           )
         }
-        if (!html.includes('Auth gate')) {
-          throw new Error('index.html is missing the Auth gate badge marker')
+        if (!html.includes(LOGIN_PAGE_MARKER)) {
+          throw new Error(`index.html is missing the ${LOGIN_PAGE_MARKER} marker`)
         }
         return html
       },
@@ -163,8 +166,8 @@ export function authHtmlGatePlugin(): Plugin {
 
 /** Test helper: assert login HTML invariants without a running server. */
 export function assertLoginHtml(html: string): void {
-  if (!html.includes('Auth gate')) {
-    throw new Error('login HTML missing Auth gate badge')
+  if (!html.includes(LOGIN_PAGE_MARKER)) {
+    throw new Error(`login HTML missing ${LOGIN_PAGE_MARKER} marker`)
   }
   if (!html.includes('Sign in')) {
     throw new Error('login HTML missing Sign in')

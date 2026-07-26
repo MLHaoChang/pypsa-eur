@@ -1,115 +1,395 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-pypsa-page="login">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-store" />
+    <meta name="theme-color" content="#07130f" />
     <title>PyPSA Studio — Sign in</title>
+    <link rel="preload" as="image" href="/img/login-bg.jpg" />
     <style>
       :root {
-        color-scheme: light;
-        --bg: #eef3ef;
-        --panel: #ffffff;
-        --text: #14231a;
-        --muted: #5b6b61;
-        --accent: #234631;
-        --border: #cfd9d1;
-        --danger: #9b1c1c;
+        color-scheme: dark;
+        --ink: #eaf3ee;
+        --ink-dim: #9fb4a9;
+        --accent: #35d39a;
+        --line: rgba(255, 255, 255, 0.14);
+        --danger: #ff8b8b;
+        --panel: rgba(8, 20, 16, 0.78);
       }
+
       * { box-sizing: border-box; }
+
+      html, body { height: 100%; }
+
       body {
         margin: 0;
+        font-family: "Inter", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+        color: var(--ink);
+        background: #07130f;
+        overflow: hidden;
+      }
+
+      .stage {
+        position: relative;
         min-height: 100vh;
-        font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        overflow: hidden;
+      }
+
+      .bg {
+        position: absolute;
+        inset: 0;
+        background-image: url("/img/login-bg.jpg");
+        background-size: cover;
+        background-position: center 55%;
+        filter: saturate(1.15) contrast(1.08) brightness(1.18);
+        transform: scale(1.06);
+        animation: drift 46s ease-in-out infinite alternate;
+      }
+
+      @keyframes drift {
+        from { transform: scale(1.06) translate3d(0, 0, 0); }
+        to   { transform: scale(1.14) translate3d(-2%, -1.5%, 0); }
+      }
+
+      .bg::after {
+        content: "";
+        position: absolute;
+        inset: 0;
         background:
-          radial-gradient(circle at top left, #d9ebe0 0%, transparent 45%),
-          linear-gradient(160deg, #f7faf7 0%, var(--bg) 55%, #e4ece6 100%);
-        color: var(--text);
+          radial-gradient(1100px 720px at 8% 45%, rgba(5, 15, 12, 0.92) 0%, rgba(5, 15, 12, 0.62) 34%, rgba(5, 15, 12, 0.18) 62%, transparent 100%),
+          linear-gradient(90deg, rgba(5, 15, 12, 0.86) 0%, rgba(5, 15, 12, 0.28) 42%, rgba(5, 15, 12, 0.12) 62%, rgba(5, 15, 12, 0.55) 100%),
+          linear-gradient(180deg, rgba(5, 15, 12, 0.42) 0%, transparent 26%, transparent 62%, rgba(5, 15, 12, 0.6) 100%);
+      }
+
+      .grid-lines {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(53, 211, 154, 0.06) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(53, 211, 154, 0.06) 1px, transparent 1px);
+        background-size: 64px 64px;
+        mask-image: radial-gradient(900px 600px at 20% 50%, #000 0%, transparent 75%);
+        pointer-events: none;
+      }
+
+      .brand {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: clamp(28px, 4.2vw, 64px);
+      }
+
+      .mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        font-size: 1.05rem;
+      }
+
+      .mark .dot {
+        width: 34px;
+        height: 34px;
+        border-radius: 11px;
+        background: linear-gradient(140deg, var(--accent), #0e8f66 70%);
+        box-shadow: 0 8px 28px rgba(53, 211, 154, 0.35);
         display: grid;
         place-items: center;
-        padding: 24px;
+        font-size: 0.95rem;
+        color: #04140e;
+        font-weight: 900;
       }
-      .card {
-        width: min(440px, 100%);
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 24px;
-        padding: 28px;
-        box-shadow: 0 18px 50px rgba(20, 35, 26, 0.08);
-      }
-      .badge {
-        display: inline-block;
-        margin-bottom: 12px;
-        padding: 4px 10px;
+
+      .headline { max-width: 30ch; }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border: 1px solid var(--line);
         border-radius: 999px;
-        background: #234631;
-        color: #fff;
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
+        background: rgba(9, 24, 19, 0.55);
+        backdrop-filter: blur(8px);
+        font-size: 0.72rem;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
+        color: var(--ink-dim);
+        margin-bottom: 22px;
       }
-      h1 { margin: 0 0 8px; font-size: 1.75rem; letter-spacing: -0.03em; }
-      p { margin: 0 0 20px; color: var(--muted); line-height: 1.5; font-size: 0.95rem; }
-      label { display: grid; gap: 8px; margin-bottom: 14px; font-size: 0.9rem; font-weight: 600; }
+
+      .eyebrow .pulse {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 0 rgba(53, 211, 154, 0.7);
+        animation: pulse 2.4s infinite;
+      }
+
+      @keyframes pulse {
+        70% { box-shadow: 0 0 0 9px rgba(53, 211, 154, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(53, 211, 154, 0); }
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(2.1rem, 4.4vw, 3.6rem);
+        line-height: 1.04;
+        letter-spacing: -0.035em;
+        font-weight: 700;
+      }
+
+      h1 .grad {
+        background: linear-gradient(100deg, #7ef0c0, #35d39a 45%, #6fd8ff);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .lede {
+        margin: 0;
+        color: var(--ink-dim);
+        font-size: clamp(0.96rem, 1.15vw, 1.08rem);
+        line-height: 1.65;
+        max-width: 48ch;
+      }
+
+      .stats {
+        display: flex;
+        gap: clamp(18px, 3vw, 44px);
+        flex-wrap: wrap;
+      }
+
+      .stat .k {
+        font-size: clamp(1.15rem, 1.7vw, 1.5rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+
+      .stat .v {
+        font-size: 0.76rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+        margin-top: 4px;
+      }
+
+      .panel {
+        position: relative;
+        z-index: 2;
+        display: grid;
+        place-items: center;
+        padding: clamp(20px, 3vw, 48px);
+      }
+
+      .card {
+        width: min(420px, 100%);
+        background: var(--panel);
+        backdrop-filter: blur(26px) saturate(140%);
+        -webkit-backdrop-filter: blur(26px) saturate(140%);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: clamp(24px, 2.4vw, 34px);
+        box-shadow:
+          0 30px 80px rgba(0, 0, 0, 0.6),
+          inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+
+      .card h2 {
+        margin: 0 0 6px;
+        font-size: 1.5rem;
+        letter-spacing: -0.02em;
+      }
+
+      .card .sub {
+        margin: 0 0 22px;
+        color: var(--ink-dim);
+        font-size: 0.9rem;
+        line-height: 1.55;
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 16px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--ink-dim);
+      }
+
       input {
         width: 100%;
-        border: 1px solid var(--border);
+        border: 1px solid var(--line);
+        background: rgba(4, 14, 11, 0.6);
+        color: var(--ink);
         border-radius: 14px;
-        padding: 12px 14px;
+        padding: 13px 15px;
         font: inherit;
+        font-size: 0.95rem;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
       }
+
+      input::placeholder { color: rgba(159, 180, 169, 0.6); }
+
+      input:focus {
+        outline: none;
+        border-color: rgba(53, 211, 154, 0.65);
+        background: rgba(6, 20, 16, 0.85);
+        box-shadow: 0 0 0 4px rgba(53, 211, 154, 0.16);
+      }
+
       button {
         width: 100%;
+        margin-top: 6px;
         border: 0;
         border-radius: 14px;
-        padding: 12px 14px;
-        background: var(--accent);
-        color: white;
+        padding: 14px 16px;
         font: inherit;
-        font-weight: 600;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: #04140e;
+        background: linear-gradient(135deg, #7ef0c0, #23c78d 55%, #12a774);
         cursor: pointer;
+        transition: transform 0.14s ease, filter 0.18s ease, box-shadow 0.18s ease;
+        box-shadow: 0 14px 34px rgba(35, 199, 141, 0.28);
       }
-      button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+      button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
+      button:active:not(:disabled) { transform: translateY(0); }
+      button:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+
       .msg {
         display: none;
-        margin-bottom: 14px;
-        padding: 10px 12px;
-        border-radius: 12px;
-        font-size: 0.9rem;
-        line-height: 1.4;
+        margin-bottom: 16px;
+        padding: 11px 13px;
+        border-radius: 13px;
+        font-size: 0.86rem;
+        line-height: 1.5;
+        border: 1px solid transparent;
       }
-      .msg.error { display: block; background: #fdecec; color: var(--danger); border: 1px solid #f3c1c1; }
-      .msg.ok { display: block; background: #eef8f1; color: var(--accent); border: 1px solid #cfe5d7; }
-      .hint { margin-top: 16px; font-size: 0.8rem; color: var(--muted); }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+
+      .msg.error {
+        display: block;
+        background: rgba(120, 32, 32, 0.3);
+        border-color: rgba(255, 139, 139, 0.4);
+        color: var(--danger);
+      }
+
+      .msg.ok {
+        display: block;
+        background: rgba(24, 92, 66, 0.35);
+        border-color: rgba(53, 211, 154, 0.45);
+        color: #8ff0c5;
+      }
+
+      .hint {
+        margin: 18px 0 0;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+        font-size: 0.78rem;
+        color: var(--ink-dim);
+        line-height: 1.6;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.76rem;
+        color: #b8ead3;
+      }
+
+      .foot {
+        font-size: 0.74rem;
+        color: rgba(159, 180, 169, 0.75);
+        letter-spacing: 0.02em;
+      }
+
+      @media (max-width: 900px) {
+        body { overflow: auto; }
+        .stage { grid-template-columns: 1fr; }
+        .brand { gap: 26px; min-height: auto; padding-bottom: 8px; }
+        .stats { display: none; }
+        .panel { padding-top: 4px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .bg { animation: none; }
+        .eyebrow .pulse { animation: none; }
+      }
     </style>
   </head>
   <body>
-    <main class="card">
-      <div class="badge">Auth gate · not the workbench</div>
-      <h1>Sign in</h1>
-      <p>
-        If you can read this green badge, you are on the real login page.
-        This page does not load the React workbench.
-      </p>
-      <div id="msg" class="msg" role="status"></div>
-      <form id="form">
-        <label>
-          Email
-          <input autocomplete="username" id="email" name="email" required type="email" value="admin@example.com" />
-        </label>
-        <label>
-          Password
-          <input autocomplete="current-password" id="password" name="password" required type="password" value="admin-pass-123" />
-        </label>
-        <button id="submit" type="submit">Sign in</button>
-      </form>
-      <p class="hint">
-        After sign-in you go to <code>/projects</code>.
-        Review account: <code>admin@example.com</code> / <code>admin-pass-123</code>.
-      </p>
-    </main>
+    <div class="stage">
+      <div class="bg" aria-hidden="true"></div>
+      <div class="grid-lines" aria-hidden="true"></div>
+
+      <section class="brand">
+        <div class="mark">
+          <span class="dot">P</span>
+          <span>PyPSA Studio</span>
+        </div>
+
+        <div class="headline">
+          <span class="eyebrow"><span class="pulse"></span> Energy system planning</span>
+          <h1>Plan the grid behind <span class="grad">tomorrow's cities</span>.</h1>
+          <p class="lede">
+            Model megacity demand, data-center load growth, and transmission
+            build-out — then compare scenarios side by side with your team.
+          </p>
+        </div>
+
+        <div class="stats">
+          <div class="stat">
+            <div class="k">Multi-user</div>
+            <div class="v">Org workspaces</div>
+          </div>
+          <div class="stat">
+            <div class="k">Scenario trees</div>
+            <div class="v">Branch &amp; compare</div>
+          </div>
+          <div class="stat">
+            <div class="k">Edit locks</div>
+            <div class="v">Safe collaboration</div>
+          </div>
+        </div>
+
+        <div class="foot">Built on PyPSA · Powered by open optimisation</div>
+      </section>
+
+      <section class="panel">
+        <main class="card">
+          <h2>Welcome back</h2>
+          <p class="sub">Sign in to resume your last project.</p>
+
+          <div id="msg" class="msg" role="status" aria-live="polite"></div>
+
+          <form id="form">
+            <label>
+              Email
+              <input autocomplete="username" id="email" name="email" placeholder="you@company.com" required type="email" value="admin@example.com" />
+            </label>
+            <label>
+              Password
+              <input autocomplete="current-password" id="password" name="password" placeholder="••••••••••" required type="password" value="admin-pass-123" />
+            </label>
+            <button id="submit" type="submit">Sign in</button>
+          </form>
+
+          <p class="hint">
+            Accounts are created by an administrator — there is no self sign-up.
+            Review account: <code>admin@example.com</code> / <code>admin-pass-123</code>.
+          </p>
+        </main>
+      </section>
+    </div>
+
     <script>
       const form = document.getElementById('form')
       const msg = document.getElementById('msg')
@@ -142,6 +422,7 @@
       form.addEventListener('submit', async (event) => {
         event.preventDefault()
         submit.disabled = true
+        submit.textContent = 'Signing in…'
         msg.className = 'msg'
         try {
           const response = await fetch('/api/auth/login', {
@@ -160,7 +441,7 @@
                 || ('Login failed (' + response.status + ')')
             )
           }
-          show('Signed in. Opening projects…', true)
+          show('Signed in. Opening your projects…', true)
           window.location.href = '/projects?signed_in=' + Date.now()
         } catch (error) {
           const isNetworkError = error instanceof TypeError
@@ -171,6 +452,7 @@
             false,
           )
           submit.disabled = false
+          submit.textContent = 'Sign in'
         }
       })
     </script>

@@ -30,7 +30,7 @@ async function get(path, headers = {}) {
 }
 
 function assertLoginDocument(label, text) {
-  if (!text.includes('Auth gate')) fail(`${label}: missing Auth gate badge`)
+  if (!text.includes('data-pypsa-page="login"')) fail(`${label}: missing login page marker`)
   if (!text.includes('Sign in')) fail(`${label}: missing Sign in`)
   if (text.includes('src/main.tsx') || text.includes('/src/main.tsx')) {
     fail(`${label}: leaked React entry main.tsx`)
@@ -87,7 +87,7 @@ if (authedProjects.status !== 200) fail(`authed GET /projects expected 200, got 
 if (!authedText.includes('src/main.tsx') && !authedText.includes('/src/main.tsx')) {
   fail('authed GET /projects should serve spa.html with React entry')
 }
-if (authedText.includes('Auth gate')) fail('authed GET /projects should not be the login page')
+if (authedText.includes('data-pypsa-page="login"')) fail('authed GET /projects should not be the login page')
 ok('authed GET /projects serves React SPA')
 
 console.log('All auth-gate smoke checks passed against', base)
