@@ -15,6 +15,7 @@ fixture resets both before AND after every test so state can't bleed between tes
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
@@ -27,7 +28,11 @@ import pandas as pd
 import pypsa
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from db.base import Base
 import main
 from routers import network as net_router
 from routers import projects as projects_router
@@ -102,6 +107,44 @@ def tmp_projects_dir(tmp_path, monkeypatch):
     d.mkdir()
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", d)
     return d
+
+
+@pytest.fixture
+def db_engine():
+    """
+    Disposable SQLAlchemy engine for model tests.
+
+    Defaults to in-memory SQLite because cloud agents do not have a live
+    PostgreSQL service; callers may override with PYPSA_GUI_TEST_DATABASE_URL.
+    """
+    url = os.environ.get("PYPSA_GUI_TEST_DATABASE_URL", "sqlite+pysqlite:///:memory:")
+    engine_kwargs = {}
+    if url == "sqlite+pysqlite:///:memory:":
+        engine_kwargs["connect_args"] = {"check_same_thread": False}
+        engine_kwargs["poolclass"] = StaticPool
+
+    engine = create_engine(url, **engine_kwargs)
+    Base.metadata.create_all(engine)
+    try:
+        yield engine
+    finally:
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+@pytest.fixture
+def db_session(db_engine):
+    """Transaction-scoped SQLAlchemy session that rolls back after each test."""
+    connection = db_engine.connect()
+    transaction = connection.begin()
+    testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=connection)
+    session = testing_session_local()
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
 
 
 def build_network(*, solve: bool = False, gens_weight=None, obj_weight=None) -> pypsa.Network:
