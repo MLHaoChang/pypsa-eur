@@ -87,3 +87,29 @@ Result:
 - `pypsa-gui/backend/routers/auth.py`
 - `pypsa-gui/backend/services/email_service.py`
 - `pypsa-gui/backend/tests/test_auth_api.py`
+- `pypsa-gui/backend/tests/test_auth_service.py`
+
+## Task 4 review follow-up: password token race fix
+
+- Serialized password-token issuance per user with a row lock on `users` so
+  concurrent reissues cannot leave multiple live tokens for the same
+  user/purpose.
+- Switched password-token consume/set flows to a single conditional `UPDATE`
+  claim (`used_at IS NULL` and `expires_at > now`) so only one concurrent
+  consumer can win.
+- Left logout lock-release behavior for Task 8, with a short note near the
+  logout handler instead of adding lock-service behavior here.
+
+Verification command:
+
+```bash
+export PATH="$HOME/.pixi/bin:$PATH" && pixi run python -m pytest pypsa-gui/backend/tests/test_auth_service.py pypsa-gui/backend/tests/test_auth_api.py -q
+```
+
+Result:
+
+- Exit code: `0`
+- `18 passed`
+- Warnings observed:
+  - FastAPI/Starlette `TestClient` deprecation warning for `httpx`
+  - FastAPI `on_event` deprecation warning in `main.py`

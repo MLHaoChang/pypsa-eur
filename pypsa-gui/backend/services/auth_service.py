@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from pwdlib import PasswordHash
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import AuthToken, Session, User
@@ -93,15 +93,17 @@ def revoke_all_sessions_for_user(db: DBSession, user_id: uuid.UUID) -> None:
 
 def issue_password_token(db: DBSession, user_id: uuid.UUID, purpose: str) -> str:
     now = _now_utc()
-    existing_tokens = db.scalars(
-        select(AuthToken).where(
+    db.scalar(select(User.id).where(User.id == user_id).with_for_update())
+    db.execute(
+        update(AuthToken)
+        .where(
             AuthToken.user_id == user_id,
             AuthToken.purpose == purpose,
             AuthToken.used_at.is_(None),
         )
-    ).all()
-    for existing_token in existing_tokens:
-        existing_token.used_at = now
+        .values(used_at=now)
+        .execution_options(synchronize_session=False)
+    )
 
     raw_token = _new_raw_token()
     auth_token = AuthToken(
@@ -116,7 +118,12 @@ def issue_password_token(db: DBSession, user_id: uuid.UUID, purpose: str) -> str
     return raw_token
 
 
-def consume_password_token(db: DBSession, raw_token: str, purpose: str) -> User | None:
+def _claim_password_token(
+    db: DBSession,
+    raw_token: str,
+    purpose: str,
+) -> tuple[uuid.UUID, datetime] | None:
+    now = _now_utc()
     token_hash = _hash_token(raw_token)
     auth_token = db.scalar(
         select(AuthToken).where(
@@ -126,13 +133,30 @@ def consume_password_token(db: DBSession, raw_token: str, purpose: str) -> User 
     )
     if auth_token is None:
         return None
-    if auth_token.used_at is not None:
-        return None
-    if _ensure_utc(auth_token.expires_at) <= _now_utc():
+
+    claimed_rows = db.execute(
+        update(AuthToken)
+        .where(
+            AuthToken.id == auth_token.id,
+            AuthToken.used_at.is_(None),
+            AuthToken.expires_at > now,
+        )
+        .values(used_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed_rows.rowcount != 1:
         return None
 
-    auth_token.used_at = _now_utc()
-    user = db.get(User, auth_token.user_id)
+    return auth_token.user_id, now
+
+
+def consume_password_token(db: DBSession, raw_token: str, purpose: str) -> User | None:
+    claimed = _claim_password_token(db, raw_token, purpose)
+    if claimed is None:
+        return None
+
+    user_id, _claimed_at = claimed
+    user = db.get(User, user_id)
     db.commit()
     return user
 
@@ -143,26 +167,15 @@ def set_password_from_token(
     purpose: str,
     password: str,
 ) -> User | None:
-    token_hash = _hash_token(raw_token)
-    auth_token = db.scalar(
-        select(AuthToken).where(
-            AuthToken.token_hash == token_hash,
-            AuthToken.purpose == purpose,
-        )
-    )
-    if auth_token is None:
-        return None
-    if auth_token.used_at is not None:
-        return None
-    if _ensure_utc(auth_token.expires_at) <= _now_utc():
+    claimed = _claim_password_token(db, raw_token, purpose)
+    if claimed is None:
         return None
 
-    user = db.get(User, auth_token.user_id)
+    user_id, now = claimed
+    user = db.get(User, user_id)
     if user is None:
         return None
 
-    now = _now_utc()
-    auth_token.used_at = now
     user.password_hash = hash_password(password)
     user.status = "active"
 

@@ -109,6 +109,8 @@ def logout(
     raw_token = request.cookies.get(get_settings().session_cookie_name)
     if raw_token:
         revoke_session(db, raw_token)
+    # Task 8's lock service handles releasing project locks on logout; keep the
+    # auth endpoint focused on revoking the session and clearing the cookie.
     _clear_session_cookie(response)
     return {"ok": True}
 

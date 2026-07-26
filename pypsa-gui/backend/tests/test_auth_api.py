@@ -207,6 +207,28 @@ def test_set_password_consumes_token_and_activates_user(
     assert stored_token.used_at is not None
 
 
+def test_set_password_rejects_already_used_token(
+    auth_client,
+    auth_session_local,
+) -> None:
+    user = _create_user(auth_session_local, status="invited")
+    with auth_session_local() as db:
+        raw_token = issue_password_token(db, user.id, "set_password")
+
+    first_response = auth_client.post(
+        "/api/auth/set-password",
+        json={"token": raw_token, "password": "new-secret-pass"},
+    )
+    second_response = auth_client.post(
+        "/api/auth/set-password",
+        json={"token": raw_token, "password": "another-secret-pass"},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 400
+    assert second_response.json() == {"detail": "Invalid or expired token"}
+
+
 def test_reset_password_consumes_token_and_revokes_existing_sessions(
     auth_client,
     auth_session_local,
