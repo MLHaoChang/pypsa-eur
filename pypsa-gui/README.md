@@ -260,13 +260,19 @@ This GUI lives inside a **PyPSA-Eur** checkout and reuses its toolchain.
 
 ### Optional: enable multi-user auth locally
 
-Auth is **opt-in and disabled by default**. A fresh clone runs as a single-user
-workbench with no Postgres and no login — `VITE_AUTH_ENABLED` is unset (which
-the frontend treats as `false`), so the SPA drops straight into the workbench.
+Auth is **on by default on this branch** (`VITE_AUTH_ENABLED` treated as enabled
+unless set to `false`). A fresh `npm run dev` shows `/login`. To force the
+classic single-user workbench, put `VITE_AUTH_ENABLED=false` in
+`frontend/.env.local`.
+
+Backend auth remains opt-in via `PYPSA_GUI_AUTH_ENABLED` — when the API has
+auth on, the SPA also upgrades itself at runtime from `/api/health` so a stale
+browser session cannot stay stuck on the workbench toasting
+“Authentication required”.
 
 To exercise invited-user flows, org/project tenancy, edit locks, and password
-emails locally, wire the backend to Postgres, point SMTP at Mailpit, and set
-`VITE_AUTH_ENABLED=true`.
+emails locally, wire the backend to Postgres (or SQLite), point SMTP at Mailpit,
+and keep frontend auth enabled.
 
 #### 1) One-time stack setup
 

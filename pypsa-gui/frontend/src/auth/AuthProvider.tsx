@@ -2,8 +2,8 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 import axios from 'axios'
 import { authApi, type AuthUser } from '../api/auth'
 import { hasAdminConsoleAccess } from '../pages/admin/helpers'
+import { useAuthMode } from './AuthModeProvider'
 import { loginWithPassword } from './requests'
-import { authEnabled } from './config'
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
 
@@ -24,8 +24,9 @@ function isUnauthorized(error: unknown): boolean {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { authEnabled, ready: authModeReady } = useAuthMode()
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [status, setStatus] = useState<AuthStatus>(authEnabled ? 'loading' : 'authenticated')
+  const [status, setStatus] = useState<AuthStatus>('loading')
 
   const refresh = useCallback(async (): Promise<AuthUser | null> => {
     if (!authEnabled) {
@@ -45,11 +46,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isUnauthorized(error)) return null
       return null
     }
-  }, [])
+  }, [authEnabled])
 
   useEffect(() => {
+    if (!authModeReady) {
+      setStatus('loading')
+      return
+    }
     void refresh()
-  }, [refresh])
+  }, [authModeReady, refresh])
 
   const login = useCallback(async (email: string, password: string): Promise<AuthUser> => {
     const response = await loginWithPassword(email, password)
@@ -67,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null)
       setStatus(authEnabled ? 'unauthenticated' : 'authenticated')
     }
-  }, [])
+  }, [authEnabled])
 
   const value = useMemo<AuthContextValue>(() => ({
     user,

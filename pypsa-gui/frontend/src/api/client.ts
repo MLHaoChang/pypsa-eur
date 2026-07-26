@@ -1,7 +1,7 @@
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { appLog } from '../store/simulationStore'
-import { authEnabled } from '../auth/config'
+import { getAuthEnabled, setAuthEnabled } from '../auth/config'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -34,27 +34,6 @@ const QUIET_MUTATION_URLS = ['/simulation/preflight']
 const AUTH_API_PREFIX = '/auth/'
 const AUTH_PAGES = new Set(['/login', '/set-password', '/reset-password'])
 
-function shouldRedirectToLogin(error: unknown): boolean {
-  if (!authEnabled) return false
-  if (!axios.isAxiosError(error)) return false
-  if (error.response?.status !== 401) return false
-  if (error.config?.skipAuthRedirect) return false
-  const url = error.config?.url ?? ''
-  if (url.startsWith(AUTH_API_PREFIX)) return false
-  if (typeof window === 'undefined') return false
-  if (AUTH_PAGES.has(window.location.pathname)) return false
-  return true
-}
-
-function redirectToLogin(): void {
-  if (typeof window === 'undefined') return
-  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
-  const nextQuery = currentPath && !AUTH_PAGES.has(window.location.pathname)
-    ? `?next=${encodeURIComponent(currentPath)}`
-    : ''
-  window.location.assign(`/login${nextQuery}`)
-}
-
 function formatErrorDetail(detail: unknown, fallback: string): string {
   if (typeof detail === 'string' && detail.trim()) return detail
   if (Array.isArray(detail)) {
@@ -72,15 +51,42 @@ function formatErrorDetail(detail: unknown, fallback: string): string {
   return fallback
 }
 
-let authBackendRequiredNotified = false
-
 function notifyAuthBackendRequired(status: number): void {
-  if (authEnabled || typeof window === 'undefined') return
-  if (authBackendRequiredNotified) return
-  authBackendRequiredNotified = true
+  if (typeof window === 'undefined') return
   window.dispatchEvent(
     new CustomEvent('pypsa-auth-backend-required', { detail: { status } }),
   )
+}
+
+function forceLoginRedirect(): void {
+  if (typeof window === 'undefined') return
+  if (AUTH_PAGES.has(window.location.pathname)) return
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  const nextQuery = currentPath && currentPath !== '/'
+    ? `?next=${encodeURIComponent(currentPath)}`
+    : ''
+  // Full navigation remounts the SPA so a stale authEnabled=false HMR/session
+  // cannot keep rendering the classic workbench.
+  window.location.replace(`/login${nextQuery}`)
+}
+
+function shouldRedirectToLogin(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) return false
+  if (error.response?.status !== 401) return false
+  if (error.config?.skipAuthRedirect) return false
+  const url = error.config?.url ?? ''
+  if (url.startsWith(AUTH_API_PREFIX)) return false
+  if (typeof window === 'undefined') return false
+  if (AUTH_PAGES.has(window.location.pathname)) return false
+
+  const detail = formatErrorDetail(error.response?.data?.detail, '')
+  // Backend auth middleware uses this exact detail. Treat it as authoritative
+  // even when the Vite env flag was stale/false — otherwise reviewers stay on
+  // the workbench toasting "Authentication required" forever.
+  if (detail.includes('Authentication required') || getAuthEnabled()) {
+    return true
+  }
+  return false
 }
 
 client.interceptors.response.use(
@@ -96,26 +102,30 @@ client.interceptors.response.use(
     return res
   },
   (err) => {
-    if (shouldRedirectToLogin(err)) {
-      redirectToLogin()
-      return Promise.reject(err)
-    }
-
-    const status = err.response?.status
+    const status = err.response?.status as number | undefined
     const fallback = err.message ?? 'Unknown error'
     const msg = formatErrorDetail(err.response?.data?.detail, fallback)
     const method = (err.config?.method ?? '').toUpperCase()
     const url = err.config?.url ?? ''
 
-    // Classic workbench + auth-enabled API: surface a setup gate once instead
-    // of toasting every background poll as "Request failed with status code N".
     if (
-      !authEnabled
-      && (status === 401 || status === 503)
-      && typeof msg === 'string'
-      && (msg.includes('Authentication required') || msg.includes('Auth database unavailable'))
+      (status === 401 && String(msg).includes('Authentication required'))
+      || (status === 503 && String(msg).includes('Auth database unavailable'))
     ) {
-      notifyAuthBackendRequired(status)
+      setAuthEnabled(true)
+      notifyAuthBackendRequired(status ?? 401)
+    }
+
+    if (shouldRedirectToLogin(err)) {
+      forceLoginRedirect()
+      return Promise.reject(err)
+    }
+
+    if (
+      status === 401
+      && String(msg).includes('Authentication required')
+    ) {
+      // Already on an auth page, or redirect skipped — don't toast-spam.
       return Promise.reject(err)
     }
 
