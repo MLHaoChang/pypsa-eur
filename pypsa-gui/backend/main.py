@@ -23,7 +23,11 @@ except ImportError:
 import pypsa
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from db import session as db_session_module
+from deps import resolve_request_user
 from routers import (
+    auth,
     changelog,
     chat,
     clustering,
@@ -40,6 +44,7 @@ from routers import (
     vintage,
 )
 from services.pypsa_service import PyPSAService
+from settings import get_settings
 
 # Prefixes whose non-GET mutations should be captured in the undo stack.
 _UNDO_PREFIXES = ("/api/network/", "/api/io/")
@@ -96,6 +101,13 @@ _SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
 # /api/projects/* router which also brings its own dispatch.
 _DISPATCH_INVALIDATE_PREFIXES = ("/api/network/",)
 _DISPATCH_INVALIDATE_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
+_AUTH_PUBLIC_PATHS = {
+    "/api/auth/forgot-password",
+    "/api/auth/login",
+    "/api/auth/reset-password",
+    "/api/auth/set-password",
+    "/api/health",
+}
 
 # Undo-snapshot push coalescing now lives in services.undo_service
 # (claim_push_slot) so the timer travels with the undo subsystem — the
@@ -133,7 +145,22 @@ async def undo_snapshot_middleware(request: Request, call_next):
     snapshot or a dispatch-invalidation probe.
     """
     path = request.url.path
+    normalized_path = path.rstrip("/") or "/"
     is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
+
+    if (
+        request.method != "OPTIONS"
+        and get_settings().pypsa_gui_auth_enabled
+        and (normalized_path == "/api" or normalized_path.startswith("/api/"))
+        and normalized_path not in _AUTH_PUBLIC_PATHS
+    ):
+        with db_session_module.SessionLocal() as db:
+            request.state.auth_user = resolve_request_user(request, db)
+        if request.state.auth_user is None:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Authentication required"},
+            )
 
     # ── Solver-in-flight gate ─────────────────────────────────────────
     # Refuse writes to /api/network/* and /api/io/* while the LP worker
@@ -149,7 +176,6 @@ async def undo_snapshot_middleware(request: Request, call_next):
             and not any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES)):
         from routers.simulation import _solver_in_flight
         if _solver_in_flight():
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=409,
                 content={
@@ -273,6 +299,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
 
     return response
 
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.
