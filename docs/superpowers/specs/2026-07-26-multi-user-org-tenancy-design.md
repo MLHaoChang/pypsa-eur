@@ -21,6 +21,7 @@ Today `pypsa-gui` is a single-user localhost workbench. Projects live as directo
 - Projects home is resume-first; otherwise list accessible projects.
 - Hybrid storage: Postgres for identity/ACL/metadata/locks; filesystem for large project bundles.
 - Existing on-disk projects become a legacy unclaimed pool, claimable via Admin → Legacy migrate.
+- **Keep scenario trees working:** create scenario, nested scenario trees, compare, rename reparenting, and cascade delete continue to work under org tenancy and ACL.
 
 ## 3. Non-goals (v1)
 
@@ -31,6 +32,7 @@ Today `pypsa-gui` is a single-user localhost workbench. Projects live as directo
 - Storing `network.nc` / large blobs primarily in the database
 - Billing, quotas, or usage metering
 - Redesigning the existing network workbench canvas beyond auth/lock/assignment chrome
+- Redesigning the Scenarios panel / Compare UX (preserve behavior; only adapt IDs/ACL)
 
 ## 4. Chosen approach
 
@@ -76,23 +78,30 @@ Postgres          Filesystem
 | `User` | email (unique), password hash, status (`invited` \| `active` \| `disabled`), flags |
 | `Organization` | name, created_by super-admin, timestamps |
 | `OrgMembership` | user_id, org_id, role (`admin` \| `member`); one org per user in v1 |
-| `Project` | id (UUID), org_id, name, created_by, storage_path, timestamps, soft metadata |
-| `ProjectMembership` | project_id, user_id, assigned_by, assigned_at |
-| `ProjectLock` | project_id, holder_user_id, acquired_at, expires_at / heartbeat |
+| `Project` | id (UUID), org_id, name, created_by, storage_path, `parent_project_id` (nullable FK to `Project`), `scenario_description`, timestamps |
+| `ProjectMembership` | project_id, user_id, assigned_by, assigned_at — stored on the **tree root** (see §5.6) |
+| `ProjectLock` | project_id, holder_user_id, acquired_at, expires_at / heartbeat — **per scenario/project node** |
 | `AuthToken` | type (`set_password` \| `reset_password`), user_id, hash, expires_at, used_at |
 | Platform super-admin | Bootstrap principal that can create orgs and org admins; not an org role |
+
+**Constraints**
+
+- Project `name` is unique within an `org_id` (not globally).
+- `parent_project_id`, when set, must reference a project in the **same org**.
+- Cycles are rejected (same guards as today’s `parent_project` tree walk).
+- On-disk `metadata.json` may still carry display fields; Postgres is authoritative for `parent_project_id` and ACL after migration.
 
 **Access rule for any project resource**
 
 Allow if authenticated user is in the project’s org AND one of:
 
 1. org role is `admin`, or
-2. user is project `created_by`, or
-3. user has a `ProjectMembership` row
+2. user is `created_by` of this project **or any ancestor** including the tree root, or
+3. user has a `ProjectMembership` on the **tree root** (whole-tree inheritance)
 
 Otherwise return **404** (do not reveal existence).
 
-**Delete / rename policy (v1):** project creator or org admin only.
+**Delete / rename policy (v1):** tree-root creator or org admin only (same people who manage membership). Cascade-delete of scenario children stays as today when deleting a node that has descendants (explicit `cascade=true`).
 
 ### 5.3 Storage layout
 
@@ -128,6 +137,41 @@ Postgres `projects.storage_path` points at the org-scoped directory. Legacy fold
 
 - **Default:** PostgreSQL for shared/cloud and local-via-Docker.
 - Keep the data-access layer swappable so a SQLite local mode can be added later if needed; not required for v1 if Docker Postgres is acceptable.
+
+### 5.6 Scenario trees (must keep working)
+
+Today scenarios are full project bundles linked by `metadata.parent_project`, forming trees. The workbench Scenarios panel rebuilds the tree from a flat list; Compare loads multiple scenarios; rename reparents direct children; delete can cascade.
+
+**v1 requirement:** that product behavior remains intact under multi-tenancy.
+
+**Model**
+
+- Each scenario is a `Project` row + filesystem bundle (unchanged physical shape).
+- Parent link moves to Postgres `parent_project_id` (UUID). API responses still expose a human `parent_project` name for the existing UI where needed.
+- Creating a scenario (`POST .../scenarios`) copies the base bundle (as today), sets `parent_project_id = base.id`, same `org_id`, and does **not** create a separate membership table for the child.
+- Nested scenarios (scenario-of-scenario) remain allowed within one org.
+
+**ACL — whole-tree inheritance**
+
+- Membership and “who can manage this lineage” are evaluated on the **tree root** (walk `parent_project_id` to null).
+- If a user can access the root (creator, assigned member, or org admin), they can access **all descendant scenarios** automatically.
+- Assign-members UI edits membership on the **root**; it applies to the whole tree.
+- Creating a scenario requires write access to the base node (root membership / creator / admin, and edit lock on the base if mutating from an open editor — same practical gate as “can use create scenario today,” plus ACL).
+
+**Locks**
+
+- Locks remain **per node** (parent and each scenario can be edited by different people, one writer each).
+- Holding a lock on the parent does not lock children, and vice versa.
+
+**Projects home**
+
+- Default list emphasizes **tree roots** (projects with `parent_project_id IS NULL`) the user can access.
+- Scenarios remain reachable from the workbench Scenarios panel and via resume/recents if last opened.
+- Optional secondary affordance: expand a root to show its scenario tree on the home page (nice-to-have; not required if workbench panel covers it).
+
+**Compare / chat / snapshots**
+
+- Existing compare-across-scenarios, scenario chat lineage, and snapshots continue to operate on project bundles the user can access; ACL checks each referenced project ID, which succeeds for any node in an allowed tree.
 
 ## 6. Auth & account flows
 
@@ -176,16 +220,17 @@ Postgres `projects.storage_path` points at the org-scoped directory. Legacy fold
 ### 7.2 Projects home (resume-first)
 
 - Header: brand, org name, user menu, Admin link (if authorized).
-- Hero: “Continue where you left off” when a last project exists and is still accessible; primary Resume CTA.
-- Below: searchable list of projects the user can access (created, assigned, or all org projects if admin).
-- New project CTA.
+- Hero: “Continue where you left off” when a last project exists and is still accessible; primary Resume CTA (may be a root or a scenario).
+- Below: searchable list of **accessible tree roots** (org admin: all org roots; member: roots they created or are assigned to). Scenario children are not required on the home list.
+- New project CTA creates a new **root** project.
 - If no resume candidate, hero collapses to the list.
 
 ### 7.3 Workbench additions
 
 - User menu (account, back to projects, logout).
-- Lock status banner (editing / read-only with holder).
-- Assign members dialog for creator and org admin (pick from org members).
+- Lock status banner (editing / read-only with holder) — per open scenario/project.
+- Assign members dialog for **tree-root** creator and org admin (pick from org members); copy clarifies that access applies to the whole scenario tree.
+- Keep existing Scenarios panel + Compare flows; only wire them to UUID-backed project APIs and tree-aware ACL.
 
 ### 7.4 Admin console
 
@@ -228,14 +273,14 @@ Left nav:
 
 ### Projects (ACL-aware replacements/extensions)
 
-- `GET /api/projects` — only accessible projects for current user
-- `POST /api/projects` — create in user’s org; creator becomes owner
-- Existing load/save/activate/rename/delete/bundle endpoints — enforce ACL; delete/rename limited to creator or org admin
-- `GET /api/projects/{id}/members`
-- `PUT /api/projects/{id}/members`
-- `POST /api/projects/{id}/lock` / `POST .../lock/heartbeat` / `DELETE .../lock`
+- `GET /api/projects` — accessible projects for current user (include scenario nodes needed by Scenarios panel / compare; support `roots_only=true` for Projects home)
+- `POST /api/projects` — create **root** in user’s org; creator becomes root owner
+- `POST /api/projects/{id}/scenarios` — create child scenario under `{id}`; same org; sets `parent_project_id`; inherits tree ACL (no separate membership row)
+- Existing load/save/activate/rename/delete/bundle/compare endpoints — enforce tree-aware ACL; delete/rename limited to root creator or org admin; rename still reparents direct children; delete still supports cascade for descendants
+- `GET /api/projects/{id}/members` / `PUT .../members` — operate on the **tree root** (if `{id}` is a scenario, resolve to root)
+- `POST /api/projects/{id}/lock` / `POST .../lock/heartbeat` / `DELETE .../lock` — per node
 
-All project identifiers in URLs should prefer stable UUIDs; display names remain unique per org.
+All project identifiers in URLs should prefer stable UUIDs; display names remain unique **per org**.
 
 ## 9. Frontend routing
 
@@ -253,7 +298,8 @@ Authenticated access to `/login` redirects to `/projects`.
 
 - On upgrade/startup, detect existing `backend/projects/*` bundles that are not already registered in Postgres.
 - Move or mark them under `legacy_unclaimed/` (implementation detail: move preferred to avoid dual listing).
-- Admin Legacy migrate UI claims a folder into an org: creates `Project` row, sets storage path, assigns owner/members, removes from unclaimed pool.
+- Admin Legacy migrate UI claims folders into an org: creates `Project` rows, sets storage paths, assigns owner/members on roots, removes from unclaimed pool.
+- **Preserve scenario trees:** when claiming, read legacy `metadata.parent_project` name pointers and reconnect `parent_project_id` for folders claimed together (or claim a root with an option to include detected descendants). Broken parent links become roots with a migration warning.
 - Normal users never see unclaimed legacy projects.
 
 ## 11. Components & responsibilities
@@ -262,7 +308,7 @@ Authenticated access to `/login` redirects to `/projects`.
 |---|---|
 | `auth` service/router | Credentials, sessions, tokens, password flows |
 | `tenancy` service/router | Orgs, org membership, super-admin bootstrap |
-| `project_acl` | Project registry, assignment, authorization helpers |
+| `project_acl` | Project registry, tree root resolution, assignment, authorization helpers |
 | `project_locks` | Advisory lock lifecycle |
 | `email` | SMTP send + templates |
 | Existing `projects` router | Bundle IO, activate/resident contexts — call ACL first |
@@ -285,9 +331,9 @@ Authenticated access to `/login` redirects to `/projects`.
 
 ## 13. Testing strategy
 
-- **Backend unit/integration:** password hashing; token lifecycle; org isolation; project ACL matrix; lock acquire/conflict/heartbeat/expiry; legacy claim.
-- **Frontend:** route guards; resume-home visibility; admin nav gating; lock banner states.
-- **Manual/dev:** Mailpit end-to-end for set-password and reset-password.
+- **Backend unit/integration:** password hashing; token lifecycle; org isolation; project ACL matrix; **tree-wide ACL** (member on root can open nested scenario; outsider cannot); create scenario under parent; rename reparent; cascade delete; lock acquire/conflict/heartbeat/expiry; legacy claim with parent relinking.
+- **Frontend:** route guards; resume-home visibility; admin nav gating; lock banner states; Scenarios panel still builds a tree after auth.
+- **Manual/dev:** Mailpit end-to-end for set-password and reset-password; create nested scenarios as two assigned members.
 
 ## 14. Rollout notes
 
@@ -326,3 +372,7 @@ Authenticated access to `/login` redirects to `/projects`.
 | Login layout | Split brand + form |
 | Admin UX | Full admin console |
 | Approach | Hybrid multi-tenant |
+| Scenario trees | Keep intact; each scenario is a Project; `parent_project_id` in Postgres |
+| Scenario ACL | Whole-tree inheritance from tree root membership/creator |
+| Scenario locks | Per node (not whole-tree lock) |
+| Projects home listing | Roots by default; scenarios via workbench / resume |
