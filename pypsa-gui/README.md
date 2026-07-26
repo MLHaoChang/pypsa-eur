@@ -273,21 +273,26 @@ emails locally, wire the backend to Postgres, point SMTP at Mailpit, and set
 ```bash
 # Backend env (Postgres + SMTP + auth flag)
 cp pypsa-gui/backend/.env.example pypsa-gui/backend/.env
+# Optional quick path without Docker: edit DATABASE_URL to
+#   sqlite+pysqlite:///./auth_dev.db
 
-# Frontend auth routes
-printf 'VITE_AUTH_ENABLED=true\n' > pypsa-gui/frontend/.env.local
+# Frontend: `frontend/.env.development` already sets VITE_AUTH_ENABLED=true
+# for this branch. Override with frontend/.env.local if needed.
 
-# Postgres + Mailpit (requires Docker on your machine)
+# Postgres + Mailpit (requires Docker on your machine) — skip if using SQLite
 cd pypsa-gui
 docker compose -f docker-compose.auth.yml up -d
 
-# Schema
+# Schema (Postgres). For SQLite, bootstrap_super_admin creates tables automatically.
 cd backend
-pixi run alembic -c alembic.ini upgrade head
+pixi run alembic -c alembic.ini upgrade head   # Postgres only
 ```
 
 Mailpit inbox UI: **http://localhost:8025**. Invite / set-password / reset emails
 go to SMTP `:1025`. Links use `PUBLIC_BASE_URL` (default `http://localhost:5173`).
+
+**Important:** after pulling this branch, fully restart `npm run dev` so Vite
+reloads `.env.development`. A hard refresh alone will not enable the login page.
 
 #### 2) Create the platform super-admin (CLI — no signup UI)
 

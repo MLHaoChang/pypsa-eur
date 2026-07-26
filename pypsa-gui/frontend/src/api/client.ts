@@ -55,6 +55,34 @@ function redirectToLogin(): void {
   window.location.assign(`/login${nextQuery}`)
 }
 
+function formatErrorDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object' && 'msg' in item) {
+          return String((item as { msg: unknown }).msg)
+        }
+        return null
+      })
+      .filter(Boolean)
+    if (parts.length) return parts.join('; ')
+  }
+  return fallback
+}
+
+let authBackendRequiredNotified = false
+
+function notifyAuthBackendRequired(status: number): void {
+  if (authEnabled || typeof window === 'undefined') return
+  if (authBackendRequiredNotified) return
+  authBackendRequiredNotified = true
+  window.dispatchEvent(
+    new CustomEvent('pypsa-auth-backend-required', { detail: { status } }),
+  )
+}
+
 client.interceptors.response.use(
   (res) => {
     const method = (res.config.method ?? '').toUpperCase()
@@ -73,9 +101,23 @@ client.interceptors.response.use(
       return Promise.reject(err)
     }
 
-    const msg = err.response?.data?.detail ?? err.message ?? 'Unknown error'
+    const status = err.response?.status
+    const fallback = err.message ?? 'Unknown error'
+    const msg = formatErrorDetail(err.response?.data?.detail, fallback)
     const method = (err.config?.method ?? '').toUpperCase()
     const url = err.config?.url ?? ''
+
+    // Classic workbench + auth-enabled API: surface a setup gate once instead
+    // of toasting every background poll as "Request failed with status code N".
+    if (
+      !authEnabled
+      && (status === 401 || status === 503)
+      && typeof msg === 'string'
+      && (msg.includes('Authentication required') || msg.includes('Auth database unavailable'))
+    ) {
+      notifyAuthBackendRequired(status)
+      return Promise.reject(err)
+    }
 
     // Quiet poll endpoints (undo/info, changelog) silently fail during the
     // brief uvicorn --reload window. They'll succeed on the next interval; no

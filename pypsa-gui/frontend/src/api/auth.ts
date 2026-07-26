@@ -47,11 +47,13 @@ const quietAuthRequest = {
 }
 
 const forgotPassword = (payload: ForgotPasswordPayload) =>
-  client.post<OkResponse>('/auth/forgot-password', payload).then(r => r.data)
+  client.post<OkResponse>('/auth/forgot-password', payload, quietAuthRequest).then(r => r.data)
 
 export const authApi = {
+  // Login/password flows render their own inline errors — skip the global toast
+  // so reviewers don't only see opaque axios "status code 500" popups.
   login: (payload: LoginPayload) =>
-    client.post<LoginResponse>('/auth/login', payload).then(r => r.data),
+    client.post<LoginResponse>('/auth/login', payload, quietAuthRequest).then(r => r.data),
   logout: () =>
     client.post<OkResponse>('/auth/logout', undefined, quietAuthRequest).then(r => r.data),
   me: () =>
@@ -61,7 +63,7 @@ export const authApi = {
   forgotPassword,
   forgot: forgotPassword,
   setPassword: (payload: PasswordTokenPayload) =>
-    client.post<OkResponse>('/auth/set-password', payload).then(r => r.data),
+    client.post<OkResponse>('/auth/set-password', payload, quietAuthRequest).then(r => r.data),
   resetPassword: (payload: PasswordTokenPayload) =>
-    client.post<OkResponse>('/auth/reset-password', payload).then(r => r.data),
+    client.post<OkResponse>('/auth/reset-password', payload, quietAuthRequest).then(r => r.data),
 }

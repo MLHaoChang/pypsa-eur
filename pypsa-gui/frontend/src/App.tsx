@@ -30,6 +30,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import ChatPanel from './components/ChatPanel'
 import { useUIStore, type SlidePanel } from './store/uiStore'
 import { authEnabled } from './auth/config'
+import AuthMismatchGate from './auth/AuthMismatchGate'
 import { networkApi } from './api/network'
 import { projectsApi } from './api/projects'
 import { simulationApi, createLogStream } from './api/simulation'
@@ -532,92 +533,94 @@ export default function App() {
   }, [activeSlidePanel, setSlidePanel])
 
   return (
-    <AppErrorBoundary>
-    <div className="flex flex-col h-screen overflow-hidden bg-bg">
-      {/* ── Crash recovery banner ──────────────────────────────────── */}
-      {/* Renders only when a project has an orphaned `.tmp` sibling — a
-          tell-tale of a save killed before the atomic rename. Hidden
-          (returns null) the rest of the time so it doesn't take vertical
-          space. */}
-      <CrashRecoveryBanner />
+    <AuthMismatchGate>
+      <AppErrorBoundary>
+      <div className="flex flex-col h-screen overflow-hidden bg-bg">
+        {/* ── Crash recovery banner ──────────────────────────────────── */}
+        {/* Renders only when a project has an orphaned `.tmp` sibling — a
+            tell-tale of a save killed before the atomic rename. Hidden
+            (returns null) the rest of the time so it doesn't take vertical
+            space. */}
+        <CrashRecoveryBanner />
 
-      {/* ── Read-only lock banner ──────────────────────────────────── */}
-      {/* Renders only when another user holds this project's edit lock
-          (auth mode). Hidden otherwise so it takes no vertical space. */}
-      <LockBanner />
+        {/* ── Read-only lock banner ──────────────────────────────────── */}
+        {/* Renders only when another user holds this project's edit lock
+            (auth mode). Hidden otherwise so it takes no vertical space. */}
+        <LockBanner />
 
-      {/* ── App header ─────────────────────────────────────────────── */}
-      <AppHeader />
+        {/* ── App header ─────────────────────────────────────────────── */}
+        <AppHeader />
 
-      {/* ── Project tab strip ──────────────────────────────────────── */}
-      <ProjectTabs />
+        {/* ── Project tab strip ──────────────────────────────────────── */}
+        <ProjectTabs />
 
-      {/* ── Three-column body ──────────────────────────────────────── */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* ── Three-column body ──────────────────────────────────────── */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
 
-        {/* Zone 0 — Sectioned nav sidebar */}
-        <Sidebar />
+          {/* Zone 0 — Sectioned nav sidebar */}
+          <Sidebar />
 
-        {/* Zone 2 — Centre: the canvas (+ bottom panel). Most sidebar tabs
-            open alongside it as a HALF-WIDTH panel (the canvas stays visible,
-            shrunk to the other half); Results takes the whole area. */}
-        <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+          {/* Zone 2 — Centre: the canvas (+ bottom panel). Most sidebar tabs
+              open alongside it as a HALF-WIDTH panel (the canvas stays visible,
+              shrunk to the other half); Results takes the whole area. */}
+          <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
 
-          {/* Canvas column — full width normally, half beside a tab panel,
-              hidden while a full-screen tab (Results) occupies the area. Kept
-              mounted (display:none, not unmounted) so its zoom/pan + React
-              Flow state survive a tab open/close. */}
-          <div
-            className={`flex flex-col min-h-0 overflow-hidden ${
-              fullScreenTab ? 'hidden'
-                : activeSlidePanel ? 'w-1/2 min-w-0'
-                : 'flex-1 min-w-0'
-            }`}
-          >
-            <div className="relative flex-1 min-h-0 overflow-hidden">
-              <ErrorBoundary label="Canvas crashed">
-                {canvasView === 'blank'
-                  ? <TopologyCanvas />
-                  : <MapCanvas mode={canvasView} />}
-              </ErrorBoundary>
-              {/* Mode switcher floats over whichever canvas is active */}
-              <MapModeSwitcher />
-              {/* Snapshot picker / playback bar for the results overlay —
-                  shown on both the blank schematic and the satellite/hybrid map */}
-              <SnapshotPicker />
-            </div>
-            {/* Zone 4 — Bottom tabbed panel (canvas only) */}
-            <BottomPanel />
-          </div>
-
-          {/* Tab panel — half-width beside the canvas, full-width for Results. */}
-          {activeSlidePanel && (
+            {/* Canvas column — full width normally, half beside a tab panel,
+                hidden while a full-screen tab (Results) occupies the area. Kept
+                mounted (display:none, not unmounted) so its zoom/pan + React
+                Flow state survive a tab open/close. */}
             <div
-              ref={panelRef}
-              className={`min-w-0 flex flex-col min-h-0 overflow-hidden ${
-                fullScreenTab ? 'flex-1' : 'w-1/2 border-l border-border'
+              className={`flex flex-col min-h-0 overflow-hidden ${
+                fullScreenTab ? 'hidden'
+                  : activeSlidePanel ? 'w-1/2 min-w-0'
+                  : 'flex-1 min-w-0'
               }`}
             >
-              {/* Boundary keyed on panel + project so a crash in any full-page
-                  tab (Results/Compare/Economics/…) shows an inline fallback
-                  instead of whitescreening the app, and navigating to another
-                  tab or switching project remounts it (clearing the error). */}
-              <ErrorBoundary key={`${activeSlidePanel}-${currentProject ?? ''}`} label="This panel crashed">
-                <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
-              </ErrorBoundary>
+              <div className="relative flex-1 min-h-0 overflow-hidden">
+                <ErrorBoundary label="Canvas crashed">
+                  {canvasView === 'blank'
+                    ? <TopologyCanvas />
+                    : <MapCanvas mode={canvasView} />}
+                </ErrorBoundary>
+                {/* Mode switcher floats over whichever canvas is active */}
+                <MapModeSwitcher />
+                {/* Snapshot picker / playback bar for the results overlay —
+                    shown on both the blank schematic and the satellite/hybrid map */}
+                <SnapshotPicker />
+              </div>
+              {/* Zone 4 — Bottom tabbed panel (canvas only) */}
+              <BottomPanel />
             </div>
-          )}
+
+            {/* Tab panel — half-width beside the canvas, full-width for Results. */}
+            {activeSlidePanel && (
+              <div
+                ref={panelRef}
+                className={`min-w-0 flex flex-col min-h-0 overflow-hidden ${
+                  fullScreenTab ? 'flex-1' : 'w-1/2 border-l border-border'
+                }`}
+              >
+                {/* Boundary keyed on panel + project so a crash in any full-page
+                    tab (Results/Compare/Economics/…) shows an inline fallback
+                    instead of whitescreening the app, and navigating to another
+                    tab or switching project remounts it (clearing the error). */}
+                <ErrorBoundary key={`${activeSlidePanel}-${currentProject ?? ''}`} label="This panel crashed">
+                  <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+                </ErrorBoundary>
+              </div>
+            )}
+          </div>
+
+          {/* Zone 3 — Right properties panel. Only renders alongside the
+              Topology Canvas — hidden while a tab panel occupies the right half. */}
+          {!activeSlidePanel && <PropertiesPanel />}
         </div>
 
-        {/* Zone 3 — Right properties panel. Only renders alongside the
-            Topology Canvas — hidden while a tab panel occupies the right half. */}
-        {!activeSlidePanel && <PropertiesPanel />}
+        <StatusBar />
+        <CommandPalette />
+        <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       </div>
-
-      <StatusBar />
-      <CommandPalette />
-      <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />
-    </div>
-    </AppErrorBoundary>
+      </AppErrorBoundary>
+    </AuthMismatchGate>
   )
 }

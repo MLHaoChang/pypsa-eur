@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
+import sys
 from datetime import datetime, timezone
+
+# Allow `python tools/bootstrap_super_admin.py` from the backend directory.
+_BACKEND = pathlib.Path(__file__).resolve().parent.parent
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_BACKEND))
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -19,7 +26,11 @@ def _now_utc() -> datetime:
 
 def bootstrap_super_admin(*, email: str, password: str) -> User:
     settings = get_settings()
-    engine = create_engine(settings.database_url, pool_pre_ping=True)
+    url = settings.database_url
+    kwargs: dict = {"pool_pre_ping": True}
+    if url.startswith("sqlite"):
+        kwargs["connect_args"] = {"check_same_thread": False}
+    engine = create_engine(url, **kwargs)
     session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
 

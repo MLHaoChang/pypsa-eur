@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -46,6 +47,8 @@ from routers import (
 )
 from services.pypsa_service import PyPSAService
 from settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 # Prefixes whose non-GET mutations should be captured in the undo stack.
 _UNDO_PREFIXES = ("/api/network/", "/api/io/")
@@ -155,8 +158,24 @@ async def undo_snapshot_middleware(request: Request, call_next):
         and (normalized_path == "/api" or normalized_path.startswith("/api/"))
         and normalized_path not in _AUTH_PUBLIC_PATHS
     ):
-        with db_session_module.SessionLocal() as db:
-            request.state.auth_user = resolve_request_user(request, db)
+        try:
+            with db_session_module.SessionLocal() as db:
+                request.state.auth_user = resolve_request_user(request, db)
+        except Exception:
+            # Misconfigured/unreachable DB must not surface as an opaque 500 on
+            # every /api call (that looked like a broken workbench to reviewers
+            # when auth was on without Postgres).
+            logger.exception("auth database unavailable while enforcing session")
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "Auth database unavailable. Start Postgres (or use a "
+                        "sqlite DATABASE_URL), run alembic upgrade head, then "
+                        "restart the backend."
+                    ),
+                },
+            )
         if request.state.auth_user is None:
             return JSONResponse(
                 status_code=401,
@@ -363,4 +382,10 @@ def _chatbot_startup_check() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "pypsa_version": pypsa.__version__}
+    return {
+        "status": "ok",
+        "pypsa_version": pypsa.__version__,
+        # Lets the SPA detect "backend auth on / frontend auth off" and show a
+        # setup gate instead of an opaque workbench + 401/500 toast storm.
+        "auth_enabled": get_settings().pypsa_gui_auth_enabled,
+    }

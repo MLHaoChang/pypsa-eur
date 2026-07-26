@@ -57,12 +57,17 @@ export function AuthSplitLayout({
   )
 }
 
-export function AuthMessage({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-[#d6e1d8] bg-[#f6faf5] px-4 py-3 text-sm leading-6 text-slate-700">
-      {children}
-    </div>
-  )
+export function AuthMessage({
+  children,
+  tone = 'info',
+}: {
+  children: ReactNode
+  tone?: 'info' | 'error'
+}) {
+  const classes = tone === 'error'
+    ? 'rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800'
+    : 'rounded-2xl border border-[#d6e1d8] bg-[#f6faf5] px-4 py-3 text-sm leading-6 text-slate-700'
+  return <div className={classes}>{children}</div>
 }
 
 export function AuthInput(

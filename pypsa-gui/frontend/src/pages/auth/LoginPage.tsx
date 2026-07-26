@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { type FormEvent, useMemo, useState } from 'react'
 import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthProvider'
@@ -11,6 +12,19 @@ import {
   AuthSecondaryButton,
   AuthSplitLayout,
 } from './AuthSplitLayout'
+
+function formatAuthError(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError(error)) return fallback
+  const detail = error.response?.data?.detail
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (error.response?.status === 503) {
+    return 'Auth database unavailable. Check DATABASE_URL, then restart the backend.'
+  }
+  if (error.response?.status === 500) {
+    return 'Sign-in failed on the server. Confirm the backend is running with auth DB ready.'
+  }
+  return error.message || fallback
+}
 
 type AuthLocationState = {
   from?: string
@@ -43,6 +57,7 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSendingReset, setIsSendingReset] = useState(false)
   const [infoMessage, setInfoMessage] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const locationState = location.state as AuthLocationState
   const requestedPath = searchParams.get('next') ?? locationState?.from ?? null
@@ -60,10 +75,13 @@ export default function LoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setInfoMessage(null)
+    setErrorMessage(null)
     setIsSubmitting(true)
     try {
       await login(email, password)
       navigate(destination, { replace: true })
+    } catch (error) {
+      setErrorMessage(formatAuthError(error, 'Sign-in failed. Check your email and password.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -72,10 +90,17 @@ export default function LoginPage() {
   async function handleForgotPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setInfoMessage(null)
+    setErrorMessage(null)
     setIsSendingReset(true)
     try {
       const result = await requestPasswordReset(forgotEmail, email)
-      setInfoMessage(result.message)
+      if (result.ok) {
+        setInfoMessage(result.message)
+      } else {
+        setErrorMessage(result.message)
+      }
+    } catch (error) {
+      setErrorMessage(formatAuthError(error, 'Could not send a reset link.'))
     } finally {
       setIsSendingReset(false)
     }
@@ -87,6 +112,7 @@ export default function LoginPage() {
       title="Welcome back"
     >
       {flashMessage && <AuthMessage>{flashMessage}</AuthMessage>}
+      {errorMessage && <AuthMessage tone="error">{errorMessage}</AuthMessage>}
 
       <form className="space-y-4" onSubmit={handleSubmit}>
         <AuthInput

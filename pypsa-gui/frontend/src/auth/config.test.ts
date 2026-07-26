@@ -6,7 +6,10 @@ describe('authEnabled', () => {
     vi.resetModules()
   })
 
-  it('defaults to false when VITE_AUTH_ENABLED is unset', async () => {
+  it('is false when VITE_AUTH_ENABLED is empty / not exactly true', async () => {
+    // Vitest loads `.env.development` (VITE_AUTH_ENABLED=true) by default on
+    // this branch, so explicitly stub an empty value for the negative case.
+    vi.stubEnv('VITE_AUTH_ENABLED', '')
     vi.resetModules()
     const { authEnabled } = await import('./config')
     expect(authEnabled).toBe(false)
