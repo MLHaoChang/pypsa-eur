@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Loader, Users, X } from 'lucide-react'
 import { projectsApi } from '../api/projects'
-import { adminApi } from '../api/admin'
+import { authApi } from '../api/auth'
 import { useAuth } from '../auth/AuthProvider'
 
 interface Props {
@@ -16,11 +16,12 @@ interface Props {
 }
 
 // Assign-members dialog (Task 14). Reads/writes /api/projects/{id}/members.
-// Candidate users come from the admin user list, filtered to the acting user's
-// organization. Membership management is permitted for org admins and the tree
-// root's creator; when the candidate-list fetch is forbidden (a non-admin who
-// can't enumerate org users) we degrade to a read-only view of the current
-// members plus a hint, rather than dead-ending.
+// Candidate users come from the non-admin org-member directory
+// (GET /api/auth/org-members), which any authenticated org member can read —
+// so a project CREATOR (not just an org admin) can assign colleagues. The
+// directory is already scoped to the caller's own organization server-side.
+// If the save is refused (a non-owner / non-admin), the backend returns 403
+// and we surface that as a toast rather than dead-ending the dialog.
 export default function AssignMembersDialog({ projectId, projectLabel, onClose }: Props) {
   const qc = useQueryClient()
   const { user } = useAuth()
@@ -31,11 +32,12 @@ export default function AssignMembersDialog({ projectId, projectLabel, onClose }
     staleTime: 5_000,
   })
 
-  // Candidate users to pick from. `retry: false` so a 403 (non-admin) surfaces
-  // immediately as the degraded read-only path instead of retrying.
+  // Candidate users to pick from — the org-member directory any authenticated
+  // member can read. `retry: false` so a rare failure surfaces immediately as
+  // the degraded read-only path instead of retrying.
   const usersQuery = useQuery({
-    queryKey: ['admin-users-for-assign'],
-    queryFn: () => adminApi.listUsers(),
+    queryKey: ['org-members-for-assign'],
+    queryFn: () => authApi.orgMembers(),
     retry: false,
     staleTime: 30_000,
   })
@@ -49,15 +51,11 @@ export default function AssignMembersDialog({ projectId, projectLabel, onClose }
     [membersQuery.data],
   )
 
-  // Candidate users limited to the acting user's org (membership always stays
-  // within one organization; cross-org ids are rejected by the backend).
+  // Candidate users — the org-member directory is already scoped to the
+  // acting user's organization server-side, so we only sort for a stable list.
   const candidates = useMemo(() => {
-    const all = usersQuery.data ?? []
-    const orgId = user?.org_id ?? null
-    return all
-      .filter(u => (orgId ? u.org_id === orgId : true))
-      .sort((a, b) => a.email.localeCompare(b.email))
-  }, [usersQuery.data, user?.org_id])
+    return [...(usersQuery.data ?? [])].sort((a, b) => a.email.localeCompare(b.email))
+  }, [usersQuery.data])
 
   const effectiveSelected = selected ?? currentMemberIds
   const canManage = !usersQuery.isError
@@ -127,11 +125,11 @@ export default function AssignMembersDialog({ projectId, projectLabel, onClose }
               <Loader size={13} className="animate-spin" /> Loading members…
             </div>
           ) : !canManage ? (
-            // Degraded path — can't enumerate org users (non-admin). Show the
-            // current members read-only so the dialog is still informative.
+            // Degraded path — the org-member directory couldn't be loaded. Show
+            // the current members read-only so the dialog is still informative.
             <div className="space-y-2">
               <div className="text-[11px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1.5">
-                Only an organization admin (or the project owner) can change members.
+                Couldn't load your organization's member directory. Showing the current members only.
               </div>
               {(membersQuery.data ?? []).length === 0 ? (
                 <div className="text-[11.5px] text-muted py-4 text-center">No members assigned yet.</div>

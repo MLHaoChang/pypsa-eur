@@ -9,6 +9,15 @@ export interface AuthUser {
   role: 'admin' | 'member' | null
 }
 
+// One row of the non-admin org-member directory (GET /api/auth/org-members).
+// Available to any authenticated org member so a project creator can pick the
+// colleagues to assign — unlike the admin user list, it never crosses orgs.
+export interface OrgMember {
+  id: string
+  email: string
+  role: 'admin' | 'member' | null
+}
+
 export interface LoginPayload {
   email: string
   password: string
@@ -47,6 +56,8 @@ export const authApi = {
     client.post<OkResponse>('/auth/logout', undefined, quietAuthRequest).then(r => r.data),
   me: () =>
     client.get<AuthUser>('/auth/me', quietAuthRequest).then(r => r.data),
+  orgMembers: () =>
+    client.get<OrgMember[]>('/auth/org-members').then(r => r.data),
   forgotPassword,
   forgot: forgotPassword,
   setPassword: (payload: PasswordTokenPayload) =>
