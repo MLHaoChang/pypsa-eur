@@ -258,6 +258,55 @@ This GUI lives inside a **PyPSA-Eur** checkout and reuses its toolchain.
    npm install
    ```
 
+### Optional: enable multi-user auth locally
+
+The default dev setup works without Postgres. To exercise invited-user flows,
+org/project tenancy, edit locks, and password emails locally, wire the backend
+to Postgres and point SMTP at Mailpit.
+
+1. **Copy the backend env template**:
+   ```bash
+   cp pypsa-gui/backend/.env.example pypsa-gui/backend/.env
+   ```
+2. **Enable auth routes in the frontend**:
+   ```bash
+   printf 'VITE_AUTH_ENABLED=true\n' > pypsa-gui/frontend/.env.local
+   ```
+3. **Save this as `docker-compose.auth.yml` and use it for local Postgres +
+   Mailpit** (for local machines with Docker Compose; this cloud environment
+   does not provide Docker):
+   ```yaml
+   services:
+     postgres:
+       image: postgres:16
+       environment:
+         POSTGRES_DB: pypsa_gui
+         POSTGRES_USER: pypsa
+         POSTGRES_PASSWORD: pypsa
+       ports:
+         - "5432:5432"
+       volumes:
+         - pypsa-gui-postgres:/var/lib/postgresql/data
+
+     mailpit:
+       image: axllent/mailpit:latest
+       ports:
+         - "1025:1025"
+         - "8025:8025"
+
+   volumes:
+     pypsa-gui-postgres:
+   ```
+4. **Start that local stack**:
+   ```bash
+   docker compose -f docker-compose.auth.yml up -d
+   ```
+
+Mailpit's inbox UI is at **http://localhost:8025**. The backend will deliver
+invite, set-password, and reset-password emails to SMTP on port 1025, and the
+links in those emails resolve against `PUBLIC_BASE_URL` (default
+`http://localhost:5173`).
+
 ### Run it
 
 **Windows (one click):** from `pypsa-gui/` run `start.bat` — it opens the
@@ -276,6 +325,9 @@ npm run dev
 
 Open **http://localhost:5173**. API + interactive docs at
 **http://localhost:8000** and **/docs**. Production build: `npm run build`.
+With `VITE_AUTH_ENABLED=true`, the SPA routes through `/login`, `/projects`,
+`/app`, and `/admin` instead of dropping straight into the single-user
+workbench.
 
 ---
 
