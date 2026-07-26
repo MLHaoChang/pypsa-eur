@@ -251,11 +251,19 @@ This GUI lives inside a **PyPSA-Eur** checkout and reuses its toolchain.
    ```bash
    pixi run -- pip install -r pypsa-gui/backend/requirements.txt
    ```
-3. **Node.js + front-end packages** (bundled Node under `pypsa-gui/.nodeenv`,
-   or a system Node ≥ 18):
+3. **Node.js + front-end packages** (Node comes from the **pixi** env —
+   there is no separate global `npm` required):
    ```bash
+   # from the repo root
+   pixi install
    cd pypsa-gui/frontend
-   npm install
+   pixi run -- npm install
+   ```
+   If a bare `npm` says “command not found”, always prefix with `pixi run --`.
+   Alternatively use the helper script (starts backend + frontend together):
+   ```bash
+   # from the repo root
+   ./pypsa-gui/start.sh
    ```
 
 ### Optional: enable multi-user auth locally
@@ -306,7 +314,14 @@ reloads `.env.development`. A hard refresh alone will not enable the login page.
 The React workbench only boots from `spa.html` after a valid session cookie.
 
 1. Stop any old Vite on your machine (`Ctrl+C` in that terminal).
-2. From this branch: `cd pypsa-gui/frontend && npm run dev`
+2. From this branch (repo root), install once if needed, then start frontend:
+   ```bash
+   pixi install
+   cd pypsa-gui/frontend
+   pixi run -- npm install          # first time / after pull
+   pixi run -- npm run dev
+   ```
+   Or start both servers: `./pypsa-gui/start.sh` from the repo root.
 3. Open `http://localhost:5173/` (port **5173**, not 8000).
 4. You must see a dark green badge: **“Auth gate · not the workbench”**.
 5. Sign in: `admin@example.com` / your bootstrap password → `/projects`.
@@ -315,7 +330,7 @@ Verify locally anytime:
 
 ```bash
 cd pypsa-gui/frontend
-npm run test:auth-gate
+pixi run -- npm run test:auth-gate
 ```
 
 That fails if `/`, `/app`, or `/projects` would still serve the React workbench
@@ -341,9 +356,12 @@ This creates (or upgrades) an **active** `is_super_admin` user with that passwor
 cd pypsa-gui/backend
 pixi run python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 
-# Terminal 2 — frontend
+# Terminal 2 — frontend (npm comes from pixi — do not rely on a global npm)
 cd pypsa-gui/frontend
-npm run dev
+pixi run -- npm run dev
+
+# Or both at once from the repo root:
+# ./pypsa-gui/start.sh
 ```
 
 Open **http://localhost:5173** → you should see the split-brand **Sign in** page
