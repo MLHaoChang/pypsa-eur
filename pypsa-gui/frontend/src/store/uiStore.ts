@@ -51,6 +51,16 @@ const RESULTS_OVERLAY_KEY = 'network-diagram:results-overlay'
 const LAST_SAVED_KEY = 'network-diagram:last-saved'
 const RECENTS_KEY = 'network-diagram:recents'
 const THEME_KEY = 'network-diagram:theme'
+// Generation marker for the persisted theme preference. The store predates
+// zustand's `persist` middleware (every preference is written to its own
+// localStorage key by hand), so there is no `version`/`migrate` pair to bump —
+// this is the minimal equivalent. Bump THEME_SCHEMA whenever the SHIPPED
+// DEFAULT theme changes: on the next load a stored value from an older
+// generation is dropped exactly once, so sessions that were silently sitting
+// on the old default pick up the new one instead of being pinned forever.
+// Generation 2 = the mint/dark identity that matches the sign-in page.
+const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
+const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
@@ -126,16 +136,17 @@ function storedResultsOverlay(): boolean {
 
 function storedTheme(): Theme {
   try {
+    if (localStorage.getItem(THEME_SCHEMA_KEY) !== THEME_SCHEMA) {
+      localStorage.removeItem(THEME_KEY)
+      localStorage.setItem(THEME_SCHEMA_KEY, THEME_SCHEMA)
+    }
     const v = localStorage.getItem(THEME_KEY)
     if (v === 'light' || v === 'dark') return v
   } catch { /* noop */ }
-  // No persisted preference — respect the OS-level setting if available.
-  // `matchMedia` is undefined under SSR and on very old browsers; the
-  // optional chain falls through to `light` in that case.
-  try {
-    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
-  } catch { /* noop */ }
-  return 'light'
+  // Dark is the product identity — it is what the sign-in page hands off to,
+  // so the workbench opens in it regardless of the OS preference. The toggle
+  // (and its localStorage write) still lets anyone stay in light.
+  return 'dark'
 }
 
 function storedDensity(): Density {

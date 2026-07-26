@@ -1,10 +1,37 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-store" />
+    <meta name="theme-color" content="#07130f" />
     <title>PyPSA Studio</title>
+    <style>
+      /* Paint the themed surface before the bundle's CSS arrives, so the
+         handoff from the sign-in page never flashes white. */
+      html { background: #07130f; color-scheme: dark; }
+      html[data-theme="light"] { background: #fdfdfe; color-scheme: light; }
+    </style>
+    <script>
+      // Mirror uiStore's persisted theme onto <html> before first paint —
+      // React only writes data-theme once it mounts, which is several hundred
+      // ms of wrong-coloured screen. Kept in sync with storedTheme() in
+      // src/store/uiStore.ts; both migrations are idempotent, so whichever
+      // runs first wins.
+      ;(function pypsaBootTheme() {
+        try {
+          if (localStorage.getItem('network-diagram:theme-schema') !== '2') {
+            localStorage.removeItem('network-diagram:theme')
+            localStorage.setItem('network-diagram:theme-schema', '2')
+          }
+          if (localStorage.getItem('network-diagram:theme') === 'light') {
+            document.documentElement.dataset.theme = 'light'
+          }
+        } catch (err) {
+          /* keep the dark default already on the markup */
+        }
+      })()
+    </script>
     <script>
       window.__PYPSA_AUTH_BOOT__ = (async function pypsaAuthBoot() {
         try {

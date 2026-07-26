@@ -221,10 +221,11 @@ export function Btn({
     return (
       <button
         {...props}
-        className={`${base} font-semibold text-white hover:brightness-105 ${className ?? ''}`}
+        className={`${base} font-semibold hover:brightness-105 ${className ?? ''}`}
         style={{
+          color: 'var(--color-on-accent)',
           background: 'linear-gradient(180deg, var(--color-accent) 0%, var(--color-accent-700) 100%)',
-          boxShadow: '0 1px 0 rgba(184,0,14,0.3), 0 1px 2px rgba(230,0,18,0.2), inset 0 1px 0 rgba(255,255,255,0.18)',
+          boxShadow: '0 1px 0 rgba(0,0,0,0.18), 0 1px 2px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.18)',
           ...style,
         }}
       >
