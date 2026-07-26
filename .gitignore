@@ -109,3 +109,6 @@ doc/img/intro-workflow.svg
 /response.json
 /tmp_audit/
 .pytest_cache/
+
+# Local brainstorm / visual companion session files
+.superpowers/
