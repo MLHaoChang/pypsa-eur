@@ -190,6 +190,38 @@ def _safe_project_dir(name: str) -> pathlib.Path:
     return dest
 
 
+def _resolve_project_src(
+    name: str,
+    db: DBSession | None,
+    user: User | None,
+) -> tuple[pathlib.Path, str]:
+    """
+    Auth-aware resolution of a project's storage dir + canonical name.
+
+    In auth mode this uses the SAME resolution path as every other DB-backed
+    project route — ``require_user`` + ``resolve_project`` (which does the
+    org-scoped id/name lookup AND tree-aware ACL gating, raising 404 for both
+    "no such project" and "you can't see it") + the org-scoped
+    ``storage_path`` — so read-only project sub-resources (layout, statistics,
+    results bundle) can't become escape hatches that bypass the ACL via a flat
+    ``_safe_project_dir(name)``.
+
+    In legacy (auth-disabled) mode it degrades to the flat
+    ``PROJECTS_DIR / name`` exactly as before.
+
+    Returns ``(storage_dir, canonical_name)`` — the canonical name is the DB
+    row's name in auth mode (so a caller that addressed the project by UUID
+    still gets human-readable messages) or the passed ``name`` in legacy mode.
+    """
+    if _auth_enabled():
+        from services import project_registry
+
+        project_registry.require_user(user)
+        project = project_registry.resolve_project(db, user, name)
+        return project_registry.project_dir(project), project.name
+    return _safe_project_dir(name), name
+
+
 def _meta_path(project_dir: pathlib.Path) -> pathlib.Path:
     return project_dir / "metadata.json"
 
@@ -989,6 +1021,8 @@ def save_project(
         scenario_description_override=scenario_description_override,
         apply_overrides=apply_overrides,
         storage_dir=storage_dir,
+        db=db,
+        user=user,
     )
     # Saved state is the new baseline — explicit user-triggered saves discard
     # the undo stack so revert can't roll back across the checkpoint. Autosave
@@ -1012,6 +1046,8 @@ def _save_context(
     apply_overrides: bool = False,
     persist_user_ts: bool = True,
     storage_dir: pathlib.Path | None = None,
+    db: DBSession | None = None,
+    user: User | None = None,
 ):
     """
     Persist `ctx`'s in-memory network to ``projects/<name>/``.
@@ -1402,9 +1438,21 @@ def _save_context(
         # available in both projects, not a per-conversation thread). Same
         # best-effort guard — a copy failure must not abort the user's save.
         try:
-            _copy_bundle_dirs(
-                _safe_project_dir(loaded), _safe_project_dir(name),
-            )
+            # Destination is the already-resolved `dest` (the org-scoped
+            # storage dir in auth mode, or the flat PROJECTS_DIR/name in legacy
+            # mode). The SOURCE (`loaded`) must be resolved the same way — in
+            # auth mode via the DB registry so we copy from the source
+            # project's org-scoped storage_path rather than a flat
+            # `_safe_project_dir(loaded)` that would point at the wrong (or a
+            # nonexistent) directory.
+            src_dir = _safe_project_dir(loaded)
+            if _auth_enabled() and db is not None and user is not None:
+                from services import project_registry
+
+                src_project = project_registry.find_project(db, user, loaded)
+                if src_project is not None:
+                    src_dir = pathlib.Path(src_project.storage_path)
+            _copy_bundle_dirs(src_dir, dest)
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
 
@@ -2348,7 +2396,12 @@ _BUNDLE_FRAMES = (
 
 
 @router.get("/{name}/results_bundle")
-def get_results_bundle(name: str, source: str = "lopf"):
+def get_results_bundle(
+    name: str,
+    source: str = "lopf",
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
     """
     Read-only per-snapshot dispatch for a SAVED (non-active) project — the
     multi-project solve queue's "view a finished job's results without loading
@@ -2376,7 +2429,7 @@ def get_results_bundle(name: str, source: str = "lopf"):
     from services.serialization import ts_payload as _ts_payload
 
     src = source if source in ("lopf", "ac_pf") else "lopf"
-    project_dir = _safe_project_dir(name)
+    project_dir, name = _resolve_project_src(name, db, user)
     nc_path = project_dir / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
@@ -2454,7 +2507,11 @@ def get_results_bundle(name: str, source: str = "lopf"):
 
 
 @router.get("/{name}/layout")
-def get_layout(name: str) -> dict:
+def get_layout(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Read a project's blank-canvas layout — the "latent coordinates".
 
@@ -2467,7 +2524,7 @@ def get_layout(name: str) -> dict:
     the clustering algorithms consume. The backend treats the document as
     opaque — its internal shape is the frontend canvas's concern.
     """
-    src = _safe_project_dir(name)
+    src, name = _resolve_project_src(name, db, user)
     if not src.exists():
         raise HTTPException(404, f"Project '{name}' not found")
     layout_path = src / "layout.json"
@@ -2483,7 +2540,12 @@ def get_layout(name: str) -> dict:
 
 
 @router.put("/{name}/layout")
-def put_layout(name: str, layout: dict) -> dict:
+def put_layout(
+    name: str,
+    layout: dict,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Persist the blank-canvas layout for a project.
 
@@ -2492,7 +2554,7 @@ def put_layout(name: str, layout: dict) -> dict:
     directory and travels with the project bundle via ``_BUNDLE_FILES``.
     Capped at ``_MAX_LAYOUT_BYTES`` to bound a malformed/abusive payload.
     """
-    dest = _safe_project_dir(name)
+    dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
         raise HTTPException(404, f"Project '{name}' not found")
     # Compact (no indent): layout.json is a machine-written coordinate blob,
@@ -2629,8 +2691,12 @@ def put_project_members(
 
 
 @router.get("/{name}/statistics")
-def project_statistics(name: str):
-    src = _safe_project_dir(name)
+def project_statistics(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    src, name = _resolve_project_src(name, db, user)
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
