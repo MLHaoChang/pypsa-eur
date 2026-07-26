@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { LockState } from '../utils/lockState'
 
 interface SelectedComponent { type: string; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
@@ -252,6 +253,14 @@ interface UIStore {
   compareRailOpen: boolean
   compareRailWidth: number
   bottomTabRequest: string | null
+  // Multi-user edit lock (Task 14). `readOnly` is true when another user holds
+  // the active project's lock (or acquisition failed) — every destructive /
+  // mutating affordance is gated on it. `lockHolderEmail` names the current
+  // holder for the read-only banner. In-memory only (a session concept); auth
+  // is required for either to ever be non-default, so the legacy single-user
+  // workbench is always writable.
+  readOnly: boolean
+  lockHolderEmail: string | null
   currentProject: string | null
   // Resume target for auth / projects-home flows. Prefer a stable UUID when a
   // caller knows it, but keep the project name as a compatible fallback so
@@ -303,6 +312,8 @@ interface UIStore {
   setCompareRailWidth: (px: number) => void
   requestBottomTab: (tab: string) => void
   clearBottomTabRequest: () => void
+  // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
+  setLockState: (s: LockState) => void
   setCurrentProject: (name: string | null, preferredId?: string | null) => void
   setLastProjectId: (id: string | null) => void
   setAutosaveEnabled: (v: boolean) => void
@@ -346,6 +357,8 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
+  readOnly: false,
+  lockHolderEmail: null,
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(),
@@ -446,6 +459,7 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   requestBottomTab: (tab) => set({ bottomTabRequest: tab }),
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
+  setLockState: (s) => set({ readOnly: s.readOnly, lockHolderEmail: s.holderEmail }),
   setCurrentProject: (name, preferredId) => {
     try {
       if (name) {

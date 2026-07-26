@@ -4,6 +4,8 @@ import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { appLog, useSimulationStore } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
+import { authEnabled } from '../auth/config'
+import { lockStateFromAcquire, WRITABLE, type LockInfo, type LockAcquireOutcome } from './lockState'
 import { nk } from './queryKeys'
 
 // Query keys invalidated by any operation that swaps the underlying PyPSA
@@ -211,6 +213,109 @@ export type SwitchResult =
   | { status: 'not-found' }
   | { status: 'error'; message: string }
 
+// ── Multi-user edit lock (Task 14) ──────────────────────────────────────────
+//
+// In auth mode a project can be edited by ONE user at a time. On switch we
+// POST /lock to claim it; success → we hold the lock and start a heartbeat that
+// refreshes the server-side TTL; a 409 → someone else holds it, so we open the
+// project READ-ONLY (still activated for viewing) and surface the holder in the
+// banner. The heartbeat is a module-level singleton bound to one project id so
+// a rapid switch A→B can't leave two intervals racing.
+//
+// Backend TTL is 120 s; refresh well inside that so a slow tick / transient
+// blip doesn't drop the lock. In-memory only — a reload re-acquires via the
+// App mount effect + the switch flow.
+const LOCK_HEARTBEAT_MS = 45_000
+
+let _heartbeatTimer: ReturnType<typeof setInterval> | null = null
+let _heartbeatProject: string | null = null
+
+function _lockFromErrorDetail(e: unknown): LockInfo | null {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (detail && typeof detail === 'object' && 'lock' in detail) {
+    return ((detail as { lock?: LockInfo | null }).lock) ?? null
+  }
+  return null
+}
+
+function _applyLock(outcome: LockAcquireOutcome): void {
+  useUIStore.getState().setLockState(lockStateFromAcquire(outcome))
+}
+
+// Stop the heartbeat interval (idempotent). Called on release, on losing the
+// lock, and before starting a heartbeat for a different project.
+export function stopLockHeartbeat(): void {
+  if (_heartbeatTimer) {
+    clearInterval(_heartbeatTimer)
+    _heartbeatTimer = null
+  }
+  _heartbeatProject = null
+}
+
+function startLockHeartbeat(projectId: string): void {
+  stopLockHeartbeat()
+  _heartbeatProject = projectId
+  _heartbeatTimer = setInterval(() => {
+    // Defend against a stale timer that outlived a project switch.
+    if (_heartbeatProject !== projectId) return
+    projectsApi.heartbeatLock(projectId)
+      .then(res => _applyLock({ ok: true, lock: res.lock }))
+      .catch((e) => {
+        const status = (e as { response?: { status?: number } })?.response?.status
+        if (status === 409) {
+          // Lost the lock — it expired and another user grabbed it, or the
+          // server dropped it. Fall to read-only and stop pinging.
+          _applyLock({ ok: false, lock: _lockFromErrorDetail(e) })
+          stopLockHeartbeat()
+          appLog('WARN', `Lost the edit lock on '${projectId}' — the workbench is now read-only.`)
+        }
+        // Other errors (network blip during a backend reload) are transient;
+        // keep the lock optimistically and retry on the next tick.
+      })
+  }, LOCK_HEARTBEAT_MS)
+}
+
+// Acquire the edit lock for a project (auth mode only). On success the UI is
+// writable and a heartbeat starts; on a 409 (or any failure) the project stays
+// ACTIVATED for viewing but the workbench drops into read-only mode. Returns
+// the resulting `readOnly` flag. A no-op returning false when auth is disabled
+// — the legacy single-user workbench is always writable.
+export async function acquireProjectLock(projectId: string): Promise<boolean> {
+  if (!authEnabled) {
+    useUIStore.getState().setLockState(WRITABLE)
+    return false
+  }
+  try {
+    const res = await projectsApi.acquireLock(projectId)
+    _applyLock({ ok: true, lock: res.lock })
+    startLockHeartbeat(projectId)
+    return false
+  } catch (e) {
+    stopLockHeartbeat()
+    const lock = _lockFromErrorDetail(e)
+    // Both a 409 and an unexpected failure resolve to read-only: never let two
+    // users each believe they hold the edit lock.
+    _applyLock({ ok: false, lock })
+    const status = (e as { response?: { status?: number } })?.response?.status
+    if (status === 409) {
+      appLog('WARN', `'${projectId}' is being edited${lock?.holder_email ? ` by ${lock.holder_email}` : ' by another user'} — opened read-only.`)
+    } else {
+      appLog('WARN', `Could not acquire the edit lock on '${projectId}' — opened read-only.`)
+    }
+    return true
+  }
+}
+
+// Best-effort release of a project's lock (auth mode only) so a teammate can
+// pick it up immediately instead of waiting out the TTL. Never throws.
+export async function releaseProjectLock(projectId: string): Promise<void> {
+  if (!authEnabled) return
+  if (_heartbeatProject === projectId) stopLockHeartbeat()
+  try {
+    await projectsApi.releaseLock(projectId)
+  } catch { /* best effort — the TTL reclaims it anyway */ }
+}
+
 /**
  * B8 — INSTANT in-memory project switch (the C2 payoff).
  *
@@ -301,6 +406,20 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
 
   // 6. LRU signal for B9 eviction.
   useUIStore.getState().touchTab(activated)
+
+  // 7. Multi-user edit lock (auth mode). Release the OUTGOING project's lock so
+  //    a teammate can grab it now, then claim the target's. If another user
+  //    holds the target, acquireProjectLock flips the UI to read-only — the
+  //    switch itself still succeeds (the project is activated for viewing).
+  //    A no-op when auth is disabled (legacy workbench stays writable).
+  if (authEnabled) {
+    if (currentProject && currentProject !== activated) {
+      void releaseProjectLock(currentProject)
+    }
+    await acquireProjectLock(activated)
+  } else {
+    useUIStore.getState().setLockState(WRITABLE)
+  }
 
   return { status: 'switched' }
 }

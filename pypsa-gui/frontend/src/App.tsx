@@ -25,13 +25,15 @@ import SolveQueuePanel from './pages/SolveQueuePanel'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
+import LockBanner from './components/LockBanner'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import ChatPanel from './components/ChatPanel'
 import { useUIStore, type SlidePanel } from './store/uiStore'
+import { authEnabled } from './auth/config'
 import { networkApi } from './api/network'
 import { projectsApi } from './api/projects'
 import { simulationApi, createLogStream } from './api/simulation'
-import { invalidateNetworkQueries, switchToProject } from './utils/projectActions'
+import { acquireProjectLock, invalidateNetworkQueries, stopLockHeartbeat, switchToProject } from './utils/projectActions'
 import { nk } from './utils/queryKeys'
 import { appLog, useSimulationStore } from './store/simulationStore'
 
@@ -278,6 +280,21 @@ export default function App() {
     void switchToProject(resumeProject, qc).finally(stripProjectParam)
   }, [currentProject, qc])
 
+  // Edit-lock acquisition on mount (auth mode). Covers the plain-reload path
+  // where `currentProject` is restored from localStorage but NO switch/resume
+  // fires (so switchToProject's own acquire never runs). Idempotent with the
+  // switch flow — re-acquiring the same lock just refreshes our TTL, so it's
+  // safe that StrictMode double-invokes this in dev (mount → unmount stops the
+  // heartbeat → mount re-acquires and restarts it). The heartbeat is a
+  // module-level singleton; stop it when the workbench unmounts so navigating
+  // to /projects or /login doesn't keep pinging.
+  useEffect(() => {
+    if (!authEnabled) return
+    const proj = useUIStore.getState().currentProject
+    if (proj) void acquireProjectLock(proj)
+    return () => { stopLockHeartbeat() }
+  }, [])
+
   // Simulation reconnect: on mount, ask the backend whether a solve is in
   // flight. If yes, restore the in-memory store to `status='running'` and
   // open an SSE stream — the backend replays the ring-buffer of historical
@@ -523,6 +540,11 @@ export default function App() {
           (returns null) the rest of the time so it doesn't take vertical
           space. */}
       <CrashRecoveryBanner />
+
+      {/* ── Read-only lock banner ──────────────────────────────────── */}
+      {/* Renders only when another user holds this project's edit lock
+          (auth mode). Hidden otherwise so it takes no vertical space. */}
+      <LockBanner />
 
       {/* ── App header ─────────────────────────────────────────────── */}
       <AppHeader />

@@ -9,6 +9,8 @@ import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from
 import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore } from '../store/uiStore'
+import { authEnabled } from '../auth/config'
+import UserMenu from './UserMenu'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
 import toast from 'react-hot-toast'
 
@@ -88,6 +90,7 @@ export default function AppHeader() {
     currentProject, setCurrentProject, addTab, markProjectSaved,
     renameProject: renameProjectInStore,
     setPaletteMode,
+    readOnly,
   } = useUIStore()
   const queryClient = useQueryClient()
 
@@ -288,9 +291,9 @@ export default function AppHeader() {
   })
 
   const handleUndo = useCallback(() => {
-    if (undoDepth === 0 || undoMut.isPending) return
+    if (undoDepth === 0 || undoMut.isPending || readOnly) return
     undoMut.mutate()
-  }, [undoDepth, undoMut])
+  }, [undoDepth, undoMut, readOnly])
 
   // ── Save shortcut ──────────────────────────────────────────────────────────
   // Save = persist current network to the backend project folder AND download
@@ -404,6 +407,12 @@ export default function AppHeader() {
   })
 
   const handleQuickSave = useCallback(() => {
+    // Read-only guard — the keyboard shortcut (Ctrl+S) bypasses the disabled
+    // button, so block here too when another user holds the edit lock.
+    if (readOnly) {
+      toast.error('Read-only — another user is editing this project.')
+      return
+    }
     // No active project yet ⇒ prompt for a name and save under that. Avoids
     // dead-ending the user with a "create a project first" instruction —
     // they already have a network in memory and just want to save it.
@@ -422,7 +431,7 @@ export default function AppHeader() {
       }
     }
     saveMut.mutate(name)
-  }, [currentProject, projectName, saveMut])
+  }, [currentProject, projectName, saveMut, readOnly])
 
   // Global Ctrl+S / Cmd+S shortcut for save
   useEffect(() => {
@@ -648,6 +657,10 @@ export default function AppHeader() {
       return
     }
     // 3. IDLE / slot may be free → ENQUEUE the current project.
+    if (readOnly) {
+      toast.error('Read-only — another user is editing this project.')
+      return
+    }
     if (!currentProject) {
       toast.error('Save the project before running it.')
       return
@@ -798,8 +811,8 @@ export default function AppHeader() {
       {/* Undo */}
       <button
         onClick={handleUndo}
-        disabled={undoDepth === 0 || undoMut.isPending || busy}
-        title={undoDepth > 0 ? `Undo last action (Ctrl+Z) · ${undoDepth} step${undoDepth !== 1 ? 's' : ''} available` : 'Nothing to undo'}
+        disabled={undoDepth === 0 || undoMut.isPending || busy || readOnly}
+        title={readOnly ? 'Read-only — another user is editing this project' : undoDepth > 0 ? `Undo last action (Ctrl+Z) · ${undoDepth} step${undoDepth !== 1 ? 's' : ''} available` : 'Nothing to undo'}
         className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium border border-border text-text hover:bg-border/30 transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
       >
         {undoMut.isPending
@@ -818,8 +831,10 @@ export default function AppHeader() {
           Ctrl+S already takes. Only disable for in-flight save / running solve. */}
       <button
         onClick={handleQuickSave}
-        disabled={saveMut.isPending || busy}
-        title={currentProject
+        disabled={saveMut.isPending || busy || readOnly}
+        title={readOnly
+          ? 'Read-only — another user is editing this project'
+          : currentProject
           ? `Save '${currentProject}' (Ctrl+S) — overwrites the saved project & clears revert history`
           : 'Save (Ctrl+S) — you will be prompted to name the project'}
         className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium border border-border text-text hover:bg-border/30 transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
@@ -847,8 +862,10 @@ export default function AppHeader() {
         return (
           <button
             onClick={handleRunButton}
-            disabled={abort.isPending || enqueue.isPending}
-            title={jobRunning || isRunning
+            disabled={abort.isPending || enqueue.isPending || (readOnly && !amber)}
+            title={readOnly && !amber
+              ? 'Read-only — another user is editing this project'
+              : jobRunning || isRunning
               ? 'Abort the running simulation'
               : jobQueued
                 ? 'Cancel this queued solve'
@@ -902,6 +919,10 @@ export default function AppHeader() {
       >
         {rightPanelOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
       </button>
+
+      {/* User menu — identity + assign members / back to projects / sign out.
+          Auth mode only; the legacy single-user workbench has no account. */}
+      {authEnabled && <UserMenu />}
     </header>
   )
 }

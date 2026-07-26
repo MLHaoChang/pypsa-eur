@@ -32,6 +32,21 @@ export interface RestoreResult {
   snapshot_count: number
 }
 
+// Multi-user edit lock (Task 8/14). `holder_email` names the current holder;
+// `yours` is true when that holder is the requesting user. `null` (top-level
+// `lock` field) means no lock exists on the project.
+export interface ProjectLockInfo {
+  holder_email: string
+  yours: boolean
+}
+
+// One row of a project tree-root's membership set (Task 7/14). `email` can be
+// null if the user record was removed but the membership row lingers.
+export interface ProjectMember {
+  user_id: string
+  email: string | null
+}
+
 interface ListProjectsOptions {
   rootsOnly?: boolean
 }
@@ -199,4 +214,33 @@ export const projectsApi = {
     client.delete(
       `/projects/${encodeURIComponent(name)}/snapshots/${encodeURIComponent(snapshotId)}`,
     ),
+
+  // ── Multi-user edit lock (auth mode only; 404 otherwise) ──────────────────
+  // `id` may be a project UUID or name — the backend's resolver accepts either.
+  // Acquire/heartbeat use `skipErrorToast` because a 409 (someone else holds
+  // the lock, or ours expired) is EXPECTED and surfaced as the read-only
+  // banner, not as an error toast; the structured detail carries the current
+  // holder in `.detail.lock`.
+  acquireLock: (id: string) =>
+    client.post<{ lock: ProjectLockInfo | null }>(
+      `/projects/${encodeURIComponent(id)}/lock`, null, { skipErrorToast: true },
+    ).then(r => r.data),
+  heartbeatLock: (id: string) =>
+    client.post<{ lock: ProjectLockInfo | null }>(
+      `/projects/${encodeURIComponent(id)}/lock/heartbeat`, null, { skipErrorToast: true },
+    ).then(r => r.data),
+  releaseLock: (id: string) =>
+    client.delete<{ released: boolean }>(
+      `/projects/${encodeURIComponent(id)}/lock`, { skipErrorToast: true },
+    ).then(r => r.data),
+
+  // ── Membership (auth mode only; server resolves the id to the tree ROOT) ──
+  getMembers: (id: string) =>
+    client.get<ProjectMember[]>(
+      `/projects/${encodeURIComponent(id)}/members`,
+    ).then(r => r.data),
+  setMembers: (id: string, userIds: string[]) =>
+    client.put<ProjectMember[]>(
+      `/projects/${encodeURIComponent(id)}/members`, { user_ids: userIds },
+    ).then(r => r.data),
 }
