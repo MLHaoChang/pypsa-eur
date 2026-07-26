@@ -162,7 +162,7 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
       <div className="text-center">
         <p className="text-sm text-text font-semibold">Drop a project or network file here</p>
         <p className="text-xs text-muted mt-1">
-          Supported: .pypsaproj.zip (full project) · .nc · .xlsx · .zip (CSV) · .m (MATPOWER)
+          Recommended: .pypsaproj.zip (network + solve results + config). Also: .nc · .xlsx · .zip (CSV) · .m (network only)
         </p>
       </div>
       <label className="flex items-center gap-1.5 px-4 py-2 bg-panel border border-border rounded text-xs text-text hover:border-accent cursor-pointer transition-colors">

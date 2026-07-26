@@ -455,11 +455,11 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
             <>
               <ImportZone onSuccess={handleImportSuccess} />
               <p className="mt-3 text-[10px] text-muted text-center">
-                Supported: <span className="font-mono">.pypsaproj.zip</span> ·{' '}
-                <span className="font-mono">.nc</span> ·{' '}
+                Recommended: <span className="font-mono">.pypsaproj.zip</span> (network + results).
+                Also: <span className="font-mono">.nc</span> ·{' '}
                 <span className="font-mono">.xlsx</span> ·{' '}
                 <span className="font-mono">.zip</span> ·{' '}
-                <span className="font-mono">.m</span>
+                <span className="font-mono">.m</span> (network only)
               </p>
             </>
           )}
@@ -483,7 +483,7 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
               <p className="text-xs text-muted mb-3">Format:</p>
               <div className="space-y-2 mb-4">
                 {([
-                  { id: 'bundle',   label: 'Project bundle (.pypsaproj.zip)', desc: 'Network + time series + solver config — round-trips into PyPSA Studio' },
+                  { id: 'bundle',   label: 'Project bundle (.pypsaproj.zip)', desc: 'Network + solve results + time series + solver config + layout — full round-trip' },
                   { id: 'netcdf',   label: 'NetCDF (.nc)',   desc: 'Native PyPSA format — lossless' },
                   { id: 'excel',    label: 'Excel (.xlsx)',  desc: 'One sheet per component' },
                   { id: 'csv',      label: 'CSV zip (.zip)', desc: 'Folder of CSVs' },
@@ -603,6 +603,9 @@ function OpenProjectModal({
             <Upload size={12} />
             <span>Browse for a project file (.pypsaproj.zip)</span>
           </button>
+          <p className="mt-1.5 text-[10px] text-muted text-center">
+            Full project file: network + results + config. Opens as a project tab.
+          </p>
           <input
             ref={fileInputRef}
             type="file"
@@ -1135,10 +1138,12 @@ function ProjectSectionContent({
       // the in-memory network, so the prior auto-save above is essential.
       const res = await projectsApi.importBundle(file)
       invalidateNetworkQueries(qc, res.imported)
+      qc.invalidateQueries({ queryKey: nk(res.imported, 'results') })
+      qc.invalidateQueries({ queryKey: ['projects'] })
       setCurrentProject(res.imported)
       setProjectName(res.imported)
       appLog('INFO', `Opened project '${res.imported}' from disk (${file.name})`)
-      toast.success(`Opened '${res.imported}'`)
+      toast.success(`Opened '${res.imported}' (network + results when present)`)
     } catch (e) {
       appLog('ERROR', `Open from disk failed: ${String((e as Error)?.message ?? e)}`)
       toast.error('Could not open project from file')

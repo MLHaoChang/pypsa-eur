@@ -7,6 +7,7 @@ import {
 import toast from 'react-hot-toast'
 import type { ProjectInfo } from '../api/types'
 import { projectsApi } from '../api/projects'
+import { ioApi } from '../api/io'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, formatRelativeTime } from '../utils/projectActions'
@@ -18,7 +19,7 @@ import { appLog } from '../store/simulationStore'
 //
 //   • Blank       — name + create empty project (legacy behaviour)
 //   • Template    — pick a curated example network
-//   • From file   — drop a .nc / .pypsaproj.zip, wraps as a project
+//   • From file   — drop a .pypsaproj.zip (full project + results); .nc wraps as project
 //   • Clone       — fork an existing project under a new name
 //
 // Tabs share a single header + the same `onClose`. Submission paths vary per
@@ -297,22 +298,57 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
   )
 }
 
-// ── Tab 3: From file — import a .nc / .pypsaproj.zip ──────────────────────
+// ── Tab 3: From file — prefer .pypsaproj.zip (full project + results) ─────
+
+function _uniqueProjectName(base: string, existing: string[]): string {
+  const taken = new Set(existing.map(n => n.toLowerCase()))
+  let name = base.trim() || 'imported_project'
+  if (!taken.has(name.toLowerCase())) return name
+  let i = 2
+  while (taken.has(`${name}_${i}`.toLowerCase())) i += 1
+  return `${name}_${i}`
+}
 
 function FromFileTab({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
   const [dragOver, setDragOver] = useState(false)
+  const { data: existingProjects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: projectsApi.list,
+    staleTime: 10_000,
+  })
 
   const importMut = useMutation({
-    mutationFn: (file: File) => projectsApi.importBundle(file),
+    mutationFn: async (file: File) => {
+      const lower = file.name.toLowerCase()
+      // Full project bundle — network + results + config + layout.
+      if (lower.endsWith('.pypsaproj.zip') || lower.endsWith('.zip')) {
+        return projectsApi.importBundle(file)
+      }
+      // Raw PyPSA netcdf: load into memory, then Save as a new project.
+      // Network-only (no results_state.pkl / solver sidecars).
+      if (lower.endsWith('.nc')) {
+        const summary = await ioApi.importNetcdf(file)
+        const base = file.name.replace(/\.nc$/i, '').trim() || 'imported_project'
+        const names = (existingProjects as { name: string }[]).map(p => p.name)
+        const name = _uniqueProjectName(base, names)
+        await projectsApi.save(name, false, true, undefined, true)
+        return { imported: name, summary }
+      }
+      throw new Error(
+        'Unsupported file. Use a .pypsaproj.zip project bundle (network + results), or a .nc network file.',
+      )
+    },
     onSuccess: (res) => {
       invalidateNetworkQueries(qc, res.imported)
+      qc.invalidateQueries({ queryKey: nk(res.imported, 'results') })
+      qc.invalidateQueries({ queryKey: ['projects'] })
       setCurrentProject(res.imported)
       setProjectName(res.imported)
       appLog('INFO', `Imported '${res.imported}' via wizard (${res.summary.buses} buses)`)
-      toast.success(`Imported '${res.imported}'`)
+      toast.success(`Opened project '${res.imported}'`)
       onClose()
     },
     onError: (e: Error) => toast.error(`Import failed: ${e.message}`),
@@ -320,7 +356,6 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
 
   const onFile = (file: File) => {
     if (!file) return
-    // Accept .nc, .h5, .zip, .pypsaproj.zip — backend distinguishes.
     importMut.mutate(file)
   }
 
@@ -339,11 +374,11 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
         }}
       >
         <Upload size={28} className="text-muted" />
-        <span className="text-sm font-medium text-text">Drop a .nc or .pypsaproj.zip file here</span>
-        <span className="text-[11px] text-muted">or click to browse</span>
+        <span className="text-sm font-medium text-text">Drop a .pypsaproj.zip project file here</span>
+        <span className="text-[11px] text-muted">or click to browse · .nc also accepted (network only)</span>
         <input
           type="file"
-          accept=".nc,.zip,.pypsaproj.zip,.h5"
+          accept=".pypsaproj.zip,.zip,.nc"
           className="hidden"
           onChange={e => {
             const f = e.target.files?.[0]
@@ -357,8 +392,10 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
         </div>
       )}
       <p className="text-[11px] text-muted leading-relaxed mt-4">
-        <strong>.pypsaproj.zip</strong> — full project bundle (network + time series + solver config).
-        <strong> .nc</strong> — raw PyPSA network; will be wrapped as a project.
+        <strong>.pypsaproj.zip</strong> — recommended. Full project: network + solve results + solver config + layout.
+        Restores Results tabs when the file was saved after a solve.
+        <br />
+        <strong>.nc</strong> — PyPSA network only; wrapped as a new project (no GUI side-results).
       </p>
     </div>
   )
