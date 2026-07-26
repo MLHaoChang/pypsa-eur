@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import ProjectLock
@@ -54,7 +55,13 @@ def acquire_lock(
             expires_at=expires_at,
         )
         db.add(lock)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # A concurrent acquire inserted the lock first: treat as contention
+            # (caller maps None to HTTP 409) rather than surfacing a 500.
+            db.rollback()
+            return None
         db.refresh(lock)
         return lock
     if lock.holder_user_id != user_id:

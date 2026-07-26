@@ -256,6 +256,43 @@ def test_lock_endpoints_surface_holder_and_allow_release(session_local):
         }
 
 
+def test_acquire_lock_returns_none_on_insert_race(session_local, monkeypatch):
+    """A concurrent insert (IntegrityError) maps to contention (None), not a 500."""
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        # Simulate the lost-update race: another worker inserts the lock row
+        # after our prune returns None but before our own insert commits.
+        db.add(
+            ProjectLock(
+                project_id=project.id,
+                holder_user_id=user_a.id,
+                acquired_at=_now(),
+                expires_at=project_locks._expires_at(120),
+            )
+        )
+        db.commit()
+
+    monkeypatch.setattr(project_locks, "_prune_expired", lambda db, project_id: None)
+
+    with session_local() as db:
+        result = project_locks.acquire_lock(db, project.id, user_b.id)
+
+    assert result is None
+
+    with session_local() as db:
+        current = db.scalar(select(ProjectLock).where(ProjectLock.project_id == project.id))
+        assert current is not None
+        assert current.holder_user_id == user_a.id
+
+
 def test_logout_releases_all_project_locks(session_local):
     org = _create_org(session_local)
     user = _create_user(session_local, email="holder@example.com")
