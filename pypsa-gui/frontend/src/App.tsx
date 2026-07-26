@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Toaster } from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FailureInfo } from './api/types'
 import AppHeader from './layout/AppHeader'
@@ -32,7 +31,7 @@ import { useUIStore, type SlidePanel } from './store/uiStore'
 import { networkApi } from './api/network'
 import { projectsApi } from './api/projects'
 import { simulationApi, createLogStream } from './api/simulation'
-import { invalidateNetworkQueries } from './utils/projectActions'
+import { invalidateNetworkQueries, switchToProject } from './utils/projectActions'
 import { nk } from './utils/queryKeys'
 import { appLog, useSimulationStore } from './store/simulationStore'
 
@@ -185,6 +184,7 @@ export default function App() {
   const qc = useQueryClient()
   const [recoveryAttempted, setRecoveryAttempted] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const resumeProjectRef = useRef<string | null>(null)
 
   // Backend project list — used in two places: (1) prune recents of names that
   // no longer exist on disk (after a delete from another tab), (2) seed
@@ -244,6 +244,33 @@ export default function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Post-login resume: when auth routes bounce the user back to `/app` with a
+  // `?project=` query, activate that project once and strip the query param so
+  // refreshes don't keep replaying the handoff.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const resumeProject = params.get('project')
+    if (!resumeProject) return
+    if (resumeProjectRef.current === resumeProject) return
+    resumeProjectRef.current = resumeProject
+
+    const stripProjectParam = () => {
+      const nextParams = new URLSearchParams(window.location.search)
+      if (nextParams.get('project') !== resumeProject) return
+      nextParams.delete('project')
+      const query = nextParams.toString()
+      const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+      window.history.replaceState({}, '', nextUrl)
+    }
+
+    if (resumeProject === currentProject) {
+      stripProjectParam()
+      return
+    }
+
+    void switchToProject(resumeProject, qc).finally(stripProjectParam)
+  }, [currentProject, qc])
 
   // Simulation reconnect: on mount, ask the backend whether a solve is in
   // flight. If yes, restore the in-memory store to `status='running'` and
@@ -560,20 +587,6 @@ export default function App() {
       </div>
 
       <StatusBar />
-      <div data-no-panel-close>
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            style: {
-              fontSize: 13,
-              background: 'var(--color-panel)',
-              color: 'var(--color-text)',
-              border: '1px solid var(--color-border)',
-            },
-          }}
-        />
-      </div>
-
       <CommandPalette />
       <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
