@@ -638,6 +638,54 @@ function ChatEmptyState() {
   )
 }
 
+/** Starter prompts when a project is loaded but the conversation is empty. */
+const CHAT_STARTER_PROMPTS: { label: string; text: string }[] = [
+  {
+    label: 'Compare two scenarios',
+    text: 'Compare scenario_a vs scenario_b on total cost and open the compare rail',
+  },
+  {
+    label: 'Open Economics',
+    text: 'Open the Results Economics tab',
+  },
+  {
+    label: 'Summarize this solve',
+    text: 'Summarize the key results of the current project',
+  },
+]
+
+function ChatStarterChips({
+  onPick,
+  disabled,
+}: {
+  onPick: (text: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div
+      className="m-3 mt-4"
+      data-testid="chat-starter-chips"
+    >
+      <div className="text-[11px] text-muted mb-2">Try asking</div>
+      <div className="flex flex-wrap gap-1.5">
+        {CHAT_STARTER_PROMPTS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            disabled={disabled}
+            className="px-2.5 py-1 text-[11px] rounded border border-border bg-bg-2/60 text-text hover:bg-bg-3/50 hover:border-accent/40 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+            onClick={() => onPick(p.text)}
+            data-testid="chat-starter-chip"
+            title={p.text}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
   // Look up filename + kind from the live uploads slice. Missing files
   // (deleted since the turn) render as muted "Attachment no longer
@@ -1561,6 +1609,18 @@ export default function ChatPanel() {
             project is active AND there are no messages yet so a returning
             user with stale chat replay isn't double-primed. */}
         {!currentProject && messages.length === 0 && <ChatEmptyState />}
+        {/* Discoverability chips for compare / navigate / results once a
+            project is loaded but the thread is still empty. Click fills the
+            composer so the user can edit names before sending. */}
+        {currentProject && messages.length === 0 && (
+          <ChatStarterChips
+            disabled={streaming}
+            onPick={(text) => {
+              setInput(text)
+              requestAnimationFrame(() => textareaRef.current?.focus())
+            }}
+          />
+        )}
         {messages.map((m) => (
           <div
             key={m.id}
