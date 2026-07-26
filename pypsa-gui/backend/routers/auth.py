@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -21,6 +22,7 @@ from services.auth_service import (
 from settings import get_settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class LoginRequest(BaseModel):
@@ -109,8 +111,13 @@ def logout(
     raw_token = request.cookies.get(get_settings().session_cookie_name)
     if raw_token:
         revoke_session(db, raw_token)
-    # Task 8's lock service handles releasing project locks on logout; keep the
-    # auth endpoint focused on revoking the session and clearing the cookie.
+    try:
+        from services import project_locks
+
+        project_locks.release_all_for_user(db, _user.id)
+    except Exception:
+        db.rollback()
+        logger.warning("best-effort project lock release failed on logout", exc_info=True)
     _clear_session_cookie(response)
     return {"ok": True}
 

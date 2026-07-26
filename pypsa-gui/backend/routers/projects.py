@@ -595,6 +595,19 @@ def _project_info_db(db, project) -> ProjectInfo:
     return info
 
 
+def _serialize_project_lock(db: DBSession, project_id, user: User) -> dict[str, object] | None:
+    from services import project_locks
+
+    lock = project_locks.get_lock(db, project_id)
+    if lock is None:
+        return None
+    holder = db.get(User, lock.holder_user_id)
+    return {
+        "holder_email": holder.email if holder is not None else str(lock.holder_user_id),
+        "yours": lock.holder_user_id == user.id,
+    }
+
+
 @router.get("/")
 def list_projects(
     db: DBSession = Depends(get_db),
@@ -1586,12 +1599,14 @@ def activate_project(
     ``_solver_in_flight()`` (which keys on the active ctx), so switching away
     while the queue solves a DIFFERENT project is allowed — that is the payoff.
     """
+    lock_info = None
     if _auth_enabled():
         from services import project_registry
 
         project_registry.require_user(user)
         project = project_registry.resolve_project(db, user, project_id)
         src = project_registry.project_dir(project)
+        lock_info = _serialize_project_lock(db, project.id, user)
         # Reuse the project NAME as the process-global registry key / binding
         # (names are unique within an org; the singleton is process-global).
         project_id = project.name
@@ -1648,21 +1663,94 @@ def activate_project(
 
     # `evicted` lets the frontend drop the evicted projects' retained React Query
     # caches (the RAM the eviction reclaimed server-side has a UI mirror).
-    return {"activated": project_id, "evicted": evicted}
+    response = {"activated": project_id, "evicted": evicted}
+    if _auth_enabled():
+        response["lock"] = lock_info
+    return response
 
 
-@router.get("/{name}")
+@router.post("/{project_id}/lock")
+def acquire_project_lock(
+    project_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict[str, object]:
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    from services import project_locks, project_registry
+
+    user = project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, project_id)
+    lock = project_locks.acquire_lock(db, project.id, user.id)
+    if lock is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_locked",
+                "message": "Project is locked by another user.",
+                "lock": _serialize_project_lock(db, project.id, user),
+            },
+        )
+    return {"lock": _serialize_project_lock(db, project.id, user)}
+
+
+@router.post("/{project_id}/lock/heartbeat")
+def heartbeat_project_lock(
+    project_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict[str, object]:
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    from services import project_locks, project_registry
+
+    user = project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, project_id)
+    if not project_locks.heartbeat_lock(db, project.id, user.id):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_lock_not_held",
+                "message": "Project lock is not held by this user.",
+                "lock": _serialize_project_lock(db, project.id, user),
+            },
+        )
+    return {"lock": _serialize_project_lock(db, project.id, user)}
+
+
+@router.delete("/{project_id}/lock")
+def release_project_lock(
+    project_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict[str, bool]:
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    from services import project_locks, project_registry
+
+    user = project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, project_id)
+    project_locks.release_lock(db, project.id, user.id)
+    return {"released": True}
+
+
+@router.get("/{name}", response_model=None)
 def load_project(
     name: str,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
-) -> ImportSummary:
+) -> ImportSummary | dict[str, object]:
+    lock_info = None
     if _auth_enabled():
         from services import project_registry
 
         project_registry.require_user(user)
         project = project_registry.resolve_project(db, user, name)
         src = project_registry.project_dir(project)
+        lock_info = _serialize_project_lock(db, project.id, user)
         name = project.name
     else:
         src = _safe_project_dir(name)
@@ -1801,7 +1889,7 @@ def load_project(
         "load", "Project", name,
         f"Loaded project '{name}' ({len(n.buses)} buses, {len(n.generators)} generators, {len(n.snapshots)} snapshots)",
     )
-    return ImportSummary(
+    summary = ImportSummary(
         buses=len(n.buses),
         generators=len(n.generators),
         lines=len(n.lines),
@@ -1812,6 +1900,9 @@ def load_project(
         transformers=len(n.transformers),
         snapshots=len(n.snapshots),
     )
+    if _auth_enabled():
+        return {**summary.model_dump(), "lock": lock_info}
+    return summary
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
