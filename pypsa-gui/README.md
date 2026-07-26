@@ -308,13 +308,16 @@ even after code fixes). Do this:
 
 1. **Close** the preview panel completely (don’t just refresh).
 2. Open a **new** preview tab to exactly:
-   `http://localhost:5173/login.html`
-3. Sign in with the bootstrapped super-admin
+   `http://localhost:5173/`
+3. You must see a dark green badge: **“Auth gate · not the workbench”** and a
+   Sign in form. If you still see “Unnamed”, the preview is not talking to this
+   Vite server — close it and reopen port **5173** (not 8000).
+4. Sign in with the bootstrapped super-admin
    (`admin@example.com` / your bootstrap password).
-4. You should land on `/projects`.
+5. You should land on `/projects`.
 
-Unauthenticated visits to `/` now **HTTP 302** to `/login.html` (static page,
-no React). That bypasses a stuck SPA bundle.
+Unauthenticated visits to `/`, `/app`, and `/projects` are **rewritten** to the
+static login page (HTTP 200, no React). That bypasses a stuck SPA bundle.
 
 #### 2) Create the platform super-admin (CLI — no signup UI)
 
