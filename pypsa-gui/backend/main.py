@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from db import session as db_session_module
 from deps import resolve_request_user
 from routers import (
+    admin,
     auth,
     changelog,
     chat,
@@ -300,6 +301,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
     return response
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.
