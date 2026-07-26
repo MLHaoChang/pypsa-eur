@@ -268,55 +268,88 @@ To exercise invited-user flows, org/project tenancy, edit locks, and password
 emails locally, wire the backend to Postgres, point SMTP at Mailpit, and set
 `VITE_AUTH_ENABLED=true`.
 
-1. **Copy the backend env template**:
-   ```bash
-   cp pypsa-gui/backend/.env.example pypsa-gui/backend/.env
-   ```
-2. **Enable auth routes in the frontend**:
-   ```bash
-   printf 'VITE_AUTH_ENABLED=true\n' > pypsa-gui/frontend/.env.local
-   ```
-3. **Save this as `docker-compose.auth.yml` and use it for local Postgres +
-   Mailpit** (for local machines with Docker Compose; this cloud environment
-   does not provide Docker):
-   ```yaml
-   services:
-     postgres:
-       image: postgres:16
-       environment:
-         POSTGRES_DB: pypsa_gui
-         POSTGRES_USER: pypsa
-         POSTGRES_PASSWORD: pypsa
-       ports:
-         - "5432:5432"
-       volumes:
-         - pypsa-gui-postgres:/var/lib/postgresql/data
+#### 1) One-time stack setup
 
-     mailpit:
-       image: axllent/mailpit:latest
-       ports:
-         - "1025:1025"
-         - "8025:8025"
+```bash
+# Backend env (Postgres + SMTP + auth flag)
+cp pypsa-gui/backend/.env.example pypsa-gui/backend/.env
 
-   volumes:
-     pypsa-gui-postgres:
-   ```
-4. **Start that local stack**:
-   ```bash
-   docker compose -f docker-compose.auth.yml up -d
-   ```
+# Frontend auth routes
+printf 'VITE_AUTH_ENABLED=true\n' > pypsa-gui/frontend/.env.local
 
-Mailpit's inbox UI is at **http://localhost:8025**. The backend will deliver
-invite, set-password, and reset-password emails to SMTP on port 1025, and the
-links in those emails resolve against `PUBLIC_BASE_URL` (default
-`http://localhost:5173`).
+# Postgres + Mailpit (requires Docker on your machine)
+cd pypsa-gui
+docker compose -f docker-compose.auth.yml up -d
 
-5. **Run auth/tenancy smoke tests** (from the backend directory; uses in-memory
-   SQLite, no Postgres required):
-   ```bash
-   cd pypsa-gui/backend
-   pixi run python -m pytest -m auth_smoke
-   ```
+# Schema
+cd backend
+pixi run alembic -c alembic.ini upgrade head
+```
+
+Mailpit inbox UI: **http://localhost:8025**. Invite / set-password / reset emails
+go to SMTP `:1025`. Links use `PUBLIC_BASE_URL` (default `http://localhost:5173`).
+
+#### 2) Create the platform super-admin (CLI — no signup UI)
+
+There is **no self-registration**. The first account is created with:
+
+```bash
+cd pypsa-gui/backend
+pixi run python tools/bootstrap_super_admin.py \
+  --email admin@example.com \
+  --password 'your-secure-password'
+```
+
+This creates (or upgrades) an **active** `is_super_admin` user with that password.
+
+#### 3) Start the app
+
+```bash
+# Terminal 1 — backend
+cd pypsa-gui/backend
+pixi run python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+
+# Terminal 2 — frontend
+cd pypsa-gui/frontend
+npm run dev
+```
+
+Open **http://localhost:5173** → you should see the split-brand **Sign in** page
+(not the bare workbench).
+
+#### 4) Browser walkthrough (landing → org → invite → member)
+
+1. **Sign in** at `/login` as `admin@example.com`.
+2. Open **Admin** (`/admin`). As super-admin:
+   - **Organizations** → create e.g. `Acme Energy`.
+   - **Users** → create a user with email + role (`admin` or `member`) + that org.
+3. Open Mailpit (**http://localhost:8025**) → open the invite email → click the
+   **set-password** link (`/set-password?token=…`).
+4. Choose a password → you should land on **Projects home** (`/projects`).
+5. Sign out; sign in as the invited user → `/projects` again.
+6. Confirm a **member** cannot manage orgs (Admin is hidden / `/admin` forbidden).
+7. Optional: create a project, open workbench (`/app`), assign members, verify
+   edit lock (second browser = read-only).
+
+#### 5) Automated checks
+
+API journey (in-memory SQLite — no Docker required):
+
+```bash
+cd pypsa-gui/backend
+pixi run python -m pytest -m auth_smoke
+# Includes test_auth_journey_e2e.py: login → org → invite → set-password → member login
+```
+
+Live API helper against a running stack (prints the set-password URL for browser finish):
+
+```bash
+cd pypsa-gui/backend
+pixi run python tools/auth_e2e_smoke.py \
+  --base-url http://127.0.0.1:8000 \
+  --super-email admin@example.com \
+  --super-password 'your-secure-password'
+```
 
 #### Known limitation (v1): process-global active network
 
