@@ -83,7 +83,7 @@ emails>=0.6
 httpx>=0.27
 ```
 
-Also add the same packages to the appropriate pixi feature used by `gui-backend` / `gui-tests` in `pixi.toml` (follow existing fastapi pins style).
+Also add the same packages under `[dependencies]` in root `pixi.toml` (alongside existing `fastapi` / `uvicorn` pins used by `gui-backend`).
 
 - [ ] **Step 2: Create settings module**
 
