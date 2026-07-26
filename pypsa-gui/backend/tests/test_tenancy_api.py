@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 import importlib.util
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,16 +13,18 @@ from sqlalchemy.orm import sessionmaker
 
 import main
 from db import session as db_session_module
-from db.models import AuthToken, Organization, OrgMembership, User
+from db.models import AuthToken, Organization, OrgMembership, Project, User
 from services import email_service
 from services.auth_service import hash_password
 from settings import get_settings
 
 
 @pytest.fixture
-def auth_env(monkeypatch):
+def auth_env(tmp_path, monkeypatch):
     monkeypatch.setenv("PYPSA_GUI_AUTH_ENABLED", "true")
     monkeypatch.setenv("PUBLIC_BASE_URL", "http://localhost:5173")
+    monkeypatch.setenv("PROJECTS_ROOT", str(tmp_path / "tenant-projects"))
+    monkeypatch.setenv("LEGACY_ROOT", str(tmp_path / "legacy-unclaimed"))
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -182,6 +185,79 @@ def test_super_admin_creates_organization(super_admin_client, auth_session_local
         created_org = db.scalar(select(Organization).where(Organization.name == "New Org"))
 
     assert created_org is not None
+
+
+def test_admin_lists_and_claims_legacy_project_tree(
+    admin_client,
+    auth_session_local,
+) -> None:
+    legacy_root = get_settings().legacy_root
+    (legacy_root / "Root").mkdir(parents=True)
+    (legacy_root / "Child").mkdir(parents=True)
+    (legacy_root / "Root" / "metadata.json").write_text(
+        json.dumps({"name": "Root", "parent_project": None}),
+        encoding="utf-8",
+    )
+    (legacy_root / "Child" / "metadata.json").write_text(
+        json.dumps({"name": "Child", "parent_project": "Root"}),
+        encoding="utf-8",
+    )
+    (legacy_root / "Root" / "network.nc").write_text("root", encoding="utf-8")
+    (legacy_root / "Child" / "network.nc").write_text("child", encoding="utf-8")
+
+    listed = admin_client.get("/api/admin/legacy-projects")
+
+    assert listed.status_code == 200
+    assert {row["name"] for row in listed.json()} == {"Root", "Child"}
+
+    with auth_session_local() as db:
+        admin = db.scalar(select(User).where(User.is_super_admin.is_(False)))
+        assert admin is not None
+        membership = db.scalar(select(OrgMembership).where(OrgMembership.user_id == admin.id))
+        assert membership is not None
+
+    claimed = admin_client.post(
+        "/api/admin/legacy-projects/Root/claim",
+        json={
+            "owner_id": str(admin.id),
+            "member_ids": [],
+            "include_descendants": True,
+        },
+    )
+
+    assert claimed.status_code == 201, claimed.text
+    assert claimed.json()["root"]["name"] == "Root"
+    assert {row["name"] for row in claimed.json()["claimed"]} == {"Root", "Child"}
+
+    with auth_session_local() as db:
+        root_project = db.scalar(select(Project).where(Project.name == "Root"))
+        child_project = db.scalar(select(Project).where(Project.name == "Child"))
+        assert root_project is not None
+        assert child_project is not None
+        assert root_project.org_id == membership.org_id
+        assert child_project.parent_project_id == root_project.id
+
+
+def test_admin_email_status_and_test_email(admin_client, mail_outbox) -> None:
+    response = admin_client.get("/api/admin/email/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is True
+    assert body["smtp_host"] == "localhost"
+    assert body["smtp_port"] == 1025
+    assert body["smtp_from"] == "noreply@localhost"
+
+    test_response = admin_client.post(
+        "/api/admin/email/test",
+        json={"to": "deliver@example.com"},
+    )
+
+    assert test_response.status_code == 200
+    assert test_response.json() == {"ok": True, "to": "deliver@example.com"}
+    assert len(mail_outbox) == 1
+    assert mail_outbox[0]["to"] == "deliver@example.com"
+    assert mail_outbox[0]["subject"] == "PyPSA GUI email test"
 
 
 def test_bootstrap_super_admin_script_creates_active_super_admin(tmp_path, monkeypatch) -> None:

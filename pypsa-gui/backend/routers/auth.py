@@ -138,12 +138,15 @@ def forgot_password(
         reset_link = (
             f"{get_settings().public_base_url.rstrip('/')}/reset-password?token={raw_token}"
         )
-        email_service.send_email(
-            to=user.email,
-            subject="Reset your password",
-            body=f"Use this link to reset your password: {reset_link}",
-            metadata={"purpose": "reset_password"},
-        )
+        try:
+            email_service.send_email(
+                to=user.email,
+                subject="Reset your password",
+                body_text=f"Use this link to reset your password: {reset_link}",
+                metadata={"purpose": "reset_password"},
+            )
+        except email_service.EmailServiceError:
+            logger.warning("forgot-password email delivery failed", exc_info=True)
     return {"ok": True}
 
 
