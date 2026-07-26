@@ -150,6 +150,7 @@ def test_admin_creates_user_and_issues_token(admin_client, auth_session_local, m
     assert response.json()["email"] == "new@example.com"
     assert response.json()["role"] == "member"
     assert response.json()["status"] == "invited"
+    assert response.json()["email_sent"] is True
     assert len(mail_outbox) == 1
     assert mail_outbox[0]["to"] == "new@example.com"
     assert mail_outbox[0]["metadata"]["purpose"] == "set_password"
@@ -172,6 +173,45 @@ def test_admin_creates_user_and_issues_token(admin_client, auth_session_local, m
     assert membership.role == "member"
     assert token is not None
     assert token.used_at is None
+
+
+def test_admin_create_user_survives_email_failure(
+    admin_client, auth_session_local, mail_outbox
+) -> None:
+    """If SMTP send fails after the user is committed, the admin still gets 201
+    with a clear warning (email_sent=False) instead of a dead-end 503."""
+
+    def _failing_hook(_envelope):
+        raise email_service.EmailDeliveryError("SMTP delivery failed: connection refused")
+
+    email_service.set_delivery_hook_for_tests(_failing_hook)
+    try:
+        response = admin_client.post(
+            "/api/admin/users",
+            json={"email": "noemail@example.com", "role": "member"},
+        )
+    finally:
+        email_service.set_delivery_hook_for_tests(None)
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["email"] == "noemail@example.com"
+    assert body["status"] == "invited"
+    assert body["email_sent"] is False
+    assert "warning" in body and body["warning"]
+
+    # The user + set-password token must still be persisted so resend works.
+    with auth_session_local() as db:
+        created_user = db.scalar(select(User).where(User.email == "noemail@example.com"))
+        assert created_user is not None
+        token = db.scalar(
+            select(AuthToken).where(
+                AuthToken.user_id == created_user.id,
+                AuthToken.purpose == "set_password",
+            )
+        )
+        assert token is not None
+        assert token.used_at is None
 
 
 def test_member_lists_org_members(member_client, auth_session_local) -> None:

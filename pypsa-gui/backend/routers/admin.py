@@ -165,14 +165,24 @@ def create_user_endpoint(
 ) -> dict[str, str | bool | None]:
     try:
         user, raw_token = create_user(db, payload.email, payload.org_id, payload.role, actor)
-        _send_set_password_email(email=user.email, raw_token=raw_token)
     except (PermissionDenied, ConflictError, ValidationError) as exc:
         _raise_http_error(exc)
-    except email_service.EmailServiceError as exc:
-        _raise_email_http_error(exc)
 
+    # The user (and its set-password token) is already committed at this point.
+    # A failed/unconfigured email must not dead-end the admin with a 503: return
+    # 201 with a clear warning so the admin can use the resend endpoint.
     membership = get_user_membership(db, user.id)
-    return _serialize_user(user, membership)
+    response = _serialize_user(user, membership)
+    try:
+        _send_set_password_email(email=user.email, raw_token=raw_token)
+        response["email_sent"] = True
+    except email_service.EmailServiceError as exc:
+        response["email_sent"] = False
+        response["warning"] = (
+            f"User created, but the set-password email was not sent: {exc}. "
+            "Use the resend set-password action once email is configured."
+        )
+    return response
 
 
 @router.get("/users")
