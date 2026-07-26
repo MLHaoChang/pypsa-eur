@@ -101,8 +101,20 @@ export default function Results() {
   const toggleCompareRail = useUIStore(s => s.toggleCompareRail)
   const setCompareRailOpen  = useUIStore(s => s.setCompareRailOpen)
   const setCompareRailWidth = useUIStore(s => s.setCompareRailWidth)
+  const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
+  const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
   const splitWrapRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
+
+  // Chat / agent navigation — switch Results sub-tab on request.
+  useEffect(() => {
+    if (!resultsTabRequest) return
+    const allowed = new Set(TABS.map(x => x.id))
+    if (allowed.has(resultsTabRequest as ResultsTab)) {
+      setTab(resultsTabRequest as ResultsTab)
+    }
+    clearResultsTabRequest()
+  }, [resultsTabRequest, clearResultsTabRequest])
 
   // Vertical splitter — transpose of BottomPanel's row-resize. The handle sits
   // on the rail's LEFT edge, so dragging left grows the rail. Clamp against the

@@ -2514,18 +2514,53 @@ def _dispatch_real_tool_call(
                 tool_name, _redact_for_log(exc),
             )
 
+    # UI-control tools (and compare_scenarios with open_compare_rail) return a
+    # marker dict with `_ui_event: True`. Emit a dedicated SSE frame so the
+    # ChatPanel can drive uiStore / Results tabs / compare rail; strip the
+    # sentinel from the Anthropic-facing tool_result payload.
+    ui_event_payload: dict[str, Any] | None = None
+    result_for_model = result
+    if isinstance(result, dict) and result.get("_ui_event"):
+        ui_event_payload = {
+            k: v for k, v in result.items() if k != "_ui_event"
+        }
+        # Keep a compact acknowledgement for the model (full navigate args stay
+        # on the SSE ui_event frame for the frontend).
+        result_for_model = {
+            "ok": True,
+            "ui_navigated": True,
+            "kind": ui_event_payload.get("kind"),
+            "panel_id": ui_event_payload.get("panel_id"),
+            "results_tab": ui_event_payload.get("results_tab"),
+            "bottom_tab": ui_event_payload.get("bottom_tab"),
+            "compare_rail": ui_event_payload.get("compare_rail"),
+            "compare_a": ui_event_payload.get("compare_a"),
+            "compare_b": ui_event_payload.get("compare_b"),
+            "compare_tab": ui_event_payload.get("compare_tab"),
+            # Preserve compare_scenarios numeric payload when present.
+            **{
+                k: result[k]
+                for k in (
+                    "project_a", "project_b", "focus", "a", "b",
+                    "delta_b_minus_a", "focus_section", "note",
+                )
+                if k in result
+            },
+        }
+        yield "ui_event", ui_event_payload
+
     # Success — push into result_refs (small summary) and emit tool_result.
     session.push_result_ref({
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
-        "summary": _truncate_result(result),
+        "summary": _truncate_result(result_for_model),
     })
     yield "tool_result", {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
-        "result": _truncate_result(result),
+        "result": _truncate_result(result_for_model),
     }
-    content = _result_to_anthropic_content(result)
+    content = _result_to_anthropic_content(result_for_model)
     if result_char_budget is not None:
         content = _apply_turn_tool_result_budget(content, result_char_budget)
     tool_results_collector.append({

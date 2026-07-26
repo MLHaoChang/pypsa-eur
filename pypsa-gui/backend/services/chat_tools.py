@@ -1220,6 +1220,176 @@ def get_project_results_summary(name: str) -> dict:
     return _h(name)
 
 
+_COMPARE_FOCUS_TO_TAB = {
+    "overview": "overview",
+    "capacity": "capacity",
+    "dispatch": "dispatch",
+    "economics": "economics",
+    "emissions": "emissions",
+    "prices": "prices",
+    "curtailment": "curtailment",
+    "lost_load": "lost_load",
+    "storage_cycling": "storage_cycling",
+    "all": "overview",
+}
+
+_FOCUS_SUMMARY_KEYS = {
+    "capacity": "capacity",
+    "dispatch": "dispatch",
+    "economics": "economics",
+    "emissions": "emissions",
+    "prices": "prices",
+    "curtailment": "curtailment",
+    "lost_load": "lost_load",
+    "storage_cycling": "storage_cycling",
+}
+
+
+def _model_to_dict(value: Any) -> Any:
+    if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
+        try:
+            return value.model_dump()
+        except Exception:  # noqa: BLE001
+            return value
+    return value
+
+
+def _cpv_total(cpv: Any) -> float | None:
+    """CarrierPeriodValue → float total (dict or model)."""
+    if cpv is None:
+        return None
+    if isinstance(cpv, (int, float)):
+        return float(cpv)
+    if isinstance(cpv, dict):
+        t = cpv.get("total")
+        return float(t) if isinstance(t, (int, float)) else None
+    t = getattr(cpv, "total", None)
+    return float(t) if isinstance(t, (int, float)) else None
+
+
+def _sum_cpv_map(mapping: Any) -> float:
+    if not isinstance(mapping, dict):
+        return 0.0
+    total = 0.0
+    for v in mapping.values():
+        t = _cpv_total(v)
+        if t is not None:
+            total += t
+    return total
+
+
+def _scenario_headlines(summary: dict) -> dict:
+    cap = summary.get("capacity") or {}
+    disp = summary.get("dispatch") or {}
+    if not isinstance(cap, dict):
+        cap = _model_to_dict(cap) or {}
+    if not isinstance(disp, dict):
+        disp = _model_to_dict(disp) or {}
+    return {
+        "has_solve": bool(summary.get("has_solve")),
+        "is_multi_period": bool(summary.get("is_multi_period")),
+        "periods": list(summary.get("periods") or []),
+        "capacity_mw_total": _sum_cpv_map(cap.get("capacity_mw_by_carrier")),
+        "capex_meur_total": _sum_cpv_map(cap.get("capex_meur_by_carrier")),
+        "new_capex_meur_total": _sum_cpv_map(cap.get("new_capex_meur_by_carrier")),
+        "dispatch_gwh_total": _sum_cpv_map(disp.get("dispatch_gwh_by_carrier")),
+        "opex_meur": _cpv_total(disp.get("opex_meur")),
+        "total_load_gwh": _cpv_total(disp.get("total_load_gwh")),
+    }
+
+
+def _delta_numeric(a: Any, b: Any) -> float | None:
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return float(b) - float(a)
+    return None
+
+
+def compare_scenarios(
+    project_a: str,
+    project_b: str,
+    focus: str = "overview",
+    open_compare_rail: bool = False,
+) -> dict:
+    """
+    Side-by-side numeric comparison of two saved projects/scenarios.
+
+    Pulls both results-summary payloads without activating either project.
+    Optional ``open_compare_rail`` emits a navigate ui_event so the frontend
+    opens Results + the A|B compare rail on the matching tab.
+    """
+    focus_key = (focus or "overview").strip().lower()
+    if focus_key not in _COMPARE_FOCUS_TO_TAB:
+        focus_key = "overview"
+
+    raw_a = _model_to_dict(get_project_results_summary(project_a))
+    raw_b = _model_to_dict(get_project_results_summary(project_b))
+    if not isinstance(raw_a, dict):
+        raw_a = {}
+    if not isinstance(raw_b, dict):
+        raw_b = {}
+
+    head_a = _scenario_headlines(raw_a)
+    head_b = _scenario_headlines(raw_b)
+    deltas = {
+        k: _delta_numeric(head_a.get(k), head_b.get(k))
+        for k in (
+            "capacity_mw_total", "capex_meur_total", "new_capex_meur_total",
+            "dispatch_gwh_total", "opex_meur", "total_load_gwh",
+        )
+    }
+
+    focus_payload: dict[str, Any] | None = None
+    section_key = _FOCUS_SUMMARY_KEYS.get(focus_key)
+    if section_key:
+        focus_payload = {
+            "a": _model_to_dict(raw_a.get(section_key)),
+            "b": _model_to_dict(raw_b.get(section_key)),
+        }
+    elif focus_key == "all":
+        focus_payload = {
+            k: {
+                "a": _model_to_dict(raw_a.get(k)),
+                "b": _model_to_dict(raw_b.get(k)),
+            }
+            for k in _FOCUS_SUMMARY_KEYS.values()
+        }
+
+    out: dict[str, Any] = {
+        "project_a": project_a,
+        "project_b": project_b,
+        "focus": focus_key,
+        "a": head_a,
+        "b": head_b,
+        "delta_b_minus_a": deltas,
+        "focus_section": focus_payload,
+        "note": (
+            "Figures are from each project's last saved results-summary "
+            "(not unsaved in-memory edits). delta = B − A."
+        ),
+    }
+    if open_compare_rail:
+        out["_ui_event"] = True
+        out["kind"] = "navigate"
+        out["panel_id"] = "Results"
+        out["compare_rail"] = True
+        out["compare_a"] = project_a
+        out["compare_b"] = project_b
+        out["compare_tab"] = _COMPARE_FOCUS_TO_TAB[focus_key]
+        out["results_tab"] = {
+            "overview": "overview",
+            "capacity": "capex",
+            "dispatch": "dispatch",
+            "economics": "economics",
+            "emissions": "emissions",
+            "prices": "prices",
+            "curtailment": "curtailment",
+            "lost_load": "lostload",
+            "storage_cycling": "storage",
+            "all": "overview",
+        }.get(focus_key, "overview")
+    return out
+
+
 # ── Project snapshots (4) — checkpoint backups, NOT time snapshots ──────────
 
 
@@ -1385,8 +1555,38 @@ def ui_select_component(component_class: str, name: str) -> dict:
             "component_class": component_class, "name": name}
 
 
-def ui_open_panel(panel_id: str) -> dict:
-    return {"_ui_event": True, "kind": "open_panel", "panel_id": panel_id}
+def ui_open_panel(
+    panel_id: str,
+    results_tab: str | None = None,
+    bottom_tab: str | None = None,
+    compare_rail: bool | None = None,
+    compare_a: str | None = None,
+    compare_b: str | None = None,
+    compare_tab: str | None = None,
+) -> dict:
+    """
+    Navigate the GUI. Emits a ``ui_event`` SSE frame (kind=navigate) that
+    ChatPanel applies to uiStore — slide panels, Results sub-tabs, bottom
+    asset tabs, and the A|B compare rail.
+    """
+    event: dict[str, Any] = {
+        "_ui_event": True,
+        "kind": "navigate",
+        "panel_id": panel_id,
+    }
+    if results_tab:
+        event["results_tab"] = results_tab
+    if bottom_tab:
+        event["bottom_tab"] = bottom_tab
+    if compare_rail is not None:
+        event["compare_rail"] = bool(compare_rail)
+    if compare_a:
+        event["compare_a"] = compare_a
+    if compare_b:
+        event["compare_b"] = compare_b
+    if compare_tab:
+        event["compare_tab"] = compare_tab
+    return event
 
 
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
@@ -2393,6 +2593,7 @@ DISPATCHERS: dict[str, Any] = {
     "create_project_from_template": create_project_from_template,
     "get_project_compare_state": get_project_compare_state,
     "get_project_results_summary": get_project_results_summary,
+    "compare_scenarios": compare_scenarios,
     # project_snapshots (4)
     "create_project_snapshot": create_project_snapshot,
     "list_project_snapshots": list_project_snapshots,

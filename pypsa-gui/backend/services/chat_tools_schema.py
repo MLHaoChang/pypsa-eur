@@ -47,11 +47,43 @@ COMPONENT_CLASS_ENUM = [
 CRUD_CLASS_ENUM = COMPONENT_CLASS_ENUM[:]
 PROFILE_KIND_ENUM = ["loads", "generators", "links"]
 TIMESERIES_KIND_ENUM = ["loads", "generators", "links"]
+# Friendly + SlidePanel ids accepted by ui_open_panel (frontend normalises).
 SAFETY_PANEL_ENUM = [
-    "Results", "Topology", "MapCanvas", "BottomPanel", "PropertiesPanel",
-    "TimeSeriesManager", "VintagePeriodBoundsModal", "OverviewPanel",
-    "GenerationStack", "LoadProfileManager", "ImportExport", "SolverSettings",
-    "Compare", "IssuesPanel", "CommandPalette", "Chat",
+    "Results", "results",
+    "Topology", "topology",
+    "MapCanvas", "map",
+    "BottomPanel",
+    "PropertiesPanel", "properties",
+    "TimeSeriesManager", "timeseries", "LoadProfileManager",
+    "VintagePeriodBoundsModal", "capacityBounds",
+    "OverviewPanel", "overview",
+    "GenerationStack",
+    "ImportExport", "import_export",
+    "SolverSettings", "simparams",
+    "Compare", "compare",
+    "IssuesPanel", "issues",
+    "CommandPalette", "palette",
+    "Chat", "chat",
+    "Scenarios", "scenarios",
+    "Snapshots", "snapshots",
+    "Horizon", "horizon",
+    "SolveQueue", "solveQueue",
+]
+RESULTS_TAB_ENUM = [
+    "overview", "capex", "dispatch", "loadflow", "prices", "economics",
+    "emissions", "curtailment", "lostload", "storage",
+]
+BOTTOM_TAB_ENUM = [
+    "Log", "History", "Buses", "Lines", "Transformers", "Generators",
+    "Storage", "Stores", "Loads", "Links", "Carriers",
+]
+COMPARE_FOCUS_ENUM = [
+    "overview", "capacity", "dispatch", "economics", "emissions", "prices",
+    "curtailment", "lost_load", "storage_cycling", "all",
+]
+COMPARE_TAB_ENUM = [
+    "overview", "capacity", "dispatch", "loading", "prices", "emissions",
+    "economics", "curtailment", "lost_load", "storage_cycling",
 ]
 RESULTS_ENUM = [
     "cost_breakdown", "objective_decomposition", "economics_by_carrier",
@@ -998,9 +1030,36 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "ui_open_panel",
-        "Route a SlidePanel open command to the frontend. Safety: read.",
-        {"panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM}},
+        "Navigate the GUI via SSE ui_event (kind=navigate). Opens a main "
+        "panel (Results / SolverSettings / TimeSeriesManager / Scenarios / "
+        "Issues / Chat / …), optionally a Results sub-tab (capex, dispatch, "
+        "economics, …), a bottom asset table tab (Buses, Generators, …), "
+        "and/or the A|B compare rail with scenario picks. Safety: read.",
+        {
+            "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
+            "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},
+            "bottom_tab": {"type": "string", "enum": BOTTOM_TAB_ENUM},
+            "compare_rail": {"type": "boolean"},
+            "compare_a": {"type": "string"},
+            "compare_b": {"type": "string"},
+            "compare_tab": {"type": "string", "enum": COMPARE_TAB_ENUM},
+        },
         ["panel_id"],
+    ),
+    _t(
+        "compare_scenarios",
+        "Side-by-side comparison of two saved projects/scenarios. Returns "
+        "headline KPIs for A and B plus delta_b_minus_a (B − A), and the "
+        "optional focus_section payload from each project's results-summary. "
+        "Does NOT activate either project. Set open_compare_rail=true to also "
+        "open the Results compare rail on the matching tab. Safety: read.",
+        {
+            "project_a": {"type": "string"},
+            "project_b": {"type": "string"},
+            "focus": {"type": "string", "enum": COMPARE_FOCUS_ENUM},
+            "open_compare_rail": {"type": "boolean"},
+        },
+        ["project_a", "project_b"],
     ),
     _t(
         "ui_set_snapshot",
@@ -1382,6 +1441,7 @@ TOOL_ROUTES: dict[str, list] = {
     "create_project_from_template": [("POST", "/api/projects/from_template/{template_id}")],
     "get_project_compare_state": [("GET", "/api/projects/{name}/compare-state")],
     "get_project_results_summary": [("GET", "/api/projects/{name}/results-summary")],
+    "compare_scenarios": _DERIVED,  # dual results-summary + optional ui_event
     # project_snapshots (4)
     "create_project_snapshot": [("POST", "/api/projects/{name}/snapshots")],
     "list_project_snapshots": [("GET", "/api/projects/{name}/snapshots")],

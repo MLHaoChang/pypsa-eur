@@ -1665,6 +1665,7 @@ export default function Sidebar() {
     sidebarMode, setSidebarMode, toggleSidebar, canvasMode, setCanvasMode,
     activeSlidePanel, projectName, requestBottomTab,
     setCurrentProject, setProjectName, currentProject, addTab,
+    ioModalRequest, clearIoModalRequest,
   } = useUIStore()
   const [sections, setSections] = useState({ project: true, data: true, simulation: true })
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
@@ -1674,6 +1675,14 @@ export default function Sidebar() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const qc = useQueryClient()
+
+  // Chat / agent: open Import/Export modal on request.
+  useEffect(() => {
+    if (!ioModalRequest) return
+    setIoTab(ioModalRequest)
+    setIoOpen(true)
+    clearIoModalRequest()
+  }, [ioModalRequest, clearIoModalRequest])
 
   const { data: allProjects = [] } = useQuery({
     queryKey: ['projects'],

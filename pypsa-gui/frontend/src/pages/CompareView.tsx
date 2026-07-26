@@ -106,6 +106,18 @@ export default function CompareView({ embedded = false, onClose, initialTab }: C
   const setB = (v: string) => { setBState(v); persistCmp(CMP_B_KEY, v) }
   const setTab = (t: Tab) => { setTabState(t); persistCmp(CMP_TAB_KEY, t) }
 
+  const compareNavRequest = useUIStore(s => s.compareNavRequest)
+  const clearCompareNavRequest = useUIStore(s => s.clearCompareNavRequest)
+  useEffect(() => {
+    if (!compareNavRequest) return
+    if (compareNavRequest.a) setA(compareNavRequest.a)
+    if (compareNavRequest.b) setB(compareNavRequest.b)
+    if (compareNavRequest.tab && VALID_COMPARE_TABS.has(compareNavRequest.tab as Tab)) {
+      setTab(compareNavRequest.tab as Tab)
+    }
+    clearCompareNavRequest()
+  }, [compareNavRequest, clearCompareNavRequest])
+
   // Reset selection if a project is deleted under us.
   useEffect(() => {
     const list = projects as ProjectInfo[]

@@ -53,6 +53,100 @@ function _frame_data<T = Record<string, unknown>>(f: ChatFrame): T {
   return f.data as T
 }
 
+/** Map chat tool panel_id → SlidePanel / special navigation targets. */
+function _normalizePanelId(raw: string): string {
+  const key = raw.trim()
+  const aliases: Record<string, string> = {
+    Results: 'results', results: 'results',
+    SolverSettings: 'simparams', simparams: 'simparams',
+    TimeSeriesManager: 'timeseries', LoadProfileManager: 'timeseries', timeseries: 'timeseries',
+    VintagePeriodBoundsModal: 'capacityBounds', capacityBounds: 'capacityBounds',
+    OverviewPanel: 'overview', overview: 'overview',
+    IssuesPanel: 'issues', issues: 'issues',
+    Scenarios: 'scenarios', scenarios: 'scenarios',
+    Snapshots: 'snapshots', snapshots: 'snapshots',
+    Horizon: 'horizon', horizon: 'horizon',
+    SolveQueue: 'solveQueue', solveQueue: 'solveQueue',
+    Chat: 'chat', chat: 'chat',
+    Compare: 'compare', compare: 'compare',
+    Topology: 'topology', topology: 'topology',
+    MapCanvas: 'map', map: 'map',
+    PropertiesPanel: 'properties', properties: 'properties',
+    BottomPanel: 'bottom',
+    CommandPalette: 'palette', palette: 'palette',
+    ImportExport: 'import_export', import_export: 'import_export',
+    GenerationStack: 'results',
+  }
+  return aliases[key] ?? key
+}
+
+function applyUiNavigate(d: {
+  kind?: string
+  panel_id?: string
+  results_tab?: string
+  bottom_tab?: string
+  compare_rail?: boolean
+  compare_a?: string
+  compare_b?: string
+  compare_tab?: string
+  component_class?: string
+  name?: string
+  snapshot_iso?: string
+  period?: number | null
+}) {
+  const ui = useUIStore.getState()
+  if (d.kind === 'select_component' && d.component_class && d.name) {
+    ui.setSelectedComponent({ type: d.component_class, name: d.name })
+    ui.openRightPanel()
+    return
+  }
+  if (d.kind === 'set_snapshot' && d.snapshot_iso) {
+    // Snapshot picker is driven by ISO + optional period; store the index
+    // is unknown here — open Results so the user sees the picker context.
+    ui.setSlidePanel('results')
+    return
+  }
+  // kind === 'navigate' | legacy 'open_panel'
+  const panel = d.panel_id ? _normalizePanelId(d.panel_id) : null
+  if (panel === 'topology') {
+    ui.setSlidePanel(null)
+    ui.setCanvasView('blank')
+  } else if (panel === 'map') {
+    ui.setSlidePanel(null)
+    ui.setCanvasView('satellite')
+  } else if (panel === 'properties') {
+    ui.openRightPanel()
+  } else if (panel === 'palette') {
+    ui.setPaletteMode('all')
+  } else if (panel === 'import_export') {
+    ui.requestIoModal('import')
+  } else if (panel === 'bottom') {
+    // Expand bottom panel on a default tab if none specified below.
+    if (!d.bottom_tab) ui.requestBottomTab('Buses')
+  } else if (panel === 'compare') {
+    ui.setSlidePanel('results')
+    ui.setCompareRailOpen(true)
+  } else if (
+    panel === 'results' || panel === 'simparams' || panel === 'timeseries'
+    || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
+    || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
+    || panel === 'solveQueue' || panel === 'chat'
+  ) {
+    ui.setSlidePanel(panel)
+  }
+
+  if (d.results_tab) ui.requestResultsTab(d.results_tab)
+  if (d.bottom_tab) ui.requestBottomTab(d.bottom_tab)
+  if (typeof d.compare_rail === 'boolean') ui.setCompareRailOpen(d.compare_rail)
+  if (d.compare_a || d.compare_b || d.compare_tab) {
+    ui.requestCompareNav({
+      a: d.compare_a,
+      b: d.compare_b,
+      tab: d.compare_tab,
+    })
+  }
+}
+
 interface SessionInitFrame {
   session_id: string
   model?: string
@@ -1166,6 +1260,28 @@ export default function ChatPanel() {
               : `✗ ${d.tool_name ?? '?'} — ${d.error_kind}`,
             tool_use_id: d.tool_use_id, tool_name: d.tool_name,
           })
+        }
+        break
+      }
+      case 'ui_event': {
+        const d = _frame_data<{
+          kind?: string
+          panel_id?: string
+          results_tab?: string
+          bottom_tab?: string
+          compare_rail?: boolean
+          compare_a?: string
+          compare_b?: string
+          compare_tab?: string
+          component_class?: string
+          name?: string
+          snapshot_iso?: string
+          period?: number | null
+        }>(frame)
+        try {
+          applyUiNavigate(d)
+        } catch (e) {
+          console.warn('ui_event apply failed', e)
         }
         break
       }

@@ -247,6 +247,12 @@ interface UIStore {
   compareRailOpen: boolean
   compareRailWidth: number
   bottomTabRequest: string | null
+  // Chat / agent navigation: Results sub-tab id (capex, dispatch, …).
+  resultsTabRequest: string | null
+  // Chat / agent: seed CompareView A/B + tab (consumed then cleared).
+  compareNavRequest: { a?: string; b?: string; tab?: string } | null
+  // Chat / agent: open Import/Export modal ('import' | 'export').
+  ioModalRequest: 'import' | 'export' | null
   currentProject: string | null
   autosaveEnabled: boolean
   openTabs: OpenTab[]
@@ -294,6 +300,12 @@ interface UIStore {
   setCompareRailWidth: (px: number) => void
   requestBottomTab: (tab: string) => void
   clearBottomTabRequest: () => void
+  requestResultsTab: (tab: string) => void
+  clearResultsTabRequest: () => void
+  requestCompareNav: (nav: { a?: string; b?: string; tab?: string }) => void
+  clearCompareNavRequest: () => void
+  requestIoModal: (tab: 'import' | 'export') => void
+  clearIoModalRequest: () => void
   setCurrentProject: (name: string | null) => void
   setAutosaveEnabled: (v: boolean) => void
   addTab: (name: string) => void
@@ -336,6 +348,9 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
+  resultsTabRequest: null,
+  compareNavRequest: null,
+  ioModalRequest: null,
   currentProject: storedCurrentProject(),
   autosaveEnabled: storedAutosave(),
   openTabs: (() => {
@@ -435,6 +450,12 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   requestBottomTab: (tab) => set({ bottomTabRequest: tab }),
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
+  requestResultsTab: (tab) => set({ resultsTabRequest: tab }),
+  clearResultsTabRequest: () => set({ resultsTabRequest: null }),
+  requestCompareNav: (nav) => set({ compareNavRequest: nav }),
+  clearCompareNavRequest: () => set({ compareNavRequest: null }),
+  requestIoModal: (tab) => set({ ioModalRequest: tab }),
+  clearIoModalRequest: () => set({ ioModalRequest: null }),
   setCurrentProject: (name) => {
     try {
       if (name) localStorage.setItem(CURRENT_PROJECT_KEY, name)

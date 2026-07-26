@@ -532,10 +532,11 @@ def test_ui_select_component_returns_event_marker():
 
 
 def test_ui_open_panel_returns_event_marker():
-    event = chat_tools.ui_open_panel(panel_id="Results")
+    event = chat_tools.ui_open_panel(panel_id="Results", results_tab="economics")
     assert event["_ui_event"] is True
-    assert event["kind"] == "open_panel"
+    assert event["kind"] == "navigate"
     assert event["panel_id"] == "Results"
+    assert event["results_tab"] == "economics"
 
 
 def test_ui_set_snapshot_returns_event_marker():
