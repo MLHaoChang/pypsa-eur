@@ -1,5 +1,6 @@
-import { Play, Zap, Search, Loader, PanelRightClose, PanelRightOpen, Undo2, Save, Check, Command } from 'lucide-react'
+import { Play, Zap, Search, Loader, PanelRightClose, PanelRightOpen, Undo2, Save, Check, Command, LayoutGrid } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { useSimulationStore, appLog } from '../store/simulationStore'
 import { networkApi } from '../api/network'
 import { simulationApi, createLogStream } from '../api/simulation'
@@ -94,6 +95,7 @@ export default function AppHeader() {
     readOnly,
   } = useUIStore()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   // Platform-correct modifier label for the command-palette hint chip.
   // App.tsx binds both Ctrl+K and Cmd+K; we just display the right one.
@@ -722,6 +724,20 @@ export default function AppHeader() {
 
   return (
     <header data-no-panel-close className="h-11 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">
+
+      {/* Breadcrumb back to the workspace. The workbench used to be a dead end
+          — the only route out was the browser Back button — which is why
+          create / import / duplicate had to be duplicated into the sidebar.
+          Those live on the projects home now, so the way back is chrome. */}
+      <button
+        onClick={() => navigate('/projects')}
+        title="Projects home — every project you can access"
+        className="flex items-center gap-1.5 shrink-0 px-1.5 py-1 -ml-1 rounded text-[11px] font-medium text-muted hover:text-accent hover:bg-accent/8 transition-colors"
+      >
+        <LayoutGrid size={13} />
+        <span className="hidden sm:inline">Projects</span>
+      </button>
+      <span aria-hidden="true" className="text-border-3 shrink-0 text-[11px]">/</span>
 
       {/* Project name — click to edit inline */}
       <div className="flex items-center gap-1.5 shrink-0">

@@ -32,9 +32,14 @@ export interface NewProjectWizardProps {
   onConfirm: (name: string) => void  // legacy "create blank" handler
   onClose: () => void
   isPending: boolean
+  // Which tab to land on. The projects home surfaces the four tabs as four
+  // separate action cards, so it needs to open the wizard already on the one
+  // the user clicked; the workbench omits it and gets 'blank'.
+  initialTab?: NewProjectTab
 }
 
-type Tab = 'blank' | 'template' | 'file' | 'clone'
+export type NewProjectTab = 'blank' | 'template' | 'file' | 'clone'
+type Tab = NewProjectTab
 
 // Curated example networks. `available: true` templates are backed by a real
 // network.nc under backend/project_templates/<id> and import via
@@ -48,9 +53,9 @@ const TEMPLATES = [
 ] as const
 
 export default function NewProjectWizard({
-  existingProjects, onConfirm, onClose, isPending,
+  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank',
 }: NewProjectWizardProps) {
-  const [tab, setTab] = useState<Tab>('blank')
+  const [tab, setTab] = useState<Tab>(initialTab)
 
   return (
     <div

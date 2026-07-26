@@ -2,14 +2,19 @@
 
 /* ══════════════════════════════════════════════════════════════════════════
    Design tokens — "PyPSA Studio" design system.
-   Mint/teal accent shared with the sign-in landing page, engineering-clean
+   Red accent shared with the sign-in landing page, engineering-clean
    (Linear / Vercel / Figma lineage), mono numerics.
 
-   Dark is the shipped default and carries the product identity: a green-tinted
-   near-black surface ramp with a #35d39a mint accent, mirroring index.html.
+   Dark is the shipped default and carries the product identity: a near-black
+   surface ramp warmed toward red, with a #ff5252 accent, mirroring index.html.
    Light is the @theme default block (so it stays the Tailwind fallback) and
-   keeps its warm-white identity, with the accent pulled down to a deeper
-   emerald that stays legible as text on white.
+   keeps its near-white identity, with the accent pulled down to a deeper
+   crimson that stays legible as text on white.
+
+   `public/brand.css` is the source of truth for the identity colours — it is
+   what the static (non-Tailwind) sign-in document consumes. Tailwind's @theme
+   needs literal values at build time, so the shared numbers are repeated here;
+   `frontend/brand.theme.test.ts` fails if the two drift.
 
    Tailwind v4 emits every --color-* both as a utility class (bg-bg-2,
    text-ink-700, border-border-2, …) AND as a real CSS custom property, so
@@ -46,18 +51,23 @@
   --color-axis: #97a0ae;
   --color-legend: #475061;
 
-  /* Emerald accent — same family as the dark theme's mint, darkened so
-     `text-accent` on a white surface still clears WCAG AA (≈5.3:1). Bright
-     mint (#35d39a) is reserved for the dark theme, where it has the contrast. */
-  --color-accent: #0b7a53;
-  --color-accent-700: #075c3e;
-  --color-accent-100: #c6ecdb;
-  --color-accent-50: #edfaf4;
+  /* Crimson accent — same family as the dark theme's red, darkened so
+     `text-accent` on a white surface still clears WCAG AA (≈6.5:1). Bright red
+     (#ff5252) is reserved for the dark theme, where it has the contrast. */
+  --color-accent: #b3261e;
+  --color-accent-700: #8c1d18;
+  --color-accent-100: #f7cdcb;
+  --color-accent-50: #fdf0ef;
   /* Foreground for anything FILLED with the accent. White works on the light
-     theme's deep emerald; the dark theme's bright mint needs ink instead. */
+     theme's deep crimson; the dark theme's bright red needs ink instead. */
   --color-on-accent: #ffffff;
 
-  /* State colours */
+  /* State colours. `danger` stays the saturated destructive red even though
+     the brand accent is now also red — red IS the destructive signal, and
+     re-hueing it to keep it distinct from the accent would be a worse trade.
+     They separate in practice: accent fills carry near-black text (see
+     --color-on-accent), destructive fills carry white, and every destructive
+     action is labelled and confirmed. */
   --color-success: #16a34a;
   --color-warn: #d97706;
   --color-danger: #dc2626;
@@ -81,11 +91,11 @@
   --color-cat-storage: #7c3aed;
   --color-cat-load: #d97706;
 
-  /* Left sidebar — a light warm-white surface (was a dark navy rail).
+  /* Left sidebar — a light near-white surface (was a dark navy rail).
      nav-hover is the row-hover tint; nav-active tracks the accent. */
   --color-nav: #f9fafb;
   --color-nav-hover: #f5f6f8;
-  --color-nav-active: #0b7a53;
+  --color-nav-active: #b3261e;
 
   /* Typography */
   --font-family-sans: 'Inter', system-ui, sans-serif;
@@ -108,56 +118,64 @@
   --shadow: 0 2px 4px rgba(10, 14, 20, 0.04), 0 1px 2px rgba(10, 14, 20, 0.03);
   --shadow-md: 0 6px 16px rgba(10, 14, 20, 0.07), 0 2px 5px rgba(10, 14, 20, 0.04);
   --shadow-lg: 0 18px 40px rgba(10, 14, 20, 0.12), 0 4px 12px rgba(10, 14, 20, 0.06);
-  --ring-accent: 0 0 0 3px rgba(11, 122, 83, 0.18);
-  /* Canvas signature — soft ambient mint/cyan radial gradients. */
+  --ring-accent: 0 0 0 3px rgba(179, 38, 30, 0.18);
+  /* Canvas signature — soft ambient crimson radial gradients. */
   --ambient:
-    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(11, 122, 83, 0.05), transparent 60%),
-    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(56, 189, 248, 0.035), transparent 55%);
+    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(179, 38, 30, 0.05), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(220, 38, 38, 0.035), transparent 55%);
 }
 
 /* ── Dark theme overrides ──────────────────────────────────────────────────
    Activated by `<html data-theme="dark">` (the shipped default). Matches the
-   sign-in landing page in index.html: a green-tinted near-black surface ramp,
-   near-white text with a desaturated sage for secondary copy, and a mint
-   accent. Hairlines are the solid-hex equivalents of rgba(255,255,255,0.10)
-   → 0.18 composited over the surface ramp, so the existing border utilities
-   keep working without an alpha channel. */
-:root[data-theme="dark"] {
-  --color-bg: #07130f;
-  --color-bg-2: #0b1a15;
-  --color-panel: #101f19;
-  --color-panel-2: #16261f;
-  --color-canvas: #050f0c;
-  --color-canvas-dot: #1c3229;
+   sign-in landing page in index.html: a near-black surface ramp warmed a few
+   degrees toward red, near-white text with a desaturated warm grey for
+   secondary copy, and a red accent. Hairlines are the solid-hex equivalents of
+   rgba(255,255,255,0.10) → 0.18 composited over the surface ramp, so the
+   existing border utilities keep working without an alpha channel.
 
-  --color-border: #1d2e28;
-  --color-border-2: #2a3d36;
-  --color-border-3: #3b514a;
-  --color-grid: #1d2e28;
+   The second selector pins the SAME ramp onto any subtree marked
+   `data-pypsa-surface="brand-dark"`. The projects home is the product's front
+   door and is always dark (it shares the sign-in page's backdrop), so
+   token-driven children mounted inside it — NewProjectWizard and friends —
+   must read the dark ramp even when the user's workbench preference is light.
+   Custom properties cascade, so redeclaring them on a subtree is enough. */
+:root[data-theme="dark"],
+[data-pypsa-surface="brand-dark"] {
+  --color-bg: #0a0708;
+  --color-bg-2: #120c0e;
+  --color-panel: #170f11;
+  --color-panel-2: #1f1417;
+  --color-canvas: #070405;
+  --color-canvas-dot: #332124;
 
-  --color-ink-900: #eaf3ee;
-  --color-ink-800: #d3e3da;
-  --color-ink-700: #c0d3ca;
-  --color-ink-600: #b0c6bb;
-  --color-ink-500: #9fb4a9;
-  --color-ink-400: #74897f;
-  --color-ink-300: #46584f;
-  --color-ink-200: #2b3a34;
-  --color-text: #eaf3ee;
-  --color-muted: #9fb4a9;
-  --color-axis: #74897f;
-  --color-legend: #b0c6bb;
+  --color-border: #271a1d;
+  --color-border-2: #372528;
+  --color-border-3: #4d363a;
+  --color-grid: #271a1d;
+
+  --color-ink-900: #f4eaea;
+  --color-ink-800: #e2d3d4;
+  --color-ink-700: #d3c2c4;
+  --color-ink-600: #c6b3b5;
+  --color-ink-500: #b9a7a9;
+  --color-ink-400: #8b7679;
+  --color-ink-300: #574447;
+  --color-ink-200: #35262a;
+  --color-text: #f4eaea;
+  --color-muted: #b9a7a9;
+  --color-axis: #8b7679;
+  --color-legend: #c6b3b5;
 
   /* accent-100 / accent-50 back accent-coloured text (chips, rings, active
-     tool buttons), so in dark they have to be dark mint tints, not pastels. */
-  --color-accent: #35d39a;
-  --color-accent-700: #12a774;
-  --color-accent-100: #123a2c;
-  --color-accent-50: #0c261e;
-  --color-on-accent: #04140e;
+     tool buttons), so in dark they have to be dark red tints, not pastels. */
+  --color-accent: #ff5252;
+  --color-accent-700: #e03131;
+  --color-accent-100: #3a1214;
+  --color-accent-50: #260c0e;
+  --color-on-accent: #14090a;
 
-  --color-nav: #091712;
-  --color-nav-hover: #101f19;
+  --color-nav: #0c0809;
+  --color-nav-hover: #170f11;
 
   /* Deeper, softer shadows — on a near-black surface the light-theme shadows
      are invisible, so lean on spread plus a hairline top inset for lift. */
@@ -166,11 +184,11 @@
   --shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --ring-accent: 0 0 0 3px rgba(53, 211, 154, 0.22);
+  --ring-accent: 0 0 0 3px rgba(255, 82, 82, 0.22);
 
   --ambient:
-    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(53, 211, 154, 0.10), transparent 60%),
-    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(111, 216, 255, 0.055), transparent 55%);
+    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(255, 82, 82, 0.10), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(255, 138, 138, 0.055), transparent 55%);
 
   /* Tell the browser to render native form controls (date pickers, scrollbar
      thumbs, autofill rendering) in dark variants. */
@@ -193,7 +211,8 @@
    tints, which are separate class names and keep `text-accent`) at the
    on-accent token. The `:root[data-theme]` prefix outranks the `text-white`
    utility, and the light theme is deliberately left on the utility. */
-:root[data-theme="dark"] :is(.bg-accent, .bg-accent\/90, .bg-accent\/85, .bg-accent\/80) {
+:root[data-theme="dark"] :is(.bg-accent, .bg-accent\/90, .bg-accent\/85, .bg-accent\/80),
+[data-pypsa-surface="brand-dark"] :is(.bg-accent, .bg-accent\/90, .bg-accent\/85, .bg-accent\/80) {
   color: var(--color-on-accent);
 }
 

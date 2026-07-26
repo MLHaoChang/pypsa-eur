@@ -9,9 +9,10 @@ import {
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   GitBranch as GitBranchIcon, ListChecks,
-  MessageSquare,
+  MessageSquare, LayoutGrid, Users,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { ioApi } from '../api/io'
@@ -171,12 +172,6 @@ const PALETTE_SECTIONS: PaletteSection[] = [
       { id: 'load_heat', label: 'Heating Demand',    subtitle: 'Load on heat bus',  icon: <Thermometer size={14} /> },
     ],
   },
-]
-
-const EXAMPLES = [
-  { id: '3bus',   name: '3-Bus Tutorial', description: 'Simple 3-bus tutorial network', buses: 3,  lines: 3  },
-  { id: 'ieee14', name: 'IEEE 14-Bus',    description: 'IEEE standard test case',        buses: 14, lines: 20 },
-  { id: 'belgium',name: 'Belgium Grid',   description: 'Belgian HV transmission grid',  buses: 11, lines: 18 },
 ]
 
 // ── Shared sidebar item row ────────────────────────────────────────────────────
@@ -519,42 +514,6 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
   )
 }
 
-// ── Examples Modal ─────────────────────────────────────────────────────────────
-function ExamplesModal({ onClose }: { onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.45)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="bg-bg rounded-xl shadow-2xl w-[560px] max-w-[95vw] overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-          <div>
-            <p className="text-[9px] font-bold text-accent uppercase tracking-widest">EXAMPLES</p>
-            <p className="text-sm font-semibold text-text">Example Networks</p>
-          </div>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors"><X size={16} /></button>
-        </div>
-        <div className="p-5 grid grid-cols-3 gap-3">
-          {EXAMPLES.map(ex => (
-            <div key={ex.id} className="border border-border rounded-lg p-3.5 flex flex-col gap-2 hover:border-accent/50 transition-colors">
-              <div className="text-xs font-semibold text-text">{ex.name}</div>
-              <div className="text-[10px] text-muted flex-1">{ex.description}</div>
-              <div className="text-[10px] text-muted font-mono">{ex.buses} buses · {ex.lines} lines</div>
-              <button
-                onClick={() => { toast('Import the example .nc file via Project → Import Project Data.', { icon: '📂' }); onClose() }}
-                className="mt-1 py-1 bg-accent/10 text-accent border border-accent/30 rounded text-[11px] font-semibold hover:bg-accent/20 transition-colors"
-              >Load</button>
-            </div>
-          ))}
-        </div>
-        <div className="px-5 pb-4 text-[10px] text-muted text-center">
-          PyPSA-Eur test networks are in <span className="font-mono">results/test-elec/networks/</span>.
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Open project modal ─────────────────────────────────────────────────────────
 // Two ways to open a project:
 //   1. Pick from the backend's saved-projects list (recent / persistent state).
@@ -820,14 +779,13 @@ function ProjectHeaderCard({
 
 function ProjectSectionContent({
   onCloseModal, projectName, saveStatus, setSaveStatus,
-  openIo, openExamples, handleNewProject,
+  openIo, handleNewProject,
 }: {
   onCloseModal?: () => void
   projectName: string
   saveStatus: 'idle' | 'saved'
   setSaveStatus: (s: 'idle' | 'saved') => void
   openIo: (tab: 'import' | 'export') => void
-  openExamples: () => void
   handleNewProject: () => void
 }) {
   const {
@@ -844,13 +802,16 @@ function ProjectSectionContent({
   const [showCopyModal, setShowCopyModal] = useState(false)
   // "Open Project" picker — lists existing backend projects.
   const [showOpenModal, setShowOpenModal] = useState(false)
+  // Route back to the projects home (the workspace surface that now owns
+  // create / import / duplicate).
+  const navigate = useNavigate()
 
   // Phase D polish #1 — chat empty-state primer bridge. The chat panel
   // dispatches CustomEvents instead of reaching across the layout tree;
   // this Sidebar effect listens and opens the existing modals. Decoupled
   // so chat panel doesn't depend on Sidebar's local state shape.
   useEffect(() => {
-    const onNewProject = () => setShowNameModal(true)
+    const onNewProject = () => handleNewProject()
     const onOpenPicker = () => setShowOpenModal(true)
     window.addEventListener('chat:open-new-project-wizard', onNewProject)
     window.addEventListener('chat:open-project-picker', onOpenPicker)
@@ -858,7 +819,7 @@ function ProjectSectionContent({
       window.removeEventListener('chat:open-new-project-wizard', onNewProject)
       window.removeEventListener('chat:open-project-picker', onOpenPicker)
     }
-  }, [])
+  }, [handleNewProject])
   const qc = useQueryClient()
 
   // Live network meta — used to guard autosave against saving an empty network
@@ -1290,15 +1251,28 @@ function ProjectSectionContent({
         </>
       )}
 
+      {/* The old "Workspace" block (New project / Open from disk / Import /
+          From template) now lives on the projects home — creating a project
+          belongs to the workspace, not to whichever network is resident here.
+          All four are the tabs of the same NewProjectWizard, which that page
+          opens directly. What stays is the way BACK to the workspace. */}
       <SubHdr title="Workspace" />
-      <SItem icon={<FilePlus size={15} />} label="New project"
-        onClick={() => { handleNewProject(); onCloseModal?.() }} />
-      <SItem icon={<FolderOpen size={15} />} label="Open from disk"
-        onClick={() => { setShowOpenModal(true); onCloseModal?.() }} />
-      <SItem icon={<Upload size={15} />} label="Import (.nc / .zip)"
-        onClick={() => { openIo('import'); onCloseModal?.() }} />
-      <SItem icon={<BookOpen size={15} />} label="From template"
-        onClick={() => { openExamples(); onCloseModal?.() }} />
+      <SItem
+        icon={<LayoutGrid size={15} />}
+        label="Projects home"
+        title="Browse every project you can access, resume the last one, or create / import a new one."
+        onClick={() => { onCloseModal?.(); navigate('/projects') }}
+      />
+      <SItem
+        icon={<Users size={15} />}
+        label="Workspace panel"
+        title="Ownership, edit lock, scenario tree, members, and recent projects for the open project."
+        active={activeSlidePanel === 'workspace'}
+        onClick={() => {
+          setSlidePanel(activeSlidePanel === 'workspace' ? null : 'workspace')
+          onCloseModal?.()
+        }}
+      />
     </div>
   )
 }
@@ -1610,11 +1584,11 @@ function IconStripBtn({
 
 // ── Flyout panel ───────────────────────────────────────────────────────────────
 function FlyoutPanel({
-  section, onClose, projectName, saveStatus, setSaveStatus, openIo, openExamples, handleNewProject, requestBottomTab,
+  section, onClose, projectName, saveStatus, setSaveStatus, openIo, handleNewProject, requestBottomTab,
 }: {
   section: FlyoutSection; onClose: () => void; projectName: string
   saveStatus: 'idle' | 'saved'; setSaveStatus: (s: 'idle' | 'saved') => void
-  openIo: (tab: 'import' | 'export') => void; openExamples: () => void; handleNewProject: () => void
+  openIo: (tab: 'import' | 'export') => void; handleNewProject: () => void
   requestBottomTab: (tab: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -1660,7 +1634,7 @@ function FlyoutPanel({
             onCloseModal={onClose}
             projectName={projectName}
             saveStatus={saveStatus} setSaveStatus={setSaveStatus}
-            openIo={openIo} openExamples={openExamples} handleNewProject={handleNewProject}
+            openIo={openIo} handleNewProject={handleNewProject}
           />
         )}
         {section === 'data' && <DataSectionContent onCloseModal={onClose} />}
@@ -1684,7 +1658,6 @@ export default function Sidebar() {
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)
   const [ioTab, setIoTab] = useState<'import' | 'export'>('import')
-  const [examplesOpen, setExamplesOpen] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const qc = useQueryClient()
@@ -1827,14 +1800,13 @@ export default function Sidebar() {
             onClose={() => setActiveFlyout(null)}
             projectName={projectName}
             saveStatus={saveStatus} setSaveStatus={setSaveStatus}
-            openIo={openIo} openExamples={() => setExamplesOpen(true)}
+            openIo={openIo}
             handleNewProject={handleNewProject}
             requestBottomTab={requestBottomTab}
           />
         )}
 
         {ioOpen && <IoModal onClose={() => setIoOpen(false)} initialTab={ioTab} projectName={projectName} />}
-        {examplesOpen && <ExamplesModal onClose={() => setExamplesOpen(false)} />}
         {newProjectOpen && (
           <NewProjectWizard
             existingProjects={allProjects as ProjectInfo[]}
@@ -1879,7 +1851,7 @@ export default function Sidebar() {
             <ProjectSectionContent
               projectName={projectName}
               saveStatus={saveStatus} setSaveStatus={setSaveStatus}
-              openIo={openIo} openExamples={() => setExamplesOpen(true)}
+              openIo={openIo}
               handleNewProject={handleNewProject}
             />
           )}
@@ -1898,7 +1870,6 @@ export default function Sidebar() {
       </aside>
 
       {ioOpen && <IoModal onClose={() => setIoOpen(false)} initialTab={ioTab} projectName={projectName} />}
-      {examplesOpen && <ExamplesModal onClose={() => setExamplesOpen(false)} />}
       {newProjectOpen && (
         <NewProjectWizard
           existingProjects={allProjects as ProjectInfo[]}

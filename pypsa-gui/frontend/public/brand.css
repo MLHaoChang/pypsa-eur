@@ -1,0 +1,54 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   PyPSA Studio — brand palette (red on black).
+
+   SINGLE SOURCE OF TRUTH for the identity colours. Served from /brand.css and
+   linked by BOTH HTML entry points:
+
+     * index.html — the static sign-in landing page (no React, no Tailwind)
+     * spa.html   — the workbench + projects home
+
+   The static page cannot import from `src/`, and Tailwind's `@theme` block in
+   `src/index.css` needs literal values at build time, so the same numbers
+   necessarily appear in `src/index.css` too. `frontend/brand.theme.test.ts` parses
+   both files and fails if they drift — treat that test as the contract, not
+   the comment.
+
+   Contrast (all against --brand-black #0a0708):
+     --brand-red        #ff5252  6.3:1  ✓ AA for body text
+     --brand-red-soft   #ff8a8a  9.4:1  ✓
+     --brand-ink        #f4eaea 17.6:1  ✓
+     --brand-ink-dim    #b9a7a9  8.9:1  ✓
+   and --brand-on-red (#14090a) on --brand-red is 6.3:1, which is why filled
+   red surfaces carry near-black text rather than white (white would be 3.2:1).
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* Surfaces — neutral black warmed a few degrees toward red so it reads as a
+     deliberate choice rather than an unstyled grey. */
+  --brand-black: #0a0708;
+  --brand-surface: #150e10;
+  --brand-surface-2: #1d1316;
+  --brand-panel: rgba(18, 11, 13, 0.78);
+
+  /* Red ramp */
+  --brand-red: #ff5252;
+  --brand-red-soft: #ff8a8a;
+  --brand-red-deep: #e03131;
+  --brand-red-deeper: #b02226;
+  --brand-on-red: #14090a;
+
+  /* Ink */
+  --brand-ink: #f4eaea;
+  --brand-ink-dim: #b9a7a9;
+
+  /* Hairlines */
+  --brand-line: rgba(255, 255, 255, 0.14);
+  --brand-line-strong: rgba(255, 82, 82, 0.45);
+
+  /* Semantic */
+  --brand-danger: #ff8b8b;
+  --brand-warn: #f6c68a;
+
+  /* Composites reused by both entry points */
+  --brand-red-gradient: linear-gradient(135deg, #ff8a8a, #ff5252 55%, #e03131);
+  --brand-red-glow: 0 14px 34px rgba(255, 82, 82, 0.28);
+}

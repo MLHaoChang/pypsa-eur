@@ -27,7 +27,7 @@ export type CanvasMode = 'select' | 'connect'
 // `chat` is the chatbot integration v6 panel (Phase 3). It opens a
 // half-width slide-panel on the right with the conversation, confirmation
 // cards, and live tool-progress streams. Reset via chatStore on project switch.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'chat'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'chat' | 'workspace'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -58,7 +58,8 @@ const THEME_KEY = 'network-diagram:theme'
 // DEFAULT theme changes: on the next load a stored value from an older
 // generation is dropped exactly once, so sessions that were silently sitting
 // on the old default pick up the new one instead of being pinned forever.
-// Generation 2 = the mint/dark identity that matches the sign-in page.
+// Generation 2 = the dark identity that matches the sign-in page (retuned
+// from mint to red without changing the DEFAULT, so no bump was needed).
 const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
 const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'

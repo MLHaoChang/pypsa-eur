@@ -20,6 +20,7 @@ import SnapshotsPanel from './pages/SnapshotsPanel'
 import IssuesPanel from './pages/IssuesPanel'
 import OverviewPanel from './pages/OverviewPanel'
 import ScenariosPanel from './pages/ScenariosPanel'
+import WorkspacePanel from './pages/WorkspacePanel'
 import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
 import CommandPalette from './components/CommandPalette'
@@ -107,6 +108,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   // Chatbot integration v6 (Phase 3). Half-width by default; the panel
   // body handles its own layout (message list + composer + cost meter).
   chat:       { eyebrow: 'ASSISTANT',  title: 'Chat assistant' },
+  workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
 }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
@@ -124,6 +126,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'issues':     return <IssuesPanel />
     case 'overview':   return <OverviewPanel />
     case 'scenarios':  return <ScenariosPanel />
+    case 'workspace':  return <WorkspacePanel />
     // Superseded by the docked comparison rail inside Results (the Compare
     // triggers now open Results + the rail). Kept so the SlidePanel union /
     // PANEL_META stay exhaustive; don't re-point the triggers back here.

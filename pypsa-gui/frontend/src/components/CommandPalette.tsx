@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
   Search, X, FolderOpen, Camera, Save as SaveIcon, FilePlus, Settings2,
   TrendingUp, Clock, Zap, RotateCcw, LayoutDashboard,
-  Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks,
+  Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks, LayoutGrid, Users,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
@@ -214,6 +215,7 @@ const GROUP_LABELS: Record<CommandKind, string> = {
 // opens the palette during normal browsing.
 function useCommands(mode: PaletteMode): Command[] {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   // Per-field zustand selectors instead of `useUIStore()` for the whole store.
   // The bare hook subscribes the component to *every* slice — meaning unrelated
   // updates (canvasMode, sidebarMode, resultsSnapshotIdx, …) re-render the
@@ -355,6 +357,22 @@ function useCommands(mode: PaletteMode): Command[] {
           subtitle: 'Validate the current network without solving',
           icon: <Zap size={14} />,
           run: () => setSlidePanel('issues'),
+        },
+        {
+          id: 'act-projects-home',
+          kind: 'action',
+          title: 'Projects home',
+          subtitle: 'Browse, create, import or duplicate a project',
+          icon: <LayoutGrid size={14} />,
+          run: () => navigate('/projects'),
+        },
+        {
+          id: 'act-workspace-panel',
+          kind: 'action',
+          title: 'Open workspace panel',
+          subtitle: 'Ownership, edit lock, scenario tree and members',
+          icon: <Users size={14} />,
+          run: () => setSlidePanel('workspace'),
         },
         {
           id: 'act-newproj',
@@ -530,7 +548,7 @@ function useCommands(mode: PaletteMode): Command[] {
   }, [
     mode, projects, snapshots,
     buses, generators, loads, lines, links, storageUnits, stores, transformers,
-    qc, currentProject,
+    qc, currentProject, navigate,
     // Setters are stable references from zustand so they don't trigger
     // re-runs in practice, but listing them documents the closure's surface.
     setCurrentProject, setProjectName, setSelectedComponent,

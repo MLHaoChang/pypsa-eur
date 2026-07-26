@@ -4,18 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-store" />
-    <meta name="theme-color" content="#07130f" />
+    <meta name="theme-color" content="#0a0708" />
     <title>PyPSA Studio — Sign in</title>
     <link rel="preload" as="image" href="/img/login-bg.jpg" />
+    <!-- Identity palette. Single source of truth for the red/black brand
+         colours, shared with spa.html — see public/brand.css. -->
+    <link rel="stylesheet" href="/brand.css" />
     <style>
       :root {
         color-scheme: dark;
-        --ink: #eaf3ee;
-        --ink-dim: #9fb4a9;
-        --accent: #35d39a;
-        --line: rgba(255, 255, 255, 0.14);
-        --danger: #ff8b8b;
-        --panel: rgba(8, 20, 16, 0.78);
+        --ink: var(--brand-ink);
+        --ink-dim: var(--brand-ink-dim);
+        --accent: var(--brand-red);
+        --line: var(--brand-line);
+        --danger: var(--brand-danger);
+        --panel: var(--brand-panel);
       }
 
       * { box-sizing: border-box; }
@@ -26,7 +29,7 @@
         margin: 0;
         font-family: "Inter", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
         color: var(--ink);
-        background: #07130f;
+        background: var(--brand-black);
         overflow: hidden;
       }
 
@@ -59,17 +62,17 @@
         position: absolute;
         inset: 0;
         background:
-          radial-gradient(1100px 720px at 8% 45%, rgba(5, 15, 12, 0.92) 0%, rgba(5, 15, 12, 0.62) 34%, rgba(5, 15, 12, 0.18) 62%, transparent 100%),
-          linear-gradient(90deg, rgba(5, 15, 12, 0.86) 0%, rgba(5, 15, 12, 0.28) 42%, rgba(5, 15, 12, 0.12) 62%, rgba(5, 15, 12, 0.55) 100%),
-          linear-gradient(180deg, rgba(5, 15, 12, 0.42) 0%, transparent 26%, transparent 62%, rgba(5, 15, 12, 0.6) 100%);
+          radial-gradient(1100px 720px at 8% 45%, rgba(6, 4, 5, 0.92) 0%, rgba(6, 4, 5, 0.62) 34%, rgba(6, 4, 5, 0.18) 62%, transparent 100%),
+          linear-gradient(90deg, rgba(6, 4, 5, 0.86) 0%, rgba(6, 4, 5, 0.28) 42%, rgba(6, 4, 5, 0.12) 62%, rgba(6, 4, 5, 0.55) 100%),
+          linear-gradient(180deg, rgba(6, 4, 5, 0.42) 0%, transparent 26%, transparent 62%, rgba(6, 4, 5, 0.6) 100%);
       }
 
       .grid-lines {
         position: absolute;
         inset: 0;
         background-image:
-          linear-gradient(rgba(53, 211, 154, 0.06) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(53, 211, 154, 0.06) 1px, transparent 1px);
+          linear-gradient(rgba(255, 82, 82, 0.06) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 82, 82, 0.06) 1px, transparent 1px);
         background-size: 64px 64px;
         mask-image: radial-gradient(900px 600px at 20% 50%, #000 0%, transparent 75%);
         pointer-events: none;
@@ -97,14 +100,18 @@
         width: 34px;
         height: 34px;
         border-radius: 11px;
-        background: linear-gradient(140deg, var(--accent), #0e8f66 70%);
-        box-shadow: 0 8px 28px rgba(53, 211, 154, 0.35);
+        background: linear-gradient(140deg, var(--accent), var(--brand-red-deeper) 70%);
+        box-shadow: 0 8px 28px rgba(255, 82, 82, 0.35);
         display: grid;
         place-items: center;
         font-size: 0.95rem;
-        color: #04140e;
+        color: var(--brand-on-red);
         font-weight: 900;
       }
+
+      /* Wordmark: "PyPSA" carries the accent, "Studio" stays ink — the same
+         split the SPA header and the projects home use. */
+      .mark .pypsa { color: var(--brand-red); }
 
       .headline { max-width: 30ch; }
 
@@ -115,7 +122,7 @@
         padding: 6px 12px;
         border: 1px solid var(--line);
         border-radius: 999px;
-        background: rgba(9, 24, 19, 0.55);
+        background: rgba(20, 13, 15, 0.55);
         backdrop-filter: blur(8px);
         font-size: 0.72rem;
         letter-spacing: 0.14em;
@@ -129,13 +136,13 @@
         height: 7px;
         border-radius: 50%;
         background: var(--accent);
-        box-shadow: 0 0 0 0 rgba(53, 211, 154, 0.7);
+        box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7);
         animation: pulse 2.4s infinite;
       }
 
       @keyframes pulse {
-        70% { box-shadow: 0 0 0 9px rgba(53, 211, 154, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(53, 211, 154, 0); }
+        70% { box-shadow: 0 0 0 9px rgba(255, 82, 82, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); }
       }
 
       h1 {
@@ -147,7 +154,7 @@
       }
 
       h1 .grad {
-        background: linear-gradient(100deg, #7ef0c0, #35d39a 45%, #6fd8ff);
+        background: linear-gradient(100deg, var(--brand-red-soft), var(--brand-red) 45%, var(--brand-red-deep));
         -webkit-background-clip: text;
         background-clip: text;
         color: transparent;
@@ -228,7 +235,7 @@
       input {
         width: 100%;
         border: 1px solid var(--line);
-        background: rgba(4, 14, 11, 0.6);
+        background: rgba(8, 5, 6, 0.6);
         color: var(--ink);
         border-radius: 14px;
         padding: 13px 15px;
@@ -237,13 +244,13 @@
         transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
       }
 
-      input::placeholder { color: rgba(159, 180, 169, 0.6); }
+      input::placeholder { color: rgba(185, 167, 169, 0.6); }
 
       input:focus {
         outline: none;
-        border-color: rgba(53, 211, 154, 0.65);
-        background: rgba(6, 20, 16, 0.85);
-        box-shadow: 0 0 0 4px rgba(53, 211, 154, 0.16);
+        border-color: rgba(255, 82, 82, 0.65);
+        background: rgba(14, 9, 10, 0.85);
+        box-shadow: 0 0 0 4px rgba(255, 82, 82, 0.16);
       }
 
       button {
@@ -255,11 +262,11 @@
         font: inherit;
         font-weight: 700;
         letter-spacing: 0.01em;
-        color: #04140e;
-        background: linear-gradient(135deg, #7ef0c0, #23c78d 55%, #12a774);
+        color: var(--brand-on-red);
+        background: var(--brand-red-gradient);
         cursor: pointer;
         transition: transform 0.14s ease, filter 0.18s ease, box-shadow 0.18s ease;
-        box-shadow: 0 14px 34px rgba(35, 199, 141, 0.28);
+        box-shadow: var(--brand-red-glow);
       }
 
       button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
@@ -278,16 +285,19 @@
 
       .msg.error {
         display: block;
-        background: rgba(120, 32, 32, 0.3);
+        background: rgba(90, 20, 22, 0.3);
         border-color: rgba(255, 139, 139, 0.4);
         color: var(--danger);
       }
 
+      /* Deliberately NOT red. This is the success/notice state ("Signed in…"),
+         and on a red-accented page a red chip would read as a failure. Neutral
+         ink on a plain glass panel is unambiguous. */
       .msg.ok {
         display: block;
-        background: rgba(24, 92, 66, 0.35);
-        border-color: rgba(53, 211, 154, 0.45);
-        color: #8ff0c5;
+        background: rgba(255, 255, 255, 0.06);
+        border-color: var(--line);
+        color: var(--ink);
       }
 
       .hint {
@@ -302,12 +312,12 @@
       code {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.76rem;
-        color: #b8ead3;
+        color: var(--brand-red-soft);
       }
 
       .foot {
         font-size: 0.74rem;
-        color: rgba(159, 180, 169, 0.75);
+        color: rgba(185, 167, 169, 0.75);
         letter-spacing: 0.02em;
       }
 
@@ -333,7 +343,7 @@
       <section class="brand">
         <div class="mark">
           <span class="dot">P</span>
-          <span>PyPSA Studio</span>
+          <span><span class="pypsa">PyPSA</span> Studio</span>
         </div>
 
         <div class="headline">

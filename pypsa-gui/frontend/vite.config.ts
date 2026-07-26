@@ -25,7 +25,7 @@ export default defineConfig({
     // real cost in startup time. Add jsdom + @testing-library only when the
     // first component test lands.
     environment: 'node',
-    include: ['src/**/*.test.ts', 'vite.auth-gate.test.ts'],
+    include: ['src/**/*.test.ts', 'vite.auth-gate.test.ts', 'brand.theme.test.ts'],
   },
   server: {
     // Pin to IPv4. On macOS, Vite's default `localhost` resolves to ::1, so the
