@@ -19,6 +19,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
+import { useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
@@ -27,6 +28,7 @@ import {
   postChatConfirm,
   type ChatFrame,
 } from '../api/chat'
+import { nk } from '../utils/queryKeys'
 import {
   deleteUpload,
   getUploadBlobUrl,
@@ -76,6 +78,10 @@ function _normalizePanelId(raw: string): string {
     CommandPalette: 'palette', palette: 'palette',
     ImportExport: 'import_export', import_export: 'import_export',
     GenerationStack: 'results',
+    ProjectPicker: 'project_picker', project_picker: 'project_picker',
+    OpenProject: 'project_picker',
+    NewProject: 'new_project', new_project: 'new_project',
+    NewProjectWizard: 'new_project',
   }
   return aliases[key] ?? key
 }
@@ -120,6 +126,10 @@ function applyUiNavigate(d: {
     ui.setPaletteMode('all')
   } else if (panel === 'import_export') {
     ui.requestIoModal('import')
+  } else if (panel === 'project_picker') {
+    window.dispatchEvent(new CustomEvent('chat:open-project-picker'))
+  } else if (panel === 'new_project') {
+    window.dispatchEvent(new CustomEvent('chat:open-new-project-wizard'))
   } else if (panel === 'bottom') {
     // Expand bottom panel on a default tab if none specified below.
     if (!d.bottom_tab) ui.requestBottomTab('Buses')
@@ -612,11 +622,11 @@ function ChatEmptyState() {
     >
       <div className="text-2xl mb-2">💬</div>
       <div className="text-sm font-medium text-text mb-1">
-        Load a project to start chatting
+        No project loaded
       </div>
       <div className="text-[12px] text-muted leading-relaxed mb-3">
-        The assistant works on the network in the active project — uploads,
-        exports, and chat history all attach to it.
+        Ask me to open a saved project by name, or pick one below. Uploads
+        and chat history attach once a project is active.
       </div>
       <div className="flex items-center justify-center gap-2">
         <button
@@ -638,6 +648,18 @@ function ChatEmptyState() {
   )
 }
 
+/** Starter prompts when no project is loaded. */
+const CHAT_STARTER_PROMPTS_UNBOUND: { label: string; text: string }[] = [
+  {
+    label: 'Open a project',
+    text: 'List my projects and open project_name',
+  },
+  {
+    label: 'Browse projects',
+    text: 'Open the project picker',
+  },
+]
+
 /** Starter prompts when a project is loaded but the conversation is empty. */
 const CHAT_STARTER_PROMPTS: { label: string; text: string }[] = [
   {
@@ -655,9 +677,11 @@ const CHAT_STARTER_PROMPTS: { label: string; text: string }[] = [
 ]
 
 function ChatStarterChips({
+  prompts,
   onPick,
   disabled,
 }: {
+  prompts: { label: string; text: string }[]
   onPick: (text: string) => void
   disabled?: boolean
 }) {
@@ -668,7 +692,7 @@ function ChatStarterChips({
     >
       <div className="text-[11px] text-muted mb-2">Try asking</div>
       <div className="flex flex-wrap gap-1.5">
-        {CHAT_STARTER_PROMPTS.map((p) => (
+        {prompts.map((p) => (
           <button
             key={p.label}
             type="button"
@@ -725,6 +749,7 @@ function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
 
 
 export default function ChatPanel() {
+  const qc = useQueryClient()
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
   const model = useChatStore((s) => s.model)
@@ -1341,9 +1366,18 @@ export default function ChatPanel() {
         // loop's `expect=<name>` matches the backend's binding —
         // otherwise the next autosave 409s with "Backend network is
         // bound to project X, not Y" (incident 2026-06-08).
+        // Also covers unbound → open: set name + refresh lifecycle roots
+        // so the canvas / StatusBar pick up the newly activated project
+        // (backend already activated; do NOT call switchToProject again).
         const d = _frame_data<{ from: string | null; to: string | null; via_tool: string }>(frame)
         if (d.to && d.to !== useUIStore.getState().currentProject) {
-          useUIStore.getState().setCurrentProject(d.to)
+          const ui = useUIStore.getState()
+          ui.setCurrentProject(d.to)
+          ui.setProjectName(d.to)
+          ui.touchTab(d.to)
+          qc.invalidateQueries({ queryKey: nk(d.to, 'meta') })
+          qc.invalidateQueries({ queryKey: nk(d.to, 'simulationStatus') })
+          qc.invalidateQueries({ queryKey: nk(d.to, 'snapshots') })
           toast(`Active project: ${d.to}`, { icon: '🔀' })
         }
         // Render a small tool-line so the conversation explains what
@@ -1379,7 +1413,7 @@ export default function ChatPanel() {
         break
       }
     }
-  }, [setSessionId, appendMessage, appendTokenDelta, setPending, appendToolProgress,
+  }, [qc, setSessionId, appendMessage, appendTokenDelta, setPending, appendToolProgress,
       accrueUsage, setStreaming, setError])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
@@ -1609,11 +1643,11 @@ export default function ChatPanel() {
             project is active AND there are no messages yet so a returning
             user with stale chat replay isn't double-primed. */}
         {!currentProject && messages.length === 0 && <ChatEmptyState />}
-        {/* Discoverability chips for compare / navigate / results once a
-            project is loaded but the thread is still empty. Click fills the
-            composer so the user can edit names before sending. */}
-        {currentProject && messages.length === 0 && (
+        {/* Discoverability chips: unbound → open/browse; bound → compare /
+            navigate / summarize. Click fills the composer for edit-before-send. */}
+        {messages.length === 0 && (
           <ChatStarterChips
+            prompts={currentProject ? CHAT_STARTER_PROMPTS : CHAT_STARTER_PROMPTS_UNBOUND}
             disabled={streaming}
             onPick={(text) => {
               setInput(text)

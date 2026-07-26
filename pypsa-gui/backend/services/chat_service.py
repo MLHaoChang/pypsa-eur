@@ -1578,14 +1578,22 @@ def trim_session_messages(
 
 def _format_live_network_meta(ctx: Any) -> str | None:
     """
-    One-line orientation for the system prompt: project binding + size +
-    solved flag. Returns None when unbound or on any read failure so a
-    flaky meta lookup never aborts the turn.
+    Orientation for the system prompt: project binding + size + solved flag,
+    or unbound guidance so the agent knows it can open a project first.
+    Returns None only on read failure so a flaky meta lookup never aborts
+    the turn.
     """
     try:
         project = getattr(ctx, "loaded_project", None)
         if not project:
-            return None
+            return (
+                "No project is loaded. If the user names a project (or asks "
+                "to open/load one), call list_projects then activate_project "
+                "with the matching name — that opens it in the UI via "
+                "project_rebound. Prefer activate_project over load_project. "
+                "If they do not know the name, list_projects and offer "
+                "choices, or ui_open_panel(panel_id='project_picker')."
+            )
         n = getattr(ctx, "network", None)
         if n is None:
             return None

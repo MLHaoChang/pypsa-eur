@@ -68,6 +68,8 @@ SAFETY_PANEL_ENUM = [
     "Snapshots", "snapshots",
     "Horizon", "horizon",
     "SolveQueue", "solveQueue",
+    "ProjectPicker", "project_picker", "OpenProject",
+    "NewProject", "new_project", "NewProjectWizard",
 ]
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
@@ -700,10 +702,13 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "activate_project",
-        "Instant resident-switch path (POST /api/projects/{project_id}/"
-        "activate). Returns {activated: str, evicted: list[str]} per "
-        "projects.py:1330. v6-F2: if `resident` flipped between list_projects "
-        "and this call, the backend takes the cold path automatically "
+        "Open / switch the active project (POST /api/projects/{project_id}/"
+        "activate). Prefer this when nothing is loaded or the user asks to "
+        "open a saved project — list_projects first if the name is unclear. "
+        "Emits project_rebound so the browser UI mirrors the new binding. "
+        "Returns {activated: str, evicted: list[str]} per projects.py:1330. "
+        "v6-F2: if `resident` flipped between list_projects and this call, "
+        "the backend takes the cold path automatically "
         "(projects.py:1319-1326). Refuses with 409 error_kind='solver_in_"
         "flight' when a foreground solve is active. Safety: write.",
         {"project_id": {"type": "string"}},
@@ -1032,9 +1037,11 @@ TOOLS: list[dict[str, Any]] = [
         "ui_open_panel",
         "Navigate the GUI via SSE ui_event (kind=navigate). Opens a main "
         "panel (Results / SolverSettings / TimeSeriesManager / Scenarios / "
-        "Issues / Chat / …), optionally a Results sub-tab (capex, dispatch, "
-        "economics, …), a bottom asset table tab (Buses, Generators, …), "
-        "and/or the A|B compare rail with scenario picks. Safety: read.",
+        "Issues / Chat / project_picker / new_project / …), optionally a "
+        "Results sub-tab (capex, dispatch, economics, …), a bottom asset "
+        "table tab (Buses, Generators, …), and/or the A|B compare rail with "
+        "scenario picks. Use project_picker when the user wants to browse "
+        "saved projects without naming one. Safety: read.",
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},

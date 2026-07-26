@@ -20,9 +20,13 @@ def _tiny_network() -> pypsa.Network:
     return n
 
 
-def test_format_live_network_meta_unbound_returns_none():
+def test_format_live_network_meta_unbound_guides_activate():
     ctx = ProjectContext(network=_tiny_network(), loaded_project=None)
-    assert chat_service._format_live_network_meta(ctx) is None
+    line = chat_service._format_live_network_meta(ctx)
+    assert line is not None
+    assert "No project is loaded" in line
+    assert "activate_project" in line
+    assert "list_projects" in line
 
 
 def test_format_live_network_meta_includes_counts():

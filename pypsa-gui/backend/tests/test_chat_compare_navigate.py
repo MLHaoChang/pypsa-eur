@@ -84,3 +84,12 @@ def test_compare_scenarios_headlines_and_delta(monkeypatch):
 def test_compare_scenarios_in_dispatchers():
     assert "compare_scenarios" in chat_tools.DISPATCHERS
     assert chat_tools.DISPATCHERS["compare_scenarios"] is chat_tools.compare_scenarios
+
+
+def test_ui_open_panel_project_picker_in_enum():
+    from services.chat_tools_schema import SAFETY_PANEL_ENUM
+    assert "project_picker" in SAFETY_PANEL_ENUM
+    assert "new_project" in SAFETY_PANEL_ENUM
+    ev = chat_tools.ui_open_panel(panel_id="project_picker")
+    assert ev["panel_id"] == "project_picker"
+    assert ev["_ui_event"] is True
