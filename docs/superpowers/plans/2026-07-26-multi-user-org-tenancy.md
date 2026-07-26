@@ -808,6 +808,24 @@ git commit -m "docs(gui): auth setup guide and env example for multi-user v1"
 
 ---
 
+## Known limitations (v1 rollout)
+
+**Process-global active network.** Persistent tenancy state (users, orgs,
+projects, saved scenarios, edit locks) is isolated per org/project in Postgres.
+The in-memory *active network* behind the live `/api/network` edit endpoints is
+**process-global** on a shared backend process — full per-user resident context
+isolation is out of scope for v1.
+
+With auth enabled on a single shared process, concurrent users edit the same
+in-memory active network for live `/api/network` operations. Advisory edit locks
+reduce accidental collisions but must **not** be treated as strong isolation for
+concurrent live edits. Recommended v1 deployment: one trusted org / low
+concurrency on a shared process, or a separate backend process per tenant.
+Formalizing per-user resident contexts is deferred to a later iteration; this
+fix pass intentionally does **not** attempt a multi-active rewrite.
+
+---
+
 ## Flexibility checklist (do not regress)
 
 While implementing, keep these seams intact:

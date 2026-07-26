@@ -260,9 +260,13 @@ This GUI lives inside a **PyPSA-Eur** checkout and reuses its toolchain.
 
 ### Optional: enable multi-user auth locally
 
-The default dev setup works without Postgres. To exercise invited-user flows,
-org/project tenancy, edit locks, and password emails locally, wire the backend
-to Postgres and point SMTP at Mailpit.
+Auth is **opt-in and disabled by default**. A fresh clone runs as a single-user
+workbench with no Postgres and no login — `VITE_AUTH_ENABLED` is unset (which
+the frontend treats as `false`), so the SPA drops straight into the workbench.
+
+To exercise invited-user flows, org/project tenancy, edit locks, and password
+emails locally, wire the backend to Postgres, point SMTP at Mailpit, and set
+`VITE_AUTH_ENABLED=true`.
 
 1. **Copy the backend env template**:
    ```bash
@@ -313,6 +317,28 @@ links in those emails resolve against `PUBLIC_BASE_URL` (default
    cd pypsa-gui/backend
    pixi run python -m pytest -m auth_smoke
    ```
+
+#### Known limitation (v1): process-global active network
+
+Persistent tenancy data (users, orgs, projects, saved scenarios, edit locks) is
+fully isolated per org/project in Postgres. However, the **in-memory active
+network** — the working PyPSA network behind the live `/api/network` edit
+endpoints — is **process-global** on a shared backend process. Full per-user
+resident context isolation is out of scope for v1.
+
+Practically, this means: when auth is enabled on a **single shared backend
+process**, concurrent users all edit the *same* in-memory active network for
+live `/api/network` operations. Edit locks reduce accidental collisions, but you
+must **not** treat this as strong isolation for concurrent live edits.
+
+Recommended v1 deployment:
+
+- One trusted organization / low concurrency on a shared process, **or**
+- A separate backend process per tenant (stronger isolation), which can later be
+  formalized into per-user resident contexts.
+
+Durable, per-project data (saved scenarios, results, tenancy) is unaffected by
+this limitation — the caveat applies only to the single live in-memory network.
 
 ### Run it
 
