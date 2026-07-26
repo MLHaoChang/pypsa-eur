@@ -307,6 +307,13 @@ invite, set-password, and reset-password emails to SMTP on port 1025, and the
 links in those emails resolve against `PUBLIC_BASE_URL` (default
 `http://localhost:5173`).
 
+5. **Run auth/tenancy smoke tests** (from the backend directory; uses in-memory
+   SQLite, no Postgres required):
+   ```bash
+   cd pypsa-gui/backend
+   pixi run python -m pytest -m auth_smoke
+   ```
+
 ### Run it
 
 **Windows (one click):** from `pypsa-gui/` run `start.bat` — it opens the

@@ -14,6 +14,8 @@ from db import session as db_session_module
 from services.auth_service import hash_password, issue_password_token, verify_password
 from settings import get_settings
 
+pytestmark = pytest.mark.auth_smoke
+
 
 @pytest.fixture
 def auth_env(monkeypatch):

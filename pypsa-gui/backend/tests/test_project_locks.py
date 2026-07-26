@@ -18,6 +18,8 @@ from services.auth_service import hash_password
 from services.storage_paths import storage_path_for
 from settings import get_settings
 
+pytestmark = pytest.mark.auth_smoke
+
 
 def _service():
     from services.project_locks import (

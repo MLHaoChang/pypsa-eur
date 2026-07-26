@@ -18,6 +18,8 @@ from services import email_service
 from services.auth_service import hash_password
 from settings import get_settings
 
+pytestmark = pytest.mark.auth_smoke
+
 
 @pytest.fixture
 def auth_env(tmp_path, monkeypatch):

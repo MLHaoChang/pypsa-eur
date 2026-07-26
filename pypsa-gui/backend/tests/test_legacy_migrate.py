@@ -13,6 +13,8 @@ from services.auth_service import hash_password
 from services.legacy_migrate import claim_legacy_project
 from settings import get_settings
 
+pytestmark = pytest.mark.auth_smoke
+
 
 def _now() -> datetime:
     return datetime.now(tz=timezone.utc)
