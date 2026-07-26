@@ -19,6 +19,7 @@ from services.auth_service import (
     set_password_from_token,
     verify_password,
 )
+from services.tenancy_service import get_user_membership
 from settings import get_settings
 
 router = APIRouter()
@@ -72,12 +73,14 @@ def _clear_session_cookie(response: Response) -> None:
     )
 
 
-def _serialize_user(user: User) -> dict[str, str | bool]:
+def _serialize_user(user: User, *, org_id: str | None = None, role: str | None = None) -> dict[str, str | bool | None]:
     return {
         "id": str(user.id),
         "email": user.email,
         "status": user.status,
         "is_super_admin": user.is_super_admin,
+        "org_id": org_id,
+        "role": role,
     }
 
 
@@ -98,7 +101,15 @@ def login(
 
     raw_token, _session = create_session(db, user.id)
     _set_session_cookie(response, raw_token)
-    return {"ok": True, "user": _serialize_user(user)}
+    membership = get_user_membership(db, user.id)
+    return {
+        "ok": True,
+        "user": _serialize_user(
+            user,
+            org_id=str(membership.org_id) if membership is not None else None,
+            role=membership.role if membership is not None else None,
+        ),
+    }
 
 
 @router.post("/logout")
@@ -123,8 +134,16 @@ def logout(
 
 
 @router.get("/me")
-def me(user: User = Depends(require_user)) -> dict[str, str | bool]:
-    return _serialize_user(user)
+def me(
+    user: User = Depends(require_user),
+    db: DBSession = Depends(get_db),
+) -> dict[str, str | bool | None]:
+    membership = get_user_membership(db, user.id)
+    return _serialize_user(
+        user,
+        org_id=str(membership.org_id) if membership is not None else None,
+        role=membership.role if membership is not None else None,
+    )
 
 
 @router.post("/forgot-password")

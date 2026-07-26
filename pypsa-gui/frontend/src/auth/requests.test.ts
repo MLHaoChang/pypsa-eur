@@ -22,6 +22,8 @@ describe('loginWithPassword', () => {
         email: 'person@example.com',
         status: 'active',
         is_super_admin: false,
+        org_id: 'org-1',
+        role: 'member',
       },
     })
 

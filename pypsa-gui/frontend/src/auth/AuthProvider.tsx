@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { authApi, type AuthUser } from '../api/auth'
+import { hasAdminConsoleAccess } from '../pages/admin/helpers'
 import { loginWithPassword } from './requests'
 import { authEnabled } from './config'
 
@@ -72,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     status,
     isAuthenticated: status === 'authenticated',
-    isAdmin: Boolean(user?.is_super_admin),
+    isAdmin: hasAdminConsoleAccess(user),
     login,
     logout,
     refresh,

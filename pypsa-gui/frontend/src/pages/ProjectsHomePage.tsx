@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { getPostLoginPath } from '../auth/resume'
 import { useUIStore } from '../store/uiStore'
 import { formatRelativeTime } from '../utils/projectActions'
+import { hasAdminConsoleAccess } from './admin/helpers'
 import {
   findProjectByIdentifier,
   isRootProject,
@@ -102,7 +103,7 @@ export default function ProjectsHomePage() {
             >
               New project
             </Link>
-            {user?.is_super_admin && (
+            {hasAdminConsoleAccess(user) && (
               <Link
                 className="inline-flex w-full items-center justify-center rounded-2xl border border-white/18 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/8"
                 to="/admin"

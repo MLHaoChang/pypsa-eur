@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 import main
-from db.models import AuthToken, Session, User
+from db.models import AuthToken, OrgMembership, Organization, Session, User
 from db import session as db_session_module
 from services.auth_service import hash_password, issue_password_token, verify_password
 from settings import get_settings
@@ -55,6 +55,27 @@ def _create_user(
         db.commit()
         db.refresh(user)
         return user
+
+
+def _create_org(session_local, *, name: str | None = None) -> Organization:
+    with session_local() as db:
+        organization = Organization(
+            name=name or f"Org {uuid.uuid4()}",
+            created_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(organization)
+        db.commit()
+        db.refresh(organization)
+        return organization
+
+
+def _add_membership(session_local, *, user_id, org_id, role: str) -> OrgMembership:
+    with session_local() as db:
+        membership = OrgMembership(user_id=user_id, org_id=org_id, role=role)
+        db.add(membership)
+        db.commit()
+        db.refresh(membership)
+        return membership
 
 
 @pytest.fixture
@@ -137,6 +158,27 @@ def test_login_allows_me_and_logout_revokes_session(
 
     assert stored_session is not None
     assert stored_session.revoked_at is not None
+
+
+def test_login_and_me_include_org_membership(auth_client, auth_session_local) -> None:
+    organization = _create_org(auth_session_local, name="Northwind")
+    user = _create_user(auth_session_local, password="secret-pass")
+    _add_membership(auth_session_local, user_id=user.id, org_id=organization.id, role="admin")
+
+    login_response = auth_client.post(
+        "/api/auth/login",
+        json={"email": user.email, "password": "secret-pass"},
+    )
+
+    assert login_response.status_code == 200
+    assert login_response.json()["user"]["org_id"] == str(organization.id)
+    assert login_response.json()["user"]["role"] == "admin"
+
+    me_response = auth_client.get("/api/auth/me")
+
+    assert me_response.status_code == 200
+    assert me_response.json()["org_id"] == str(organization.id)
+    assert me_response.json()["role"] == "admin"
 
 
 def test_forgot_password_returns_generic_success_for_unknown_email(auth_client) -> None:

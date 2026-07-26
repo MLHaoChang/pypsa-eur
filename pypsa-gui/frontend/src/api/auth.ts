@@ -5,6 +5,8 @@ export interface AuthUser {
   email: string
   status: string
   is_super_admin: boolean
+  org_id: string | null
+  role: 'admin' | 'member' | null
 }
 
 export interface LoginPayload {
