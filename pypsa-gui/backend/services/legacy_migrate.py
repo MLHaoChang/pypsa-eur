@@ -47,6 +47,32 @@ def _legacy_root() -> Path:
     return get_settings().legacy_root
 
 
+def _projects_root() -> Path:
+    return get_settings().projects_root
+
+
+def _is_uuid_named(name: str) -> bool:
+    try:
+        uuid.UUID(name)
+    except ValueError:
+        return False
+    return True
+
+
+def _contains_any_file(directory: Path) -> bool:
+    try:
+        return any(path.is_file() for path in directory.rglob("*"))
+    except OSError:
+        return False
+
+
+def _is_within(candidate: Path, ancestor: Path) -> bool:
+    """True when ``candidate`` is ``ancestor`` itself or lives underneath it."""
+    resolved_candidate = candidate.absolute()
+    resolved_ancestor = ancestor.absolute()
+    return resolved_candidate == resolved_ancestor or resolved_ancestor in resolved_candidate.parents
+
+
 def _read_metadata(project_dir: Path) -> dict:
     path = project_dir / "metadata.json"
     if not path.exists():
@@ -58,21 +84,56 @@ def _read_metadata(project_dir: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _scan_legacy_entries() -> dict[str, _LegacyEntry]:
-    root = _legacy_root()
+def _scan_root(root: Path, *, pre_auth_layout: bool) -> dict[str, _LegacyEntry]:
+    """
+    Collect the candidate legacy project directories directly under ``root``.
+
+    ``pre_auth_layout`` marks a root that ALSO holds live org-scoped storage
+    (``projects_root``), where only the flat leftovers from before auth are
+    claimable — see ``_scan_legacy_entries``.
+    """
     if not root.exists():
         return {}
 
+    try:
+        children = sorted(root.iterdir(), key=lambda item: item.name)
+    except OSError:
+        return {}
+
     entries: dict[str, _LegacyEntry] = {}
-    for directory in sorted(root.iterdir(), key=lambda item: item.name):
+    for directory in children:
         if not directory.is_dir():
             continue
+        if pre_auth_layout:
+            if directory.name.startswith("."):
+                continue
+            if _is_uuid_named(directory.name):
+                continue
+            if not _contains_any_file(directory):
+                continue
         entries[directory.name] = _LegacyEntry(
             name=directory.name,
             path=directory,
             metadata=_read_metadata(directory),
         )
     return entries
+
+
+def _scan_legacy_entries() -> dict[str, _LegacyEntry]:
+    """
+    Find every unclaimed pre-auth project across both roots.
+
+    ``legacy_root`` is the dedicated parking area an operator can drop projects
+    into. ``projects_root`` is scanned too because a user who ran the app
+    before auth has their projects sitting there as flat ``<project-name>/``
+    directories; once auth is on, that same root gains a
+    ``<org_uuid>/<project_uuid>/`` layout. A UUID-named directory is therefore
+    an org storage root (never a legacy project) and is skipped, as are hidden
+    directories and empty ones. On a name collision ``legacy_root`` wins.
+    """
+    entries = _scan_root(_projects_root(), pre_auth_layout=True)
+    entries.update(_scan_root(_legacy_root(), pre_auth_layout=False))
+    return {name: entries[name] for name in sorted(entries)}
 
 
 def _descendants(entries: dict[str, _LegacyEntry], root_name: str) -> list[str]:
@@ -217,6 +278,14 @@ def claim_legacy_project(
             destination = Path(project_map[name].storage_path)
             if destination.exists():
                 raise ConflictError(f"Storage path already exists for legacy project '{name}'")
+            # A source inside projects_root is moved into a sibling subtree of
+            # that same root (projects_root/<org>/<project>). That is safe, but
+            # a destination nested UNDER the source would make the move recurse
+            # into itself, so refuse it outright.
+            if _is_within(destination, source):
+                raise ConflictError(
+                    f"Storage path for legacy project '{name}' is nested inside its source directory"
+                )
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(source), str(destination))
             moved_paths.append((destination, source))

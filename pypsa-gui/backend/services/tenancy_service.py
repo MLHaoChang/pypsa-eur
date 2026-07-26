@@ -92,6 +92,50 @@ def create_organization(db: DBSession, name: str, actor: User) -> Organization:
     return organization
 
 
+def _personal_org_name(email: str) -> str:
+    local_part = normalize_email(email).split("@", 1)[0].strip()
+    return f"{local_part or 'personal'}'s workspace"
+
+
+def ensure_personal_org(db: DBSession, user: User) -> Organization:
+    """
+    Return the user's organization, creating a personal one if they have none.
+
+    Unlike ``create_organization`` this is not an admin action: it exists so a
+    user who predates multi-tenancy (typically the bootstrapped super-admin,
+    who has no ``OrgMembership`` at all) gets a workspace to import their
+    pre-auth projects into without an operator provisioning one first. The
+    caller is made an ``admin`` of the organization it creates.
+    """
+    membership = get_user_membership(db, user.id)
+    if membership is not None:
+        organization = db.get(Organization, membership.org_id)
+        if organization is None:
+            raise ValidationError("Organization not found")
+        return organization
+
+    base_name = _personal_org_name(user.email)
+    for suffix in range(1, 1000):
+        name = base_name if suffix == 1 else f"{base_name} {suffix}"
+        if db.scalar(select(Organization).where(Organization.name == name)) is not None:
+            continue
+
+        organization = Organization(name=name, created_at=_now_utc())
+        db.add(organization)
+        try:
+            db.flush()
+            db.add(OrgMembership(user_id=user.id, org_id=organization.id, role="admin"))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+
+        db.refresh(organization)
+        return organization
+
+    raise ConflictError("Could not derive a unique organization name")
+
+
 def create_user(
     db: DBSession,
     email: str,

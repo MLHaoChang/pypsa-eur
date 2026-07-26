@@ -595,6 +595,30 @@ def _project_info_db(db, project) -> ProjectInfo:
     return info
 
 
+def _serialize_registry_project(project) -> dict[str, str | None]:
+    return {
+        "id": str(project.id),
+        "name": project.name,
+        "org_id": str(project.org_id),
+        "parent_project_id": (
+            str(project.parent_project_id) if project.parent_project_id is not None else None
+        ),
+    }
+
+
+def _raise_tenancy_http_error(exc: Exception) -> None:
+    """Map a tenancy-service error onto its HTTP status (mirrors routers.admin)."""
+    from services.tenancy_service import ConflictError, PermissionDenied, ValidationError
+
+    if isinstance(exc, PermissionDenied):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if isinstance(exc, ConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, ValidationError):
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise exc
+
+
 def _serialize_project_lock(db: DBSession, project_id, user: User) -> dict[str, object] | None:
     from services import project_locks
 
@@ -629,6 +653,85 @@ def list_projects(
             continue
         result.append(_project_info(d))
     return result
+
+
+# NOTE: `/unclaimed` and `/unclaimed/{legacy_name}/import` MUST stay ahead of
+# the dynamic `GET /{name}` and `POST /{name}` routes further down this module,
+# or FastAPI matches "unclaimed" as a project name.
+
+
+@router.get("/unclaimed")
+def list_unclaimed_projects(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> list[dict]:
+    """
+    Pre-auth projects on disk that have no row in the project registry yet.
+
+    These are the flat ``<project-name>/`` directories a single-user install
+    left behind, which become invisible the moment auth is switched on. Any
+    authenticated user may enumerate them; importing one is a separate call.
+    """
+    if not _auth_enabled():
+        raise HTTPException(404, "Importing pre-auth projects requires authentication to be enabled")
+    from services import project_registry
+    from services.legacy_migrate import list_legacy_projects
+
+    project_registry.require_user(user)
+    return [
+        {
+            "name": project.name,
+            "parent_project": project.parent_project,
+            "scenario_description": project.scenario_description,
+            "has_network": project.has_network,
+            "descendant_names": project.descendant_names,
+        }
+        for project in list_legacy_projects()
+    ]
+
+
+@router.post("/unclaimed/{legacy_name}/import", status_code=201)
+def import_unclaimed_project(
+    legacy_name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Adopt a pre-auth project (and its scenario tree) into the caller's org.
+
+    The caller gets a personal organization created on the spot if they don't
+    have one, so a fresh super-admin can import in a single click.
+    """
+    if not _auth_enabled():
+        raise HTTPException(404, "Importing pre-auth projects requires authentication to be enabled")
+    from services import project_registry
+    from services.legacy_migrate import claim_legacy_project
+    from services.tenancy_service import (
+        ConflictError,
+        PermissionDenied,
+        ValidationError,
+        ensure_personal_org,
+    )
+
+    caller = project_registry.require_user(user)
+    try:
+        organization = ensure_personal_org(db, caller)
+        result = claim_legacy_project(
+            db,
+            legacy_name,
+            organization.id,
+            caller.id,
+            [],
+            include_descendants=True,
+        )
+    except (PermissionDenied, ConflictError, ValidationError) as exc:
+        _raise_tenancy_http_error(exc)
+
+    return {
+        "root": _serialize_registry_project(result.root),
+        "claimed": [_serialize_registry_project(project) for project in result.claimed],
+        "warnings": result.warnings,
+    }
 
 
 @router.post("/import_bundle")
