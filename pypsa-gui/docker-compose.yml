@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pypsa
+      POSTGRES_PASSWORD: pypsa
+      POSTGRES_DB: pypsa_gui
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1025:1025", "8025:8025"]
+volumes:
+  pgdata:
