@@ -9,6 +9,7 @@ import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from
 import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore } from '../store/uiStore'
+import { evaluateMutation } from '../utils/mutationGuard'
 import { authEnabled } from '../auth/config'
 import UserMenu from './UserMenu'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
@@ -124,6 +125,14 @@ export default function AppHeader() {
     setEditingName(false)
     if (!trimmed || trimmed === projectName) return
     if (currentProject && currentProject === projectName) {
+      // Read-only guard — renaming the active project is a mutation. Refuse
+      // (and keep the old name) while another user holds the edit lock.
+      const verdict = evaluateMutation(readOnly)
+      if (!verdict.allowed) {
+        toast.error(verdict.blockedMessage!)
+        setNameInput(projectName)
+        return
+      }
       // Active project — call backend. Cache invalidation + store sync are
       // handled in the .then/.catch so the UI stays consistent across
       // sidebar / OverviewPanel / Compare scenarios picker.
@@ -149,9 +158,13 @@ export default function AppHeader() {
       // Draft / unsaved — legacy behaviour.
       setProjectName(trimmed)
     }
-  }, [nameInput, projectName, currentProject, setProjectName, renameProjectInStore, queryClient])
+  }, [nameInput, projectName, currentProject, readOnly, setProjectName, renameProjectInStore, queryClient])
 
   const startEditName = useCallback(() => {
+    // Don't open the inline editor for a locked (read-only) project — renaming
+    // is a mutation. Silent here (no toast) because this also fires on focus;
+    // commitName carries the explanatory toast for the keyboard/Enter path.
+    if (readOnly && currentProject && currentProject === projectName) return
     setNameInput(projectName)
     setEditingName(true)
     // The button is about to unmount and the <input> ref is on a not-yet-
@@ -163,7 +176,7 @@ export default function AppHeader() {
       nameRef.current?.focus()
       nameRef.current?.select()
     }, 0)
-  }, [projectName])
+  }, [projectName, readOnly, currentProject])
 
   // ── Search ─────────────────────────────────────────────────────────────────
   const [searchVal, setSearchVal] = useState('')
@@ -731,7 +744,9 @@ export default function AppHeader() {
             data-project-name-editor
             onClick={startEditName}
             onFocus={startEditName}
-            title="Click to rename project"
+            title={readOnly && currentProject && currentProject === projectName
+              ? 'Read-only — another user is editing this project'
+              : 'Click to rename project'}
             className="text-[11px] font-semibold text-text truncate max-w-[180px] hover:text-accent transition-colors cursor-text"
           >
             {projectName}

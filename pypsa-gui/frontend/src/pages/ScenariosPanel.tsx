@@ -6,6 +6,7 @@ import { projectsApi } from '../api/projects'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, saveProjectQuietly, switchToProject } from '../utils/projectActions'
+import { evaluateMutation } from '../utils/mutationGuard'
 import { confirmToast } from '../utils/toasts'
 import { appLog } from '../store/simulationStore'
 import type { ProjectInfo } from '../api/types'
@@ -104,6 +105,9 @@ export default function ScenariosPanel() {
   const setSlidePanel     = useUIStore(s => s.setSlidePanel)
   const setCompareRailOpen = useUIStore(s => s.setCompareRailOpen)
   const setProjectSwitchInProgress = useUIStore(s => s.setProjectSwitchInProgress)
+  // Read-only when another user holds the active project's edit lock (auth
+  // mode). Mutating actions (branch a scenario, delete) are gated on it.
+  const readOnly = useUIStore(s => s.readOnly)
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -113,6 +117,16 @@ export default function ScenariosPanel() {
   })
 
   const forest = useMemo(() => buildScenarioForest(projects as ProjectInfo[]), [projects])
+
+  // Map project name → stable UUID (when known). Auth-mode routes are
+  // UUID-backed; we prefer the id (falling back to the name for legacy
+  // single-user mode) for create/delete/switch API calls so those routes
+  // resolve unambiguously, while the UI keeps displaying human-friendly names.
+  const idByName = useMemo(
+    () => new Map((projects as ProjectInfo[]).map(p => [p.name, p.id ?? null])),
+    [projects],
+  )
+  const apiIdFor = (name: string): string => idByName.get(name) || name
 
   // Lineage breadcrumb: walk the parent_project chain from the current
   // project up to its root, root-most first. Used in the panel header so
@@ -133,8 +147,18 @@ export default function ScenariosPanel() {
     return chain
   }, [currentProject, projects])
 
-  const [creating, setCreating] = useState<{ base: string } | null>(null)
+  // `base` is the human-friendly parent name (header display); `baseId` is the
+  // UUID-backed route key (id||name) the createScenario call uses.
+  const [creating, setCreating] = useState<{ base: string; baseId: string } | null>(null)
   const [switching, setSwitching] = useState<string | null>(null)
+
+  // Shared read-only guard for the panel's mutating actions. Returns true when
+  // the action may proceed; otherwise toasts and returns false.
+  const guardMutation = (): boolean => {
+    const verdict = evaluateMutation(readOnly)
+    if (!verdict.allowed) toast.error(verdict.blockedMessage!)
+    return verdict.allowed
+  }
 
   const switchTo = async (name: string) => {
     if (name === currentProject) {
@@ -176,8 +200,10 @@ export default function ScenariosPanel() {
       // B8 instant switch: activate (pointer swap) + re-key reactive queries to
       // the target's RETAINED cache. switchToProject re-saves the (just-saved)
       // outgoing project — idempotent — then does the swap; NO component-table
-      // refetch (deliberately not invalidateNetworkQueries).
-      const r = await switchToProject(name, qc)
+      // refetch (deliberately not invalidateNetworkQueries). Address the target
+      // by its UUID when known so the auth-mode activate route resolves it
+      // unambiguously (the backend returns the canonical name in `activated`).
+      const r = await switchToProject(apiIdFor(name), qc)
       switch (r.status) {
         case 'switched':
           appLog('INFO', `Switched to scenario '${name}'`)
@@ -211,9 +237,10 @@ export default function ScenariosPanel() {
 
   const deleteMut = useMutation({
     // Returns the full {deleted, failed} response — same shape as Projects.tsx
-    // deleteMut so the two pages don't drift.
-    mutationFn: (params: { name: string; cascade: boolean }) =>
-      projectsApi.delete(params.name, params.cascade),
+    // deleteMut so the two pages don't drift. `id` is the UUID-backed route key
+    // (id||name); `name` is kept for display + the cascade re-prompt.
+    mutationFn: (params: { id: string; name: string; cascade: boolean }) =>
+      projectsApi.delete(params.id, params.cascade),
     onSuccess: async ({ deleted, failed }) => {
       qc.invalidateQueries({ queryKey: ['projects'] })
       // If the active project (or one of its ancestors) was deleted,
@@ -252,7 +279,7 @@ export default function ScenariosPanel() {
         const detail = e.response.data?.detail ?? 'has child scenarios'
         confirmToast(
           `${detail} — delete it and all its child scenarios?`,
-          () => deleteMut.mutate({ name: params.name, cascade: true }),
+          () => deleteMut.mutate({ id: params.id, name: params.name, cascade: true }),
           { confirmLabel: 'Delete all', danger: true },
         )
         return
@@ -331,9 +358,10 @@ export default function ScenariosPanel() {
                   key={root.project.name}
                   node={root}
                   currentProject={currentProject}
+                  readOnly={readOnly}
                   onSwitch={switchTo}
-                  onCreateChild={(base) => setCreating({ base })}
-                  onDelete={(name) => deleteMut.mutate({ name, cascade: false })}
+                  onCreateChild={(base) => { if (guardMutation()) setCreating({ base, baseId: apiIdFor(base) }) }}
+                  onDelete={(name) => { if (guardMutation()) deleteMut.mutate({ id: apiIdFor(name), name, cascade: false }) }}
                 />
               ))}
             </div>
@@ -344,6 +372,7 @@ export default function ScenariosPanel() {
       {creating && (
         <CreateScenarioDialog
           base={creating.base}
+          baseId={creating.baseId}
           onClose={() => setCreating(null)}
           onCreated={(info) => {
             setCreating(null)
@@ -368,12 +397,15 @@ export default function ScenariosPanel() {
 interface RowProps {
   node: ScenarioNode
   currentProject: string | null
+  // When true, another user holds the active project's edit lock — the
+  // mutating affordances (branch, delete) are disabled with a hint.
+  readOnly: boolean
   onSwitch: (name: string) => void
   onCreateChild: (base: string) => void
   onDelete: (name: string) => void
 }
 
-function ScenarioNodeRow({ node, currentProject, onSwitch, onCreateChild, onDelete }: RowProps) {
+function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChild, onDelete }: RowProps) {
   const isCurrent = node.project.name === currentProject
   const indent = node.depth * 16
   const { type: scenType, text: scenText } = parseScenType(node.project.scenario_description)
@@ -420,13 +452,15 @@ function ScenarioNodeRow({ node, currentProject, onSwitch, onCreateChild, onDele
               backend now 409s that). Disable on non-active rows with a hint. */}
           <button
             onClick={() => isCurrent && onCreateChild(node.project.name)}
-            disabled={!isCurrent}
+            disabled={!isCurrent || readOnly}
             className={`p-1.5 transition-colors rounded ${
-              isCurrent
+              isCurrent && !readOnly
                 ? 'text-muted hover:text-accent'
                 : 'text-ink-300 cursor-not-allowed'
             }`}
-            title={isCurrent
+            title={readOnly
+              ? 'Read-only — another user is editing this project'
+              : isCurrent
               ? 'Branch a child scenario from this project'
               : 'Switch to this scenario first to branch a child from it'}
           >
@@ -434,8 +468,13 @@ function ScenarioNodeRow({ node, currentProject, onSwitch, onCreateChild, onDele
           </button>
           <button
             onClick={() => onDelete(node.project.name)}
-            className="p-1.5 text-muted hover:text-danger transition-colors rounded"
-            title="Delete this scenario"
+            disabled={readOnly}
+            className={`p-1.5 transition-colors rounded ${
+              readOnly ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-danger'
+            }`}
+            title={readOnly
+              ? 'Read-only — another user is editing this project'
+              : 'Delete this scenario'}
           >
             <Trash2 size={13} />
           </button>
@@ -446,6 +485,7 @@ function ScenarioNodeRow({ node, currentProject, onSwitch, onCreateChild, onDele
           key={child.project.name}
           node={child}
           currentProject={currentProject}
+          readOnly={readOnly}
           onSwitch={onSwitch}
           onCreateChild={onCreateChild}
           onDelete={onDelete}
@@ -458,12 +498,15 @@ function ScenarioNodeRow({ node, currentProject, onSwitch, onCreateChild, onDele
 // ── Create dialog ───────────────────────────────────────────────────────────
 
 interface DialogProps {
+  // Human-friendly parent name for the header display.
   base: string
+  // UUID-backed route key (id||name) used for the createScenario API call.
+  baseId: string
   onClose: () => void
   onCreated: (info: ProjectInfo) => void
 }
 
-function CreateScenarioDialog({ base, onClose, onCreated }: DialogProps) {
+function CreateScenarioDialog({ base, baseId, onClose, onCreated }: DialogProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   // Scenario category — 'baseline' is the canonical reference run; the others
@@ -474,7 +517,7 @@ function CreateScenarioDialog({ base, onClose, onCreated }: DialogProps) {
     mutationFn: () => {
       const desc = description.trim()
       const tagged = `[${scenType}] ${desc}`.trim()
-      return projectsApi.createScenario(base, name.trim(), tagged)
+      return projectsApi.createScenario(baseId, name.trim(), tagged)
     },
     onSuccess: onCreated,
     onError: (err) => {
