@@ -35,7 +35,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const currentProject = useUIStore(s => s.currentProject)
+  const lastProjectId = useUIStore(s => s.lastProjectId)
   const { login, status } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -47,8 +47,8 @@ export default function LoginPage() {
   const locationState = location.state as AuthLocationState
   const requestedPath = searchParams.get('next') ?? locationState?.from ?? null
   const destination = useMemo(
-    () => resolvePostLoginDestination(requestedPath, currentProject),
-    [currentProject, requestedPath],
+    () => resolvePostLoginDestination(requestedPath, lastProjectId),
+    [lastProjectId, requestedPath],
   )
 
   if (status === 'authenticated') {

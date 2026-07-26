@@ -286,6 +286,7 @@ export interface ImportSummary {
   storage_units: number; stores: number; loads: number; transformers: number; snapshots: number
 }
 export interface ProjectInfo {
+  id?: string | null
   name: string; created_at: string; has_solver_config: boolean
   bus_count: number; snapshot_count: number; objective: number | null
   // True when an interrupted save left a `*.tmp` sibling next to the

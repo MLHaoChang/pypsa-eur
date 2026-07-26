@@ -268,9 +268,11 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
   // 3. Activate the target backend-side (instant pointer swap when resident).
   //    A cold activate may EVICT the LRU resident project(s) to stay under the
   //    server's RESIDENT_CAP (B9); the response lists those ids.
+  let activated = target
   let evicted: string[] = []
   try {
     const res = await projectsApi.activate(target)
+    activated = res.activated
     evicted = res.evicted ?? []
   } catch (e) {
     const status = (e as { response?: { status?: number } })?.response?.status
@@ -287,18 +289,18 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
 
   // 4. Re-key all reactive queries to nk(target,…). React Query serves the
   //    target's retained cache — instant, no refetch when warm.
-  useUIStore.getState().setCurrentProject(target)
-  useUIStore.getState().setProjectName(target)
+  useUIStore.getState().setCurrentProject(activated, target !== activated ? target : undefined)
+  useUIStore.getState().setProjectName(activated)
 
   // 5. Refresh ONLY the small lifecycle roots so the StatusBar / title /
   //    snapshot picker reflect the activated backend state. DELIBERATELY not
   //    invalidateNetworkQueries — that would nuke the retained component cache.
-  qc.invalidateQueries({ queryKey: nk(target, 'meta') })
-  qc.invalidateQueries({ queryKey: nk(target, 'simulationStatus') })
-  qc.invalidateQueries({ queryKey: nk(target, 'snapshots') })
+  qc.invalidateQueries({ queryKey: nk(activated, 'meta') })
+  qc.invalidateQueries({ queryKey: nk(activated, 'simulationStatus') })
+  qc.invalidateQueries({ queryKey: nk(activated, 'snapshots') })
 
   // 6. LRU signal for B9 eviction.
-  useUIStore.getState().touchTab(target)
+  useUIStore.getState().touchTab(activated)
 
   return { status: 'switched' }
 }

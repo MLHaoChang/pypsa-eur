@@ -32,8 +32,25 @@ export interface RestoreResult {
   snapshot_count: number
 }
 
+interface ListProjectsOptions {
+  rootsOnly?: boolean
+}
+
+function listProjects(): Promise<ProjectInfo[]>
+function listProjects(options: ListProjectsOptions): Promise<ProjectInfo[]>
+function listProjects(options?: ListProjectsOptions): Promise<ProjectInfo[]> {
+  return client.get<ProjectInfo[]>('/projects/', {
+    params: options?.rootsOnly ? { roots_only: true } : undefined,
+  }).then((r) => {
+    const projects = r.data
+    return options?.rootsOnly
+      ? projects.filter(project => project.parent_project == null)
+      : projects
+  })
+}
+
 export const projectsApi = {
-  list: () => client.get<ProjectInfo[]>('/projects/').then(r => r.data),
+  list: listProjects,
   // Phase 8 scenarios. A scenario is a normal project with metadata
   // `parent_project=<base>`. `createScenario` saves the current in-memory
   // network to a new project keyed by `name`, branched off `base`. Caller

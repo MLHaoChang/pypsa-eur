@@ -1,15 +1,14 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { Link, Navigate, Route, Routes } from 'react-router-dom'
 import App from './App'
 import { useAuth } from './auth/AuthProvider'
 import { authEnabled } from './auth/config'
 import RequireAdmin from './auth/RequireAdmin'
 import RequireAuth from './auth/RequireAuth'
-import { getPostLoginPath } from './auth/resume'
 import LoginPage from './pages/auth/LoginPage'
 import ResetPasswordPage from './pages/auth/ResetPasswordPage'
 import SetPasswordPage from './pages/auth/SetPasswordPage'
-import { useUIStore } from './store/uiStore'
+import ProjectsHomePage from './pages/ProjectsHomePage'
 
 function AuthShell({
   title,
@@ -31,68 +30,6 @@ function AuthShell({
         <div className="space-y-4">{children}</div>
       </div>
     </div>
-  )
-}
-
-function AuthButton(
-  props: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode },
-) {
-  const { children, className, ...buttonProps } = props
-  return (
-    <button
-      {...buttonProps}
-      className={`inline-flex w-full items-center justify-center rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function ProjectsHomePage() {
-  const navigate = useNavigate()
-  const currentProject = useUIStore(s => s.currentProject)
-  const { logout, user } = useAuth()
-  const resumePath = currentProject ? getPostLoginPath(currentProject) : '/app'
-
-  async function handleLogout() {
-    await logout()
-    navigate('/login', { replace: true })
-  }
-
-  return (
-    <AuthShell
-      title="Projects"
-      subtitle="Placeholder landing page for the auth shell. Later tasks can replace this with the real projects home."
-    >
-      <div className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-muted">
-        Signed in as <span className="font-medium text-text">{user?.email ?? 'unknown user'}</span>
-      </div>
-      <div className="space-y-3">
-        <Link
-          className="inline-flex w-full items-center justify-center rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition hover:opacity-90"
-          to={resumePath}
-        >
-          {currentProject ? `Resume ${currentProject}` : 'Open editor'}
-        </Link>
-        <Link
-          className="inline-flex w-full items-center justify-center rounded-lg border border-border bg-bg px-3 py-2 text-sm font-medium text-text transition hover:bg-bg-2"
-          to="/app"
-        >
-          Go to app shell
-        </Link>
-        {user?.is_super_admin && (
-          <Link
-            className="inline-flex w-full items-center justify-center rounded-lg border border-border bg-bg px-3 py-2 text-sm font-medium text-text transition hover:bg-bg-2"
-            to="/admin"
-          >
-            Open admin shell
-          </Link>
-        )}
-        <AuthButton className="bg-bg text-text border border-border hover:bg-bg-2" onClick={handleLogout} type="button">
-          Sign out
-        </AuthButton>
-      </div>
-    </AuthShell>
   )
 }
 

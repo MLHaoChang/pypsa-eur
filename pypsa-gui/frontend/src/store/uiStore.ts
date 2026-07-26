@@ -42,6 +42,7 @@ export type Density = 'comfortable' | 'compact'
 const SIDEBAR_MODE_KEY = 'network-diagram:sidebar-mode'
 const PROJECT_NAME_KEY = 'network-diagram:project-name'
 const CURRENT_PROJECT_KEY = 'network-diagram:current-project'
+const LAST_PROJECT_ID_KEY = 'network-diagram:last-project-id'
 const AUTOSAVE_KEY = 'network-diagram:autosave'
 const OPEN_TABS_KEY = 'network-diagram:open-tabs'
 const CANVAS_VIEW_KEY = 'network-diagram:canvas-view'
@@ -72,6 +73,10 @@ function storedProjectName(): string {
 
 function storedCurrentProject(): string | null {
   try { return localStorage.getItem(CURRENT_PROJECT_KEY) || null } catch { return null }
+}
+
+function storedLastProjectId(): string | null {
+  try { return localStorage.getItem(LAST_PROJECT_ID_KEY) || storedCurrentProject() || null } catch { return storedCurrentProject() }
 }
 
 function storedAutosave(): boolean {
@@ -248,6 +253,10 @@ interface UIStore {
   compareRailWidth: number
   bottomTabRequest: string | null
   currentProject: string | null
+  // Resume target for auth / projects-home flows. Prefer a stable UUID when a
+  // caller knows it, but keep the project name as a compatible fallback so
+  // single-user mode and older persisted sessions still resume cleanly.
+  lastProjectId: string | null
   autosaveEnabled: boolean
   openTabs: OpenTab[]
   // ISO timestamp of the last save for each known project. UI consumers
@@ -294,7 +303,8 @@ interface UIStore {
   setCompareRailWidth: (px: number) => void
   requestBottomTab: (tab: string) => void
   clearBottomTabRequest: () => void
-  setCurrentProject: (name: string | null) => void
+  setCurrentProject: (name: string | null, preferredId?: string | null) => void
+  setLastProjectId: (id: string | null) => void
   setAutosaveEnabled: (v: boolean) => void
   addTab: (name: string) => void
   closeTab: (name: string) => void
@@ -337,6 +347,7 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   currentProject: storedCurrentProject(),
+  lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(),
   openTabs: (() => {
     const tabs = storedOpenTabs()
@@ -435,10 +446,14 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   requestBottomTab: (tab) => set({ bottomTabRequest: tab }),
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
-  setCurrentProject: (name) => {
+  setCurrentProject: (name, preferredId) => {
     try {
-      if (name) localStorage.setItem(CURRENT_PROJECT_KEY, name)
-      else localStorage.removeItem(CURRENT_PROJECT_KEY)
+      if (name) {
+        localStorage.setItem(CURRENT_PROJECT_KEY, name)
+        localStorage.setItem(LAST_PROJECT_ID_KEY, preferredId ?? name)
+      } else {
+        localStorage.removeItem(CURRENT_PROJECT_KEY)
+      }
     } catch { /* noop */ }
     set(s => {
       // Clear selection on every project switch — the previous project's
@@ -456,6 +471,7 @@ export const useUIStore = create<UIStore>((set) => ({
         // Defaults to 'lopf' for a never-visited / fresh project.
         resultSource: name ? (s.resultSourceByProject[name] ?? 'lopf') : 'lopf',
       }
+      if (name) patch.lastProjectId = preferredId ?? name
       if (name && !s.openTabs.some(t => t.name === name)) {
         const nextTabs = [...s.openTabs, { name, lastInteractedAt: Date.now() }]
         persistOpenTabs(nextTabs)
@@ -470,6 +486,13 @@ export const useUIStore = create<UIStore>((set) => ({
       }
       return patch
     })
+  },
+  setLastProjectId: (id) => {
+    try {
+      if (id) localStorage.setItem(LAST_PROJECT_ID_KEY, id)
+      else localStorage.removeItem(LAST_PROJECT_ID_KEY)
+    } catch { /* noop */ }
+    set({ lastProjectId: id })
   },
   setAutosaveEnabled: (v) => {
     try { localStorage.setItem(AUTOSAVE_KEY, String(v)) } catch { /* noop */ }
@@ -503,6 +526,7 @@ export const useUIStore = create<UIStore>((set) => ({
   }),
   renameProject: (oldName, newName) => set(s => {
     const wasCurrent = s.currentProject === oldName
+    const nextLastProjectId = s.lastProjectId === oldName ? newName : s.lastProjectId
     // openTabs / recents — substitute the name in-place to preserve order
     // (and the tab's LRU timestamp).
     const nextTabs = s.openTabs.map(t => t.name === oldName ? { ...t, name: newName } : t)
@@ -523,11 +547,18 @@ export const useUIStore = create<UIStore>((set) => ({
     if (wasCurrent) {
       try { localStorage.setItem(CURRENT_PROJECT_KEY, newName) } catch { /* noop */ }
     }
+    if (nextLastProjectId !== s.lastProjectId) {
+      try {
+        if (nextLastProjectId) localStorage.setItem(LAST_PROJECT_ID_KEY, nextLastProjectId)
+        else localStorage.removeItem(LAST_PROJECT_ID_KEY)
+      } catch { /* noop */ }
+    }
     persistOpenTabs(nextTabs)
     persistRecents(nextRecents)
     persistLastSaved(nextLastSaved)
     return {
       currentProject: wasCurrent ? newName : s.currentProject,
+      lastProjectId: nextLastProjectId,
       openTabs: nextTabs,
       recents: nextRecents,
       lastSavedByProject: nextLastSaved,

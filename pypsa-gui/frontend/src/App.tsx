@@ -163,7 +163,7 @@ function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: () => voi
 export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
-    lastSavedByProject, markProjectSaved, pruneRecents, recents,
+    lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
     theme, density, compareRailOpen, setCompareRailOpen,
   } = useUIStore()
 
@@ -220,6 +220,12 @@ export default function App() {
       if (!recents.includes(p.name)) continue
       if (lastSavedByProject[p.name]) continue
       if (p.created_at) markProjectSaved(p.name, p.created_at)
+    }
+    if (currentProject) {
+      const currentInfo = backendProjects.find(p => p.name === currentProject)
+      if (currentInfo?.id && currentInfo.id !== lastProjectId) {
+        setLastProjectId(currentInfo.id)
+      }
     }
   // recents intentionally NOT in deps — we only want to seed once per backend refresh, not loop.
   // eslint-disable-next-line react-hooks/exhaustive-deps
