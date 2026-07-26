@@ -49,26 +49,47 @@ def _is_local_origin(base_url: str) -> bool:
     return hostname in {"localhost", "127.0.0.1", "::1"}
 
 
-def _set_session_cookie(response: Response, raw_token: str) -> None:
+def _cookie_flags(request: Request | None = None) -> tuple[str, bool]:
+    """Return (samesite, secure) for the session cookie."""
     settings = get_settings()
+    host = (request.headers.get("host") if request is not None else "") or ""
+    hostname = host.split(":")[0].lower()
+    is_local_host = hostname in {"localhost", "127.0.0.1", "::1", "", "testserver"}
+    # Cursor cloud/mobile HTTPS tunnel hosts need SameSite=None; Secure so the
+    # session cookie is accepted inside the preview iframe.
+    if hostname.endswith(".cursorusercontent.com"):
+        return "none", True
+    if (
+        request is not None
+        and request.url.scheme == "https"
+        and not is_local_host
+    ):
+        return "none", True
+    return "lax", not _is_local_origin(settings.public_base_url)
+
+
+def _set_session_cookie(response: Response, raw_token: str, request: Request | None = None) -> None:
+    settings = get_settings()
+    samesite, secure = _cookie_flags(request)
     response.set_cookie(
         key=settings.session_cookie_name,
         value=raw_token,
         httponly=True,
-        samesite="lax",
-        secure=not _is_local_origin(settings.public_base_url),
+        samesite=samesite,
+        secure=secure,
         max_age=settings.session_ttl_hours * 60 * 60,
         path="/",
     )
 
 
-def _clear_session_cookie(response: Response) -> None:
+def _clear_session_cookie(response: Response, request: Request | None = None) -> None:
     settings = get_settings()
+    samesite, secure = _cookie_flags(request)
     response.delete_cookie(
         key=settings.session_cookie_name,
         httponly=True,
-        samesite="lax",
-        secure=not _is_local_origin(settings.public_base_url),
+        samesite=samesite,
+        secure=secure,
         path="/",
     )
 
@@ -87,6 +108,7 @@ def _serialize_user(user: User, *, org_id: str | None = None, role: str | None =
 @router.post("/login")
 def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     db: DBSession = Depends(get_db),
 ) -> dict[str, object]:
@@ -100,7 +122,7 @@ def login(
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     raw_token, _session = create_session(db, user.id)
-    _set_session_cookie(response, raw_token)
+    _set_session_cookie(response, raw_token, request)
     membership = get_user_membership(db, user.id)
     return {
         "ok": True,
@@ -129,7 +151,7 @@ def logout(
     except Exception:
         db.rollback()
         logger.warning("best-effort project lock release failed on logout", exc_info=True)
-    _clear_session_cookie(response)
+    _clear_session_cookie(response, request)
     return {"ok": True}
 
 

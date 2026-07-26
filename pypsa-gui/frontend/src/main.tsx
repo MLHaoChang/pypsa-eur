@@ -32,7 +32,10 @@ async function boot(): Promise<void> {
     await window.__PYPSA_AUTH_BOOT__
   }
 
-  createRoot(document.getElementById('root')!).render(
+    // Mark the real React app so a static login page can detect a stuck SPA tab.
+    ;(window as unknown as { __PYPSA_REACT_APP__?: boolean }).__PYPSA_REACT_APP__ = true
+
+    createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <BrowserRouter>
         <QueryClientProvider client={queryClient}>

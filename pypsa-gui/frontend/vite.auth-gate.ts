@@ -1,14 +1,19 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type { Plugin } from 'vite'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
 /**
- * Dev-server gate: unauthenticated HTML navigations never get the workbench SPA.
- * Static /login.html always works even when a stale React bundle is stuck.
+ * Dev-server gate: unauthenticated navigations never receive the React SPA.
+ *
+ * Important: do NOT key off Accept text/html. Cursor's in-app preview often
+ * requests document routes with Accept star/star, which previously skipped the
+ * gate and served the workbench bundle for /app and /projects.
  */
-export function authHtmlGatePlugin() {
-  const AUTH_PAGES = new Set([
-    '/login',
-    '/login.html',
-    '/set-password',
-    '/reset-password',
-  ])
+export function authHtmlGatePlugin(): Plugin {
+  const loginHtmlPath = path.resolve(__dirname, 'public/login.html')
 
   async function hasSession(cookieHeader: string | undefined): Promise<boolean> {
     try {
@@ -32,29 +37,30 @@ export function authHtmlGatePlugin() {
     }
   }
 
+  function isStaticAsset(urlPath: string): boolean {
+    if (urlPath.startsWith('/src/')) return true
+    if (urlPath.startsWith('/@')) return true
+    if (urlPath.startsWith('/node_modules/')) return true
+    if (urlPath.startsWith('/api/')) return true
+    if (urlPath.startsWith('/assets/')) return true
+    if (urlPath.startsWith('/favicon')) return true
+    const leaf = urlPath.split('/').pop() ?? ''
+    // Real assets have non-html extensions (.js, .css, .map, images, ...)
+    if (leaf.includes('.') && !leaf.endsWith('.html')) return true
+    return false
+  }
+
   return {
     name: 'pypsa-auth-html-gate',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        const accept = req.headers.accept ?? ''
-        const urlPath = (req.url ?? '/').split('?')[0] || '/'
-        const isDocument =
-          req.method === 'GET'
-          && (accept.includes('text/html') || urlPath === '/' || urlPath.endsWith('.html'))
-        const isAsset =
-          urlPath.startsWith('/src/')
-          || urlPath.startsWith('/@')
-          || urlPath.startsWith('/node_modules/')
-          || urlPath.startsWith('/assets/')
-          || urlPath.startsWith('/api/')
-          || urlPath.includes('.')
-
-        if (!isDocument || isAsset) {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
           next()
           return
         }
 
-        if (AUTH_PAGES.has(urlPath) || urlPath === '/login.html') {
+        const urlPath = (req.url ?? '/').split('?')[0] || '/'
+        if (isStaticAsset(urlPath)) {
           next()
           return
         }
@@ -69,10 +75,20 @@ export function authHtmlGatePlugin() {
           return
         }
 
-        res.statusCode = 302
-        res.setHeader('Location', '/login.html')
-        res.setHeader('Cache-Control', 'no-store')
-        res.end()
+        // Rewrite (200) — do not 302. Some Cursor preview sessions ignore
+        // redirects and keep the old SPA document alive.
+        try {
+          const html = fs.readFileSync(loginHtmlPath, 'utf8')
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+          res.setHeader('Pragma', 'no-cache')
+          res.end(html)
+        } catch (err) {
+          console.error('[pypsa-auth-html-gate] failed to read login.html', err)
+          res.statusCode = 503
+          res.end('Login page unavailable. Restart Vite.')
+        }
       })
     },
   }
