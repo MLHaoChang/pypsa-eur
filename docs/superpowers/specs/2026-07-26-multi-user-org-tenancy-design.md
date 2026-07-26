@@ -101,7 +101,11 @@ Allow if authenticated user is in the project’s org AND one of:
 
 Otherwise return **404** (do not reveal existence).
 
-**Delete / rename policy (v1):** tree-root creator or org admin only (same people who manage membership). Cascade-delete of scenario children stays as today when deleting a node that has descendants (explicit `cascade=true`).
+**Delete / rename policy (v1)**
+
+- **Tree root:** root creator or org admin only (same people who manage membership).
+- **Scenario node:** root creator, org admin, or that scenario’s `created_by`.
+- Cascade-delete of descendants stays as today when deleting a node that has children (explicit `cascade=true`).
 
 ### 5.3 Storage layout
 
@@ -341,14 +345,28 @@ Authenticated access to `/login` redirects to `/projects`.
 - Feature can ship behind config flag `PYPSA_GUI_AUTH_ENABLED` during development; production shared deployments require auth on.
 - Iterate UX after v1 baseline (login split, resume-first home, full admin console) without changing the tenancy model.
 
+## 14.1 Flexibility / iteration readiness (v1 constraint)
+
+v1 is a baseline we expect to iterate on. Implementation must prefer seams over hardwiring:
+
+- **Auth gate is a single middleware/dependency** — routers call `require_user` / `require_project_access`, not ad-hoc cookie parsing.
+- **ACL is one service** (`project_acl.can_access`, `resolve_tree_root`, `list_accessible`) so later per-node roles or viewer/editor can change in one place.
+- **Membership stored on tree root in v1**, but schema keeps `project_memberships.project_id` so per-scenario ACLs can be introduced without a redesign.
+- **Storage behind a path resolver** (`storage_path_for(org_id, project_id)`) so filesystem → object storage is a later swap.
+- **Sessions/tokens/email are isolated modules** so SSO or magic-link can replace password flows without rewriting project code.
+- **Frontend route map is explicit** (`/login`, `/projects`, `/admin/*`, `/app`) so screens can be redesigned independently of the workbench.
+- **Feature flag** `PYPSA_GUI_AUTH_ENABLED` allows stepwise integration and rollback during development.
+- Do **not** encode UX copy or layout choices into backend contracts beyond stable JSON fields.
+
 ## 15. Open iteration items (post-v1 OK)
 
 - Polish visual system across workbench + home
 - SQLite local mode without Docker
 - Object storage backend for bundles
-- Finer per-project roles (viewer vs editor)
+- Finer per-project roles (viewer vs editor) and optional per-scenario ACL overrides
 - Multi-org membership / org switcher
-- SSO
+- SSO / OAuth
+- Richer Projects home tree expansion / scenario management outside the workbench
 
 ## 16. Decisions log
 
