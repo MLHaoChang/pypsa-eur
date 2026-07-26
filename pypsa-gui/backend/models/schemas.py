@@ -466,6 +466,10 @@ class ImportSummary(BaseModel):
 
 class ProjectInfo(BaseModel):
     name: str
+    # Stable project identifier. Populated with the DB-registry UUID (as a
+    # string) when multi-user auth is enabled; None in legacy single-user
+    # mode, where projects are identified by their (unique) on-disk name.
+    id: str | None = None
     created_at: str
     has_solver_config: bool
     bus_count: int
