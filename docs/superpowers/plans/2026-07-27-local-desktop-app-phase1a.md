@@ -63,6 +63,16 @@ One reviewer claim was itself wrong and is **not** actioned: `dist/login.html` d
 - **Both modes must keep working.** Every change is conditional on local mode or is mode-neutral. The web deployment is not being retired.
 - **Never delete auth code.** Local mode bypasses; it does not remove.
 - **Never reload or re-import modules in tests.** `del sys.modules["db.session"]` does not work for `from db import session`, and partial reloads split-brain `security`/`settings` for the rest of the session.
+- **Serialize strictly: edit → gate → commit → next task.** Do not write or edit *any*
+  file under `pypsa-gui/` while the current task's suite is running. Two ways this bites,
+  both hit during execution of this plan:
+  (a) editing a source file mid-run silently invalidates the gate — the run no longer
+  corresponds to any commit;
+  (b) creating the *next* task's test file mid-run is worse — it imports a symbol that
+  does not exist yet, pytest aborts with `exit=2` on a collection error, and the run
+  yields **no signal at all** rather than a partial one.
+  If you want to draft ahead, write to a scratch directory outside `pypsa-gui/` and move
+  the file in when its task starts.
 - **Every local-mode fixture seeds AND removes the local identity.** conftest's shared
   database persists users/orgs across the whole session by design, so a fixture that
   seeds without a `finally: remove_local_identity(db)` leaks a super-admin into every
