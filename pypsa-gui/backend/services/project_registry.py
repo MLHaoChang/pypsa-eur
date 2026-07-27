@@ -7,13 +7,19 @@ is identified by its name. When ``settings.pypsa_gui_auth_enabled`` is False
 that behaviour is preserved verbatim.
 
 When auth is enabled, projects are rows in the ``projects`` table, scoped to an
-organization, identified by a UUID, and stored under an org-scoped path
-(``storage_path_for(org_id, project_id)``). This module concentrates the
-DB-side logic — resolution (UUID *or* name within the caller's org), tree-aware
-ACL gating, row creation for roots and scenarios, and project-membership
-management — so the router itself only needs a thin ``if auth_enabled()``
-branch per endpoint and can keep reusing its path-based bundle IO helpers
-against ``Path(project.storage_path)``.
+organization and identified by a UUID. This module concentrates the DB-side
+logic — resolution (UUID *or* name within the caller's org), tree-aware ACL
+gating, row creation for roots and scenarios, and project-membership
+management — so the router needs only a thin ``if auth_enabled()`` branch per
+endpoint.
+
+**Storage paths changed in phase 1b (E1/E2), and this docstring used to
+describe the shape they replaced.** A project's directory now carries its
+NAME, and ``storage_path`` is stored RELATIVE to ``projects_root`` —
+``Belgium Grid`` locally, ``<org_uuid>/Belgium Grid`` on the web. Nothing may
+read the raw column: ``project_dir`` rejoins it with the configured root,
+``ensure_project_dir`` adds the mkdir, and
+``tests/test_project_dir_resolver.py`` fails the build for any other access.
 """
 from __future__ import annotations
 

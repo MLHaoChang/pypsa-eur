@@ -43,6 +43,12 @@ from services import project_registry
 # that is still being written.
 STAGING_SUFFIX = ".importing"
 
+# The current staging name is hidden and hash-derived
+# (`legacy_import.STAGING_PREFIX`). Dot-prefixed entries are skipped wholesale
+# here: they are never projects, and a staging directory holds a `network.nc`
+# so without this it reads as an orphan the operator is invited to adopt.
+HIDDEN_PREFIX = "."
+
 TMP_SUFFIX = ".tmp"
 
 
@@ -88,7 +94,9 @@ def scan(db: DBSession, root, *, org_segment: bool) -> ReconcileReport:
     orphan_dirs: list[Path] = []
     stale_tmp: list[Path] = []
     for directory in _candidate_dirs(root, org_segment=org_segment):
-        if directory.name.endswith(STAGING_SUFFIX):
+        if directory.name.endswith(STAGING_SUFFIX) or directory.name.startswith(
+            HIDDEN_PREFIX
+        ):
             continue
         stale_tmp.extend(sorted(directory.rglob(f"*{TMP_SUFFIX}")))
         if not (directory / "network.nc").exists():

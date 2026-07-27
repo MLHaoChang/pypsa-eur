@@ -114,7 +114,9 @@ class ProjectContext:
     # `PyPSAService.bind_project`; both None on an unbound context.
     org_id: str | None = None
     project_uuid: str | None = None
-    # Absolute org-scoped storage directory (`Project.storage_path`). Held on
+    # The project's RESOLVED storage directory — `project_registry.project_dir`,
+    # never the raw `Project.storage_path`, which is relative from phase 1b on
+    # and no longer org-scoped in local mode. Held on
     # the context so an eviction save writes to the row's real location instead
     # of re-deriving a path from the display name — which was wrong the moment
     # two orgs owned the same name.

@@ -13,10 +13,13 @@ single surviving `Path(row.storage_path)` resolves against the process CWD
 instead of the projects root — and under pytest that CWD is
 `pypsa-gui/backend`, inside the checkout. It flags **any** attribute access
 named `storage_path`, not only ones wrapped in `Path(...)`: a regex keyed on
-`Path(` cannot see `project_registry.py:146`
-(`ctx.storage_dir = str(project.storage_path)`), whose value flows straight
-into `Path(...)` at `chat_service.py:758`, `upload_service.py:154`,
-`pypsa_service.py:696` and `solve_queue.py:368`.
+`Path(` cannot see `bind_context`'s assignment to `ctx.storage_dir`, whose
+value flows straight into `Path(...)` at `chat_service.py:758`,
+`upload_service.py:154`, `pypsa_service.py:696` and `solve_queue.py:368`.
+
+Citations below name FUNCTIONS rather than line numbers wherever the line sits
+in a file this phase edits: a review found nine stale `file:line` references,
+most of them shifted by the very commits that wrote them.
 """
 from __future__ import annotations
 
@@ -77,9 +80,9 @@ def _project(storage_path) -> Project:
 
 def test_project_dir_does_not_create_anything(projects_root):
     """
-    `routers/projects.py:578` calls this for every row of `GET /api/projects/`.
-    If it mkdir'd, listing would resurrect the directory of a project deleted
-    in Finder and defeat Task 6's missing-dir detection.
+    `_project_info_db` calls this for every row of `GET /api/projects/`. If it
+    mkdir'd, listing would resurrect the directory of a project deleted in
+    Finder and defeat `storage_reconcile`'s missing-dir detection.
     """
     absent = projects_root / "Belgium Grid"
     resolved = project_registry.project_dir(_project(absent))

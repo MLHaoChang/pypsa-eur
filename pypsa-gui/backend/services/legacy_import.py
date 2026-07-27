@@ -9,25 +9,37 @@ checking the result.
 
 Sequence per project — **stage, receipt, rename, row**:
 
-    <dest>.importing/          copy the tree here
+    .pypsa-importing-<hash>/   copy the tree here (hidden, and a name no
+                               project directory can ever equal)
     verify                     every source file present at the same size,
                                plus a SHA-256 of network.nc
-    <dest>.importing/.pypsa-import-receipt.json
+    .../.pypsa-import-receipt.json
                                written INSIDE the staging directory, so it
                                moves atomically with the data
     os.rename -> <dest>        one operation
-    INSERT                     the row
+    INSERT + COMMIT            the row, on its own
 
 A crash between the rename and the insert therefore leaves a destination
 carrying a matching receipt, which the next run recognises as "copied, needs
 row" and completes. Without the receipt it would look like a foreign directory
 the importer must refuse — and would be skipped forever.
 
-**Idempotence keys on (source root, destination root, install id).** Source
-root alone breaks on a synced checkout: importing on machine A writes a marker
-into the shared tree, and machine B then sees a match and imports nothing,
-silently. The install id is persisted in app-data, never per-process — an
-ephemeral id makes every receipt unrecognisable to the next run.
+**Idempotence has TWO signals, and both are needed.**
+
+  *The receipt* inside each destination, keyed on (source root, source
+  directory, destination root). It recognises an already-imported tree on a
+  machine with no manifests at all — a restored backup, a reinstall — and it is
+  what keeps the synced-checkout case working: machine B has its own
+  destination root, so machine A's receipts do not match and its projects still
+  import.
+
+  *The run manifests* in app-data, read back by `_ledger`. The receipt lives
+  INSIDE the destination, so deleting the project through the UI deletes the
+  marker with it — and a review found the next launch then re-imported a
+  project the user had just removed, every launch, for as long as the legacy
+  root stayed configured. The manifests survive that. They are the same files
+  `--rollback` consumes, so rolling a run back also makes those projects
+  importable again.
 
 **Size is never an "already imported" signal.** In the tree this was written
 against, `KeepA` and `KeepB` are both 39,716 bytes and three
@@ -302,6 +314,12 @@ def _receipt_matches(receipt: dict | None, *, source_root, source_dir_name, dest
     """
     Three keys, not one. Source root alone means a synced checkout carrying
     machine A's marker suppresses the import on machine B, silently.
+
+    `install_id` is deliberately NOT among them. It is recorded in the receipt
+    for provenance, but matching on it would mean a reinstall — new app-data,
+    same projects folder — fails to recognise its own destinations and imports
+    everything a second time alongside. `dest_root` already carries the
+    distinction `install_id` was reaching for.
     """
     if receipt is None:
         return False

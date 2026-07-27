@@ -9,9 +9,12 @@ Every rule tested here came from a confirmed finding, not from imagination:
   forever. The receipt is written INSIDE the staging directory, so it moves
   atomically with the data.
 
-  **Idempotence keys on (source root, destination root, install id).** Source
-  root alone breaks on a synced checkout: import on machine A writes a manifest
-  into the synced tree, machine B sees a match and imports nothing, silently.
+  **Idempotence has two signals.** The receipt inside each destination
+  recognises an already-imported tree with no manifests at all, and keeps the
+  synced-checkout case importing because machine B's destination root differs.
+  The run manifests in app-data survive the user DELETING a project — the
+  receipt goes with it, and without the ledger the next launch brings the
+  project straight back.
 
   **Size is never an "already imported" signal.** In the real tree `KeepA` and
   `KeepB` are both 39,716 bytes and three `chatbot_validation_*` projects are

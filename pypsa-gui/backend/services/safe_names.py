@@ -13,12 +13,14 @@ D1 targets Windows and macOS, whose rules disagree:
   macOS    is case-insensitive by default, so ``Belgium Grid`` and
            ``belgium grid`` are one directory.
   POSIX    hides a leading dot. A legacy ``.foo`` would import invisible;
-           ``routers/projects.py:188`` already rejects those on the way in.
+           ``routers/projects.py:195`` already rejects those on the way in.
+           (Not the regex at ``:94`` — that one PERMITS a leading dot; the
+           explicit ``name.startswith(".")`` check is what refuses it.)
 
 Two functions, deliberately separate. ``safe_dir_name`` is a pure string
 transform with no knowledge of the filesystem; ``unique_dir_name`` resolves
 collisions against a caller-supplied set. Callers assemble that set from the
-database **union** the directory listing — see ``storage_paths._taken_names``.
+database **union** the directory listing — see ``storage_paths.taken_names``.
 
 ``_MAX_LEN`` caps the DIRECTORY. Truncating ``Project.name`` is a separate
 concern in a separate place: the column is ``String(64)`` but SQLite does not

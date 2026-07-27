@@ -14,8 +14,9 @@ rules disagree:
   macOS    is case-insensitive by default, so `Belgium Grid` and
            `belgium grid` collide.
   POSIX    treats a leading dot as "hidden" — a legacy `.foo` would import
-           invisible. `routers/projects.py:188` already rejects those on the
-           way in, for the same reason.
+           invisible. `routers/projects.py:195` already rejects those on the
+           way in, for the same reason. (`_PROJECT_NAME_RE` at `:94` does NOT
+           — it permits a leading dot; the explicit `startswith` check does.)
 
 `_MAX_LEN` caps the DIRECTORY at 96 characters. Truncating the row's own name
 is Task 7's job: `Project.name` is `String(64)` but SQLite does not enforce it

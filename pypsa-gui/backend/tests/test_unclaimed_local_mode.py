@@ -4,7 +4,7 @@
 `services/legacy_migrate._scan_root(projects_root, pre_auth_layout=True)`
 classifies every non-UUID-named directory at the top of `projects_root` as a
 claimable leftover, and `POST /unclaimed/{name}/import` then `shutil.move`s it
-(`legacy_migrate.py:290`). While storage paths are `<org_uuid>/<project_uuid>/`
+(`legacy_migrate.py:304`). While storage paths are `<org_uuid>/<project_uuid>/`
 that scan matches nothing, because `_is_uuid_named` skips the org roots.
 
 Task 4 puts project directories at the top of `projects_root` under their

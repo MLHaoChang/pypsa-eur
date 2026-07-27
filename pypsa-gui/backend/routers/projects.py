@@ -780,9 +780,13 @@ async def import_bundle(
     dest = project_registry.ensure_project_dir(_imported_project)
     for fname in _BUNDLE_FILES:
         if fname in members:
-            # Atomic: a plain `write_bytes` truncates a live project's
-            # `network.nc` before the first byte of the archive member is
-            # decompressed, so a corrupt member destroys the existing project.
+            # Atomic because the process can be KILLED mid-write, leaving a
+            # live project's `network.nc` truncated.
+            #
+            # NOT because `write_bytes` truncates before reading the member:
+            # `zf.read(fname)` is fully evaluated first, so that hazard never
+            # existed at this call. It DOES exist at the `copy2` site below,
+            # which opens the destination before reading the source.
             atomic_write_bytes(dest / fname, zf.read(fname))
     # Chatbot uploads (Phase A) — extract any `uploads/...` entries the
     # exporting GUI included. Each archive member's path is verified to
