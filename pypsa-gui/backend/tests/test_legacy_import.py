@@ -32,6 +32,7 @@ from db.models import Organization, Project, User
 from services import project_registry
 from services.legacy_import import (
     RECEIPT_NAME,
+    STAGING_PREFIX,
     STAGING_SUFFIX,
     import_all,
     install_id,
@@ -95,8 +96,8 @@ def _write_project(root, name, *, parent=None, payload="network", extras=()):
     return directory
 
 
-def _run(db, source, *, apply=True):
-    return import_all(db, source, _ORG, _USER, apply=apply)
+def _run(db, source, *, apply=True, manifest=None):
+    return import_all(db, source, _ORG, _USER, apply=apply, manifest_path=manifest)
 
 
 def _rows(db) -> dict[str, Project]:
@@ -249,8 +250,10 @@ def test_a_crash_before_the_rename_leaves_staging_the_next_run_discards(
 ):
     """A staging directory is an unverified partial copy. The next run throws
     it away and starts again rather than adopting it."""
+    from services.legacy_import import _staging_dir
+
     _write_project(source, "Belgium Grid")
-    abandoned = dest_root / f"Belgium Grid{STAGING_SUFFIX}"
+    abandoned = _staging_dir(dest_root, "Belgium Grid")
     abandoned.mkdir()
     (abandoned / "network.nc").write_text("half a copy", encoding="utf-8")
 
@@ -262,6 +265,31 @@ def test_a_crash_before_the_rename_leaves_staging_the_next_run_discards(
     assert (project_registry.project_dir(row) / "network.nc").read_text(
         encoding="utf-8"
     ) == "network"
+
+
+def test_a_live_project_named_like_the_old_staging_suffix_is_never_deleted(
+    db_session, identity, source, dest_root
+):
+    """
+    The staging directory used to be `<destination>.importing`, and
+    `safe_dir_name` happily produces `Belgium Grid.importing` — so a live
+    project could hold that name and the "discard the abandoned staging
+    directory" step would `rmtree` it, reporting success. The hidden,
+    hash-derived prefix makes the collision impossible rather than unlikely,
+    because no allocated directory can begin with a dot.
+    """
+    _write_project(source, "Belgium Grid")
+    victim = dest_root / f"Belgium Grid{STAGING_SUFFIX}"
+    victim.mkdir()
+    (victim / "network.nc").write_text("THE USER'S IRREPLACEABLE WORK", encoding="utf-8")
+
+    _run(db_session, source)
+
+    assert victim.exists()
+    assert (victim / "network.nc").read_text(encoding="utf-8") == (
+        "THE USER'S IRREPLACEABLE WORK"
+    )
+    assert not STAGING_PREFIX.startswith(tuple("abcdefghijklmnopqrstuvwxyz"))
 
 
 def test_a_crash_after_the_rename_is_completed_not_refused(db_session, identity, source, dest_root):
@@ -520,3 +548,207 @@ def test_rebase_removes_the_copy_when_the_commit_fails(db_session, identity, tmp
     monkeypatch.setattr(db_session, "commit", real_commit)
     assert list(dest_root.iterdir()) == []
     assert (outside / "network.nc").read_text(encoding="utf-8") == "irreplaceable"
+
+
+# ── _verify_copy, driven directly (review finding T1) ────────────────────────
+#
+# Every existing test that named this function monkeypatched it away, so all
+# four of its checks could be deleted and the suite stayed green. It is the
+# ONLY gate between "copytree finished" and "tell the user 113 MB is safely
+# imported".
+
+def _staged_copy(tmp_path, extras=()):
+    import shutil as _shutil
+
+    source = tmp_path / "src"
+    _write_project(source.parent, "src", extras=extras)
+    staged = tmp_path / "staged"
+    _shutil.copytree(source, staged)
+    return source, staged
+
+
+def test_verify_accepts_a_faithful_copy(tmp_path):
+    from services.legacy_import import _verify_copy
+
+    source, staged = _staged_copy(tmp_path, extras=("user_ts.json",))
+    assert _verify_copy(source, staged) is None
+
+
+def test_verify_rejects_a_missing_file(tmp_path):
+    from services.legacy_import import _verify_copy
+
+    source, staged = _staged_copy(tmp_path, extras=("user_ts.json",))
+    (staged / "user_ts.json").unlink()
+
+    problem = _verify_copy(source, staged)
+    assert problem is not None and "user_ts.json" in problem
+
+
+def test_verify_rejects_a_size_mismatch(tmp_path):
+    from services.legacy_import import _verify_copy
+
+    source, staged = _staged_copy(tmp_path, extras=("user_ts.json",))
+    (staged / "user_ts.json").write_text("short", encoding="utf-8")
+
+    problem = _verify_copy(source, staged)
+    assert problem is not None and "size" in problem
+
+
+def test_verify_rejects_same_size_different_bytes_in_the_network(tmp_path):
+    """
+    The case size-checking cannot catch, and the reason `network.nc` is hashed
+    at all. In the real tree `KeepA` and `KeepB` are both 39,716 bytes.
+    """
+    from services.legacy_import import _verify_copy
+
+    source, staged = _staged_copy(tmp_path)
+    original = (source / "network.nc").read_text(encoding="utf-8")
+    corrupted = "X" * len(original)
+    assert len(corrupted) == len(original)
+    (staged / "network.nc").write_text(corrupted, encoding="utf-8")
+
+    problem = _verify_copy(source, staged)
+    assert problem is not None and "content" in problem
+
+
+def test_a_symlinked_source_is_copied_as_real_bytes(db_session, identity, source, dest_root, tmp_path):
+    """
+    `copytree(symlinks=True)` preserved the link, so `_verify_copy` hashed the
+    SAME file on both sides — a tautology — and the `--forget-legacy` step this
+    CLI recommends then destroyed the imported project.
+    """
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "real_network.nc").write_text("irreplaceable", encoding="utf-8")
+    directory = _write_project(source, "Symlinked Project")
+    (directory / "network.nc").unlink()
+    (directory / "network.nc").symlink_to(vault / "real_network.nc")
+
+    _run(db_session, source)
+
+    copied = project_registry.project_dir(_rows(db_session)["Symlinked Project"]) / "network.nc"
+    assert not copied.is_symlink(), "the copy must not depend on the source"
+    assert copied.read_text(encoding="utf-8") == "irreplaceable"
+
+    # The whole point: removing the original leaves the import intact.
+    (vault / "real_network.nc").unlink()
+    assert copied.read_text(encoding="utf-8") == "irreplaceable"
+
+
+def test_normalising_modes_never_touches_the_source(db_session, identity, source, dest_root, tmp_path):
+    """`Path.chmod` FOLLOWS symlinks, so the mode normalisation was writing
+    into the user's original tree."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    target = vault / "real_network.nc"
+    target.write_text("irreplaceable", encoding="utf-8")
+    target.chmod(0o666)
+    directory = _write_project(source, "Symlinked Project")
+    (directory / "network.nc").unlink()
+    (directory / "network.nc").symlink_to(target)
+
+    _run(db_session, source)
+
+    assert target.stat().st_mode & 0o777 == 0o666
+
+
+# ── The wedge and the resurrection (review finding C4/C5) ────────────────────
+
+def _manifest(tmp_path, name="import-manifest-20260101T000000.json"):
+    return get_settings().projects_root.parent / "appdata" / name
+
+
+def test_a_deleted_project_is_not_re_imported_on_the_next_run(
+    db_session, identity, source, dest_root, tmp_path
+):
+    """
+    The receipt lives INSIDE the destination, so deleting the project deletes
+    the marker — and the importer brought it straight back, every launch, for
+    as long as the legacy root stayed configured. The user could not delete
+    their own project. The manifests in app-data are the ledger that survives.
+    """
+    _write_project(source, "KeepA")
+    _write_project(source, "KeepB")
+    _run(db_session, source, manifest=_manifest(tmp_path))
+
+    row = _rows(db_session)["KeepA"]
+    import shutil as _shutil
+    _shutil.rmtree(project_registry.project_dir(row))
+    db_session.delete(row)
+    db_session.commit()
+
+    report = _run(db_session, source, manifest=_manifest(tmp_path, "second.json"))
+
+    assert report.imported == []
+    assert sorted(report.already_imported) == ["KeepA", "KeepB"]
+    assert set(_rows(db_session)) == {"KeepB"}
+
+
+def test_a_name_collision_does_not_wedge_the_rest_of_the_run(
+    db_session, identity, source, dest_root, tmp_path
+):
+    """
+    `UniqueConstraint("org_id","name")` predates this phase. With one commit
+    for the whole run, an `IntegrityError` on ONE candidate aborted the loop —
+    so every candidate sorted after it was never imported again, on any launch,
+    swallowed into a log line. Per-candidate commits plus a suffixed retry.
+    """
+    _write_project(source, "AAA Conflict")
+    _write_project(source, "ZZZ Innocent")
+    # The user already has a project by that name.
+    _seed = Project(
+        id=uuid.uuid4(), org_id=_ORG, name="AAA Conflict", created_by=_USER,
+        storage_path="Something Else", created_at=_now(), updated_at=_now(),
+    )
+    db_session.add(_seed)
+    db_session.commit()
+
+    report = _run(db_session, source, manifest=_manifest(tmp_path))
+
+    assert "ZZZ Innocent" in report.imported, "a later candidate must still import"
+    assert "AAA Conflict" in report.imported
+    assert "AAA Conflict (2)" in _rows(db_session)
+    assert any("already taken" in w for w in report.warnings)
+
+
+# ── _receipt_matches, discriminated (review finding T2) ─────────────────────
+
+def test_a_populated_destination_from_another_root_is_not_recognised(
+    db_session, identity, source, dest_root, tmp_path, monkeypatch
+):
+    """
+    The previous test for this repointed `PROJECTS_ROOT` at an EMPTY directory,
+    so `_existing_destination` iterated nothing and returned before
+    `_receipt_matches` was ever called — it passed for any implementation,
+    including `return True`. Copying the finished tree is what discriminates.
+    """
+    import shutil as _shutil
+
+    _write_project(source, "Belgium Grid")
+    _run(db_session, source)
+
+    other = tmp_path / "OtherProjects"
+    _shutil.copytree(dest_root, other)
+    monkeypatch.setenv("PROJECTS_ROOT", str(other))
+    get_settings.cache_clear()
+
+    report = _run(db_session, source, apply=False)
+
+    assert report.would_import == ["Belgium Grid"], (
+        "the receipts in the copied tree name the OLD destination root"
+    )
+
+
+def test_a_receipt_from_another_source_root_is_not_recognised(
+    db_session, identity, source, dest_root, tmp_path
+):
+    """Same directory name, different legacy tree — a different project."""
+    _write_project(source, "Belgium Grid", payload="from tree A")
+    _run(db_session, source)
+
+    other_source = tmp_path / "legacy-b"
+    _write_project(other_source, "Belgium Grid", payload="from tree B")
+
+    report = import_all(db_session, other_source, _ORG, _USER, apply=False)
+
+    assert report.would_import == ["Belgium Grid"]

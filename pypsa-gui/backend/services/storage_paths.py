@@ -19,15 +19,16 @@ The org segment is a **parameter**, not a constant — see `use_org_segment`.
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterable
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
 import local_mode
 from db.models import Project
-from services.safe_names import unique_dir_name
+from services.safe_names import fold, unique_dir_name
 from settings import get_settings
 
 
@@ -75,6 +76,63 @@ def storage_path_for(
     """
     rel = Path(str(org_id)) if org_segment else Path()
     return rel / unique_dir_name(name, taken)
+
+
+def storage_value(relative: Path) -> str:
+    """
+    The string form to persist in ``Project.storage_path``. **Always POSIX.**
+
+    ``str(Path("<org>") / "Belgium Grid")`` is ``<org>\\Belgium Grid`` on
+    Windows, and a database written there and read on macOS resolves to a
+    single directory whose name contains a backslash — while
+    ``Path(row).name`` returns the whole string instead of the leaf, so
+    ``taken_names`` stops detecting collisions too. Portability across exactly
+    these two platforms is the reason E2 exists, so the separator cannot be
+    the host's.
+
+    Reading needs no counterpart: ``Path`` accepts ``/`` on Windows.
+    """
+    return PurePosixPath(*Path(relative).parts).as_posix()
+
+
+def allocate_storage_path(
+    db: DBSession,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    name: str,
+    *,
+    org_segment: bool,
+    exclude: Iterable[str] = (),
+) -> Path:
+    """
+    A free storage path for a new project, checked against the filesystem.
+
+    `taken_names` already unions the directory listing, so the `exists()` loop
+    below is a backstop rather than the mechanism — but it is the difference
+    between "the allocator has a bug" and "the user's project was overwritten",
+    and `_stage_and_rename` has had the same check since it was written.
+
+    `exclude` drops names the caller knows are its own (a rename excludes the
+    project's current directory, or a no-op rename suffixes itself).
+    """
+    root = Path(get_settings().projects_root)
+    mine = {fold(entry) for entry in exclude}
+    taken = {entry for entry in taken_names(db, org_id, org_segment) if fold(entry) not in mine}
+    for _ in range(8):
+        relative = storage_path_for(
+            org_id, project_id, name, taken, org_segment=org_segment
+        )
+        # `exclude` names are the CALLER'S OWN directory, so of course it
+        # exists — a rename to a name that sanitises back to the current
+        # directory must land on it, not allocate ` (2)` and move the data for
+        # nothing.
+        if fold(relative.name) in mine or not (root / relative).exists():
+            return relative
+        taken.add(relative.name)
+    raise HTTPException(
+        status_code=409,
+        detail=f"Could not find a free directory name for '{name}'",
+    )
 
 
 def taken_names(db: DBSession, org_id: uuid.UUID, org_segment: bool) -> set[str]:

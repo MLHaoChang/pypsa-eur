@@ -8,11 +8,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import Organization, OrgMembership, Project, ProjectMembership, User
 from services import project_registry
-from services.storage_paths import storage_path_for, taken_names, use_org_segment
+from services.storage_paths import (
+    storage_path_for,
+    storage_value,
+    taken_names,
+    use_org_segment,
+)
 from services.tenancy_service import ConflictError, ValidationError
 from settings import get_settings
 
@@ -251,7 +257,7 @@ def claim_legacy_project(
             org_id=org_id,
             name=name,
             created_by=owner_id,
-            storage_path=str(relative),
+            storage_path=storage_value(relative),
             parent_project_id=None,
             scenario_description=entry.metadata.get("scenario_description"),
             created_at=_now(),
@@ -259,7 +265,17 @@ def claim_legacy_project(
         )
         db.add(project_map[name])
 
-    db.flush()
+    try:
+        # `UniqueConstraint("org_id", "storage_path")` (migration 0003) can fire
+        # here now that paths carry names. Un-caught it surfaces as a 500 from
+        # both claim endpoints, with the session left dirty — where every other
+        # conflict in this function is a ConflictError the routers map to 409.
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError(
+            "A storage directory for one of these projects already exists"
+        ) from exc
 
     warnings: list[str] = []
     for name, project in project_map.items():

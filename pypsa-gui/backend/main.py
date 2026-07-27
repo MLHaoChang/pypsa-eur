@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Load `pypsa-gui/backend/.env` (gitignored) before any module reads
@@ -199,9 +200,23 @@ def run_first_run_import() -> None:
             if user is None:
                 logger.warning("first-run import: no local identity; skipping")
                 return
-            report = legacy_import.import_all(
-                db, source, local_mode.LOCAL_ORG_ID, user.id, apply=True
+            # A manifest, exactly as the CLI writes: it is what `--rollback`
+            # undoes, and it is the ledger that stops a project the user
+            # DELETED from being re-imported on the next launch. Without it,
+            # rollback simply does not exist on the path a real user takes.
+            import app_paths
+
+            stamp = datetime.now(tz=timezone.utc)
+            manifest = (
+                app_paths.app_data_dir()
+                / f"import-manifest-{stamp:%Y%m%dT%H%M%S}.json"
             )
+            report = legacy_import.import_all(
+                db, source, local_mode.LOCAL_ORG_ID, user.id,
+                apply=True, manifest_path=manifest,
+            )
+            if not report.records:
+                manifest.unlink(missing_ok=True)
         if report.imported:
             logger.info(
                 "first-run import: %d project(s) imported from %s",

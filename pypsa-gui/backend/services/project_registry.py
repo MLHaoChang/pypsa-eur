@@ -18,6 +18,7 @@ against ``Path(project.storage_path)``.
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import shutil
 import uuid
@@ -29,11 +30,20 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 
+import local_mode
 from db.models import Project, ProjectMembership, User
 from services import project_acl
-from services.storage_paths import storage_path_for, taken_names, use_org_segment
+from services.storage_paths import (
+    allocate_storage_path,
+    storage_path_for,
+    storage_value,
+    taken_names,
+    use_org_segment,
+)
 from services.tenancy_service import get_user_membership
 from settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def auth_enabled() -> bool:
@@ -210,12 +220,8 @@ def create_root(
         org_id=org_id,
         name=name,
         created_by=user.id,
-        storage_path=str(
-            storage_path_for(
-                org_id, project_id, name,
-                taken_names(db, org_id, segment),
-                org_segment=segment,
-            )
+        storage_path=storage_value(
+            allocate_storage_path(db, org_id, project_id, name, org_segment=segment)
         ),
         parent_project_id=None,
         scenario_description=scenario_description,
@@ -253,11 +259,9 @@ def create_scenario(
         org_id=base.org_id,
         name=name,
         created_by=user.id,
-        storage_path=str(
-            storage_path_for(
-                base.org_id, project_id, name,
-                taken_names(db, base.org_id, segment),
-                org_segment=segment,
+        storage_path=storage_value(
+            allocate_storage_path(
+                db, base.org_id, project_id, name, org_segment=segment
             )
         ),
         parent_project_id=base.id,
@@ -297,15 +301,28 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
     sanitises back to the current directory would allocate ` (2)` and move the
     data for nothing.
     """
-    segment = use_org_segment()
     old_dir = project_dir(project)
-    old_rel = project.storage_path
-    new_rel = storage_path_for(
-        project.org_id,
-        project.id,
-        new_name,
-        taken=taken_names(db, project.org_id, segment) - {old_dir.name},
-        org_segment=segment,
+    old_name, old_rel = project.name, project.storage_path
+
+    if not _may_move_directory(project, old_dir):
+        # Rename the ROW only. The directory keeps the name it was created
+        # with, which is stale but readable, resolvable and safe.
+        project.name = new_name
+        project.updated_at = _now()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=409, detail=f"Project '{new_name}' already exists"
+            ) from exc
+        db.refresh(project)
+        return project
+
+    segment = use_org_segment()
+    new_rel = allocate_storage_path(
+        db, project.org_id, project.id, new_name,
+        org_segment=segment, exclude={old_dir.name},
     )
     new_dir = Path(get_settings().projects_root) / new_rel
     if new_dir.exists() and new_dir != old_dir:
@@ -315,7 +332,7 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
         )
 
     project.name = new_name
-    project.storage_path = str(new_rel)
+    project.storage_path = storage_value(new_rel)
     project.updated_at = _now()
     try:
         db.commit()
@@ -329,20 +346,87 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
         try:
             new_dir.parent.mkdir(parents=True, exist_ok=True)
             os.replace(old_dir, new_dir)
-        except OSError as exc:
-            if exc.errno == errno.EXDEV:
-                # A pre-0003 absolute row can point at another volume, where
-                # `os.replace` cannot rename across the boundary.
-                shutil.move(str(old_dir), str(new_dir))
-            else:
-                # The row is already committed; put it back or the project
-                # points at a directory that does not exist and vanishes.
-                project.storage_path = old_rel
-                db.commit()
-                raise
+        except OSError:
+            # The row is already committed — there is no transaction spanning
+            # the database and the filesystem — so put BOTH columns back or the
+            # project points at a directory that does not exist and vanishes
+            # from the UI. `name` too: restoring only `storage_path` leaves the
+            # project renamed in the database and not on disk.
+            _compensate(db, project, old_name, old_rel)
+            raise
 
+    _rebind_resident_contexts(project)
     db.refresh(project)
     return project
+
+
+def _may_move_directory(project: Project, old_dir: Path) -> bool:
+    """
+    Whether renaming this project may also move its directory.
+
+    **Local mode only, and only for a row inside the projects root.** Two
+    independent reasons, both found by review:
+
+      * Four subsystems cache the resolved directory on the resident
+        `ProjectContext` (`bind_context` -> `ctx.storage_dir`, read back by
+        `upload_service`, `chat_service`, `solve_queue` and eviction). Eviction
+        writes through it with `mkdir(parents=True, exist_ok=True)`, so a moved
+        directory is silently RECREATED at the old path and the user's work
+        lands in an orphan no row references. In local mode there is one
+        process (D11's single-instance lock) and `_rebind_resident_contexts`
+        can fix every cached copy; across replicas it cannot, and rename takes
+        no project lock.
+      * A row whose path is absolute lives outside `projects_root` by design
+        (`stores_absolute_path`). Moving it into the root on a rename
+        contradicts that, and on a hosted deployment with projects on a
+        separate mount it turns a rename into a multi-gigabyte cross-volume
+        copy inside one HTTP request.
+
+    Web mode therefore renames the row and leaves the directory — which is
+    exactly what it did before this phase, when `storage_path` was UUID-keyed.
+    """
+    if not local_mode.is_local_mode():
+        return False
+    if stores_absolute_path(project):
+        return False
+    return old_dir.is_relative_to(Path(get_settings().projects_root))
+
+
+def _compensate(db: DBSession, project: Project, name: str, storage_path: str) -> None:
+    """Put a committed row back after the filesystem half failed."""
+    project.name = name
+    project.storage_path = storage_path
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001 — the original error is the one to report
+        db.rollback()
+        logger.exception(
+            "rename compensation failed for %s; row and disk now disagree",
+            project.id,
+        )
+
+
+def _rebind_resident_contexts(project: Project) -> None:
+    """
+    Point any resident `ProjectContext` at the directory's new location.
+
+    `rekey_context` keys on `org:uuid`, which a rename does not change, so
+    without this a context that is resident-but-not-active keeps the old path
+    and the next save or eviction writes there.
+    """
+    try:
+        from services.pypsa_service import PyPSAService
+
+        resolved = str(project_dir(project))
+        for ctx in (
+            PyPSAService.get_context(registry_key(project)),
+            PyPSAService.get_active_context(),
+        ):
+            if ctx is not None and getattr(ctx, "project_uuid", None) == str(project.id):
+                ctx.storage_dir = resolved
+                ctx.loaded_project = project.name
+    except Exception:  # noqa: BLE001 — a rename must not fail on bookkeeping
+        logger.exception("could not rebind resident contexts after rename")
 
 
 def descendants(db: DBSession, project: Project) -> list[Project]:

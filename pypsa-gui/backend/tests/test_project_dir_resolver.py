@@ -39,15 +39,22 @@ _BACKEND = pathlib.Path(__file__).resolve().parent.parent
 # matcher back to `Path(`-wrapped hits is not, because that is exactly the
 # weakness that hid `bind_context`'s assignment.
 #
-# `rebase_row` is `rename_project`'s counterpart for a row 0003 could not
-# convert, and `stores_absolute_path` is the one predicate that needs the
-# distinction `project_dir` deliberately erases.
+# Keyed on `module::function`, NOT on the bare name. A review demonstrated the
+# weakness by injecting a raw `storage_path` read into
+# `routers/projects.py::rename_project` — a DIFFERENT function that happens to
+# share a name with an exempt one — and this test still passed. Five of the six
+# original offenders lived in exactly that file.
 _EXEMPT_FUNCTIONS = frozenset({
-    "project_dir",
-    "ensure_project_dir",
-    "rename_project",
-    "rebase_row",
-    "stores_absolute_path",
+    # The resolver itself, and the one predicate that needs the distinction
+    # `project_dir` deliberately erases.
+    "services/project_registry.py::project_dir",
+    "services/project_registry.py::ensure_project_dir",
+    "services/project_registry.py::stores_absolute_path",
+    # These legitimately read the old value and write the new one, because E1
+    # makes the directory move with the name.
+    "services/project_registry.py::rename_project",
+    "services/project_registry.py::_compensate",
+    "services/legacy_import.py::rebase_row",
 })
 
 
@@ -175,8 +182,12 @@ class _StoragePathVisitor(ast.NodeVisitor):
     visit_FunctionDef = _visit_function
     visit_AsyncFunctionDef = _visit_function
 
+    def _exempt(self) -> bool:
+        relative = self.path.relative_to(_BACKEND).as_posix()
+        return any(f"{relative}::{name}" in _EXEMPT_FUNCTIONS for name in self.stack)
+
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        if node.attr == "storage_path" and not (set(self.stack) & _EXEMPT_FUNCTIONS):
+        if node.attr == "storage_path" and not self._exempt():
             # `Project.storage_path` is a COLUMN reference for SQLAlchemy
             # (`select(Project.storage_path)`), not a value read — it never
             # produces a path and cannot resolve against the wrong root.
@@ -208,3 +219,25 @@ def test_nothing_reads_storage_path_except_the_resolver():
         "Direct `storage_path` reads outside the resolver:\n  "
         + "\n  ".join(offenders)
     )
+
+
+def test_the_guard_keys_on_module_and_function_not_the_bare_name(tmp_path):
+    """
+    A review defeated the previous version by injecting a raw `storage_path`
+    read into `routers/projects.py::rename_project` — a DIFFERENT function that
+    merely shares a name with an exempt one — and the guard stayed green. Five
+    of the six original offenders lived in that exact file, so a name-keyed
+    exemption blanket-pardons the place the guard exists to watch.
+    """
+    source = "def rename_project(project):\n    return Path(project.storage_path)\n"
+
+    exempt = _BACKEND / "services" / "project_registry.py"
+    impostor = _BACKEND / "routers" / "projects.py"
+
+    def _hits(path):
+        visitor = _StoragePathVisitor(path)
+        visitor.visit(ast.parse(source))
+        return visitor.hits
+
+    assert _hits(exempt) == [], "the real rename_project is exempt"
+    assert _hits(impostor), "a same-named function elsewhere is NOT exempt"

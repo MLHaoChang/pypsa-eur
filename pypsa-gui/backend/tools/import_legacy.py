@@ -125,30 +125,33 @@ def _do_import(args) -> int:
             print("No local identity. Run `python -m tools.bootstrap_local` first.")
             return 2
         org_id = local_mode.LOCAL_ORG_ID
-        report = legacy_import.import_all(
-            db, source, org_id, user.id, apply=args.apply
+        stamp = datetime.now(tz=timezone.utc)
+        manifest_path = (
+            app_paths.app_data_dir()
+            / f"import-manifest-{stamp:%Y%m%dT%H%M%S}.json"
         )
+        try:
+            report = legacy_import.import_all(
+                db, source, org_id, user.id,
+                apply=args.apply,
+                manifest_path=manifest_path if args.apply else None,
+            )
+        except OSError as exc:
+            # `import_all` writes the manifest EMPTY before copying anything,
+            # so this is the refusal the rule asks for rather than a post-hoc
+            # error on an import that already happened.
+            print(f"Refusing to import: the run manifest cannot be written ({exc})")
+            print("An import with no manifest is an import with no way back.")
+            return 1
         _print_report(report)
 
         if args.apply and report.records:
-            stamp = datetime.now(tz=timezone.utc)
-            manifest_path = (
-                app_paths.app_data_dir()
-                / f"import-manifest-{stamp:%Y%m%dT%H%M%S}.json"
-            )
-            try:
-                legacy_import.write_manifest(
-                    report,
-                    source_root=source,
-                    dest_root=Path(settings.projects_root),
-                    path=manifest_path,
-                )
-            except OSError as exc:
-                # An import with no manifest is an import with no way back.
-                print(f"FAILED to write the run manifest: {exc}")
-                return 1
             print(f"manifest: {manifest_path}")
             print("Roll this run back with --rollback <manifest>.")
+        elif args.apply and manifest_path.exists():
+            # Nothing landed; do not leave an empty manifest behind for the
+            # ledger to read.
+            manifest_path.unlink(missing_ok=True)
 
     if not args.apply:
         print("\nDry run — nothing was changed. Re-run with --apply.")

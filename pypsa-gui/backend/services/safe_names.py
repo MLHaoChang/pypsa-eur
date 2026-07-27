@@ -27,6 +27,7 @@ enforce it, so the row is truncated defensively by the importer.
 from __future__ import annotations
 
 import itertools
+import unicodedata
 from typing import Iterable
 
 # Windows' forbidden set. `/` and `\` are in here as separators, not just as
@@ -83,26 +84,44 @@ def safe_dir_name(name: str) -> str:
     return text or _FALLBACK
 
 
+def fold(name: str) -> str:
+    """
+    The key two directory names collide under.
+
+    **NFC first, then casefold** — and both halves are load-bearing:
+
+      * ``casefold`` rather than ``lower``: macOS and Windows are both
+        case-insensitive by default, and ``lower`` gets ``ß``/``ss`` wrong.
+      * ``NFC``: APFS and NTFS are normalisation-INSENSITIVE but
+        form-PRESERVING. ``Café`` typed in a browser (NFC) and ``Café`` from a
+        Finder-era directory name (NFD) are *the same directory on disk* while
+        being different Python strings, different SQLite TEXT values, and
+        therefore invisible both to this allocator and to
+        ``UniqueConstraint("org_id", "storage_path")``. Without this, importing
+        an NFD-named project and then creating an NFC-named one hands them one
+        directory and the first save overwrites the other project.
+    """
+    return unicodedata.normalize("NFC", str(name)).casefold()
+
+
 def unique_dir_name(name: str, taken: Iterable[str]) -> str:
     """
     ``safe_dir_name`` plus a ``  (2)``-style suffix until the name is free.
 
     ``taken`` is annotated ``Iterable[str]`` and iterated exactly once, so a
     one-shot generator works. A bare ``Container`` would not: the body needs to
-    build a case-folded set, because macOS and Windows both consider
-    ``Belgium Grid`` and ``belgium grid`` the same directory and creating the
-    second one opens the first.
+    build the folded set described in ``fold``.
     """
     base = safe_dir_name(name)
-    lowered = {str(entry).lower() for entry in taken}
-    if base.lower() not in lowered:
+    folded = {fold(entry) for entry in taken}
+    if fold(base) not in folded:
         return base
 
     for n in itertools.count(2):
         suffix = f" ({n})"
         stem = base[: _MAX_LEN - len(suffix)].rstrip(" .") or _FALLBACK
         candidate = f"{stem}{suffix}"
-        if candidate.lower() not in lowered:
+        if fold(candidate) not in folded:
             return candidate
 
     raise AssertionError("unreachable: itertools.count is infinite")

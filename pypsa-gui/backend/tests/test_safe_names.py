@@ -184,3 +184,47 @@ def test_a_suffixed_name_is_never_a_reserved_device_name():
     """`CON` is defused before suffixing, so the suffixed form cannot revert."""
     result = unique_dir_name("CON", ["CON_"])
     assert result.split(".")[0].split(" ")[0].upper() != "CON"
+
+
+# ── Unicode normalisation (review finding C1) ────────────────────────────────
+
+def test_nfc_and_nfd_forms_of_one_name_collide():
+    """
+    APFS and NTFS are normalisation-INSENSITIVE but form-PRESERVING: `Café`
+    typed in a browser (NFC) and `Café` from a Finder-era directory name (NFD)
+    are ONE directory on disk while being different Python strings — and so
+    invisible to a `lower()`-keyed comparison and to the unique index, which
+    compares SQLite TEXT.
+
+    Without this, importing an NFD-named project and then creating an
+    NFC-named one hands both the same directory and the first save overwrites
+    the other project.
+    """
+    import unicodedata
+
+    nfc = unicodedata.normalize("NFC", "Café Study")
+    nfd = unicodedata.normalize("NFD", "Café Study")
+    assert nfc != nfd, "precondition: the two forms are distinct strings"
+
+    assert unique_dir_name(nfc, [nfd]) != nfc
+    assert unique_dir_name(nfc, [nfd]) == f"{nfc} (2)"
+    assert unique_dir_name(nfd, [nfc]) == f"{nfd} (2)"
+
+
+def test_folding_uses_casefold_not_lower():
+    """`lower()` leaves `ß` alone; `casefold()` maps it to `ss`, which is what
+    a case-insensitive filesystem compares."""
+    assert "STRASSE".lower() != "straße".lower()
+    assert unique_dir_name("STRASSE", ["straße"]) == "STRASSE (2)"
+
+
+def test_fold_is_exposed_so_callers_key_on_the_same_thing():
+    """`storage_paths` and the importer compare directory names too; they must
+    not each invent their own key."""
+    import unicodedata
+
+    from services.safe_names import fold
+
+    assert fold(unicodedata.normalize("NFD", "Café")) == fold(
+        unicodedata.normalize("NFC", "CAFÉ")
+    )

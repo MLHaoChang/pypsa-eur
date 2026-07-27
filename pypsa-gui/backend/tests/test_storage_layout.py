@@ -321,9 +321,8 @@ def test_rename_refuses_a_destination_that_appeared_after_allocation(
     """
     The `new_dir.exists()` check runs BEFORE the commit, and it is there for
     the window between allocating a name and moving the directory. Simulate it
-    with a stale `taken` set: doing the check after the commit would leave a
-    committed row pointing at a directory that never moved, with nothing to
-    put it back.
+    with a stale allocator: doing the check after the commit would leave a
+    committed row pointing at a directory that never moved.
     """
     project = _seed_project(db_session, name="Old Name", storage_path="Old Name")
     old_dir = projects_root / "Old Name"
@@ -333,7 +332,9 @@ def test_rename_refuses_a_destination_that_appeared_after_allocation(
     appeared.mkdir()
     (appeared / "network.nc").write_text("not mine", encoding="utf-8")
 
-    monkeypatch.setattr(project_registry, "taken_names", lambda *a, **k: set())
+    monkeypatch.setattr(
+        project_registry, "allocate_storage_path", lambda *a, **k: Path("New Name")
+    )
 
     with pytest.raises(HTTPException) as exc:
         project_registry.rename_project(db_session, project, "New Name")
@@ -346,8 +347,18 @@ def test_rename_refuses_a_destination_that_appeared_after_allocation(
     assert project.name == "Old Name"
 
 
-def test_rename_keeps_the_org_segment_in_web_mode(db_session, projects_root, monkeypatch):
-    """The rename is mode-neutral; only the shape of the allocated path moves."""
+def test_web_mode_renames_the_row_and_leaves_the_directory(db_session, projects_root, monkeypatch):
+    """
+    **Web mode does not move the directory**, which is what it did before this
+    phase, when `storage_path` was UUID-keyed.
+
+    Four subsystems cache the resolved directory on the resident
+    `ProjectContext`, and eviction writes through it with
+    `mkdir(parents=True, exist_ok=True)` — so a moved directory is silently
+    RECREATED at the old path and the user's work lands in an orphan no row
+    references. In local mode there is one process and every cached copy can be
+    rebound; across replicas it cannot, and rename takes no project lock.
+    """
     monkeypatch.delenv("PYPSAGUI_LOCAL_MODE", raising=False)
     project = _seed_project(
         db_session, name="Old Name", storage_path=f"{_ORG}/Old Name"
@@ -358,8 +369,63 @@ def test_rename_keeps_the_org_segment_in_web_mode(db_session, projects_root, mon
 
     project_registry.rename_project(db_session, project, "New Name")
 
-    assert project.storage_path == f"{_ORG}/New Name"
-    assert (projects_root / str(_ORG) / "New Name" / "network.nc").exists()
+    assert project.name == "New Name"
+    assert project.storage_path == f"{_ORG}/Old Name"
+    assert (old_dir / "network.nc").read_text(encoding="utf-8") == "payload"
+    assert project_registry.project_dir(project) == old_dir
+
+
+def test_a_row_outside_the_projects_root_is_never_relocated_by_a_rename(
+    db_session, projects_root, desktop_layout, tmp_path
+):
+    """
+    `stores_absolute_path` says such rows are left alone by design. Rename
+    honouring that is not pedantry: on a deployment with projects on a separate
+    mount it is the difference between updating one column and a multi-gigabyte
+    cross-volume copy inside one HTTP request.
+    """
+    outside = tmp_path / "elsewhere" / "Old Name"
+    outside.mkdir(parents=True)
+    (outside / "network.nc").write_text("payload", encoding="utf-8")
+    project = _seed_project(db_session, name="Old Name", storage_path=str(outside))
+
+    project_registry.rename_project(db_session, project, "New Name")
+
+    assert project.name == "New Name"
+    assert project.storage_path == str(outside)
+    assert (outside / "network.nc").read_text(encoding="utf-8") == "payload"
+    assert list(projects_root.iterdir()) == []
+
+
+def test_rename_rebinds_a_resident_context_that_is_not_the_active_one(
+    db_session, projects_root, desktop_layout
+):
+    """
+    The regression E1 created. `rekey_context` keys on `org:uuid`, which a
+    rename does not change, so a resident-but-not-active context keeps the old
+    path — and the next eviction save mkdirs it back into existence and writes
+    `network.nc` there, into an orphan directory no row references.
+    """
+    from services.pypsa_service import PyPSAService
+
+    project = _seed_project(db_session, name="Old Name", storage_path="Old Name")
+    old_dir = projects_root / "Old Name"
+    old_dir.mkdir()
+    (old_dir / "network.nc").write_text("payload", encoding="utf-8")
+
+    key = project_registry.registry_key(project)
+    ctx = PyPSAService.build_context()
+    project_registry.bind_context(ctx, project)
+    PyPSAService.register(key, ctx)
+    try:
+        assert ctx.storage_dir == str(old_dir)
+
+        project_registry.rename_project(db_session, project, "New Name")
+
+        assert ctx.storage_dir == str(projects_root / "New Name")
+        assert ctx.loaded_project == "New Name"
+    finally:
+        PyPSAService.drop(key)
 
 
 def test_rename_compensates_the_row_when_the_move_fails(db_session, projects_root, desktop_layout, monkeypatch):

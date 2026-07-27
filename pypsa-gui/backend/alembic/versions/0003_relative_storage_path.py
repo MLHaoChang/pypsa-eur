@@ -82,7 +82,10 @@ def upgrade() -> None:
         try:
             # `relative_to` rather than string prefixing: `/x/Projects2` must
             # not be treated as living under `/x/Projects`.
-            return str(path.relative_to(root))
+            # POSIX separators always — a database written on Windows and read
+            # on macOS otherwise resolves to one directory with a backslash in
+            # its name, which is the portability E2 exists to provide.
+            return path.relative_to(root).as_posix()
         except ValueError:
             return None                    # outside the root — left alone
 
