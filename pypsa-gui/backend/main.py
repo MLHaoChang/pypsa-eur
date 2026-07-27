@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import time
@@ -144,6 +145,35 @@ def _import_lock_path() -> Path:
     return app_paths.app_data_dir() / _IMPORT_LOCK_NAME
 
 
+def _persist_import_report(report, source) -> None:
+    """
+    Write the last import's outcome where a human can find it.
+
+    Logging alone is not a channel: a project skipped as a collision is
+    indistinguishable from one that was never there, and on a packaged
+    windowless build nobody reads the log at all. This does not deliver a UI —
+    that belongs to workstream H — but it makes "why is my project missing"
+    answerable with a file path rather than a rebuild.
+    """
+    import app_paths
+
+    try:
+        payload = {
+            "source": str(source),
+            "at": datetime.now(tz=timezone.utc).isoformat(),
+            "imported": report.imported,
+            "already_imported": report.already_imported,
+            "collisions": report.collisions,
+            "failed": report.failed,
+            "warnings": report.warnings,
+        }
+        (app_paths.app_data_dir() / "last-import-report.json").write_text(
+            json.dumps(payload, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        logger.exception("could not write the import report")
+
+
 def run_first_run_import() -> None:
     """
     Import a pre-desktop project tree, once, on launch.
@@ -225,6 +255,7 @@ def run_first_run_import() -> None:
             )
         for line in report.failed + report.collisions + report.warnings:
             logger.warning("first-run import: %s", line)
+        _persist_import_report(report, source)
     except Exception:  # noqa: BLE001 — a failed import must still yield an app
         logger.exception("first-run import failed; continuing without it")
     finally:

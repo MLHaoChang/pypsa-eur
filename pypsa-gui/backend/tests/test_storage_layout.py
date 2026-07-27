@@ -607,3 +607,17 @@ def test_0003_downgrade_re_absolutises_and_drops_the_index(tmp_path, projects_ro
     # And the round trip works, which is what "drops the index" is really for.
     command.upgrade(cfg, "0003_relative_storage_path")
     assert _rows(url)["under"] == f"{_ORG}/abc"
+
+
+def test_0003_does_not_treat_a_sibling_root_as_being_under_the_root(tmp_path, projects_root):
+    """
+    `/x/Projects2` must not be rewritten as if it lived under `/x/Projects`.
+    A naive `str.removeprefix` implementation passes every other test here.
+    """
+    sibling = projects_root.parent / f"{projects_root.name}2" / str(_ORG) / "abc"
+    url, cfg = _built_db(tmp_path, "0002_session_active_project")
+    _insert(url, [("sibling", str(sibling))])
+
+    command.upgrade(cfg, "0003_relative_storage_path")
+
+    assert _rows(url)["sibling"] == str(sibling)

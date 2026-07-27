@@ -231,3 +231,77 @@ def test_a_fresh_lock_blocks_and_a_stale_one_is_reclaimed(desktop, monkeypatch):
         pass
 
     assert _project_names(session_local) == {"Belgium Grid"}
+
+
+def test_the_outcome_is_written_where_a_human_can_find_it(desktop):
+    """
+    Logging alone is not a channel: a project skipped as a collision is
+    indistinguishable from one that was never there, and a packaged windowless
+    build has no console. Not a UI — that is workstream H — but it makes "why
+    is my project missing" answerable with a file path.
+    """
+    import json as _json
+
+    legacy, session_local = desktop
+    _write_project(legacy, "Belgium Grid")
+
+    with TestClient(main.app):
+        pass
+
+    report_path = get_settings().projects_root.parent / "appdata" / "last-import-report.json"
+    payload = _json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["imported"] == ["Belgium Grid"]
+    assert payload["source"] == str(legacy)
+
+
+def test_the_first_run_writes_a_rollback_manifest(desktop):
+    """
+    `--rollback` is keyed entirely on the manifest recording row ids, and the
+    first-run path wrote none — so rollback did not exist on the path a real
+    user takes. It doubles as the ledger that stops a DELETED project being
+    re-imported on the next launch.
+    """
+    legacy, session_local = desktop
+    _write_project(legacy, "Belgium Grid")
+
+    with TestClient(main.app):
+        pass
+
+    appdata = get_settings().projects_root.parent / "appdata"
+    manifests = list(appdata.glob("import-manifest-*.json"))
+    assert len(manifests) == 1, manifests
+
+    import json as _json
+
+    records = _json.loads(manifests[0].read_text(encoding="utf-8"))["records"]
+    assert [r["dir_name"] for r in records] == ["Belgium Grid"]
+    assert records[0]["project_id"]
+
+
+def test_a_project_deleted_by_the_user_stays_deleted(desktop):
+    """The resurrection bug: the receipt lives inside the destination, so
+    deleting the project deleted the marker and the next launch brought it
+    back — every launch, for as long as the legacy root stayed configured."""
+    import shutil as _shutil
+
+    from services import project_registry
+
+    legacy, session_local = desktop
+    _write_project(legacy, "Belgium Grid")
+
+    with TestClient(main.app):
+        pass
+
+    from db.models import Project
+    from sqlalchemy import select
+
+    with session_local() as db:
+        row = db.scalar(select(Project))
+        _shutil.rmtree(project_registry.project_dir(row))
+        db.delete(row)
+        db.commit()
+
+    with TestClient(main.app):
+        pass
+
+    assert _project_names(session_local) == set()

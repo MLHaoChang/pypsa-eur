@@ -136,3 +136,58 @@ def test_routers_still_expose_the_historical_names():
 
     assert projects_router._atomic_write_with is atomic_io.atomic_write_with
     assert projects_router._atomic_write_text is atomic_io.atomic_write_text
+
+
+# ── The CALL SITES (review finding: reverting them was invisible) ────────────
+#
+# `test_atomic_io.py` tested the helper in isolation and nothing asserted any
+# caller used it, so reverting `atomic_write_bytes` to `write_bytes` at the
+# bundle-import, from-template and scenario-create sites passed the whole
+# suite. Those three sites are the entire point of the task.
+
+def _sites():
+    """The production call sites, as (file, needle) pairs."""
+    return [
+        ("routers/projects.py", "atomic_write_bytes(dest / fname, zf.read(fname))"),
+        ("routers/projects.py", "atomic_write_bytes(target_path, zf.read(member))"),
+        ("routers/projects.py", 'atomic_copy(src_nc, dest / "network.nc")'),
+        ("routers/projects.py", "atomic_write_bytes(child_dir / fname, src_file.read_bytes())"),
+    ]
+
+
+@pytest.mark.parametrize(("relative", "needle"), _sites())
+def test_the_destructive_write_sites_go_through_atomic_io(relative, needle):
+    """
+    A source check, deliberately, and it is worth saying why rather than
+    apologising for it. The behavioural difference between `write_bytes` and
+    `atomic_write_bytes` is observable only when the write FAILS PART-WAY —
+    which at these sites means a corrupt zip member or an unreadable template
+    mid-stream, and neither is reachable through the public API without
+    monkeypatching the thing under test. `test_a_failed_copy_leaves_the_
+    destination_intact` above proves the mechanism; this proves the sites use
+    it, which is the half that silently regressed.
+    """
+    import pathlib
+
+    source = (pathlib.Path(__file__).resolve().parent.parent / relative).read_text(
+        encoding="utf-8"
+    )
+    assert needle in source, f"{relative} no longer routes this write through atomic_io"
+
+
+def test_no_bare_write_bytes_survives_in_the_bundle_paths():
+    """The inverse of the above: catch a NEW unguarded write appearing beside
+    the guarded ones."""
+    import pathlib
+    import re
+
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent / "routers" / "projects.py"
+    ).read_text(encoding="utf-8")
+    # `.write_bytes(` on a path built from a project directory.
+    offenders = [
+        line.strip()
+        for line in source.splitlines()
+        if re.search(r"\b(dest|child_dir|target_path)\s*/.*\.write_bytes\(", line)
+    ]
+    assert offenders == [], offenders
