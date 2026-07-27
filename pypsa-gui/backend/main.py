@@ -25,6 +25,8 @@ import pypsa
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import local_bootstrap
+import local_mode
 import security
 from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
@@ -123,6 +125,15 @@ _AUTH_PUBLIC_PATHS = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if local_mode.is_local_mode():
+        # First run on a fresh machine has no app-data directory, no database
+        # and no identity. Order matters: the directories must exist before
+        # Alembic opens the database file, or `upgrade` dies with "unable to
+        # open database file".
+        local_bootstrap.ensure_app_dirs()
+        local_bootstrap.ensure_schema(get_settings().database_url)
+        with db_session_module.SessionLocal() as db:
+            local_mode.ensure_local_identity(db)
     PyPSAService.initialize()
     yield
 
@@ -160,6 +171,13 @@ def _csrf_rejection(request: Request) -> JSONResponse | None:
     forge, and refusing them would turn every anonymous 401 into a confusing
     403.
     """
+    # Local mode issues no session cookie, so the exemption below would already
+    # let every request through — but a stale cookie left in a packaged webview
+    # profile would re-arm the check against a user who has no way to obtain a
+    # matching CSRF token.
+    if local_mode.is_local_mode():
+        return None
+
     settings = get_settings()
     if not request.cookies.get(settings.session_cookie_name):
         return None
@@ -245,22 +263,35 @@ async def undo_snapshot_middleware(request: Request, call_next):
     ):
         try:
             with db_session_module.SessionLocal() as db:
-                request.state.auth_user = resolve_request_user(request, db)
+                if local_mode.is_local_mode():
+                    # The desktop build has no login, so the seeded identity is
+                    # injected here rather than resolved from a session cookie.
+                    # Re-fetched per request, never cached: sessionmaker runs
+                    # with expire_on_commit=True, so a cached User goes detached
+                    # and reading user.id raises DetachedInstanceError inside
+                    # project_registry / project_acl.
+                    request.state.auth_user = local_mode.get_local_user(db)
+                else:
+                    request.state.auth_user = resolve_request_user(request, db)
         except Exception:
             # Misconfigured/unreachable DB must not surface as an opaque 500 on
             # every /api call (that looked like a broken workbench to reviewers
             # when auth was on without Postgres).
             logger.exception("auth database unavailable while enforcing session")
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "detail": (
-                        "Auth database unavailable. Start Postgres (or use a "
-                        "sqlite DATABASE_URL), run alembic upgrade head, then "
-                        "restart the backend."
-                    ),
-                },
-            )
+            if local_mode.is_local_mode():
+                # A desktop user has no Postgres to start and no alembic to run;
+                # the realistic cause is a second copy holding the SQLite file.
+                detail = (
+                    "Local database unavailable. Close any other running copy "
+                    "of PyPSA GUI and try again."
+                )
+            else:
+                detail = (
+                    "Auth database unavailable. Start Postgres (or use a "
+                    "sqlite DATABASE_URL), run alembic upgrade head, then "
+                    "restart the backend."
+                )
+            return JSONResponse(status_code=503, content={"detail": detail})
         if request.state.auth_user is None:
             return JSONResponse(
                 status_code=401,
@@ -544,10 +575,12 @@ def health():
     return {
         "status": "ok",
         "pypsa_version": pypsa.__version__,
-        # Retained as a constant `true`. Single-user mode is gone (Step 0a), but
-        # the field is part of the SPA's boot contract — `AuthModeProvider`
-        # reads it — and dropping it would make an older cached bundle fall
-        # back to "auth off" and render the workbench without a login gate.
-        # Remove it only together with the frontend read.
-        "auth_enabled": True,
+        # True for the web deployment, False for the desktop build. This field
+        # is the SPA's boot contract — `AuthModeProvider` overwrites its
+        # compile-time flag from it, and spa.html's pre-React gate skips
+        # /api/auth/me when it is false — so flipping it is what turns the login
+        # gate off locally. Remove it only together with the frontend read: an
+        # older cached bundle reading a missing field falls back to "auth off"
+        # and would render the web workbench with no login gate.
+        "auth_enabled": not local_mode.is_local_mode(),
     }
