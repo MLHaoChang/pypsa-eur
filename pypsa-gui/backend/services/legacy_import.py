@@ -64,6 +64,7 @@ from sqlalchemy.orm import Session as DBSession
 import app_paths
 from db.models import Project
 from services import project_registry
+from services.atomic_io import atomic_write_text
 from services.safe_names import unique_dir_name
 from services.storage_paths import (
     storage_path_for,
@@ -403,7 +404,7 @@ def import_all(
     if segment:
         dest_root = dest_root / str(org_id)
 
-    done = _ledger(dest_root) if apply or manifest_path else _ledger(dest_root)
+    done = _ledger(dest_root)
 
     def _already(candidate) -> bool:
         """
@@ -445,11 +446,21 @@ def import_all(
     inserted: dict[str, Project] = {}
 
     for candidate in candidates:
-        if (source_root_str(source_root), candidate.dir_name) in done:
+        ledger_hit = (source_root_str(source_root), candidate.dir_name) in done
+        existing = _existing_destination(dest_root, source_root, candidate)
+
+        if ledger_hit:
+            # Already imported — but it must STILL enter `inserted`, or a child
+            # imported in a later run than its parent is reparented to root and
+            # warned about as "parent not found in the legacy tree" while the
+            # parent sits in the same database. Returning early here was a
+            # regression the ledger introduced.
+            row = _row_for_directory(db, org_id, existing) if existing else None
+            if row is not None:
+                inserted[candidate.dir_name] = row
             report.already_imported.append(candidate.dir_name)
             continue
 
-        existing = _existing_destination(dest_root, source_root, candidate)
         if existing is not None:
             row = _row_for_directory(db, org_id, existing)
             if row is not None:
@@ -490,8 +501,17 @@ def import_all(
 
 
 def source_root_str(source_root) -> str:
-    """One spelling of the source root, so the ledger and the receipts agree."""
-    return str(Path(source_root))
+    """
+    ONE spelling of the source root, shared by every entry point.
+
+    The ledger and the receipts are both keyed on this string, so two spellings
+    of the same tree are two different imports. `main.py` used
+    `Path(x).expanduser()` while the CLI used `.expanduser().resolve()`, and on
+    a symlinked path — `/tmp`, an iCloud- or OneDrive-backed `~/Documents` —
+    those differ: a CLI `--apply` after a first-run import copied all 113 MB a
+    second time as `Name (2)`. Both go through here now.
+    """
+    return str(Path(source_root).expanduser().resolve())
 
 
 def _ledger(dest_root: Path) -> set[tuple[str, str]]:
@@ -513,16 +533,29 @@ def _ledger(dest_root: Path) -> set[tuple[str, str]]:
     except OSError:
         return done
     for path in manifests:
+        # Every isinstance below is a guard against a file killing every future
+        # import. `_read_receipt` and `_read_metadata` have had this check
+        # since they were written; this function shipped without it, and a
+        # manifest containing `[]` or `null` — shape-valid JSON — raised
+        # `AttributeError` out of `import_all` BEFORE the dry-run branch. On
+        # the first-run path that surfaces as "first-run import failed" on
+        # every launch, forever, with the projects never importable and nothing
+        # saying why.
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if data.get("dest_root") != str(dest_root):
+        if not isinstance(data, dict) or data.get("dest_root") != str(dest_root):
             continue
-        for record in data.get("records", []):
+        records = data.get("records")
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
             source = record.get("source_root")
             name = record.get("dir_name")
-            if source and name:
+            if isinstance(source, str) and isinstance(name, str):
                 done.add((source, name))
     return done
 
@@ -580,7 +613,14 @@ def write_manifest(report: ImportReport, *, source_root, dest_root, path) -> Pat
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    # ATOMIC. This is rewritten after every project so that a crash midway
+    # still leaves a manifest covering what landed — a promise a bare
+    # `write_text` cannot keep, because it truncates first. A torn manifest
+    # loses both the rollback record and the ledger for the whole run, and this
+    # phase shipped `atomic_io` precisely so nothing that matters is written
+    # any other way.
+    atomic_write_text(
+        path,
         json.dumps(
             {
                 "source_root": str(source_root),
@@ -591,7 +631,6 @@ def write_manifest(report: ImportReport, *, source_root, dest_root, path) -> Pat
             },
             indent=2,
         ),
-        encoding="utf-8",
     )
     return path
 
@@ -673,7 +712,13 @@ def rebase_row(db: DBSession, row: Project) -> Path:
 
     # `dirs_exist_ok=False` is the default and is the point: fail safe if the
     # allocator and the filesystem disagree.
-    shutil.copytree(source, destination, symlinks=True, ignore_dangling_symlinks=True)
+    # `symlinks=False` for the same reason as `_stage_and_rename`, and this is
+    # the path that matters most: it is the only thing delivering E2 for a row
+    # whose `storage_path` is absolute, which on the machine this was written
+    # for is the only row there is. A preserved link makes `_verify_copy` hash
+    # the same inode twice — a tautology — and `--forget-legacy`, which the CLI
+    # recommends immediately afterwards, then destroys the "imported" project.
+    shutil.copytree(source, destination, symlinks=False, ignore_dangling_symlinks=True)
 
     # Verify BEFORE touching the session at all. A failure here has not
     # modified the row, so rolling back would only discard whatever else the

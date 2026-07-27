@@ -57,10 +57,11 @@ def _database_is_inside_the_checkout(url: str) -> bool:
 
 
 def _source_root(args) -> Path | None:
-    if args.source:
-        return Path(args.source).expanduser().resolve()
-    configured = get_settings().legacy_import_root
-    return Path(configured).expanduser().resolve() if configured else None
+    configured = args.source or get_settings().legacy_import_root
+    if not configured:
+        return None
+    # Shared with `main.py` — see `legacy_import.source_root_str`.
+    return Path(legacy_import.source_root_str(configured))
 
 
 def _print_report(report) -> None:
@@ -130,19 +131,30 @@ def _do_import(args) -> int:
             app_paths.app_data_dir()
             / f"import-manifest-{stamp:%Y%m%dT%H%M%S}.json"
         )
-        try:
-            report = legacy_import.import_all(
-                db, source, org_id, user.id,
-                apply=args.apply,
-                manifest_path=manifest_path if args.apply else None,
-            )
-        except OSError as exc:
-            # `import_all` writes the manifest EMPTY before copying anything,
-            # so this is the refusal the rule asks for rather than a post-hoc
-            # error on an import that already happened.
-            print(f"Refusing to import: the run manifest cannot be written ({exc})")
-            print("An import with no manifest is an import with no way back.")
-            return 1
+        if args.apply:
+            # The refusal, made HERE rather than inferred from an exception
+            # escaping the import. `import_all` also writes this file after
+            # every project, so catching `OSError` around the whole call would
+            # print "refusing to import" after five projects had already
+            # landed — and would mislabel an unrelated `OSError` from
+            # `mkdir`/`iterdir` as a manifest failure.
+            try:
+                legacy_import.write_manifest(
+                    legacy_import.ImportReport(),
+                    source_root=source,
+                    dest_root=Path(settings.projects_root),
+                    path=manifest_path,
+                )
+            except OSError as exc:
+                print(f"Refusing to import: the run manifest cannot be written ({exc})")
+                print("An import with no manifest is an import with no way back.")
+                return 1
+
+        report = legacy_import.import_all(
+            db, source, org_id, user.id,
+            apply=args.apply,
+            manifest_path=manifest_path if args.apply else None,
+        )
         _print_report(report)
 
         if args.apply and report.records:

@@ -755,3 +755,103 @@ def test_a_receipt_from_another_source_root_is_not_recognised(
     report = import_all(db_session, other_source, _ORG, _USER, apply=False)
 
     assert report.would_import == ["Belgium Grid"]
+
+
+# ── Defects the FIRST remediation introduced (found by re-review) ────────────
+
+@pytest.mark.parametrize("body", ["[]", "null", '{"records": "oops"}',
+                                  '{"records": [null]}', "not json at all"])
+def test_a_malformed_manifest_never_blocks_a_future_import(
+    db_session, identity, source, dest_root, tmp_path, body
+):
+    """
+    `_ledger` shipped without the `isinstance` guard its two sibling readers
+    have had since they were written, so a manifest containing shape-valid
+    JSON like `[]` raised `AttributeError` out of `import_all` — BEFORE the
+    dry-run branch, so even a read-only `--source X` died. On the first-run
+    path that is "first-run import failed" on every launch, forever, with the
+    projects never importable and nothing saying why.
+    """
+    appdata = get_settings().projects_root.parent / "appdata"
+    appdata.mkdir(parents=True, exist_ok=True)
+    (appdata / "import-manifest-broken.json").write_text(body, encoding="utf-8")
+    _write_project(source, "Belgium Grid")
+
+    assert _run(db_session, source, apply=False).would_import == ["Belgium Grid"]
+    assert _run(db_session, source).imported == ["Belgium Grid"]
+
+
+def test_a_parent_imported_in_an_earlier_run_still_adopts_its_child(
+    db_session, identity, source, dest_root, tmp_path
+):
+    """
+    The ledger short-circuit `continue`d before the row was resolved, so an
+    already-imported parent never entered `inserted` — and the child was
+    reparented to root with a warning saying the parent "was not found in the
+    legacy tree" while it sat in the same database.
+    """
+    _write_project(source, "Parent")
+    _run(db_session, source, manifest=_manifest(tmp_path))
+
+    _write_project(source, "Child", parent="Parent")
+    report = _run(db_session, source, manifest=_manifest(tmp_path, "second-run.json"))
+
+    assert report.imported == ["Child"]
+    assert report.already_imported == ["Parent"]
+    assert not any("not found" in w for w in report.warnings), report.warnings
+    rows = _rows(db_session)
+    assert rows["Child"].parent_project_id == rows["Parent"].id
+
+
+def test_rebase_copies_a_symlink_as_real_bytes(db_session, identity, tmp_path, dest_root):
+    """
+    The first remediation fixed `_stage_and_rename` and left `rebase_row` — the
+    one path that delivers E2 for an absolute row, which on the machine this
+    was written for is the only row there is.
+    """
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "real.nc").write_text("irreplaceable", encoding="utf-8")
+    outside = tmp_path / "checkout" / "old"
+    outside.mkdir(parents=True)
+    (outside / "network.nc").symlink_to(vault / "real.nc")
+    row = Project(id=uuid.uuid4(), org_id=_ORG, name="3_nodes_system", created_by=_USER,
+                  storage_path=str(outside), created_at=_now(), updated_at=_now())
+    db_session.add(row)
+    db_session.commit()
+
+    destination = rebase_row(db_session, row)
+
+    assert not (destination / "network.nc").is_symlink()
+    (vault / "real.nc").unlink()
+    assert (destination / "network.nc").read_text(encoding="utf-8") == "irreplaceable"
+
+
+def test_the_manifest_is_written_atomically(db_session, identity, source, dest_root, tmp_path):
+    """It is rewritten after every project and is the only record `--rollback`
+    has; a bare `write_text` truncates first, so a kill mid-rewrite loses both
+    the rollback record and the ledger for the whole run."""
+    import inspect
+
+    from services import legacy_import
+
+    body = inspect.getsource(legacy_import.write_manifest)
+    assert "atomic_write_text(" in body
+    assert ".write_text(" not in body
+
+
+def test_both_entry_points_spell_the_source_root_the_same_way(tmp_path):
+    """
+    The ledger and the receipts are keyed on this string. `main.py` used
+    `expanduser()` and the CLI `expanduser().resolve()`, so on a symlinked path
+    — /tmp, an iCloud-backed ~/Documents — a CLI `--apply` after a first-run
+    import copied all 113 MB a second time as `Name (2)`.
+    """
+    from services.legacy_import import source_root_str
+
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real)
+
+    assert source_root_str(alias) == source_root_str(real)

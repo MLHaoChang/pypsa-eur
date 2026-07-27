@@ -14,8 +14,11 @@ instead of the projects root — and under pytest that CWD is
 `pypsa-gui/backend`, inside the checkout. It flags **any** attribute access
 named `storage_path`, not only ones wrapped in `Path(...)`: a regex keyed on
 `Path(` cannot see `bind_context`'s assignment to `ctx.storage_dir`, whose
-value flows straight into `Path(...)` at `chat_service.py:758`,
-`upload_service.py:154`, `pypsa_service.py:696` and `solve_queue.py:368`.
+value flows straight into `Path(...)` in `chat_service`, `upload_service` and
+`pypsa_service`'s eviction save. (`solve_queue` reads `job.storage_dir`, not
+the context — a separate cache, captured at enqueue, which is why
+`rename_project` refuses while a solve is queued rather than trying to rebind
+it.)
 
 Citations below name FUNCTIONS rather than line numbers wherever the line sits
 in a file this phase edits: a review found nine stale `file:line` references,

@@ -621,3 +621,61 @@ def test_0003_does_not_treat_a_sibling_root_as_being_under_the_root(tmp_path, pr
     command.upgrade(cfg, "0003_relative_storage_path")
 
     assert _rows(url)["sibling"] == str(sibling)
+
+
+def test_a_case_only_rename_is_not_refused(db_session, projects_root, desktop_layout):
+    """
+    `exists()` is case- and normalisation-insensitive on APFS and NTFS while
+    `Path.__ne__` is neither, so the destination check saw the project's OWN
+    directory as occupied and 409'd. A user could not change the case of their
+    own project name.
+    """
+    project = _seed_project(db_session, name="Belgium Grid", storage_path="Belgium Grid")
+    (projects_root / "Belgium Grid").mkdir()
+    (projects_root / "Belgium Grid" / "network.nc").write_text("payload", encoding="utf-8")
+
+    project_registry.rename_project(db_session, project, "belgium grid")
+
+    assert project.name == "belgium grid"
+    assert (project_registry.project_dir(project) / "network.nc").read_text(
+        encoding="utf-8"
+    ) == "payload"
+
+
+def test_a_rename_is_refused_while_a_solve_holds_the_directory(
+    db_session, projects_root, desktop_layout, monkeypatch
+):
+    """
+    `SolveJob.storage_dir` is captured at enqueue and never revisited, so
+    moving the directory under a live job loses the solve — and after the freed
+    name is reused, the stale job saves its result over a DIFFERENT project.
+    `_rebind_resident_contexts` cannot reach that cache; refusing is the honest
+    answer.
+    """
+    project = _seed_project(db_session, name="Belgium Grid", storage_path="Belgium Grid")
+    old_dir = projects_root / "Belgium Grid"
+    old_dir.mkdir()
+    (old_dir / "network.nc").write_text("payload", encoding="utf-8")
+
+    key = project_registry.registry_key(project)
+    monkeypatch.setattr(
+        project_registry,
+        "_queued_job_blocks_rename",
+        lambda p: project_registry.registry_key(p) == key,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        project_registry.rename_project(db_session, project, "New Name")
+    assert exc.value.status_code == 409
+    assert "solve" in exc.value.detail.lower()
+
+    db_session.refresh(project)
+    assert project.name == "Belgium Grid"
+    assert (old_dir / "network.nc").read_text(encoding="utf-8") == "payload"
+
+
+def test_the_solve_guard_reads_the_real_queue(db_session, projects_root, desktop_layout):
+    """The guard above is monkeypatched; this one drives the real predicate so
+    a change to `list_jobs()`'s shape is caught."""
+    project = _seed_project(db_session, name="Belgium Grid", storage_path="Belgium Grid")
+    assert project_registry._queued_job_blocks_rename(project) is False

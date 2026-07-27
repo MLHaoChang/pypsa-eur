@@ -23,10 +23,8 @@ read the raw column: ``project_dir`` rejoins it with the configured root,
 """
 from __future__ import annotations
 
-import errno
 import logging
 import os
-import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +37,7 @@ from sqlalchemy.orm import Session as DBSession
 import local_mode
 from db.models import Project, ProjectMembership, User
 from services import project_acl
+from services.safe_names import fold
 from services.storage_paths import (
     allocate_storage_path,
     storage_path_for,
@@ -325,13 +324,28 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
         db.refresh(project)
         return project
 
+    if _queued_job_blocks_rename(project):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This project has a solve queued or running. Renaming would "
+                "move its directory out from under the solver. Wait for it to "
+                "finish, then rename."
+            ),
+        )
+
     segment = use_org_segment()
     new_rel = allocate_storage_path(
         db, project.org_id, project.id, new_name,
         org_segment=segment, exclude={old_dir.name},
     )
     new_dir = Path(get_settings().projects_root) / new_rel
-    if new_dir.exists() and new_dir != old_dir:
+    # FOLDED, not byte-wise. `exists()` is case- and normalisation-insensitive
+    # on APFS and NTFS while `Path.__ne__` is neither, so a case-only rename
+    # (`Belgium Grid` -> `belgium grid`) or an NFC/NFD change would see its OWN
+    # directory as an occupied destination and 409. `allocate_storage_path`
+    # deliberately returns the caller's current directory in exactly that case.
+    if new_dir.exists() and not _same_dir(new_dir, old_dir):
         raise HTTPException(
             status_code=409,
             detail=f"A directory named '{new_dir.name}' already exists",
@@ -348,7 +362,7 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
             status_code=409, detail=f"Project '{new_name}' already exists"
         ) from exc
 
-    if old_dir.exists() and old_dir != new_dir:
+    if old_dir.exists() and not _same_dir(old_dir, new_dir):
         try:
             new_dir.parent.mkdir(parents=True, exist_ok=True)
             os.replace(old_dir, new_dir)
@@ -366,6 +380,14 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
     return project
 
 
+def _same_dir(a: Path, b: Path) -> bool:
+    """
+    Whether two paths name the same directory on a case- and
+    normalisation-insensitive filesystem. See `safe_names.fold`.
+    """
+    return a.parent == b.parent and fold(a.name) == fold(b.name)
+
+
 def _may_move_directory(project: Project, old_dir: Path) -> bool:
     """
     Whether renaming this project may also move its directory.
@@ -373,15 +395,25 @@ def _may_move_directory(project: Project, old_dir: Path) -> bool:
     **Local mode only, and only for a row inside the projects root.** Two
     independent reasons, both found by review:
 
-      * Four subsystems cache the resolved directory on the resident
-        `ProjectContext` (`bind_context` -> `ctx.storage_dir`, read back by
-        `upload_service`, `chat_service`, `solve_queue` and eviction). Eviction
-        writes through it with `mkdir(parents=True, exist_ok=True)`, so a moved
-        directory is silently RECREATED at the old path and the user's work
-        lands in an orphan no row references. In local mode there is one
-        process (D11's single-instance lock) and `_rebind_resident_contexts`
-        can fix every cached copy; across replicas it cannot, and rename takes
-        no project lock.
+      * Three consumers read the resolved directory back off the resident
+        `ProjectContext` (`bind_context` -> `ctx.storage_dir`, read by
+        `upload_service`, `chat_service` and eviction). Eviction writes through
+        it with `mkdir(parents=True, exist_ok=True)`, so a moved directory is
+        silently RECREATED at the old path and the user's work lands in an
+        orphan no row references. In local mode there is one process (D11's
+        single-instance lock) and `_rebind_resident_contexts` fixes every
+        cached copy; across replicas it cannot, and rename takes no project
+        lock.
+
+        **`solve_queue` is a FOURTH cache and `_rebind_resident_contexts`
+        cannot reach it** — an earlier version of this docstring claimed
+        otherwise and was wrong. `routers/solve_queue.py` captures
+        `str(project_dir(project))` onto the JOB at enqueue time, and the
+        dispatcher hydrates and saves through `job.storage_dir`. A rename
+        during a queued solve therefore loses that solve, and in the
+        name-reuse window (rename A->B, create a new A) the stale job would
+        save over the NEW project. `_queued_job_blocks_rename` refuses the
+        rename instead.
       * A row whose path is absolute lives outside `projects_root` by design
         (`stores_absolute_path`). Moving it into the root on a rename
         contradicts that, and on a hosted deployment with projects on a
@@ -396,6 +428,30 @@ def _may_move_directory(project: Project, old_dir: Path) -> bool:
     if stores_absolute_path(project):
         return False
     return old_dir.is_relative_to(Path(get_settings().projects_root))
+
+
+def _queued_job_blocks_rename(project: Project) -> bool:
+    """
+    True when a solve job holds this project's directory path.
+
+    `SolveJob.storage_dir` is captured at enqueue and never revisited, so
+    moving the directory under a live job loses the solve at best and — after
+    the freed name is reused — writes the job's result over a DIFFERENT
+    project at worst. Refusing the rename is the honest answer: the user can
+    rename once the solve finishes.
+    """
+    try:
+        from services.solve_queue import solve_queue as _queue
+
+        jobs = _queue.list_jobs()
+    except Exception:  # noqa: BLE001 — never fail a rename on bookkeeping
+        return False
+    key = registry_key(project)
+    # `list_jobs()` returns `to_public()` dicts, not `SolveJob` objects.
+    return any(
+        job.get("status") in {"queued", "running"} and job.get("project_key") == key
+        for job in jobs
+    )
 
 
 def _compensate(db: DBSession, project: Project, name: str, storage_path: str) -> None:

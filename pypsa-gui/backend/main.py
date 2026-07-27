@@ -201,7 +201,10 @@ def run_first_run_import() -> None:
         # checkout — a declared F1 deviation, not a silent no-op.
         return
 
-    source = Path(configured).expanduser()
+    # Through `legacy_import.source_root_str`, not a local spelling: the
+    # ledger and the receipts are keyed on this string, and the CLI resolving
+    # symlinks while this did not made a second `--apply` re-copy everything.
+    source = Path(legacy_import.source_root_str(configured))
     if not source.is_dir():
         logger.info("first-run import: %s does not exist; nothing to do", source)
         return
