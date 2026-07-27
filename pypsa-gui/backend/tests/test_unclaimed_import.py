@@ -24,6 +24,7 @@ from sqlalchemy.orm import sessionmaker
 import main
 from db import session as db_session_module
 from db.models import Organization, OrgMembership, Project, User
+from services import project_registry
 from services.auth_service import hash_password
 from settings import get_settings
 
@@ -214,14 +215,18 @@ def test_import_moves_directory_into_org_storage(session_local, projects_root):
         assert resp.status_code == 201, resp.text
         project_id = resp.json()["root"]["id"]
 
-    destination = projects_root / str(org.id) / project_id
+    # Phase 1b (E1/E2): the destination is `<org>/<readable name>`, relative in
+    # the row and rejoined by the resolver — not `<org>/<project uuid>`
+    # absolute. Ask the resolver rather than rebuilding the path by hand, or
+    # this assertion re-encodes a layout decision that lives in one place.
+    with session_local() as db:
+        project = db.get(Project, uuid.UUID(project_id))
+        destination = project_registry.project_dir(project)
+        assert project.storage_path == f"{org.id}/Old Study"
+
     assert destination.is_dir()
     assert (destination / "payload.txt").read_text() == "payload:Old Study"
     assert not (projects_root / "Old Study").exists()
-
-    with session_local() as db:
-        project = db.get(Project, uuid.UUID(project_id))
-        assert project.storage_path == str(destination)
 
 
 def test_import_relinks_scenario_child_to_root(session_local, projects_root):

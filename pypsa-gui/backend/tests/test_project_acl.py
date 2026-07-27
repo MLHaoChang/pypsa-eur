@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pathlib
 import uuid
 from datetime import datetime, timezone
 
@@ -81,7 +82,11 @@ def _create_project(
         org_id=org.id,
         name=name,
         created_by=creator.id,
-        storage_path=str(storage_path_for(org.id, project_id)),
+        # Phase 1b: relative to `projects_root`, and never materialised — this
+        # module only exercises the ACL, so nothing here reads the disk.
+        storage_path=str(
+            storage_path_for(org.id, project_id, name, taken=set(), org_segment=True)
+        ),
         parent_project_id=parent.id if parent is not None else None,
         scenario_description=None,
         created_at=_now_utc(),
@@ -112,14 +117,31 @@ def _assign(
     return membership
 
 
-def test_storage_path_uses_configured_projects_root(tmp_path, monkeypatch) -> None:
+def test_storage_path_is_relative_and_rejoins_the_configured_root(tmp_path, monkeypatch) -> None:
+    """
+    Phase 1b (E2) inverted this. `storage_path_for` no longer returns an
+    absolute path — it returns one relative to `projects_root`, and
+    `project_registry.project_dir` is what rejoins them. An absolute value in
+    the row bakes one machine's home directory into the database.
+    """
+    from db.models import Project as _Project
+    from services.project_registry import project_dir
+
     monkeypatch.setenv("PROJECTS_ROOT", str(tmp_path / "tenant-projects"))
     get_settings.cache_clear()
 
     org_id = uuid.uuid4()
     project_id = uuid.uuid4()
 
-    assert storage_path_for(org_id, project_id) == tmp_path / "tenant-projects" / str(org_id) / str(project_id)
+    relative = storage_path_for(
+        org_id, project_id, "Belgium Grid", taken=set(), org_segment=True
+    )
+    assert not relative.is_absolute()
+    assert relative == pathlib.Path(str(org_id)) / "Belgium Grid"
+
+    row = _Project(id=project_id, org_id=org_id, name="Belgium Grid",
+                   storage_path=str(relative))
+    assert project_dir(row) == tmp_path / "tenant-projects" / str(org_id) / "Belgium Grid"
 
     get_settings.cache_clear()
 

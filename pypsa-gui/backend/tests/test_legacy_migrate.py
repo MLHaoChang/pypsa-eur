@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from db.models import Organization, OrgMembership, Project, ProjectMembership, User
+from services import project_registry
 from services.auth_service import hash_password
 from services.legacy_migrate import claim_legacy_project
 from settings import get_settings
@@ -152,4 +153,9 @@ def test_claim_assigns_owner_and_members_on_root_only(
         assert child_memberships == []
         assert not (legacy_root_dir / "Root").exists()
         assert not (legacy_root_dir / "Child").exists()
-        assert (get_settings().projects_root / str(org.id) / str(result.root.id) / "payload.txt").exists()
+        # Phase 1b (E1/E2): `<org>/<readable name>`, relative in the row.
+        # Through the resolver, not a hand-built path — the layout decision
+        # lives in `storage_paths`, and re-encoding it here is how the two
+        # drift apart.
+        assert result.root.storage_path == f"{org.id}/Root"
+        assert (project_registry.project_dir(result.root) / "payload.txt").exists()

@@ -17,6 +17,9 @@ against ``Path(project.storage_path)``.
 """
 from __future__ import annotations
 
+import errno
+import os
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,7 +31,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from db.models import Project, ProjectMembership, User
 from services import project_acl
-from services.storage_paths import storage_path_for
+from services.storage_paths import storage_path_for, taken_names, use_org_segment
 from services.tenancy_service import get_user_membership
 from settings import get_settings
 
@@ -186,12 +189,19 @@ def create_root(
     """Insert a root (parent-less) project row for the caller's org."""
     org_id = _org_id_for(db, user)
     project_id = uuid.uuid4()
+    segment = use_org_segment()
     project = Project(
         id=project_id,
         org_id=org_id,
         name=name,
         created_by=user.id,
-        storage_path=str(storage_path_for(org_id, project_id)),
+        storage_path=str(
+            storage_path_for(
+                org_id, project_id, name,
+                taken_names(db, org_id, segment),
+                org_segment=segment,
+            )
+        ),
         parent_project_id=None,
         scenario_description=scenario_description,
         created_at=_now(),
@@ -222,12 +232,19 @@ def create_scenario(
     ``parent_project_id`` set so the tree-aware ACL grants inherited access.
     """
     project_id = uuid.uuid4()
+    segment = use_org_segment()
     project = Project(
         id=project_id,
         org_id=base.org_id,
         name=name,
         created_by=user.id,
-        storage_path=str(storage_path_for(base.org_id, project_id)),
+        storage_path=str(
+            storage_path_for(
+                base.org_id, project_id, name,
+                taken_names(db, base.org_id, segment),
+                org_segment=segment,
+            )
+        ),
         parent_project_id=base.id,
         scenario_description=scenario_description,
         created_at=_now(),
@@ -246,9 +263,44 @@ def create_scenario(
 
 
 def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
-    """Update a project's name in place (storage_path is UUID-keyed, so it
-    does not move). Raises 409 on an org-level name collision."""
+    """
+    Rename a project — and MOVE its directory, since E1 puts the name on disk.
+
+    The row and the filesystem cannot be changed in one transaction, so the
+    order is chosen to make every failure recoverable:
+
+      1. resolve the new directory and refuse a collision **before** the
+         commit. Doing it after leaves a committed row pointing at a directory
+         that never moved, with nothing to put it back.
+      2. commit the row, keeping the existing `IntegrityError` -> 409 handler.
+         Its old comment ("storage_path is UUID-keyed, so it does not move")
+         is what E1 invalidates; the handler itself is still right, and the
+         unique index on `(org_id, storage_path)` now backs it up.
+      3. move the directory, compensating the row if the move fails.
+
+    `taken` excludes this project's own directory, or a rename to a name that
+    sanitises back to the current directory would allocate ` (2)` and move the
+    data for nothing.
+    """
+    segment = use_org_segment()
+    old_dir = project_dir(project)
+    old_rel = project.storage_path
+    new_rel = storage_path_for(
+        project.org_id,
+        project.id,
+        new_name,
+        taken=taken_names(db, project.org_id, segment) - {old_dir.name},
+        org_segment=segment,
+    )
+    new_dir = Path(get_settings().projects_root) / new_rel
+    if new_dir.exists() and new_dir != old_dir:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A directory named '{new_dir.name}' already exists",
+        )
+
     project.name = new_name
+    project.storage_path = str(new_rel)
     project.updated_at = _now()
     try:
         db.commit()
@@ -257,6 +309,23 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
         raise HTTPException(
             status_code=409, detail=f"Project '{new_name}' already exists"
         ) from exc
+
+    if old_dir.exists() and old_dir != new_dir:
+        try:
+            new_dir.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(old_dir, new_dir)
+        except OSError as exc:
+            if exc.errno == errno.EXDEV:
+                # A pre-0003 absolute row can point at another volume, where
+                # `os.replace` cannot rename across the boundary.
+                shutil.move(str(old_dir), str(new_dir))
+            else:
+                # The row is already committed; put it back or the project
+                # points at a directory that does not exist and vanishes.
+                project.storage_path = old_rel
+                db.commit()
+                raise
+
     db.refresh(project)
     return project
 

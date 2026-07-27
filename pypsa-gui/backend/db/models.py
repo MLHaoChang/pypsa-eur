@@ -40,7 +40,18 @@ class OrgMembership(Base):
 
 class Project(Base):
     __tablename__ = "projects"
-    __table_args__ = (UniqueConstraint("org_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("org_id", "name"),
+        # Phase 1b: `storage_path` carries the project's readable NAME, so two
+        # rows can now be allocated the same directory and each save would
+        # clobber the other. Four write paths allocate one (create_root,
+        # create_scenario, rename_project, the legacy importer); a constraint
+        # covers all four by construction, where four hand-written checks
+        # drift. Named to match migration 0003's index.
+        UniqueConstraint(
+            "org_id", "storage_path", name="uq_projects_org_id_storage_path"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)

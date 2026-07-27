@@ -33,8 +33,12 @@ from settings import get_settings
 _BACKEND = pathlib.Path(__file__).resolve().parent.parent
 
 # Functions allowed to touch the raw column. `project_dir` IS the resolver;
-# `ensure_project_dir` delegates to it.
-_EXEMPT_FUNCTIONS = frozenset({"project_dir", "ensure_project_dir"})
+# `ensure_project_dir` delegates to it; `rename_project` legitimately reads the
+# old value and writes the new one, because E1 makes the directory move with
+# the name. Exempting a named function is the right relaxation — narrowing the
+# matcher back to `Path(`-wrapped hits is not, because that is exactly the
+# weakness that hid `bind_context`'s assignment.
+_EXEMPT_FUNCTIONS = frozenset({"project_dir", "ensure_project_dir", "rename_project"})
 
 
 @pytest.fixture

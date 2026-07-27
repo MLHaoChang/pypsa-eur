@@ -102,7 +102,19 @@ def _create_project(
     parent: Project | None = None,
 ) -> Project:
     project_id = uuid.uuid4()
-    storage_path = storage_path_for(org.id, project_id)
+    # Phase 1b: `storage_path_for` returns a path RELATIVE to `projects_root`,
+    # so the row stores the relative form and anything that writes must rejoin
+    # it with the root first — otherwise `_seed_network` lands in
+    # `pypsa-gui/backend/<org>/…`, inside the checkout (pixi runs the suite
+    # with that cwd) and outside `.gitignore`'s reach.
+    #
+    # `taken=set()` is sound here and only here: `UniqueConstraint(org_id,
+    # name)` already makes every project in one org distinctly named, and no
+    # two names in this module sanitise alike.
+    relative = storage_path_for(
+        org.id, project_id, name, taken=set(), org_segment=True
+    )
+    storage_path = get_settings().projects_root / relative
     _seed_network(storage_path)
     with session_local() as db:
         project = Project(
@@ -110,7 +122,7 @@ def _create_project(
             org_id=org.id,
             name=name,
             created_by=creator.id,
-            storage_path=str(storage_path),
+            storage_path=str(relative),
             parent_project_id=parent.id if parent is not None else None,
             scenario_description=None,
             created_at=_now(),

@@ -24,6 +24,7 @@ import main
 from db import session as db_session_module
 from db.models import Organization, OrgMembership, Project, ProjectMembership, User
 from services.auth_service import hash_password
+from services import project_registry
 from services.storage_paths import storage_path_for
 from settings import get_settings
 
@@ -104,7 +105,19 @@ def _create_project(
     seed_disk=True,
 ) -> Project:
     project_id = uuid.uuid4()
-    storage_path = storage_path_for(org.id, project_id)
+    # Phase 1b: `storage_path_for` returns a path RELATIVE to `projects_root`,
+    # so the row stores the relative form and anything that writes must rejoin
+    # it with the root first — otherwise `_seed_network` lands in
+    # `pypsa-gui/backend/<org>/…`, inside the checkout (pixi runs the suite
+    # with that cwd) and outside `.gitignore`'s reach.
+    #
+    # `taken=set()` is sound here and only here: `UniqueConstraint(org_id,
+    # name)` already makes every project in one org distinctly named, and no
+    # two names in this module sanitise alike.
+    relative = storage_path_for(
+        org.id, project_id, name, taken=set(), org_segment=True
+    )
+    storage_path = get_settings().projects_root / relative
     if seed_disk:
         _seed_network(storage_path)
     with session_local() as db:
@@ -113,7 +126,7 @@ def _create_project(
             org_id=org.id,
             name=name,
             created_by=creator.id,
-            storage_path=str(storage_path),
+            storage_path=str(relative),
             parent_project_id=parent.id if parent is not None else None,
             scenario_description=None,
             created_at=_now(),
@@ -242,7 +255,7 @@ def test_scenario_child_metadata_parent_name_in_sync(session_local):
     import json
     with session_local() as db:
         child = db.get(Project, uuid.UUID(child_id))
-    meta = json.loads((storage_path_for(org.id, child.id) / "metadata.json").read_text())
+    meta = json.loads((project_registry.project_dir(child) / "metadata.json").read_text())
     assert meta["parent_project"] == "Root"
 
 
@@ -380,7 +393,7 @@ def test_layout_put_then_get_roundtrip_for_owner(session_local):
         assert got.json() == {"nodes": {"B1": [1, 2]}}
 
     # The layout landed in the org-scoped storage dir, not a flat path.
-    layout_file = storage_path_for(org.id, project.id) / "layout.json"
+    layout_file = project_registry.project_dir(project) / "layout.json"
     assert layout_file.exists()
 
 
@@ -502,7 +515,7 @@ def test_save_as_copies_uploads_from_auth_storage(session_local):
     source = _create_project(session_local, org=org, creator=admin, name="Source")
 
     # Seed an upload under the SOURCE project's org-scoped storage dir.
-    uploads = storage_path_for(org.id, source.id) / "uploads" / "file-1"
+    uploads = project_registry.project_dir(source) / "uploads" / "file-1"
     uploads.mkdir(parents=True, exist_ok=True)
     (uploads / "ref.csv").write_text("a,b\n1,2\n")
 
@@ -519,6 +532,6 @@ def test_save_as_copies_uploads_from_auth_storage(session_local):
             select(Project).where(Project.org_id == org.id, Project.name == "Copy")
         )
     assert copy_row is not None
-    copied = storage_path_for(org.id, copy_row.id) / "uploads" / "file-1" / "ref.csv"
+    copied = project_registry.project_dir(copy_row) / "uploads" / "file-1" / "ref.csv"
     assert copied.exists(), "uploads/ was not copied from the source storage_path"
     assert copied.read_text() == "a,b\n1,2\n"

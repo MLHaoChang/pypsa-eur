@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from db.models import Organization, OrgMembership, Project, ProjectMembership, User
 from services import project_registry
-from services.storage_paths import storage_path_for
+from services.storage_paths import storage_path_for, taken_names, use_org_segment
 from services.tenancy_service import ConflictError, ValidationError
 from settings import get_settings
 
@@ -233,15 +233,25 @@ def claim_legacy_project(
             raise ConflictError(f"Project '{name}' already exists in the target organization")
 
     project_map: dict[str, Project] = {}
+    # `taken` ACCUMULATES across the loop. Seeded once from the database and
+    # the filesystem, then added to after each allocation — without that, two
+    # legacy names that sanitise alike (`Study:1` and `Study/1`) are both
+    # handed `Study_1` inside a single call.
+    segment = use_org_segment()
+    taken = taken_names(db, org_id, segment)
     for name in claim_names:
         entry = entries[name]
         project_id = uuid.uuid4()
+        relative = storage_path_for(
+            org_id, project_id, name, taken, org_segment=segment
+        )
+        taken.add(relative.name)
         project_map[name] = Project(
             id=project_id,
             org_id=org_id,
             name=name,
             created_by=owner_id,
-            storage_path=str(storage_path_for(org_id, project_id)),
+            storage_path=str(relative),
             parent_project_id=None,
             scenario_description=entry.metadata.get("scenario_description"),
             created_at=_now(),
