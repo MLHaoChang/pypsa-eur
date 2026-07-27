@@ -17,6 +17,7 @@
  *     into a React `useEffect` return.
  */
 import { client } from './client'
+import { rawFetchHeaders } from './csrf'
 
 // Latest Sonnet + Opus. Keep in sync with the backend DEFAULT_MODEL/OPUS_MODEL
 // (chat_service.py) and PRICING_USD_PER_MTOK (chatStore.ts).
@@ -62,7 +63,9 @@ export function createChatStream(
     try {
       const resp = await fetch('/api/chat/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Raw fetch bypasses the axios CSRF interceptor, so the header is
+        // added here — without it every chat turn 403s once a session exists.
+        headers: { 'Content-Type': 'application/json', ...rawFetchHeaders('POST') },
         body: JSON.stringify(req),
         signal: controller.signal,
       })

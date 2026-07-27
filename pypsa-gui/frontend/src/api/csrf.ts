@@ -42,3 +42,24 @@ export function readCsrfToken(cookieSource?: string): string | null {
   }
   return null
 }
+
+/**
+ * Header bag for a raw `fetch` call.
+ *
+ * The axios instance gets this from its request interceptor; direct `fetch`
+ * callers bypass that entirely and 403 on any mutation once a session cookie
+ * exists. Built on the same two helpers above so there is exactly one
+ * definition of "which methods need a token" and one cookie parser.
+ *
+ * Always returns an object, never undefined: every call site spreads the result
+ * into a headers literal, where undefined would be a TypeError rather than a
+ * quietly missing header.
+ */
+export function rawFetchHeaders(
+  method: string,
+  cookieSource?: string,
+): Record<string, string> {
+  if (!needsCsrfHeader(method)) return {}
+  const token = readCsrfToken(cookieSource)
+  return token ? { [CSRF_HEADER]: token } : {}
+}

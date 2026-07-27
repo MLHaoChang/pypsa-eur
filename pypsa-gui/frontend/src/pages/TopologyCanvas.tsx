@@ -16,6 +16,7 @@ import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
 import { resultsApi } from '../api/simulation'
 import { projectsApi } from '../api/projects'
+import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { isRenewableCarrier } from '../utils/carriers'
@@ -147,7 +148,9 @@ function persistLayoutOnUnload(project: string | null, state: PersistedState): v
     fetch(url, {
       method: 'PUT',
       body,
-      headers: { 'Content-Type': 'application/json' },
+      // Read at unload time, not cached: raw fetch bypasses the axios CSRF
+      // interceptor, and a 403 here loses the user's last drag silently.
+      headers: { 'Content-Type': 'application/json', ...rawFetchHeaders('PUT') },
       keepalive: true,
     }).catch(() => { /* localStorage fallback already done */ })
     return
@@ -2358,7 +2361,13 @@ export default function TopologyCanvas() {
           const name = edgeId.replace(/^(line-|link-)/, '')
           const url = `/api/network/${isLink ? 'links' : 'lines'}/${encodeURIComponent(name)}`
           try {
-            fetch(url, { method: 'DELETE', keepalive: true }).catch(() => { /* best effort */ })
+            fetch(url, {
+              method: 'DELETE',
+              // This site had no headers object at all — raw fetch bypasses the
+              // axios CSRF interceptor, so the pending delete 403s on unload.
+              headers: { ...rawFetchHeaders('DELETE') },
+              keepalive: true,
+            }).catch(() => { /* best effort */ })
           } catch { /* keepalive unsupported — drop on the floor */ }
         })
         pendingDeletes.clear()

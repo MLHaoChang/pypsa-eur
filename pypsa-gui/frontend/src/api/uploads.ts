@@ -5,7 +5,13 @@
  * (drag-drop + paste + file-picker) and by chatStore's upload-chip strip.
  * Phase C will add an `attachment_file_ids` field to the chat stream
  * request that references these meta entries.
+ *
+ * These call `fetch` directly rather than the axios client — multipart upload
+ * and blob URLs are simpler without it — which means they bypass the CSRF
+ * request interceptor and have to add the header themselves. Only the two
+ * mutating calls need it; the reads are exempt server-side.
  */
+import { rawFetchHeaders } from './csrf'
 
 export interface UploadMeta {
   schema_version: number
@@ -74,7 +80,8 @@ export async function uploadFile(
   form.append('file', file)
   const resp = await fetch(
     `/api/projects/${encodeURIComponent(projectName)}/uploads`,
-    { method: 'POST', body: form },
+    // No Content-Type: the browser must set its own multipart boundary.
+    { method: 'POST', body: form, headers: { ...rawFetchHeaders('POST') } },
   )
   if (!resp.ok) {
     throw await _parseError(resp)
@@ -128,7 +135,7 @@ export async function deleteUpload(
 ): Promise<DeleteUploadResponse> {
   const resp = await fetch(
     `/api/projects/${encodeURIComponent(projectName)}/uploads/${encodeURIComponent(fileId)}`,
-    { method: 'DELETE' },
+    { method: 'DELETE', headers: { ...rawFetchHeaders('DELETE') } },
   )
   if (!resp.ok) {
     throw await _parseError(resp)
