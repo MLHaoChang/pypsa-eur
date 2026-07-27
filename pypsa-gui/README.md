@@ -308,6 +308,40 @@ go to SMTP `:1025`. Links use `PUBLIC_BASE_URL` (default `http://localhost:5173`
 **Important:** after pulling this branch, fully restart `npm run dev` so Vite
 reloads `.env.development`. A hard refresh alone will not enable the login page.
 
+### Local desktop mode
+
+The desktop build runs the same backend with no login at all. It is selected by
+one environment variable, and the launcher MUST set the whole set below **before
+`import main`** — `get_settings()` and `security.allowed_origins()` are
+`lru_cache`d and read their values once.
+
+| Variable | Value |
+|---|---|
+| `PYPSAGUI_LOCAL_MODE` | `1` (also `true` / `yes` / `on`) |
+| `DATABASE_URL` | absolute SQLite path under the app-data dir. **Mandatory** — `backend/.env` ships a CWD-relative `sqlite:///./auth_dev.db`, dotenv outranks the field default, and a frozen `.app` has cwd `/` |
+| `PROJECTS_ROOT` | user-visible projects folder |
+| `FLAT_PROJECTS_ROOT`, `LEGACY_ROOT` | app-data dir |
+| `CORS_ALLOWED_ORIGINS` | `http://127.0.0.1:<chosen port>` |
+| `MPLBACKEND` | `Agg` — matplotlib otherwise resolves to `macosx`, which crashes off the main thread |
+
+The prefix is `PYPSAGUI_`, not `PYPSA_GUI_`: PyPSA's own option system claims the
+whole `PYPSA_*` namespace and warns about unknown options on every boot.
+
+In this mode the backend seeds one org, one user and one membership with fixed
+UUIDs, injects that user on every request, and reports `auth_enabled: false` from
+`/api/health` — which is what tells the SPA not to render the login gate. The IDs
+are constants rather than generated because `projects_root/<org_id>/<project_id>/`
+embeds the org id, so a regenerated id would orphan every project directory on
+reinstall.
+
+One-shot setup without the shell, useful on a fresh machine and as a diagnostic
+(it prints the three paths the app will actually use):
+
+```bash
+cd pypsa-gui/backend
+pixi run python -m tools.bootstrap_local
+```
+
 ### Hard reset if the preview is stuck on the workbench
 
 `frontend/index.html` is now the **static login page** (it does not load React).
