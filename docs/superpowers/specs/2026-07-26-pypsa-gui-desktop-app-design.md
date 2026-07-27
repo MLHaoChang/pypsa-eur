@@ -1,7 +1,7 @@
 # PyPSA GUI as a local desktop application — design
 
 **Date:** 2026-07-26
-**Status:** awaiting review — Step 0b reviewed 2026-07-27, premise holds, see §10
+**Status:** awaiting review — Step 0b landed `09bd7020`, premise holds, implementation unblocked (§10)
 **Scope:** `pypsa-gui/` (backend + frontend). No changes to PyPSA-Eur workflow code.
 
 ---
@@ -629,28 +629,36 @@ shutdown-flush requirement is unaffected.
 docstring names SQLite "the documented local fallback" — partly discharging G2 and
 confirming SQLite compatibility is already a project norm.
 
-### Defect observed in the in-flight work (not ours to fix)
+### Defect shipped in Step 0b (not ours to fix)
 
-Three endpoints now take `current_session` and write the pointer: `save_project`
+Three endpoints take `current_session` and write the pointer: `save_project`
 (`projects.py:1075`), `activate_project` (`:1694`), `reset_network`
 (`network.py:1733`). Five siblings that also swap the network context do **not**:
 `create_from_template`, `import_bundle`, `import_unclaimed_project`, `load_project`,
-`create_scenario`.
+`create_scenario`. **Verified against `09bd7020` as committed**, not against the draft.
 
 `resolve_for_session` does not compensate — it resolves purely from
 `sessions.active_project_id`. So on the next request the stale pointer re-resolves
 and re-hydrates the previous project, which is the failure the patch author documents
 for `reset_network`: the operation "would appear to silently undo itself."
+(The mechanism is Verified; the end-to-end symptom is Assumed — not reproduced.)
 
-This is **web-mode only** — it requires a session — and the work is unfinished, so it
-may already be on their list. It does not block this spec. Raise it with that
-workstream rather than fixing it here.
+Severity is higher than "unfinished work":
+- `tests/test_qa_step0b.py` has **zero** references to any of the five.
+- The frontend calls three of them in normal use: `createFromTemplate`
+  (`frontend/src/api/projects.ts:233`), `import_bundle` (`:244`), and the scenario
+  fork (`:127`).
+- The commit message does not list them as follow-up.
+
+Still **web-mode only** — all five need a session to misbehave, and local mode never
+has one. Does not block this spec. Belongs to the cloud/SaaS workstream.
 
 ### Decision
 
-**Planning is unblocked.** The premise survives, §5 is re-verified, and the mechanism
-is unchanged. Writing the implementation plan can proceed.
+**Unblocked.** Step 0b committed as `09bd7020` on 2026-07-27. The working tree is
+clean, the premise survives, and every line reference in §5 and in the phase-1a plan
+was re-verified against the committed code — `main.py:248`/`:267`, `projects.py:48`,
+`pypsa_service.py:52`, `main.py:552` all unchanged from the draft review.
 
-**Implementation still waits** for 0b to commit. Seven of the files this spec touches
-hold uncommitted work; branching from `master` now would produce a diff that cannot
-be rebased cleanly. Re-run the concurrency check before the first edit.
+Implementation may begin. Task 0 of the phase-1a plan re-runs the concurrency check
+regardless — cheap, and the repo has two other active worktrees.
