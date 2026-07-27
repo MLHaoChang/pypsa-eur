@@ -34,6 +34,7 @@ import uuid
 from functools import lru_cache
 from urllib.parse import urlparse
 
+import local_mode
 from settings import get_settings
 
 # ── Replica identity ────────────────────────────────────────────────────────
@@ -124,6 +125,11 @@ def _now() -> float:
 
 def login_retry_after(ip: str, email: str) -> int | None:
     """Seconds the caller must wait, or None when the attempt may proceed."""
+    # A 15-minute lockout whose only escape is a process restart is a support
+    # call on a machine with one user and no attacker to throttle.
+    if local_mode.is_local_mode():
+        return None
+
     key = (ip, email.strip().lower())
     with _throttle_lock:
         until = _blocked_until.get(key)

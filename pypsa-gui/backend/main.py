@@ -488,6 +488,10 @@ async def replica_identity_middleware(request: Request, call_next):
     HTTP 200 alone. Opaque (keyed hash of pid + boot nonce) so it cannot be
     read as topology.
     """
+    if local_mode.is_local_mode():
+        # Replica identity is multi-replica test infrastructure. One process,
+        # one machine, no proxy — the header is dead weight locally.
+        return await call_next(request)
     response = await call_next(request)
     response.headers[security.REPLICA_HEADER] = security.replica_id()
     return response
@@ -512,7 +516,27 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+def _reject_in_local_mode() -> None:
+    """
+    Admin is a multi-tenant surface, and there is no second tenant locally.
+    `/api/admin/legacy-projects/{name}/claim` shutil.moves whole project
+    directories, which is the one that actually matters.
+
+    A router-level dependency, NOT an `if` around include_router: conftest
+    imports `main` with local mode unset, so an import-time guard would
+    register the router permanently and no fixture could un-register it. 404
+    rather than 403 — locally the surface does not exist at all.
+    """
+    if local_mode.is_local_mode():
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+app.include_router(
+    admin.router,
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(_reject_in_local_mode)],
+)
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.
