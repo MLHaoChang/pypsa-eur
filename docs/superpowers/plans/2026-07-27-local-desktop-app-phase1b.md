@@ -12,6 +12,80 @@
 
 ---
 
+## Execution log — phase 1b COMPLETE (2026-07-27)
+
+All ten tasks landed on `feature/local-app-impl`. Backend **64 files / 1251
+tests → 73 files / 1413 tests**, all green; frontend unchanged at **23 / 147**,
+as predicted (the frontend already read 404 as "nothing to import").
+
+| Task | Commit | Tests |
+|---|---|---|
+| 1 close `/unclaimed` locally | `f0970d7e` | 6 |
+| 2 portable directory names | `50e4bdd2` | 51 |
+| 3 split resolve from materialise | `6a7ca9cc` | 7 |
+| 4 relative paths + 0003 | `becca2d8` | 25 |
+| 5 atomic writes | `db4b2fd6` | 14 |
+| 6 reconcile | `ab7c8750` | 13 |
+| 7 inventory + import | `6f43e93f` | 38 |
+| 8 first-run wiring | `977f105d` | 8 |
+
+**What the RED runs proved, rather than described.** Task 1's failing test
+returned **201** from `POST /api/projects/unclaimed/Old Study/import` in local
+mode — the `shutil.move` hazard, executed. Task 3's guard found exactly the
+eight `storage_path` readers the plan predicted, by name and line.
+
+**Six deviations from the plan, each recorded in its commit:**
+
+1. `routers/solve_queue.py:56` stays on `project_dir`, not `ensure_project_dir`
+   — it 404s when `network.nc` is absent, so mkdir-ing first would resurrect a
+   deleted project's directory, which is what Task 3 exists to stop.
+2. `_taken_names` / `_org_segment` are public: `taken_names` and
+   `use_org_segment`. The latter renamed to avoid shadowing the `org_segment`
+   keyword every function here takes.
+3. Migration 0003's test database is built by running alembic from 0001, not
+   `create_all` + `stamp`. `create_all` emits the current model, which already
+   carries the unique constraint 0003 adds, so a database built that way
+   cannot hold the colliding rows the abort test needs.
+4. A foreign directory in the import destination is stepped **around**, not
+   refused: `taken_names` unions the filesystem, so the project lands beside it
+   as `… (2)`. Same reasoning as rename. The explicit `exists()` check remains
+   as the race guard and is tested with a stale `taken` set.
+5. A dry run consults the receipts, so the rehearsal tells the truth on a
+   second run.
+6. E5-partial stands: `snapshots.py:294,361,364` remain plain `copy2`. They
+   write into a directory created `exist_ok=False` five lines earlier.
+
+**Rehearsal + acceptance, against a COPY of the real tree.** A real uvicorn on
+port 8125 with a fresh app-data directory, first run:
+
+- `auth_enabled:false`; `/api/projects/` lists **12**; 12 readable top-level
+  directories, no org segment
+- `Belgium Grid` opens: **10 buses**, 6 lines, 33 generators, 7 snapshots, real
+  Belgian coordinates — the copies are valid netCDF, not just present
+- both real lineage chains reconstructed; the one dangling parent
+  (`4_nodes_N-1` → `test_project_4_nodes2`) imported as a root **with a
+  warning**, not refused
+- restart → still 12 projects, 12 directories: idempotent in a live app
+- `/api/projects/unclaimed`, `/api/admin/legacy-projects`,
+  `/api/admin/organizations` all **404**; no `X-PyPSA-Replica`
+- deep links 200, assets 200, `PUT /layout` 200 with no cookie and no CSRF
+- `--rollback` removed 12 rows and 12 directories, source untouched
+- **the real tree is byte-identical to Task 0's `shasum` manifest**, verified
+  after the rehearsal and again after acceptance
+- `~/Library/Application Support/PyPSA GUI/` never created
+
+**Still open, deliberately.** `pypsa-gui/backend/projects/` is still in the
+checkout: `--forget-legacy` is a user action and Task 9 does not run it, so
+`git clean -xdf` can still delete 113 MB. Task 0's verified tarball is at
+`~/pypsa-phase1b-backup-20260727T213326/` (80 files, `shasum` manifest) and the
+path is in `~/.pypsa-phase1b-backup-path`. `smoke/qa_e2e.py:289,639` hardcode
+`BACKEND_DIR / "projects"` and will self-skip once the tree is retired; they
+are not in the pytest gate, so nothing goes red — which is why it is written
+down. `--rebase-db` has not been run against `auth_dev.db`, so
+`3_nodes_system` is still absolute into the checkout.
+
+---
+
 ## Revision log
 
 **v4 (2026-07-27)** — fourth independent review; v3 was **REJECT**ed with 5 blocking findings, all narrow. Each re-verified before applying.
