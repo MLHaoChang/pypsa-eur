@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -125,6 +126,96 @@ _AUTH_PUBLIC_PATHS = {
 # The middleware calls it below, before the expensive netcdf export.
 
 
+# ── First-run legacy import (spec F1) ────────────────────────────────────────
+
+_IMPORT_LOCK_NAME = "import.lock"
+
+# A lock left behind by a KILLED process must not wedge every future launch.
+# A fresh lock is trusted — that is a real second instance mid-copy — and an
+# old one is reclaimed. The window is generous because the thing it guards is
+# copying 100+ MB.
+_LOCK_STALE_SECONDS = 3600
+
+
+def _import_lock_path() -> Path:
+    import app_paths
+
+    return app_paths.app_data_dir() / _IMPORT_LOCK_NAME
+
+
+def run_first_run_import() -> None:
+    """
+    Import a pre-desktop project tree, once, on launch.
+
+    **Never blocks startup.** Anything that goes wrong is logged and the app
+    boots anyway: `tools/import_legacy` is the retry path, and an app that
+    will not start is a worse outcome than an import that did not happen.
+
+    **Idempotence comes from the receipts `legacy_import` writes**, not from a
+    marker here. A marker is what lets a reinstall — new app-data, same
+    projects folder — copy stale data over live work. It also means a launch
+    with nothing to import records nothing, so a machine whose legacy root was
+    not configured yet does not skip the import permanently.
+
+    The `O_EXCL` lock stands in for the single-instance guard (D11/H1), which
+    has not landed. Two launches can genuinely overlap today, and without it
+    they interleave `copytree` calls into the same staging directory.
+    """
+    from services import legacy_import
+
+    configured = get_settings().legacy_import_root
+    if not configured:
+        # No import configured. Until the packaged shell sets
+        # PYPSAGUI_LEGACY_IMPORT_ROOT this is the normal path for a plain
+        # checkout — a declared F1 deviation, not a silent no-op.
+        return
+
+    source = Path(configured).expanduser()
+    if not source.is_dir():
+        logger.info("first-run import: %s does not exist; nothing to do", source)
+        return
+
+    lock = _import_lock_path()
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            age = time.time() - lock.stat().st_mtime
+            if age < _LOCK_STALE_SECONDS:
+                logger.info("first-run import: another instance holds the lock")
+                return
+            logger.warning("first-run import: reclaiming a stale lock (%.0fs old)", age)
+            lock.unlink(missing_ok=True)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+    except OSError:
+        logger.exception("first-run import: could not take the lock")
+        return
+
+    try:
+        with db_session_module.SessionLocal() as db:
+            user = local_mode.get_local_user(db)
+            if user is None:
+                logger.warning("first-run import: no local identity; skipping")
+                return
+            report = legacy_import.import_all(
+                db, source, local_mode.LOCAL_ORG_ID, user.id, apply=True
+            )
+        if report.imported:
+            logger.info(
+                "first-run import: %d project(s) imported from %s",
+                len(report.imported),
+                source,
+            )
+        for line in report.failed + report.collisions + report.warnings:
+            logger.warning("first-run import: %s", line)
+    except Exception:  # noqa: BLE001 — a failed import must still yield an app
+        logger.exception("first-run import failed; continuing without it")
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if local_mode.is_local_mode():
@@ -136,6 +227,9 @@ async def lifespan(app: FastAPI):
         local_bootstrap.ensure_schema(get_settings().database_url)
         with db_session_module.SessionLocal() as db:
             local_mode.ensure_local_identity(db)
+        # Fourth, and after the identity: imported rows need an org and a
+        # creator. Never blocks startup — see `run_first_run_import`.
+        run_first_run_import()
     PyPSAService.initialize()
     yield
 
