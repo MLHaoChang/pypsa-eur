@@ -45,7 +45,17 @@ class MembersRequest(BaseModel):
     user_ids: list[str] = []
 
 
-PROJECTS_DIR = pathlib.Path(__file__).parent.parent / "projects"
+# The FLAT legacy store: <root>/<display-name>/network.nc. Distinct from
+# `settings.projects_root`, which is org-scoped (<root>/<org>/<project>/) —
+# pointing this at that one makes `_find_direct_children`'s <dir>/network.nc
+# filter iterate org-UUID directories and never match, so scenario-tree delete
+# and reparent silently return [].
+#
+# Deliberately a module ATTRIBUTE rather than a function: tests/conftest.py's
+# `tmp_projects_dir` fixture monkeypatches this name, and nine test files
+# depend on that. Only the default moved — it used to be __file__-relative,
+# which lands inside a read-only app bundle once the backend is frozen.
+PROJECTS_DIR = pathlib.Path(get_settings().flat_projects_root)
 
 # Files that make up a project bundle (.pypsaproj.zip).
 # `layout.json` holds the blank-canvas schematic layout — the "latent
