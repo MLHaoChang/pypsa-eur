@@ -18,7 +18,10 @@ def test_app_data_dir_is_absolute_and_outside_the_source_tree():
     assert backend not in d.parents and d != backend
 
 
-def test_app_data_dir_is_platform_correct():
+def test_app_data_dir_is_platform_correct(monkeypatch):
+    # conftest pins PYPSAGUI_APP_DATA_DIR to a tmpdir for the whole session, so
+    # the override has to be cleared to see the platform default at all.
+    monkeypatch.delenv("PYPSAGUI_APP_DATA_DIR", raising=False)
     d = app_paths.app_data_dir()
     if sys.platform == "darwin":
         assert d.parts[-3:] == ("Library", "Application Support", "PyPSA GUI")

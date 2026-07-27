@@ -57,6 +57,15 @@ import tempfile as _tempfile
 _TEST_PROJECTS_ROOT = _tempfile.mkdtemp(prefix="pypsa-gui-test-projects-")
 os.environ["PROJECTS_ROOT"] = _TEST_PROJECTS_ROOT
 
+# Same reason, for the three paths that now default into the per-user app-data
+# dir instead of next to the source. Without all three, `test_legacy_migrate` /
+# `test_tenancy_api` and anything that calls `ensure_app_dirs()` accumulate
+# directories in the developer's real ~/Library/Application Support/PyPSA GUI/
+# and become history-dependent. Pinning only one moves the problem to the others.
+os.environ["PYPSAGUI_APP_DATA_DIR"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-appdata-")
+os.environ["LEGACY_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-legacy-")
+os.environ["FLAT_PROJECTS_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-flat-")
+
 import pandas as pd
 import pypsa
 import pytest

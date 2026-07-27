@@ -1,6 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+import app_paths
 
 _BACKEND = Path(__file__).resolve().parent
 
@@ -8,7 +11,14 @@ _BACKEND = Path(__file__).resolve().parent
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(_BACKEND / ".env"), extra="ignore")
 
-    database_url: str = "postgresql+psycopg://pypsa:pypsa@localhost:5432/pypsa_gui"
+    # SQLite under the per-user app-data dir. Web deployments set DATABASE_URL
+    # explicitly (compose, .env), so this default only ever applies to a local
+    # run — where the previous Postgres default produced a 503 on every route.
+    #
+    # default_factory, NOT a class-body expression: a bare `= app_paths.x()` is
+    # evaluated once at `import settings`, so a launcher that sets
+    # PYPSAGUI_APP_DATA_DIR afterwards would get the stale value.
+    database_url: str = Field(default_factory=app_paths.default_database_url)
     secret_key: str = "dev-only-change-me"
     session_cookie_name: str = "pypsa_gui_session"
     session_ttl_hours: int = 72
@@ -35,8 +45,24 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "noreply@localhost"
     public_base_url: str = "http://localhost:5173"
-    projects_root: Path = _BACKEND / "projects"
-    legacy_root: Path = _BACKEND / "legacy_unclaimed"
+    # All default_factory for the reason given on `database_url` above.
+    projects_root: Path = Field(default_factory=app_paths.default_projects_root)
+    legacy_root: Path = Field(
+        default_factory=lambda: app_paths.app_data_dir() / "legacy_unclaimed"
+    )
+    # FLAT legacy store, `<root>/<display-name>/network.nc`. Deliberately NOT
+    # the same as `projects_root`, which is org-scoped
+    # (`<root>/<org_uuid>/<project_uuid>/`). Pointing the flat store at it makes
+    # `_find_direct_children`'s `<dir>/network.nc` filter never match, so
+    # scenario-tree delete and reparent silently return [].
+    flat_projects_root: Path = Field(
+        default_factory=app_paths.default_flat_projects_root
+    )
+    # Built SPA, served by the backend in local mode. Overridable so a frozen
+    # app can point at its bundled copy.
+    frontend_dist: Path = Field(
+        default_factory=lambda: _BACKEND.parent / "frontend" / "dist"
+    )
 
 
 @lru_cache
