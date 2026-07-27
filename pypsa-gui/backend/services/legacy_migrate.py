@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import Organization, OrgMembership, Project, ProjectMembership, User
+from services import project_registry
 from services.storage_paths import storage_path_for
 from services.tenancy_service import ConflictError, ValidationError
 from settings import get_settings
@@ -275,7 +276,10 @@ def claim_legacy_project(
     try:
         for name in claim_names:
             source = entries[name].path
-            destination = Path(project_map[name].storage_path)
+            # `project_dir`, never `ensure_project_dir`: the very next line
+            # treats an existing destination as a conflict, so materialising it
+            # here would make every claim fail.
+            destination = project_registry.project_dir(project_map[name])
             if destination.exists():
                 raise ConflictError(f"Storage path already exists for legacy project '{name}'")
             # A source inside projects_root is moved into a sibling subtree of

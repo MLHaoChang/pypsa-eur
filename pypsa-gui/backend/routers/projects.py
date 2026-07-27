@@ -574,8 +574,12 @@ def _project_info_db(db, project) -> ProjectInfo:
     export/import round-trips.
     """
     from db.models import Project as _Project
+    from services import project_registry
 
-    d = pathlib.Path(project.storage_path)
+    # `project_dir`, not the raw column: this runs for every row of
+    # `GET /api/projects/`, and it must neither resolve against the CWD once
+    # paths go relative nor create the directory of a deleted project.
+    d = project_registry.project_dir(project)
     if (d / "network.nc").exists():
         info = _project_info(d)
     else:
@@ -791,7 +795,7 @@ async def import_bundle(
     project_registry.require_user(user)
     _imported_project = project_registry.create_root(db, user, target_name)
     target_name = _imported_project.name
-    dest = project_registry.project_dir(_imported_project)
+    dest = project_registry.ensure_project_dir(_imported_project)
     for fname in _BUNDLE_FILES:
         if fname in members:
             (dest / fname).write_bytes(zf.read(fname))
@@ -1013,7 +1017,7 @@ def create_from_template(
     project_registry.require_user(user)
     _created_project = project_registry.create_root(db, user, requested)
     target_name = _created_project.name
-    dest = project_registry.project_dir(_created_project)
+    dest = project_registry.ensure_project_dir(_created_project)
     shutil.copy2(src_nc, dest / "network.nc")
 
     # Reset + load, mirroring import_bundle / load_project.
@@ -1125,7 +1129,7 @@ def save_project(
         )
     else:
         project_acl.ensure_project_access(db, user, project)
-    storage_dir = project_registry.project_dir(project)
+    storage_dir = project_registry.ensure_project_dir(project)
     name = project.name
     # Captured BEFORE the save, which is what performs the claim. Mirrors
     # `_save_context`'s own condition (`loaded is None or rebind`) — keying on
@@ -1601,7 +1605,7 @@ def _save_context(
 
                 src_project = project_registry.find_project(db, user, loaded)
                 if src_project is not None:
-                    src_dir = pathlib.Path(src_project.storage_path)
+                    src_dir = project_registry.project_dir(src_project)
             _copy_bundle_dirs(src_dir, dest)
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
@@ -2052,7 +2056,7 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
     child = project_registry.create_scenario(
         db, user, base_project, req.name, scenario_description=desc
     )
-    child_dir = project_registry.project_dir(child)
+    child_dir = project_registry.ensure_project_dir(child)
 
     try:
         for fname in _BUNDLE_FILES:
@@ -2149,7 +2153,9 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
     # its parent, keeping the DB parent graph consistent at every step.
     targets = list(reversed(child_projects)) + [project]
     for target in targets:
-        target_dir = pathlib.Path(target.storage_path)
+        # Resolve, never ensure — creating a directory here and then rmtree-ing
+        # it would turn "already gone" into churn on the user's disk.
+        target_dir = project_registry.project_dir(target)
         try:
             if target_dir.exists():
                 _force_rmtree(target_dir)
@@ -2229,7 +2235,7 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
 
     # Sync metadata.json name pointer on the renamed project + parent pointer
     # on direct children (best-effort; DB is authoritative).
-    dest = pathlib.Path(project.storage_path)
+    dest = project_registry.project_dir(project)
     meta = _read_meta(dest)
     if meta:
         meta["name"] = new_name
@@ -2239,7 +2245,7 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
         except OSError:
             pass
     for child in children:
-        child_dir = pathlib.Path(child.storage_path)
+        child_dir = project_registry.project_dir(child)
         child_meta = _read_meta(child_dir)
         if child_meta.get("parent_project") == old_name:
             child_meta["parent_project"] = new_name

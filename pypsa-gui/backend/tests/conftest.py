@@ -80,7 +80,7 @@ from routers import network as net_router
 from routers import projects as projects_router
 from routers import simulation as sim_router
 from routers.projects import _RESULTS_STATE_KEYS
-from services import undo_service
+from services import project_registry, undo_service
 from services.pypsa_service import PyPSAService
 from services.solve_queue import solve_queue
 from services.solver_service import SolverConfig
@@ -415,7 +415,10 @@ def project_storage_dir(project_row):
     def _dir(name: str, org_id=None) -> pathlib.Path:
         row = project_row(name, org_id)
         assert row is not None, f"no project row named {name!r}"
-        return pathlib.Path(row.storage_path)
+        # Through the resolver, not the raw column. 19 tests use this fixture,
+        # and once `storage_path` is relative the raw value resolves against
+        # pytest's CWD — `pypsa-gui/backend`, inside the checkout.
+        return project_registry.project_dir(row)
     return _dir
 
 

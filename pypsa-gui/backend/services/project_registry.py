@@ -143,12 +143,35 @@ def bind_context(ctx, project: Project) -> None:
     ctx.loaded_project = project.name
     ctx.org_id = str(project.org_id)
     ctx.project_uuid = str(project.id)
-    ctx.storage_dir = str(project.storage_path)
+    # Resolved, not raw. `ProjectContext.storage_dir` is turned back into a
+    # `Path` by four other modules (`chat_service`, `upload_service`,
+    # `pypsa_service`, `solve_queue`), and once `storage_path` can be relative
+    # the raw column would resolve there against the process CWD.
+    ctx.storage_dir = str(project_dir(project))
 
 
 def project_dir(project: Project) -> Path:
-    """Materialise the project's org-scoped storage directory."""
+    """
+    Resolve a row to its storage directory. **Creates nothing.**
+
+    `routers/projects.py` calls this for every row of `GET /api/projects/`; a
+    mkdir here resurrects the directory of a project the user deleted in
+    Finder and defeats `storage_reconcile`'s missing-dir detection. Callers
+    that are about to write use `ensure_project_dir`.
+
+    Both path formats are accepted permanently, not as a migration window:
+    rows created before migration 0003 are absolute, rows outside the projects
+    root stay absolute by design, and a restored backup can carry either.
+    """
     path = Path(project.storage_path)
+    if path.is_absolute():
+        return path
+    return Path(get_settings().projects_root) / path
+
+
+def ensure_project_dir(project: Project) -> Path:
+    """`project_dir` plus the mkdir. For callers about to WRITE."""
+    path = project_dir(project)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
