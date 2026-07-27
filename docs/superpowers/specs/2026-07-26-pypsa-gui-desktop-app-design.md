@@ -1,7 +1,7 @@
 # PyPSA GUI as a local desktop application — design
 
 **Date:** 2026-07-26
-**Status:** awaiting review — **blocked on in-flight Step 0b work, see §10**
+**Status:** awaiting review — Step 0b reviewed 2026-07-27, premise holds, see §10
 **Scope:** `pypsa-gui/` (backend + frontend). No changes to PyPSA-Eur workflow code.
 
 ---
@@ -92,14 +92,19 @@ env on 2026-07-26. These are the reasons the workstreams are shaped as they are.
 
 ### 5.1 The auth gate is one block, not 68 call sites
 
-`main.py:232-262` sets `request.state.auth_user = resolve_request_user(request, db)`
-unconditionally and returns 401 when it is `None`. Starlette makes the last-added
-middleware outermost, so an added middleware is either overwritten at `:239` or
-never reached. **The change must be a branch inside that block.**
+> Line numbers re-verified 2026-07-27 against the Step 0b working tree.
+
+`main.py:248` sets `request.state.auth_user = resolve_request_user(request, db)`
+unconditionally and returns 401 at `main.py:267` when it is `None`. Starlette makes the
+last-added middleware outermost, so an added middleware is either overwritten at `:248`
+or never reached. **The change must be a branch inside that block.**
 
 That block gates 118 of 172 routes that never touch `deps.optional_user` at all
 (`network`, `simulation`, `results`, `io`, `clustering`, `vintage`, `chat`). One
 edit therefore covers the whole surface.
+
+`deps.optional_user` still honours a pre-populated `request.state.auth_user`
+(`deps.py:112-113`), so the branch also covers the dependency-based routes.
 
 Constraints on the branch:
 - Must re-fetch the `User` per request. `expire_on_commit` defaults to `True`
@@ -556,30 +561,96 @@ describes it as a precondition for Step 3, which moves the resident
 
 That set overlaps almost exactly with the files this spec depends on.
 
-### Impact
+### Review of 2026-07-27
 
-1. **D4 and §5.1 must change.** Local mode was designed to have *no session at all*
-   — inject `request.state.auth_user`, never set a session cookie. If active-project
-   resolution now reads `sessions.active_project_id`, a session-less local mode has
-   nowhere to keep the pointer. Local mode must instead **seed a real long-lived
-   `Session` row and mint its cookie**, alongside the org/user/membership seed.
-2. **Therefore CSRF stops being optional.** §5.6 notes local mode dodges the CSRF
-   bug because it sets no session cookie. With a seeded session cookie present,
-   `_csrf_rejection` arms on every mutation. Workstream C moves from "nice, also
-   fixes the web bug" to **required for local mode to function at all**.
-3. **Every line citation in §5 is stale** for the seven modified files. The
-   *findings* are expected to hold — they are about structure, not line numbers —
-   but each must be re-confirmed before the implementation plan is written.
-4. **§5.7's resident-context analysis needs re-checking.** `pypsa_service.py` gained
-   ~190 lines; `RESIDENT_CAP`, `_contexts`, and the eviction path may have moved.
-5. **Positive overlap.** Migration `0002` uses `batch_alter_table` explicitly for
-   SQLite and its docstring names SQLite as "the documented local fallback". That
-   partly discharges workstream G2 and confirms SQLite compatibility is already a
-   project norm rather than something this spec has to introduce.
+Still uncommitted (`master` at `1d930244`). The change grew from 11 files to 20 —
+now also `routers/simulation.py`, `services/solve_queue.py`, and seven test files —
+and has been idle since 23:22 the previous evening.
+
+**How it works.** `bind_active_project` is registered as an **app-level async
+dependency** (`main.py`, `dependencies=[Depends(bind_active_project)]`), with a
+middleware-local twin inside the auth middleware. It resolves the caller's session
+row from the cookie, calls `active_project.resolve_for_session(db, session)`, and
+binds the result into `PyPSAService._request_ctx`, a `ContextVar`.
+`PyPSAService._ensure_active` prefers that binding over the process foreground.
+
+### CORRECTION to the previous impact assessment
+
+**Points 1 and 2 below were wrong, and the error mattered.** They claimed local mode
+would have to seed a `Session` row and mint its cookie, which would in turn make the
+CSRF work mandatory. Reading the implementation shows the opposite:
+
+```python
+# services/pypsa_service.py:235-254
+scoped = cls._request_ctx.get()      # ContextVar, default=None
+if scoped is not None:
+    return scoped
+if cls._active is None: ...
+return cls._active                   # process foreground
+```
+
+`bind_active_project` returns early when there is no session cookie — its own
+docstring: *"a route that has no session simply gets no binding and falls through to
+the process foreground."* Verified: no session → contextvar stays at its `None`
+default → `_ensure_active` returns `cls._active`, exactly the pre-0b behaviour.
+
+**Consequences, all in the simplifying direction:**
+
+1. **D4 and §5.1 survive unchanged.** Local mode stays session-less: inject
+   `request.state.auth_user`, never set a cookie. The entire 0b layer is inert
+   without one, which is correct for a single-user desktop app — the process
+   foreground *is* the right answer when there is exactly one user.
+2. **CSRF stays exempt.** No session cookie means `_csrf_rejection` returns `None`
+   at its first check. Workstream C remains "required for the web deployment,
+   which is separately broken (§5.6)" rather than a local-mode blocker.
+3. **Per-session scratch contexts are not needed locally.** `scratch:<session-id>`
+   slots are only created inside `resolve_for_session`, which local mode never calls.
+
+### Re-verification of §5
+
+All §5 findings hold against the Step 0b tree. Line numbers updated where they moved:
+
+| Finding | Then | Now |
+|---|---|---|
+| auth assignment / 401 | `main.py:239` / `:256` | `main.py:248` / `:267` |
+| `optional_user` cache hook | `deps.py:24-27` | `deps.py:112-113` |
+| `RESIDENT_CAP` | `pypsa_service.py:51` | `pypsa_service.py:52` |
+| `PROJECTS_DIR` second root | `projects.py:48` | unchanged |
+| `storage_path` stored absolute | `project_registry.py:171,207` | unchanged |
+| CORS/CSRF origin default | `settings.py:23` | unchanged |
+| chat executor never shut down | `chat_service.py:227` | unchanged |
+| `lifespan` has nothing after `yield` | `main.py` | unchanged |
+| SQLite `check_same_thread` only | `db/session.py:40,44` | unchanged |
+
+`RESIDENT_CAP = 5` and the daemon solver threads are both still present, so §5.7's
+shutdown-flush requirement is unaffected.
+
+**Positive overlap.** Migration `0002` uses `batch_alter_table` for SQLite and its
+docstring names SQLite "the documented local fallback" — partly discharging G2 and
+confirming SQLite compatibility is already a project norm.
+
+### Defect observed in the in-flight work (not ours to fix)
+
+Three endpoints now take `current_session` and write the pointer: `save_project`
+(`projects.py:1075`), `activate_project` (`:1694`), `reset_network`
+(`network.py:1733`). Five siblings that also swap the network context do **not**:
+`create_from_template`, `import_bundle`, `import_unclaimed_project`, `load_project`,
+`create_scenario`.
+
+`resolve_for_session` does not compensate — it resolves purely from
+`sessions.active_project_id`. So on the next request the stale pointer re-resolves
+and re-hydrates the previous project, which is the failure the patch author documents
+for `reset_network`: the operation "would appear to silently undo itself."
+
+This is **web-mode only** — it requires a session — and the work is unfinished, so it
+may already be on their list. It does not block this spec. Raise it with that
+workstream rather than fixing it here.
 
 ### Decision
 
-Implementation **waits** for Step 0b to land. Starting now would mean editing seven
-files another session is writing, against a design premise (session-less local mode)
-that Step 0b invalidates. When 0b is committed: re-verify §5, revise D4/§5.1 and
-workstream B/C per the above, then write the implementation plan.
+**Planning is unblocked.** The premise survives, §5 is re-verified, and the mechanism
+is unchanged. Writing the implementation plan can proceed.
+
+**Implementation still waits** for 0b to commit. Seven of the files this spec touches
+hold uncommitted work; branching from `master` now would produce a diff that cannot
+be rebased cleanly. Re-run the concurrency check before the first edit.
