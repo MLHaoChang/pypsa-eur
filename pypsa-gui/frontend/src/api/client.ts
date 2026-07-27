@@ -2,6 +2,7 @@ import axios from 'axios'
 import toast from 'react-hot-toast'
 import { appLog } from '../store/simulationStore'
 import { getAuthEnabled, setAuthEnabled } from '../auth/config'
+import { shouldRearmAuth, shouldRedirectWhenAuthDisabled } from '../auth/localMode'
 import { CSRF_HEADER, needsCsrfHeader, readCsrfToken } from './csrf'
 
 declare module 'axios' {
@@ -101,14 +102,13 @@ function shouldRedirectToLogin(error: unknown): boolean {
   if (typeof window === 'undefined') return false
   if (AUTH_PAGES.has(window.location.pathname)) return false
 
-  const detail = formatApiDetail(error.response?.data?.detail, '')
-  // Backend auth middleware uses this exact detail. Treat it as authoritative
-  // even when the Vite env flag was stale/false — otherwise reviewers stay on
-  // the workbench toasting "Authentication required" forever.
-  if (detail.includes('Authentication required') || getAuthEnabled()) {
-    return true
-  }
-  return false
+  // Was: `detail.includes('Authentication required') || getAuthEnabled()`. The
+  // detail check existed to override a stale compile-time flag, but the flag is
+  // now authoritative because AuthModeProvider syncs it from /api/health — and
+  // in local mode the detail branch redirected to a /login page that does not
+  // exist. Gated on the flag anyway, the detail branch is unreachable, so it is
+  // dropped rather than left reading as a second condition.
+  return shouldRedirectWhenAuthDisabled(getAuthEnabled())
 }
 
 // ── CSRF double-submit (backend Step 0a) ────────────────────────────────────
@@ -143,10 +143,10 @@ client.interceptors.response.use(
     const method = (err.config?.method ?? '').toUpperCase()
     const url = err.config?.url ?? ''
 
-    if (
-      (status === 401 && String(msg).includes('Authentication required'))
-      || (status === 503 && String(msg).includes('Auth database unavailable'))
-    ) {
+    // getAuthEnabled() is false in local mode BECAUSE /api/health said so, which
+    // is exactly the "backend reported auth_enabled: false" signal that must
+    // suppress the ratchet. Everywhere else it stays live.
+    if (shouldRearmAuth(status, String(msg), !getAuthEnabled())) {
       setAuthEnabled(true)
       notifyAuthBackendRequired(status ?? 401)
     }

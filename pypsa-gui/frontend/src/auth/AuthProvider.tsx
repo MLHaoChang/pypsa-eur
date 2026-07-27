@@ -3,6 +3,7 @@ import axios from 'axios'
 import { authApi, type AuthUser } from '../api/auth'
 import { hasAdminConsoleAccess } from '../pages/admin/helpers'
 import { useAuthMode } from './AuthModeProvider'
+import { localAdminUser } from './localMode'
 import { loginWithPassword } from './requests'
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
@@ -30,9 +31,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async (): Promise<AuthUser | null> => {
     if (!authEnabled) {
-      setUser(null)
+      // A synthetic admin, not null. `null` made hasAdminConsoleAccess(null)
+      // false, so /admin/* bounced to /projects — but a local user owns their
+      // machine and the admin console is where the settings live.
+      const local = localAdminUser()
+      setUser(local)
       setStatus('authenticated')
-      return null
+      return local
     }
 
     try {

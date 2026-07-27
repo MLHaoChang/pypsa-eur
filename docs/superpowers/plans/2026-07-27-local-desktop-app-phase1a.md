@@ -18,6 +18,14 @@
 
 ## Revision log
 
+**Execution log (2026-07-27)** — defects found while running the plan, not by review:
+
+| Task | Defect | Resolution |
+|---|---|---|
+| 9 | v3's finding #6 flipped `shouldRearmAuth`'s third argument to *local-mode-detected* in the **implementation** block and in the call site (`!getAuthEnabled()`), but left the **test** block at v2's *auth-enabled* polarity. Two of its four assertions asserted the exact opposite of what the planned implementation returns, so the task could not go green as written. | Kept `localModeDetected` — the implementation's own rationale and the call site both depend on it — and corrected the test's polarity and labels. Two tests added: an `undefined` status, and the `status`/`role` fields that `auth_service` and `hasAdminConsoleAccess` actually read. |
+| 9 | Step 4 says to wrap the sign-out surfaces in `authEnabled &&` "if either renders unconditionally". Both are already conditional (`AppHeader.tsx:965`, `ProjectsHomePage.tsx:377`). | No edit. Verified, not assumed. |
+| 9 | Step 3 warns that removing the `detail` binding will trip ESLint. The frontend has **no** ESLint config (`eslint.config.*` absent; ESLint 10 refuses to run without one). | `tsc --noEmit` is the real gate for this repo. |
+
 **v3 (2026-07-27)** — second adversarial review of v2. 12 further findings applied (2 of its
 14 were already fixed). The severe ones, each verified against `09bd7020` before applying:
 
