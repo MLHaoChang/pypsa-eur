@@ -22,12 +22,14 @@ except ImportError:
     pass
 
 import pypsa
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 import local_bootstrap
 import local_mode
 import security
+import static_gate
 from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
 from services import active_project
@@ -584,3 +586,76 @@ def health():
         # and would render the web workbench with no login gate.
         "auth_enabled": not local_mode.is_local_mode(),
     }
+
+
+# ── Static SPA (must be LAST) ────────────────────────────────────────────────
+# FastAPI matches in registration order, and `health` above is declared AFTER
+# the routers — so this has to come after BOTH or the catch-all swallows
+# /api/health, which breaks spa.html's boot gate and AuthModeProvider.
+#
+# Mounted at the document root because every asset reference in dist/ is
+# root-absolute (/assets/…, /brand.css); a sub-path mount 404s every asset.
+def _dist() -> Path:
+    # Read per call, not captured at import: tests point FRONTEND_DIST at a
+    # tmpdir, and a frozen app points it at its bundled copy.
+    return Path(get_settings().frontend_dist)
+
+
+class _DistAssets(StaticFiles):
+    """
+    StaticFiles whose directory is resolved per request.
+
+    The stock class captures `directory` at construction. That is wrong here in
+    both directions: `frontend_dist` already points at a real tree when this
+    module is imported, so a captured directory would ignore any later
+    FRONTEND_DIST (tests, and a frozen app that sets it from the bundle path);
+    and a checkout with no `dist/` yet must not fail at import.
+
+    It stays a Mount rather than folding into the catch-all below because
+    Starlette Mounts do NOT run app-level dependencies, and this app applies
+    `Depends(bind_active_project)` to every APIRoute. Serving assets through the
+    catch-all would cost a session lookup plus a project resolve for every
+    JS/CSS/image on a cold SPA load.
+
+    `lookup_path` is the right seam: it keeps Starlette's own containment check,
+    which is what refuses `..` traversal out of the asset directory.
+    """
+
+    def lookup_path(self, path: str) -> tuple[str, os.stat_result | None]:
+        self.all_directories = [_dist() / "assets"]
+        return super().lookup_path(path)
+
+
+app.mount("/assets", _DistAssets(check_dir=False), name="assets")
+
+
+@app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+def serve_spa(full_path: str, request: Request):
+    dist = _dist()
+    if not dist.is_dir():
+        raise HTTPException(status_code=503, detail="Frontend not built. Run `npm run build`.")
+
+    path = "/" + full_path
+    if static_gate.is_static_asset(path):
+        candidate = (dist / full_path).resolve()
+        if not candidate.is_relative_to(dist.resolve()) or not candidate.is_file():
+            raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(candidate)
+
+    # NOT request.state.auth_user: the auth middleware only sets it for /api/*
+    # paths, so for an HTML route it is always None and every authenticated deep
+    # link would fall through to the login document.
+    authed = local_mode.is_local_mode()
+    if not authed:
+        try:
+            with db_session_module.SessionLocal() as db:
+                authed = resolve_request_user(request, db) is not None
+        except Exception:  # noqa: BLE001 — a DB outage must still serve the shell
+            authed = False
+
+    kind, target = static_gate.decide_route(
+        path, local_mode=local_mode.is_local_mode(), authed=authed
+    )
+    if kind == "redirect":
+        return RedirectResponse(url=target, status_code=302)
+    return FileResponse(dist / target)
