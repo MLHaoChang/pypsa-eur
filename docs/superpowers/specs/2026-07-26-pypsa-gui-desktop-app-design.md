@@ -185,7 +185,28 @@ Reproduced independently by two reviewers against a live server.
 Both `get_settings()` and `security.allowed_origins()` are `@lru_cache`d, so
 `CORS_ALLOWED_ORIGINS` must be in `os.environ` **before `import main`**.
 
-### 5.6 Pre-existing: the frontend never sends the CSRF token
+### 5.6 WITHDRAWN — the frontend does send the CSRF token
+
+> **Correction, 2026-07-27.** This section claimed a live bug. It is false and the
+> claim is withdrawn. `frontend/src/api/csrf.ts` exists (committed in `1d930244`) and
+> exports `CSRF_COOKIE`, `CSRF_HEADER`, `CSRF_SAFE_METHODS`, `needsCsrfHeader()` and
+> `readCsrfToken()`; `frontend/src/api/client.ts:5` imports them and `:114-122` wires
+> the request interceptor, with a `csrf_token_invalid` refresh-and-retry path at `:164`.
+>
+> The original finding came from three independent greps over `frontend/src` and the
+> built bundle, all returning zero matches. The frontend was being rebuilt by a
+> concurrent session while those checks ran — `dist/assets/spa-B6BHlEqH.js` was
+> replaced by `spa-vXDFmC4A.js`. The evidence was accurate when gathered and stale
+> when reported.
+>
+> The only real residual gap is the handful of raw `fetch`/`sendBeacon` call sites that
+> bypass the axios interceptor. That is now the whole of workstream C.
+>
+> Original text retained below for the record.
+
+---
+
+### 5.6 (original, superseded) The frontend never sends the CSRF token
 
 `_csrf_rejection` (`main.py:170-183`) requires `X-CSRF-Token` to match the
 `pypsa_gui_csrf` cookie. The frontend has **zero** occurrences of `csrf`/`xsrf` in

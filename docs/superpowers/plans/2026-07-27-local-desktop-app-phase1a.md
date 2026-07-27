@@ -10,6 +10,30 @@
 
 **Source spec:** `docs/superpowers/specs/2026-07-26-pypsa-gui-desktop-app-design.md` (workstreams D, G, B, C, A).
 
+## Revision log
+
+**v2 (2026-07-27)** — adversarial review found the v1 plan would have broken the build
+and the test suite. Corrections applied:
+
+| # | v1 defect | v2 |
+|---|---|---|
+| 1 | Task 10 created `frontend/src/api/csrf.ts` — **it already exists** (`1d930244`) with a wired interceptor at `client.ts:114-122`. The replacement dropped `needsCsrfHeader`/`CSRF_SAFE_METHODS` that `client.ts` imports (TS build failure) and made `readCsrfToken`'s parameter required (runtime crash). | Task 10 reduced to the raw-`fetch` sites only. The spec's §5.6 "live CSRF bug" claim is **withdrawn**. |
+| 2 | Task 3 deleted `PROJECTS_DIR` and pointed it at `settings.projects_root`. Two errors: `conftest.py:430` monkeypatches the attribute (9 test files depend on it), and the two are **different roots** — `PROJECTS_DIR` is the flat legacy store, `projects_root` is the org-scoped tenant store. Repointing breaks `_find_direct_children`, `_safe_project_dir`, `_walk_ancestors`. | Task 3 rewritten: `PROJECTS_DIR` stays a settable module attribute; only its *default* becomes settings-driven, with legacy-flat semantics preserved. |
+| 3 | Task 5 renamed `enable_sqlite_foreign_keys`; `conftest.py:151` calls it from a session-scoped autouse fixture → every test errors. | Alias retained. |
+| 4 | Task 13 said "after every `include_router`" (last is `:519`), but `health` is defined at `:542` → the catch-all shadows `/api/health`. | Explicit: append at end of file, after `health()`. |
+| 5 | Tasks 8/13/15 rebuilt the app via `del sys.modules[...]` + `importlib.reload`. `del sys.modules["db.session"]` is a **no-op** for `from db import session` — the local-mode app keeps conftest's monkeypatched `SessionLocal`, seeds into the shared in-memory DB, and leaves `security`/`settings` split-brained for the rest of the session. | `is_local_mode()` is read **per call**, so no re-import is needed and the ordinary `client` fixture works with a monkeypatched env. |
+| 6 | Task 8 never created the app-data dir → `alembic upgrade` dies with "unable to open database file" on a clean machine. | `mkdir(parents=True)` added. |
+| 7 | Task 6's rationale for `render_as_batch` was wrong — it is an autogenerate-rendering flag and does not change how `0002` executes. | Rationale corrected; test relaxed. |
+| 8 | Task 13 read `authed` from `request.state.auth_user`, which is only set for `/api/*` paths → every web-mode deep link served the login page. | Resolves the session directly. |
+| 9 | Task 11's second test cleared caches *before* `setenv` and asserted `False`; it returns `True`. | Ordering fixed. |
+| 10 | Task 2's tests never restored the settings cache and `legacy_root` moved without `conftest` pinning `LEGACY_ROOT` → later tests write into the developer's real app-data dir. | `finally: cache_clear()` everywhere; `LEGACY_ROOT` pinned. |
+| 11 | Task 9 imported `AuthUser` from `./types` (does not exist) and targeted the wrong re-arm site. | Import corrected to `../api/auth`; real site handled, including its 503 branch and `shouldRedirectToLogin`. |
+| 12 | Running Alembic in-process calls `fileConfig(...)` with `disable_existing_loggers=True`, killing app and uvicorn logging. | `configure_logger=false`. |
+| 13 | Spec items G1, G4, G6, B4, B5, C4, A5, D6 had no task. | Tasks 16–18 added. |
+
+One reviewer claim was itself wrong and is **not** actioned: `dist/login.html` does exist
+(`vite.auth-gate.ts` emits it), so Task 12's `/login.html` branch stays.
+
 **Scope note:** Phase 1b (workstreams E storage model + F migration) is a separate plan. Phase 2 (H–L: shell, freeze, installers, key handling, CI) follows that.
 
 ## Global Constraints
@@ -331,99 +355,140 @@ git commit -m "feat(gui): default settings paths to per-user writable locations"
 - Test: `pypsa-gui/backend/tests/test_projects_dir_follows_settings.py`
 
 **Interfaces:**
-- Produces: `routers.projects.projects_dir() -> Path`. The module constant `PROJECTS_DIR` is removed.
+- Produces: `Settings.flat_projects_root`. `routers.projects.PROJECTS_DIR` **stays a module attribute** and is initialised from it.
 
-**Context:** `PROJECTS_DIR = pathlib.Path(__file__).parent.parent / "projects"` never reads
-settings, so setting `PROJECTS_ROOT` relocates `storage_path_for` but leaves
-`_safe_project_dir`, the legacy scan, `routers/compare.py`, `services/upload_service.py`
-and `services/chat_service.py` pointing into the source tree. This is the "half-relocated
-app" failure.
+**Context — two roots, deliberately.** Do not merge them:
+
+| Root | Layout | Used by |
+|---|---|---|
+| `routers.projects.PROJECTS_DIR` | flat, `<root>/<display-name>/network.nc` | `_safe_project_dir` (`:180-183`), `_find_direct_children` (`:462-465`), `_walk_ancestors` (`:507-511`) |
+| `settings.projects_root` | org-scoped, `<root>/<org_uuid>/<project_uuid>/` | `services/storage_paths.py:10` |
+
+`tests/conftest.py:58` pins `PROJECTS_ROOT` to one tmpdir while `:430` monkeypatches
+`PROJECTS_DIR` to a *different* one — they are not interchangeable. Pointing `PROJECTS_DIR`
+at `projects_root` makes `_find_direct_children` iterate org-UUID directories, whose
+`(d / "network.nc").exists()` filter always fails, so scenario-tree delete and reparent
+silently return `[]`.
+
+**`PROJECTS_DIR` must remain a settable module attribute.** `conftest.py:430` does
+`monkeypatch.setattr(projects_router, "PROJECTS_DIR", d)`, which raises `AttributeError`
+if the name is gone. Nine test files depend on it, directly or via `tmp_projects_dir`.
+
+The actual defect being fixed is narrower than v1 assumed: the *default* is
+`__file__`-relative, so it lands inside a read-only app bundle. Only the default changes.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# pypsa-gui/backend/tests/test_projects_dir_follows_settings.py
+# pypsa-gui/backend/tests/test_projects_dir_default.py
 from pathlib import Path
 
-import pytest
 
-
-def test_projects_dir_follows_settings(monkeypatch, tmp_path):
+def test_flat_root_default_is_outside_the_source_tree(monkeypatch, tmp_path):
+    import app_paths
     import settings as settings_module
-    from routers import projects as projects_router
 
-    monkeypatch.setenv("PROJECTS_ROOT", str(tmp_path / "relocated"))
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+    monkeypatch.delenv("FLAT_PROJECTS_ROOT", raising=False)
     settings_module.get_settings.cache_clear()
     try:
-        assert projects_router.projects_dir() == tmp_path / "relocated"
+        root = Path(settings_module.get_settings().flat_projects_root)
+        backend = Path(app_paths.__file__).resolve().parent
+        assert backend not in root.parents and root != backend
     finally:
         settings_module.get_settings.cache_clear()
 
 
-def test_no_module_level_projects_dir_constant():
+def test_flat_root_is_env_overridable(monkeypatch, tmp_path):
+    import settings as settings_module
+
+    monkeypatch.setenv("FLAT_PROJECTS_ROOT", str(tmp_path / "flat"))
+    settings_module.get_settings.cache_clear()
+    try:
+        assert Path(settings_module.get_settings().flat_projects_root) == tmp_path / "flat"
+    finally:
+        settings_module.get_settings.cache_clear()
+
+
+def test_projects_dir_attribute_still_exists_and_is_settable(monkeypatch, tmp_path):
+    """conftest.py:430 monkeypatches this attribute; nine test files depend on it."""
     from routers import projects as projects_router
-    assert not hasattr(projects_router, "PROJECTS_DIR"), (
-        "PROJECTS_DIR is a second source of truth; use projects_dir()"
-    )
+
+    assert hasattr(projects_router, "PROJECTS_DIR")
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_path / "patched")
+    assert projects_router.PROJECTS_DIR == tmp_path / "patched"
+
+
+def test_flat_root_is_not_the_org_scoped_root(monkeypatch, tmp_path):
+    """They are different stores with different layouts. Merging them breaks
+    _find_direct_children, which filters on <dir>/network.nc."""
+    import settings as settings_module
+
+    monkeypatch.setenv("PROJECTS_ROOT", str(tmp_path / "org"))
+    monkeypatch.setenv("FLAT_PROJECTS_ROOT", str(tmp_path / "flat"))
+    settings_module.get_settings.cache_clear()
+    try:
+        s = settings_module.get_settings()
+        assert Path(s.projects_root) != Path(s.flat_projects_root)
+    finally:
+        settings_module.get_settings.cache_clear()
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_projects_dir_follows_settings.py -v
+cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_projects_dir_default.py -v
 ```
 
-Expected: both fail — no `projects_dir`, and `PROJECTS_DIR` still exists.
+Expected: the two `flat_projects_root` tests fail (`AttributeError: 'Settings' object has
+no attribute 'flat_projects_root'`); the `PROJECTS_DIR` attribute tests already pass — they
+are regression guards, not new behaviour.
 
-- [ ] **Step 3: Replace the constant with a function**
+- [ ] **Step 3: Add the setting**
 
-In `routers/projects.py`, delete line 48 and add:
+In `settings.py`, beside `projects_root`:
 
 ```python
-def projects_dir() -> pathlib.Path:
-    """
-    The projects root, from settings, resolved per call.
-
-    Was a module constant pinned to `__file__` — which meant PROJECTS_ROOT moved
-    `storage_path_for` while every consumer here kept writing next to the source.
-    Resolved per call rather than cached so a test's monkeypatched PROJECTS_ROOT
-    takes effect without a reimport.
-    """
-    return pathlib.Path(get_settings().projects_root)
+    # FLAT legacy store: <root>/<display-name>/network.nc. Distinct from
+    # projects_root, which is org-scoped (<root>/<org>/<project>/). Merging
+    # them breaks _find_direct_children, whose <dir>/network.nc filter never
+    # matches an org-uuid directory. Separated here only so the default stops
+    # being __file__-relative, which lands inside a read-only app bundle.
+    flat_projects_root: Path = app_paths.app_data_dir() / "flat_projects"
 ```
 
-Then replace every `PROJECTS_DIR` reference in the file with `projects_dir()`.
-Find them with:
+- [ ] **Step 4: Point the module attribute at it, keeping it settable**
 
-```bash
-grep -n "PROJECTS_DIR" pypsa-gui/backend/routers/projects.py
+In `routers/projects.py`, replace line 48:
+
+```python
+# Initialised from settings, but deliberately left a MODULE ATTRIBUTE rather
+# than a function call: tests/conftest.py:430 monkeypatches this name, and nine
+# test files depend on that (directly or via the tmp_projects_dir fixture).
+PROJECTS_DIR = pathlib.Path(get_settings().flat_projects_root)
 ```
 
-Known sites: the docstring at `:163`, the comment at `:167`, `dest = (PROJECTS_DIR / name).resolve()`
-at `:180`, `PROJECTS_DIR.resolve()` at `:183`, the comment at `:207`, the scan at `:451-465`,
-and the two `parent_project` reads at `:507-511`.
+Confirm `get_settings` is already imported in this module; if not, add
+`from settings import get_settings`. Change nothing else — every existing
+`PROJECTS_DIR` reference keeps working, and `routers/compare.py`,
+`services/upload_service.py` (docstring only) and `services/chat_service.py`
+keep importing the same name.
 
-- [ ] **Step 4: Update the other importers**
-
-```bash
-grep -rn "PROJECTS_DIR" pypsa-gui/backend --include=*.py | grep -v __pycache__
-```
-
-Update `routers/compare.py`, `services/upload_service.py`, and `services/chat_service.py`
-to `from routers.projects import projects_dir` and call it. Then:
+- [ ] **Step 5: Run both suites and commit**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_projects_dir_follows_settings.py -v
+cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_projects_dir_default.py -v
 ../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
 ```
 
-Expected: new tests pass, full suite matches baseline.
-
-- [ ] **Step 5: Commit**
+Expected: 4 passed; full suite matches the Task 0 baseline exactly. If any test errors with
+`AttributeError: <module> has no attribute 'PROJECTS_DIR'`, the attribute was removed —
+revert and re-read the Context above.
 
 ```bash
-git add -A pypsa-gui/backend
-git commit -m "fix(gui): make the projects root a single settings-driven source of truth"
+git add pypsa-gui/backend/settings.py pypsa-gui/backend/routers/projects.py \
+        pypsa-gui/backend/tests/test_projects_dir_default.py
+git commit -m "fix(gui): move the flat projects root out of the source tree"
 ```
 
 ---
@@ -600,6 +665,18 @@ Update `get_engine` to call it, and widen the SQLite connect args:
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
     return configure_sqlite(create_engine(url, **kwargs))
+```
+
+**Keep the old name as an alias.** `tests/conftest.py:151` calls
+`db_session_module.enable_sqlite_foreign_keys(engine)` from inside `_auth_db`, which is
+session-scoped and pulled in by the autouse `_reset_tenant_tables` and `_acting_user`
+fixtures — i.e. every test in the suite. Renaming without an alias makes all of them error
+with `AttributeError`.
+
+```python
+# Retained: tests/conftest.py:151 calls this from a session-scoped autouse
+# fixture. Renaming it outright errors every test in the suite.
+enable_sqlite_foreign_keys = configure_sqlite
 ```
 
 - [ ] **Step 4: Run the tests**
@@ -1183,119 +1260,112 @@ git commit -m "fix(gui): stop re-arming the login gate when auth is disabled"
 
 ---
 
-## Task 10: Send the CSRF token the backend asks for
+## Task 10: Cover the raw `fetch` mutation sites with CSRF
 
 **Files:**
-- Modify: `frontend/src/api/client.ts` (add a request interceptor), `frontend/src/api/uploads.ts:76,88,102,130`, `frontend/src/api/chat.ts:63`, `frontend/src/pages/TopologyCanvas.tsx:147,2361`
-- Test: `frontend/src/api/csrf.test.ts`
+- Modify: `frontend/src/api/uploads.ts:75,87,101,129`, `frontend/src/api/chat.ts:63`, `frontend/src/pages/TopologyCanvas.tsx:147,2361`
+- Test: `frontend/src/api/csrf.rawfetch.test.ts` (new — do **not** touch the existing `csrf.test.ts`)
 
-**Context:** This fixes a **live bug in the web deployment**, not just a desktop concern.
-`_csrf_rejection` requires `X-CSRF-Token` to match the `pypsa_gui_csrf` cookie. The frontend
-has zero occurrences of `csrf` in `src/`, the HTML entries, or the built bundle. `client.ts`
-sets no `xsrfCookieName`/`xsrfHeaderName`, and axios's defaults (`XSRF-TOKEN` /
-`X-XSRF-TOKEN`) do not match the backend's names. So every mutation by a logged-in browser
-session should 403. The backend suite passes because `tests/conftest.py:226` sets the header
-by hand.
+**Context — read before starting.** The axios path is **already done**. `frontend/src/api/csrf.ts`
+exists (added in `1d930244`) and exports `CSRF_COOKIE`, `CSRF_HEADER`, `CSRF_SAFE_METHODS`,
+`needsCsrfHeader()`, `readCsrfToken(cookieSource?)`. `client.ts:114-122` wires the request
+interceptor, and `:164` handles `csrf_token_invalid` by refreshing and retrying.
 
-- [ ] **Step 1: Write the failing test**
+**Do not create or overwrite `csrf.ts` or `csrf.test.ts`.** An earlier draft of this plan did,
+which would have dropped `needsCsrfHeader`/`CSRF_SAFE_METHODS` that `client.ts` imports (TypeScript
+build failure) and made `readCsrfToken`'s parameter required while `client.ts` calls it with none.
+
+The residual gap is only the handful of places that bypass axios and call `fetch` directly.
+Those never pass through the interceptor.
+
+- [ ] **Step 1: Confirm the existing module before touching anything**
+
+```bash
+cd pypsa-gui/frontend
+sed -n '1,50p' src/api/csrf.ts
+grep -n "csrf\|Csrf\|CSRF" src/api/client.ts
+grep -rn "fetch(\|sendBeacon(" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+```
+
+Expected: `csrf.ts` exports the four symbols above; `client.ts` imports and uses them at
+`:5` and `:114-122`. The `fetch`/`sendBeacon` list is the actual work — reconcile it with
+the **Files** list and use what you find, not what is written here.
+
+- [ ] **Step 2: Write the failing test**
 
 ```typescript
-// frontend/src/api/csrf.test.ts
+// frontend/src/api/csrf.rawfetch.test.ts
 import { describe, expect, it } from 'vitest'
-import { readCsrfToken, CSRF_COOKIE, CSRF_HEADER } from './csrf'
+import { CSRF_HEADER, needsCsrfHeader, readCsrfToken } from './csrf'
+import { rawFetchHeaders } from './csrf'
 
-describe('readCsrfToken', () => {
-  it('reads the backend cookie name', () => {
-    expect(readCsrfToken(`${CSRF_COOKIE}=abc123`)).toBe('abc123')
+describe('rawFetchHeaders', () => {
+  it('adds the header when a token cookie is present', () => {
+    expect(rawFetchHeaders('POST', 'pypsa_gui_csrf=tok')).toEqual({ [CSRF_HEADER]: 'tok' })
   })
-  it('finds it among other cookies', () => {
-    expect(readCsrfToken(`a=1; ${CSRF_COOKIE}=tok; b=2`)).toBe('tok')
+  it('adds nothing for a safe method', () => {
+    expect(rawFetchHeaders('GET', 'pypsa_gui_csrf=tok')).toEqual({})
   })
-  it('does not match a cookie that merely ends with the name', () => {
-    expect(readCsrfToken(`not_${CSRF_COOKIE}=nope`)).toBeNull()
+  it('adds nothing when the cookie is absent', () => {
+    expect(rawFetchHeaders('POST', 'other=1')).toEqual({})
   })
-  it('url-decodes', () => {
-    expect(readCsrfToken(`${CSRF_COOKIE}=a%2Bb`)).toBe('a+b')
-  })
-  it('returns null when absent', () => {
-    expect(readCsrfToken('other=1')).toBeNull()
-  })
-  it('uses the header name the backend checks', () => {
-    expect(CSRF_HEADER).toBe('X-CSRF-Token')
+  it('reuses the shared helpers rather than reimplementing them', () => {
+    expect(needsCsrfHeader('POST')).toBe(true)
+    expect(readCsrfToken('pypsa_gui_csrf=tok')).toBe('tok')
   })
 })
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [ ] **Step 3: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/frontend && npm test -- src/api/csrf.test.ts
+cd pypsa-gui/frontend && npm test -- src/api/csrf.rawfetch.test.ts
 ```
 
-Expected: cannot resolve `./csrf`.
+Expected: `rawFetchHeaders` is not exported.
 
-- [ ] **Step 3: Implement and apply**
+- [ ] **Step 4: Add the helper and apply it**
+
+Append to the **existing** `src/api/csrf.ts` — do not rewrite the file:
 
 ```typescript
-// frontend/src/api/csrf.ts
 /**
- * Double-submit CSRF, browser half.
+ * Header bag for a raw `fetch`/`sendBeacon` call.
  *
- * The backend has always required this (main.py `_csrf_rejection`); the
- * frontend never sent it. Axios's built-in XSRF support does not help — its
- * defaults are XSRF-TOKEN / X-XSRF-TOKEN and the backend uses these names.
+ * The axios instance gets this from its request interceptor; direct fetch
+ * callers bypass that and would 403 on any mutation once a session cookie
+ * exists. Built on the same two helpers so there is one definition of
+ * "which methods need a token" and one cookie parser.
  */
-export const CSRF_COOKIE = 'pypsa_gui_csrf'
-export const CSRF_HEADER = 'X-CSRF-Token'
-
-export function readCsrfToken(cookieString: string): string | null {
-  for (const part of cookieString.split(';')) {
-    const [rawName, ...rest] = part.trim().split('=')
-    if (rawName === CSRF_COOKIE) return decodeURIComponent(rest.join('='))
-  }
-  return null
-}
-
-/** Header bag for a mutating request, empty when there is no token. */
-export function csrfHeaders(): Record<string, string> {
-  const token = typeof document === 'undefined' ? null : readCsrfToken(document.cookie)
+export function rawFetchHeaders(
+  method: string,
+  cookieSource?: string,
+): Record<string, string> {
+  if (!needsCsrfHeader(method)) return {}
+  const token = readCsrfToken(cookieSource)
   return token ? { [CSRF_HEADER]: token } : {}
 }
 ```
 
-Add the interceptor in `client.ts`, after `export const client = axios.create({...})`:
+At each site found in Step 1, spread it into the request headers, e.g.:
 
 ```typescript
-// Attach the double-submit token to every mutating request. GET/HEAD are
-// exempt server-side (CSRF_SAFE_METHODS), so skip the cookie read for them.
-client.interceptors.request.use((config) => {
-  const method = (config.method ?? 'get').toUpperCase()
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return config
-  Object.assign((config.headers ??= {}), csrfHeaders())
-  return config
+const res = await fetch(url, {
+  method: 'POST',
+  credentials: 'include',
+  headers: { ...existingHeaders, ...rawFetchHeaders('POST') },
+  body,
 })
 ```
 
-Add `...csrfHeaders()` to the `headers` of each raw `fetch` mutation site listed in
-**Files** above. Find any others with:
+- [ ] **Step 5: Run the tests and commit**
 
 ```bash
-grep -rn "fetch(\|sendBeacon(" pypsa-gui/frontend/src | grep -v ".test."
-```
-
-- [ ] **Step 4: Run the tests**
-
-```bash
-cd pypsa-gui/frontend && npm test -- src/api/csrf.test.ts && npm test
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add pypsa-gui/frontend/src/api/csrf.ts pypsa-gui/frontend/src/api/csrf.test.ts \
-        pypsa-gui/frontend/src/api/client.ts pypsa-gui/frontend/src/api/uploads.ts \
-        pypsa-gui/frontend/src/api/chat.ts pypsa-gui/frontend/src/pages/TopologyCanvas.tsx
-git commit -m "fix(gui): send the CSRF token the backend requires"
+cd pypsa-gui/frontend && npm test
+git add pypsa-gui/frontend/src/api/csrf.ts pypsa-gui/frontend/src/api/csrf.rawfetch.test.ts \
+        pypsa-gui/frontend/src/api/uploads.ts pypsa-gui/frontend/src/api/chat.ts \
+        pypsa-gui/frontend/src/pages/TopologyCanvas.tsx
+git commit -m "fix(gui): send the CSRF token from raw fetch call sites too"
 ```
 
 ---
@@ -1652,8 +1722,16 @@ In `settings.py`:
     frontend_dist: Path = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 ```
 
-In `main.py`, **after every `include_router` call** (a catch-all registered earlier would
-shadow the API):
+In `main.py`, **append at the very end of the file — after the `health()` definition at
+`:542`, not merely after the last `include_router` at `:519`.** FastAPI matches routes in
+registration order, and `health` is declared *after* the routers. A catch-all inserted at
+`:520` matches `GET /api/health` first, `is_static_asset("/api/health")` returns `True`
+(the prefix list contains `/api/`), and health 404s — which breaks `spa.html`'s pre-React
+boot gate and `AuthModeProvider`.
+
+Register it for all methods, not just GET: `@app.get` leaves a `POST` to an unknown path
+returning 405 (partial method match) instead of 404, and `HEAD` on any SPA route 405s
+because FastAPI's `APIRoute` does not auto-add HEAD.
 
 ```python
 from fastapi.responses import FileResponse
@@ -1663,10 +1741,10 @@ import static_gate
 _DIST = Path(get_settings().frontend_dist)
 
 
-@app.get("/{full_path:path}", include_in_schema=False)
+@app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def serve_spa(full_path: str, request: Request):
     """
-    Serve the built SPA. Registered last so /api/* wins.
+    Serve the built SPA. Registered LAST — after health() — so /api/* wins.
 
     Mounted at document root because every asset reference in dist/ is
     root-absolute (/assets/…, /brand.css) — a sub-path mount serves the HTML
