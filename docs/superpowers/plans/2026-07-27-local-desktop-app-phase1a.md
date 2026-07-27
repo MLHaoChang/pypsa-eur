@@ -25,6 +25,13 @@
 | 9 | v3's finding #6 flipped `shouldRearmAuth`'s third argument to *local-mode-detected* in the **implementation** block and in the call site (`!getAuthEnabled()`), but left the **test** block at v2's *auth-enabled* polarity. Two of its four assertions asserted the exact opposite of what the planned implementation returns, so the task could not go green as written. | Kept `localModeDetected` — the implementation's own rationale and the call site both depend on it — and corrected the test's polarity and labels. Two tests added: an `undefined` status, and the `status`/`role` fields that `auth_service` and `hasAdminConsoleAccess` actually read. |
 | 9 | Step 4 says to wrap the sign-out surfaces in `authEnabled &&` "if either renders unconditionally". Both are already conditional (`AppHeader.tsx:965`, `ProjectsHomePage.tsx:377`). | No edit. Verified, not assumed. |
 | 9 | Step 3 warns that removing the `detail` binding will trip ESLint. The frontend has **no** ESLint config (`eslint.config.*` absent; ESLint 10 refuses to run without one). | `tsc --noEmit` is the real gate for this repo. |
+| 13 | Task 13's `/assets` mount captured its directory at import. `frontend_dist` already resolves to a real tree when `main` is imported, so the mount would ignore the `FRONTEND_DIST` a test (or a frozen app) sets afterwards — `test_assets_are_served_verbatim` could never pass. **Confirmed empirically:** it was one of the six RED failures. | A `StaticFiles` subclass refreshing `all_directories` inside `lookup_path`, which keeps Starlette's own `commonpath` traversal check, mounted unconditionally with `check_dir=False`. |
+| 14 | Step 4's manual command sets only `PYPSAGUI_LOCAL_MODE` and `PYPSAGUI_APP_DATA_DIR`. `backend/.env:17` carries a CWD-relative `DATABASE_URL` that outranks the field default, and the command runs with cwd `pypsa-gui/backend` — so it opens, migrates and seeds the developer's dev auth database **in the source tree**. Reproduced live; the rows were removed afterwards. | Command corrected to pass `DATABASE_URL` and `MPLBACKEND`, with teardown. Contradicted the README table Task 11 had just written. |
+| 14 | `test_full_local_journey` creates a project via `POST /api/projects/{name}` — a *destructive save* — and never deletes it, so a rerun inherits it. Safe only because conftest pins `PROJECTS_ROOT` to a mkdtemp. | Deleted in a `finally`, with the reason recorded in the module docstring. |
+| 14 | Step 2 builds the frontend, but nothing says the e2e is worthless against a stale bundle. `dist/` predated the Task 9 and 10 frontend changes. | Rebuilt before running; noted that the e2e must follow a build. |
+| 15 | `security.py` is told to `import local_mode` *inside* `login_retry_after`, implying a cycle. There is none: `local_mode` reaches only `db.models` → `db.base` → SQLAlchemy. | Ordinary module-level import. |
+| 15 | Every test asserts only the local-mode side, so deleting the admin router and the replica header outright would pass identically. | Added web-mode counterparts: admin must still **401** (not 404), and the replica header must still be stamped. |
+| — | Task 5 turned on WAL for file-backed SQLite, which creates `<db>-shm` / `<db>-wal`. `pypsa-gui/.gitignore` covers `backend/*.db`, which does not match those. | Both sidecar patterns added. |
 
 **v3 (2026-07-27)** — second adversarial review of v2. 12 further findings applied (2 of its
 14 were already fixed). The severe ones, each verified against `09bd7020` before applying:
@@ -2390,11 +2397,24 @@ Both must match the Task 0 baseline.
 
 ```bash
 cd pypsa-gui/backend
-PYPSAGUI_LOCAL_MODE=1 PYPSAGUI_APP_DATA_DIR=$(mktemp -d) \
+APPDATA=$(mktemp -d)
+PYPSAGUI_LOCAL_MODE=1 PYPSAGUI_APP_DATA_DIR="$APPDATA" \
+  DATABASE_URL="sqlite+pysqlite:///$APPDATA/pypsa-gui.db" MPLBACKEND=Agg \
   pixi run python -m uvicorn main:app --port 8123
 ```
 
+**`DATABASE_URL` is not optional here**, though an earlier draft of this step
+omitted it. `backend/.env:17` carries a CWD-relative
+`sqlite+pysqlite:///./auth_dev.db`, dotenv outranks the field default, and this
+command runs with cwd `pypsa-gui/backend` — so without it the run opens the
+developer's dev auth database *in the source tree*, migrates it, and seeds the
+local identity into it. That is the same trap the README table marks Mandatory;
+it was reproduced live during execution.
+
 Open `http://127.0.0.1:8123/`. Expected: the workbench, no login screen, no Vite server running.
+
+Teardown: `lsof -ti :8123 | xargs kill -9`, then confirm with
+`lsof -nP -iTCP:8123 -sTCP:LISTEN`. Killing a `--reload` child alone respawns it.
 
 - [ ] **Step 5: Commit**
 

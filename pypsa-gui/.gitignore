@@ -36,6 +36,10 @@ backend/projects/
 # Local SQLite auth DB used for Docker-less review
 backend/auth_dev.db
 backend/*.db
+# WAL sidecars. The backend now opens file-backed SQLite in WAL mode, which
+# creates `<db>-shm` and `<db>-wal` alongside it — `*.db` does not match those.
+backend/*.db-shm
+backend/*.db-wal
 
 # ── Never commit pickles (deserialisation = code-exec risk on clone) ──
 *.pkl
