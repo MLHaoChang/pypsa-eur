@@ -748,10 +748,20 @@ def get_persist_path(ctx: ProjectContext) -> Path | None:
     """
     if ctx.loaded_project is None:
         return None
-    # Lazy import — `routers.projects` exposes PROJECTS_DIR as a module
-    # constant; pulling it here avoids hardcoding the path in two places.
-    from routers.projects import PROJECTS_DIR
-    expected = PROJECTS_DIR / ctx.loaded_project / CHAT_FILENAME
+    # Resolve from the BOUND context, not the display name. Project data lives
+    # at `projects_root/<org_uuid>/<project_uuid>/`; the flat-name path below is
+    # the pre-tenancy shape, which put a project's chat history in a different
+    # directory from the project itself — and is why chat.jsonl could not be
+    # included in the export bundle.
+    storage_dir = getattr(ctx, "storage_dir", None)
+    if storage_dir:
+        expected = Path(storage_dir) / CHAT_FILENAME
+    else:
+        # Bound by name but never stored (pre-tenancy projects, and any context
+        # whose storage_dir has not been stamped yet). Lazy import — pulling
+        # PROJECTS_DIR at module scope would be a circular import.
+        from routers.projects import PROJECTS_DIR
+        expected = PROJECTS_DIR / ctx.loaded_project / CHAT_FILENAME
     cached = ctx.chat_state.persist_path
     if cached is not None:
         # Phase 4 QA fix (state-lifecycle): self-validate the cache against
