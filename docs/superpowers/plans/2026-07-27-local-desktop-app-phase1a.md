@@ -50,7 +50,10 @@ One reviewer claim was itself wrong and is **not** actioned: `dist/login.html` d
 - **Cross-platform: Windows x64 and macOS arm64.** `pathlib` throughout; explicit `encoding="utf-8"` on every text read.
 - **New env vars use `PYPSAGUI_`, not `PYPSA_GUI_`** — PyPSA's option system claims the whole `PYPSA_*` namespace and already warns on every boot.
 - `get_settings()` and `security.allowed_origins()` are `lru_cache`d. Any test that mutates their env must `cache_clear()` in a `finally`.
-- Run the pixi Python: `../../.pixi/envs/default/bin/python` from `pypsa-gui/backend`.
+- **Never hardcode an interpreter path** (project rule, CLAUDE.md): `.pixi/envs/default/bin/python` is
+  wrong on Windows and this repo is developed on both platforms. Use `pixi run python …`, or the
+  existing task `pixi run gui-tests` for the full backend suite. Same for node/npm — `nodejs >=22`
+  is a pixi dependency, so use `pixi run npm …` rather than a path.
 
 ---
 
@@ -100,8 +103,8 @@ git checkout -b feature/local-desktop-app-impl master
 - [ ] **Step 3: Record the baseline**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
-cd ../frontend && npm test 2>&1 | tail -5
+pixi run gui-tests -q 2>&1 | tail -3
+pixi run npm --prefix pypsa-gui/frontend test 2>&1 | tail -5
 ```
 
 Write both numbers down. Every later task compares against them. A task that changes the
@@ -167,7 +170,7 @@ def test_env_overrides_win(monkeypatch, tmp_path):
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_app_paths.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_app_paths.py -v
 ```
 
 Expected: `ModuleNotFoundError: No module named 'app_paths'`.
@@ -240,7 +243,7 @@ def default_database_url() -> str:
 - [ ] **Step 4: Run the tests**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_app_paths.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_app_paths.py -v
 ```
 
 Expected: 6 passed.
@@ -326,7 +329,7 @@ def test_conftest_pins_legacy_root():
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_settings_paths.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_settings_paths.py -v
 ```
 
 Expected: the `database_url` and `conftest pins` tests fail.
@@ -368,8 +371,8 @@ os.environ["LEGACY_ROOT"] = _TEST_LEGACY_ROOT
 - [ ] **Step 5: Run everything and commit**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_settings_paths.py -v
-../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run python -m pytest pypsa-gui/backend/tests/test_settings_paths.py -v
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 Expected: 4 passed; full suite matches the Task 0 baseline.
@@ -457,7 +460,7 @@ def test_flat_root_is_not_the_org_scoped_root(monkeypatch, tmp_path):
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_projects_dir_default.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_projects_dir_default.py -v
 ```
 
 Expected: the two `flat_projects_root` tests fail (the setting exists after Task 2, so if
@@ -482,8 +485,8 @@ not. Change nothing else — every existing `PROJECTS_DIR` reference keeps worki
 - [ ] **Step 4: Run both suites**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_projects_dir_default.py -v
-../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run python -m pytest pypsa-gui/backend/tests/test_projects_dir_default.py -v
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 Expected: 4 passed; full suite matches baseline. Any `AttributeError: has no attribute
@@ -537,7 +540,7 @@ def test_persist_path_falls_back_when_unbound(tmp_path):
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_chat_persist_path.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_chat_persist_path.py -v
 ```
 
 Expected: the first test fails — the path is under the flat display name.
@@ -562,8 +565,8 @@ Replace the `expected = ...` construction in `get_persist_path`:
 - [ ] **Step 4: Run both suites**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_chat_persist_path.py -v
-../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run python -m pytest pypsa-gui/backend/tests/test_chat_persist_path.py -v
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 - [ ] **Step 5: Commit**
@@ -638,7 +641,7 @@ def test_sqlite_uses_nullpool(monkeypatch, tmp_path):
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_sqlite_pragmas.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_sqlite_pragmas.py -v
 ```
 
 Expected: `ImportError: cannot import name 'configure_sqlite'`.
@@ -722,8 +725,8 @@ Add above `auth_service.py:127`:
 - [ ] **Step 5: Run both suites and commit**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_sqlite_pragmas.py -v
-../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run python -m pytest pypsa-gui/backend/tests/test_sqlite_pragmas.py -v
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 Expected: 4 passed; full suite matches baseline. If the suite collapses, the alias is missing.
@@ -800,7 +803,7 @@ def test_upgrade_creates_a_fresh_database(tmp_path):
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_alembic_sqlite.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_alembic_sqlite.py -v
 ```
 
 Expected: `ModuleNotFoundError: No module named 'local_bootstrap'` and the `render_as_batch`
@@ -903,8 +906,8 @@ if config.config_file_name is not None and \
 - [ ] **Step 4: Run the tests**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_alembic_sqlite.py -v
-../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run python -m pytest pypsa-gui/backend/tests/test_alembic_sqlite.py -v
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 Expected: 3 passed; full suite matches baseline.
@@ -1010,7 +1013,7 @@ def test_ids_are_stable_constants():
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_local_mode_seed.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_local_mode_seed.py -v
 ```
 
 Expected: `ModuleNotFoundError: No module named 'local_mode'`.
@@ -1159,8 +1162,8 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run the tests**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_local_mode_seed.py -v
-PYPSAGUI_APP_DATA_DIR=$(mktemp -d) ../../.pixi/envs/default/bin/python -m tools.bootstrap_local
+pixi run python -m pytest pypsa-gui/backend/tests/test_local_mode_seed.py -v
+PYPSAGUI_APP_DATA_DIR=$(mktemp -d) pixi run python -m tools.bootstrap_local
 ```
 
 Expected: 15 passed; the CLI prints three lines and exits 0.
@@ -1218,9 +1221,12 @@ import main
 
 
 @pytest.fixture
-def local_client(_auth_db, monkeypatch):
+def local_client(_auth_db, monkeypatch, tmp_path):
     """Cookie-less client with local mode on, seeded into conftest's DB."""
     monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
+    # Required: local mode's lifespan calls ensure_app_dirs(), which would
+    # otherwise mkdir the developer's real ~/Library/Application Support/PyPSA GUI/.
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
     _engine, session_local = _auth_db
     with session_local() as db:
         local_mode.ensure_local_identity(db)
@@ -1264,7 +1270,7 @@ def test_web_mode_still_401s_without_a_cookie(monkeypatch, _auth_db):
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_local_mode_api.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_local_mode_api.py -v
 ```
 
 Expected: the local-mode tests 401, and `test_health_reports_auth_disabled` fails because
@@ -1341,8 +1347,8 @@ At `main.py:552`:
 - [ ] **Step 4: Run both suites**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_local_mode_api.py -v
-../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run python -m pytest pypsa-gui/backend/tests/test_local_mode_api.py -v
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 Expected: 6 passed; full suite matches the Task 0 baseline. If the count *changed*, a
@@ -1418,7 +1424,7 @@ describe('localAdminUser', () => {
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/frontend && npm test -- src/auth/localMode.test.ts
+pixi run npm --prefix pypsa-gui/frontend test -- src/auth/localMode.test.ts
 ```
 
 Expected: cannot resolve `./localMode`.
@@ -1517,7 +1523,7 @@ get back in.
 - [ ] **Step 5: Run the tests and commit**
 
 ```bash
-cd pypsa-gui/frontend && npm test
+pixi run npm --prefix pypsa-gui/frontend test
 git add pypsa-gui/frontend/src/auth/localMode.ts pypsa-gui/frontend/src/auth/localMode.test.ts \
         pypsa-gui/frontend/src/api/client.ts pypsa-gui/frontend/src/auth/AuthProvider.tsx \
         pypsa-gui/frontend/src/layout/AppHeader.tsx pypsa-gui/frontend/src/pages/ProjectsHomePage.tsx
@@ -1580,7 +1586,7 @@ describe('rawFetchHeaders', () => {
 - [ ] **Step 3: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/frontend && npm test -- src/api/csrf.rawfetch.test.ts
+pixi run npm --prefix pypsa-gui/frontend test -- src/api/csrf.rawfetch.test.ts
 ```
 
 Expected: `rawFetchHeaders` is not exported.
@@ -1624,7 +1630,7 @@ const resp = await fetch(url, {
 - [ ] **Step 5: Run the tests and commit**
 
 ```bash
-cd pypsa-gui/frontend && npm test
+pixi run npm --prefix pypsa-gui/frontend test
 git add pypsa-gui/frontend/src/api/csrf.ts pypsa-gui/frontend/src/api/csrf.rawfetch.test.ts \
         pypsa-gui/frontend/src/api/uploads.ts pypsa-gui/frontend/src/api/chat.ts \
         pypsa-gui/frontend/src/pages/TopologyCanvas.tsx
@@ -1690,13 +1696,16 @@ def test_the_caches_must_be_cleared_after_the_env_changes(monkeypatch):
         _reset()
 
 
-def test_mutation_succeeds_from_a_non_5173_origin(_auth_db, monkeypatch):
+def test_mutation_succeeds_from_a_non_5173_origin(_auth_db, monkeypatch, tmp_path):
     """
     Spec C4 — the integration test the unit tests above cannot replace. Drives a
     real mutation through _csrf_rejection with an Origin header, which is what
     would actually catch a regression in the origin gate.
     """
     monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
+    # Required: local mode's lifespan calls ensure_app_dirs(), which would
+    # otherwise mkdir the developer's real ~/Library/Application Support/PyPSA GUI/.
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
     _engine, session_local = _auth_db
     with session_local() as db:
         local_mode.ensure_local_identity(db)
@@ -1709,7 +1718,7 @@ def test_mutation_succeeds_from_a_non_5173_origin(_auth_db, monkeypatch):
 - [ ] **Step 2: Run it**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_dynamic_origin.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_dynamic_origin.py -v
 ```
 
 Expected: 3 passed. These are characterization tests — a failure means the caching contract
@@ -1740,7 +1749,7 @@ One-shot setup without the shell: `python -m tools.bootstrap_local`.
 - [ ] **Step 4: Full suite**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 - [ ] **Step 5: Commit**
@@ -1822,7 +1831,7 @@ def test_login_html_always_serves_the_login_document():
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_static_gate.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_static_gate.py -v
 ```
 
 Expected: `ModuleNotFoundError: No module named 'static_gate'`.
@@ -1889,7 +1898,7 @@ def decide_route(path: str, *, local_mode: bool, authed: bool) -> Decision:
 - [ ] **Step 4: Run the tests**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_static_gate.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_static_gate.py -v
 ```
 
 Expected: 17 passed (5 + 5 parametrized, 4 more parametrized, 7 named).
@@ -1942,8 +1951,11 @@ def dist(tmp_path):
 
 
 @pytest.fixture
-def local_spa_client(_auth_db, dist, monkeypatch):
+def local_spa_client(_auth_db, dist, monkeypatch, tmp_path):
     monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
+    # Required: local mode's lifespan calls ensure_app_dirs(), which would
+    # otherwise mkdir the developer's real ~/Library/Application Support/PyPSA GUI/.
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
     monkeypatch.setenv("FRONTEND_DIST", str(dist))
     settings_module.get_settings.cache_clear()
     _engine, session_local = _auth_db
@@ -1994,7 +2006,7 @@ def test_head_is_supported(local_spa_client):
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_serve_spa.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_serve_spa.py -v
 ```
 
 Expected: every HTML route 404s — nothing serves static files today.
@@ -2057,8 +2069,8 @@ import static_gate
 - [ ] **Step 4: Run both suites**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_serve_spa.py -v
-../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run python -m pytest pypsa-gui/backend/tests/test_serve_spa.py -v
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 Expected: 9 passed; full suite matches baseline. A failure in
@@ -2099,10 +2111,13 @@ _REAL_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 
 @pytest.fixture
-def real_dist_client(_auth_db, monkeypatch):
+def real_dist_client(_auth_db, monkeypatch, tmp_path):
     if not (_REAL_DIST / "spa.html").is_file():
         pytest.skip("frontend not built — run `npm run build` in pypsa-gui/frontend")
     monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
+    # Required: local mode's lifespan calls ensure_app_dirs(), which would
+    # otherwise mkdir the developer's real ~/Library/Application Support/PyPSA GUI/.
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
     monkeypatch.setenv("FRONTEND_DIST", str(_REAL_DIST))
     settings_module.get_settings.cache_clear()
     _engine, session_local = _auth_db
@@ -2160,8 +2175,8 @@ def test_no_writable_path_resolves_inside_the_source_tree(monkeypatch, tmp_path)
 - [ ] **Step 2: Build the frontend and run**
 
 ```bash
-cd pypsa-gui/frontend && npm run build
-cd ../backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_local_mode_e2e.py -v
+pixi run npm --prefix pypsa-gui/frontend run build
+cd ../backend && pixi run python -m pytest tests/test_local_mode_e2e.py -v
 ```
 
 Expected: 4 passed. A 403 means the CSRF short-circuit regressed; a 401 means the auth branch
@@ -2170,8 +2185,8 @@ did; a login page at `/` means `decide_route` regressed.
 - [ ] **Step 3: Full suite, both sides**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
-cd ../frontend && npm test
+pixi run gui-tests -q 2>&1 | tail -3
+pixi run npm --prefix pypsa-gui/frontend test
 ```
 
 Both must match the Task 0 baseline.
@@ -2181,7 +2196,7 @@ Both must match the Task 0 baseline.
 ```bash
 cd pypsa-gui/backend
 PYPSAGUI_LOCAL_MODE=1 PYPSAGUI_APP_DATA_DIR=$(mktemp -d) \
-  ../../.pixi/envs/default/bin/python -m uvicorn main:app --port 8123
+  pixi run python -m uvicorn main:app --port 8123
 ```
 
 Open `http://127.0.0.1:8123/`. Expected: the workbench, no login screen, no Vite server running.
@@ -2216,8 +2231,11 @@ import security
 
 
 @pytest.fixture
-def local_client(_auth_db, monkeypatch):
+def local_client(_auth_db, monkeypatch, tmp_path):
     monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
+    # Required: local mode's lifespan calls ensure_app_dirs(), which would
+    # otherwise mkdir the developer's real ~/Library/Application Support/PyPSA GUI/.
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
     _engine, session_local = _auth_db
     with session_local() as db:
         local_mode.ensure_local_identity(db)
@@ -2255,7 +2273,7 @@ def test_throttle_still_active_in_web_mode(monkeypatch):
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_local_mode_surfaces.py -v
+pixi run python -m pytest pypsa-gui/backend/tests/test_local_mode_surfaces.py -v
 ```
 
 Expected: the first three fail.
@@ -2287,8 +2305,8 @@ In `security.py`, as the first statement of `login_retry_after`:
 - [ ] **Step 4: Run both suites**
 
 ```bash
-cd pypsa-gui/backend && ../../.pixi/envs/default/bin/python -m pytest tests/test_local_mode_surfaces.py -v
-../../.pixi/envs/default/bin/python -m pytest -q 2>&1 | tail -3
+pixi run python -m pytest pypsa-gui/backend/tests/test_local_mode_surfaces.py -v
+pixi run gui-tests -q 2>&1 | tail -3
 ```
 
 Expected: 4 passed; full suite matches baseline.
