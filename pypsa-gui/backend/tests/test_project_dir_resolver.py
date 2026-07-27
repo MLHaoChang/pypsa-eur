@@ -38,7 +38,17 @@ _BACKEND = pathlib.Path(__file__).resolve().parent.parent
 # the name. Exempting a named function is the right relaxation — narrowing the
 # matcher back to `Path(`-wrapped hits is not, because that is exactly the
 # weakness that hid `bind_context`'s assignment.
-_EXEMPT_FUNCTIONS = frozenset({"project_dir", "ensure_project_dir", "rename_project"})
+#
+# `rebase_row` is `rename_project`'s counterpart for a row 0003 could not
+# convert, and `stores_absolute_path` is the one predicate that needs the
+# distinction `project_dir` deliberately erases.
+_EXEMPT_FUNCTIONS = frozenset({
+    "project_dir",
+    "ensure_project_dir",
+    "rename_project",
+    "rebase_row",
+    "stores_absolute_path",
+})
 
 
 @pytest.fixture

@@ -65,6 +65,11 @@ os.environ["PROJECTS_ROOT"] = _TEST_PROJECTS_ROOT
 os.environ["PYPSAGUI_APP_DATA_DIR"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-appdata-")
 os.environ["LEGACY_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-legacy-")
 os.environ["FLAT_PROJECTS_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-flat-")
+# Same reasoning, one step further: this one is UNSET rather than redirected.
+# A developer who exported it — exactly what the importer's rehearsal
+# instructions teach — would otherwise have every local-mode test walk their
+# real legacy tree, and the first-run import fire against it.
+os.environ.pop("PYPSAGUI_LEGACY_IMPORT_ROOT", None)
 
 import pandas as pd
 import pypsa

@@ -179,6 +179,21 @@ def ensure_project_dir(project: Project) -> Path:
     return path
 
 
+def stores_absolute_path(project: Project) -> bool:
+    """
+    True for a row migration 0003 could not convert.
+
+    Either it pointed outside `projects_root` — left alone by design, because
+    a rewrite that invalidates a working path is worse than one that does
+    nothing — or 0003 never ran against this database. `tools/import_legacy
+    --rebase-db` is what resolves either case.
+
+    Lives here, next to the resolver, because `project_dir` deliberately
+    erases the distinction and this is the one place that needs it back.
+    """
+    return Path(project.storage_path).is_absolute()
+
+
 def create_root(
     db: DBSession,
     user: User,

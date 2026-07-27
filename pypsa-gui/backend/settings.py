@@ -58,6 +58,18 @@ class Settings(BaseSettings):
     flat_projects_root: Path = Field(
         default_factory=app_paths.default_flat_projects_root
     )
+    # Where `tools/import_legacy` (and the first-run import) looks for projects
+    # saved by a pre-desktop install. `None` means "no import configured".
+    #
+    # The `validation_alias` is load-bearing: this class declares NO
+    # `env_prefix`, so without it the field would bind bare `LEGACY_IMPORT_ROOT`
+    # while every document and command uses the `PYPSAGUI_` name — and the
+    # importer would silently inventory nothing. The other `PYPSAGUI_*`
+    # variables work because `app_paths` reads them from `os.environ` directly,
+    # not through pydantic.
+    legacy_import_root: Path | None = Field(
+        default=None, validation_alias="PYPSAGUI_LEGACY_IMPORT_ROOT"
+    )
     # Built SPA, served by the backend in local mode. Overridable so a frozen
     # app can point at its bundled copy.
     frontend_dist: Path = Field(
