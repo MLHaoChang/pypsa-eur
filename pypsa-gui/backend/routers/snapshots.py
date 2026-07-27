@@ -41,10 +41,12 @@ from services.pypsa_service import PyPSAService
 
 # Reuse the same path-validation pattern as projects.py — snapshots inherit the
 # project-name safety check by going through `_safe_project_dir`.
+from services.atomic_io import (
+    atomic_write_text as _atomic_write_text,
+    atomic_write_with as _atomic_write_with,
+)
 from routers.projects import (
     _BUNDLE_FILES,
-    _atomic_write_text,
-    _atomic_write_with,
     _force_rmtree,
     _read_meta,
     _restore_results_state,

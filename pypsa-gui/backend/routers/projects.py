@@ -29,6 +29,12 @@ from models.schemas import (
     RenameProjectRequest,
 )
 from services import active_project, change_log_service
+from services.atomic_io import (
+    atomic_copy,
+    atomic_write_bytes,
+    atomic_write_text,
+    atomic_write_with,
+)
 from services.dispatch_status import network_has_dispatch
 from services.project_context import RESULT_STATE_KEYS
 from services.pypsa_service import PyPSAService
@@ -232,36 +238,12 @@ def _meta_path(project_dir: pathlib.Path) -> pathlib.Path:
     return project_dir / "metadata.json"
 
 
-def _atomic_write_with(path: pathlib.Path, writer) -> None:
-    """
-    Run `writer(tmp_path)` then atomically rename to `path`.
-
-    Survives crashes mid-write: if the process is killed before `os.replace`,
-    the original `path` is untouched (intact previous-version of the file)
-    and a stale `path.tmp` sibling is left behind for diagnostic / recovery.
-
-    `os.replace` is atomic on POSIX and on NTFS (Windows) — both are
-    journalled filesystems that swap the directory entry in a single op.
-    """
-    import os
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    try:
-        writer(tmp)
-        os.replace(str(tmp), str(path))
-    except Exception:
-        # Clean up the tmp file so the project dir doesn't accumulate junk
-        # after a write failure. The original `path` is untouched either way.
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-        raise
-
-
-def _atomic_write_text(path: pathlib.Path, text: str) -> None:
-    """Atomic-replace shortcut for JSON / config writes."""
-    _atomic_write_with(path, lambda p: p.write_text(text))
+# Moved verbatim to `services/atomic_io.py` (phase 1b, E5) so the destructive
+# write paths below and `routers/snapshots.py` share one implementation. The
+# private names stay as aliases: fourteen call sites in this module use them,
+# and renaming those would turn a move into a rewrite.
+_atomic_write_with = atomic_write_with
+_atomic_write_text = atomic_write_text
 
 
 # Keys persisted via `results_state.pkl` — must match the save block in
@@ -798,7 +780,10 @@ async def import_bundle(
     dest = project_registry.ensure_project_dir(_imported_project)
     for fname in _BUNDLE_FILES:
         if fname in members:
-            (dest / fname).write_bytes(zf.read(fname))
+            # Atomic: a plain `write_bytes` truncates a live project's
+            # `network.nc` before the first byte of the archive member is
+            # decompressed, so a corrupt member destroys the existing project.
+            atomic_write_bytes(dest / fname, zf.read(fname))
     # Chatbot uploads (Phase A) — extract any `uploads/...` entries the
     # exporting GUI included. Each archive member's path is verified to
     # stay inside `dest` before writing (zip-slip defence) and the parent
@@ -814,7 +799,7 @@ async def import_bundle(
             except ValueError:
                 continue  # zip-slip attempt — silently drop the member
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_bytes(zf.read(member))
+            atomic_write_bytes(target_path, zf.read(member))
 
     nc_path = dest / "network.nc"
     from services import undo_service
@@ -1018,7 +1003,9 @@ def create_from_template(
     _created_project = project_registry.create_root(db, user, requested)
     target_name = _created_project.name
     dest = project_registry.ensure_project_dir(_created_project)
-    shutil.copy2(src_nc, dest / "network.nc")
+    # `copy2` opens the destination for writing before it reads the source, so
+    # a template that cannot be read leaves a truncated `network.nc` behind.
+    atomic_copy(src_nc, dest / "network.nc")
 
     # Reset + load, mirroring import_bundle / load_project.
     from services import undo_service
@@ -2062,7 +2049,7 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
         for fname in _BUNDLE_FILES:
             src_file = base_dir / fname
             if src_file.exists():
-                (child_dir / fname).write_bytes(src_file.read_bytes())
+                atomic_write_bytes(child_dir / fname, src_file.read_bytes())
         _copy_bundle_dirs(base_dir, child_dir)
 
         # Keep metadata.json's NAME pointer in sync with the DB parent id so
