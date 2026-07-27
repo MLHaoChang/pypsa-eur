@@ -2187,6 +2187,15 @@ def _dist() -> Path:
     return Path(get_settings().frontend_dist)
 
 
+# Mounted BEFORE the catch-all — Starlette matches in registration order.
+# Starlette Mounts do NOT run app-level dependencies, and main.py:137 applies
+# `dependencies=[Depends(bind_active_project)]` to every APIRoute. Without this
+# the catch-all would serve assets through that dependency, costing a session
+# lookup plus a project resolve for every JS/CSS/image on a cold SPA load.
+if _dist().is_dir():
+    app.mount("/assets", StaticFiles(directory=_dist() / "assets"), name="assets")
+
+
 @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def serve_spa(full_path: str, request: Request):
     dist = _dist()
@@ -2217,17 +2226,6 @@ def serve_spa(full_path: str, request: Request):
     if kind == "redirect":
         return RedirectResponse(url=target, status_code=302)
     return FileResponse(dist / target)
-```
-
-Mount the hot asset directory as a Starlette `Mount` **before** the catch-all:
-
-```python
-# Starlette Mounts do NOT run app-level dependencies. main.py:137 applies
-# `dependencies=[Depends(bind_active_project)]` to every APIRoute, and the
-# catch-all is one — so without this, a cold SPA load costs a session lookup
-# plus a project resolve for every JS/CSS/image it fetches.
-if _dist().is_dir():
-    app.mount("/assets", StaticFiles(directory=_dist() / "assets"), name="assets")
 ```
 
 Add to the imports at the top of `main.py` (check each against what is already imported —
