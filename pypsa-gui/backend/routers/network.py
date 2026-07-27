@@ -6,7 +6,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy.orm import Session as DBSession
 from fastapi.responses import StreamingResponse
 from models.schemas import (
     BusCreate,
@@ -24,7 +25,10 @@ from models.schemas import (
     StoreCreate,
     TransformerCreate,
 )
-from services import change_log_service, vintage_service
+from db.models import Session as SessionRow
+from db.session import get_db
+from deps import current_session
+from services import active_project, change_log_service, vintage_service
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
@@ -1724,7 +1728,10 @@ def update_meta(meta: NetworkMeta):
 
 
 @router.post("/reset")
-def reset_network():
+def reset_network(
+    db: DBSession = Depends(get_db),
+    session: SessionRow | None = Depends(current_session),
+):
     with PyPSAService.get_lock():
         PyPSAService.reset_network()
     # Atomic clear under the lock — concurrent serialise/iterate paths are safe.
@@ -1732,6 +1739,12 @@ def reset_network():
         _user_ts.clear()
     from services import undo_service
     undo_service.clear()
+    # Step 0b: "New Project" un-binds the SESSION, not the process. Leaving the
+    # pointer set would make the very next request re-resolve the old project
+    # and hydrate it back on top of the network the user just cleared — the
+    # reset would appear to silently undo itself.
+    if session is not None:
+        active_project.set_active_project(db, session, None)
     return {"status": "reset"}
 
 

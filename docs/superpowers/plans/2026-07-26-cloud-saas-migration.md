@@ -220,7 +220,61 @@ becomes a composite key), `services/solve_queue.py` (`:323-324` compares
 `frontend/src/utils/projectActions.ts:376-397` (consumes the
 `{activated, evicted}` payload keyed by the old id).
 
-### Step 0b — session-bound active project
+### Step 0b — session-bound active project  ✅ **LANDED**
+
+> **Implemented.** Backend suite **1151 passed / 1 skipped** (0a's re-pinned
+> baseline was 1143; 0b adds 8). Frontend: tsc clean, 132 vitest, production
+> build OK. Migration `0002_session_active_project` round-trips
+> upgrade → downgrade → upgrade on SQLite, leaving the FK as
+> `active_project_id → projects.id ON DELETE SET NULL`. S0.10 is covered by
+> `backend/tests/test_qa_step0b.py`, and verified again in headless Chrome with
+> **two isolated browser contexts** (14/14): different session cookies, each
+> session building its own unbound network, isolation holding across
+> interleaved reads, and one session's mutation invisible to the other.
+>
+> **Both decisions this section left open are now made:**
+>
+> - **Unbound state → key by session, not a draft row.** A session with no
+>   pointer gets `scratch:<session-id>` in the resident registry. Creating a
+>   real project row per session was rejected as specified: it would litter
+>   every user's project list with drafts they never asked to save. The first
+>   save CLAIMS the scratch context — `rekey_context` moves it to `org:uuid`
+>   and moves the session pointer in the same operation, because releasing the
+>   scratch slot without moving the pointer orphans the session mid-save.
+> - **Eviction protected set is plural.** `_evict_if_over_cap` now unions in
+>   `_session_active_keys()`, which reads only LIVE sessions
+>   (`revoked_at IS NULL AND expires_at > now`) — otherwise every session ever
+>   created pins a context forever and the LRU cap stops meaning anything.
+>
+> **Three things this step found that the plan did not predict.** All three are
+> the same shape — a binding that silently did not propagate — and all three
+> failed *quietly*, which is why they are worth recording:
+>
+> 1. **`BaseHTTPMiddleware` cannot bind a contextvar for the endpoint.** It runs
+>    the downstream app in a task spawned by its own task group, and that task
+>    does not inherit contextvars set in `dispatch`. The binding moved to an
+>    app-level dependency — and that dependency **must be `async`**: FastAPI
+>    runs a sync dependency in a threadpool, where `ContextVar.set()` mutates a
+>    copy that is discarded on return. Both wrong versions returned 200 for
+>    every route while serving the process global.
+> 2. **A function-local re-import shadowed the module-level one for the whole
+>    function body**, so the middleware's own binding raised `UnboundLocalError`
+>    into a bare `except` — which also silently disabled undo recording and
+>    dispatch invalidation, neither of which is what the traceback would have
+>    said. `main.py` now re-imports `PyPSAService` locally at the top of that
+>    block, with a comment saying why.
+> 3. **A bare `threading.Thread` gets an EMPTY context, not a copy.** After a
+>    session adopts the process foreground, `_active` is None, so a worker
+>    thread calling `_state_update` self-heals a brand-new context and writes
+>    the terminal status where nobody reads it. The real solver worker is safe
+>    (`/run` hands it the context explicitly, and `contextvars.copy_context()`
+>    carries the request identity into the executor), but any *new* background
+>    writer must take the ctx as an argument rather than resolve "active".
+>
+> **Deliberately still process-global:** `PyPSAService._active`. It is now a
+> bootstrap slot with an adopt-once handover, not a shared workspace — the
+> remaining callers are the ones with no session at all (lifespan startup, the
+> solve dispatcher, eviction). Step 3 removes it.
 
 The ~110 routes with no project identifier resolve through
 `PyPSAService.get_network()` → the process-global active context. There is

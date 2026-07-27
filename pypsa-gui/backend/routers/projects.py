@@ -18,16 +18,16 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
-from db.models import User
+from db.models import Session as SessionRow, User
 from db.session import get_db
-from deps import optional_user
+from deps import current_session, optional_user
 from models.schemas import (
     CreateScenarioRequest,
     ImportSummary,
     ProjectInfo,
     RenameProjectRequest,
 )
-from services import change_log_service
+from services import active_project, change_log_service
 from services.dispatch_status import network_has_dispatch
 from services.project_context import RESULT_STATE_KEYS
 from services.pypsa_service import PyPSAService
@@ -1072,6 +1072,7 @@ def save_project(
     apply_overrides: bool = False,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ):
     """
     Persist the ACTIVE project's in-memory network to ``projects/<name>/``.
@@ -1103,6 +1104,11 @@ def save_project(
         project_acl.ensure_project_access(db, user, project)
     storage_dir = project_registry.project_dir(project)
     name = project.name
+    # Captured BEFORE the save, which is what performs the claim. Mirrors
+    # `_save_context`'s own condition (`loaded is None or rebind`) — keying on
+    # `project_uuid` instead would treat a name-only binding as unbound and
+    # move the pointer on a Save-a-Copy, which must never rebind.
+    was_unbound = PyPSAService.get_active_context().loaded_project is None
     result = _save_context(
         PyPSAService.get_active_context(),
         name,
@@ -1118,6 +1124,19 @@ def save_project(
         db=db,
         user=user,
     )
+    # Step 0b: if this save CLAIMED or REBOUND the context (a draft becoming a
+    # real project, or Save-As), the session is now looking at that project —
+    # move its pointer to match. Without this the context is re-keyed from the
+    # session's `scratch:` slot to `org:uuid` while the pointer still says
+    # "unbound", so the very next request resolves an empty scratch and the
+    # user's just-saved work vanishes from their screen.
+    #
+    # A Save-a-Copy (`rebind=False` on an already-bound context) deliberately
+    # does NOT move the pointer: the live network still belongs to the original
+    # project, which is the only valid autosave target.
+    if session is not None and (rebind or was_unbound):
+        active_project.set_active_project(db, session, project)
+
     # Saved state is the new baseline — explicit user-triggered saves discard
     # the undo stack so revert can't roll back across the checkpoint. Autosave
     # passes clear_undo=false to keep the in-memory revert history intact.
@@ -1353,6 +1372,11 @@ def _save_context(
                 # collision Step 0a removes.
                 from services import project_registry as _registry
                 _registry.bind_context(ctx, project_row)
+                # The context's identity just changed, so its registry slot must
+                # too — a first save promotes a session's `scratch:` draft into a
+                # real project, and anything looking it up by `org:uuid` would
+                # otherwise miss it and hydrate a duplicate from disk.
+                PyPSAService.rekey_context(ctx)
             else:
                 ctx.loaded_project = name
             try:
@@ -1667,6 +1691,7 @@ def activate_project(
     project_id: str,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ) -> dict:
     """
     Make ``project_id`` the active context — the B8 instant in-memory switch.
@@ -1745,6 +1770,13 @@ def activate_project(
         _hydrate_context_from_disk(ctx, src, project.name)
         project_registry.bind_context(ctx, project)
         evicted = PyPSAService.activate_context(ctx, register=True)
+
+    # Persist the pointer (Step 0b). Until this, "which project am I looking
+    # at" lived only in process memory, so it was shared by every user on the
+    # pod and lost on restart. Written AFTER the swap succeeds so a failed
+    # activation does not leave the session pointing somewhere it never got to.
+    if session is not None:
+        active_project.set_active_project(db, session, project)
 
     # `activated` is the DISPLAY NAME: the caller may have addressed the project
     # by uuid, but everything downstream (frontend `currentProject`, autosave
@@ -2203,9 +2235,9 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
             # `project` is the same row with its name already updated, so this
             # rebinds the name AND keeps the tenant identity/storage path — a
             # name-only rebind would drop them and re-key the resident context.
-            project_registry.bind_context(
-                PyPSAService.get_active_context(), project
-            )
+            _renamed_ctx = PyPSAService.get_active_context()
+            project_registry.bind_context(_renamed_ctx, project)
+            PyPSAService.rekey_context(_renamed_ctx)
 
     change_log_service.log("rename_project", "Project", new_name, f"Renamed project '{old_name}' → '{new_name}'")
     return _project_info_db(db, project)

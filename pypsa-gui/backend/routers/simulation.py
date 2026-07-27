@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import contextvars
 import json
 import logging
 import queue
@@ -507,7 +508,13 @@ def run():
             objective=obj,
         )
 
-    t = threading.Thread(target=_worker, daemon=True)
+    # Carry the request's context into the worker. Step 0b resolves the active
+    # project into a ContextVar, and a bare `threading.Thread` does NOT inherit
+    # contextvars — so the worker would fall back to the PROCESS foreground and
+    # write its status, objective and results into a context nobody is reading,
+    # while the caller's `/status` polls its own and sees `None` forever.
+    _worker_ctx = contextvars.copy_context()
+    t = threading.Thread(target=lambda: _worker_ctx.run(_worker), daemon=True)
 
     # Gate + claim + start under a SINGLE _state_lock hold so two concurrent
     # /run requests cannot both pass the "not running" check and spawn racing
@@ -724,7 +731,13 @@ def run_ac_pf():
                 log_queue.put(f"TRACEBACK: {_line}")
             _state_update(status="failed", condition=str(exc))
 
-    t = threading.Thread(target=_worker, daemon=True)
+    # Carry the request's context into the worker. Step 0b resolves the active
+    # project into a ContextVar, and a bare `threading.Thread` does NOT inherit
+    # contextvars — so the worker would fall back to the PROCESS foreground and
+    # write its status, objective and results into a context nobody is reading,
+    # while the caller's `/status` polls its own and sees `None` forever.
+    _worker_ctx = contextvars.copy_context()
+    t = threading.Thread(target=lambda: _worker_ctx.run(_worker), daemon=True)
 
     # Gate + pre-checks + claim + start under a SINGLE _state_lock hold so two
     # concurrent triggers can't both pass the "not running" check and spawn

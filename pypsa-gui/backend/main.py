@@ -22,12 +22,13 @@ except ImportError:
     pass
 
 import pypsa
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import security
 from db import session as db_session_module
-from deps import resolve_request_user
+from deps import bind_active_project, resolve_request_session, resolve_request_user
+from services import active_project
 from routers import (
     admin,
     auth,
@@ -126,7 +127,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="PyPSA GUI API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="PyPSA GUI API",
+    version="1.0.0",
+    lifespan=lifespan,
+    # Runs before every endpoint on every router: binds the caller's session to
+    # its active project so the ~110 routes that name no project resolve
+    # per-user instead of through a process global (Step 0b).
+    dependencies=[Depends(bind_active_project)],
+)
 
 def _csrf_rejection(request: Request) -> JSONResponse | None:
     """
@@ -260,6 +269,42 @@ async def undo_snapshot_middleware(request: Request, call_next):
                 # so the next real navigation picks up the login gate.
                 headers={"Clear-Site-Data": '"cache"'},
             )
+
+        # ── Session-bound active project, MIDDLEWARE-LOCAL half (Step 0b) ──
+        # The binding the ENDPOINT sees is made in `deps.bind_active_project`,
+        # an app-level dependency: `BaseHTTPMiddleware` runs the downstream app
+        # in a task spawned by its own task group, and that task does not
+        # inherit contextvars set here.
+        #
+        # But this middleware ALSO runs code of its own against "the active
+        # network" — the undo snapshot push and the dispatch-invalidation probe
+        # below — and that code executes in THIS context. Without the binding
+        # here, both silently operated on the process foreground: undo stopped
+        # recording, and a topology edit no longer cleared stale solver
+        # dispatch, so the Results tab kept showing numbers for a network that
+        # had changed. Hence both bindings; they are not redundant.
+        try:
+            # Local re-import, deliberately. Later in THIS function several
+            # blocks do `from services.pypsa_service import PyPSAService`, which
+            # makes the name function-local for the whole body — so the
+            # module-level import is shadowed here and reading it raises
+            # UnboundLocalError. The binding then silently failed (swallowed by
+            # the except below) and every middleware-local read fell back to the
+            # process foreground, which is precisely the bug this block exists
+            # to prevent. Keep this import, or hoist every other one.
+            from services.pypsa_service import PyPSAService
+
+            with db_session_module.SessionLocal() as db:
+                session_row = resolve_request_session(request, db)
+                if session_row is not None:
+                    ctx, slot = active_project.resolve_for_session(db, session_row)
+                    PyPSAService.bind_request_context(ctx)
+                    PyPSAService.bind_request_slot(slot)
+                    PyPSAService.bind_request_scratch(
+                        active_project.scratch_key(session_row)
+                    )
+        except Exception:  # noqa: BLE001
+            logger.exception("could not bind the session's active project")
 
     # ── Solver-in-flight gate ─────────────────────────────────────────
     # Refuse writes to /api/network/* and /api/io/* while the LP worker

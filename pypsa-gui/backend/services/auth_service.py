@@ -55,7 +55,15 @@ def create_session(db: DBSession, user_id: uuid.UUID) -> tuple[str, Session]:
     return raw_token, session
 
 
-def resolve_session(db: DBSession, raw_token: str) -> User | None:
+def resolve_session_row(db: DBSession, raw_token: str) -> Session | None:
+    """
+    The live, unrevoked, unexpired `Session` row for `raw_token`, or None.
+
+    Split out from `resolve_session` in Step 0b: the session row now carries
+    `active_project_id`, so the request path needs the ROW, not just the user it
+    belongs to. `resolve_session` is kept as the user-only view because most
+    callers only ever wanted that.
+    """
     token_hash = _hash_token(raw_token)
     session = db.scalar(select(Session).where(Session.token_hash == token_hash))
     if session is None:
@@ -64,10 +72,33 @@ def resolve_session(db: DBSession, raw_token: str) -> User | None:
         return None
     if _ensure_utc(session.expires_at) <= _now_utc():
         return None
+    return session
+
+
+def resolve_session(db: DBSession, raw_token: str) -> User | None:
+    session = resolve_session_row(db, raw_token)
+    if session is None:
+        return None
     user = db.get(User, session.user_id)
     if user is None or user.status != "active":
         return None
     return user
+
+
+def set_session_active_project(
+    db: DBSession, session: Session, project_id: uuid.UUID | None
+) -> None:
+    """
+    Point a session at a project (Step 0b), or clear it with None.
+
+    The caller MUST have authorized `project_id` first — this writes the pointer
+    and nothing else. Clearing is the New Project / post-reset state and is the
+    normal state on first load, not an error.
+    """
+    if session.active_project_id == project_id:
+        return
+    session.active_project_id = project_id
+    db.commit()
 
 
 def revoke_session(db: DBSession, raw_token: str) -> None:

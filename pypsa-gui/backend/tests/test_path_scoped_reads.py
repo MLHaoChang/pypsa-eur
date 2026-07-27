@@ -44,6 +44,24 @@ def _save_project(client, name: str) -> None:
     assert r.status_code == 200, r.text
 
 
+def _evict_from_registry(name: str) -> None:
+    """
+    Drop `name`'s resident context so the project exists on DISK ONLY.
+
+    Step 0b changed what a save leaves behind. A save now CLAIMS the saving
+    session's context and registers it under `org:uuid`, so the old recipe
+    ("save B while live, then install A") no longer leaves B cold — B stays
+    resident under its own key, which is correct behaviour and not what these
+    tests are about. Evicting restores the premise: the first touch of a
+    saved-but-not-resident project must hydrate it from disk. Matches what the
+    B9 LRU cap does to a cold project in a long-running process.
+    """
+    with PyPSAService._registry_lock:
+        for key, ctx in list(PyPSAService._contexts.items()):
+            if ctx.loaded_project == name:
+                PyPSAService._contexts.pop(key, None)
+
+
 def _put_A_and_B_on_disk(client, install_network):
     """
     Two saved projects on disk with distinct buses; leaves A as the active
@@ -55,14 +73,15 @@ def _put_A_and_B_on_disk(client, install_network):
     _save_project(client, "B")
     install_network(_bus_network("A_BUS"), name="A")
     _save_project(client, "A")
+    _evict_from_registry("B")
     return "A_BUS", "B_BUS"
 
 
 def test_path_scoped_read_targets_named_project_not_active(
     client, install_network, tmp_projects_dir, registry_key_for
-):
+, session_ctx):
     a_bus, b_bus = _put_A_and_B_on_disk(client, install_network)
-    assert PyPSAService.get_active_id() == registry_key_for("A")
+    assert session_ctx(client).registry_key == registry_key_for("A")
 
     # B's buses via the path-scoped route — must be B's, not the active A's.
     rb = client.get("/api/projects/B/network/buses")
@@ -79,14 +98,14 @@ def test_path_scoped_read_targets_named_project_not_active(
 
 def test_path_scoped_reads_do_not_move_active(
     client, install_network, tmp_projects_dir, registry_key_for
-):
+, session_ctx):
     _put_A_and_B_on_disk(client, install_network)
     key_a = registry_key_for("A")
-    assert PyPSAService.get_active_id() == key_a
+    assert session_ctx(client).registry_key == key_a
 
     # Reading B (a not-yet-resident project) must NOT change the foreground.
     client.get("/api/projects/B/network/buses")
-    assert PyPSAService.get_active_id() == key_a
+    assert session_ctx(client).registry_key == key_a
     # The active network is still A's (B_BUS must not appear).
     active_buses = [row["name"] for row in client.get("/api/network/buses").json()]
     assert active_buses == ["A_BUS"]
@@ -94,12 +113,12 @@ def test_path_scoped_reads_do_not_move_active(
     # Repeat reads (now resident) still don't move it.
     client.get("/api/projects/B/network/meta")
     client.get("/api/projects/A/network/links")
-    assert PyPSAService.get_active_id() == key_a
+    assert session_ctx(client).registry_key == key_a
 
 
 def test_path_scoped_read_makes_target_resident(
     client, install_network, tmp_projects_dir, registry_key_for
-):
+, session_ctx):
     _put_A_and_B_on_disk(client, install_network)
     key_a, key_b = registry_key_for("A"), registry_key_for("B")
     # B is on disk but not resident yet (save doesn't register into _contexts).
@@ -112,7 +131,7 @@ def test_path_scoped_read_makes_target_resident(
     ctx_b = PyPSAService.get_context(key_b)
     assert ctx_b is not None
     assert ctx_b.loaded_project == "B"
-    assert PyPSAService.get_active_id() == key_a
+    assert session_ctx(client).registry_key == key_a
     # A second read returns the SAME resident ctx (registry hit, no re-hydrate).
     client.get("/api/projects/B/network/buses")
     assert PyPSAService.get_context(key_b) is ctx_b
@@ -120,7 +139,7 @@ def test_path_scoped_read_makes_target_resident(
 
 def test_path_scoped_meta_reflects_target_project(
     client, install_network, tmp_projects_dir, registry_key_for
-):
+, session_ctx):
     _put_A_and_B_on_disk(client, install_network)
 
     mb = client.get("/api/projects/B/network/meta")
@@ -133,10 +152,10 @@ def test_path_scoped_meta_reflects_target_project(
     # The active foreground is still A; the shim meta proves it.
     shim = client.get("/api/network/meta").json()
     assert shim["loaded_project"] == "A"
-    assert PyPSAService.get_active_id() == registry_key_for("A")
+    assert session_ctx(client).registry_key == registry_key_for("A")
 
 
-def test_shim_reads_stay_active(client, install_network, tmp_projects_dir):
+def test_shim_reads_stay_active(client, install_network, tmp_projects_dir, session_ctx):
     """The active-network shim is byte-identical — still serves the active ctx."""
     _put_A_and_B_on_disk(client, install_network)
     # Active is A; the shim must report A regardless of any path-scoped reads.
@@ -145,7 +164,7 @@ def test_shim_reads_stay_active(client, install_network, tmp_projects_dir):
     assert client.get("/api/network/meta").json()["loaded_project"] == "A"
 
 
-def test_unknown_project_returns_404(client, install_network, tmp_projects_dir):
+def test_unknown_project_returns_404(client, install_network, tmp_projects_dir, session_ctx):
     install_network(_bus_network("A_BUS"), name="A")
     _save_project(client, "A")
     r = client.get("/api/projects/DoesNotExist/network/buses")
@@ -156,7 +175,7 @@ def test_unknown_project_returns_404(client, install_network, tmp_projects_dir):
 
 def test_hostile_project_id_is_indistinguishable_from_absent(
     client, install_network, tmp_projects_dir
-):
+, session_ctx):
     """
     Was `test_bad_project_id_returns_400`; Step 0a changed the contract.
 
@@ -183,7 +202,7 @@ def test_hostile_project_id_is_indistinguishable_from_absent(
 
 def test_unknown_component_class_returns_4xx(
     client, install_network, tmp_projects_dir
-):
+, session_ctx):
     install_network(_bus_network("A_BUS"), name="A")
     _save_project(client, "A")
     r = client.get("/api/projects/A/network/wombats")
@@ -196,7 +215,7 @@ def test_unknown_component_class_returns_4xx(
 
 def test_path_scoped_serves_multiple_component_classes(
     client, install_network, tmp_projects_dir
-):
+, session_ctx):
     _put_A_and_B_on_disk(client, install_network)
     # Generators + loads come back for the target project; links (none) is [].
     gens = client.get("/api/projects/B/network/generators")

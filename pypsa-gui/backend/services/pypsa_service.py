@@ -3,6 +3,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 
 import pypsa
 
@@ -95,17 +96,157 @@ class PyPSAService:
     # take it, and they take it FIRST) — prevents the two-lock deadlock.
     _registry_lock: threading.RLock = threading.RLock()
 
+    # ── Request-scoped active context (Step 0b) ──────────────────────────────
+    # The "active project" is per SESSION, not per process. `_request_ctx` holds
+    # the context resolved for the request currently on this thread/task; when
+    # it is set, EVERY `get_network()` call site (133 of them) resolves to that
+    # caller's project without any of them changing.
+    #
+    # Falls back to `_active` when unset, which is the correct answer for the
+    # callers that genuinely have no session: the solve-queue dispatcher thread,
+    # the eviction save, and direct in-process use. Those either carry their own
+    # ctx explicitly or operate on the process foreground by design.
+    #
+    # ContextVar rather than threading.local because it survives BOTH threads
+    # and asyncio tasks — the same reason `_ThreadScopedQueueHandler` will have
+    # to switch to one if Step 2's worker runs jobs on a single event loop.
+    _request_ctx: ContextVar[ProjectContext | None] = ContextVar(
+        "pypsa_request_ctx", default=None
+    )
+
+    @classmethod
+    def bind_request_context(cls, ctx: ProjectContext | None):
+        """Bind (or clear) the active context for the current request."""
+        return cls._request_ctx.set(ctx)
+
+    @classmethod
+    def reset_request_context(cls, token) -> None:
+        cls._request_ctx.reset(token)
+
+    # Registry key the request's context occupies. Held alongside the ctx so a
+    # mid-request swap (New Project, load, import) replaces the SAME registry
+    # slot instead of leaving the old object resident under a stale key.
+    _request_slot: ContextVar[str | None] = ContextVar(
+        "pypsa_request_slot", default=None
+    )
+
+    # The session's SCRATCH slot key, held for the whole request so an UNBOUND
+    # context created mid-request (New Project, or the reset that starts every
+    # load) lands in the session's own draft slot instead of overwriting the
+    # registry entry of the project the user was just on.
+    _request_scratch: ContextVar[str | None] = ContextVar(
+        "pypsa_request_scratch", default=None
+    )
+
+    @classmethod
+    def bind_request_slot(cls, key: str | None):
+        return cls._request_slot.set(key)
+
+    @classmethod
+    def bind_request_scratch(cls, key: str | None):
+        return cls._request_scratch.set(key)
+
+    @classmethod
+    def get_request_context(cls) -> ProjectContext | None:
+        return cls._request_ctx.get()
+
+    @classmethod
+    def adopt_process_foreground(cls) -> ProjectContext | None:
+        """
+        Hand the process foreground context to the first session that asks, ONCE.
+
+        `_active` is a BOOTSTRAP slot, not a shared workspace. Before Step 0b it
+        was the one place an unbound network could live; now each session owns
+        its own scratch context, and `_active` exists only for callers with no
+        session at all (the solve dispatcher, eviction, direct in-process use).
+
+        Adopt-once resolves the handover without reintroducing sharing: the
+        first session to need a scratch context takes `_active` over and CLEARS
+        it under the registry lock, so a second session cannot adopt the same
+        object. Returns None when there is nothing to adopt.
+
+        In production this is nearly always a no-op on an empty network — the
+        lifespan creates one at startup and no request-path code writes `_active`
+        any more. It matters for two real cases: a process that was serving
+        before this change and still holds a bound foreground, and any
+        in-process caller (tests, scripts) that installs a network directly and
+        then drives the app over HTTP.
+        """
+        with cls._registry_lock:
+            ctx = cls._active
+            if ctx is None:
+                return None
+            cls._active = None
+            return ctx
+
+    @classmethod
+    def rekey_context(cls, ctx: ProjectContext) -> None:
+        """
+        Move `ctx` to the registry slot its CURRENT identity implies.
+
+        Called after a context's binding changes — the first save of a draft, a
+        Save-As rebind, a rename. A session's unbound draft lives under
+        `scratch:<session>`; the moment it becomes a real project it has to
+        become findable by `org:uuid`, or everything that looks projects up by
+        key (the solve dispatcher, path-scoped reads, activate's resident fast
+        path) misses it and hydrates a SECOND copy from disk — leaving the user
+        editing one context while a background solve writes another.
+        """
+        key = ctx.registry_key
+        if key is None:
+            return
+        with cls._registry_lock:
+            for existing_key, existing_ctx in list(cls._contexts.items()):
+                if existing_ctx is ctx and existing_key != key:
+                    cls._contexts.pop(existing_key, None)
+            cls._contexts[key] = ctx
+        if cls._request_ctx.get() is ctx:
+            cls._request_slot.set(key)
+
+    @classmethod
+    def _publish_active(cls, ctx: ProjectContext) -> None:
+        """
+        Make `ctx` the active one for whoever is asking.
+
+        Inside a request (Step 0b) that means the caller's session slot, so one
+        user pressing "New" cannot reset another user's network. Outside a
+        request — the solve dispatcher, eviction, direct in-process callers —
+        it means the process foreground, exactly as before.
+        """
+        if cls._request_ctx.get() is not None:
+            cls._request_ctx.set(ctx)
+            # Route by the NEW context's own identity, not by the slot the
+            # request arrived on. A `reset_network()` mid-request produces an
+            # UNBOUND context; writing it into the previous project's registry
+            # slot would replace that project's resident network with an empty
+            # one, so "New Project" silently wiped the copy of the project the
+            # user had open. An unbound context belongs in the session's scratch
+            # slot; a bound one belongs under its own `org:uuid` key.
+            slot = ctx.registry_key or cls._request_scratch.get()
+            cls._request_slot.set(slot)
+            if slot is not None:
+                with cls._registry_lock:
+                    cls._contexts[slot] = ctx
+            return
+        cls._active = ctx
+
     # ── Active-context lifecycle ──────────────────────────────────────────────
     @classmethod
     def _ensure_active(cls) -> ProjectContext:
         """
         Return the active context, self-healing a fresh UNBOUND one if absent.
-        The self-heal matters during uvicorn --reload between the time a module
-        is reimported and the lifespan re-runs initialize() — without it the GUI
-        shows transient 500s on every save. Two threads both seeing None and
-        both creating is harmless (both fresh + empty; last assignment wins) —
-        same race profile as the previous unlocked `_network` self-heal.
+
+        Prefers the REQUEST-scoped context (Step 0b) so two users on one process
+        each read their own project. The self-heal below matters during uvicorn
+        --reload between the time a module is reimported and the lifespan
+        re-runs initialize() — without it the GUI shows transient 500s on every
+        save. Two threads both seeing None and both creating is harmless (both
+        fresh + empty; last assignment wins) — same race profile as the previous
+        unlocked `_network` self-heal.
         """
+        scoped = cls._request_ctx.get()
+        if scoped is not None:
+            return scoped
         if cls._active is None:
             n = pypsa.Network()
             n.name = "Untitled Project"
@@ -139,7 +280,7 @@ class PyPSAService:
         # empty transient registry, so a load that fails mid-import leaves
         # identity unbound (rather than dangling on the previous project) and a
         # subsequent autosave can't misdirect.
-        prev = cls._active
+        prev = cls._request_ctx.get() or cls._active
         n = pypsa.Network()
         n.name = "Untitled Project"
         # Carry the solver-state object (+ its lock) AND the undo stack forward so
@@ -150,7 +291,7 @@ class PyPSAService:
         # intentionally keeps the prior lifecycle + undo, as before. B2's registry
         # replaces this carry-forward with per-project selection.
         if prev is not None:
-            cls._active = ProjectContext(
+            cls._publish_active(ProjectContext(
                 network=n,
                 solver_state=prev.solver_state,
                 solver_state_lock=prev.solver_state_lock,
@@ -171,9 +312,9 @@ class PyPSAService:
                 # build_context EXCLUDED from this carry (background-solve
                 # contexts get clean chat).
                 chat_state=prev.chat_state,
-            )
+            ))
         else:
-            cls._active = ProjectContext(network=n)
+            cls._publish_active(ProjectContext(network=n))
         cls._clear_swap_caches()
 
     @classmethod
@@ -190,7 +331,7 @@ class PyPSAService:
         # Same project (clustering swaps the network in place): carry identity,
         # solver_state AND undo forward so the user's solver_config / status /
         # undo history survive the swap, matching the pre-split module globals.
-        cls._active = ProjectContext(
+        cls._publish_active(ProjectContext(
             network=n,
             loaded_project=prev.loaded_project,
             org_id=prev.org_id,
@@ -204,7 +345,7 @@ class PyPSAService:
             # is an explicit user op the chat may have just triggered; killing
             # its session here would lose the very conversation that drove it.
             chat_state=prev.chat_state,
-        )
+        ))
         cls._clear_swap_caches()
 
     @classmethod
@@ -256,7 +397,11 @@ class PyPSAService:
         """
         with cls._registry_lock:
             ctx.last_interacted_at = time.monotonic()
-            cls._active = ctx
+            if cls._request_ctx.get() is not None:
+                cls._request_ctx.set(ctx)
+                cls._request_slot.set(ctx.registry_key)
+            else:
+                cls._active = ctx
             if register and ctx.registry_key is not None:
                 cls._contexts[ctx.registry_key] = ctx
         # Run the cap check AFTER releasing `_registry_lock` so eviction's heavy
@@ -359,6 +504,52 @@ class PyPSAService:
         return cls._evict_if_over_cap(protected_ids={project_id})
 
     @classmethod
+    def _session_active_keys(cls) -> set[str]:
+        """
+        Registry keys every live session currently points at (Step 0b).
+
+        Read from the DB rather than tracked in memory: a session's pointer is
+        durable, and an in-memory mirror would go stale the moment a second
+        replica (or a restarted process) held one. Failures degrade to "nothing
+        extra is protected" rather than stranding the cap — a wrongly-evicted
+        context is recoverable from disk; a registry that can never shrink is a
+        memory leak.
+
+        Scratch contexts (`scratch:<session-id>`, the unbound New Project state)
+        are protected as well: they hold a draft the user has not saved anywhere,
+        so evicting one loses work outright — and `_save_evicted_ctx` cannot save
+        it, because an unbound context has no destination.
+        """
+        keys: set[str] = set()
+        try:
+            from datetime import datetime, timezone
+
+            from sqlalchemy import select
+
+            from db.models import Project, Session as SessionRow
+            from db.session import SessionLocal
+            from services.active_project import SCRATCH_PREFIX
+
+            # Live sessions only. An expired or revoked session protects nothing
+            # — including its stale entries would make the cap unreachable on a
+            # long-running process, which is a memory leak dressed as safety.
+            now = datetime.now(tz=timezone.utc)
+            with SessionLocal() as db:
+                rows = db.execute(
+                    select(SessionRow.id, SessionRow.active_project_id, Project.org_id)
+                    .outerjoin(Project, Project.id == SessionRow.active_project_id)
+                    .where(SessionRow.revoked_at.is_(None), SessionRow.expires_at > now)
+                ).all()
+            for session_id, project_id, org_id in rows:
+                if project_id is not None and org_id is not None:
+                    keys.add(f"{org_id}:{project_id}")
+                else:
+                    keys.add(f"{SCRATCH_PREFIX}{session_id}")
+        except Exception:  # noqa: BLE001 — never let a probe failure strand the cap
+            logger.exception("eviction: session active-project probe failed")
+        return keys
+
+    @classmethod
     def _evict_if_over_cap(cls, protected_ids: set[str] | None = None) -> list[str]:
         """
         Enforce RESIDENT_CAP by evicting least-recently-interacted contexts.
@@ -396,6 +587,15 @@ class PyPSAService:
         active_id = cls.get_active_id()
         if active_id is not None:
             protected.add(active_id)
+        # STEP 0b — the protected set is PLURAL. `get_active_id()` returns ONE
+        # id (this request's, or the process foreground's), but there is now one
+        # active project PER SESSION. Protecting only one of them means the 6th
+        # concurrent user's activation can evict another user's live editing
+        # context — and eviction is still WRITE-BACK (`_save_evicted_ctx`), so it
+        # would not merely drop that context, it would FLUSH it to disk over
+        # whatever is there. Step 3 removes write-back entirely; until then this
+        # set is the whole defence.
+        protected |= cls._session_active_keys()
         # Projects with a queued/running solve must stay resident — their
         # in-memory ctx is being solved (foreground-resident or background).
         # Lazy import to avoid a services <-> solve_queue import cycle.
@@ -536,7 +736,13 @@ class PyPSAService:
         with cls._registry_lock:
             ctx = cls._contexts[project_id]
             ctx.last_interacted_at = time.monotonic()  # resident switch → MRU (B9)
-            cls._active = ctx
+            if cls._request_ctx.get() is not None:
+                # Step 0b: inside a request the switch is per SESSION. Writing
+                # `_active` here would move every other user's foreground too.
+                cls._request_ctx.set(ctx)
+                cls._request_slot.set(project_id)
+            else:
+                cls._active = ctx
         cls._clear_swap_caches()
         return ctx
 
@@ -560,6 +766,14 @@ class PyPSAService:
         when the active context is unbound (fresh / New Project). Derived rather
         than stored so it can never drift from `_active`.
         """
+        # Prefer the REQUEST-scoped context (Step 0b): reading `_active`
+        # directly here reported the process foreground to a caller whose own
+        # project was resolved correctly — `/api/network/meta` served the right
+        # network with the wrong (None) binding, which the autosave `expect`
+        # guard then refused.
+        scoped = cls._request_ctx.get()
+        if scoped is not None:
+            return scoped.registry_key
         return cls._active.registry_key if cls._active is not None else None
 
     # ── Loaded-project identity ──────────────────────────────────────────────
@@ -576,7 +790,12 @@ class PyPSAService:
     @classmethod
     def get_loaded_project(cls) -> str | None:
         """Project the in-memory network belongs to on disk, or None if unbound."""
-        # Read-only: don't materialize a context just to answer "unbound?".
+        # Read-only: don't materialize a context just to answer "unbound?" — but
+        # DO honour the request-scoped binding, or a caller reads its own
+        # network under someone else's project name (Step 0b).
+        scoped = cls._request_ctx.get()
+        if scoped is not None:
+            return scoped.loaded_project
         return cls._active.loaded_project if cls._active is not None else None
 
     @classmethod

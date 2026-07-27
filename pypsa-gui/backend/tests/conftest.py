@@ -316,6 +316,42 @@ def other_org_client(_auth_db, second_identity):
 # registry is keyed `org:uuid`, so a test can no longer assert on a name-derived
 # path or registry key. These resolve a name the way the app does.
 
+# ── Reading a client's OWN context (Step 0b) ────────────────────────────────
+# The active project is per SESSION now, so `PyPSAService.get_active_id()` read
+# from the TEST thread reports the process foreground — a different context from
+# the one the client's requests resolve to. Tests that used to assert on the
+# process global assert through these instead. This is not a workaround: it is
+# the same resolution the app performs, so an assertion here fails for exactly
+# the reasons a user would notice.
+
+@pytest.fixture
+def session_ctx(_auth_db):
+    """Factory: the `ProjectContext` a given test client's session resolves to."""
+    _engine, session_local = _auth_db
+
+    def _ctx(test_client):
+        from services import active_project
+        from services.auth_service import resolve_session_row
+        from settings import get_settings
+
+        raw = test_client.cookies.get(get_settings().session_cookie_name)
+        assert raw, "client has no session cookie"
+        with session_local() as db:
+            row = resolve_session_row(db, raw)
+            assert row is not None, "client's session is not live"
+            ctx, _slot = active_project.resolve_for_session(db, row)
+            return ctx
+    return _ctx
+
+
+@pytest.fixture
+def session_state(session_ctx):
+    """Factory: the solver-lifecycle dict for a client's own context."""
+    def _state(test_client):
+        return session_ctx(test_client).solver_state
+    return _state
+
+
 @pytest.fixture
 def api_project(client, install_network):
     """
@@ -472,5 +508,33 @@ def install_network():
         if name is not None:
             n.name = name
             PyPSAService.set_loaded_project(name)
+        # Step 0b: drop every resident SCRATCH context so the next request
+        # re-adopts what was just installed.
+        #
+        # `set_network` writes the PROCESS foreground, which a session adopts
+        # exactly once (`adopt_process_foreground`). Without this, the second
+        # `install_network` in a test would be invisible: the session already
+        # holds a scratch context and would keep serving the FIRST network
+        # while the test believed it had swapped it. Bound project contexts are
+        # deliberately left alone — those mirror real on-disk projects.
+        with PyPSAService._registry_lock:
+            for key in [k for k in PyPSAService._contexts if k.startswith("scratch:")]:
+                PyPSAService._contexts.pop(key, None)
+        # …and un-bind every live session, so the next request resolves the
+        # freshly-installed network instead of re-hydrating whatever project the
+        # session was last pointed at. `install_network` means "this is what the
+        # client is now looking at"; leaving the pointer set would silently
+        # discard the install one request later.
+        try:
+            from sqlalchemy import update
+
+            from db import session as _db
+            from db.models import Session as _SessionRow
+
+            with _db.SessionLocal() as db:
+                db.execute(update(_SessionRow).values(active_project_id=None))
+                db.commit()
+        except Exception:  # noqa: BLE001 — no DB in pure-service tests
+            pass
         return n
     return _install

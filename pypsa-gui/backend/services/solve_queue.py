@@ -347,10 +347,18 @@ class SolveQueue:
             #    included). Otherwise build a fresh background ctx and hydrate it
             #    from disk — its own network + mutation_lock + solver_state, so
             #    the foreground active ctx (a different project) is never touched.
-            active_id = PyPSAService.get_active_id()
-            is_foreground = job.project_key is not None and job.project_key == active_id
-            if is_foreground:
-                ctx = PyPSAService.get_active_context()
+            # Step 0b: "is this the foreground?" is no longer a single answer —
+            # each SESSION has its own active project. The rule that still means
+            # what it meant is RESIDENCY: if this project already has a live
+            # in-memory context, solve THAT one in place so the user's unsaved
+            # edits are included; otherwise hydrate a private copy from disk.
+            resident = (
+                PyPSAService.get_context(job.project_key)
+                if job.project_key is not None
+                else None
+            )
+            if resident is not None:
+                ctx = resident
             else:
                 ctx = PyPSAService.build_context()
                 # Use the directory the ENQUEUING request authorized. Falling
@@ -451,7 +459,13 @@ class SolveQueue:
                     # already correct, so we leave user_ts.json untouched there.
                     _save_context(
                         ctx, project_id, expect=project_id,
-                        persist_user_ts=is_foreground,
+                        # `_user_ts` is still a module GLOBAL belonging to the
+                        # process foreground. Persist it only when the context
+                        # being solved IS that foreground; for anything else,
+                        # writing it would stamp one project's profiles onto
+                        # another's `user_ts.json`. Not writing it is safe — the
+                        # netcdf already carries the profiles.
+                        persist_user_ts=(ctx is PyPSAService._active),
                         storage_dir=(
                             pathlib.Path(job.storage_dir) if job.storage_dir else None
                         ),

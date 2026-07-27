@@ -70,22 +70,26 @@ def test_card_shape():
     }
 
 
-def test_auto_scale_run_keeps_objective_in_euros(client, install_network):
+def test_auto_scale_run_keeps_objective_in_euros(client, install_network, session_state):
     # A feasible solve with auto_objective_scale=True must still report the
     # objective in € (the post-solve rescale divides the scale back out). We
     # don't assert a specific value (scale is data-dependent) — only that the
     # run completes cleanly and the objective is finite, proving the auto path
     # threads through the existing wrap + rescale machinery without corruption.
     install_network(build_network())
-    sim_router._state["solver_config"] = SolverConfig(auto_objective_scale=True)
+    # Configure the CLIENT'S context (Step 0b): `sim_router._state` read from
+    # the test thread is the process foreground, which the request never sees.
+    client.get("/api/network/meta")  # force the session's context to resolve
+    session_state(client)["solver_config"] = SolverConfig(auto_objective_scale=True)
 
     resp = client.post("/api/simulation/run")
     assert resp.status_code == 200, resp.text
-    t = sim_router._state.get("thread")
+    state = session_state(client)
+    t = state.get("thread")
     assert t is not None
     t.join(timeout=90)
     assert not t.is_alive()
-    s = sim_router._state_snapshot()
+    s = dict(state)
     assert s["status"] == "completed", f"{s['status']} / {s['condition']}"
     assert isinstance(s["objective"], (int, float))
     assert s["objective"] == s["objective"]  # not NaN

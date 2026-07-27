@@ -50,7 +50,7 @@ def _save_project(client, name: str) -> None:
 
 
 def test_enqueue_solves_and_persists(
-    client, install_network, tmp_projects_dir, project_storage_dir
+    client, install_network, tmp_projects_dir, project_storage_dir, session_ctx
 ):
     # A saved, feasible single-bus project on disk. Storage is org-scoped since
     # Step 0a — `projects_root/<org>/<uuid>/`, not the flat `projects/<name>/`.
@@ -78,13 +78,13 @@ def test_enqueue_solves_and_persists(
     assert n.generators_t.p.to_numpy().sum() > 0
 
 
-def test_enqueue_nonexistent_project_404(client, tmp_projects_dir):
+def test_enqueue_nonexistent_project_404(client, tmp_projects_dir, session_ctx):
     r = client.post("/api/simulation/queue", json={"project_id": "NoSuchProject"})
     assert r.status_code == 404, r.text
     assert solve_queue.list_jobs() == []
 
 
-def test_fifo_two_jobs_both_complete(client, install_network, tmp_projects_dir):
+def test_fifo_two_jobs_both_complete(client, install_network, tmp_projects_dir, session_ctx):
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
 
@@ -99,7 +99,7 @@ def test_fifo_two_jobs_both_complete(client, install_network, tmp_projects_dir):
     assert da["started_at"] <= db["started_at"]
 
 
-def test_abort_queued_job_is_skipped(client, install_network, tmp_projects_dir, monkeypatch):
+def test_abort_queued_job_is_skipped(client, install_network, tmp_projects_dir, monkeypatch, session_ctx):
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
     # Move the foreground OFF P1 so the queued P1 jobs take the BACKGROUND path
@@ -174,7 +174,7 @@ def _slow_network() -> pypsa.Network:
 
 
 def test_abort_running_solve_is_fast_and_next_job_starts(
-    client, install_network, tmp_projects_dir
+    client, install_network, tmp_projects_dir, session_ctx
 ):
     """
     The headline fix: aborting a RUNNING (mid-native-solve) queue job cancels
@@ -219,7 +219,7 @@ def test_abort_running_solve_is_fast_and_next_job_starts(
     assert isinstance(db["objective"], (int, float)), db
 
 
-def test_enqueue_unsafe_name_is_404(client, tmp_projects_dir):
+def test_enqueue_unsafe_name_is_404(client, tmp_projects_dir, session_ctx):
     """
     Was `..._is_400`; Step 0a changed the contract deliberately.
 
@@ -235,13 +235,13 @@ def test_enqueue_unsafe_name_is_404(client, tmp_projects_dir):
     assert solve_queue.list_jobs() == []
 
 
-def test_abort_unknown_job_is_404(client):
+def test_abort_unknown_job_is_404(client, session_ctx):
     r = client.post("/api/simulation/queue/99999/abort")
     assert r.status_code == 404, r.text
 
 
 def test_disowned_queue_job_reports_superseded(
-    client, install_network, tmp_projects_dir, monkeypatch
+    client, install_network, tmp_projects_dir, monkeypatch, session_ctx
 ):
     # When a newer run claims a job's ctx mid-solve (its solver_state["thread"]
     # changes away from this worker), the dispatcher must record the job as
@@ -268,7 +268,7 @@ def test_disowned_queue_job_reports_superseded(
     assert "Superseded" in (done.get("error") or ""), done
 
 
-def test_abort_completed_job_is_noop(client, install_network, tmp_projects_dir):
+def test_abort_completed_job_is_noop(client, install_network, tmp_projects_dir, session_ctx):
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
     job = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
@@ -371,7 +371,7 @@ def test_abort_watcher_injects_exactly_once():
 
 
 # ── A6: background results-bundle reader (view a finished job WITHOUT loading) ──
-def test_results_bundle_after_queue_solve(client, install_network, tmp_projects_dir):
+def test_results_bundle_after_queue_solve(client, install_network, tmp_projects_dir, session_ctx):
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
     job = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
@@ -391,19 +391,19 @@ def test_results_bundle_after_queue_solve(client, install_network, tmp_projects_
     assert isinstance(b["objective"], (int, float))
 
 
-def test_results_bundle_unsolved_is_204(client, install_network, tmp_projects_dir):
+def test_results_bundle_unsolved_is_204(client, install_network, tmp_projects_dir, session_ctx):
     install_network(build_network(), name="P1")  # never solved
     _save_project(client, "P1")
     r = client.get("/api/projects/P1/results_bundle")
     assert r.status_code == 204, r.text
 
 
-def test_results_bundle_missing_project_404(client, tmp_projects_dir):
+def test_results_bundle_missing_project_404(client, tmp_projects_dir, session_ctx):
     r = client.get("/api/projects/NoSuch/results_bundle")
     assert r.status_code == 404, r.text
 
 
-def test_results_bundle_does_not_touch_active_slot(client, install_network, tmp_projects_dir):
+def test_results_bundle_does_not_touch_active_slot(client, install_network, tmp_projects_dir, session_ctx):
     # Solve + persist P1 via the queue so it has dispatch on disk.
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
@@ -411,14 +411,14 @@ def test_results_bundle_does_not_touch_active_slot(client, install_network, tmp_
     assert _wait_for_terminal(job["id"])["status"] == "completed"
     # Bind the active slot to a DIFFERENT project, then read P1's bundle.
     install_network(build_network(), name="Foreground")
-    before = PyPSAService.get_loaded_project()
+    before = session_ctx(client).loaded_project
     r = client.get("/api/projects/P1/results_bundle")
     assert r.status_code == 200, r.text
     # The core A6 invariant: a transient disk read must NOT swap the active slot.
-    assert PyPSAService.get_loaded_project() == before == "Foreground"
+    assert session_ctx(client).loaded_project == before == "Foreground"
 
 
-def test_results_bundle_invalid_source_coerces_to_lopf(client, install_network, tmp_projects_dir):
+def test_results_bundle_invalid_source_coerces_to_lopf(client, install_network, tmp_projects_dir, session_ctx):
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
     job = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
@@ -430,7 +430,7 @@ def test_results_bundle_invalid_source_coerces_to_lopf(client, install_network, 
 
 # ── B4.3: dispatcher solves on its OWN ProjectContext (per-project isolation) ──
 def test_background_solve_does_not_touch_foreground(
-    client, install_network, tmp_projects_dir, project_storage_dir
+    client, install_network, tmp_projects_dir, project_storage_dir, session_ctx
 ):
     """
     Enqueue project B while project A is the foreground (active) ctx with UNSAVED
@@ -445,10 +445,10 @@ def test_background_solve_does_not_touch_foreground(
 
     # A becomes the active foreground ctx; mutate it in memory WITHOUT saving.
     install_network(build_network(), name="A")
-    a_network = PyPSAService.get_network()
+    a_network = session_ctx(client).network
     r = client.put("/api/network/loads/L1", json={"name": "L1", "bus": "B1", "p_set": 999.0})
     assert r.status_code == 200, r.text
-    assert PyPSAService.get_network().loads.at["L1", "p_set"] == 999.0
+    assert session_ctx(client).network.loads.at["L1", "p_set"] == 999.0
     a_status_before = client.get("/api/simulation/status").json()
 
     # Enqueue B → background path (B != active id "A").
@@ -457,9 +457,9 @@ def test_background_solve_does_not_touch_foreground(
     assert done["status"] == "completed", done
 
     # Foreground A is untouched: same binding, same network object, edit intact.
-    assert PyPSAService.get_loaded_project() == "A"
-    assert PyPSAService.get_network() is a_network
-    assert PyPSAService.get_network().loads.at["L1", "p_set"] == 999.0
+    assert session_ctx(client).loaded_project == "A"
+    assert session_ctx(client).network is a_network
+    assert session_ctx(client).network.loads.at["L1", "p_set"] == 999.0
     # A's lifecycle state was not co-opted by B's solve.
     assert client.get("/api/simulation/status").json()["status"] == a_status_before["status"]
     # No transient LP-scaffolding rows leaked into the foreground ctx.
@@ -472,7 +472,7 @@ def test_background_solve_does_not_touch_foreground(
 
 
 def test_two_independent_projects_each_persist_own_results(
-    client, install_network, tmp_projects_dir, project_storage_dir
+    client, install_network, tmp_projects_dir, project_storage_dir, session_ctx
 ):
     """Two distinct saved projects each solve on their own ctx and persist."""
     install_network(build_network(gens_weight=1.0), name="P1")
@@ -495,7 +495,7 @@ def test_two_independent_projects_each_persist_own_results(
         assert n.generators_t.p.to_numpy().sum() > 0
 
 
-def test_enqueue_resident_foreground_solves_in_place(client, install_network, tmp_projects_dir):
+def test_enqueue_resident_foreground_solves_in_place(client, install_network, tmp_projects_dir, session_ctx):
     """
     Enqueuing the project that IS the active foreground ctx solves the resident
     in-memory instance in place — dispatch lands on the live network AND the
@@ -503,7 +503,7 @@ def test_enqueue_resident_foreground_solves_in_place(client, install_network, tm
     """
     install_network(build_network(), name="P1")
     _save_project(client, "P1")
-    assert PyPSAService.get_loaded_project() == "P1"
+    assert session_ctx(client).loaded_project == "P1"
 
     job = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
     done = _wait_for_terminal(job["id"])
@@ -511,12 +511,12 @@ def test_enqueue_resident_foreground_solves_in_place(client, install_network, tm
 
     # The live foreground network carries the solved dispatch (solved in place),
     # and the active binding is unchanged.
-    assert not PyPSAService.get_network().generators_t.p.empty
-    assert PyPSAService.get_loaded_project() == "P1"
+    assert not session_ctx(client).network.generators_t.p.empty
+    assert session_ctx(client).loaded_project == "P1"
 
 
 def test_enqueue_foreground_surfaces_status_for_run_button(
-    client, install_network, tmp_projects_dir, registry_key_for
+    client, install_network, tmp_projects_dir, registry_key_for, session_ctx
 ):
     """
     The "Run = enqueue the foreground" UX: clicking Run enqueues the ACTIVE
@@ -532,7 +532,7 @@ def test_enqueue_foreground_surfaces_status_for_run_button(
     _save_project(client, "P1")
     # The registry key is `org:uuid` since Step 0a; the NAME is what a client
     # sends, so that is what this enqueues — mirroring the Run button.
-    assert PyPSAService.get_active_id() == registry_key_for("P1")
+    assert session_ctx(client).registry_key == registry_key_for("P1")
 
     # Enqueue the FOREGROUND project — the project the active ctx is bound to.
     job = client.post(
@@ -543,7 +543,7 @@ def test_enqueue_foreground_surfaces_status_for_run_button(
     assert done["status"] == "completed", done
 
     # 1. Solved in place — dispatch on the live foreground network.
-    assert not PyPSAService.get_network().generators_t.p.empty
+    assert not session_ctx(client).network.generators_t.p.empty
 
     # 2. The foreground status endpoint (what StatusBar polls) reflects the
     #    queue-driven solve: completed + a finite objective + a solve_time.
