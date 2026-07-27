@@ -24,7 +24,9 @@
 | 4 | **The uniqueness backstop covered 2 of 4 write paths.** It was scoped to `create_root`/`create_scenario`; the rename path got only `if new_dir.exists()`, which is False for a row whose directory the user deleted in Finder (Task 6's `missing_dirs`), so a rename could be assigned another row's `storage_path`. The importer got nothing. Step 4's snippet elided the `taken=` argument that *is* the fix for v3 row 1. And there is no DB constraint behind any of it (`db/models.py:42` constrains `("org_id","name")` only). | A **unique index on `("org_id","storage_path")` in migration 0003** — the only atomic mechanism, and 0003 is already being written. Plus the full `taken=` argument spelled out, and the assertion applied on rename and in the importer. |
 | 5 | **`--rebase-db` moved rather than copied the only DB-tracked project**, contradicting the plan's own "the importer copies, never moves", claimed a filesystem move and a DB commit were "the same transaction", and had no test. | Copy → verify (same manifest + SHA-256 as rule 2) → rewrite the row → leave the source for `--forget-legacy`. Ordering and compensation specified; three test cases required. |
 
-MINOR fixes applied: the deviation list now includes **E2-partial** (0003 does not reach the one existing row) and **E5-partial** (the three `snapshots.py` sites are cosmetic); the Task 3 guard test flags **any** `storage_path` attribute access outside the resolver, not only ones wrapped in `Path(...)` — `project_registry.py:146` (`ctx.storage_dir = str(project.storage_path)`) is constraint #5 and the old regex could not see it, though its value flows into `Path(...)` at `chat_service.py:758`, `upload_service.py:154`, `pypsa_service.py:696`, `solve_queue.py:368`; `tests/conftest.py` pops `PYPSAGUI_LEGACY_IMPORT_ROOT` at import (its own comment: "Pinning only one moves the problem to the others"); Task 7's rehearsal runs `tools.bootstrap_local` first, since a fresh DB has no schema and no identity; the receipt gets a schema and an explicit **lookup-before-allocate** order; `scan` skips `*.importing`; `--forget-legacy` defaults to a destination **outside the checkout** (renaming to `backend/projects.imported-<date>` leaves 113 MB untracked *and un-ignored*, so `git status` goes permanently dirty and a plain `git clean -df` deletes it); `_org_segment()` is defined once as `not local_mode.is_local_mode()` with a test asserting it and Task 1's gate agree; `_scan_root`'s filter skips any directory a `Project.storage_path` resolves to, demoting Task 1 from sole guard to belt-and-braces; the backup pointer moves off `/tmp` (macOS clears it on reboot); constraint #17's ignore file is `pypsa-gui/.gitignore:23`.
+MINOR fixes applied: the deviation list now includes **E2-partial** (0003 does not reach the one existing row) and **E5-partial** (the three `snapshots.py` sites are cosmetic); the Task 3 guard test flags **any** `storage_path` attribute access outside the resolver, not only ones wrapped in `Path(...)` — `project_registry.py:146` (`ctx.storage_dir = str(project.storage_path)`) is constraint #5 and the old regex could not see it, though its value flows into `Path(...)` at `chat_service.py:758`, `upload_service.py:154`, `pypsa_service.py:696`, `solve_queue.py:368`; `tests/conftest.py` pops `PYPSAGUI_LEGACY_IMPORT_ROOT` at import (its own comment: "Pinning only one moves the problem to the others"); Task 7's rehearsal runs `tools.bootstrap_local` first, since a fresh DB has no schema and no identity; the receipt gets a schema and an explicit **lookup-before-allocate** order; `scan` skips `*.importing`; `--forget-legacy` defaults to a destination **outside the checkout** (renaming to `backend/projects.imported-<date>` leaves 113 MB untracked *and un-ignored*, so `git status` goes permanently dirty and a plain `git clean -df` deletes it); `_org_segment()` is defined once as `not local_mode.is_local_mode()` with a test asserting it and Task 1's gate agree; the backup pointer moves off `/tmp` (macOS clears it on reboot); constraint #17's ignore file is `pypsa-gui/.gitignore:23`.
+
+An earlier draft of this paragraph also claimed `_scan_root`'s filter would skip any directory a `Project.storage_path` resolves to, "demoting Task 1 from sole guard to belt-and-braces". **That claim is withdrawn** — no task implemented it, and it contradicted Task 4's own note. Adding it would mean threading a `db` session through `_scan_legacy_entries` (`legacy_migrate.py:120-135`, which has none today) into `routers/projects.py:678` and `routers/admin.py:230`. Task 1 alone does close the hazard; that it is the *only* layer is now recorded under Residual risk rather than papered over.
 
 **v3 (2026-07-27)** — third independent review; v2 was **REJECT**ed with 10 blocking findings. Each re-verified before applying.
 
@@ -276,7 +278,7 @@ def test_project_dir_does_not_create_anything(tmp_path, monkeypatch):
     """
 ```
 
-- [ ] **Step 2: RED** — seven offenders; "creates nothing" fails.
+- [ ] **Step 2: RED** — **eight** offenders (the six in constraint #3, plus `tests/conftest.py:418`, plus `project_registry.py:146`, which is constraint #5 and which Step 3 converts); `project_registry.py:151` is correctly exempt as the resolver's own body. "Creates nothing" fails.
 
 - [ ] **Step 3: Split**
 
@@ -309,7 +311,8 @@ def ensure_project_dir(project: Project) -> Path:
 | `projects.py:1731,1867,2531` | no | `project_dir` |
 | `projects.py:2033` | no | `project_dir` |
 | `projects.py:2042` | **yes** (`write_bytes`) | `ensure_project_dir` |
-| `deps.py:91,131` | decide per site | — |
+| `deps.py:91` | no — `AuthorizedProject.directory` fans out to 14 read/write sites (`snapshots.py:390,398,422,598`, `uploads.py:204,218,228,243,246,265,297`, `chat_tools.py:1236`, `compare.py:100,2625`), and every write path among them already mkdirs with `parents=True` (`upload_service.py:270,313`, `snapshots.py:246,265`) | `project_dir` |
+| `deps.py:131` | check the site | decide |
 | `solve_queue.py:56` | yes | `ensure_project_dir` |
 | `active_project.py:107` | no | `project_dir` |
 
@@ -388,14 +391,19 @@ def _taken_names(db, org_id, org_segment: bool) -> set[str]:
 
 Test it: a new project whose sanitised name equals an existing **orphan** directory gets a suffix, and the orphan's `network.nc` is untouched.
 
-**The backstop is a DB constraint, not an assertion.** Migration 0003 adds a unique index on `("org_id", "storage_path")` — `op.create_index(..., unique=True)`, no batch mode needed on SQLite. `db/models.py:42` constrains `("org_id","name")` only, so nothing today prevents two rows sharing a directory, and an index is the only mechanism that is atomic under concurrency. Add the matching `UniqueConstraint` to the model. Every write path — `create_root`, `create_scenario`, `rename_project`, and Task 7's importer — is then covered by construction rather than by four separate assertions.
+`_taken_names` lives in **`services/storage_paths.py`** alongside `storage_path_for`, since both `project_registry` and `legacy_migrate` call it. That introduces a `storage_paths → db.models` import the module does not have today (it imports only `settings`) — confirm the direction is acyclic before writing it. No leading underscore: it is called cross-module.
+
+Under pytest, `conftest.py:57-58` pins `PROJECTS_ROOT` to one session-scoped `mkdtemp`, so with `org_segment=False` the filesystem half of the union sees every prior local-mode test's directories. Harmless today — only `test_local_mode_e2e.py:80-87` creates a project this way and removes it in a `finally` — but the next local-mode test that creates a project and asserts its directory name becomes order-dependent. Note it in the test.
+
+**The backstop is a DB constraint, not an assertion.** Migration 0003 adds a unique index on `("org_id", "storage_path")` — `op.create_index(..., unique=True)`, no batch mode needed on SQLite. **Order inside the migration: rewrite the paths first, then create the index** — the reverse fails on any database whose rows already collide. Add a test for a database holding two rows that share `(org_id, storage_path)`: the migration must abort loudly rather than silently drop one. `db/models.py:42` constrains `("org_id","name")` only, so nothing today prevents two rows sharing a directory, and an index is the only mechanism that is atomic under concurrency. Add the matching `UniqueConstraint` to the model. Every write path — `create_root`, `create_scenario`, `rename_project`, and Task 7's importer — is then covered by construction rather than by four separate assertions.
 
 - [ ] **Step 4: Rename moves the directory — check destination BEFORE committing**
 
-`_org_segment()` is defined **once**, in `services/storage_paths.py`, as `not local_mode.is_local_mode()` — the same predicate Task 1 gates `/unclaimed` on. Q1's whole safety argument depends on the two agreeing; add a test asserting they do. If they ever diverge, projects sit at the top of `projects_root` while `_scan_root(…, pre_auth_layout=True)` is reachable and `shutil.move` (`legacy_migrate.py:290`) fires on a live project.
+`_org_segment()` is defined **once**, in `services/storage_paths.py`, as `not local_mode.is_local_mode()` — the same predicate Task 1 gates `/unclaimed` on. **Task 1 is the sole guard here**, so the two must agree: add a test asserting it. If they diverge, projects sit at the top of `projects_root` while `_scan_root(…, pre_auth_layout=True)` is reachable and `shutil.move` (`legacy_migrate.py:290`) fires on a live project. Web mode is unaffected either way — the org segment stays, so top-level entries are UUID-named and `_is_uuid_named` skips them.
 
 ```python
     old_dir = project_dir(project)
+    old_rel = project.storage_path          # for the compensating branch below
     # taken= is the whole point of the fix — not elided. Exclude this project's
     # own current directory, or a no-op rename suffixes itself.
     new_rel = storage_path_for(
@@ -435,7 +443,12 @@ Rows outside the root are left absolute **by design**; on this machine that is t
 
 Constraint #16: alembic never runs under pytest, so build the test DB explicitly (`create_all` + `stamp("0002_session_active_project")` + `upgrade("0003")`), with rows absolute-under-root, relative, and absolute-outside-root; run `upgrade` twice for idempotence.
 
-- [ ] **Step 6: Gate and commit.** Expect to edit the eight test call sites; `test_project_acl.py:122` asserts the old absolute shape and must be rewritten, not merely re-argumented.
+- [ ] **Step 6: Gate and commit.** Expect to edit the eight test call sites. Three need **rewriting**, not merely re-argumenting:
+
+  - `test_project_acl.py:122` asserts the old absolute `<root>/<org>/<uuid>` shape.
+  - `test_project_locks.py:105-106` and `test_projects_tenancy.py:107-109` pass the result straight to `_seed_network(...)`, which does `directory.mkdir(parents=True, exist_ok=True)` + `export_to_netcdf`. With a **relative** return that writes `pypsa-gui/backend/<org>/<Name>/network.nc` — **inside the checkout**, untracked *and* un-ignored (`pypsa-gui/.gitignore:23` covers `backend/projects/` only), leaving `git status` permanently dirty and reachable by a plain `git clean -df`. The row would then resolve to `projects_root/<rel>`, where nothing exists, so the gate goes red for a reason that looks unrelated. Pass `Path(get_settings().projects_root) / storage_path` to `_seed_network`.
+
+  This is the same reasoning the plan applies to `tests/conftest.py:418`; these two are the sites that actually write.
 
 ---
 
@@ -510,7 +523,9 @@ Record what is **not** fixed: `atomic_write_with` does no `fsync` of the file or
 5. **Copy, never move.** The source is untouched until `--forget-legacy`.
 6. **Idempotence keys on (source root, destination root, install id)** — not source root alone. A synced checkout on a second machine must not see machine A's manifest and import nothing (v2 revision-log row 7). `--apply` **refuses** when the manifest cannot be written.
 
-   **`install_id` is a `uuid4` persisted in `<app_data_dir()>/install.json`**, created beside Task 8's `O_EXCL` lock; an absent file means a new install. It cannot be `LOCAL_ORG_ID`/`LOCAL_USER_ID` — those are fixed constants shared by *every* install (`local_mode.py:25-26`), which makes the term a no-op — and it must not be per-process, or Task 8 re-imports on every launch and duplicates 113 MB each time.
+   **`install_id()` lives in `services/legacy_import.py`** — this task's own module, because this task runs first and needs it. It reads `<app_data_dir()>/install.json`, creating it with `O_EXCL` and a `uuid4` when absent and re-reading on `FileExistsError` to tolerate a race. Both the CLI and Task 8's lifespan call it; neither mints its own.
+
+   It cannot be `LOCAL_ORG_ID`/`LOCAL_USER_ID` — fixed constants shared by *every* install (`local_mode.py:25-26`), which makes the term a no-op. And it must not be per-process: an ephemeral id means every receipt carries a different one, the next run reads its own destinations as non-matching, rule 4 reports them as foreign collisions and skips them **permanently** — the exact outcome the receipt exists to prevent.
 
    **Receipt schema**, written inside the staging directory before the rename:
 
@@ -521,6 +536,8 @@ Record what is **not** fixed: `atomic_write_with` does no `fsync` of the file or
    ```
 
    **Resolution order is lookup-before-allocate:** find the receipt naming this source directory *first*, and only allocate a fresh `unique_dir_name` when none matches. Otherwise a crash-resumed run whose inventory order differs allocates a different name and reports the half-imported project as a foreign collision it skips forever.
+
+   **The allocation uses `taken = _taken_names(db, org_id, _org_segment())`, seeded once and added to after each successful `os.rename`.** Without the accumulation, two legacy names that sanitise alike — a case Step 1's fixture deliberately includes — both target one destination; the second is caught by rule 4's exists-check and silently skipped. No data is lost (the source is untouched until `--forget-legacy`), but a project goes un-imported, which is exactly what lookup-before-allocate exists to prevent.
 7. **`copytree(symlinks=True, ignore_dangling_symlinks=True)`**; normalise destination modes — three legacy directories are `drwxrwxrwx` and must not become world-writable under `~/Documents`.
 8. **Truncate the row name defensively.** SQLite does not enforce `String(64)` (constraint #1), so long names persist silently until something else trips.
 9. **Two-pass parents** by name; dangling is normal and reported.
@@ -566,7 +583,7 @@ pixi run python -m tools.import_legacy --rebase-db      # separate, see below
 
 It **copies**, like everything else here — v3 said "relocates", contradicting this plan's own global constraint on the single highest-value object in the phase. A filesystem move is also not transactional with a DB commit, so the ordering is explicit:
 
-1. copy the org-scoped tree to its new location under `projects_root`;
+1. copy the org-scoped tree to `projects_root / unique_dir_name(row.name, taken)` — the **same sanitised layout every other project gets**, not `<org>/<uuid>` verbatim, which would re-introduce the segment Q1 removes. `shutil.copytree` defaults to `dirs_exist_ok=False`, so it fails safe if the name is taken;
 2. verify with the same manifest + `network.nc` SHA-256 as rule 2 — abort and remove the copy if it fails;
 3. rewrite the row's `storage_path` to the relative form and commit;
 4. if the commit fails, remove the copy and re-raise — the source is still authoritative and untouched;
@@ -646,4 +663,12 @@ Steps 1–3 are possible only because Task 0 backs up the database and Task 7 wr
 
 **Type consistency.** `storage_path_for` gains three parameters in Task 4; all three production callers and all eight test call sites change in that commit. `project_dir` / `ensure_project_dir` are distinct from Task 3 onward. `inventory` returns the `LegacyProject` that `import_all` consumes. `scan` takes `org_segment` to match Task 4's layout.
 
-**Residual risk, stated not hidden.** `atomic_write_with` does not `fsync`. E3 is manual. A local→web conversion needs a further rebase migration. A machine that runs 0003 but never `--rebase-db` keeps one absolute row. `smoke/qa_e2e.py` self-skips after the tree is retired.
+**Residual risk, stated not hidden.**
+
+- `atomic_write_with` does not `fsync` the file or its parent directory — the guarantee is against a killed process, not power loss.
+- E3 is manual, not on startup.
+- A local→web conversion needs a further rebase migration to reintroduce the org segment.
+- A machine that runs 0003 but never `--rebase-db` keeps one absolute row.
+- `smoke/qa_e2e.py:289,639` self-skip once the tree is retired; not in the pytest gate, so nothing goes red.
+- **Task 1 is the *sole* guard** against `_scan_root(pre_auth_layout=True)` classifying a live local project as claimable. There is no second layer; an earlier draft claimed one and it is withdrawn above. Web mode is structurally safe (org UUIDs are skipped by name), so this is a local-mode-only single point of failure, and the test asserting `_org_segment()` and Task 1's gate share a predicate is what holds it.
+- **The phase ends with the legacy tree still live inside the checkout.** `--forget-legacy` is a user action and Task 9 does not run it, so `git clean -xdf` can still silently delete 113 MB when the phase closes — the hazard this phase opens with. Task 0's verified tarball at `~/pypsa-phase1b-backup-<ts>/` is what makes that recoverable; tell the user to run `--forget-legacy` once they have checked the import.
