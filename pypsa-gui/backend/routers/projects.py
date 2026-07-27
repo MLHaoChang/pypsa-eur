@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
+import local_mode
 from db.models import Session as SessionRow, User
 from db.session import get_db
 from deps import current_session, optional_user
@@ -657,9 +658,17 @@ def list_projects(
 # NOTE: `/unclaimed` and `/unclaimed/{legacy_name}/import` MUST stay ahead of
 # the dynamic `GET /{name}` and `POST /{name}` routes further down this module,
 # or FastAPI matches "unclaimed" as a project name.
+#
+# Both are closed in local mode (phase 1b, Task 1). `_scan_root(projects_root,
+# pre_auth_layout=True)` treats every non-UUID-named top-level directory as a
+# claimable leftover, and the import below `shutil.move`s it. That matches
+# nothing while paths are `<org_uuid>/<project_uuid>/`; from Task 4 on, every
+# local project sits at the top of the root under its own readable name and
+# looks exactly like a leftover. Per-route, not router-level: this router must
+# stay mounted locally.
 
 
-@router.get("/unclaimed")
+@router.get("/unclaimed", dependencies=[Depends(local_mode.reject_in_local_mode)])
 def list_unclaimed_projects(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
@@ -687,7 +696,11 @@ def list_unclaimed_projects(
     ]
 
 
-@router.post("/unclaimed/{legacy_name}/import", status_code=201)
+@router.post(
+    "/unclaimed/{legacy_name}/import",
+    status_code=201,
+    dependencies=[Depends(local_mode.reject_in_local_mode)],
+)
 def import_unclaimed_project(
     legacy_name: str,
     db: DBSession = Depends(get_db),

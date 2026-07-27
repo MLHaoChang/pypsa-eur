@@ -17,6 +17,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
@@ -45,6 +46,33 @@ def is_local_mode() -> bool:
     every boot.
     """
     return os.environ.get("PYPSAGUI_LOCAL_MODE", "").strip().lower() in _TRUTHY
+
+
+def reject_in_local_mode() -> None:
+    """
+    FastAPI dependency: 404 the route when running as the desktop app.
+
+    Used two ways, and both are deliberate:
+
+      * ``main.py`` applies it to the whole ``admin`` router — a multi-tenant
+        surface with no second tenant locally.
+      * ``routers/projects.py`` and ``routers/admin.py`` apply it per-route to
+        the four ``unclaimed`` / ``legacy-projects`` doors, which reach
+        ``legacy_migrate`` and ``shutil.move`` whole project directories.
+        ``projects.router`` must stay mounted, so those cannot be gated
+        wholesale.
+
+    **Runtime, never import-time.** ``tests/conftest.py`` imports ``main`` with
+    ``PYPSAGUI_LOCAL_MODE`` unset, so an ``if not is_local_mode():`` wrapped
+    around ``include_router`` would register the route permanently and no
+    fixture could un-register it — the local-mode tests could never pass.
+
+    404 rather than 403: locally the surface does not exist at all, and the
+    frontend already reads 404 as "nothing to import"
+    (``frontend/src/api/projects.ts:83``).
+    """
+    if is_local_mode():
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 def _now_utc() -> datetime:

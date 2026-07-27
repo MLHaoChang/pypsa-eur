@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
+import local_mode
 from db.session import get_db
 from db.models import OrgMembership, Organization, Project, User
 from deps import require_user
@@ -222,7 +223,11 @@ def resend_set_password_endpoint(
     return {"ok": True}
 
 
-@router.get("/legacy-projects")
+# The same two `legacy_migrate` functions `routers/projects.py` exposes under
+# `/unclaimed`, behind a different door. `main.py` already 404s this whole
+# router in local mode; these two carry their own guard as well, so the
+# protection survives someone re-opening the admin surface. See Task 1's tests.
+@router.get("/legacy-projects", dependencies=[Depends(local_mode.reject_in_local_mode)])
 def list_legacy_projects_endpoint(
     actor: User = Depends(require_user),
     db: DBSession = Depends(get_db),
@@ -240,7 +245,11 @@ def list_legacy_projects_endpoint(
     ]
 
 
-@router.post("/legacy-projects/{legacy_name}/claim", status_code=201)
+@router.post(
+    "/legacy-projects/{legacy_name}/claim",
+    status_code=201,
+    dependencies=[Depends(local_mode.reject_in_local_mode)],
+)
 def claim_legacy_project_endpoint(
     legacy_name: str,
     payload: ClaimLegacyProjectRequest,
