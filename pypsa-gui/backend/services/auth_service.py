@@ -124,6 +124,10 @@ def revoke_all_sessions_for_user(db: DBSession, user_id: uuid.UUID) -> None:
 
 def issue_password_token(db: DBSession, user_id: uuid.UUID, purpose: str) -> str:
     now = _now_utc()
+    # NOTE (spec G6): SQLAlchemy's SQLite dialect renders `.with_for_update()`
+    # as nothing — no error, no lock. On SQLite this row lock silently does not
+    # exist. Harmless in local mode (one user, no concurrent password change);
+    # load-bearing on Postgres, where it works. Do not "simplify" it away.
     db.scalar(select(User.id).where(User.id == user_id).with_for_update())
     db.execute(
         update(AuthToken)
