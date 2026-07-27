@@ -18,6 +18,24 @@
 
 ## Revision log
 
+**v3 (2026-07-27)** — second adversarial review of v2. 12 further findings applied (2 of its
+14 were already fixed). The severe ones, each verified against `09bd7020` before applying:
+
+| # | v2 defect | v3 |
+|---|---|---|
+| 1 | Settings path defaults were class-body expressions, evaluated once at `import settings`. Monkeypatching `PYPSAGUI_APP_DATA_DIR` afterwards left them stale, so `ensure_app_dirs()` still mkdir'd the developer's real app-data dir. **Verified empirically.** | `Field(default_factory=...)` on all five path/URL fields. |
+| 2 | `backend/.env:17` carries `DATABASE_URL=sqlite+pysqlite:///./auth_dev.db`, and pydantic-settings ranks dotenv **above** field defaults — so `delenv` never reached the new default and the D6 test failed deterministically. | Probe with `Settings(_env_file=None)`; `DATABASE_URL` marked mandatory for the launcher. |
+| 3 | `ensure_schema` stamped `0001_tenancy`, but `create_all` builds **head** (`db/models.py:113` already has `active_project_id`), so `upgrade` re-ran 0002's `add_column` on an existing column. | `command.stamp(cfg, "head")`. |
+| 4 | `alembic/env.py:15` unconditionally overwrites `sqlalchemy.url` with `get_settings().database_url` — so `ensure_schema(url)` migrated a *different* database than the one passed in. | `explicit_url` attribute honoured in `env.py`. |
+| 5 | Task 15's guards were import-time, but `conftest.py:69` imports `main` with local mode unset — the router and middleware register permanently and no fixture can un-register them. Its tests could never pass. | Runtime guards: a router dependency raising 404, and an early return in the middleware. |
+| 6 | `shouldRearmAuth` gated on `getAuthEnabled()`, which disables the ratchet exactly when it is needed — its purpose is to override a stale compile-time flag. | Keyed on local-mode detection instead. |
+| 7 | The `shouldRedirectToLogin` edit was tautological — after the new guard the second branch always fired, collapsing to `return getAuthEnabled()` with dead code above it. | Replaced with that single line. |
+| 8 | `localAdminUser()` supplied 3 of `AuthUser`'s 6 fields and hid it behind `as AuthUser`; admin pages read `org_id`. | All six fields, no cast, plus the missing import. |
+| 9 | The catch-all inherits the app-level `Depends(bind_active_project)` — a session lookup and project resolve per static asset. | `/assets` mounted as `StaticFiles` (Mounts skip app dependencies). |
+| 10 | Local-mode fixtures seeded into conftest's session-scoped DB and never cleaned up, leaking a super-admin into every later test. | `remove_local_identity()` + `finally` in all five fixtures. |
+| 11 | Task 4's second test could not fail for the stated reason — `_Ctx(None, "…")` is bound-without-storage-dir, not unbound. | Split into a true-unbound test and a flat-fallback test. |
+| 12 | Task 12 expected 17 passed (actually 20), and `/login.html` returned `index.html` while the gate it ports serves `login.html`. | Both corrected. |
+
 **v2 (2026-07-27)** — adversarial review found v1 would have broken the frontend build and the backend test suite. All 13 findings applied:
 
 | # | v1 defect | v2 |
@@ -45,6 +63,10 @@ One reviewer claim was itself wrong and is **not** actioned: `dist/login.html` d
 - **Both modes must keep working.** Every change is conditional on local mode or is mode-neutral. The web deployment is not being retired.
 - **Never delete auth code.** Local mode bypasses; it does not remove.
 - **Never reload or re-import modules in tests.** `del sys.modules["db.session"]` does not work for `from db import session`, and partial reloads split-brain `security`/`settings` for the rest of the session.
+- **Every local-mode fixture seeds AND removes the local identity.** conftest's shared
+  database persists users/orgs across the whole session by design, so a fixture that
+  seeds without a `finally: remove_local_identity(db)` leaks a super-admin into every
+  later test.
 - **Never remove a name `tests/conftest.py` monkeypatches.** Check with `grep -n "<name>" tests/conftest.py` before deleting anything.
 - Python ≥3.10, SQLAlchemy ≥2.0, FastAPI ≥0.115, Alembic ≥1.13.
 - **Cross-platform: Windows x64 and macOS arm64.** `pathlib` throughout; explicit `encoding="utf-8"` on every text read.
@@ -277,6 +299,8 @@ those tests history-dependent. Pin it in the same task.
 # pypsa-gui/backend/tests/test_settings_paths.py
 from pathlib import Path
 
+import pytest
+
 import app_paths
 import settings as settings_module
 
@@ -310,19 +334,27 @@ def test_legacy_root_is_env_overridable(monkeypatch, tmp_path):
 
 
 def test_database_url_default_is_sqlite_not_postgres(monkeypatch, tmp_path):
+    """
+    Probes the FIELD DEFAULT, with the dotenv source disabled.
+
+    `settings.py:9` sets `env_file=<backend>/.env`, and pydantic-settings ranks
+    dotenv ABOVE field defaults — `backend/.env:17` currently carries
+    `DATABASE_URL=sqlite+pysqlite:///./auth_dev.db`. So `delenv` alone does not
+    reach the default and this test would pass (or fail) for the wrong reason.
+    """
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    try:
-        assert _fresh(monkeypatch).database_url.startswith("sqlite+pysqlite:///")
-    finally:
-        settings_module.get_settings.cache_clear()
+    url = settings_module.Settings(_env_file=None).database_url
+    assert url.startswith("sqlite+pysqlite:///")
+    assert "auth_dev.db" not in url
 
 
-def test_conftest_pins_legacy_root():
-    """Regression guard: without this pin, legacy tests write to the real app-data dir."""
+@pytest.mark.parametrize("var", ["PYPSAGUI_APP_DATA_DIR", "LEGACY_ROOT", "FLAT_PROJECTS_ROOT"])
+def test_conftest_pins_the_app_data_paths(var):
+    """Regression guard: without these pins the suite writes to the real app-data dir."""
     import os
-    assert os.environ.get("LEGACY_ROOT"), (
-        "conftest must pin LEGACY_ROOT now that its default lives in app-data"
+    assert os.environ.get(var), (
+        f"conftest must pin {var} now that its default lives in app-data"
     )
 ```
 
@@ -332,27 +364,39 @@ def test_conftest_pins_legacy_root():
 pixi run python -m pytest pypsa-gui/backend/tests/test_settings_paths.py -v
 ```
 
-Expected: the `database_url` and `conftest pins` tests fail.
+Expected: **three** fail — `test_projects_root_default_is_outside_the_source_tree` (it
+`delenv`s `PROJECTS_ROOT`, so `settings.py:38`'s `_BACKEND / "projects"` applies and the
+backend dir *is* in `parents`), `test_database_url_default_is_sqlite_not_postgres`, and
+`test_conftest_pins_legacy_root`.
 
 - [ ] **Step 3: Edit `settings.py`**
 
-Add `import app_paths` next to the existing `from pathlib import Path`, then replace the
-three defaults:
+Add `import app_paths` and `from pydantic import Field` next to the existing
+`from pathlib import Path`, then replace the defaults:
 
 ```python
     # SQLite under the per-user app-data dir. Web deployments set DATABASE_URL
     # explicitly, so this default only ever applies to a local run — where the
     # previous Postgres default produced a 503 on every route.
-    database_url: str = app_paths.default_database_url()
+    database_url: str = Field(default_factory=app_paths.default_database_url)
 ```
 
 ```python
-    projects_root: Path = app_paths.default_projects_root()
-    legacy_root: Path = app_paths.app_data_dir() / "legacy_unclaimed"
+    # default_factory, NOT a class-body expression. A bare `= app_paths.x()`
+    # is evaluated once at `import settings`, so a test (or the desktop shell)
+    # that sets PYPSAGUI_APP_DATA_DIR afterwards gets the stale value and
+    # ensure_app_dirs() mkdirs the developer's real app-data directory.
+    # Verified: class-body default stays frozen; default_factory re-reads env.
+    projects_root: Path = Field(default_factory=app_paths.default_projects_root)
+    legacy_root: Path = Field(
+        default_factory=lambda: app_paths.app_data_dir() / "legacy_unclaimed"
+    )
     # FLAT legacy store — see Task 3. Distinct from projects_root.
-    flat_projects_root: Path = app_paths.default_flat_projects_root()
+    flat_projects_root: Path = Field(default_factory=app_paths.default_flat_projects_root)
     # Built SPA — see Task 13. Overridable so a frozen app can point at its copy.
-    frontend_dist: Path = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    frontend_dist: Path = Field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    )
 ```
 
 - [ ] **Step 4: Pin `LEGACY_ROOT` in conftest**
@@ -360,12 +404,16 @@ three defaults:
 In `tests/conftest.py`, immediately after the `PROJECTS_ROOT` pin at `:58`:
 
 ```python
-# Pinned for the same reason as PROJECTS_ROOT above: `legacy_root` now defaults
-# into the per-user app-data dir, and test_legacy_migrate / test_tenancy_api
-# create directories under it. Without this they accumulate in the developer's
-# real ~/Library/Application Support/PyPSA GUI/ and go history-dependent.
-_TEST_LEGACY_ROOT = _tempfile.mkdtemp(prefix="pypsa-gui-test-legacy-")
-os.environ["LEGACY_ROOT"] = _TEST_LEGACY_ROOT
+# Pinned for the same reason as PROJECTS_ROOT above: these now default into the
+# per-user app-data dir. Without the pins, test_legacy_migrate / test_tenancy_api
+# and every local-mode test's ensure_app_dirs() accumulate directories in the
+# developer's real ~/Library/Application Support/PyPSA GUI/ and go
+# history-dependent. All three are needed — pinning only LEGACY_ROOT moves the
+# problem to flat_projects_root.
+_TEST_APP_DATA = _tempfile.mkdtemp(prefix="pypsa-gui-test-appdata-")
+os.environ["PYPSAGUI_APP_DATA_DIR"] = _TEST_APP_DATA
+os.environ["LEGACY_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-legacy-")
+os.environ["FLAT_PROJECTS_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-flat-")
 ```
 
 - [ ] **Step 5: Run everything and commit**
@@ -530,11 +578,24 @@ def test_persist_path_uses_storage_dir(tmp_path):
     assert chat_service.get_persist_path(ctx) == storage / chat_service.CHAT_FILENAME
 
 
-def test_persist_path_falls_back_when_unbound(tmp_path):
-    """UNBOUND (New Project) has no project directory yet."""
-    ctx = _Ctx(None, "My Project")
-    p = chat_service.get_persist_path(ctx)
-    assert p is None or p.name == chat_service.CHAT_FILENAME
+def test_persist_path_is_none_when_truly_unbound(tmp_path):
+    """
+    UNBOUND (New Project): no project at all. get_persist_path returns None
+    early (chat_service.py:749-750) before either branch is reached.
+    """
+    assert chat_service.get_persist_path(_Ctx(None, None)) is None
+
+
+def test_persist_path_falls_back_to_the_flat_root_without_storage_dir(tmp_path, monkeypatch):
+    """
+    Bound by name but with no storage_dir — the pre-tenancy shape. Must take
+    the PROJECTS_DIR fallback, not crash.
+    """
+    from routers import projects as projects_router
+
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_path / "flat")
+    got = chat_service.get_persist_path(_Ctx(None, "My Project"))
+    assert got == tmp_path / "flat" / "My Project" / chat_service.CHAT_FILENAME
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
@@ -543,7 +604,8 @@ def test_persist_path_falls_back_when_unbound(tmp_path):
 pixi run python -m pytest pypsa-gui/backend/tests/test_chat_persist_path.py -v
 ```
 
-Expected: the first test fails — the path is under the flat display name.
+Expected: `test_persist_path_uses_storage_dir` fails — the path is built from the flat
+display name. The other two pass already; they are regression guards for the fallback.
 
 - [ ] **Step 3: Resolve from the bound context**
 
@@ -821,6 +883,11 @@ In `alembic/env.py`, in the **online** `context.configure(...)` only:
         render_as_batch=True,
 ```
 
+**Deviation from spec G2, stated deliberately:** the spec asks for the flag in *both*
+`context.configure()` calls. Only the online block gets it. The offline block
+(`run_migrations_offline`) emits SQL and never autogenerates, so the flag is inert there —
+adding it would be noise that implies a behaviour it does not have.
+
 Create `backend/local_bootstrap.py`:
 
 ```python
@@ -855,6 +922,14 @@ def _alembic_config(url: str) -> Config:
     )
     cfg.set_main_option("script_location", str(backend / "alembic"))
     cfg.set_main_option("sqlalchemy.url", url)
+    # alembic/env.py:15 unconditionally overwrites sqlalchemy.url with
+    # get_settings().database_url, which would silently migrate a DIFFERENT
+    # database than the one passed in (under pytest, conftest's :memory:).
+    # The env.py edit in Step 3 makes it honour this flag.
+    cfg.attributes["explicit_url"] = True
+    # alembic.ini carries `prepend_sys_path = .`, resolved against the process
+    # CWD — which is "/" for a macOS .app launched from Finder.
+    cfg.set_main_option("prepend_sys_path", str(backend))
     return cfg
 
 
@@ -866,8 +941,11 @@ def ensure_schema(url: str) -> None:
       * file does not exist  -> upgrade creates everything
       * has alembic_version  -> upgrade applies what is missing
       * built by create_all  -> no alembic_version, so `upgrade` would fail with
-        "table organizations already exists". Stamp it at the revision whose
-        tables are already present, then upgrade the rest. This is spec G4.
+        "table organizations already exists". `create_all` builds the CURRENT
+        model schema, i.e. HEAD — db/models.py:113 already declares
+        Session.active_project_id, which is exactly what 0002 adds. So stamp
+        HEAD, not 0001: stamping 0001 would re-run 0002's add_column on a
+        column that already exists. This is spec G4.
     """
     if url.startswith("sqlite"):
         db_path = Path(url.split("///", 1)[1])
@@ -881,7 +959,8 @@ def ensure_schema(url: str) -> None:
         engine.dispose()
 
     if names and "alembic_version" not in names:
-        command.stamp(cfg, "0001_tenancy")
+        # Schema present but unversioned => built by create_all => already head.
+        command.stamp(cfg, "head")
     command.upgrade(cfg, "head")
 
 
@@ -895,12 +974,19 @@ def ensure_app_dirs() -> None:
         Path(p).mkdir(parents=True, exist_ok=True)
 ```
 
-Also update `alembic/env.py`'s `fileConfig` guard so the attribute is honoured:
+Also make `alembic/env.py` honour both attributes. Replace lines 12-15:
 
 ```python
 if config.config_file_name is not None and \
         config.attributes.get("configure_logger", "true") != "false":
     fileConfig(config.config_file_name)
+
+# Only fall back to settings when the caller did not pass a URL. Without this
+# guard, `ensure_schema(url)` silently migrates get_settings().database_url
+# instead of `url` — under pytest that is conftest's in-memory database, so
+# the file the test created is never touched and the assertions fail.
+if not config.attributes.get("explicit_url"):
+    config.set_main_option("sqlalchemy.url", get_settings().database_url)
 ```
 
 - [ ] **Step 4: Run the tests**
@@ -1005,6 +1091,19 @@ def test_get_local_user_returns_none_on_an_unseeded_db(db):
     assert local_mode.get_local_user(db) is None
 
 
+def test_remove_local_identity_is_a_clean_round_trip(db):
+    """Test fixtures rely on this: conftest's DB persists users across tests."""
+    from sqlalchemy import select as _select
+
+    local_mode.ensure_local_identity(db)
+    local_mode.remove_local_identity(db)
+    assert local_mode.get_local_user(db) is None
+    assert db.get(Organization, local_mode.LOCAL_ORG_ID) is None
+    assert db.scalars(_select(OrgMembership)).all() == []
+    local_mode.ensure_local_identity(db)   # must be re-seedable
+    assert local_mode.get_local_user(db) is not None
+
+
 def test_ids_are_stable_constants():
     assert isinstance(local_mode.LOCAL_ORG_ID, uuid.UUID)
     assert isinstance(local_mode.LOCAL_USER_ID, uuid.UUID)
@@ -1105,6 +1204,26 @@ def ensure_local_identity(db: DBSession) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def remove_local_identity(db: DBSession) -> None:
+    """
+    Delete the seeded org, user and membership. Test-teardown only.
+
+    conftest's shared session-scoped database deliberately persists users and
+    orgs between tests, so a local-mode fixture that seeds without cleaning up
+    leaks a super-admin into every subsequent test.
+    """
+    membership = db.scalar(
+        select(OrgMembership).where(OrgMembership.user_id == LOCAL_USER_ID)
+    )
+    if membership is not None:
+        db.delete(membership)
+    for model, pk in ((User, LOCAL_USER_ID), (Organization, LOCAL_ORG_ID)):
+        row = db.get(model, pk)
+        if row is not None:
+            db.delete(row)
+    db.commit()
 
 
 def get_local_user(db: DBSession) -> User | None:
@@ -1230,9 +1349,19 @@ def local_client(_auth_db, monkeypatch, tmp_path):
     _engine, session_local = _auth_db
     with session_local() as db:
         local_mode.ensure_local_identity(db)
-    with TestClient(main.app) as c:
-        c.cookies.clear()
-        yield c
+    try:
+        with TestClient(main.app) as c:
+            c.cookies.clear()
+            yield c
+    finally:
+        # conftest's _reset_tenant_tables truncates only project tables — users,
+        # orgs and memberships "deliberately persist" for the whole session. So
+        # without this the shared DB carries an extra Local org and a
+        # super-admin user into every later test. Nothing asserts exact counts
+        # today, which makes it a latent order-dependent trap rather than a
+        # current failure.
+        with session_local() as db:
+            local_mode.remove_local_identity(db)
 
 
 def test_health_reports_auth_disabled(local_client):
@@ -1445,18 +1574,26 @@ import type { AuthUser } from '../api/auth'
 export function shouldRearmAuth(
   status: number | undefined,
   message: string,
-  authEnabled: boolean,
+  localModeDetected: boolean,
 ): boolean {
-  if (!authEnabled) return false
+  // Keyed on LOCAL MODE, not on the current authEnabled flag. Gating on
+  // authEnabled would disable the ratchet exactly when it is needed: its whole
+  // purpose (client.ts:146-152) is to force the flag back on when the
+  // compile-time VITE_AUTH_ENABLED is stale/false. The only case where
+  // re-arming is wrong is a backend that reported auth_enabled:false.
+  if (localModeDetected) return false
   if (status === 401 && message.includes('Authentication required')) return true
   if (status === 503 && message.includes('Auth database unavailable')) return true
   return false
 }
 
 /**
- * Guard for `shouldRedirectToLogin`, which is a SEPARATE path from the ratchet
- * above and fires on the message alone regardless of the flag. With auth off
- * there is no login page to redirect to.
+ * Whether a 401 should bounce to the login page.
+ *
+ * `shouldRedirectToLogin` is a SEPARATE path from the ratchet above and fired
+ * on the message alone, regardless of the flag — so in local mode a stray 401
+ * still redirected to a login page that does not exist. With auth off there is
+ * nowhere to redirect to, so the flag alone is the answer.
  */
 export function shouldRedirectWhenAuthDisabled(authEnabled: boolean): boolean {
   return authEnabled
@@ -1469,33 +1606,47 @@ export function shouldRedirectWhenAuthDisabled(authEnabled: boolean): boolean {
  * false and bounced /admin/* to /projects. A local user owns their machine.
  */
 export function localAdminUser(): AuthUser {
+  // Every field AuthUser (src/api/auth.ts:3-10) declares — no `as` cast. The
+  // cast would compile while leaving status/org_id/role undefined at runtime,
+  // and the admin pages read org_id.
   return {
     id: 'local',
     email: 'local@pypsa-gui.localhost',
+    status: 'active',
     is_super_admin: true,
-  } as AuthUser
+    org_id: null,
+    role: 'admin',
+  }
 }
 ```
 
 Apply in `client.ts` — replace the condition at `:147-149`:
 
 ```typescript
-    if (shouldRearmAuth(status, String(msg), getAuthEnabled())) {
+    // getAuthEnabled() is false in local mode BECAUSE health said so, which is
+    // exactly the "backend reported auth_enabled:false" signal we want here.
+    if (shouldRearmAuth(status, String(msg), !getAuthEnabled())) {
       setAuthEnabled(true)
       notifyAuthBackendRequired(status ?? 401)
     }
 ```
 
-and in `shouldRedirectToLogin`, gate the detail branch at `:108`:
+and replace the whole detail branch in `shouldRedirectToLogin` (`client.ts:104-112`):
 
 ```typescript
-  if (!shouldRedirectWhenAuthDisabled(getAuthEnabled())) return false
-  if (detail.includes('Authentication required') || getAuthEnabled()) {
-    return true
-  }
+  // Was: `if (detail.includes('Authentication required') || getAuthEnabled())`.
+  // The detail check existed to override a stale compile-time flag; the flag is
+  // now authoritative because AuthModeProvider syncs it from /api/health. With
+  // it gated on the flag anyway, the detail branch is unreachable — so drop it
+  // rather than leave dead code that reads as a second condition.
+  return getAuthEnabled()
 ```
 
-In `AuthProvider.tsx:32-35`, return the synthetic user:
+`formatApiDetail(...)` above it becomes unused in this function; remove the local
+`detail` binding too, or ESLint will flag it.
+
+In `AuthProvider.tsx`, add `import { localAdminUser } from './localMode'` and replace the
+auth-off branch at `:32-35`:
 
 ```typescript
     if (!authEnabled) {
@@ -1709,10 +1860,14 @@ def test_mutation_succeeds_from_a_non_5173_origin(_auth_db, monkeypatch, tmp_pat
     _engine, session_local = _auth_db
     with session_local() as db:
         local_mode.ensure_local_identity(db)
-    with TestClient(main.app) as c:
-        c.cookies.clear()
-        r = c.post("/api/network/reset", headers={"Origin": "http://127.0.0.1:51234"})
-        assert r.status_code != 403, r.text
+    try:
+        with TestClient(main.app) as c:
+            c.cookies.clear()
+            r = c.post("/api/network/reset", headers={"Origin": "http://127.0.0.1:51234"})
+            assert r.status_code != 403, r.text
+    finally:
+        with session_local() as db:
+            local_mode.remove_local_identity(db)
 ```
 
 - [ ] **Step 2: Run it**
@@ -1737,7 +1892,7 @@ The launcher MUST set these before `import main` — `get_settings()` and
 | Variable | Value |
 |---|---|
 | `PYPSAGUI_LOCAL_MODE` | `1` |
-| `DATABASE_URL` | absolute SQLite path under the app-data dir |
+| `DATABASE_URL` | absolute SQLite path under the app-data dir. **Mandatory** — `backend/.env` ships a CWD-relative `sqlite:///./auth_dev.db` that outranks the field default, and a frozen `.app` has cwd `/` |
 | `PROJECTS_ROOT` | user-visible projects folder |
 | `FLAT_PROJECTS_ROOT`, `LEGACY_ROOT` | app-data dir |
 | `CORS_ALLOWED_ORIGINS` | `http://127.0.0.1:<chosen port>` |
@@ -1824,8 +1979,9 @@ def test_spa_html_is_never_served_directly_in_web_mode():
     assert decide_route("/spa.html", local_mode=False, authed=False) == ("redirect", "/")
 
 
-def test_login_html_always_serves_the_login_document():
-    assert decide_route("/login.html", local_mode=False, authed=False) == ("serve", "index.html")
+def test_login_html_serves_login_html_not_index():
+    """vite.auth-gate.ts:48 passes /login.html through to dist/login.html."""
+    assert decide_route("/login.html", local_mode=False, authed=False) == ("serve", "login.html")
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
@@ -1883,7 +2039,10 @@ def decide_route(path: str, *, local_mode: bool, authed: bool) -> Decision:
         return ("serve", SPA)
 
     if path == "/login.html":
-        return ("serve", LOGIN)
+        # login.html, not index.html. vite.auth-gate.ts:48 passes this path
+        # through to dist/login.html; they are byte-identical today, but the
+        # port should not quietly substitute one file for the other.
+        return ("serve", "login.html")
 
     if authed:
         if path in ("/", "/index.html"):
@@ -1901,7 +2060,7 @@ def decide_route(path: str, *, local_mode: bool, authed: bool) -> Decision:
 pixi run python -m pytest pypsa-gui/backend/tests/test_static_gate.py -v
 ```
 
-Expected: 17 passed (5 + 5 parametrized, 4 more parametrized, 7 named).
+Expected: 20 passed (5 + 5 + 4 parametrized, plus 6 named).
 
 - [ ] **Step 5: Commit**
 
@@ -1967,6 +2126,8 @@ def local_spa_client(_auth_db, dist, monkeypatch, tmp_path):
             yield c
     finally:
         settings_module.get_settings.cache_clear()
+        with session_local() as db:
+            local_mode.remove_local_identity(db)
 
 
 def test_serves_spa_at_root(local_spa_client):
@@ -2058,11 +2219,24 @@ def serve_spa(full_path: str, request: Request):
     return FileResponse(dist / target)
 ```
 
-Add to the imports at the top of `main.py`:
+Mount the hot asset directory as a Starlette `Mount` **before** the catch-all:
 
 ```python
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+# Starlette Mounts do NOT run app-level dependencies. main.py:137 applies
+# `dependencies=[Depends(bind_active_project)]` to every APIRoute, and the
+# catch-all is one — so without this, a cold SPA load costs a session lookup
+# plus a project resolve for every JS/CSS/image it fetches.
+if _dist().is_dir():
+    app.mount("/assets", StaticFiles(directory=_dist() / "assets"), name="assets")
+```
+
+Add to the imports at the top of `main.py` (check each against what is already imported —
+`Depends`, `FastAPI` and `Request` are already there):
+
+```python
+from fastapi import HTTPException
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 import static_gate
 ```
 
@@ -2129,6 +2303,8 @@ def real_dist_client(_auth_db, monkeypatch, tmp_path):
             yield c
     finally:
         settings_module.get_settings.cache_clear()
+        with session_local() as db:
+            local_mode.remove_local_identity(db)
 
 
 def test_root_serves_the_react_entry_not_the_login_page(real_dist_client):
@@ -2162,7 +2338,10 @@ def test_no_writable_path_resolves_inside_the_source_tree(monkeypatch, tmp_path)
         monkeypatch.delenv(var, raising=False)
     settings_module.get_settings.cache_clear()
     try:
-        s = settings_module.get_settings()
+        # _env_file=None is load-bearing: backend/.env carries a CWD-relative
+        # DATABASE_URL that outranks the field default, which would resolve
+        # inside the source tree and fail this assertion for the wrong reason.
+        s = settings_module.Settings(_env_file=None)
         backend = Path(app_paths.__file__).resolve().parent
         db_file = Path(s.database_url.split("///", 1)[1])
         for p in (s.projects_root, s.legacy_root, s.flat_projects_root, db_file):
@@ -2239,9 +2418,13 @@ def local_client(_auth_db, monkeypatch, tmp_path):
     _engine, session_local = _auth_db
     with session_local() as db:
         local_mode.ensure_local_identity(db)
-    with TestClient(main.app) as c:
-        c.cookies.clear()
-        yield c
+    try:
+        with TestClient(main.app) as c:
+            c.cookies.clear()
+            yield c
+    finally:
+        with session_local() as db:
+            local_mode.remove_local_identity(db)
 
 
 def test_admin_router_is_not_reachable(local_client):
@@ -2280,17 +2463,37 @@ Expected: the first three fail.
 
 - [ ] **Step 3: Make the surfaces conditional**
 
-The admin router and the replica middleware are registered at import time, when local mode is
-already known from the environment, so a plain `if` is correct:
+**Both guards must be RUNTIME, not import-time.** `tests/conftest.py:69` imports `main` with
+`PYPSAGUI_LOCAL_MODE` unset, so an `if not is_local_mode():` around `include_router` registers
+the router permanently and no fixture can un-register it — the tests above could never pass.
+This is the v2 no-reload rule colliding with the B6 requirement; runtime guards satisfy both.
+
+Add a router-level dependency:
 
 ```python
-# Nine multi-tenant endpoints, including a claim path that shutil.moves whole
-# project directories. There is no second tenant locally and no admin to be.
-if not local_mode.is_local_mode():
-    app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+def _reject_in_local_mode() -> None:
+    """Admin is a multi-tenant surface. There is no second tenant locally, and
+    /api/admin/legacy-projects/{name}/claim shutil.moves whole directories."""
+    if local_mode.is_local_mode():
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+app.include_router(
+    admin.router,
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(_reject_in_local_mode)],
+)
 ```
 
-Guard the replica middleware registration (`:447-460`) the same way.
+and an early return inside `replica_identity_middleware` (`:447-460`):
+
+```python
+    if local_mode.is_local_mode():
+        # Replica identity is multi-replica test infrastructure. One process,
+        # one machine, no proxy — the header is dead weight.
+        return await call_next(request)
+```
 
 In `security.py`, as the first statement of `login_retry_after`:
 
