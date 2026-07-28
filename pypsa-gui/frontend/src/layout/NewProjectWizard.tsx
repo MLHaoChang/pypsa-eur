@@ -120,17 +120,10 @@ function TabBtn({ active, onClick, icon, label }: {
 function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjectWizardProps) {
   const [name, setName] = useState('new_project')
   const inputRef = useRef<HTMLInputElement>(null)
-  // Deferred to a microtask: BlankTab sits deeper in the tree than Dialog
-  // (it's part of the `children` Dialog renders), so its mount effect
-  // commits BEFORE Dialog's own initial-focus effect (children-before-parent
-  // effect order) and would otherwise lose this field to Dialog's default —
-  // the header's close button, the first focusable element in DOM order.
-  // Running after a microtask lets it win once Dialog has already settled,
-  // preserving the pre-migration "name field focused + selected on open"
-  // behaviour. Verified empirically in a throwaway test before landing this.
-  useEffect(() => {
-    Promise.resolve().then(() => { inputRef.current?.focus(); inputRef.current?.select() })
-  }, [])
+  // Dialog's own initial-focus effect now guards against stealing focus
+  // already claimed inside the panel (see Dialog.tsx), so this plain
+  // synchronous focus+select is enough — no microtask deferral needed.
+  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select() }, [])
 
   const trimmed = name.trim()
   const existing = existingProjects.find(p => p.name === trimmed)

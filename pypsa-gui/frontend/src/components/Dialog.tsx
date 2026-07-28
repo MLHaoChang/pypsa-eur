@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type HTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, type HTMLAttributes, type ReactNode } from 'react'
 
 // The app's only accessible dialog. Owns exactly the behaviours that were
 // missing everywhere before it existed: ARIA role/modal state, a focus trap,
@@ -54,16 +54,41 @@ export function Dialog({
   const restoreRef = useRef<HTMLElement | null>(null)
   const titleId = useId()
 
-  // Initial focus on open + restoration on close. Capturing the previously
-  // focused element must happen before we move focus away from it.
-  useEffect(() => {
+  // Capture the element to restore focus to on close. This runs in a layout
+  // effect specifically so it fires before ANY child's mount effect can move
+  // focus into the panel: React flushes every layout effect in the whole
+  // committed tree before it flushes any passive effect (useEffect), which
+  // is a stronger guarantee than fiber depth order. If this instead lived in
+  // a plain useEffect alongside the initial-focus logic below, a panel child
+  // deeper than Dialog (its own useEffect committing before Dialog's, per
+  // the usual children-before-parents order) could focus itself first, and
+  // `document.activeElement` here would already be that child — restoring
+  // focus on close to a since-unmounted panel element instead of the
+  // control that actually opened the dialog. Caught empirically: a
+  // regression test for exactly this below.
+  useLayoutEffect(() => {
     if (!open) return
     restoreRef.current = document.activeElement as HTMLElement | null
-    const panel = panelRef.current
-    const first = panel?.querySelector<HTMLElement>(FOCUSABLE)
-    ;(first ?? panel)?.focus()
     return () => {
       restoreRef.current?.focus?.()
+    }
+  }, [open])
+
+  // Initial focus on open. Guard: if the panel already contains
+  // document.activeElement, some child has already claimed focus in its own
+  // mount effect and we leave it alone instead of overriding it with "first
+  // focusable". This is safe because effects commit children-before-parents:
+  // by the time this effect runs, any child mount effect that wanted focus
+  // has already run and taken it. Without the guard, a panel whose content
+  // manages its own initial focus (e.g. a form's name field) would have that
+  // focus silently stolen back to the first focusable element (often just a
+  // close button) the instant this effect ran.
+  useEffect(() => {
+    if (!open) return
+    const panel = panelRef.current
+    if (panel && !panel.contains(document.activeElement)) {
+      const first = panel.querySelector<HTMLElement>(FOCUSABLE)
+      ;(first ?? panel).focus()
     }
   }, [open])
 
