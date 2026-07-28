@@ -66,6 +66,34 @@ class ShutdownReport:
     server_stage: str | None = None
 
 
+# ── the mutation gate (step 1) ──────────────────────────────────────────────
+#
+# A plain flag rather than anything cleverer: it is read on every mutating
+# request and flipped twice in the life of the process. `threading.Event` would
+# read the same and imply a wait nobody performs.
+_gated = threading.Event()
+
+# 503, deliberately, and NOT 409. A 409 from this backend already means "a
+# solver is in flight, try again in a moment" and the frontend treats it as
+# retryable. A shutting-down backend must not invite a retry, and the SPA needs
+# to tell the two apart without parsing prose — hence the typed code.
+SHUTTING_DOWN_CODE = "shutting_down"
+
+
+def gate_mutations() -> None:
+    """Step 1. Reversible, touches no GUI, and NOT the same as hiding."""
+    _gated.set()
+
+
+def un_gate_mutations() -> None:
+    """The Cancel path, and the only way back."""
+    _gated.clear()
+
+
+def mutations_gated() -> bool:
+    return _gated.is_set()
+
+
 # The latch. Cleared on the Cancel path so a user who cancels once can still
 # quit later; held for the duration otherwise, because `webview` will deliver a
 # second close event while the first sequence is mid-flush and running the
@@ -189,10 +217,62 @@ def flush_all(
     return problems
 
 
+def abort_and_wait(
+    *,
+    in_flight: list[InFlightSolve],
+    abort_active: Callable[[], None],
+    abort_queue: Callable[[], None],
+    wait: Callable[[float], bool],
+    timeout: float = ABORT_TIMEOUT,
+) -> bool:
+    """
+    Signal every solve that CAN be stopped, then wait a bounded time for all of
+    them. Returns whether everything actually finished.
+
+    Three paths, and they are not symmetric:
+
+      (a) active   `/api/simulation/abort` sets the foreground context's event
+      (b) queue    each job carries its own; `solve_queue.abort(id)` reaches it
+      (c) ac_pf    creates an event that NOTHING READS. There is nothing to
+                   signal, so this does not pretend to. It is still waited for
+                   and still reported.
+
+    The bound is not optional. HiGHS and Gurobi do not yield until the next
+    iteration boundary, so `status` flips to "aborted" instantly while the
+    worker stays alive for seconds — an unbounded wait is a window that never
+    closes. Returning False is how the caller learns the flush may 409, which
+    is the difference between reporting a clean quit and reporting the truth.
+    """
+    if not in_flight:
+        return True
+
+    ok = True
+    paths = {s.path for s in in_flight if s.interruptible}
+
+    for path, signal in (("active", abort_active), ("queue", abort_queue)):
+        if path not in paths:
+            continue
+        try:
+            signal()
+        except Exception as exc:
+            # One path failing must not leave the others un-signalled — that
+            # strands a solve the sequence is about to flush around.
+            ok = False
+            logger.exception("aborting the %s solve failed", path)
+
+    try:
+        finished = bool(wait(timeout))
+    except Exception:
+        logger.exception("waiting for solves to finish failed")
+        finished = False
+
+    return ok and finished
+
+
 def shutdown_sequence(
     *,
-    gate: Callable[[], None],
-    un_gate: Callable[[], None],
+    gate: Callable[[], None] = gate_mutations,
+    un_gate: Callable[[], None] = un_gate_mutations,
     confirm: Callable[[list[InFlightSolve]], bool],
     hide: Callable[[], None],
     abort_and_wait: Callable[[], bool],

@@ -36,6 +36,7 @@ iterates the registry, which is precisely the bug this guards.
 """
 from __future__ import annotations
 
+import pathlib
 import threading
 import time
 
@@ -446,3 +447,229 @@ def test_the_chat_transcript_is_flushed_even_though_it_is_a_no_op_today():
     )
 
     assert called == ["chat"]
+
+
+# ── the HTTP mutation gate ──────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _never_leave_the_gate_closed():
+    """
+    A gate is process-global state. A test that closed it and failed before
+    re-opening would 503 every mutating request in every later test — and the
+    failure would look like a bug in whatever ran next.
+    """
+    yield
+    shutdown_service.un_gate_mutations()
+
+
+def test_the_gate_refuses_mutations_with_a_typed_code(client):
+    """
+    503, not 409. 409 already means "a solver is in flight, try again" and the
+    frontend retries it; a shutting-down backend must not invite a retry. The
+    typed code is what lets the SPA tell them apart without parsing prose.
+    """
+    shutdown_service.gate_mutations()
+
+    response = client.post("/api/network/reset")
+
+    assert response.status_code == 503, response.text
+    assert response.json().get("code") == "shutting_down", response.json()
+
+
+def test_reads_still_work_while_the_gate_is_closed(client):
+    """
+    The window is still visible at this point — step 1 does not hide it — and
+    the user may be looking at a confirm dialog. A blank workbench behind it
+    would be alarming and is not necessary: reads never mutate.
+    """
+    shutdown_service.gate_mutations()
+
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/network/buses").status_code == 200
+
+
+def test_un_gating_restores_mutations(client):
+    """The Cancel path. Without this the app is wedged with no reverse."""
+    shutdown_service.gate_mutations()
+    assert client.post("/api/network/reset").status_code == 503
+
+    shutdown_service.un_gate_mutations()
+
+    assert client.post("/api/network/reset").status_code == 200
+
+
+def test_the_gate_is_open_by_default():
+    """
+    In a FRESH interpreter, because the autouse fixture above un-gates after
+    every test — so an in-process assertion here is satisfied by whatever ran
+    before it, and passes against a module that gates itself on import.
+
+    Caught by mutation: `_gated.set()` at module scope survived the whole
+    suite. A shipped build with that defect would refuse every mutation from
+    the moment it started, with a message saying it was shutting down.
+    """
+    import subprocess
+    import sys
+
+    backend = str(pathlib.Path(__file__).resolve().parent.parent)
+    result = subprocess.run(
+        [sys.executable, "-c",
+         f"import sys; sys.path.insert(0, {backend!r})\n"
+         "from services import shutdown\n"
+         "print('GATED' if shutdown.mutations_gated() else 'OPEN')"],
+        capture_output=True, text=True, timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "OPEN" in result.stdout, result.stdout
+
+
+def test_mutations_work_when_nothing_has_gated_them(client):
+    assert client.post("/api/network/reset").status_code == 200
+
+
+# ── aborting, across three paths that behave differently ────────────────────
+
+
+def test_aborting_signals_the_active_solve_and_every_queue_job():
+    """
+    Paths (a) and (b) can both be stopped, but not by the same call:
+    `/api/simulation/abort` targets the foreground context's stop event, while
+    each queue job carries its own and is reached by `solve_queue.abort(id)`.
+    """
+    signalled: list[str] = []
+
+    report = shutdown_service.abort_and_wait(
+        in_flight=[
+            shutdown_service.InFlightSolve("active", "open project", True),
+            shutdown_service.InFlightSolve("queue", "job 7", True),
+        ],
+        abort_active=lambda: signalled.append("active"),
+        abort_queue=lambda: signalled.append("queue"),
+        wait=lambda timeout: True,
+        timeout=1.0,
+    )
+
+    assert sorted(signalled) == ["active", "queue"]
+    assert report is True
+
+
+def test_an_ac_pf_run_is_waited_for_but_never_signalled():
+    """
+    Path (c). `run_ac_pf` creates a stop event and `ac_pf_service` reads it
+    nowhere, so there is nothing to signal — pretending otherwise would make
+    the code look like it handles a case it does not.
+
+    The decision, taken rather than deferred: wait the bounded time, then warn
+    and let the flush report what it could not write.
+    """
+    signalled: list[str] = []
+
+    result = shutdown_service.abort_and_wait(
+        in_flight=[shutdown_service.InFlightSolve("ac_pf", "AC power flow", False)],
+        abort_active=lambda: signalled.append("active"),
+        abort_queue=lambda: signalled.append("queue"),
+        wait=lambda timeout: False,          # never finishes in time
+        timeout=0.1,
+    )
+
+    assert signalled == [], "nothing reads AC PF's stop event; signalling it is theatre"
+    assert result is False, "an unfinished abort must be reported, not assumed"
+
+
+def test_interruptible_is_the_authority_not_the_path_name():
+    """
+    A solve marked non-interruptible must not be signalled even when its path
+    HAS a signaller.
+
+    Without this the `if s.interruptible` filter is dead code: every
+    non-interruptible solve today happens to sit on a path (`ac_pf`) that has
+    no entry in the signal table, so the field never changes what happens.
+    Caught by mutation — dropping the filter left all 27 tests green.
+
+    It matters because AC PF and the LP worker both live in `routers.simulation`
+    `_state`. The moment one is reported under the other's path — a refactor
+    away — the path name stops being a proxy for "can this be stopped" and the
+    field is the only thing standing between the shutdown and a signal that
+    nothing reads.
+    """
+    signalled: list[str] = []
+
+    shutdown_service.abort_and_wait(
+        in_flight=[shutdown_service.InFlightSolve("active", "ac pf, active slot", False)],
+        abort_active=lambda: signalled.append("active"),
+        abort_queue=lambda: signalled.append("queue"),
+        wait=lambda timeout: True,
+        timeout=1.0,
+    )
+
+    assert signalled == [], "signalled a solve that nothing can stop"
+
+
+def test_a_solver_that_ignores_the_abort_is_reported_not_waited_on_forever():
+    """
+    HiGHS and Gurobi do not yield until the next iteration boundary, so
+    `status` flips to "aborted" instantly while the worker stays alive for
+    seconds. An unbounded wait here is a window that never closes.
+    """
+    # Records the budget it was handed rather than sleeping through it. A
+    # double that slept would turn "the bound was dropped" into a hung test
+    # instead of a failing one — which is exactly what happened first time.
+    handed: list[float] = []
+
+    def wait(timeout):
+        handed.append(timeout)
+        return False
+
+    result = shutdown_service.abort_and_wait(
+        in_flight=[shutdown_service.InFlightSolve("active", "stubborn", True)],
+        abort_active=lambda: None, abort_queue=lambda: None,
+        wait=wait, timeout=0.3,
+    )
+
+    assert result is False
+    assert handed == [0.3], (
+        f"the wait was given {handed} rather than the caller's bound — an "
+        "unbounded wait here is a window that never closes"
+    )
+
+
+def test_nothing_in_flight_needs_no_abort_and_reports_success():
+    called: list[str] = []
+
+    result = shutdown_service.abort_and_wait(
+        in_flight=[],
+        abort_active=lambda: called.append("active"),
+        abort_queue=lambda: called.append("queue"),
+        wait=lambda timeout: called.append("wait") or True,
+        timeout=1.0,
+    )
+
+    assert called == [], "nothing was running; there is nothing to abort or wait for"
+    assert result is True
+
+
+def test_a_failing_abort_signal_does_not_stop_the_others():
+    """
+    One path throwing must not leave the rest un-signalled — that would strand
+    a solve the sequence is about to flush around.
+    """
+    signalled: list[str] = []
+
+    def explode():
+        raise RuntimeError("abort endpoint blew up")
+
+    result = shutdown_service.abort_and_wait(
+        in_flight=[
+            shutdown_service.InFlightSolve("active", "a", True),
+            shutdown_service.InFlightSolve("queue", "b", True),
+        ],
+        abort_active=explode,
+        abort_queue=lambda: signalled.append("queue"),
+        wait=lambda timeout: True,
+        timeout=1.0,
+    )
+
+    assert signalled == ["queue"]
+    assert result is False, "an abort that partly failed is not a clean abort"

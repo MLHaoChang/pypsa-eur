@@ -36,6 +36,7 @@ import static_gate
 from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
 from services import active_project
+from services import shutdown as shutdown_service
 from routers import (
     admin,
     auth,
@@ -494,6 +495,31 @@ async def undo_snapshot_middleware(request: Request, call_next):
                     )
         except Exception:  # noqa: BLE001
             logger.exception("could not bind the session's active project")
+
+    # ── Shutting-down gate (workstream H, step 1) ─────────────────────
+    # Set before the quit confirmation is even shown, and cleared again if the
+    # user cancels. It lives here for the same reason the solver gate does:
+    # this is the one place every mutating request passes through, and the
+    # alternative is a check in ~30 endpoints.
+    #
+    # Hiding the window does NOT do this. The frontend keeps 20 refetch
+    # intervals, a 5-minute autosave and a 45 s lock heartbeat running behind a
+    # hidden window, and its SSE stream stays connected — so without an actual
+    # gate the app carries on writing while the shutdown sequence is flushing.
+    #
+    # GETs pass: the window is still visible during the confirm dialog and a
+    # blank workbench behind it would be alarming for no benefit.
+    if is_write and shutdown_service.mutations_gated():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": shutdown_service.SHUTTING_DOWN_CODE,
+                "detail": (
+                    "PyPSA GUI is shutting down and is no longer accepting "
+                    "changes. If you cancelled the quit, this clears itself."
+                ),
+            },
+        )
 
     # ── Solver-in-flight gate ─────────────────────────────────────────
     # Refuse writes to /api/network/* and /api/io/* while the LP worker
