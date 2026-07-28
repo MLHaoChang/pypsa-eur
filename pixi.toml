@@ -69,7 +69,11 @@ httpx = ">=0.27"
 python-multipart = ">=0.0.12"
 sse-starlette = ">=2.1"
 aiofiles = ">=24.0"
-atlite = ">=0.3,!=0.5.0"
+# Pinned: atlite builds renewable capacity factors, i.e. a direct optimisation
+# INPUT, and it is on the `[exclude-newer] = "0d"` list above so every re-lock
+# would otherwise take the newest release. Named as floating in this repo's own
+# test docstring while two of the three names beside it had been pinned.
+atlite = "==0.6.1"
 bokeh = ">=3.8.0"
 cartopy = ">=0.25.0"
 copernicusmarine = ">=2.2.4"
@@ -88,6 +92,11 @@ gurobi = ">=12.0.3"
 # The LP solver. Pinned for the same reason as pypsa: a solver change moves
 # optimisation results, and this workstream is about windows and shutdown.
 highspy = "==1.14.0"
+# The OTHER solver in the workspace. Missed on the first pass, which claimed
+# "a solver change would be the risk and both are pinned" while scip had in
+# fact moved 10.0.2 -> 10.0.3 on all four platforms. CLAUDE.md documents SCIP
+# as one of the four supported solvers.
+scip = "==10.0.2"
 ipython = ">=9.7.0"
 jpype1 = ">=1.6.0"
 libgdal-netcdf = ">=3.10.3"
@@ -117,7 +126,7 @@ pydeck = ">0.6"  # pypsa fails to import with pydeck <0.6, lower bound was only 
 # to converge on. Bump deliberately, with a full re-validation, not as a side
 # effect of adding an environment.
 pypsa = "==1.1.2"
-pyscipopt = ">=5.6.0"
+pyscipopt = "==6.2.0"   # see the `scip` pin above
 pytables = ">=3.10.2"
 python = ">=3.10"
 pytz = ">=2025.2"
@@ -134,7 +143,10 @@ snakemake-minimal = ">=9"
 snakemake-storage-plugin-http = ">=0.3"
 tenacity = ">=9.1.2"
 tqdm = ">=4.67.1"
-tsam = ">=2.3.1"
+# Temporal aggregation for `prepare_network` / `prepare_perfect_foresight`.
+# Left unpinned it took a MAJOR jump, 2.3.9 -> 3.4.1, on win-64 only — the one
+# platform nobody working on this can run.
+tsam = "==2.3.9"
 xarray = ">=2024.3.0,<2025.7.0"
 xlrd = ">=2.0.2"
 yaml = ">=0.2.5"
@@ -253,8 +265,8 @@ pytest = ">=8.4.2"
 
 [environments]
 doc = { features = ["doc"], no-default-feature = true }
-test = ["test", "dev"]
-dev = ["dev"]
+test = { features = ["test", "dev"], solve-group = "gui" }
+dev = { features = ["dev"], solve-group = "gui" }
 # ONE solve group. `desktop` runs the pypsa-gui backend and the backend suite
 # runs in `default`, so the two must resolve identically or the app that ships
 # is not the app that was tested. Solved independently they did not, and three
@@ -263,7 +275,18 @@ dev = ["dev"]
 # invisible because numpy and scipy were pinned identically.
 #
 # A solve group makes them agree by construction rather than by enumeration.
-# The cost is that `default` is re-solved — which is why pypsa, highspy and
-# linopy are pinned above.
+# The cost is that `default` is re-solved — which is why the optimisation
+# packages are pinned above.
+#
+# `test` and `dev` are IN THE GROUP TOO, and leaving them out was a defect in
+# the first attempt: `.github/workflows/test.yaml` runs both `unit-tests` and
+# `integration-tests` through `[feature.test.tasks]`, i.e. in `test`. Grouping
+# only `default` and `desktop` re-solved those two and left `test` behind, so
+# the environment that ships had NO ci coverage and the environment CI gates on
+# was 85-105 packages away from it. That is the same defect the group exists to
+# remove, relocated.
+#
+# `doc` stays out: it is `no-default-feature = true` with its own pypsa 1.0.3,
+# so it shares nothing and a group would only over-constrain it.
 default = { solve-group = "gui" }
 desktop = { features = ["desktop"], solve-group = "gui" }

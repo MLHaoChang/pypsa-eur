@@ -109,7 +109,8 @@ def test_a_server_that_will_not_die_is_abandoned():
     is never shut down and CPython's atexit joiner blocks interpreter exit on
     it, so "the thread returned" is not the same as "the process will exit".
 
-    In production `hard_exit` is `os._exit(0)` and never returns; the string is
+    In production `hard_exit` is `os._exit(HARD_EXIT_STATUS)` and never
+    returns; the string is
     reachable only under a double like this one.
     """
     ladder = _Ladder(dies_after=None)
@@ -178,11 +179,12 @@ def _serving(app, **kwargs):
     """
     Never lets a test reach the real `os._exit(0)`.
 
-    Without this the default `hard_exit` takes down the PYTEST PROCESS, and it
-    does so with status 0 — so a regression in the escalation ladder reads as a
-    green run to anything that checks the exit code. Found by mutating the
-    ladder to hard-exit first: the run produced no summary line at all and the
-    mutant scored as a survivor.
+    Without this the default `hard_exit` takes down the PYTEST PROCESS. Found
+    by mutating the ladder to hard-exit first: the run produced no summary line
+    at all and the mutant scored as a survivor, because the status was 0 back
+    then and 0 reads as success to anything checking the exit code. The status
+    is `HARD_EXIT_STATUS` now, so the run would at least be reported as failed
+    — but a suite that dies mid-run still tells you nothing about what passed.
     """
     sock = launcher.bind_socket()
     kwargs.setdefault("hard_exit", _refuse_to_hard_exit)
@@ -424,8 +426,8 @@ def test_the_join_budget_is_larger_while_lifespan_startup_is_still_running():
 
 def test_abandoning_the_server_does_not_exit_with_success():
     """
-    `os._exit(0)` tells an installer, a supervisor or a crash reporter that the
-    app quit cleanly, when in fact a thread had to be abandoned — possibly
+    Exiting 0 would tell an installer, a supervisor or a crash reporter that
+    the app quit cleanly, when in fact a thread had to be abandoned — possibly
     mid-copy. The status is the only channel left at that point.
     """
     assert launcher.HARD_EXIT_STATUS != 0

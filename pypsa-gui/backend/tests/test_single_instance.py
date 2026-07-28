@@ -257,6 +257,110 @@ def test_the_default_retry_budget_is_not_zero(lock_path):
     assert lock._retry_for == single_instance.RETRY_FOR
 
 
+@pytest.mark.parametrize("code", ["EACCES", "EAGAIN", "EWOULDBLOCK", "EDEADLK"])
+def test_every_contention_errno_is_recognised(lock_path, code):
+    """
+    `EACCES` is the one that matters and the one no other test reaches.
+
+    MSVC's `_locking()` sets **EACCES** (13) for a locking violation. `EAGAIN`
+    is 11 and `EWOULDBLOCK` is 140 on Windows CPython, and `_locking` sets
+    neither — so every other test here, which injects `EWOULDBLOCK` or relies
+    on POSIX `flock`'s `EAGAIN`, passes with `EACCES` dropped from the set.
+    That is the errno by which a second Windows launch is recognised at all,
+    on the platform this whole design was reasoned from.
+    """
+    def contended(fd):
+        raise OSError(getattr(errno, code), "held")
+
+    with mock.patch.object(single_instance, "_lock", contended):
+        with pytest.raises(AlreadyRunning):
+            SingleInstance(lock_path, retry_for=0.1, retry_interval=0.02).acquire()
+
+
+def test_the_default_retry_budget_is_bounded_from_above_too():
+    """
+    `RETRY_FOR = 60.0` passed every other test: the one that bounds the wait
+    supplies its own `retry_for=0.3`, and the one that checks the default only
+    asserts `> 0`. A minute of frozen splash before a second launch is refused
+    would have shipped green.
+    """
+    assert 0 < single_instance.RETRY_FOR <= 5.0, single_instance.RETRY_FOR
+
+
+def test_unlocking_actually_releases_the_lock_for_another_handle(lock_path):
+    """
+    `_unlock` had no coverage: on POSIX `close()` drops the flock anyway, so a
+    no-op `_unlock` passed everything. It is load-bearing on Windows, where
+    Microsoft treats closing a file with outstanding byte-range locks as
+    undefined — the platform no test here can fail for.
+
+    So this asserts the unlock in isolation, holding the descriptor open.
+    """
+    lock = SingleInstance(lock_path)
+    lock.acquire()
+    fd = lock._fd
+
+    single_instance._unlock(fd)
+    try:
+        # A second handle must now succeed while the first fd is STILL OPEN.
+        second = SingleInstance(lock_path, retry_for=0.1, retry_interval=0.02)
+        second.acquire()
+        second.release()
+    finally:
+        os.close(fd)
+        lock._fd = None
+
+
+def test_leaving_the_context_manager_releases_the_lock(lock_path):
+    """
+    Six tests use `with SingleInstance(...)` and none re-acquires afterwards,
+    each on a fresh `tmp_path` — so a no-op `__exit__` passed all of them.
+    """
+    with SingleInstance(lock_path) as lock:
+        assert lock.held
+
+    with SingleInstance(lock_path, retry_for=0.1, retry_interval=0.02) as again:
+        assert again.held
+
+
+def test_acquiring_twice_on_one_instance_does_not_orphan_a_locked_handle(lock_path):
+    """
+    `acquire()` assigned `self._fd` unguarded, so a second call replaced the
+    first descriptor. `release()` then freed only the second and the first
+    stayed open AND locked, with no `__del__` to reach it — the lock could
+    never be released for the life of the process.
+    """
+    lock = SingleInstance(lock_path)
+    lock.acquire()
+    lock.acquire()          # must not orphan the first descriptor
+    lock.release()
+
+    with SingleInstance(lock_path, retry_for=0.2, retry_interval=0.02) as second:
+        assert second.held
+
+
+def test_release_still_drops_the_lock_when_closing_the_descriptor_fails(lock_path):
+    """
+    `os.close(fd)` sat OUTSIDE the `try`, and `self._fd` was already cleared —
+    so an `OSError` from `close()` escaped `release()` (and `__exit__`) with
+    `held` already reading False and the descriptor still open and locked.
+    Deferring `EIO`/`ENOSPC` to `close(2)` is the documented NFS behaviour, and
+    `PYPSAGUI_APP_DATA_DIR` is explicitly allowed to point at a network mount.
+    """
+    lock = SingleInstance(lock_path)
+    lock.acquire()
+
+    real_close = os.close
+    def flaky_close(fd):
+        real_close(fd)
+        raise OSError(errno.EIO, "deferred write error")
+
+    with mock.patch.object(os, "close", flaky_close):
+        lock.release()          # must not raise
+
+    assert not lock.held
+
+
 def test_release_is_idempotent(lock_path):
     """The shutdown path may run twice; a second release must not raise."""
     lock = SingleInstance(lock_path)

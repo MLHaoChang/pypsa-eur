@@ -1,38 +1,41 @@
 """
-The desktop environment must run the stack the suite tested (phase 2a, Task 0).
+Every environment that runs this code must resolve the same packages.
 
-`pixi run -e desktop` is how the shell runs; the backend suite runs in
-`default`. If the two resolve different packages, the app that ships is not the
-app that was tested — and the divergence is invisible, because every test still
-passes in `default`.
+`pixi run -e desktop` is how the shell runs, `pixi run gui-tests` runs the
+backend suite in `default`, and `.github/workflows/test.yaml` runs PyPSA-Eur's
+own suites in `test`. If those disagree, the app that ships is not the app
+anything validated — and the disagreement is invisible, because every suite
+still passes in whichever environment it happens to use.
 
-Not hypothetical. `desktop` was added solved freely, and a fresh solve of a new
-environment does not reproduce an old lock: it takes today's newest.
-`[exclude-newer] pypsa = "0d"` in `pixi.toml` deliberately lets pypsa float, so
-`desktop` came up on **pypsa 1.2.4** against a suite validated on 1.1.2, plus
-numpy, scipy and **highspy** — the LP solver PyPSA calls. `CLAUDE.md` documents
-multi-port Link vintage workarounds scoped to PyPSA 1.1.2 that took five
-re-solves to converge on.
+**How this was arrived at, so the dead ends are not retried.** `desktop` was
+originally solved independently, and a fresh solve of a new environment does
+not reproduce an old lock: it takes today's newest. `[exclude-newer]` in
+`pixi.toml` deliberately lets pypsa, linopy and atlite float. So `desktop` came
+up on pypsa 1.2.4 against a suite validated on 1.1.2. Three rounds then tried
+to enumerate what mattered:
 
-Two fixes that did NOT work, recorded so they are not retried:
+  1. pin `python`                     -> it was 1 of 112 differing packages
+  2. pin a curated "core stack"       -> `anyio` was in the import closure
+  3. pin that plus the measured
+     import closure                   -> `pillow`, `websockets`, `libsqlite`,
+                                         `openssl`, `polars-runtime-32` -- and
+                                         win-64 on NETLIB reference BLAS with
+                                         no OpenBLAS at all, invisible because
+                                         numpy and scipy were pinned to
+                                         identical versions
 
-  * Pinning only `python`. The interpreter was 1 of 112 differing packages.
-  * A pixi `solve-group`. It does make them agree — by re-solving `default` UP
-    to pypsa 1.2.4 and highspy 1.15.1, i.e. upgrading the environment
-    `snakemake -call` runs PyPSA-Eur in, across 228 lines. Measured, then
-    reverted. The model environment is not this workstream's to modernise.
+An enumerated list is only as good as the imagination of whoever wrote it. A
+solve group makes the environments agree by construction instead, and this file
+asserts the result rather than a list.
 
-**What is enforced here is the CORE stack plus the backend's whole import
-closure, not full parity.** Roughly 90 further packages — build tooling, the
-docs and plotting stack, things reachable only from `snakemake` — sit on newer
-patch versions in `desktop`. Closing that last gap requires the solve-group
-above, which is why it stays open; it is a recorded trade-off, not an oversight.
+**A solve group is not free and the first attempt got it wrong**: it covers
+`default`, `desktop`, `test` and `dev`. Grouping only `default` and `desktop`
+re-solved those two and left `test` behind — and `test` is the environment both
+CI gates run in, so the shipping environment ended up with no coverage and CI's
+environment ended up 85-105 packages from it. Same defect, relocated.
 
-An earlier version of this paragraph said the residual contained nothing the
-backend imports. That was measured against DIRECT imports only and was wrong:
-16 of the then-104 were in the transitive closure, `anyio` among them. They are
-pinned now, and the enforced list below is derived from the closure rather than
-from a reading of the source.
+`doc` is deliberately OUT: it is `no-default-feature = true` with its own pypsa
+1.0.3, so it shares nothing and a group would only over-constrain it.
 """
 from __future__ import annotations
 
@@ -46,6 +49,9 @@ _LOCK = Path(__file__).resolve().parents[3] / "pixi.lock"
 # Every platform `pixi.toml` targets. A platform missing from the lock fails
 # rather than skips — a skip here is the test quietly evaporating.
 _PLATFORMS = ("osx-arm64", "osx-64", "win-64", "linux-64")
+
+# Every environment in the solve group. `doc` is excluded by design.
+_GROUPED = ("default", "desktop", "test", "dev")
 
 # Packages that MUST be present for the comparison below to mean anything. A
 # parity assertion is satisfied perfectly by an empty environment, and by a
@@ -134,7 +140,8 @@ def test_the_lockfile_parser_actually_finds_packages():
 
 
 @pytest.mark.parametrize("platform", _PLATFORMS)
-def test_every_shared_package_is_identical_in_both_environments(platform):
+@pytest.mark.parametrize("other", ("desktop", "test", "dev"))
+def test_every_shared_package_is_identical_across_the_solve_group(platform, other):
     """
     FULL parity — every package the two environments have in common, compared
     by version AND build string. Not a curated list.
@@ -152,11 +159,11 @@ def test_every_shared_package_is_identical_in_both_environments(platform):
     break, which is the right way round.
     """
     default, _ = _packages("default", platform)
-    desktop, _ = _packages("desktop", platform)
+    desktop, _ = _packages(other, platform)
 
     for name in _MUST_BE_PRESENT:
         assert name in default, f"{name} missing from `default` on {platform}"
-        assert name in desktop, f"{name} missing from `desktop` on {platform}"
+        assert name in desktop, f"{name} missing from `{other}` on {platform}"
 
     differing = {
         name: (default[name], desktop[name])
@@ -171,7 +178,7 @@ def test_every_shared_package_is_identical_in_both_environments(platform):
 
     missing = default.keys() - desktop.keys()
     assert not missing, (
-        f"`desktop` is missing {len(missing)} package(s) `default` has on "
+        f"`{other}` is missing {len(missing)} package(s) `default` has on "
         f"{platform}: {sorted(missing)[:12]}"
     )
 
@@ -187,9 +194,16 @@ def test_the_optimisation_stack_is_pinned_not_floating(platform):
     """
     default, _ = _packages("default", platform)
 
-    assert default["pypsa"].startswith("1.1.2="), default["pypsa"]
-    assert default["highspy"].startswith("1.14.0="), default["highspy"]
-    assert default["linopy"].startswith("0.8.0="), default["linopy"]
+    for name, version in (
+        ("pypsa", "1.1.2"),
+        ("highspy", "1.14.0"),   # the LP solver
+        ("linopy", "0.8.0"),     # the modelling layer between them
+        ("scip", "10.0.2"),      # the OTHER solver — missed on the first pass,
+        ("pyscipopt", "6.2.0"),  # while claiming "both are pinned"
+        ("atlite", "0.6.1"),     # builds renewable capacity factors
+        ("tsam", "2.3.9"),       # temporal aggregation; took a MAJOR jump to
+    ):                           # 3.4.1 on win-64 alone while unpinned
+        assert default[name].startswith(f"{version}="), f"{name}={default[name]}"
 
 
 @pytest.mark.parametrize("platform", _PLATFORMS)

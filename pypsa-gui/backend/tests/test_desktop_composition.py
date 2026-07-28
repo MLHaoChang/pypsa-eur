@@ -109,11 +109,19 @@ def test_the_whole_chain_starts_serves_stops_and_the_process_exits(tmp_path):
     test that looked like a broken launcher.
     """
     result = _run_chain(tmp_path, _chain(tmp_path, """
-        import urllib.request
-        with urllib.request.urlopen(
-            "http://127.0.0.1:{}/api/health".format(server.port), timeout=30
-        ) as response:
-            body = json.loads(response.read())
+        # `http.client`, NOT `urllib.request.urlopen` — the harness must not
+        # reintroduce the hazard the launcher was rewritten to avoid. `urlopen`
+        # builds a default opener whose ProxyHandler reads `getproxies()`, and
+        # `proxy_bypass_environment` returns False outright when `no_proxy` is
+        # unset, so on any machine with HTTP_PROXY exported these tests would
+        # fail while the shipped launcher works.
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=30)
+        conn.request("GET", "/api/health")
+        response = conn.getresponse()
+        body = json.loads(response.read())
+        conn.close()
+
         result["health"] = body["status"]
         # local mode is what turns the login gate off; the SPA reads this field.
         result["auth_enabled"] = body["auth_enabled"]
@@ -258,10 +266,13 @@ def test_the_first_window_would_have_a_page_to_load(tmp_path):
     run the build is not a broken launcher.
     """
     result = _run_chain(tmp_path, _chain(tmp_path, """
-        import urllib.request
-        with urllib.request.urlopen(launcher.app_url(server.port), timeout=30) as page:
-            result["spa_status"] = page.status
-            result["spa_is_html"] = b"<html" in page.read(2048).lower()
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=30)
+        conn.request("GET", "/")
+        page = conn.getresponse()
+        result["spa_status"] = page.status
+        result["spa_is_html"] = b"<html" in page.read(2048).lower()
+        conn.close()
 
         result["stage"] = server.stop()
         lock.release()

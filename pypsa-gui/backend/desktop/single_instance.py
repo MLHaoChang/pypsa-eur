@@ -93,6 +93,15 @@ class SingleInstance:
         return self._fd is not None
 
     def acquire(self) -> None:
+        if self.held:
+            # Idempotent, like `release()`. Without this the second call
+            # replaced `self._fd` and the first descriptor stayed open AND
+            # locked with nothing able to reach it — no `__del__`, and
+            # `release()` frees only the one it can see. Reachable exactly on
+            # the filesystems where advisory locking is silently degraded, so
+            # both `_lock` calls succeed.
+            return
+
         # `ensure_app_dirs()` runs inside the FastAPI lifespan, which is after
         # this — the point of the lock is to refuse before importing the
         # backend at all. So on a first run the directory may not exist.
@@ -136,7 +145,16 @@ class SingleInstance:
             # Closing the descriptor releases it regardless; an error here
             # must not stop the shutdown sequence.
             pass
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            # `os.close` was outside the `try` above, so a deferred write error
+            # surfacing here — the documented NFS behaviour, and
+            # `PYPSAGUI_APP_DATA_DIR` may point at a network mount — escaped
+            # `release()` and `__exit__` with `_fd` already cleared: `held`
+            # read False while the descriptor was still open and still locked.
+            # The kernel drops the fd regardless of what close() reports.
+            pass
 
     def __enter__(self) -> SingleInstance:
         self.acquire()

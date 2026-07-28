@@ -190,7 +190,7 @@ Extend `test_dynamic_origin.py` rather than restating what it already proves.
   - **`stop()` returns within its bound with a live SSE connection open.** The stream returns immediately when no solve is running, so the test must **seed the log queue first** and assert the stream was still open when `stop()` was called. Without that seeding the test passes without ever exercising the hang.
   - `wait_healthy` returning False has a defined outcome (constraint #17) — assert the launcher surfaces it rather than looping.
 
-- [ ] **Step 2: Implement.** `uvicorn.Config(app_object, …, timeout_graceful_shutdown=N)` — the app **OBJECT**, never `"main:app"`; a frozen build has no importable module path. Server on a `daemon=True` thread. `stop()` escalates: `should_exit` → bounded join → `force_exit` → bounded join → `os._exit(0)`.
+- [ ] **Step 2: Implement.** `uvicorn.Config(app_object, …, timeout_graceful_shutdown=N)` — the app **OBJECT**, never `"main:app"`; a frozen build has no importable module path. Server on a `daemon=True` thread. `stop()` escalates: `should_exit` → bounded join → `force_exit` → bounded join → `os._exit(HARD_EXIT_STATUS)` (70, not 0 — an abandoned shutdown must not report success).
 
 - [ ] **Step 3: Gate and commit.**
 
