@@ -22,11 +22,17 @@ Two fixes that did NOT work, recorded so they are not retried:
     `snakemake -call` runs PyPSA-Eur in, across 228 lines. Measured, then
     reverted. The model environment is not this workstream's to modernise.
 
-**What is enforced here is the CORE stack, not full parity.** ~100 further
-transitive packages (bokeh, beautifulsoup4, asttokens, …) sit on newer patch
-versions in `desktop`. None is imported by the backend — measured against its
-actual import set — and closing that gap requires the solve-group above. That
-residual is a deliberate, recorded trade-off rather than an oversight.
+**What is enforced here is the CORE stack plus the backend's whole import
+closure, not full parity.** Roughly 90 further packages — build tooling, the
+docs and plotting stack, things reachable only from `snakemake` — sit on newer
+patch versions in `desktop`. Closing that last gap requires the solve-group
+above, which is why it stays open; it is a recorded trade-off, not an oversight.
+
+An earlier version of this paragraph said the residual contained nothing the
+backend imports. That was measured against DIRECT imports only and was wrong:
+16 of the then-104 were in the transitive closure, `anyio` among them. They are
+pinned now, and the enforced list below is derived from the closure rather than
+from a reading of the source.
 """
 from __future__ import annotations
 
@@ -57,6 +63,15 @@ _CORE = (
     "netcdf4",
     "matplotlib", "matplotlib-base",   # MPLBACKEND=Agg is set against these
     "python",
+    # The rest of the backend's IMPORT CLOSURE, measured by importing
+    # pypsa/fastapi/starlette/uvicorn/sqlalchemy/pydantic/alembic/anthropic and
+    # reading `sys.modules`. An earlier round pinned only what the backend
+    # imports DIRECTLY — 4 packages — and this file claimed the residual was
+    # invisible to the backend. 16 were not. `anyio` is the async runtime under
+    # starlette and uvicorn: the layer the bounded-shutdown design rests on.
+    "anyio", "certifi", "charset-normalizer", "geopandas", "greenlet", "idna",
+    "narwhals", "numexpr", "plotly", "polars", "pydeck", "requests", "tqdm",
+    "typing-extensions", "typing_extensions", "ujson",
 )
 
 
@@ -108,7 +123,13 @@ def _packages(env: str, platform: str) -> tuple[dict[str, str], set[str]]:
             stem = re.sub(r"\.(conda|tar\.bz2)$", "", m.group(1).rsplit("/", 1)[-1])
             parts = stem.rsplit("-", 2)
             if len(parts) == 3:
-                conda[parts[0]] = parts[1]
+                # version AND build string. Comparing versions alone let a
+                # different scipy BINARY through: both environments resolved
+                # 1.17.1 while `default` shipped `py313hc753a45_0` and
+                # `desktop` `py313h52f5312_1` — a different sha256. The same
+                # hole would have hidden a highspy rebuild, and highspy is the
+                # LP solver whose build is the one thing that must not move.
+                conda[parts[0]] = f"{parts[1]}={parts[2]}"
             continue
         m = re.match(r"^      - pypi: (\S+)$", line)
         if m:
@@ -130,7 +151,7 @@ def test_the_lockfile_parser_actually_finds_packages():
     assert len(conda) > 400, f"parser found only {len(conda)} conda packages"
     for name in ("pypsa", "numpy", "uvicorn", "python"):
         assert name in conda, f"{name} missing — the parser is not reading the lock"
-    assert re.match(r"^\d+\.\d+", conda["pypsa"]), conda["pypsa"]
+    assert re.match(r"^\d+\.\d+.*=", conda["pypsa"]), conda["pypsa"]
 
 
 @pytest.mark.parametrize("platform", _PLATFORMS)

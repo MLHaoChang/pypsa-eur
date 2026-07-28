@@ -48,7 +48,8 @@ else:
     import fcntl
 
 # Errnos that mean "someone else holds it" and nothing else. Everything else
-# propagates: see `acquire`.
+# propagates: see `acquire`. (EINTR is deliberately absent — since PEP 475
+# CPython retries the syscall internally and never surfaces it.)
 _CONTENDED = frozenset(
     {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK, errno.EDEADLK}
 )
@@ -109,7 +110,7 @@ class SingleInstance:
                 os.close(fd)  # before anything else — the retry loop reopens
                 if exc.errno not in _CONTENDED:
                     # NOT "another instance is running". `flock` also raises for
-                    # ENOLCK, EOPNOTSUPP, EBADF and EINTR, and advisory locking
+                    # ENOLCK, EOPNOTSUPP and EBADF, and advisory locking
                     # is unsupported or silently degraded on several network
                     # filesystems — which `PYPSAGUI_APP_DATA_DIR` can point at.
                     # Reporting those as contention wedges that machine

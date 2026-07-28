@@ -38,6 +38,8 @@ import urllib.request
 from contextlib import asynccontextmanager, closing
 
 import pytest
+from unittest import mock
+
 from fastapi import FastAPI
 from starlette.responses import StreamingResponse
 
@@ -319,7 +321,7 @@ def test_the_listener_is_closed_once_the_server_stops():
             pass
 
 
-def test_the_health_probe_ignores_a_proxy_configured_in_the_environment():
+def test_the_health_probe_ignores_a_proxy_configured_in_the_environment(monkeypatch):
     """
     `urllib.request.urlopen` builds the default opener, whose `ProxyHandler`
     reads `getproxies()` — so a machine with `HTTP_PROXY` exported, or a
@@ -337,20 +339,20 @@ def test_the_health_probe_ignores_a_proxy_configured_in_the_environment():
     server = _serving(_health_app())
     try:
         server.start()
-        # A proxy that cannot possibly serve anything. Port 1 is reserved and
-        # nothing listens there.
+        # A proxy that cannot possibly serve anything: port 1 is reserved and
+        # nothing listens there. `monkeypatch` rather than `os.environ` directly —
+        # an earlier version popped `no_proxy` without restoring it, which
+        # leaks process-wide into every later test in the session.
         for var in ("http_proxy", "HTTP_PROXY", "ALL_PROXY", "all_proxy"):
-            os.environ[var] = "http://127.0.0.1:1"
-        os.environ.pop("no_proxy", None)
-        os.environ.pop("NO_PROXY", None)
+            monkeypatch.setenv(var, "http://127.0.0.1:1")
+        monkeypatch.delenv("no_proxy", raising=False)
+        monkeypatch.delenv("NO_PROXY", raising=False)
         # urlopen memoises its opener process-wide; drop it so this test is not
         # decided by whichever earlier test happened to build it first.
         urllib.request.install_opener(None)
 
         assert server.wait_healthy(20) is True
     finally:
-        for var in ("http_proxy", "HTTP_PROXY", "ALL_PROXY", "all_proxy"):
-            os.environ.pop(var, None)
         urllib.request.install_opener(None)
         server.stop()
 
@@ -373,13 +375,51 @@ def test_the_join_budget_is_larger_while_lifespan_startup_is_still_running():
     `Server.started` is uvicorn's own flag for "startup finished", so it is
     what distinguishes the two budgets.
     """
-    server = _serving(_health_app(), join_timeout=3.0, startup_join_timeout=90.0)
+    # This test drives the ladder to its last rung on purpose, so it supplies
+    # its own recording `hard_exit` instead of `_serving`'s refuse-to-exit guard.
+    abandoned: list[int] = []
+    server = _serving(
+        _health_app(), join_timeout=3.0, startup_join_timeout=90.0,
+        hard_exit=lambda: abandoned.append(1),
+    )
 
-    assert server._server.started is False
-    assert server._join_budget() == 90.0, "a quit during startup gets the long budget"
+    # Drive `stop()` against a thread that records what it was joined WITH.
+    # Asserting on `_join_budget()` alone is not enough: nothing would then
+    # connect the accessor to the escalation, and reverting `wait_for_exit` to
+    # `thread.join(self._join_timeout)` — the whole defect — leaves such a test
+    # passing. Verified: that mutant survived the accessor-only version.
+    joined_with: list[float] = []
 
-    server._server.started = True
-    assert server._join_budget() == 3.0, "once serving, the normal bound applies"
+    class _RecordingThread:
+        def join(self, timeout=None):
+            joined_with.append(timeout)
+
+        def is_alive(self):
+            return True
+
+    server._started = True
+    server._thread = _RecordingThread()
+    server._server.started = False           # still inside lifespan startup
+
+    assert server.stop() == "abandoned"
+    assert joined_with == [90.0, 90.0], joined_with
+
+    # And the other side of the branch: once serving, the normal bound applies.
+    joined_with.clear()
+    other = _serving(
+        _health_app(), join_timeout=3.0, startup_join_timeout=90.0,
+        hard_exit=lambda: abandoned.append(1),
+    )
+    other._started = True
+    other._thread = _RecordingThread()
+    other._server.started = True
+    assert other.stop() == "abandoned"
+    assert joined_with == [3.0, 3.0], joined_with
+    assert len(abandoned) == 2
+
+    # Neither server ever ran, so nothing else will release these.
+    server.close()
+    other.close()
 
 
 def test_abandoning_the_server_does_not_exit_with_success():
@@ -389,6 +429,16 @@ def test_abandoning_the_server_does_not_exit_with_success():
     mid-copy. The status is the only channel left at that point.
     """
     assert launcher.HARD_EXIT_STATUS != 0
+
+    # The constant is not the contract — the default `hard_exit` is. Asserting
+    # only the constant leaves `lambda: os._exit(0)` passing, which is exactly
+    # the defect. Verified: that mutant survived the constant-only version.
+    sock = launcher.bind_socket()
+    with closing(sock):
+        server = launcher.DesktopServer(_health_app(), sock)
+        with mock.patch.object(os, "_exit") as fake_exit:
+            server._hard_exit()
+        fake_exit.assert_called_once_with(launcher.HARD_EXIT_STATUS)
 
 
 def test_starting_twice_is_refused():
@@ -431,16 +481,71 @@ def test_the_socket_is_released_even_if_the_server_never_ran():
     handed — it stays listening for the life of the process, accepting
     connections nothing will answer.
     """
-    server = _serving(_health_app())
+    # Two paths, and only the second was covered before. Calling `close()`
+    # directly tests a one-line wrapper; the fix that matters is `close()` in
+    # `stop()`'s `finally`, because uvicorn's `_serve` runs `shutdown()` only
+    # `if self.started` — so on a startup failure nothing else ever closes it.
+    @asynccontextmanager
+    async def refuses_to_start(app):
+        raise RuntimeError("lifespan startup failed on purpose")
+        yield  # pragma: no cover
+
+    server = _serving(FastAPI(lifespan=refuses_to_start))
     port = server.port
-    server.close()
+    server.start()
+    assert server.wait_healthy(30) is False
+    server.stop()
 
     with pytest.raises((ConnectionRefusedError, socket.timeout, OSError)):
         with closing(socket.create_connection(("127.0.0.1", port), timeout=3)):
             pass
 
 
-def test_web_concurrency_in_the_environment_cannot_change_the_worker_count():
+def test_stopping_a_server_that_was_never_started_still_releases_the_socket():
+    """
+    REGRESSION. `stop()` gained a `_stopped` latch that returns from inside the
+    lifecycle lock, so it never reached the `close()` in its own `finally` —
+    leaving the listener bound for the life of the process AND refusing every
+    later `start()`.
+
+    This is the exact path `close()`'s docstring describes: `bind_socket()`
+    succeeds, `import main` raises, and the error handler calls `stop()`
+    because that is the obvious cleanup.
+    """
+    server = _serving(_health_app())
+    port = server.port
+
+    assert server.stop() == "already-stopped"
+
+    with pytest.raises((ConnectionRefusedError, socket.timeout, OSError)):
+        with closing(socket.create_connection(("127.0.0.1", port), timeout=3)):
+            pass
+
+
+def test_the_health_probe_survives_a_malformed_reply():
+    """
+    `http.client` raises `HTTPException` subclasses — `BadStatusLine`,
+    `ResponseNotReady`, `IncompleteRead` — and none of them is an `OSError`.
+    Narrowing the except clause to `OSError` during the proxy fix meant a
+    truncated reply while the server was still coming up would propagate out of
+    `wait_healthy()` and kill the bootstrap thread rather than counting as
+    "not ready yet".
+    """
+    server = _serving(_health_app())
+    try:
+        server.start()
+        assert server.wait_healthy(30) is True
+
+        with mock.patch.object(
+            http.client.HTTPConnection, "request",
+            side_effect=http.client.BadStatusLine("garbage"),
+        ):
+            assert server._health_answers() is False
+    finally:
+        server.stop()
+
+
+def test_web_concurrency_in_the_environment_cannot_change_the_worker_count(monkeypatch):
     """
     `uvicorn.Config` reads `WEB_CONCURRENCY` when `workers` is None, and
     `Server.startup` shares the socket via `sock.share(os.getpid())` +
@@ -448,14 +553,12 @@ def test_web_concurrency_in_the_environment_cannot_change_the_worker_count():
     uvicorn serve a DUPLICATE socket while `shutdown()` closes the original we
     handed it — on Windows only, from a stray environment variable.
     """
-    os.environ["WEB_CONCURRENCY"] = "4"
-    try:
-        sock = launcher.bind_socket()
-        with closing(sock):
-            server = launcher.DesktopServer(_health_app(), sock)
-            assert server.config.workers == 1
-    finally:
-        os.environ.pop("WEB_CONCURRENCY", None)
+    monkeypatch.setenv("WEB_CONCURRENCY", "4")
+
+    sock = launcher.bind_socket()
+    with closing(sock):
+        server = launcher.DesktopServer(_health_app(), sock)
+        assert server.config.workers == 1
 
 
 @pytest.mark.parametrize("attr", ["log_config"])

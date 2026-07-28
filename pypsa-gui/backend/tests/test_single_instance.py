@@ -243,6 +243,18 @@ def test_a_failed_acquire_leaks_no_file_descriptor(lock_path):
         assert after <= before + 1, f"fd count went {before} -> {after}"
 
 
+def test_the_default_retry_budget_is_not_zero(lock_path):
+    """
+    Every other retry test passes an explicit `retry_for=`, so `RETRY_FOR = 0.0`
+    passed all of them — the shipped default was untested. It is the value that
+    actually runs on a user's machine after a hard quit.
+    """
+    assert single_instance.RETRY_FOR > 0
+
+    lock = SingleInstance(lock_path)
+    assert lock._retry_for == single_instance.RETRY_FOR
+
+
 def test_release_is_idempotent(lock_path):
     """The shutdown path may run twice; a second release must not raise."""
     lock = SingleInstance(lock_path)

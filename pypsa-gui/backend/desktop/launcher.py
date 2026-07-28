@@ -28,8 +28,6 @@ import socket
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Callable
 
@@ -45,9 +43,13 @@ HOST = "127.0.0.1"
 
 # Modules whose import freezes configuration this shell still needs to set.
 # `main`/`settings`/`security` for the `lru_cache`d settings and allowlist.
-# `matplotlib` because importing it resolves the backend — measured: after a
-# bare `import matplotlib` the backend is already `macosx` and setting
-# `MPLBACKEND=Agg` afterwards does not move it. `pypsa` is listed separately
+# `matplotlib` because importing it is what makes `MPLBACKEND` too late.
+# Measured end-to-end: set the variable BEFORE the import and `get_backend()`
+# is `Agg`; set it after and you get `macosx` with `backend_macosx` loaded.
+# (The resolution is lazy — `rcParams` still holds the auto sentinel straight
+# after the import — so the mechanism is the deferred read, not an eager one.
+# The earlier comment here asserted the eager version, which is not what the
+# interpreter does.) `pypsa` is listed separately
 # rather than relied on as a proxy for matplotlib: it does pull it in, but so
 # would `gui.py`, seaborn, cartopy, or a PyInstaller hidden import, and any of
 # those would otherwise let this function succeed with its most
@@ -209,6 +211,14 @@ JOIN_TIMEOUT = 8.0
 # for the next hour every relaunch silently skips the import and the user's
 # projects do not appear.
 STARTUP_JOIN_TIMEOUT = 120.0
+
+# Worst case for `stop()` is TWICE whichever budget applies — `escalate_shutdown`
+# waits once after `should_exit` and again after `force_exit` — so 16 s while
+# serving and 240 s during startup. Task 4 drives `stop()` from the window's
+# close handler, where a UI thread blocked past ~5 s is ghosted as *Not
+# Responding* on Windows, so that step must run on a worker and not the UI
+# thread. Stated here because the first version of this comment justified one
+# 120 s budget and silently meant two.
 
 # NOT zero. An abandoned shutdown is not a clean quit, and the exit status is
 # the only channel left to say so to an installer, a supervisor, or a crash
@@ -409,7 +419,12 @@ class DesktopServer:
         try:
             conn.request("GET", "/api/health")
             return conn.getresponse().status == 200
-        except OSError:
+        except (OSError, http.client.HTTPException):
+            # `HTTPException` is NOT an `OSError`: `BadStatusLine`,
+            # `ResponseNotReady` and `IncompleteRead` all escape a bare
+            # `except OSError`. A truncated reply while the server is still
+            # coming up would then propagate out of `wait_healthy` and kill
+            # the bootstrap thread instead of counting as "not ready yet".
             return False
         finally:
             conn.close()
@@ -418,10 +433,26 @@ class DesktopServer:
         """One of `clean`, `forced`, `abandoned`, `already-stopped`."""
         with self._lifecycle:
             if self._stopped or self._thread is None:
+                already = self._stopped
                 self._stopped = True
-                return "already-stopped"
-            self._stopped = True
-            thread = self._thread
+                never_ran = self._thread is None
+            else:
+                already = False
+                never_ran = False
+                self._stopped = True
+                thread = self._thread
+
+        if already or never_ran:
+            # Outside the lock, and NOT skipped. The `_stopped` latch added in
+            # the previous round returned from inside the `with` block, so this
+            # never ran: a `stop()` on a server that was bound but never
+            # started left the listener accepting for the life of the process
+            # AND refused every later `start()`. That is precisely the path
+            # `close()` exists for — `bind_socket()` succeeds, `import main`
+            # raises, and the error handler calls `stop()` as the obvious
+            # cleanup.
+            self.close()
+            return "already-stopped"
 
         def request_exit() -> None:
             self._server.should_exit = True

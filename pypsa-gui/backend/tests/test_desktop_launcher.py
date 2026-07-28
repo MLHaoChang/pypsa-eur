@@ -149,17 +149,27 @@ def test_the_default_probe_is_the_backend_project_store():
     assert launcher.PRE_DESKTOP_PROJECTS_DIR == (_BACKEND / "projects").resolve()
 
 
-def test_the_default_probe_is_actually_the_one_resolve_uses():
+def test_the_default_probe_is_actually_the_one_resolve_uses(tmp_path):
     """
     Asserting on the constant is only worth anything if the function reads it.
-    Points it somewhere empty and requires the answer to follow.
+
+    Points it at a directory that EXISTS and requires the answer to be that
+    directory. The first attempt pointed it at a nonexistent path and asserted
+    `is None` — which an implementation ignoring the constant also returns on
+    any machine where `backend/projects/` is absent, i.e. every fresh clone,
+    because `pypsa-gui/.gitignore` ignores it. That is byte-for-byte the
+    vacuity this test was written to remove; it only bit here because this
+    developer happens to have the directory.
     """
     import unittest.mock
 
+    elsewhere = tmp_path / "somewhere-else"
+    elsewhere.mkdir()
+
     with unittest.mock.patch.object(
-        launcher, "PRE_DESKTOP_PROJECTS_DIR", Path("/nonexistent/elsewhere")
+        launcher, "PRE_DESKTOP_PROJECTS_DIR", elsewhere
     ):
-        assert launcher.resolve_legacy_root() is None
+        assert launcher.resolve_legacy_root() == elsewhere.resolve()
 
 
 # ── the socket ──────────────────────────────────────────────────────────────
