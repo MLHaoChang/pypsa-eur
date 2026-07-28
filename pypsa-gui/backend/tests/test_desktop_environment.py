@@ -47,32 +47,11 @@ _LOCK = Path(__file__).resolve().parents[3] / "pixi.lock"
 # rather than skips — a skip here is the test quietly evaporating.
 _PLATFORMS = ("osx-arm64", "osx-64", "win-64", "linux-64")
 
-# The packages whose version changes backend behaviour. Kept in step with the
-# pins in `[feature.desktop.*]`; both sides are load-bearing and this list is
-# what makes forgetting one a test failure instead of a silent regression.
-_CORE = (
-    "pypsa",            # the model itself
-    "numpy", "scipy", "pandas", "xarray",
-    "highspy", "linopy",        # the LP path
-    "sqlalchemy", "alembic",    # persistence + migrations
-    "fastapi", "starlette", "pydantic", "pydantic-settings",
-    # uvicorn especially: the desktop shell's entire shutdown design was
-    # verified by reading uvicorn 0.51.0's `Server.shutdown` and
-    # `_wait_tasks_to_complete`. A different uvicorn is a different contract.
-    "uvicorn",
-    "netcdf4",
-    "matplotlib", "matplotlib-base",   # MPLBACKEND=Agg is set against these
-    "python",
-    # The rest of the backend's IMPORT CLOSURE, measured by importing
-    # pypsa/fastapi/starlette/uvicorn/sqlalchemy/pydantic/alembic/anthropic and
-    # reading `sys.modules`. An earlier round pinned only what the backend
-    # imports DIRECTLY — 4 packages — and this file claimed the residual was
-    # invisible to the backend. 16 were not. `anyio` is the async runtime under
-    # starlette and uvicorn: the layer the bounded-shutdown design rests on.
-    "anyio", "certifi", "charset-normalizer", "geopandas", "greenlet", "idna",
-    "narwhals", "numexpr", "plotly", "polars", "pydeck", "requests", "tqdm",
-    "typing-extensions", "typing_extensions", "ujson",
-)
+# Packages that MUST be present for the comparison below to mean anything. A
+# parity assertion is satisfied perfectly by an empty environment, and by a
+# parser that matches nothing.
+_MUST_BE_PRESENT = ("pypsa", "highspy", "linopy", "numpy", "scipy", "uvicorn",
+                    "sqlalchemy", "python", "libblas")
 
 
 def _packages(env: str, platform: str) -> tuple[dict[str, str], set[str]]:
@@ -155,48 +134,62 @@ def test_the_lockfile_parser_actually_finds_packages():
 
 
 @pytest.mark.parametrize("platform", _PLATFORMS)
-def test_the_core_stack_is_identical_in_both_environments(platform):
+def test_every_shared_package_is_identical_in_both_environments(platform):
     """
-    The invariant the shell depends on. Runs against `pixi.lock` rather than
-    the installed environment, so it holds for all four platforms — including
-    the two nobody working on this can run.
+    FULL parity — every package the two environments have in common, compared
+    by version AND build string. Not a curated list.
+
+    The curated version of this test is why it is now written this way. Three
+    rounds enumerated what mattered: first `python`, then a "core stack", then
+    the core stack plus the backend's measured import closure. Each round a
+    reviewer found something the list had missed, and the last miss was the
+    worst — `desktop` resolving NETLIB reference BLAS with no OpenBLAS at all
+    on win-64, invisible precisely because numpy and scipy were pinned to
+    identical versions. An enumerated list can only ever be as good as the
+    imagination of whoever wrote it.
+
+    The solve group makes this assertion cheap to satisfy and expensive to
+    break, which is the right way round.
     """
     default, _ = _packages("default", platform)
     desktop, _ = _packages("desktop", platform)
 
-    assert default, f"no `default` packages parsed for {platform}"
-    assert desktop, f"no `desktop` packages parsed for {platform}"
+    for name in _MUST_BE_PRESENT:
+        assert name in default, f"{name} missing from `default` on {platform}"
+        assert name in desktop, f"{name} missing from `desktop` on {platform}"
 
     differing = {
-        name: (default[name], desktop.get(name))
-        for name in _CORE
-        if name in default and default[name] != desktop.get(name)
+        name: (default[name], desktop[name])
+        for name in default.keys() & desktop.keys()
+        if default[name] != desktop[name]
     }
-
     assert not differing, (
-        f"{len(differing)} core package(s) differ on {platform} — the shell would "
-        "run code the suite never tested. Pin them in `[feature.desktop.*]`: "
-        + ", ".join(
-            f"{n} default={d} desktop={k}" for n, (d, k) in sorted(differing.items())
-        )
+        f"{len(differing)} package(s) differ on {platform}: "
+        + ", ".join(f"{n} default={d} desktop={k}"
+                    for n, (d, k) in sorted(differing.items())[:12])
+    )
+
+    missing = default.keys() - desktop.keys()
+    assert not missing, (
+        f"`desktop` is missing {len(missing)} package(s) `default` has on "
+        f"{platform}: {sorted(missing)[:12]}"
     )
 
 
 @pytest.mark.parametrize("platform", _PLATFORMS)
-def test_every_core_package_is_actually_present(platform):
+def test_the_optimisation_stack_is_pinned_not_floating(platform):
     """
-    The parity assertion above is vacuously true for a package absent from
-    BOTH environments — including one renamed upstream, or misspelled in
-    `_CORE`. Without this, a typo silently removes something from the guard.
+    The solve group re-solves `default`, so the packages that decide
+    optimisation RESULTS have to be held explicitly or a routine re-lock moves
+    them. `[exclude-newer]` in `pixi.toml` deliberately lets pypsa, linopy and
+    atlite float to the newest release, which is what made an independently
+    solved environment land on pypsa 1.2.4 in the first place.
     """
     default, _ = _packages("default", platform)
 
-    missing = [name for name in _CORE if name not in default]
-
-    assert not missing, (
-        f"not in `default` on {platform}: {missing} — either the package was "
-        "renamed upstream or `_CORE` has a typo; both make the parity test blind"
-    )
+    assert default["pypsa"].startswith("1.1.2="), default["pypsa"]
+    assert default["highspy"].startswith("1.14.0="), default["highspy"]
+    assert default["linopy"].startswith("0.8.0="), default["linopy"]
 
 
 @pytest.mark.parametrize("platform", _PLATFORMS)

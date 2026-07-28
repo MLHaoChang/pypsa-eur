@@ -85,11 +85,15 @@ geopy = ">=2.4.1"
 glpk = ">=5.0"
 graphviz = ">=12.2.1"
 gurobi = ">=12.0.3"
-highspy = ">=1.12.0"
+# The LP solver. Pinned for the same reason as pypsa: a solver change moves
+# optimisation results, and this workstream is about windows and shutdown.
+highspy = "==1.14.0"
 ipython = ">=9.7.0"
 jpype1 = ">=1.6.0"
 libgdal-netcdf = ">=3.10.3"
-linopy = ">=0.8,<0.9"
+# The LP modelling layer between pypsa and the solver — pinned alongside them
+# for the same reason, and it is also on the `exclude-newer = "0d"` list.
+linopy = "==0.8.0"
 lxml = ">=6.0.2"
 matplotlib = ">=3.10.7"
 memory_profiler = ">=0.61.0"
@@ -104,7 +108,15 @@ pydantic = ">=2"
 python-dotenv = ">=1.0"
 proj = ">=9.6.2"
 pydeck = ">0.6"  # pypsa fails to import with pydeck <0.6, lower bound was only added from pypsa 1.0.6
-pypsa = ">=0.35.2"
+# PINNED, not a floor. `[exclude-newer] pypsa = "0d"` above deliberately lets
+# pypsa float to the newest release, which is correct for a workspace that is
+# re-locked often — and fatal the moment a second environment is solved
+# independently, because that environment gets today's pypsa while `pixi.lock`
+# still holds the one the tests were written against. CLAUDE.md documents
+# multi-port Link vintage workarounds scoped to 1.1.2 that took five re-solves
+# to converge on. Bump deliberately, with a full re-validation, not as a side
+# effect of adding an environment.
+pypsa = "==1.1.2"
 pyscipopt = ">=5.6.0"
 pytables = ">=3.10.2"
 python = ">=3.10"
@@ -223,105 +235,15 @@ generate-config = "pytest test/test_config_schema.py --fix"
 # venv, because freezing the conda env produces a build that works on the
 # developer's box and fails on a clean machine.
 [feature.desktop.dependencies]
-# Pinned DOWN to what `default` has locked, because the shell runs the
-# pypsa-gui backend and the backend suite runs in `default`. Solved freely, a
-# new environment does not reproduce an old lock — it takes today's newest, and
-# `[exclude-newer] pypsa = "0d"` at the top of this file deliberately lets pypsa
-# float. Measured: an unpinned `desktop` resolved pypsa 1.2.4 against the
-# suite's 1.1.2, plus numpy, scipy and highspy — 112 of 514 packages.
+# Intentionally empty of version pins. `desktop` shares a SOLVE GROUP with
+# `default` (see `[environments]`), so every package the two have in common is
+# guaranteed identical by the solver rather than by an enumerated list here.
 #
-# That matters concretely: CLAUDE.md documents multi-port-Link vintage
-# workarounds scoped to PyPSA 1.1.2 that took five re-solves to converge on,
-# and highspy is the LP solver PyPSA-Eur itself optimises with.
-#
-# The FIRST attempt pinned only `python`, on the theory that the interpreter
-# was the divergence. It was one of 112. The second attempt put both
-# environments in a solve-group, which does make them agree — by dragging
-# `default` UP to pypsa 1.2.4, numpy 2.5.1 and highspy 1.15.1, re-solving the
-# environment `snakemake -call` uses. Pinning here is the only direction that
-# leaves the model environment untouched.
-#
-# `python` and `pandas` are pinned per-platform BELOW, not here: `default`
-# itself resolves different versions per platform (python 3.13.13 on osx,
-# 3.13.0 on win-64, 3.12.13 on linux-64; pandas 3.0.3 on win-64 and 2.3.3
-# elsewhere), so no single value can match it. The previous `python = "3.13.*"`
-# could never hold on linux-64 and silently created a split there.
-#
-# `tests/test_desktop_environment.py` holds the authoritative list and compares
-# version AND build string. Its `_CORE` is deliberately WIDER than the pins
-# here: a name it lists that already agrees between the two environments needs
-# no pin, and adding a pin that already agrees changes nothing. What the test
-# guarantees is that any future drift in one of those names fails the suite —
-# not that the two lists are the same length.
-#
-# Full parity is NOT achieved. Measured residual: 111 / 111 / 116 / 137
-# differing conda packages on osx-arm64 / osx-64 / win-64 / linux-64.
-#
-# Do NOT restate that the residual is invisible to the backend. That claim has
-# now been wrong twice: `anyio` was in the import closure the first time, and
-# `pillow`, `websockets`, `backports.zstd`, `libsqlite`, `openssl` and
-# `polars-runtime-32` the second. The residual also includes the BLAS stack —
-# on win-64 `desktop` resolves NETLIB reference BLAS with no OpenBLAS at all.
-# Closing it needs a solve-group, which re-solves `default` and upgrades the
-# model environment.
-pypsa = "==1.1.2"
-numpy = "==2.4.4"
-# The LP solver PyPSA calls. A different build here changes optimisation
-# results, which is the one thing this workstream must not touch.
-highspy = "==1.14.0"
-sqlalchemy = "==2.0.49"
-alembic = "==1.18.4"
-matplotlib = "==3.10.9"
-# Everything below is in the BACKEND'S IMPORT CLOSURE, measured by importing
-# pypsa/fastapi/starlette/uvicorn/sqlalchemy/pydantic/alembic/anthropic and
-# reading `sys.modules`. An earlier round pinned only what the backend imports
-# DIRECTLY (4 packages) and claimed the rest was invisible to it; 16 were not,
-# `anyio` among them — the async runtime under starlette and uvicorn, which is
-# the layer the shell's bounded-shutdown design rests on.
-anyio = "==4.13.0"
-certifi = "==2026.4.22"
-charset-normalizer = "==3.4.7"
-geopandas = "==1.1.3"
-greenlet = "==3.5.0"
-idna = "==3.13"
-narwhals = "==2.21.0"
-numexpr = "==2.14.1"
-plotly = "==6.6.0"
-# noarch, so one build for all platforms; version alone let a rebuild through.
-polars = { version = "==1.40.1", build = "pyh58ad624_0" }
-pydeck = "==0.9.2"
-requests = "==2.34.1"
-tqdm = "==4.67.3"
-typing-extensions = "==4.15.0"
-ujson = "==5.12.0"
-
-[feature.desktop.target.osx-arm64.dependencies]
-# Build pinned, not just version: both environments resolved scipy
-# 1.17.1 while shipping different binaries (_0 vs _1).
-scipy = { version = "==1.17.1", build = "py313hc753a45_0" }
-python = "==3.13.13"
-pandas = "==2.3.3"
-
-[feature.desktop.target.osx-64.dependencies]
-# Build pinned, not just version: both environments resolved scipy
-# 1.17.1 while shipping different binaries (_0 vs _1).
-scipy = { version = "==1.17.1", build = "py313h9cbb6b6_0" }
-python = "==3.13.13"
-pandas = "==2.3.3"
-
-[feature.desktop.target.win-64.dependencies]
-# Build pinned, not just version: both environments resolved scipy
-# 1.17.1 while shipping different binaries (_0 vs _1).
-scipy = { version = "==1.17.1", build = "py313he51e9a2_0" }
-python = "==3.13.0"
-pandas = "==3.0.3"
-
-[feature.desktop.target.linux-64.dependencies]
-# Build pinned, not just version: both environments resolved scipy
-# 1.17.1 while shipping different binaries (_0 vs _1).
-scipy = { version = "==1.17.1", build = "py312h54fa4ab_0" }
-python = "==3.12.13"
-pandas = "==2.3.3"
+# Three earlier attempts are recorded in `tests/test_desktop_environment.py`
+# so they are not retried: pinning `python` alone, pinning a curated "core"
+# list, and pinning that list plus the backend's import closure. None
+# converged — the last still left win-64 on NETLIB reference BLAS with no
+# OpenBLAS, invisible because numpy and scipy were pinned identically.
 
 [feature.desktop.pypi-dependencies]
 pywebview = "*"
@@ -333,4 +255,15 @@ pytest = ">=8.4.2"
 doc = { features = ["doc"], no-default-feature = true }
 test = ["test", "dev"]
 dev = ["dev"]
-desktop = ["desktop"]
+# ONE solve group. `desktop` runs the pypsa-gui backend and the backend suite
+# runs in `default`, so the two must resolve identically or the app that ships
+# is not the app that was tested. Solved independently they did not, and three
+# rounds of pinning package-by-package never converged: the last round still
+# had `desktop` on NETLIB reference BLAS with no OpenBLAS at all on win-64,
+# invisible because numpy and scipy were pinned identically.
+#
+# A solve group makes them agree by construction rather than by enumeration.
+# The cost is that `default` is re-solved — which is why pypsa, highspy and
+# linopy are pinned above.
+default = { solve-group = "gui" }
+desktop = { features = ["desktop"], solve-group = "gui" }
