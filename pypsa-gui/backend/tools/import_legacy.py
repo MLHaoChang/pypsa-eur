@@ -71,6 +71,8 @@ def _print_report(report) -> None:
         print(f"imported:     {name}")
     for name in report.already_imported:
         print(f"already here: {name}")
+    for line in report.skipped:
+        print(f"not a project: {line}")
     for line in report.collisions:
         print(f"collision:    {line}")
     for line in report.failed:

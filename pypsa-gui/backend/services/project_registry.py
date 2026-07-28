@@ -367,8 +367,13 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
     # collision — the directory is the caller's own — but it IS still a move:
     # skipping it leaves the row saying `renamed study` while the directory is
     # `Renamed Study`, which resolves on APFS and NTFS and does not resolve on
-    # any case-sensitive filesystem. `os.replace` performs a case-only rename
-    # correctly on all three platforms.
+    # any case-sensitive filesystem. `os.replace` performs a case-only
+    # rename correctly on macOS and Linux, VERIFIED on APFS (which also
+    # rewrites the stored form to NFC). NOT verified on Windows, where it is
+    # `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` and Microsoft documents
+    # that flag as unusable when either name is a directory. If it raises there
+    # the failure path is still correct — `_compensate` restores both columns
+    # and re-raises — so this is a portability question, not a data one.
     if old_dir.exists() and old_dir != new_dir:
         try:
             new_dir.parent.mkdir(parents=True, exist_ok=True)

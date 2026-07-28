@@ -58,9 +58,15 @@ def legacy_tree(tmp_path):
     # Not projects.
     (root / "archive.pypsaproj.zip").write_bytes(b"PK\x03\x04not-really")
     _write_project(root, "Empty Folder", network=False)
-    # The org-scoped tree: UUID-named, `network.nc` one level DOWN.
+    # The org-scoped tree: UUID-named, `network.nc` one level DOWN. This is
+    # the shape the real tree has, and it holds a solved network — see
+    # `test_projects_inside_the_org_tree_are_importable`.
     org_tree = root / str(uuid.uuid4())
-    _write_project(org_tree, str(uuid.uuid4()))
+    nested = _write_project(org_tree, str(uuid.uuid4()))
+    # The org layout carries no display name; that lived in the database.
+    (nested / "metadata.json").write_text(
+        json.dumps({"parent_project": None, "bus_count": 3}), encoding="utf-8"
+    )
 
     return root
 
@@ -89,10 +95,9 @@ def test_a_directory_without_a_network_is_skipped(legacy_tree):
 
 def test_the_org_tree_is_flagged_not_imported(legacy_tree):
     """
-    Its `network.nc` is at depth 2, so a content check that recursed would
-    import the whole org root as one project. `--rebase-db` handles it
-    separately, because the row that points into it is the only DB-tracked
-    project on this machine.
+    The CONTAINER is not a project — its `network.nc` is at depth 2, so a
+    recursive content check would import the whole org root as one. The
+    projects INSIDE it are imported; see the org-tree tests below.
     """
     org_entries = [p for p in inventory(legacy_tree) if p.skip_reason == "org-scoped tree"]
     assert len(org_entries) == 1
@@ -100,8 +105,12 @@ def test_the_org_tree_is_flagged_not_imported(legacy_tree):
 
 
 def test_the_importable_set_is_exactly_the_projects(legacy_tree):
-    """The whole classification in one assertion: eight in, three out."""
-    assert sorted(p.dir_name for p in inventory(legacy_tree) if p.importable) == sorted([
+    """The whole classification in one assertion — and the nested project the
+    original phase silently dropped."""
+    found = sorted(p.dir_name for p in inventory(legacy_tree) if p.importable)
+    nested = [d for d in found if "/" in d]
+    assert len(nested) == 1, found
+    assert [d for d in found if "/" not in d] == sorted([
         "4_nodes_N-1",
         "Belgium Grid",
         "H2 Demand 250MW",
@@ -198,3 +207,57 @@ def test_two_installs_get_different_ids(tmp_path, monkeypatch):
     first = install_id()
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "b"))
     assert install_id() != first
+
+
+# ── The org tree holds real projects (review finding F1) ────────────────────
+
+def test_projects_inside_the_org_tree_are_importable(legacy_tree):
+    """
+    Phase 1b classified `<org_uuid>/` as "org-scoped tree", dropped it, and did
+    not even report it — while the tree it was written against held a SOLVED
+    3-bus, 8760-snapshot network with its chat, layout and time series.
+    `--rebase-db` does not cover it either: that walks database ROWS, and a
+    fresh desktop install has no row for it.
+    """
+    entries = inventory(legacy_tree)
+    nested = [p for p in entries if "/" in p.dir_name]
+
+    assert len(nested) == 1, [p.dir_name for p in nested]
+    assert nested[0].importable
+    assert nested[0].has_network
+
+
+def test_the_org_container_itself_is_reported_but_never_imported(legacy_tree):
+    """It is not a project — its `network.nc` is one level down — but the user
+    must be able to see that the importer noticed it."""
+    containers = [p for p in inventory(legacy_tree) if p.skip_reason == "org-scoped tree"]
+    assert len(containers) == 1
+    assert not containers[0].importable
+
+
+def test_a_uuid_named_project_gets_a_findable_name(legacy_tree):
+    """
+    The org layout stores no display name — it lived in the database the tree
+    was detached from. A UUID directory would satisfy the importer and defeat
+    E1, so the fallback has to be something a user recognises and can rename.
+    """
+    nested = next(p for p in inventory(legacy_tree) if "/" in p.dir_name)
+    assert not nested.name.startswith("Imported project ") or len(nested.name) < 40
+    uuid_part = nested.dir_name.split("/")[1]
+    assert nested.name != uuid_part
+
+
+def test_only_one_level_is_descended(tmp_path):
+    """`rglob` would mistake a project's own `snapshots/` and `uploads/`
+    subtrees for sibling projects."""
+    root = tmp_path / "projects"
+    org = root / str(uuid.uuid4())
+    project = org / str(uuid.uuid4())
+    deep = project / "snapshots" / "2026-01-01-a"
+    deep.mkdir(parents=True)
+    (deep / "network.nc").write_text("snapshot", encoding="utf-8")
+    (project / "network.nc").write_text("network", encoding="utf-8")
+
+    nested = [p for p in inventory(root) if p.importable]
+    assert len(nested) == 1
+    assert nested[0].path == project

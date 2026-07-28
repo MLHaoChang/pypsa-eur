@@ -163,6 +163,7 @@ def _persist_import_report(report, source) -> None:
             "at": datetime.now(tz=timezone.utc).isoformat(),
             "imported": report.imported,
             "already_imported": report.already_imported,
+            "skipped": report.skipped,
             "collisions": report.collisions,
             "failed": report.failed,
             "warnings": report.warnings,

@@ -2200,7 +2200,9 @@ def delete_project(
 
 def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> ProjectInfo:
     """
-    Auth-mode rename. The storage dir is UUID-keyed so it never moves — only
+    Auth-mode rename. Phase 1b (E1) put the project's NAME on disk, so in
+    LOCAL mode `project_registry.rename_project` MOVES the directory too (and
+    refuses while a solve holds it); in web mode only
     the DB ``name`` (and the metadata.json name/parent pointers used for bundle
     round-trips) change. Permission mirrors delete (org admin, tree-root
     creator, or the scenario's own creator).

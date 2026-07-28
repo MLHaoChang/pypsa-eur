@@ -689,3 +689,37 @@ def test_the_solve_guard_reads_the_real_queue(db_session, projects_root, desktop
     a change to `list_jobs()`'s shape is caught."""
     project = _seed_project(db_session, name="Belgium Grid", storage_path="Belgium Grid")
     assert project_registry._queued_job_blocks_rename(project) is False
+
+
+def test_the_solve_guard_refuses_against_a_REAL_queued_job(
+    db_session, projects_root, desktop_layout
+):
+    """
+    The other guard test monkeypatches the predicate away and this one drives
+    it: `_queued_job_blocks_rename` reads `project_key` and `status` out of
+    `SolveJob.to_public()`, so renaming either field would turn the guard into
+    a permanent `False` with both other tests still green — and this guard is
+    the only thing between a rename and a stale job saving over a DIFFERENT
+    project.
+    """
+    from services.solve_queue import solve_queue
+
+    project = _seed_project(db_session, name="Belgium Grid", storage_path="Belgium Grid")
+    directory = projects_root / "Belgium Grid"
+    directory.mkdir()
+    (directory / "network.nc").write_text("payload", encoding="utf-8")
+
+    job = solve_queue.enqueue(
+        project.name,
+        project_key=project_registry.registry_key(project),
+        storage_dir=str(directory),
+    )
+    try:
+        assert project_registry._queued_job_blocks_rename(project) is True
+
+        with pytest.raises(HTTPException) as exc:
+            project_registry.rename_project(db_session, project, "New Name")
+        assert exc.value.status_code == 409
+        assert (directory / "network.nc").exists()
+    finally:
+        solve_queue.abort(job.id)

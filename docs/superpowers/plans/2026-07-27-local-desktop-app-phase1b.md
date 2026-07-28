@@ -74,6 +74,31 @@ port 8125 with a fresh app-data directory, first run:
   after the rehearsal and again after acceptance
 - `~/Library/Application Support/PyPSA GUI/` never created
 
+**Six review rounds, four of them REJECT.** The findings are recorded in the
+commits that fixed them; the shape worth carrying forward is that *every fix
+made without a failing test first became the next round's finding*. Three of
+the five defects in round six were introduced by round five's remediation, and
+the case-only-rename defect was caught by the live e2e rather than the suite —
+on a case-insensitive filesystem the broken version passes every assertion that
+only checks "the project still opens".
+
+**Residual risks accepted rather than fixed:**
+
+- **The idempotence key is unstable across a Documents relocation.** Both the
+  receipt and the ledger key on `str(dest_root)`, which is `.resolve()`d.
+  Turning on macOS *Desktop & Documents in iCloud* changes that string, so
+  every receipt stops matching and the legacy tree re-imports as `Name (2)`.
+  `source_root_str` fixed this class of problem on the SOURCE side; the
+  destination side carries the same exposure.
+- **A sub-millisecond window where the ledger misses a project.** A kill
+  between the row commit and the manifest rewrite leaves a project imported but
+  unrecorded. The next run recognises it by receipt and still never adds it, so
+  a later user delete resurrects it once. Too small to chase, worth knowing.
+- **`os.replace` on a case-only DIRECTORY rename is unverified on Windows** —
+  it is `MoveFileExW` with a flag Microsoft documents as unusable on
+  directories. The failure path is correct if it raises, so this is
+  portability, not data.
+
 **Still open, deliberately.** `pypsa-gui/backend/projects/` is still in the
 checkout: `--forget-legacy` is a user action and Task 9 does not run it, so
 `git clean -xdf` can still delete 113 MB. Task 0's verified tarball is at
@@ -81,7 +106,16 @@ checkout: `--forget-legacy` is a user action and Task 9 does not run it, so
 path is in `~/.pypsa-phase1b-backup-path`. `smoke/qa_e2e.py:289,639` hardcode
 `BACKEND_DIR / "projects"` and will self-skip once the tree is retired; they
 are not in the pytest gate, so nothing goes red — which is why it is written
-down. `--rebase-db` has not been run against `auth_dev.db`, so
+down.
+
+The importable count is **13, not 12**: the final review found that the
+org-scoped tree holds a real solved 3-bus, 8760-snapshot network with its chat,
+layout and time series, and that NOTHING in the phase imported it — it was
+classified `org-scoped tree`, dropped, and not even reported, while
+`--rebase-db` only walks database rows and a fresh install has none. The
+importer now descends exactly one level into an org tree. That project has no
+display name (it lived in the database the tree was detached from), so it
+arrives as `Imported project <8 hex>` for the user to rename. `--rebase-db` has not been run against `auth_dev.db`, so
 `3_nodes_system` is still absolute into the checkout.
 
 ---

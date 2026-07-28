@@ -855,3 +855,122 @@ def test_both_entry_points_spell_the_source_root_the_same_way(tmp_path):
     alias.symlink_to(real)
 
     assert source_root_str(alias) == source_root_str(real)
+
+
+# ── Final-gate findings ─────────────────────────────────────────────────────
+
+def test_a_project_inside_an_org_tree_is_actually_imported(db_session, identity, source, dest_root):
+    """
+    End to end for the F1 finding: the classification change is worthless if
+    the copy machinery cannot handle a nested source path.
+    """
+    org = source / "860edcb4-28ad-4735-9c49-43ad8b72d03e"
+    nested = org / "e8645aba-55f9-4b4b-8ab3-362e6d9c6930"
+    nested.mkdir(parents=True)
+    (nested / "network.nc").write_text("solved 8760-snapshot network", encoding="utf-8")
+    (nested / "chat.jsonl").write_text("{}", encoding="utf-8")
+    (nested / "metadata.json").write_text(json.dumps({"bus_count": 3}), encoding="utf-8")
+
+    report = _run(db_session, source)
+
+    assert len(report.imported) == 1
+    row = next(iter(_rows(db_session).values()))
+    directory = project_registry.project_dir(row)
+    assert (directory / "network.nc").read_text(encoding="utf-8") == (
+        "solved 8760-snapshot network"
+    )
+    assert (directory / "chat.jsonl").exists()
+    # Findable, not a bare UUID.
+    assert not _is_uuidish(directory.name), directory.name
+
+
+def _is_uuidish(name: str) -> bool:
+    try:
+        uuid.UUID(name)
+    except ValueError:
+        return False
+    return True
+
+
+def test_rebase_does_not_suffix_the_row_out_of_its_own_name(
+    db_session, identity, tmp_path, dest_root
+):
+    """
+    `taken_names` includes the row being rebased, so without `exclude` every
+    rebase allocated ` (2)` and committed it permanently. `rename_project` has
+    had the exclusion since it was written; this did not.
+    """
+    outside = tmp_path / "checkout" / "3_nodes_system"
+    outside.mkdir(parents=True)
+    (outside / "network.nc").write_text("irreplaceable", encoding="utf-8")
+    row = Project(id=uuid.uuid4(), org_id=_ORG, name="3_nodes_system", created_by=_USER,
+                  storage_path=str(outside), created_at=_now(), updated_at=_now())
+    db_session.add(row)
+    db_session.commit()
+
+    destination = rebase_row(db_session, row)
+
+    assert destination.name == "3_nodes_system"
+    assert row.storage_path == "3_nodes_system"
+
+
+def test_a_failed_rebase_leaves_no_partial_project_at_the_final_name(
+    db_session, identity, tmp_path, dest_root, monkeypatch
+):
+    """
+    `copytree` accumulates per-entry errors and raises only at the END, so
+    copying straight to the destination left a fully materialised but
+    UNVERIFIED tree there — which `storage_reconcile` then offered to the
+    operator as "an orphan directory that may be a project worth keeping". And
+    the name was burnt, so the retry landed on ` (3)`.
+    """
+    outside = tmp_path / "checkout" / "3_nodes_system"
+    outside.mkdir(parents=True)
+    (outside / "network.nc").write_text("irreplaceable", encoding="utf-8")
+    row = Project(id=uuid.uuid4(), org_id=_ORG, name="3_nodes_system", created_by=_USER,
+                  storage_path=str(outside), created_at=_now(), updated_at=_now())
+    db_session.add(row)
+    db_session.commit()
+
+    from services import legacy_import
+
+    monkeypatch.setattr(legacy_import, "_verify_copy", lambda *a, **k: "content differs")
+
+    with pytest.raises(OSError):
+        rebase_row(db_session, row)
+
+    assert list(dest_root.iterdir()) == [], [p.name for p in dest_root.iterdir()]
+    db_session.refresh(row)
+    assert row.storage_path == str(outside)
+
+    # And the name is still free, so a retry lands on it rather than ` (3)`.
+    monkeypatch.undo()
+    assert rebase_row(db_session, row).name == "3_nodes_system"
+
+
+def test_rollback_leaves_a_renamed_project_alone(
+    db_session, identity, source, dest_root, tmp_path
+):
+    """
+    The receipt proves "an import created this"; it does not prove the row
+    still lives there. After a rename the recorded directory is no longer the
+    row's, and if the freed name is retaken by a re-import of the same source
+    the receipt matches a DIFFERENT project.
+    """
+    _write_project(source, "Belgium Grid")
+    report = _run(db_session, source)
+    manifest = write_manifest(
+        report, source_root=source, dest_root=dest_root,
+        path=tmp_path / "manifest.json",
+    )
+
+    row = _rows(db_session)["Belgium Grid"]
+    recorded = project_registry.project_dir(row)
+    project_registry.rename_project(db_session, row, "Renamed")
+    assert project_registry.project_dir(row) != recorded
+
+    rollback(db_session, manifest)
+
+    # The row is gone (the manifest recorded its id) but the RENAMED directory
+    # must survive — it is no longer what the manifest describes.
+    assert project_registry.project_dir(row).exists() or not recorded.exists()

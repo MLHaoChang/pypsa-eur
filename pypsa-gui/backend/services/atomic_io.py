@@ -54,9 +54,17 @@ def atomic_write_with(path: pathlib.Path, writer: Callable[[pathlib.Path], objec
         raise
 
 
-def atomic_write_text(path: pathlib.Path, text: str) -> None:
-    """Atomic-replace shortcut for JSON / config writes."""
-    atomic_write_with(path, lambda p: p.write_text(text))
+def atomic_write_text(path: pathlib.Path, text: str, encoding: str = "utf-8") -> None:
+    """
+    Atomic-replace shortcut for JSON / config writes.
+
+    `encoding` is explicit and defaults to UTF-8. `Path.write_text()` without
+    it uses the LOCALE codec, which is cp1252 on a stock Windows box — and
+    every reader in this codebase passes `encoding="utf-8"`. Today's callers
+    all pass `json.dumps(...)`, which is ASCII by default, so nothing was
+    broken; the first non-ASCII caller would have mojibaked or raised.
+    """
+    atomic_write_with(path, lambda p: p.write_text(text, encoding=encoding))
 
 
 def atomic_write_bytes(path: pathlib.Path, data: bytes) -> None:

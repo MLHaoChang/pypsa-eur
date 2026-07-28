@@ -67,6 +67,7 @@ from services import project_registry
 from services.atomic_io import atomic_write_text
 from services.safe_names import unique_dir_name
 from services.storage_paths import (
+    allocate_storage_path,
     storage_path_for,
     storage_value,
     taken_names,
@@ -180,13 +181,51 @@ def _classify(entry: Path) -> str | None:
     if not entry.is_dir():
         return "not a directory"
     if _is_uuid_named(entry.name):
-        # The org-scoped tree: `<org>/<project>/network.nc`. Its network is one
-        # level down, so a recursive content check would import the whole org
-        # root as a single project. `--rebase-db` handles it separately.
+        # An org-scoped tree, `<org>/<project>/network.nc`. Not a project
+        # itself — its network is one level down — but the projects INSIDE it
+        # are real and `_org_tree_children` imports them.
         return "org-scoped tree"
     if not (entry / "network.nc").exists():
         return "no network.nc"
     return None
+
+
+def _org_tree_children(entry: Path) -> list[Path]:
+    """
+    The real projects inside an org-scoped tree.
+
+    A review found the tree this phase was written against holds a solved
+    3-bus, 8760-snapshot network with its chat, layout and time series — and
+    NOTHING shipped in phase 1b imported it. It was classified `org-scoped
+    tree`, dropped, and not even reported: `--rebase-db` only walks database
+    ROWS, and a fresh desktop install has no row for it.
+
+    So descend exactly one level. Not `rglob`: one level is the org layout, and
+    anything deeper is a project's own subtree (`snapshots/`, `uploads/`) that
+    must never be mistaken for a sibling project.
+    """
+    try:
+        return sorted(
+            child
+            for child in entry.iterdir()
+            if child.is_dir() and (child / "network.nc").exists()
+        )
+    except OSError:
+        return []
+
+
+def _org_tree_display_name(child: Path, metadata: dict) -> str:
+    """
+    A findable name for a project that only ever had a UUID.
+
+    The org layout stores no display name — the name lived in the database this
+    tree was detached from. A UUID directory would satisfy the importer and
+    defeat E1, so fall back to something the user can recognise and rename.
+    """
+    name = metadata.get("name")
+    if isinstance(name, str) and name.strip():
+        return name[:_NAME_CAP]
+    return f"Imported project {child.name[:8]}"
 
 
 def inventory(root) -> list[LegacyProject]:
@@ -203,9 +242,36 @@ def inventory(root) -> list[LegacyProject]:
 
     found: list[LegacyProject] = []
     for entry in sorted(root.iterdir()):
-        if entry.name.endswith(STAGING_SUFFIX) or entry.name.startswith("."):
+        if _is_staging(entry.name) or entry.name.startswith("."):
             continue
         skip_reason = _classify(entry)
+
+        if skip_reason == "org-scoped tree":
+            # Report the container as skipped — it is not a project — and then
+            # import each project inside it.
+            found.append(
+                LegacyProject(
+                    path=entry, dir_name=entry.name, name=entry.name,
+                    has_network=False, parent_name=None,
+                    scenario_description=None, skip_reason=skip_reason,
+                )
+            )
+            for child in _org_tree_children(entry):
+                child_meta = _read_metadata(child)
+                parent = child_meta.get("parent_project")
+                found.append(
+                    LegacyProject(
+                        path=child,
+                        dir_name=f"{entry.name}/{child.name}",
+                        name=_org_tree_display_name(child, child_meta),
+                        has_network=True,
+                        parent_name=parent if isinstance(parent, str) else None,
+                        scenario_description=child_meta.get("scenario_description"),
+                        skip_reason=None,
+                    )
+                )
+            continue
+
         metadata = _read_metadata(entry) if entry.is_dir() else {}
         display = metadata.get("name")
         if not isinstance(display, str) or not display.strip():
@@ -395,7 +461,15 @@ def import_all(
     """
     source_root = Path(root)
     report = ImportReport()
-    candidates = [p for p in inventory(source_root) if p.importable]
+    entries = inventory(source_root)
+    candidates = [p for p in entries if p.importable]
+    # `skipped` was declared and never written to, so an entry the importer
+    # decided was not a project vanished from every surface: the CLI report,
+    # `last-import-report.json`, and the log. The user was then told to "check
+    # the import" against a report that could not show them what was left out.
+    report.skipped = [
+        f"{p.dir_name}: {p.skip_reason}" for p in entries if not p.importable
+    ]
     if not candidates:
         return report
 
@@ -652,15 +726,21 @@ def rollback(db: DBSession, manifest_path) -> list[str]:
         # "some import made this" — after a rename frees the name and a later
         # import takes it, that is a different project, also receipt-bearing.
         # The receipt names its own source directory, so cross-check it.
+        row = db.get(Project, uuid.UUID(record["project_id"]))
         receipt = _read_receipt(destination) if destination.is_dir() else None
+        # Three conditions, and the third is the one a review added: the
+        # recorded directory must still be THIS row's. After a rename the row
+        # has moved on, and if the freed name is later retaken by a re-import
+        # of the same source directory the receipt matches a DIFFERENT
+        # project — which rollback would then delete.
         ours = (
             receipt is not None
             and receipt.get("source_dir_name") == record.get("dir_name")
             and receipt.get("dest_root") == manifest.get("dest_root")
+            and (row is None or project_registry.project_dir(row) == destination)
         )
         if ours:
             shutil.rmtree(destination, ignore_errors=True)
-        row = db.get(Project, uuid.UUID(record["project_id"]))
         if row is not None:
             db.delete(row)
         removed.append(record["dir_name"])
@@ -703,33 +783,45 @@ def rebase_row(db: DBSession, row: Project) -> Path:
     dest_root = root / str(row.org_id) if segment else root
     dest_root.mkdir(parents=True, exist_ok=True)
 
-    relative = storage_path_for(
-        row.org_id, row.id, row.name,
-        taken=taken_names(db, row.org_id, segment),
-        org_segment=segment,
+    # `exclude` the row's OWN directory name. `taken_names` includes every row
+    # in the org — including this one — so without it every rebase allocates
+    # ` (2)` and commits that permanently. `rename_project` has had this since
+    # it was written; this function did not.
+    relative = allocate_storage_path(
+        db, row.org_id, row.id, row.name,
+        org_segment=segment, exclude={source.name},
     )
     destination = root / relative
+    staged = _staging_dir(destination.parent, relative.name)
 
     # `dirs_exist_ok=False` is the default and is the point: fail safe if the
     # allocator and the filesystem disagree.
-    # `symlinks=False` for the same reason as `_stage_and_rename`, and this is
-    # the path that matters most: it is the only thing delivering E2 for a row
-    # whose `storage_path` is absolute, which on the machine this was written
-    # for is the only row there is. A preserved link makes `_verify_copy` hash
-    # the same inode twice — a tautology — and `--forget-legacy`, which the CLI
-    # recommends immediately afterwards, then destroys the "imported" project.
-    shutil.copytree(source, destination, symlinks=False, ignore_dangling_symlinks=True)
+    # STAGE, verify, then publish with one rename — the same shape as
+    # `_stage_and_rename`, and for the same reason. Copying straight to the
+    # final name leaves a fully materialised but UNVERIFIED tree there when
+    # `copytree` fails (it accumulates per-entry errors and raises only at the
+    # end) or when the process is killed — and `storage_reconcile` then offers
+    # that partial copy to the operator as "an orphan directory that may be a
+    # project worth keeping". The name is also burnt: `taken_names` reserves
+    # it, so the retry lands on ` (3)`.
+    #
+    # `symlinks=False`: a preserved link would make `_verify_copy` hash the
+    # same inode twice — a tautology — and `--forget-legacy`, which the CLI
+    # recommends immediately afterwards, would destroy the "imported" project.
+    if destination.exists():
+        raise FileExistsError(f"{row.name}: {destination} already exists")
+    if staged.exists():
+        shutil.rmtree(staged, ignore_errors=True)
 
-    # Verify BEFORE touching the session at all. A failure here has not
-    # modified the row, so rolling back would only discard whatever else the
-    # caller had in flight.
     try:
-        _normalise_modes(destination)
-        problem = _verify_copy(source, destination)
+        shutil.copytree(source, staged, symlinks=False, ignore_dangling_symlinks=True)
+        _normalise_modes(staged)
+        problem = _verify_copy(source, staged)
         if problem is not None:
             raise OSError(f"{row.name}: copy verification failed — {problem}")
+        os.rename(staged, destination)
     except Exception:
-        shutil.rmtree(destination, ignore_errors=True)
+        shutil.rmtree(staged, ignore_errors=True)
         raise
 
     previous = row.storage_path
