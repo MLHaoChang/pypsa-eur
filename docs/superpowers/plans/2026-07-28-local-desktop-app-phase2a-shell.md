@@ -108,10 +108,20 @@ git branch --show-current && git status --porcelain && git log --oneline -1
 - [ ] **Step 2: Add the feature, and add `desktop` to the EXISTING `[environments]` table.** `pixi.toml` already declares `[environments]` with `doc`/`test`/`dev`; a second table is a duplicate-key error and `pixi` refuses the manifest.
 
 ```toml
+[feature.desktop.dependencies]
+python = "3.13.*"        # see below — NOT optional
+
 [feature.desktop.pypi-dependencies]
 pywebview = "*"
 ```
 then add `desktop = ["desktop"]` to the existing `[environments]`.
+
+**Pin the interpreter.** Adding a pypi dependency freed the solver to pick a
+newer Python for the new environment: measured, `desktop` resolved **3.14.6**
+while the default environment — the one the 1460 backend tests validate — stayed
+on **3.13.13**. The shell RUNS that backend, so an unpinned desktop environment
+means the tested configuration is not the shipped one, and workstream I would
+freeze against the untested interpreter. Pinning brought it to 3.13.14.
 
 The default environment is not re-solved, but the lock **does** gain a complete new environment across all four platforms — and they resolve different interpreters (linux-64 is on 3.12, the others 3.13). Scope by target if the win-64 leg misbehaves: pywebview pulls `pythonnet` there and `pyobjc-*` on darwin.
 
@@ -119,7 +129,17 @@ The default environment is not re-solved, but the lock **does** gain a complete 
 
 - [ ] **Step 4: Build the SPA** (`npm --prefix pypsa-gui/frontend run build`). Constraint #18: without it the first window opens on a 503 JSON page.
 
-- [ ] **Step 5: Verify a real GUI backend, not just the import.** `import webview` succeeds on Windows with no WebView2 Runtime; the failure is a blank window at render time. Probe the backend, and **on the Windows box** check the runtime is present — that confirms workstream J's bootstrapper requirement now, when it is one line.
+- [ ] **Step 5: Verify a real GUI backend, not just the import.** `import webview` succeeds on Windows with no WebView2 Runtime; the failure is a blank window at render time.
+
+The probe is **`webview.initialize()`**, which returns the platform module and sets `webview.guilib`. It is NOT `webview.guilib.initialize()` — `webview.guilib` is `None` until `initialize()` runs, so that spelling raises `AttributeError: 'NoneType' object has no attribute 'initialize'` and reads like a broken install:
+
+```python
+import webview
+lib = webview.initialize()
+print(lib.renderer)          # macOS: 'wkwebview' (webview.platforms.cocoa)
+```
+
+**On the Windows box** check the WebView2 runtime is present — that confirms workstream J's bootstrapper requirement now, when it is one line.
 
 - [ ] **Step 6: Baseline.** Expect **1460** / 23 / 147. Record the real numbers.
 

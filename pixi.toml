@@ -214,6 +214,25 @@ all-tests = {depends-on = ["integration-tests", "clean-tests", "unit-tests"]}
 
 generate-config = "pytest test/test_config_schema.py --fix"
 
+# Workstream H: the pywebview desktop shell. Deliberately a FEATURE, not a
+# default dependency — the default environment is what `snakemake -call` solves
+# PyPSA-Eur with, and re-solving it to add a GUI toolkit is a risk with no
+# upside. Run the shell with `pixi run -e desktop ...`.
+#
+# PyInstaller is NOT here. D14 builds the frozen app from a separate pip-wheel
+# venv, because freezing the conda env produces a build that works on the
+# developer's box and fails on a clean machine.
+[feature.desktop.dependencies]
+# Pinned to the default environment's interpreter. Adding a pypi dependency
+# let the solver pick 3.14 here while the default env — the one the 1460
+# backend tests validate against — stayed on 3.13. The shell RUNS that backend,
+# so a different interpreter means the tested configuration is not the shipped
+# one, and workstream I would freeze against the untested one.
+python = "3.13.*"
+
+[feature.desktop.pypi-dependencies]
+pywebview = "*"
+
 [feature.test.dependencies]
 pytest = ">=8.4.2"
 
@@ -221,3 +240,4 @@ pytest = ">=8.4.2"
 doc = { features = ["doc"], no-default-feature = true }
 test = ["test", "dev"]
 dev = ["dev"]
+desktop = ["desktop"]
