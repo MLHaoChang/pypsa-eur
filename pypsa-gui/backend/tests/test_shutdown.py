@@ -813,3 +813,145 @@ def test_a_sequence_that_raises_still_lets_the_window_close():
     assert handler.wait_for_completion(20)
     assert destroyed == [1], "the window was left un-closable after a failure"
     assert handler.report is not None and handler.report.errors
+
+
+# ── wiring the real collaborators ───────────────────────────────────────────
+
+
+def test_the_resident_contexts_include_the_active_one_exactly_once():
+    """
+    `_active` is a BOOTSTRAP slot, not a member of `_contexts`. After the first
+    request it is usually `None`, and when it is set it may ALSO be registered
+    — so a naive `list(_contexts.values()) + [_active]` either misses the open
+    project or saves it twice. Saving twice is not harmless: the second write
+    goes through `atomic_io` again with `persist_user_ts` computed the same way,
+    so it is wasted 100 MB-scale I/O during a quit the user is waiting on.
+    """
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.build_context()
+    PyPSAService._contexts["shutdown-test"] = ctx
+    PyPSAService._active = ctx
+    try:
+        contexts = shutdown_service.resident_contexts()
+
+        assert contexts.count(ctx) == 1, "the active context appears twice"
+    finally:
+        PyPSAService._contexts.pop("shutdown-test", None)
+        PyPSAService._active = None
+
+
+def test_a_registered_context_that_is_not_active_is_still_flushed():
+    """
+    The other direction, and it was untested: both earlier tests put the
+    context in `_active`, so deleting the registry walk entirely left them
+    green. `RESIDENT_CAP` is 5, so up to four projects can hold unsaved edits
+    while not being the open one — LRU eviction and the solve queue both put
+    them there.
+    """
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.build_context()
+    PyPSAService._contexts["registered-not-active"] = ctx
+    PyPSAService._active = None
+    try:
+        assert ctx in shutdown_service.resident_contexts()
+    finally:
+        PyPSAService._contexts.pop("registered-not-active", None)
+
+
+def test_an_active_context_that_was_never_registered_is_still_flushed():
+    """
+    The case that loses work. `adopt_process_foreground()` hands `_active` out
+    and CLEARS it, so a session-less caller — which is exactly the desktop
+    configuration — gets a freshly created context that is in NO registry. Miss
+    it and the open project's unsaved edits are the ones that go.
+    """
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.build_context()
+    PyPSAService._active = ctx
+    try:
+        assert ctx in shutdown_service.resident_contexts()
+    finally:
+        PyPSAService._active = None
+
+
+def test_stopping_the_executor_cancels_pending_work_but_does_not_hang():
+    """
+    Constraint #10: `chat_service` creates a module-level `ThreadPoolExecutor`
+    that is never shut down, and CPython's atexit joiner blocks interpreter
+    exit on it. `cancel_futures=True` cancels only PENDING work — a running
+    tool call still has to finish — so this is necessary, not sufficient, and
+    the bounded server exit is what makes it safe.
+    """
+    import concurrent.futures
+
+    # Its OWN executor. The first version shut down the real, shared one and
+    # passed only because pytest runs `test_chat_*.py` alphabetically earlier —
+    # any future test file sorting after this one would have been poisoned by
+    # it, and the failure would look like a bug in that file.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    executor.submit(time.sleep, 0.05)
+    started = time.monotonic()
+
+    shutdown_service.stop_tool_executor(executor)
+
+    assert time.monotonic() - started < 10
+
+
+def test_the_executor_shutdown_does_not_WAIT_for_running_work():
+    """
+    `wait=False` is the point and it was untested — the earlier test submitted
+    a 50 ms task, so `wait=True` returned just as fast and the mutant survived.
+
+    This submits work that outlasts any reasonable quit. A running tool call
+    cannot be cancelled (`cancel_futures` reaches only PENDING work), so
+    waiting for it would hold the window open for as long as the model takes.
+    """
+    import concurrent.futures
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    executor.submit(time.sleep, 30)
+    time.sleep(0.1)                      # let it actually start
+    started = time.monotonic()
+
+    shutdown_service.stop_tool_executor(executor)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2, (
+        f"waited {elapsed:.1f}s for a running tool call — the quit would hang "
+        "for as long as the model takes"
+    )
+
+
+def test_a_failing_executor_shutdown_is_swallowed():
+    """
+    Step 7 must never be the reason a window will not close. Untested before:
+    no test passed an executor whose `shutdown` raises, so narrowing the
+    `except` to a type that never fires changed nothing.
+    """
+    class _Hostile:
+        def shutdown(self, **kwargs):
+            raise RuntimeError("executor is in a bad way")
+
+    shutdown_service.stop_tool_executor(_Hostile())   # must not raise
+
+
+def test_the_executor_it_stops_by_default_is_the_chat_tool_executor():
+    """
+    The wiring, asserted WITHOUT shutting the shared executor down. Otherwise
+    the test above proves only that some ThreadPoolExecutor can be stopped.
+    """
+    from services import chat_service
+
+    assert shutdown_service._default_tool_executor() is chat_service._TOOL_EXECUTOR
+
+
+def test_stopping_the_executor_twice_is_not_an_error():
+    """The shutdown path can run twice; a second call must not raise."""
+    import concurrent.futures
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    shutdown_service.stop_tool_executor(executor)
+    shutdown_service.stop_tool_executor(executor)

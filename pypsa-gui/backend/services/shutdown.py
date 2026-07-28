@@ -269,6 +269,63 @@ def abort_and_wait(
     return ok and finished
 
 
+def resident_contexts() -> list[Any]:
+    """
+    Every context holding possibly-unsaved work, the active one included, with
+    no duplicates.
+
+    `_active` is a BOOTSTRAP slot rather than a member of `_contexts`, and the
+    two overlap unpredictably: `adopt_process_foreground()` hands `_active` out
+    and CLEARS it, so a session-less caller — the desktop configuration
+    exactly — ends up with a context in no registry at all. Iterating only
+    `_contexts` therefore misses the OPEN project, which is the one whose
+    unsaved edits matter most. Concatenating blindly saves it twice, which is
+    wasted 100 MB-scale I/O during a quit the user is watching.
+
+    `RESIDENT_CAP` is 5 by default, so this is a handful of projects.
+    """
+    from services.pypsa_service import PyPSAService
+
+    found: list[Any] = []
+    for ctx in list(PyPSAService._contexts.values()):
+        if ctx is not None and not any(ctx is seen for seen in found):
+            found.append(ctx)
+
+    active = PyPSAService._active
+    if active is not None and not any(active is seen for seen in found):
+        found.append(active)
+    return found
+
+
+def _default_tool_executor():
+    from services.chat_service import _TOOL_EXECUTOR
+
+    return _TOOL_EXECUTOR
+
+
+def stop_tool_executor(executor: Any = None) -> None:
+    """
+    Step 7. `chat_service` creates a module-level `ThreadPoolExecutor` that is
+    never shut down, and CPython's atexit joiner blocks interpreter exit on it.
+
+    `cancel_futures=True` cancels only PENDING work — a tool call already
+    running still has to finish — so this is necessary and NOT sufficient. The
+    bounded server exit and, past that, the hard exit are what make quitting
+    actually terminal.
+
+    `wait=False`: this runs inside a shutdown the user is waiting on, and a
+    long-running tool call must not extend it.
+    """
+    try:
+        (executor if executor is not None else _default_tool_executor()).shutdown(
+            wait=False, cancel_futures=True,
+        )
+    except Exception:
+        # Idempotent by requirement — the shutdown path can run twice — and a
+        # failure here must never be the reason a window will not close.
+        logger.exception("stopping the chat tool executor failed")
+
+
 def shutdown_sequence(
     *,
     gate: Callable[[], None] = gate_mutations,
