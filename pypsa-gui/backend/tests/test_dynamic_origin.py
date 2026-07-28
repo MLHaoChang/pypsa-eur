@@ -131,6 +131,35 @@ def test_csrf_origin_gate_still_rejects_a_foreign_origin(monkeypatch):
         _reset()
 
 
+def test_the_launcher_origin_is_the_one_the_allowlist_accepts(monkeypatch):
+    """
+    The seam between the desktop shell and this file's contract (phase 2a,
+    Task 2). Above, the allowlist is driven by a hand-written string; here it
+    is driven by the one the launcher actually emits, parsed by the real
+    `_normalise_origin`.
+
+    The chain is URL -> Origin -> allowlist, all three from the launcher, so a
+    host that disagreed between `app_url` and `build_environment` — `localhost`
+    in one and `127.0.0.1` in the other, which is exactly the mistake macOS
+    invites — fails here rather than at the first mutation from the window.
+    """
+    from desktop import launcher
+
+    port = 51234
+    monkeypatch.setenv(
+        "CORS_ALLOWED_ORIGINS", launcher.build_environment(port)["CORS_ALLOWED_ORIGINS"]
+    )
+    _reset()
+    try:
+        origin = security.origin_of_referer(launcher.app_url(port))
+        assert origin == "http://127.0.0.1:51234"
+        assert security.is_allowed_origin(origin) is True
+        # The name and the number are different origins to a browser.
+        assert security.is_allowed_origin("http://localhost:51234") is False
+    finally:
+        _reset()
+
+
 def test_local_mode_mutation_is_not_403ed_from_an_ephemeral_origin(
     _auth_db, monkeypatch, tmp_path,
 ):
