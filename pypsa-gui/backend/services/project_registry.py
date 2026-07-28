@@ -362,7 +362,14 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
             status_code=409, detail=f"Project '{new_name}' already exists"
         ) from exc
 
-    if old_dir.exists() and not _same_dir(old_dir, new_dir):
+    # BYTE-WISE here, unlike the collision check above, and the difference is
+    # the whole point of having two predicates. A case-only rename is not a
+    # collision — the directory is the caller's own — but it IS still a move:
+    # skipping it leaves the row saying `renamed study` while the directory is
+    # `Renamed Study`, which resolves on APFS and NTFS and does not resolve on
+    # any case-sensitive filesystem. `os.replace` performs a case-only rename
+    # correctly on all three platforms.
+    if old_dir.exists() and old_dir != new_dir:
         try:
             new_dir.parent.mkdir(parents=True, exist_ok=True)
             os.replace(old_dir, new_dir)

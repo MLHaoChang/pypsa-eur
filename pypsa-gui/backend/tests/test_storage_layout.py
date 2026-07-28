@@ -641,6 +641,16 @@ def test_a_case_only_rename_is_not_refused(db_session, projects_root, desktop_la
         encoding="utf-8"
     ) == "payload"
 
+    # And the DIRECTORY was renamed with it. Treating a case-only rename as
+    # "same directory, nothing to move" leaves the row saying `belgium grid`
+    # while the directory is `Belgium Grid` — which resolves on APFS and NTFS
+    # and does NOT resolve on any case-sensitive filesystem, so the project
+    # vanishes the moment the data is opened on Linux. A live e2e run caught
+    # exactly this after the first attempt at the fix.
+    assert project.storage_path == "belgium grid"
+    on_disk = [p.name for p in projects_root.iterdir() if p.is_dir()]
+    assert on_disk == ["belgium grid"], on_disk
+
 
 def test_a_rename_is_refused_while_a_solve_holds_the_directory(
     db_session, projects_root, desktop_layout, monkeypatch
