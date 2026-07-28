@@ -160,7 +160,7 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
+            onKeyDown={e => { if (e.key === 'Enter') commit() }}
             className="flex-1 px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 font-mono"
             placeholder="my_project"
           />

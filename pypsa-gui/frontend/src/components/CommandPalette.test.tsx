@@ -26,11 +26,15 @@
 // behaviour is exercised by Dialog.test.tsx's two dedicated regression
 // tests (generic, not call-site-specific), not by this one. What this test
 // *does* still protect here: the real, user-facing guarantee that the
-// input is immediately typable on open with no click — which would break
-// if Dialog's initial-focus effect were removed altogether, or if this
-// panel's header ever grew a focusable element ahead of the input (e.g. a
-// filter toggle) without also giving that new element's own claim
-// priority. Keyboard-filling text (rather than only asserting
+// input is immediately typable on open with no click. Note what that does
+// and does not detect. Removing Dialog's initial-focus effect alone does
+// NOT fail this test — PaletteShell's own mount effect still focuses the
+// input — and neither does removing PaletteShell's mount effect alone,
+// since Dialog's fallback then lands on the same node. For this markup the
+// two mechanisms mutually backstop, so the test fails only when BOTH are
+// removed together, or if this panel's header ever grew a focusable
+// element ahead of the input (e.g. a filter toggle) without also giving
+// that new element's own claim priority. Keyboard-filling text (rather than only asserting
 // `document.activeElement`) is kept anyway since it exercises the actually
 // load-bearing user behaviour — being able to type immediately — not just
 // the DOM's internal focus pointer.

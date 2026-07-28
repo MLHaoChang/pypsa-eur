@@ -54,21 +54,46 @@ export function Dialog({
   const restoreRef = useRef<HTMLElement | null>(null)
   const titleId = useId()
 
-  // Capture the element to restore focus to on close. This runs in a layout
-  // effect specifically so it fires before ANY child's mount effect can move
-  // focus into the panel: React flushes every layout effect in the whole
-  // committed tree before it flushes any passive effect (useEffect), which
-  // is a stronger guarantee than fiber depth order. If this instead lived in
-  // a plain useEffect alongside the initial-focus logic below, a panel child
-  // deeper than Dialog (its own useEffect committing before Dialog's, per
-  // the usual children-before-parents order) could focus itself first, and
-  // `document.activeElement` here would already be that child — restoring
-  // focus on close to a since-unmounted panel element instead of the
-  // control that actually opened the dialog. Caught empirically: a
-  // regression test for exactly this below.
+  // Capture the element to restore focus to on close, during RENDER of the
+  // closed -> open transition. Deliberately not in an effect of any kind:
+  // the capture has to beat every mechanism a panel child can use to focus
+  // itself, and there are two with different timings.
+  //
+  //   - A child's mount `useEffect` (passive). A layout effect here beats
+  //     that, since React flushes all layout effects in the committed tree
+  //     before any passive effect.
+  //   - The `autoFocus` ATTRIBUTE, used at real call sites (SnapshotsPanel's
+  //     snapshot Label input, ScenariosPanel's scenario-name input). React
+  //     applies this via commitMount in the LAYOUT phase, and layout work
+  //     also runs children-before-parents. The autofocused input is a fiber
+  //     descendant of Dialog, so it focused itself BEFORE Dialog's own
+  //     useLayoutEffect could run. `restoreRef` then captured the input
+  //     rather than the invoking control, and on close we refocused a
+  //     detached node — focus silently fell to <body>. Measured, not
+  //     reasoned: a harness in the autoFocus shape restored to BODY; the
+  //     same harness with the attribute removed restored correctly.
+  //
+  // Render strictly precedes commit, so reading document.activeElement here
+  // beats both. The `wasOpen` guard makes this idempotent: it fires only on
+  // the transition, so re-renders while open (and StrictMode's double render
+  // pass, which commits nothing in between) cannot overwrite the captured
+  // target with a node from inside the panel.
+  //
+  // Rejected alternative: a lazy `useState` initializer. It runs once per
+  // Dialog INSTANCE, not once per open, which is wrong for the call sites
+  // that keep a Dialog mounted while closed — ShortcutsHelp (App.tsx) renders
+  // `<Dialog open={showShortcuts}>` permanently. There the initializer would
+  // run at app mount while closed, capturing whatever happened to be focused
+  // then, and could never re-capture across repeated open/close cycles.
+  const wasOpenRef = useRef(false)
+  if (open && !wasOpenRef.current) {
+    restoreRef.current = document.activeElement as HTMLElement | null
+  }
+  wasOpenRef.current = open
+
+  // Restore on close/unmount. Layout effect so focus lands before paint.
   useLayoutEffect(() => {
     if (!open) return
-    restoreRef.current = document.activeElement as HTMLElement | null
     return () => {
       restoreRef.current?.focus?.()
     }

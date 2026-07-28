@@ -40,6 +40,37 @@ function DialogWithAutofocusingChild({ open = true, onClose = () => {} }: { open
   )
 }
 
+// The OTHER way a panel child claims initial focus: React's `autoFocus`
+// ATTRIBUTE, used at real call sites (SnapshotsPanel's snapshot Label input,
+// ScenariosPanel's scenario-name input). This is deliberately NOT the
+// useEffect shape above, and the two must stay distinguishable: React applies
+// autoFocus via commitMount in the LAYOUT phase, not as a passive effect, so
+// it beats even Dialog's own layout effect (layout work also runs
+// children-before-parents). A test written in the passive-effect shape
+// demonstrably does not catch a restore-capture that reads
+// document.activeElement during Dialog's layout effect.
+function AutoFocusAttributeChild({ label }: { label: string }) {
+  return <input autoFocus aria-label={label} />
+}
+
+// Mirrors CreateSnapshotModal's markup shape specifically: a close button
+// ahead of the field (so the autofocused input is NOT the first focusable,
+// and Dialog's un-guarded fallback would land somewhere else), then the
+// `<label><input autoFocus/></label>`, then Cancel/Save.
+function DialogWithAutoFocusAttribute({ open = true, onClose = () => {} }: { open?: boolean; onClose?: () => void }) {
+  return (
+    <Dialog open={open} onClose={onClose} title="Test dialog">
+      <button>close</button>
+      <label>
+        <span>Label</span>
+        <AutoFocusAttributeChild label="attr input" />
+      </label>
+      <button>Cancel</button>
+      <button>Save</button>
+    </Dialog>
+  )
+}
+
 describe('Dialog', () => {
   it('renders nothing when closed', () => {
     render(
@@ -187,6 +218,40 @@ describe('Dialog', () => {
     const trigger = screen.getByRole('button', { name: 'open me' })
     await user.click(trigger)
     expect(document.activeElement).toBe(screen.getByLabelText('child input'))
+    await user.keyboard('{Escape}')
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  // Regression coverage for a whole-branch review finding. The layout-effect
+  // capture above is correct for children that autofocus in a passive effect,
+  // but `autoFocus` is not a passive effect: React commits it in the layout
+  // phase, and the layout phase walks children before parents, so the input
+  // had already focused itself before Dialog's own useLayoutEffect ran.
+  // `restoreRef` then captured the input instead of the invoking control, and
+  // closing the dialog refocused a detached node — focus fell to <body>.
+  // Dialog now captures the restore target BEFORE commit (render phase), so
+  // neither mechanism can get in ahead of it. Keep this test in the
+  // `autoFocus`-attribute shape: the passive-effect test above passes against
+  // the broken version, so only this shape guards the layout-phase path.
+  it('restores focus to the invoking element on close even when a panel child uses the autoFocus attribute', async () => {
+    const user = userEvent.setup()
+
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>open me</button>
+          {open && <DialogWithAutoFocusAttribute onClose={() => setOpen(false)} />}
+        </>
+      )
+    }
+
+    render(<Harness />)
+    const trigger = screen.getByRole('button', { name: 'open me' })
+    await user.click(trigger)
+    // The attribute won initial focus, and Dialog's steal-guard left it alone
+    // rather than pulling focus back to the leading close button.
+    expect(document.activeElement).toBe(screen.getByLabelText('attr input'))
     await user.keyboard('{Escape}')
     expect(document.activeElement).toBe(trigger)
   })

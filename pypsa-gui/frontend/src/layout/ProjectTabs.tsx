@@ -49,7 +49,7 @@ function NewTabNameModal({
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
+            onKeyDown={e => { if (e.key === 'Enter') commit() }}
             className={`px-2.5 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 ${
               conflict
                 ? 'border-danger focus:border-danger focus:ring-danger/20'
