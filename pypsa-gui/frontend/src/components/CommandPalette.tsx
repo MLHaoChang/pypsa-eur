@@ -7,6 +7,7 @@ import {
   Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks, LayoutGrid, Users,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { Dialog } from './Dialog'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { projectsApi } from '../api/projects'
@@ -57,8 +58,11 @@ function PaletteShell({ mode, onClose }: { mode: PaletteMode; onClose: () => voi
   const [selectedIdx, setSelectedIdx] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Auto-focus on mount; the modal trap is implicit because pointer events
-  // outside the panel hit the backdrop, which dismisses the palette.
+  // Auto-focus the search input on mount. PaletteShell is a child of Dialog,
+  // so this passive effect commits before Dialog's own initial-focus effect
+  // (children-before-parents); Dialog then sees the panel already contains
+  // document.activeElement and skips its own "focus first focusable" step.
+  // Real focus trap, backdrop dismissal, and Escape are now Dialog's job.
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
@@ -73,7 +77,6 @@ function PaletteShell({ mode, onClose }: { mode: PaletteMode; onClose: () => voi
   const filtered = useMemo(() => fuzzyFilter(all, query), [all, query])
 
   const onKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') { onClose(); return }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setSelectedIdx(i => Math.min(filtered.length - 1, i + 1))
@@ -106,97 +109,96 @@ function PaletteShell({ mode, onClose }: { mode: PaletteMode; onClose: () => voi
   }, [filtered, mode])
 
   return (
-    <div
+    <Dialog
+      open
+      onClose={onClose}
+      aria-label={mode === 'projects' ? 'Switch project' : 'Command palette'}
+      z={500}
       data-no-panel-close
-      className="fixed inset-0 z-[500] flex items-start justify-center pt-[12vh] bg-black/30"
-      onClick={onClose}
+      className="fixed inset-0 flex items-start justify-center pt-[12vh]"
+      panelClassName="bg-bg rounded-lg shadow-2xl w-[640px] max-w-[92vw] max-h-[70vh] flex flex-col overflow-hidden border border-border"
     >
-      <div
-        className="bg-bg rounded-lg shadow-2xl w-[640px] max-w-[92vw] max-h-[70vh] flex flex-col overflow-hidden border border-border"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Search input row */}
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
-          <Search size={14} className="text-muted shrink-0" />
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={onKey}
-            placeholder={mode === 'projects'
-              ? 'Switch project…'
-              : 'Type a command, project, snapshot, or asset name…'}
-            className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted/60"
-          />
-          <button
-            onClick={onClose}
-            className="text-muted hover:text-text transition-colors shrink-0"
-            title="Close (Esc)"
-          >
-            <X size={14} />
-          </button>
-        </div>
-
-        {/* Results body */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {filtered.length === 0 && (
-            <div className="text-xs text-muted text-center py-8 px-6">
-              No matches. Try a different query.
-            </div>
-          )}
-          {(() => {
-            // Pre-compute a flat array index so the keyboard selection across
-            // groups maps to the right row in the rendered list.
-            let runningIdx = 0
-            return groups.map(g => (
-              <div key={g.kind}>
-                <div className="text-[9px] font-semibold uppercase tracking-wide text-muted/70 px-3 pt-2 pb-1">
-                  {GROUP_LABELS[g.kind]}
-                </div>
-                {g.rows.map(cmd => {
-                  const idx = runningIdx++
-                  const active = idx === selectedIdx
-                  return (
-                    <button
-                      key={cmd.id}
-                      onClick={() => { void cmd.run(); onClose() }}
-                      onMouseEnter={() => setSelectedIdx(idx)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors ${
-                        active ? 'bg-accent/10' : 'hover:bg-panel'
-                      }`}
-                    >
-                      <span className={`shrink-0 ${active ? 'text-accent' : 'text-muted'}`}>
-                        {cmd.icon}
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-[12px] text-text truncate">{cmd.title}</span>
-                        {cmd.subtitle && (
-                          <span className="block text-[10px] text-muted truncate">{cmd.subtitle}</span>
-                        )}
-                      </span>
-                      {cmd.hint && (
-                        <span className="text-[10px] text-muted/70 font-mono shrink-0 ml-2">
-                          {cmd.hint}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            ))
-          })()}
-        </div>
-
-        {/* Footer hint */}
-        <div className="flex items-center gap-3 px-3 py-1.5 border-t border-border text-[10px] text-muted/70 font-mono shrink-0">
-          <span>↑↓ navigate</span>
-          <span>⏎ select</span>
-          <span>esc close</span>
-          <span className="ml-auto">{filtered.length} result{filtered.length === 1 ? '' : 's'}</span>
-        </div>
+      {/* Search input row */}
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+        <Search size={14} className="text-muted shrink-0" />
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={onKey}
+          placeholder={mode === 'projects'
+            ? 'Switch project…'
+            : 'Type a command, project, snapshot, or asset name…'}
+          className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted/60"
+        />
+        <button
+          onClick={onClose}
+          className="text-muted hover:text-text transition-colors shrink-0"
+          title="Close (Esc)"
+        >
+          <X size={14} />
+        </button>
       </div>
-    </div>
+
+      {/* Results body */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {filtered.length === 0 && (
+          <div className="text-xs text-muted text-center py-8 px-6">
+            No matches. Try a different query.
+          </div>
+        )}
+        {(() => {
+          // Pre-compute a flat array index so the keyboard selection across
+          // groups maps to the right row in the rendered list.
+          let runningIdx = 0
+          return groups.map(g => (
+            <div key={g.kind}>
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-muted/70 px-3 pt-2 pb-1">
+                {GROUP_LABELS[g.kind]}
+              </div>
+              {g.rows.map(cmd => {
+                const idx = runningIdx++
+                const active = idx === selectedIdx
+                return (
+                  <button
+                    key={cmd.id}
+                    onClick={() => { void cmd.run(); onClose() }}
+                    onMouseEnter={() => setSelectedIdx(idx)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors ${
+                      active ? 'bg-accent/10' : 'hover:bg-panel'
+                    }`}
+                  >
+                    <span className={`shrink-0 ${active ? 'text-accent' : 'text-muted'}`}>
+                      {cmd.icon}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[12px] text-text truncate">{cmd.title}</span>
+                      {cmd.subtitle && (
+                        <span className="block text-[10px] text-muted truncate">{cmd.subtitle}</span>
+                      )}
+                    </span>
+                    {cmd.hint && (
+                      <span className="text-[10px] text-muted/70 font-mono shrink-0 ml-2">
+                        {cmd.hint}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          ))
+        })()}
+      </div>
+
+      {/* Footer hint */}
+      <div className="flex items-center gap-3 px-3 py-1.5 border-t border-border text-[10px] text-muted/70 font-mono shrink-0">
+        <span>↑↓ navigate</span>
+        <span>⏎ select</span>
+        <span>esc close</span>
+        <span className="ml-auto">{filtered.length} result{filtered.length === 1 ? '' : 's'}</span>
+      </div>
+    </Dialog>
   )
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState, createContext, useContext } from 'react'
+import { useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState, useId, createContext, useContext } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState,
@@ -23,6 +23,7 @@ import { isRenewableCarrier } from '../utils/carriers'
 import { useSimulationStore } from '../store/simulationStore'
 import { H2Icon } from '../components/AssetIcons'
 import CarrierSelect from '../components/CarrierSelect'
+import { Dialog } from '../components/Dialog'
 import {
   CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor,
 } from '../components/CanvasResultsContext'
@@ -2232,6 +2233,7 @@ export default function TopologyCanvas() {
   const [overlappingNodes, setOverlappingNodes] = useState<Set<string>>(new Set())
   const [busEditor, setBusEditor] = useState<{ busName: string; anchorX: number; anchorY: number } | null>(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const resetConfirmTitleId = useId()
 
   // Connect Buses mode state
   const [connectSource, setConnectSource] = useState<string | null>(null)
@@ -3610,24 +3612,28 @@ export default function TopologyCanvas() {
       })()}
 
       {showResetConfirm && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 backdrop-blur-sm">
-          <div className="bg-bg rounded-xl shadow-2xl p-6 w-[340px] border border-border">
-            <p className="text-sm font-semibold text-text mb-2">Reset diagram?</p>
-            <p className="text-xs text-muted mb-5 leading-relaxed">
-              This will clear all saved node positions and edge waypoints. The layout will be recomputed from scratch. This cannot be undone.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                className="px-4 py-1.5 text-xs rounded border border-border text-text hover:bg-panel transition-colors"
-              >Cancel</button>
-              <button
-                onClick={handleResetDiagram}
-                className="px-4 py-1.5 text-xs rounded bg-[#dc2626] text-white hover:bg-[#b91c1c] transition-colors"
-              >Reset</button>
-            </div>
+        <Dialog
+          open={showResetConfirm}
+          onClose={() => setShowResetConfirm(false)}
+          aria-labelledby={resetConfirmTitleId}
+          dismissOnBackdrop={false}
+          panelClassName="bg-bg rounded-xl shadow-2xl p-6 w-[340px] border border-border"
+        >
+          <p id={resetConfirmTitleId} className="text-sm font-semibold text-text mb-2">Reset diagram?</p>
+          <p className="text-xs text-muted mb-5 leading-relaxed">
+            This will clear all saved node positions and edge waypoints. The layout will be recomputed from scratch. This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setShowResetConfirm(false)}
+              className="px-4 py-1.5 text-xs rounded border border-border text-text hover:bg-panel transition-colors"
+            >Cancel</button>
+            <button
+              onClick={handleResetDiagram}
+              className="px-4 py-1.5 text-xs rounded bg-[#dc2626] text-white hover:bg-[#b91c1c] transition-colors"
+            >Reset</button>
           </div>
-        </div>
+        </Dialog>
       )}
       {newLineDialog && (
         <NewConnectionDialog

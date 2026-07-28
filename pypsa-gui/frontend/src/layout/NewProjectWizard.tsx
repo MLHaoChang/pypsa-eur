@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useId } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   FilePlus, FolderOpen, BookOpen, Upload, Copy as CopyIcon, X, AlertTriangle,
@@ -13,6 +13,7 @@ import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, formatRelativeTime } from '../utils/projectActions'
 import { nk } from '../utils/queryKeys'
 import { appLog } from '../store/simulationStore'
+import { Dialog } from '../components/Dialog'
 
 // NewProjectWizard — replaces the single-input NewProjectModal with a 4-tab
 // flow per the design spec. Tabs:
@@ -56,42 +57,42 @@ export default function NewProjectWizard({
   existingProjects, onConfirm, onClose, isPending, initialTab = 'blank',
 }: NewProjectWizardProps) {
   const [tab, setTab] = useState<Tab>(initialTab)
+  const titleId = useId()
 
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.45)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    <Dialog
+      open
+      onClose={onClose}
+      aria-labelledby={titleId}
+      panelClassName="bg-bg rounded-xl shadow-2xl w-[640px] max-w-[95vw] max-h-[88vh] overflow-hidden flex flex-col"
     >
-      <div className="bg-bg rounded-xl shadow-2xl w-[640px] max-w-[95vw] max-h-[88vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-          <div className="flex items-center gap-2">
-            <FilePlus size={15} className="text-accent" />
-            <span className="text-sm font-semibold text-text">New project</span>
-          </div>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors">
-            <X size={15} />
-          </button>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+        <div className="flex items-center gap-2">
+          <FilePlus size={15} className="text-accent" />
+          <span id={titleId} className="text-sm font-semibold text-text">New project</span>
         </div>
-
-        {/* Tab strip */}
-        <div className="flex items-center border-b border-border shrink-0 px-2">
-          <TabBtn id="blank"    active={tab === 'blank'}    onClick={() => setTab('blank')}    icon={<FilePlus size={12} />}   label="Blank" />
-          <TabBtn id="template" active={tab === 'template'} onClick={() => setTab('template')} icon={<BookOpen size={12} />}    label="From template" />
-          <TabBtn id="file"     active={tab === 'file'}     onClick={() => setTab('file')}     icon={<Upload size={12} />}     label="From file" />
-          <TabBtn id="clone"    active={tab === 'clone'}    onClick={() => setTab('clone')}    icon={<CopyIcon size={12} />}   label="Clone" />
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {tab === 'blank'    && <BlankTab    existingProjects={existingProjects} onConfirm={onConfirm} onClose={onClose} isPending={isPending} />}
-          {tab === 'template' && <TemplateTab onClose={onClose} />}
-          {tab === 'file'     && <FromFileTab onClose={onClose} />}
-          {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} />}
-        </div>
+        <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors">
+          <X size={15} />
+        </button>
       </div>
-    </div>
+
+      {/* Tab strip */}
+      <div className="flex items-center border-b border-border shrink-0 px-2">
+        <TabBtn id="blank"    active={tab === 'blank'}    onClick={() => setTab('blank')}    icon={<FilePlus size={12} />}   label="Blank" />
+        <TabBtn id="template" active={tab === 'template'} onClick={() => setTab('template')} icon={<BookOpen size={12} />}    label="From template" />
+        <TabBtn id="file"     active={tab === 'file'}     onClick={() => setTab('file')}     icon={<Upload size={12} />}     label="From file" />
+        <TabBtn id="clone"    active={tab === 'clone'}    onClick={() => setTab('clone')}    icon={<CopyIcon size={12} />}   label="Clone" />
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {tab === 'blank'    && <BlankTab    existingProjects={existingProjects} onConfirm={onConfirm} onClose={onClose} isPending={isPending} />}
+        {tab === 'template' && <TemplateTab onClose={onClose} />}
+        {tab === 'file'     && <FromFileTab onClose={onClose} />}
+        {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} />}
+      </div>
+    </Dialog>
   )
 }
 
@@ -119,6 +120,9 @@ function TabBtn({ active, onClick, icon, label }: {
 function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjectWizardProps) {
   const [name, setName] = useState('new_project')
   const inputRef = useRef<HTMLInputElement>(null)
+  // Dialog's own initial-focus effect now guards against stealing focus
+  // already claimed inside the panel (see Dialog.tsx), so this plain
+  // synchronous focus+select is enough — no microtask deferral needed.
   useEffect(() => { inputRef.current?.focus(); inputRef.current?.select() }, [])
 
   const trimmed = name.trim()
@@ -156,7 +160,7 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
+            onKeyDown={e => { if (e.key === 'Enter') commit() }}
             className="flex-1 px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 font-mono"
             placeholder="my_project"
           />

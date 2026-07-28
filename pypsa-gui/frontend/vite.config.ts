@@ -20,12 +20,20 @@ export default defineConfig({
     },
   },
   test: {
-    // `node` (not jsdom) on purpose: this suite covers PURE helpers only —
-    // no component rendering, so there is nothing to gain from a DOM and a
-    // real cost in startup time. Add jsdom + @testing-library only when the
-    // first component test lands.
-    environment: 'node',
-    include: ['src/**/*.test.ts', 'vite.auth-gate.test.ts', 'brand.theme.test.ts'],
+    // jsdom (not `node`): component tests render React and query the DOM.
+    // The suite was `node`-only while it covered pure helpers exclusively;
+    // the first component test (Dialog) is what changed that.
+    environment: 'jsdom',
+    globals: false,
+    // Explicit because `globals: false` defeats @testing-library/react's
+    // auto-detected `afterEach(cleanup)` — see vitest.setup.ts.
+    setupFiles: ['./vitest.setup.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'src/**/*.test.tsx',
+      'vite.auth-gate.test.ts',
+      'brand.theme.test.ts',
+    ],
   },
   server: {
     // Pin to IPv4. On macOS, Vite's default `localhost` resolves to ::1, so the

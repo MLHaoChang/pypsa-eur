@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Layers, Trash2, X } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { Dialog } from './Dialog'
 
 interface Props {
   componentClass: string  // "Generator" | "StorageUnit" | "Store" | "Link"
@@ -40,6 +41,7 @@ export default function VintagePeriodBoundsModal({ componentClass, name, onClose
   const qc = useQueryClient()
   const currentProject = useUIStore(s => s.currentProject)
   const unit = UNIT_FOR_CLASS[componentClass] ?? 'MW'
+  const titleId = useId()
 
   // Periods come from the multi-period config. Single-period networks have
   // an empty list — the modal then surfaces a hint to enable periods first
@@ -136,103 +138,102 @@ export default function VintagePeriodBoundsModal({ componentClass, name, onClose
   const hasSaved = Object.keys(savedForAsset).length > 0
 
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.45)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    <Dialog
+      open
+      onClose={onClose}
+      aria-labelledby={titleId}
+      panelClassName="bg-bg rounded-xl shadow-2xl w-[560px] max-w-[95vw] max-h-[88vh] overflow-hidden flex flex-col"
     >
-      <div className="bg-bg rounded-xl shadow-2xl w-[560px] max-w-[95vw] max-h-[88vh] overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-          <div className="flex items-center gap-2">
-            <Layers size={15} className="text-accent" />
-            <span className="text-sm font-semibold text-text">Per-period capacity bounds</span>
-            <span className="text-[11px] text-muted font-mono">{componentClass} · {name}</span>
-          </div>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors">
-            <X size={15} />
-          </button>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+        <div className="flex items-center gap-2">
+          <Layers size={15} className="text-accent" />
+          <span id={titleId} className="text-sm font-semibold text-text">Per-period capacity bounds</span>
+          <span className="text-[11px] text-muted font-mono">{componentClass} · {name}</span>
         </div>
-
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 text-[12px]">
-          <p className="text-muted mb-3 leading-relaxed">
-            For each investment period, set a lower / upper bound on the capacity
-            the optimiser can build in that period. Leave both empty for periods
-            with no constraint. At solve time the asset is expanded into one
-            vintage row per period (build_year = period), each carrying its own
-            bounds — the optimiser then sizes each vintage independently.
-          </p>
-
-          {periods.length === 0 ? (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-amber-600 text-[11.5px]">
-              No investment periods configured. Enable multi-period planning
-              under <span className="font-semibold">Solver settings → Periods</span> first.
-            </div>
-          ) : (
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="text-[10.5px] text-muted uppercase tracking-wider">
-                  <th className="text-left py-1 font-medium">Period</th>
-                  <th className="text-left py-1 font-medium">Min ({unit})</th>
-                  <th className="text-left py-1 font-medium">Max ({unit})</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={r.period} className="border-t border-border">
-                    <td className="py-1.5 font-mono">{r.period}</td>
-                    <td className="py-1 pr-2">
-                      <input
-                        type="number"
-                        value={r.min}
-                        onChange={e => setCell(i, 'min', e.target.value)}
-                        placeholder="—"
-                        className="w-full px-2 py-1 border border-border rounded font-mono text-[11.5px] bg-bg"
-                      />
-                    </td>
-                    <td className="py-1 pl-2">
-                      <input
-                        type="number"
-                        value={r.max}
-                        onChange={e => setCell(i, 'max', e.target.value)}
-                        placeholder="—"
-                        className="w-full px-2 py-1 border border-border rounded font-mono text-[11.5px] bg-bg"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-border shrink-0">
-          {hasSaved && (
-            <button
-              onClick={() => clearMut.mutate()}
-              disabled={clearMut.isPending}
-              className="flex items-center gap-1 text-[11.5px] text-muted hover:text-danger"
-              title="Remove all saved per-period bounds for this asset"
-            >
-              <Trash2 size={12} />
-              Clear all
-            </button>
-          )}
-          <span className="flex-1" />
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-[12px] text-muted hover:text-text"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => saveMut.mutate()}
-            disabled={saveMut.isPending || periods.length === 0}
-            className="px-3 py-1.5 text-[12px] bg-accent text-white rounded font-medium hover:opacity-90 disabled:opacity-40"
-          >
-            {saveMut.isPending ? 'Saving…' : 'Save'}
-          </button>
-        </div>
+        <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors">
+          <X size={15} />
+        </button>
       </div>
-    </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 text-[12px]">
+        <p className="text-muted mb-3 leading-relaxed">
+          For each investment period, set a lower / upper bound on the capacity
+          the optimiser can build in that period. Leave both empty for periods
+          with no constraint. At solve time the asset is expanded into one
+          vintage row per period (build_year = period), each carrying its own
+          bounds — the optimiser then sizes each vintage independently.
+        </p>
+
+        {periods.length === 0 ? (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-amber-600 text-[11.5px]">
+            No investment periods configured. Enable multi-period planning
+            under <span className="font-semibold">Solver settings → Periods</span> first.
+          </div>
+        ) : (
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="text-[10.5px] text-muted uppercase tracking-wider">
+                <th className="text-left py-1 font-medium">Period</th>
+                <th className="text-left py-1 font-medium">Min ({unit})</th>
+                <th className="text-left py-1 font-medium">Max ({unit})</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.period} className="border-t border-border">
+                  <td className="py-1.5 font-mono">{r.period}</td>
+                  <td className="py-1 pr-2">
+                    <input
+                      type="number"
+                      value={r.min}
+                      onChange={e => setCell(i, 'min', e.target.value)}
+                      placeholder="—"
+                      className="w-full px-2 py-1 border border-border rounded font-mono text-[11.5px] bg-bg"
+                    />
+                  </td>
+                  <td className="py-1 pl-2">
+                    <input
+                      type="number"
+                      value={r.max}
+                      onChange={e => setCell(i, 'max', e.target.value)}
+                      placeholder="—"
+                      className="w-full px-2 py-1 border border-border rounded font-mono text-[11.5px] bg-bg"
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 px-4 py-3 border-t border-border shrink-0">
+        {hasSaved && (
+          <button
+            onClick={() => clearMut.mutate()}
+            disabled={clearMut.isPending}
+            className="flex items-center gap-1 text-[11.5px] text-muted hover:text-danger"
+            title="Remove all saved per-period bounds for this asset"
+          >
+            <Trash2 size={12} />
+            Clear all
+          </button>
+        )}
+        <span className="flex-1" />
+        <button
+          onClick={onClose}
+          className="px-3 py-1.5 text-[12px] text-muted hover:text-text"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => saveMut.mutate()}
+          disabled={saveMut.isPending || periods.length === 0}
+          className="px-3 py-1.5 text-[12px] bg-accent text-white rounded font-medium hover:opacity-90 disabled:opacity-40"
+        >
+          {saveMut.isPending ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </Dialog>
   )
 }

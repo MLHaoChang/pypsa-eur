@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { GitBranch, Plus, Trash2, ArrowRight, Layers, ChevronRight } from 'lucide-react'
@@ -11,6 +11,7 @@ import { confirmToast } from '../utils/toasts'
 import { appLog } from '../store/simulationStore'
 import type { ProjectInfo } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn, Tag } from '../components/PageKit'
+import { Dialog } from '../components/Dialog'
 
 // ── Tree-building helpers ────────────────────────────────────────────────────
 // The backend returns a flat list of projects with `parent_project` pointers.
@@ -507,6 +508,7 @@ interface DialogProps {
 }
 
 function CreateScenarioDialog({ base, baseId, onClose, onCreated }: DialogProps) {
+  const titleId = useId()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   // Scenario category — 'baseline' is the canonical reference run; the others
@@ -542,74 +544,72 @@ function CreateScenarioDialog({ base, baseId, onClose, onCreated }: DialogProps)
     : null
 
   return (
-    <div
-      className="fixed inset-0 z-[400] flex items-center justify-center bg-black/30"
-      onClick={onClose}
+    <Dialog
+      open
+      onClose={onClose}
+      aria-labelledby={titleId}
+      z={400}
+      panelClassName="bg-bg rounded-lg shadow-2xl w-[440px] max-w-[92vw] border border-border"
     >
-      <div
-        className="bg-bg rounded-lg shadow-2xl w-[440px] max-w-[92vw] border border-border"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="px-3 py-2 border-b border-border">
-          <div className="text-xs font-semibold text-text">New scenario from <span className="text-accent">{base}</span></div>
-          <div className="text-[10px] text-muted mt-0.5">
-            Saves the current in-memory network as a new project linked to its base. Won't auto-switch.
-          </div>
-        </div>
-        <div className="p-3 space-y-2">
-          <label className="block">
-            <span className="text-[10px] text-muted">Scenario name</span>
-            <input
-              type="text"
-              value={name}
-              maxLength={64}
-              autoFocus
-              onChange={e => setName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') submit(); else if (e.key === 'Escape') onClose() }}
-              placeholder="e.g. high-renewables"
-              className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 focus:outline-none focus:border-accent"
-            />
-            {hint && (
-              <span className="text-[10px] text-warn mt-0.5 block">{hint}</span>
-            )}
-          </label>
-          <label className="block">
-            <span className="text-[10px] text-muted">Type</span>
-            <select
-              value={scenType}
-              onChange={e => setScenType(e.target.value as ScenType)}
-              className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 focus:outline-none focus:border-accent"
-            >
-              <option value="baseline">Baseline — canonical reference run</option>
-              <option value="scenario">Scenario — a named variant</option>
-              <option value="stress">Stress test</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-[10px] text-muted">Description (optional)</span>
-            <textarea
-              value={description}
-              maxLength={500}
-              rows={2}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="What's different from the base?"
-              className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 resize-y focus:outline-none focus:border-accent"
-            />
-          </label>
-        </div>
-        <div className="flex justify-end gap-1.5 px-3 py-2 border-t border-border">
-          <button
-            onClick={onClose}
-            className="px-3 py-1 text-xs border border-border rounded text-muted hover:text-text hover:border-text/40 transition-colors"
-          >Cancel</button>
-          <button
-            onClick={submit}
-            disabled={!valid || createMut.isPending}
-            className="px-3 py-1 text-xs rounded bg-accent text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/85 transition-colors"
-          >{createMut.isPending ? 'Creating…' : 'Create'}</button>
+      <div className="px-3 py-2 border-b border-border">
+        <div id={titleId} className="text-xs font-semibold text-text">New scenario from <span className="text-accent">{base}</span></div>
+        <div className="text-[10px] text-muted mt-0.5">
+          Saves the current in-memory network as a new project linked to its base. Won't auto-switch.
         </div>
       </div>
-    </div>
+      <div className="p-3 space-y-2">
+        <label className="block">
+          <span className="text-[10px] text-muted">Scenario name</span>
+          <input
+            type="text"
+            value={name}
+            maxLength={64}
+            autoFocus
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submit() }}
+            placeholder="e.g. high-renewables"
+            className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 focus:outline-none focus:border-accent"
+          />
+          {hint && (
+            <span className="text-[10px] text-warn mt-0.5 block">{hint}</span>
+          )}
+        </label>
+        <label className="block">
+          <span className="text-[10px] text-muted">Type</span>
+          <select
+            value={scenType}
+            onChange={e => setScenType(e.target.value as ScenType)}
+            className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 focus:outline-none focus:border-accent"
+          >
+            <option value="baseline">Baseline — canonical reference run</option>
+            <option value="scenario">Scenario — a named variant</option>
+            <option value="stress">Stress test</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-[10px] text-muted">Description (optional)</span>
+          <textarea
+            value={description}
+            maxLength={500}
+            rows={2}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="What's different from the base?"
+            className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 resize-y focus:outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+      <div className="flex justify-end gap-1.5 px-3 py-2 border-t border-border">
+        <button
+          onClick={onClose}
+          className="px-3 py-1 text-xs border border-border rounded text-muted hover:text-text hover:border-text/40 transition-colors"
+        >Cancel</button>
+        <button
+          onClick={submit}
+          disabled={!valid || createMut.isPending}
+          className="px-3 py-1 text-xs rounded bg-accent text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/85 transition-colors"
+        >{createMut.isPending ? 'Creating…' : 'Create'}</button>
+      </div>
+    </Dialog>
   )
 }
 
