@@ -47,26 +47,17 @@ from services import shutdown as shutdown_service
 
 
 # ── the three solve paths ───────────────────────────────────────────────────
+#
+# The original path (a) and path (c) tests monkeypatched `_active_solver_thread`
+# and `_ac_pf_thread`. Both are gone. The second read a `_state` key NOTHING in
+# the backend ever wrote, so path (c) never fired in production and the test
+# passed only because it patched the very function that was wrong. They are
+# replaced at the end of this file by tests that drive the real
+# `ctx.solver_state`.
 
 
 def test_no_solve_running_means_nothing_is_in_flight():
     assert shutdown_service.solves_in_flight() == []
-
-
-def test_path_a_the_active_context_solver_is_seen(monkeypatch):
-    """(a) the foreground solve, the one `/api/simulation/abort` targets."""
-    running = threading.Event()
-    worker = threading.Thread(target=running.wait, daemon=True)
-    worker.start()
-    try:
-        monkeypatch.setattr(shutdown_service, "_active_solver_thread", lambda: worker)
-
-        in_flight = shutdown_service.solves_in_flight()
-
-        assert [s.path for s in in_flight] == ["active"]
-    finally:
-        running.set()
-        worker.join(5)
 
 
 def test_path_b_a_queued_job_is_seen_through_the_real_queue():
@@ -88,29 +79,6 @@ def test_path_b_a_queued_job_is_seen_through_the_real_queue():
         assert "queue" in [s.path for s in in_flight], in_flight
     finally:
         solve_queue.reset_for_tests()
-
-
-def test_path_c_an_ac_pf_run_is_seen_even_though_it_cannot_be_aborted(monkeypatch):
-    """
-    (c) `run_ac_pf` creates a stop event nothing reads. Being unable to stop it
-    is not a reason to be unable to SEE it — the sequence has to know it is
-    there in order to wait, then warn, then report the skipped flush.
-    """
-    running = threading.Event()
-    worker = threading.Thread(target=running.wait, daemon=True)
-    worker.start()
-    try:
-        monkeypatch.setattr(shutdown_service, "_ac_pf_thread", lambda: worker)
-
-        in_flight = shutdown_service.solves_in_flight()
-
-        assert [s.path for s in in_flight] == ["ac_pf"]
-        assert in_flight[0].interruptible is False, (
-            "ac_pf must not be reported as abortable — nothing reads its stop event"
-        )
-    finally:
-        running.set()
-        worker.join(5)
 
 
 # ── the ordered sequence ────────────────────────────────────────────────────
@@ -955,3 +923,225 @@ def test_stopping_the_executor_twice_is_not_an_error():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     shutdown_service.stop_tool_executor(executor)
     shutdown_service.stop_tool_executor(executor)
+
+
+# ── review round 5: five ways this could still have lost work ───────────────
+
+
+def test_ac_pf_is_distinguished_from_an_lp_solve_by_the_REAL_state():
+    """
+    `_ac_pf_thread` read `_state["ac_pf_thread"]` — a key NOTHING writes.
+    `run_ac_pf` claims `_state["thread"]`, the same key as the LP worker, with
+    the same `status="running"` and `condition=None`. So path (c) never fired,
+    the AC-PF decision never ran, and the old test passed only because it
+    monkeypatched the very function that was wrong.
+
+    Both claims now set a `kind` discriminator and this drives the real state.
+    """
+    from services.pypsa_service import PyPSAService
+
+    running = threading.Event()
+    worker = threading.Thread(target=running.wait, daemon=True)
+    worker.start()
+    ctx = PyPSAService.build_context()
+    PyPSAService._contexts["ac-pf-ctx"] = ctx
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state.update(thread=worker, kind="ac_pf")
+
+        in_flight = shutdown_service.solves_in_flight()
+
+        assert [s.path for s in in_flight] == ["ac_pf"], in_flight
+        assert in_flight[0].interruptible is False
+    finally:
+        running.set(); worker.join(5)
+        PyPSAService._contexts.pop("ac-pf-ctx", None)
+
+
+def test_an_lp_solve_is_reported_as_interruptible():
+    """
+    The other side of the discriminator. `kind` must be set on the LP claim
+    too — a stale "ac_pf" from a previous run on the same context would mark
+    the next LP solve non-interruptible and it would never be aborted.
+    """
+    from services.pypsa_service import PyPSAService
+
+    running = threading.Event()
+    worker = threading.Thread(target=running.wait, daemon=True)
+    worker.start()
+    ctx = PyPSAService.build_context()
+    PyPSAService._contexts["lp-ctx"] = ctx
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state.update(thread=worker, kind="lopf")
+
+        in_flight = shutdown_service.solves_in_flight()
+
+        assert [s.path for s in in_flight] == ["active"], in_flight
+        assert in_flight[0].interruptible is True
+    finally:
+        running.set(); worker.join(5)
+        PyPSAService._contexts.pop("lp-ctx", None)
+
+
+def test_both_worker_claims_in_the_backend_set_a_kind():
+    """
+    The discriminator is only as good as its coverage. If a claim site forgets
+    it, that solve inherits whatever `kind` the context last had — and the
+    dangerous direction is a stale "ac_pf" making a real LP solve
+    un-abortable.
+    """
+    import re
+
+    source = pathlib.Path(__file__).resolve().parent.parent / "routers" / "simulation.py"
+    text = source.read_text()
+
+    claims = text.count("thread=t,")
+    kinds = len(re.findall(r'kind="(?:lopf|ac_pf)"', text))
+
+    assert kinds == claims, (
+        f"{claims} worker claim(s) but {kinds} kind marker(s) — a claim site "
+        "without one inherits the previous run's kind"
+    )
+
+
+def test_a_solve_on_a_NON_ACTIVE_context_is_seen():
+    """
+    The detector read only the process foreground, so a solve on any other
+    resident context was invisible: no confirm, no abort, `abort_timed_out`
+    False, and the resulting 409 reported as if the abort had succeeded.
+    `RESIDENT_CAP` is 5 and the solve queue puts solves on these contexts.
+    """
+    from services.pypsa_service import PyPSAService
+
+    running = threading.Event()
+    worker = threading.Thread(target=running.wait, daemon=True)
+    worker.start()
+    ctx = PyPSAService.build_context()
+    PyPSAService._contexts["background-solve"] = ctx
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state.update(thread=worker, kind="lopf")
+
+        assert [s.path for s in shutdown_service.solves_in_flight()] == ["active"]
+    finally:
+        running.set(); worker.join(5)
+        PyPSAService._contexts.pop("background-solve", None)
+
+
+def test_detecting_solves_does_not_MANUFACTURE_an_active_context():
+    """
+    Reading the foreground solver state went through `_ensure_active()`, which
+    self-heals AND ASSIGNS `_active`. Merely asking "is anything solving?"
+    created an empty unbound context — which `resident_contexts()` then handed
+    to `flush_all`, and which took `persist_user_ts=True` for itself, so the
+    REAL open project was saved with False and lost its `_user_ts`.
+    Constraint #8's exact failure mode, caused by asking the question.
+    """
+    from services.pypsa_service import PyPSAService
+
+    PyPSAService._active = None
+    shutdown_service.solves_in_flight()
+
+    assert PyPSAService._active is None, "asking the question created a context"
+
+
+def test_the_abort_endpoint_stays_reachable_while_the_gate_is_closed(client):
+    """
+    The gate 503'd every write with no exemption — including
+    `POST /api/simulation/abort`, which is step 4's own mechanism. Step 1 would
+    have refused step 4, the flush would 409, and nobody would be told.
+    """
+    shutdown_service.gate_mutations()
+
+    assert client.post("/api/simulation/abort").status_code != 503
+
+
+def test_a_confirm_that_raises_still_flushes_rather_than_quitting_clean():
+    """
+    `solves_in_flight()` and `confirm()` were the only unguarded calls, and
+    `confirm` is the one modal this design runs on a worker thread — the plan's
+    own Task 6 says such a modal must be marshalled to the GUI thread or it
+    hangs on macOS. A raise skipped hide, abort, FLUSH, locks, executor and
+    server, and `CloseHandler` still destroyed the window with `quit=True`.
+    """
+    calls: list[str] = []
+
+    def confirm(in_flight):
+        raise RuntimeError("the dialog blew up")
+
+    report = shutdown_service.shutdown_sequence(
+        gate=lambda: calls.append("gate"), un_gate=lambda: None,
+        confirm=confirm, hide=lambda: calls.append("hide"),
+        abort_and_wait=lambda: (calls.append("abort"), True)[1],
+        flush=lambda *, safe: (calls.append("flush"), [])[1],
+        release_locks=lambda: calls.append("locks"),
+        stop_executor=lambda: calls.append("executor"),
+        stop_server=lambda: (calls.append("server"), "clean")[1],
+        in_flight=[shutdown_service.InFlightSolve("active", "x", True)],
+    )
+
+    assert "flush" in calls, f"the flush was skipped: {calls}"
+    assert "abort" in calls, f"the abort was skipped: {calls}"
+    assert report.errors, "a failed confirm must be reported"
+
+
+def test_the_report_is_written_somewhere_a_human_can_read(tmp_path, monkeypatch):
+    """
+    `report.unflushed` reached nobody: no test asserted it, deleting its
+    assignment left the suite green, and constraint #16 records that the
+    backend has no FileHandler anywhere — so on a packaged windowless build the
+    log goes nowhere. `main._persist_import_report` is the precedent.
+    """
+    import json
+
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    report = shutdown_service.ShutdownReport(quit=True)
+    report.unflushed = ["Belgium Grid: not saved (409 — a solve was still running)"]
+    report.abort_timed_out = True
+
+    path = shutdown_service.persist_report(report)
+
+    assert path is not None and path.exists()
+    written = json.loads(path.read_text())
+    assert written["unflushed"] == report.unflushed
+    assert written["abort_timed_out"] is True
+
+
+def test_a_clean_quit_with_nothing_unsaved_writes_no_alarming_file(tmp_path, monkeypatch):
+    """
+    A file that appears after every quit trains the user to ignore the one that
+    matters — the same reasoning as only confirming when a solve is in flight.
+    """
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+
+    assert shutdown_service.persist_report(shutdown_service.ShutdownReport(quit=True)) is None
+    assert not list(tmp_path.glob("*shutdown*"))
+
+
+def test_the_SEQUENCE_persists_a_report_when_something_could_not_be_saved(
+    tmp_path, monkeypatch,
+):
+    """
+    Testing `persist_report` in isolation proved only that the function works.
+    Deleting its call from `shutdown_sequence` left all 50 tests green — the
+    unit was covered and the WIRING was not, which is the same gap that hid the
+    executor and context defects earlier in this task.
+    """
+    import json
+
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+
+    shutdown_service.shutdown_sequence(
+        gate=lambda: None, un_gate=lambda: None,
+        confirm=lambda in_flight: True, hide=lambda: None,
+        abort_and_wait=lambda: False,
+        flush=lambda *, safe: ["Belgium Grid: not saved (409 — a solve was still running)"],
+        release_locks=lambda: None, stop_executor=lambda: None,
+        stop_server=lambda: "clean",
+        in_flight=[shutdown_service.InFlightSolve("active", "Belgium Grid", True)],
+    )
+
+    written = json.loads((tmp_path / "last-shutdown-report.json").read_text())
+    assert written["unflushed"], written
+    assert written["abort_timed_out"] is True

@@ -101,26 +101,35 @@ def mutations_gated() -> bool:
 _running = threading.Lock()
 
 
-def _active_solver_thread():
-    """The foreground solver worker, or None. Seam for tests."""
-    from routers import simulation
-
-    with __import__("services.pypsa_service", fromlist=["PyPSAService"]) \
-            .PyPSAService.get_solver_state_lock():
-        return simulation._state.get("thread")
-
-
-def _ac_pf_thread():
+def _context_solves() -> list[tuple[Any, Any, str | None]]:
     """
-    The AC PF worker, or None.
+    `(context, thread, kind)` for every RESIDENT context with a live worker.
 
-    Separate from `_active_solver_thread` because it is a different KIND of
-    thing: `run_ac_pf` creates a stop event and `ac_pf_service` contains zero
-    occurrences of `stop_event`, so this one cannot be interrupted at all.
+    Walks the contexts directly instead of reading `routers.simulation._state`.
+    That proxy resolves through `PyPSAService._ensure_active()`, which
+    self-heals AND ASSIGNS `_active` — so merely asking "is anything solving?"
+    CREATED an empty unbound context, which `resident_contexts()` then handed
+    to `flush_all`, and which took `persist_user_ts=True` for itself. The real
+    open project was then saved with `False` and lost its `_user_ts`:
+    constraint #8's exact failure mode, caused by asking the question.
+
+    It also covers EVERY resident context rather than only the foreground. A
+    solve on a background context — where the queue puts them, and
+    `RESIDENT_CAP` allows five — was previously invisible, so there was no
+    confirm, no abort, and the resulting 409 was reported as a clean abort.
     """
-    from routers import simulation
-
-    return simulation._state.get("ac_pf_thread")
+    found: list[tuple[Any, Any, str | None]] = []
+    for ctx in resident_contexts():
+        try:
+            with ctx.solver_state_lock:
+                thread = ctx.solver_state.get("thread")
+                kind = ctx.solver_state.get("kind")
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("could not read solver state for a context")
+            continue
+        if thread is not None and thread.is_alive():
+            found.append((ctx, thread, kind))
+    return found
 
 
 def solves_in_flight() -> list[InFlightSolve]:
@@ -136,9 +145,18 @@ def solves_in_flight() -> list[InFlightSolve]:
     """
     found: list[InFlightSolve] = []
 
-    thread = _active_solver_thread()
-    if thread is not None and thread.is_alive():
-        found.append(InFlightSolve("active", "the open project", True))
+    for ctx, _thread, kind in _context_solves():
+        label = getattr(ctx, "loaded_project", None) or "an open project"
+        if kind == "ac_pf":
+            # Path (c), and the discriminator is load-bearing. `run_ac_pf`
+            # claims the SAME `_state["thread"]` key as the LP worker with the
+            # same status and condition, so without `kind` the two are
+            # indistinguishable — an earlier version of this function read a
+            # key NOTHING ever wrote, so path (c) never fired once and the
+            # "decision taken rather than deferred" never executed.
+            found.append(InFlightSolve("ac_pf", f"AC power flow ({label})", False))
+        else:
+            found.append(InFlightSolve("active", label, True))
 
     try:
         from services.solve_queue import solve_queue
@@ -150,13 +168,6 @@ def solves_in_flight() -> list[InFlightSolve]:
                 ))
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("could not inspect the solve queue: %s", exc)
-
-    ac_pf = _ac_pf_thread()
-    if ac_pf is not None and ac_pf.is_alive():
-        # interruptible=False, and it is not a detail. The sequence waits, then
-        # warns and skips that context's flush, and REPORTS it — abandoning the
-        # wait silently would report a clean quit over dropped edits.
-        found.append(InFlightSolve("ac_pf", "AC power flow", False))
 
     return found
 
@@ -362,8 +373,30 @@ def shutdown_sequence(
 
         # 2. CONFIRM — D12, and only when there is something to lose. Asking on
         #    every quit trains the user to dismiss it.
-        pending = solves_in_flight() if in_flight is None else in_flight
-        if pending and not confirm(pending):
+        # Both of these are guarded, and the fallback is deliberately the
+        # PESSIMISTIC one. `confirm` is the only modal this design runs on a
+        # worker thread, and the plan's own Task 6 notes that a modal off the
+        # GUI thread is a classic macOS hang; `solves_in_flight` touches the
+        # context registry under locks. If either fails, the safe answer to "is
+        # there work to lose?" is YES — proceed to the abort and the flush.
+        # Unguarded, a raise here propagated out of the sequence, `CloseHandler`
+        # caught it, reported `quit=True`, and destroyed the window having
+        # skipped hide, abort, FLUSH, locks, executor and server.
+        try:
+            pending = solves_in_flight() if in_flight is None else in_flight
+        except Exception as exc:
+            report.errors.append(f"detecting solves: {exc}")
+            logger.exception("could not determine what is still solving")
+            pending = []
+
+        try:
+            vetoed = bool(pending) and not confirm(pending)
+        except Exception as exc:
+            report.errors.append(f"confirm: {exc}")
+            logger.exception("the quit confirmation failed")
+            vetoed = False      # could not ask -> do not quit silently, FLUSH
+
+        if vetoed:
             # The veto. Un-gate and CLEAR the latch: the window was never
             # hidden, so the app must go back to fully working, and a user who
             # cancels once must still be able to quit later.
@@ -405,7 +438,49 @@ def shutdown_sequence(
         report.quit = True
         return report
     finally:
+        persist_report(report)
         _running.release()
+
+
+def persist_report(report: ShutdownReport):
+    """
+    Write the report where a user can find it — but ONLY when it says
+    something.
+
+    `report.unflushed` is this module's entire reason to exist, and it reached
+    nobody: constraint #16 records that the backend has no `basicConfig` and no
+    `FileHandler` anywhere, so on a packaged windowless build `logger` output
+    goes nowhere at all. A sequence that dropped edits could write a truthful
+    sentence into a field and exit silently.
+
+    `main._persist_import_report` is the precedent, two files away, and its
+    docstring says it plainly: "Logging alone is not a channel."
+
+    Returns the path written, or None when there was nothing worth saying — a
+    file that appears after every quit trains the user to ignore the one that
+    matters, the same reasoning as only confirming when a solve is in flight.
+    """
+    import json
+
+    if not (report.unflushed or report.errors or report.abort_timed_out):
+        return None
+
+    try:
+        import app_paths
+
+        path = app_paths.app_data_dir() / "last-shutdown-report.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "quit": report.quit,
+            "abort_timed_out": report.abort_timed_out,
+            "unflushed": report.unflushed,
+            "errors": report.errors,
+            "server_stage": report.server_stage,
+        }, indent=2))
+        return path
+    except Exception:
+        logger.exception("could not persist the shutdown report")
+        return None
 
 
 def _step(report: ShutdownReport, name: str, fn: Callable[[], None]) -> None:

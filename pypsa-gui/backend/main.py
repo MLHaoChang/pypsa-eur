@@ -108,6 +108,13 @@ _SOLVER_BLOCKING_EXEMPT: set[str] = set()
 # whole point of the resident multi-project work.
 _SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
 
+# Exempt from the SHUTTING-DOWN gate. `/api/simulation/abort` is step 4's own
+# mechanism, and step 1 closes the gate before step 4 runs — so without this
+# the sequence refuses its own abort, the flush then 409s, and the user is told
+# the quit was clean. The solver gate three blocks below has had an exemption
+# list from the start; this one shipped without one.
+_SHUTDOWN_GATE_EXEMPT: set[str] = {"/api/simulation/abort"}
+
 # Prefixes whose mutations should auto-invalidate solver dispatch. Narrower
 # than _UNDO_PREFIXES: importing a bundle (/api/io/*) replaces the network
 # wholesale with a state that may already include a solved dispatch — we
@@ -509,7 +516,9 @@ async def undo_snapshot_middleware(request: Request, call_next):
     #
     # GETs pass: the window is still visible during the confirm dialog and a
     # blank workbench behind it would be alarming for no benefit.
-    if is_write and shutdown_service.mutations_gated():
+    if (is_write
+            and shutdown_service.mutations_gated()
+            and path not in _SHUTDOWN_GATE_EXEMPT):
         return JSONResponse(
             status_code=503,
             content={

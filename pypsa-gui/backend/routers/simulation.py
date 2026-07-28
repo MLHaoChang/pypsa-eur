@@ -559,6 +559,15 @@ def run():
             ac_pf_converged_count=None,
             ac_pf_total_snapshots=None,
             thread=t,
+            # Which KIND of worker owns `thread`. AC PF and the LP solve share
+            # this key with identical status and condition, so without it a
+            # consumer cannot tell them apart — and the desktop shutdown must,
+            # because nothing reads AC PF's stop event and it therefore cannot
+            # be aborted at all. Set on BOTH claims rather than only on AC PF:
+            # a stale "ac_pf" left over from a previous run would mark the next
+            # LP solve non-interruptible and it would never be aborted.
+            # Observability only; nothing in this module branches on it.
+            kind="lopf",
         )
         t.start()
     return {"status": "started"}
@@ -786,6 +795,7 @@ def run_ac_pf():
             ac_pf_converged_count=None,
             ac_pf_total_snapshots=None,
             thread=t,
+            kind="ac_pf",   # see the `kind` note on the LP claim above
         )
         t.start()
     return {"status": "started"}
