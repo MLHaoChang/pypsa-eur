@@ -138,3 +138,36 @@ Carried from the recon's parked and deferred findings, plus this design:
   undo-toasts per the house rule.
 - Whether the primitive should later portal, if an ancestor `overflow` or
   `transform` is found to clip a migrated dialog.
+
+**Added at close-out (Task 8), from the shipped implementation:**
+
+- Resolved dependency versions from Task 1: `jsdom@29.1.1`,
+  `@testing-library/react@16.3.2`, `@testing-library/user-event@14.6.1`.
+- `CommandPalette` kept no Escape handling of its own — `Dialog` owns it now.
+  Its pre-migration handler only ever called `onClose()` (no query-clear, no
+  close-only-if-empty branch), so deleting it in favour of `Dialog`'s own
+  Escape was behaviour-preserving, not a scope reduction.
+- Accumulated cosmetic drift, accepted rather than fixed: backdrop opacity is
+  now standardised to `rgba(0,0,0,0.45)` everywhere (pre-migration sites were
+  a mix of `bg-black/30` and `bg-black/40`), and `TopologyCanvas`'s reset
+  confirm additionally lost a `backdrop-blur-sm` that had no equivalent in
+  `Dialog`'s backdrop.
+- Escape now dismisses several dialogs that previously had no Escape route at
+  all. Each of the ten migrated sites was checked individually to confirm
+  `onClose` maps to that site's Cancel semantics and never to a destructive
+  action (e.g. `TopologyCanvas`'s reset confirm: Escape reaches the Cancel
+  path, never `handleResetDiagram`).
+- `Dialog` ships with no `dismissOnEscape` opt-out. Ruled YAGNI: across all
+  ten migrated instances, none wanted non-default Escape behaviour, so the
+  extra prop would be speculative surface area with no caller.
+- `CommandPalette.test.tsx`'s header comment overclaims what its first test
+  protects: it says the test would break if `Dialog`'s initial-focus effect
+  were removed. In fact `Dialog` has two focus mechanisms (the initial-focus
+  effect and the layout-effect-based restore capture) that mutually backstop
+  each other for this call site's markup, and the test only fails when both
+  are removed together, not either alone. This is a known-inaccurate comment,
+  recorded here rather than corrected as part of this verification task.
+- All nine actionable success criteria verified independently in
+  `.superpowers/sdd/2026-07-28-modal-a11y-primitive/task-8-report.md`: 9/9
+  pass. Current suite: 27 test files / 170 tests (baseline before Task 1 was
+  23 files / 147 tests); no pre-existing test file was removed or skipped.
