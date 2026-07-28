@@ -179,9 +179,13 @@ def run_first_run_import() -> None:
     """
     Import a pre-desktop project tree, once, on launch.
 
-    **Never blocks startup.** Anything that goes wrong is logged and the app
-    boots anyway: `tools/import_legacy` is the retry path, and an app that
-    will not start is a worse outcome than an import that did not happen.
+    **Never FAILS startup** — and the distinction matters to the desktop
+    shell. Anything that goes wrong is logged and the app boots anyway:
+    `tools/import_legacy` is the retry path, and an app that will not start is
+    a worse outcome than an import that did not happen. But the call itself is
+    synchronous inside `lifespan`, so the first request waits for the whole
+    copy. A launcher showing a splash must budget for that, not for
+    `/api/health` answering in the measured 2.3 s.
 
     **Idempotence comes from the receipts `legacy_import` writes**, not from a
     marker here. A marker is what lets a reinstall — new app-data, same
@@ -278,7 +282,15 @@ async def lifespan(app: FastAPI):
         with db_session_module.SessionLocal() as db:
             local_mode.ensure_local_identity(db)
         # Fourth, and after the identity: imported rows need an org and a
-        # creator. Never blocks startup — see `run_first_run_import`.
+        # creator.
+        #
+        # This is SYNCHRONOUS and uvicorn accepts no connection until lifespan
+        # startup returns, so it delays the first request by however long the
+        # copy takes — 113 MB on the tree this was written against. What it
+        # never does is FAIL startup: every exception is swallowed and the app
+        # boots anyway. An earlier version of this comment said "never blocks
+        # startup" meaning the second thing, and a reviewer planning the
+        # desktop splash reasonably read it as the first.
         run_first_run_import()
     PyPSAService.initialize()
     yield
