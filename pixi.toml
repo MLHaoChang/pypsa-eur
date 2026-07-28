@@ -223,12 +223,62 @@ generate-config = "pytest test/test_config_schema.py --fix"
 # venv, because freezing the conda env produces a build that works on the
 # developer's box and fails on a clean machine.
 [feature.desktop.dependencies]
-# Pinned to the default environment's interpreter. Adding a pypi dependency
-# let the solver pick 3.14 here while the default env — the one the 1460
-# backend tests validate against — stayed on 3.13. The shell RUNS that backend,
-# so a different interpreter means the tested configuration is not the shipped
-# one, and workstream I would freeze against the untested one.
-python = "3.13.*"
+# Pinned DOWN to what `default` has locked, because the shell runs the
+# pypsa-gui backend and the backend suite runs in `default`. Solved freely, a
+# new environment does not reproduce an old lock — it takes today's newest, and
+# `[exclude-newer] pypsa = "0d"` at the top of this file deliberately lets pypsa
+# float. Measured: an unpinned `desktop` resolved pypsa 1.2.4 against the
+# suite's 1.1.2, plus numpy, scipy and highspy — 112 of 514 packages.
+#
+# That matters concretely: CLAUDE.md documents multi-port-Link vintage
+# workarounds scoped to PyPSA 1.1.2 that took five re-solves to converge on,
+# and highspy is the LP solver PyPSA-Eur itself optimises with.
+#
+# The FIRST attempt pinned only `python`, on the theory that the interpreter
+# was the divergence. It was one of 112. The second attempt put both
+# environments in a solve-group, which does make them agree — by dragging
+# `default` UP to pypsa 1.2.4, numpy 2.5.1 and highspy 1.15.1, re-solving the
+# environment `snakemake -call` uses. Pinning here is the only direction that
+# leaves the model environment untouched.
+#
+# `python` and `pandas` are pinned per-platform BELOW, not here: `default`
+# itself resolves different versions per platform (python 3.13.13 on osx,
+# 3.13.0 on win-64, 3.12.13 on linux-64; pandas 3.0.3 on win-64 and 2.3.3
+# elsewhere), so no single value can match it. The previous `python = "3.13.*"`
+# could never hold on linux-64 and silently created a split there.
+#
+# `tests/test_desktop_environment.py` enforces this list. Adding a package here
+# without updating that test, or vice versa, fails the suite.
+#
+# Full parity is NOT achieved and is not attempted: ~100 further transitive
+# packages (bokeh, beautifulsoup4, ...) sit on newer patch versions in
+# `desktop`. None is imported by the backend. Closing that gap needs a
+# solve-group, which re-solves `default` and upgrades the model environment.
+pypsa = "==1.1.2"
+numpy = "==2.4.4"
+scipy = "==1.17.1"
+# The LP solver PyPSA calls. A different build here changes optimisation
+# results, which is the one thing this workstream must not touch.
+highspy = "==1.14.0"
+sqlalchemy = "==2.0.49"
+alembic = "==1.18.4"
+matplotlib = "==3.10.9"
+
+[feature.desktop.target.osx-arm64.dependencies]
+python = "==3.13.13"
+pandas = "==2.3.3"
+
+[feature.desktop.target.osx-64.dependencies]
+python = "==3.13.13"
+pandas = "==2.3.3"
+
+[feature.desktop.target.win-64.dependencies]
+python = "==3.13.0"
+pandas = "==3.0.3"
+
+[feature.desktop.target.linux-64.dependencies]
+python = "==3.12.13"
+pandas = "==2.3.3"
 
 [feature.desktop.pypi-dependencies]
 pywebview = "*"
