@@ -14,9 +14,20 @@
 
 ## Execution log — phase 1b COMPLETE (2026-07-27)
 
-All ten tasks landed on `feature/local-app-impl`. Backend **64 files / 1251
-tests → 73 files / 1413 tests**, all green; frontend unchanged at **23 / 147**,
-as predicted (the frontend already read 404 as "nothing to import").
+All ten tasks landed on `feature/local-app-impl`, then five remediation
+commits driven by six independent review rounds. Backend **64 files / 1251
+tests → 1459 tests**, all green; frontend unchanged at **23 / 147**, as
+predicted (the frontend already read 404 as "nothing to import").
+
+**Final acceptance**, a real uvicorn first launch against a COPY of the legacy
+tree: **13 projects** imported into readable top-level directories — including
+the solved 3-bus / 8760-snapshot network inside the org tree that the original
+implementation silently dropped; `Belgium Grid` opens with 10 real buses; both
+lineage chains reconstructed; restart yields 13 projects and 13 directories;
+a project the user DELETES stays deleted; rename moves the directory in local
+mode and is refused while a solve holds it; `/unclaimed` and
+`/api/admin/legacy-projects` both 404; the real tree byte-identical to Task 0's
+`shasum` manifest; `~/Library/Application Support/PyPSA GUI/` never created.
 
 | Task | Commit | Tests |
 |---|---|---|
