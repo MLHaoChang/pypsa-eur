@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Camera, RotateCcw, Trash2, Plus, X, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -10,6 +10,7 @@ import { invalidateNetworkQueries, formatRelativeTime } from '../utils/projectAc
 import { appLog } from '../store/simulationStore'
 import { confirmToast } from '../utils/toasts'
 import { PageBody, PageSection, Btn, Tag } from '../components/PageKit'
+import { Dialog } from '../components/Dialog'
 
 // SnapshotsPanel — vertical timeline of project snapshots with restore +
 // delete, rendered as a full-page tab from the sidebar's PROJECT section.
@@ -280,6 +281,7 @@ function CreateSnapshotModal({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const titleId = useId()
   const [label, setLabel] = useState('')
   const [message, setMessage] = useState('')
   // Snapshot category — encoded as a `[type]` prefix on the message since the
@@ -308,79 +310,80 @@ function CreateSnapshotModal({
   })
 
   return (
-    <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div
-        className="bg-bg rounded-lg shadow-xl p-5 w-[400px] max-w-[90vw]"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-base font-semibold text-text">Save snapshot</span>
-          <button onClick={onClose} className="text-muted hover:text-text">
-            <X size={16} />
-          </button>
-        </div>
-        <p className="text-xs text-muted mb-4">
-          Captures the current saved state of <strong>{projectName}</strong>.
-          Snapshots use the project's last-saved files, so save first if you have unsaved edits.
-        </p>
-        <label className="block mb-3">
-          <span className="text-xs text-muted block mb-1">Label</span>
-          <input
-            type="text"
-            value={label}
-            onChange={e => setLabel(e.target.value)}
-            placeholder="e.g. pre-co2-cap, baseline-v2"
-            maxLength={80}
-            autoFocus
-            className="w-full px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:ring-1 focus:ring-accent/40"
-          />
-        </label>
-        <label className="block mb-3">
-          <span className="text-xs text-muted block mb-1">Type</span>
-          <select
-            value={snapType}
-            onChange={e => setSnapType(e.target.value as SnapType | '')}
-            className="w-full px-2.5 py-1.5 text-sm border border-border rounded bg-bg focus:outline-none focus:ring-1 focus:ring-accent/40"
-          >
-            <option value="">— Uncategorised —</option>
-            <option value="scenario">Scenario</option>
-            <option value="stress">Stress test</option>
-            <option value="archive">Archive</option>
-          </select>
-        </label>
-        <label className="block mb-4">
-          <span className="text-xs text-muted block mb-1">Note <span className="text-muted/60">(optional)</span></span>
-          <textarea
-            value={message}
-            onChange={e => setMessage(e.target.value)}
-            placeholder="Why are you saving this snapshot?"
-            maxLength={2000}
-            rows={3}
-            className="w-full px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:ring-1 focus:ring-accent/40 resize-none"
-          />
-        </label>
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm text-muted hover:text-text transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => createMut.mutate({
-              label,
-              // Prefix the message with the chosen type so SnapshotRow can
-              // render the category badge — backend has no `type` field.
-              message: snapType ? `[${snapType}] ${message}`.trim() : message,
-            })}
-            disabled={createMut.isPending}
-            className="px-3 py-1.5 text-sm font-medium bg-accent text-white rounded hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {createMut.isPending ? 'Saving…' : 'Save snapshot'}
-          </button>
-        </div>
+    <Dialog
+      open
+      onClose={onClose}
+      aria-labelledby={titleId}
+      z={400}
+      panelClassName="bg-bg rounded-lg shadow-xl p-5 w-[400px] max-w-[90vw]"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <span id={titleId} className="text-base font-semibold text-text">Save snapshot</span>
+        <button onClick={onClose} className="text-muted hover:text-text">
+          <X size={16} />
+        </button>
       </div>
-    </div>
+      <p className="text-xs text-muted mb-4">
+        Captures the current saved state of <strong>{projectName}</strong>.
+        Snapshots use the project's last-saved files, so save first if you have unsaved edits.
+      </p>
+      <label className="block mb-3">
+        <span className="text-xs text-muted block mb-1">Label</span>
+        <input
+          type="text"
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          placeholder="e.g. pre-co2-cap, baseline-v2"
+          maxLength={80}
+          autoFocus
+          className="w-full px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:ring-1 focus:ring-accent/40"
+        />
+      </label>
+      <label className="block mb-3">
+        <span className="text-xs text-muted block mb-1">Type</span>
+        <select
+          value={snapType}
+          onChange={e => setSnapType(e.target.value as SnapType | '')}
+          className="w-full px-2.5 py-1.5 text-sm border border-border rounded bg-bg focus:outline-none focus:ring-1 focus:ring-accent/40"
+        >
+          <option value="">— Uncategorised —</option>
+          <option value="scenario">Scenario</option>
+          <option value="stress">Stress test</option>
+          <option value="archive">Archive</option>
+        </select>
+      </label>
+      <label className="block mb-4">
+        <span className="text-xs text-muted block mb-1">Note <span className="text-muted/60">(optional)</span></span>
+        <textarea
+          value={message}
+          onChange={e => setMessage(e.target.value)}
+          placeholder="Why are you saving this snapshot?"
+          maxLength={2000}
+          rows={3}
+          className="w-full px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:ring-1 focus:ring-accent/40 resize-none"
+        />
+      </label>
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={onClose}
+          className="px-3 py-1.5 text-sm text-muted hover:text-text transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => createMut.mutate({
+            label,
+            // Prefix the message with the chosen type so SnapshotRow can
+            // render the category badge — backend has no `type` field.
+            message: snapType ? `[${snapType}] ${message}`.trim() : message,
+          })}
+          disabled={createMut.isPending}
+          className="px-3 py-1.5 text-sm font-medium bg-accent text-white rounded hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {createMut.isPending ? 'Saving…' : 'Save snapshot'}
+        </button>
+      </div>
+    </Dialog>
   )
 }
 
@@ -400,6 +403,7 @@ function RestoreConfirmModal({
   const currentProject = useUIStore(s => s.currentProject)
   const { data: meta } = useQuery({ queryKey: nk(currentProject, 'meta'), queryFn: networkApi.getMeta, staleTime: 10_000 })
   const { data: snaps } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots, staleTime: 10_000 })
+  const titleId = useId()
 
   // Compute the bus/snapshot diff between the snapshot and the live network.
   // null = unknown (still loading meta). We avoid showing partial diffs to
@@ -407,71 +411,72 @@ function RestoreConfirmModal({
   const currentBuses = meta?.bus_count
   const currentSnaps = snaps?.count
   return (
-    <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div
-        className="bg-bg rounded-lg shadow-xl p-5 w-[460px] max-w-[90vw]"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-start gap-3 mb-3">
-          <AlertTriangle className="text-warn shrink-0 mt-0.5" size={20} />
-          <div className="flex-1">
-            <div className="text-base font-semibold text-text mb-1">
-              Restore snapshot?
-            </div>
-            <div className="text-xs text-muted">
-              Project <strong>{projectName}</strong> will be replaced with the contents of
-              <strong> "{snapshot.label || snapshot.id}"</strong>.
-            </div>
+    <Dialog
+      open
+      onClose={onClose}
+      aria-labelledby={titleId}
+      z={400}
+      panelClassName="bg-bg rounded-lg shadow-xl p-5 w-[460px] max-w-[90vw]"
+    >
+      <div className="flex items-start gap-3 mb-3">
+        <AlertTriangle className="text-warn shrink-0 mt-0.5" size={20} />
+        <div className="flex-1">
+          <div id={titleId} className="text-base font-semibold text-text mb-1">
+            Restore snapshot?
           </div>
-        </div>
-
-        {/* Diff preview — what's actually changing. Only render when we have
-            the meta + snapshots data for the live network; otherwise skip
-            (don't show partial info). The diff is informational; the
-            user's commit is still gated on the explicit Restore button. */}
-        {currentBuses !== undefined && currentSnaps !== undefined && (
-          <div className="bg-bg/60 border border-border rounded p-3 mb-3 text-xs">
-            <div className="font-semibold text-text mb-2">Change preview</div>
-            <DiffRow label="Buses"     before={currentBuses} after={snapshot.bus_count} />
-            <DiffRow label="Snapshots" before={currentSnaps} after={snapshot.snapshot_count} />
-            <DiffRow
-              label="Solver dispatch"
-              before={undefined}
-              after={undefined}
-              renderValue={
-                snapshot.dispatch_status === 'stale'
-                  ? <span className="text-warn font-semibold">stale (re-run after restore)</span>
-                  : snapshot.dispatch_status === 'fresh' || snapshot.has_results
-                  ? <span className="text-success font-semibold">included</span>
-                  : <span className="text-muted">none</span>
-              }
-            />
+          <div className="text-xs text-muted">
+            Project <strong>{projectName}</strong> will be replaced with the contents of
+            <strong> "{snapshot.label || snapshot.id}"</strong>.
           </div>
-        )}
-
-        <div className="bg-bg/60 border border-border rounded p-3 mb-4 text-xs text-muted">
-          <div className="font-medium text-text mb-1">Safety net</div>
-          The current state will be auto-saved as a snapshot labelled
-          <strong> "before-restore"</strong> so you can roll back if this isn't what you wanted.
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            disabled={pending}
-            className="px-3 py-1.5 text-sm text-muted hover:text-text disabled:opacity-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={pending}
-            className="px-3 py-1.5 text-sm font-medium bg-accent text-white rounded hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {pending ? 'Restoring…' : 'Restore'}
-          </button>
         </div>
       </div>
-    </div>
+
+      {/* Diff preview — what's actually changing. Only render when we have
+          the meta + snapshots data for the live network; otherwise skip
+          (don't show partial info). The diff is informational; the
+          user's commit is still gated on the explicit Restore button. */}
+      {currentBuses !== undefined && currentSnaps !== undefined && (
+        <div className="bg-bg/60 border border-border rounded p-3 mb-3 text-xs">
+          <div className="font-semibold text-text mb-2">Change preview</div>
+          <DiffRow label="Buses"     before={currentBuses} after={snapshot.bus_count} />
+          <DiffRow label="Snapshots" before={currentSnaps} after={snapshot.snapshot_count} />
+          <DiffRow
+            label="Solver dispatch"
+            before={undefined}
+            after={undefined}
+            renderValue={
+              snapshot.dispatch_status === 'stale'
+                ? <span className="text-warn font-semibold">stale (re-run after restore)</span>
+                : snapshot.dispatch_status === 'fresh' || snapshot.has_results
+                ? <span className="text-success font-semibold">included</span>
+                : <span className="text-muted">none</span>
+            }
+          />
+        </div>
+      )}
+
+      <div className="bg-bg/60 border border-border rounded p-3 mb-4 text-xs text-muted">
+        <div className="font-medium text-text mb-1">Safety net</div>
+        The current state will be auto-saved as a snapshot labelled
+        <strong> "before-restore"</strong> so you can roll back if this isn't what you wanted.
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={onClose}
+          disabled={pending}
+          className="px-3 py-1.5 text-sm text-muted hover:text-text disabled:opacity-50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={pending}
+          className="px-3 py-1.5 text-sm font-medium bg-accent text-white rounded hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {pending ? 'Restoring…' : 'Restore'}
+        </button>
+      </div>
+    </Dialog>
   )
 }
 
