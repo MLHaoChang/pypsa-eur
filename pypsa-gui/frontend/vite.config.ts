@@ -25,6 +25,9 @@ export default defineConfig({
     // the first component test (Dialog) is what changed that.
     environment: 'jsdom',
     globals: false,
+    // Explicit because `globals: false` defeats @testing-library/react's
+    // auto-detected `afterEach(cleanup)` — see vitest.setup.ts.
+    setupFiles: ['./vitest.setup.ts'],
     include: [
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
