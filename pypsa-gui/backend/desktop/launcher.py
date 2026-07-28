@@ -443,15 +443,24 @@ class DesktopServer:
                 thread = self._thread
 
         if already or never_ran:
-            # Outside the lock, and NOT skipped. The `_stopped` latch added in
-            # the previous round returned from inside the `with` block, so this
-            # never ran: a `stop()` on a server that was bound but never
-            # started left the listener accepting for the life of the process
-            # AND refused every later `start()`. That is precisely the path
-            # `close()` exists for — `bind_socket()` succeeds, `import main`
-            # raises, and the error handler calls `stop()` as the obvious
-            # cleanup.
-            self.close()
+            # `never_ran` ONLY. The two states are genuinely different and
+            # merging them here was a regression:
+            #
+            #   never_ran  nothing was ever started, so nobody else owns the
+            #              socket — this is the path `close()` exists for
+            #              (`bind_socket()` succeeded, `import main` raised,
+            #              and the error handler called `stop()` as cleanup).
+            #   already    ANOTHER `stop()` is mid-escalation, so the server
+            #              thread is alive and uvicorn owns the socket.
+            #
+            # Closing on `already` is only invisible once `create_server` has
+            # taken the descriptor. During lifespan startup — the 113 MB
+            # first-run copytree, i.e. the widest window there is — it makes
+            # `create_server` fail with EBADF on the server thread, leaves
+            # `Server.started` False, and therefore skips `lifespan.shutdown()`
+            # entirely, because uvicorn runs it only `if self.started`.
+            if never_ran:
+                self.close()
             return "already-stopped"
 
         def request_exit() -> None:

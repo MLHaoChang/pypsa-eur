@@ -146,8 +146,10 @@ def test_the_app_data_directory_is_created_if_absent(lock_path):
 
 def test_a_lock_that_is_unsupported_is_not_reported_as_a_second_instance(lock_path):
     """
-    `flock` raises `OSError` for `ENOLCK`, `EOPNOTSUPP`, `EBADF` and `EINTR`,
-    not only for contention — and advisory locking is unsupported or silently
+    `flock` raises `OSError` for `ENOLCK`, `EOPNOTSUPP` and `EBADF`, not only
+    for contention (not EINTR — since PEP 475 CPython retries that internally
+    and never surfaces it; the source-side comment was corrected and this one
+    was missed) — and advisory locking is unsupported or silently
     degraded on several network filesystems, which `PYPSAGUI_APP_DATA_DIR` can
     point at.
 

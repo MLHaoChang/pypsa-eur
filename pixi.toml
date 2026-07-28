@@ -254,10 +254,16 @@ generate-config = "pytest test/test_config_schema.py --fix"
 # guarantees is that any future drift in one of those names fails the suite —
 # not that the two lists are the same length.
 #
-# Full parity is NOT achieved and is not attempted: ~100 further transitive
-# packages (bokeh, beautifulsoup4, ...) sit on newer patch versions in
-# `desktop`. None is imported by the backend. Closing that gap needs a
-# solve-group, which re-solves `default` and upgrades the model environment.
+# Full parity is NOT achieved. Measured residual: 111 / 111 / 116 / 137
+# differing conda packages on osx-arm64 / osx-64 / win-64 / linux-64.
+#
+# Do NOT restate that the residual is invisible to the backend. That claim has
+# now been wrong twice: `anyio` was in the import closure the first time, and
+# `pillow`, `websockets`, `backports.zstd`, `libsqlite`, `openssl` and
+# `polars-runtime-32` the second. The residual also includes the BLAS stack —
+# on win-64 `desktop` resolves NETLIB reference BLAS with no OpenBLAS at all.
+# Closing it needs a solve-group, which re-solves `default` and upgrades the
+# model environment.
 pypsa = "==1.1.2"
 numpy = "==2.4.4"
 # The LP solver PyPSA calls. A different build here changes optimisation

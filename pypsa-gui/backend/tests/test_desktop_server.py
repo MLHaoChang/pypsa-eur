@@ -522,6 +522,67 @@ def test_stopping_a_server_that_was_never_started_still_releases_the_socket():
             pass
 
 
+def test_a_concurrent_stop_does_not_close_the_socket_under_uvicorn():
+    """
+    REGRESSION, and the second one introduced by remediation in as many rounds.
+
+    `stop()` computes two distinct states and then merges them at the use site:
+    `never_ran` (nothing was ever started — safe to close) and `already`
+    (another `stop()` is mid-escalation — uvicorn still owns the socket).
+    Closing on `already` pulls the fd out from under `loop.create_server`,
+    which fails with EBADF on the server thread, leaves `Server.started` False,
+    and therefore skips `lifespan.shutdown()` entirely — uvicorn's `_serve`
+    runs `shutdown()` only `if self.started`.
+
+    Nothing is lost today because `main.lifespan` has no code after its
+    `yield`. Task 4 is about to make that path load-bearing.
+    """
+    import asyncio
+    import threading as _threading
+
+    entered = _threading.Event()
+    release = _threading.Event()
+
+    @asynccontextmanager
+    async def slow_startup(app):
+        # Stands in for `run_first_run_import()` — a synchronous 113 MB
+        # copytree inside lifespan, before uvicorn calls `create_server`.
+        entered.set()
+        await asyncio.get_running_loop().run_in_executor(None, release.wait)
+        yield
+
+    inner = _health_app()
+    app = FastAPI(lifespan=slow_startup)
+    app.router.routes.extend(inner.router.routes)
+
+    server = _serving(app)
+    try:
+        server.start()
+        assert entered.wait(30), "lifespan startup never began"
+
+        # The window matters. AFTER `create_server` the event loop owns the
+        # descriptor and closing our handle is invisible; DURING startup the
+        # socket has not been handed over yet, so closing it makes
+        # `create_server` fail with EBADF on the server thread, leaves
+        # `Server.started` False, and skips `lifespan.shutdown()` — uvicorn
+        # runs `shutdown()` only `if self.started`.
+        server._stopped = True          # a concurrent stop() is mid-ladder
+        assert server.stop() == "already-stopped"
+        assert server._sock.fileno() != -1, (
+            "the socket was closed out from under uvicorn during startup"
+        )
+
+        release.set()
+        server._stopped = False
+        assert server.wait_healthy(30) is True, (
+            "the server never came up — the socket was pulled out from under it"
+        )
+    finally:
+        release.set()
+        server._stopped = False
+        server.stop()
+
+
 def test_the_health_probe_survives_a_malformed_reply():
     """
     `http.client` raises `HTTPException` subclasses — `BadStatusLine`,
