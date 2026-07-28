@@ -468,8 +468,10 @@ export default function App() {
       // Esc closes the docked comparison rail FIRST (if open), so users can
       // dismiss the comparison without also closing the Results view; a
       // second Esc then closes the panel as before.
+      //
+      // ShortcutsHelp's own Escape (via Dialog) now owns closing it — no
+      // special-case here anymore, so this branch never fires while it's open.
       if (e.key === 'Escape') {
-        if (showShortcuts) { setShowShortcuts(false); return }
         if (compareRailOpen) { setCompareRailOpen(false); return }
         if (activeSlidePanel) setSlidePanel(null)
       }
@@ -505,7 +507,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activeSlidePanel, setSlidePanel, compareRailOpen, setCompareRailOpen, showShortcuts])
+  }, [activeSlidePanel, setSlidePanel, compareRailOpen, setCompareRailOpen])
 
   // Click-outside-to-close for slide panels. Mounts a document `mousedown`
   // listener only while a panel is open. Closes the panel unless the click
