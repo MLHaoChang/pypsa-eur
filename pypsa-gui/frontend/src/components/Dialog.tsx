@@ -20,15 +20,24 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
-export interface DialogProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
+interface DialogBaseProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title' | 'aria-label' | 'aria-labelledby'> {
   open: boolean
   onClose: () => void
   children: ReactNode
-  title?: string
   dismissOnBackdrop?: boolean
   z?: number
   panelClassName?: string
 }
+
+// At least one of title / aria-label / aria-labelledby is required so a
+// nameless dialog cannot be constructed — see the design doc, which calls a
+// Dialog with no accessible name a defect, not a lint nit.
+type DialogNameProps =
+  | { title: string; 'aria-label'?: never; 'aria-labelledby'?: never }
+  | { title?: never; 'aria-label': string; 'aria-labelledby'?: never }
+  | { title?: never; 'aria-label'?: never; 'aria-labelledby': string }
+
+export type DialogProps = DialogBaseProps & DialogNameProps
 
 export function Dialog({
   open,
