@@ -357,3 +357,96 @@ def _step(report: ShutdownReport, name: str, fn: Callable[[], None]) -> None:
     except Exception as exc:
         report.errors.append(f"{name}: {exc}")
         logger.exception("shutdown step %s failed", name)
+
+
+# ── the window's close handler ──────────────────────────────────────────────
+
+
+class CloseHandler:
+    """
+    Tri-state answer to "may the window close?".
+
+        not started  -> start the worker, VETO
+        in progress  -> VETO, and do NOT start a second worker
+        complete     -> ALLOW
+
+    Webview-free on purpose: `gui.py` wires this to `window.events.closing` and
+    passes `window.destroy`, but nothing here imports a toolkit, so the whole
+    state machine is covered by the backend suite on a headless box.
+
+    **The handler must return promptly.** A UI thread blocked past ~5 s is
+    ghosted as *Not Responding* on Windows, and the sequence's own budget is
+    far past that — `abort_and_wait` alone allows 30 s. So the eight steps run
+    on a worker and this only ever answers a question.
+
+    **The state flips to complete BEFORE `destroy()`.** `window.destroy()`
+    re-fires `closing`, so flipping afterwards would have the re-entrant call
+    still see "in progress", veto its own destroy, and leave a window that can
+    never close — with the backend already stopped behind it. That is a total
+    deadlock and the only way out is Force Quit, which is the outcome this
+    workstream exists to prevent.
+    """
+
+    def __init__(
+        self,
+        *,
+        run: Callable[[], ShutdownReport],
+        destroy: Callable[[], None],
+    ) -> None:
+        self._run = run
+        self._destroy = destroy
+        self._lock = threading.Lock()
+        self._worker: threading.Thread | None = None
+        self._complete = threading.Event()
+        self._may_close = False
+        self.report: ShutdownReport | None = None
+
+    def on_closing(self) -> bool:
+        """`True` lets the window close. Wire to `window.events.closing`."""
+        with self._lock:
+            if self._may_close:
+                return True
+            if self._worker is not None and self._worker.is_alive():
+                # A second close while the first is mid-flush. `webview`
+                # delivers these freely; starting another sequence would abort
+                # twice and flush twice.
+                return False
+
+            self._complete.clear()
+            self._worker = threading.Thread(
+                target=self._work, name="pypsa-gui-shutdown", daemon=True,
+            )
+            self._worker.start()
+            return False
+
+    def _work(self) -> None:
+        try:
+            report = self._run()
+        except Exception as exc:
+            # A window that cannot be closed is worse than whatever failed.
+            report = ShutdownReport(quit=True)
+            report.errors.append(f"shutdown: {exc}")
+            logger.exception("the shutdown sequence raised")
+
+        self.report = report
+        try:
+            if report.quit:
+                # BEFORE destroy(), which re-enters `on_closing`.
+                with self._lock:
+                    self._may_close = True
+                self._destroy()
+            else:
+                # Cancelled. Nothing to reset: `on_closing` gates on
+                # `is_alive()`, so the finished worker is replaced by the next
+                # close on its own, and `shutdown_sequence` has already
+                # un-gated and cleared its own latch. Clearing `_worker` here
+                # as well was redundant — a mutation that deleted it left the
+                # whole suite green, which is what redundant means.
+                with self._lock:
+                    self._may_close = False
+        finally:
+            self._complete.set()
+
+    def wait_for_completion(self, timeout: float) -> bool:
+        """For tests and for a caller that wants to join the worker."""
+        return self._complete.wait(timeout)

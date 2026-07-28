@@ -673,3 +673,143 @@ def test_a_failing_abort_signal_does_not_stop_the_others():
 
     assert signalled == ["queue"]
     assert result is False, "an abort that partly failed is not a clean abort"
+
+
+# ── the window's close handler ──────────────────────────────────────────────
+#
+# TRI-STATE, and each state exists because of a specific failure:
+#
+#   not started  -> start the worker, VETO this close
+#   in progress  -> VETO, and do not start a second worker
+#   complete     -> ALLOW
+#
+# The GUI thread must return from the handler promptly: a UI thread blocked
+# past ~5 s is ghosted as "Not Responding" on Windows, and the sequence's own
+# worst case is far past that (`abort_and_wait` alone budgets 30 s). So the
+# eight steps run on a worker and the handler only ever answers a question.
+
+
+def _handler(**kwargs):
+    kwargs.setdefault("run", lambda: shutdown_service.ShutdownReport(quit=True))
+    kwargs.setdefault("destroy", lambda: None)
+    return shutdown_service.CloseHandler(**kwargs)
+
+
+def test_the_first_close_starts_the_sequence_and_vetoes_the_close():
+    started = threading.Event()
+
+    handler = _handler(run=lambda: (started.set(), shutdown_service.ShutdownReport(quit=True))[1])
+
+    assert handler.on_closing() is False, "the window must not close before the flush"
+    assert started.wait(10), "the sequence never ran"
+
+
+def test_the_handler_returns_immediately_rather_than_blocking_the_ui_thread():
+    """
+    A UI thread blocked past ~5 s is ghosted as *Not Responding* on Windows,
+    and `abort_and_wait` alone budgets 30 s. The handler must answer, not work.
+    """
+    release = threading.Event()
+    handler = _handler(run=lambda: (release.wait(20), shutdown_service.ShutdownReport(quit=True))[1])
+
+    started = time.monotonic()
+    handler.on_closing()
+    elapsed = time.monotonic() - started
+    release.set()
+
+    assert elapsed < 2, f"the close handler blocked the UI thread for {elapsed:.1f}s"
+
+
+def test_a_second_close_while_running_vetoes_without_starting_another_sequence():
+    runs: list[int] = []
+    release = threading.Event()
+
+    def run():
+        runs.append(1)
+        release.wait(20)
+        return shutdown_service.ShutdownReport(quit=True)
+
+    handler = _handler(run=run)
+    try:
+        assert handler.on_closing() is False
+        time.sleep(0.2)
+
+        assert handler.on_closing() is False
+        assert len(runs) == 1, f"started {len(runs)} sequences"
+    finally:
+        release.set()
+
+
+def test_the_state_flips_to_complete_BEFORE_destroy_is_called():
+    """
+    The deadlock this prevents is subtle and total. `window.destroy()` re-fires
+    the `closing` event, so if the state were flipped AFTER the call, the
+    re-entrant handler would still see "in progress", veto its own destroy, and
+    the window would never close — with the backend already stopped behind it.
+    """
+    observed: list[bool] = []
+    handler = None
+
+    def destroy():
+        # Exactly what pywebview does: `destroy()` re-enters `closing`.
+        observed.append(handler.on_closing())
+
+    handler = _handler(destroy=destroy)
+    handler.on_closing()
+    assert handler.wait_for_completion(20)
+
+    assert observed == [True], (
+        "destroy() re-entered the handler and was vetoed — the window would "
+        "never close and the backend is already down"
+    )
+
+
+def test_destroy_is_called_exactly_once():
+    calls: list[int] = []
+    handler = _handler(destroy=lambda: calls.append(1))
+
+    handler.on_closing()
+    assert handler.wait_for_completion(20)
+
+    assert calls == [1], calls
+
+
+def test_a_cancelled_quit_resets_so_the_user_can_close_again_later():
+    """
+    The veto path. `shutdown_sequence` un-gates and clears its own latch; the
+    handler has to do the same or the window is stuck open forever — the user
+    cancels once and can never quit.
+    """
+    outcomes = [shutdown_service.ShutdownReport(quit=False),
+                shutdown_service.ShutdownReport(quit=True)]
+    destroyed: list[int] = []
+
+    handler = _handler(run=lambda: outcomes.pop(0), destroy=lambda: destroyed.append(1))
+
+    assert handler.on_closing() is False
+    assert handler.wait_for_completion(20)
+    assert destroyed == [], "the window was destroyed despite the user cancelling"
+
+    # A later close must start a NEW sequence, not report the old outcome.
+    assert handler.on_closing() is False
+    assert handler.wait_for_completion(20)
+    assert destroyed == [1]
+
+
+def test_a_sequence_that_raises_still_lets_the_window_close():
+    """
+    A window that cannot be closed is worse than any failure it is reacting
+    to — the user's only remaining option is Force Quit, which is exactly the
+    outcome this workstream exists to avoid.
+    """
+    destroyed: list[int] = []
+
+    def explode():
+        raise RuntimeError("the shutdown sequence blew up")
+
+    handler = _handler(run=explode, destroy=lambda: destroyed.append(1))
+
+    assert handler.on_closing() is False
+    assert handler.wait_for_completion(20)
+    assert destroyed == [1], "the window was left un-closable after a failure"
+    assert handler.report is not None and handler.report.errors
