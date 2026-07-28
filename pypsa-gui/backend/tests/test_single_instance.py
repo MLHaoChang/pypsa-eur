@@ -12,9 +12,16 @@ does not raise there, it calls `TerminateProcess`. A liveness probe that kills
 the process it probes would take down the running app mid-solve, skipping the
 solver threads' `finally:`.
 
-`flock` / `msvcrt.locking` have no such problem. The OS drops the lock when the
-holding process dies, so there is no staleness window to size, no pid to probe,
-and nothing to reclaim.
+`flock` / `msvcrt.locking` have no such problem: the OS drops the lock when the
+holding process dies, so there is no pid to probe and nothing to reclaim.
+
+One qualification, because the original wording said "however it dies" without
+one. That is exact for POSIX `flock`, which releases atomically with the fd —
+proven below by SIGKILLing the holder. Microsoft documents Windows as NOT
+atomic: when a process terminates holding a lock, "the time it takes for the
+operating system to unlock these locks depends upon available system
+resources". So a small staleness window does exist there, which is why
+`acquire()` retries briefly before refusing. Unmeasured — Task 7 Step 8.
 
 This is NOT the lock `main.run_first_run_import` takes. That one guards a
 113 MB copy for the duration of one import and is deliberately reclaimable
@@ -23,14 +30,18 @@ make a second launch skip the import *and* run.
 """
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from desktop import single_instance
 from desktop.single_instance import AlreadyRunning, SingleInstance
 
 
@@ -131,6 +142,105 @@ def test_the_app_data_directory_is_created_if_absent(lock_path):
     with SingleInstance(lock_path) as lock:
         assert lock.held
         assert lock_path.parent.is_dir()
+
+
+def test_a_lock_that_is_unsupported_is_not_reported_as_a_second_instance(lock_path):
+    """
+    `flock` raises `OSError` for `ENOLCK`, `EOPNOTSUPP`, `EBADF` and `EINTR`,
+    not only for contention — and advisory locking is unsupported or silently
+    degraded on several network filesystems, which `PYPSAGUI_APP_DATA_DIR` can
+    point at.
+
+    Mapping every `OSError` to `AlreadyRunning` wedges that machine forever:
+    the user is told another instance is running when none is, and the design
+    deliberately makes the lock file's contents unreadable, so there is nothing
+    to delete that helps. Harder to escape than the stale-pid-file failure this
+    design was chosen to avoid.
+    """
+    def unsupported(fd):
+        raise OSError(errno.ENOLCK, "No locks available")
+
+    with mock.patch.object(single_instance, "_lock", unsupported):
+        with pytest.raises(OSError) as caught:
+            SingleInstance(lock_path).acquire()
+
+    assert not isinstance(caught.value, AlreadyRunning)
+    assert caught.value.errno == errno.ENOLCK
+
+
+def test_real_contention_is_still_reported_as_a_second_instance(lock_path):
+    """The discrimination must not swallow the case the lock exists for."""
+    def contended(fd):
+        raise OSError(errno.EWOULDBLOCK, "Resource temporarily unavailable")
+
+    with mock.patch.object(single_instance, "_lock", contended):
+        with pytest.raises(AlreadyRunning):
+            SingleInstance(lock_path, retry_for=0.2, retry_interval=0.05).acquire()
+
+
+def test_a_lock_still_held_by_a_dead_process_is_retried_briefly(lock_path):
+    """
+    POSIX `flock` is released atomically with the fd, but Windows is documented
+    NOT to be: Microsoft's `LockFile` remarks say that when a process
+    terminates holding a lock, "the time it takes for the operating system to
+    unlock these locks depends upon available system resources", and recommend
+    unlocking before exit. This shell installs an `os._exit()` rung that skips
+    exactly that.
+
+    Without a retry, a crash — or a hard quit — could refuse the NEXT launch
+    with "another instance is already running", and the user has nothing to
+    delete and no way to know how long to wait.
+
+    Documentation-based, unmeasured, and unmeasurable from here; Task 7 Step 8
+    is where it gets tested on the platform it applies to. The retry is cheap
+    and correct on both.
+    """
+    attempts = []
+
+    def frees_up_on_the_third_try(fd):
+        attempts.append(fd)
+        if len(attempts) < 3:
+            raise OSError(errno.EWOULDBLOCK, "still held by the dead process")
+
+    with mock.patch.object(single_instance, "_lock", frees_up_on_the_third_try):
+        lock = SingleInstance(lock_path, retry_for=2.0, retry_interval=0.05)
+        lock.acquire()
+
+    assert lock.held
+    assert len(attempts) == 3
+
+
+def test_the_retry_does_not_hold_the_launch_indefinitely(lock_path):
+    """A genuine second instance must still be refused promptly."""
+    def contended(fd):
+        raise OSError(errno.EWOULDBLOCK, "held")
+
+    started = time.monotonic()
+    with mock.patch.object(single_instance, "_lock", contended):
+        with pytest.raises(AlreadyRunning):
+            SingleInstance(lock_path, retry_for=0.3, retry_interval=0.05).acquire()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 3, f"refusing a second launch took {elapsed:.1f}s"
+
+
+def test_a_failed_acquire_leaks_no_file_descriptor(lock_path):
+    """
+    `acquire()` opens before it locks, and the retry loop makes it open more
+    than once. A launcher that retried and then raised would leak one fd per
+    attempt.
+    """
+    def contended(fd):
+        raise OSError(errno.EWOULDBLOCK, "held")
+
+    before = len(os.listdir("/dev/fd")) if os.path.isdir("/dev/fd") else None
+    with mock.patch.object(single_instance, "_lock", contended):
+        with pytest.raises(AlreadyRunning):
+            SingleInstance(lock_path, retry_for=0.3, retry_interval=0.05).acquire()
+
+    if before is not None:
+        after = len(os.listdir("/dev/fd"))
+        assert after <= before + 1, f"fd count went {before} -> {after}"
 
 
 def test_release_is_idempotent(lock_path):

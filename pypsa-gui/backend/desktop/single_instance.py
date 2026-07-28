@@ -16,9 +16,18 @@ app, skipping the solver threads' `finally:` blocks — the outcome the whole
 shutdown workstream exists to prevent.
 
 `flock` and `msvcrt.locking` have no such problem. The kernel drops the lock
-when the holding process dies, however it dies, so there is no staleness window
-to size, no pid to probe, and nothing to reclaim. A crash and a clean exit look
-identical to the next launch, which is exactly right.
+when the holding process dies, so there is no pid to probe and nothing to
+reclaim: a crash and a clean exit look alike to the next launch.
+
+With one qualification, since the first version of this paragraph said "however
+it dies" and stated it absolutely. That is exact for POSIX `flock`, which
+releases atomically with the fd. Microsoft documents Windows as NOT atomic —
+when a process terminates holding a lock, "the time it takes for the operating
+system to unlock these locks depends upon available system resources", and it
+recommends unlocking before exit, which a hard quit skips. So a staleness
+window does exist there; `acquire` retries briefly rather than pretending
+otherwise. Documentation-based and unmeasured — Task 7 Step 8 is where it gets
+tested on the platform it applies to.
 
 **This is not the lock `main.run_first_run_import` takes.** That one guards a
 113 MB copy for the duration of one import and is deliberately reclaimable
@@ -27,14 +36,35 @@ make a second launch skip the import *and* run.
 """
 from __future__ import annotations
 
+import errno
 import os
 import sys
+import time
 from pathlib import Path
 
 if sys.platform == "win32":  # pragma: no cover - exercised on Windows
     import msvcrt
 else:
     import fcntl
+
+# Errnos that mean "someone else holds it" and nothing else. Everything else
+# propagates: see `acquire`.
+_CONTENDED = frozenset(
+    {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK, errno.EDEADLK}
+)
+
+# How long to keep retrying a CONTENDED lock before refusing the launch.
+#
+# Zero would be right if release were always atomic with process death. It is
+# on POSIX `flock`. Microsoft documents Windows otherwise: when a process
+# terminates holding a lock, "the time it takes for the operating system to
+# unlock these locks depends upon available system resources", with an explicit
+# recommendation to unlock before exiting — and this shell installs an
+# `os._exit()` rung that does not. Without a retry, one hard quit could refuse
+# the next launch with no recourse and no indication of how long to wait.
+#
+# Short enough that a genuine second launch is still refused promptly.
+RETRY_FOR = 1.5
 
 
 class AlreadyRunning(RuntimeError):
@@ -49,9 +79,13 @@ class SingleInstance:
     shutdown path can plausibly run twice.
     """
 
-    def __init__(self, path) -> None:
+    def __init__(
+        self, path, *, retry_for: float = RETRY_FOR, retry_interval: float = 0.1
+    ) -> None:
         self.path = Path(path)
         self._fd: int | None = None
+        self._retry_for = retry_for
+        self._retry_interval = retry_interval
 
     @property
     def held(self) -> bool:
@@ -63,18 +97,33 @@ class SingleInstance:
         # backend at all. So on a first run the directory may not exist.
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        # The file's CONTENTS are never read and never load-bearing. A lock
-        # file survives crashes by design, so anything that parsed it would be
-        # a way for a corrupt byte to wedge every future launch.
-        fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            _lock(fd)
-        except OSError as exc:
-            os.close(fd)
-            raise AlreadyRunning(
-                f"another instance already holds {self.path}"
-            ) from exc
-        self._fd = fd
+        deadline = time.monotonic() + self._retry_for
+        while True:
+            # The file's CONTENTS are never read and never load-bearing. A lock
+            # file survives crashes by design, so anything that parsed it would
+            # be a way for a corrupt byte to wedge every future launch.
+            fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                _lock(fd)
+            except OSError as exc:
+                os.close(fd)  # before anything else — the retry loop reopens
+                if exc.errno not in _CONTENDED:
+                    # NOT "another instance is running". `flock` also raises for
+                    # ENOLCK, EOPNOTSUPP, EBADF and EINTR, and advisory locking
+                    # is unsupported or silently degraded on several network
+                    # filesystems — which `PYPSAGUI_APP_DATA_DIR` can point at.
+                    # Reporting those as contention wedges that machine
+                    # permanently: the lock file is deliberately unreadable, so
+                    # there is nothing the user can delete to recover.
+                    raise
+                if time.monotonic() >= deadline:
+                    raise AlreadyRunning(
+                        f"another instance already holds {self.path}"
+                    ) from exc
+                time.sleep(self._retry_interval)
+                continue
+            self._fd = fd
+            return
 
     def release(self) -> None:
         if self._fd is None:

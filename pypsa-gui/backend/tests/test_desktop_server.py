@@ -31,8 +31,10 @@ through every rung, and cannot distinguish "the thread happened to die" from
 from __future__ import annotations
 
 import http.client
+import os
 import socket
 import time
+import urllib.request
 from contextlib import asynccontextmanager, closing
 
 import pytest
@@ -315,6 +317,145 @@ def test_the_listener_is_closed_once_the_server_stops():
     with pytest.raises((ConnectionRefusedError, socket.timeout, OSError)):
         with closing(socket.create_connection(("127.0.0.1", port), timeout=3)):
             pass
+
+
+def test_the_health_probe_ignores_a_proxy_configured_in_the_environment():
+    """
+    `urllib.request.urlopen` builds the default opener, whose `ProxyHandler`
+    reads `getproxies()` — so a machine with `HTTP_PROXY` exported, or a
+    corporate Windows box with "bypass proxy for local addresses" (which writes
+    `<local>`, and CPython's `_proxy_bypass_winreg_override` only honours that
+    for hosts with NO DOT), dials the proxy for `http://127.0.0.1:<port>`.
+
+    Verified in the installed CPython: `proxy_bypass_environment` returns False
+    outright when `no_proxy` is unset, so this is not Windows-only.
+
+    Consequence: the backend boots perfectly, every health poll goes to the
+    proxy, `wait_healthy` returns False, and the shell reports a failed start
+    on every launch. It also leaks the ephemeral port to the proxy 10× a second.
+    """
+    server = _serving(_health_app())
+    try:
+        server.start()
+        # A proxy that cannot possibly serve anything. Port 1 is reserved and
+        # nothing listens there.
+        for var in ("http_proxy", "HTTP_PROXY", "ALL_PROXY", "all_proxy"):
+            os.environ[var] = "http://127.0.0.1:1"
+        os.environ.pop("no_proxy", None)
+        os.environ.pop("NO_PROXY", None)
+        # urlopen memoises its opener process-wide; drop it so this test is not
+        # decided by whichever earlier test happened to build it first.
+        urllib.request.install_opener(None)
+
+        assert server.wait_healthy(20) is True
+    finally:
+        for var in ("http_proxy", "HTTP_PROXY", "ALL_PROXY", "all_proxy"):
+            os.environ.pop(var, None)
+        urllib.request.install_opener(None)
+        server.stop()
+
+
+def test_the_join_budget_is_larger_while_lifespan_startup_is_still_running():
+    """
+    Quitting during the first-run import must not hard-exit in 16 seconds.
+
+    uvicorn's `_serve` awaits `startup()` — which runs `main.lifespan`, which
+    calls `run_first_run_import()` synchronously, a `copytree` of the whole
+    legacy tree — BEFORE `main_loop()` begins. Nothing polls `should_exit` or
+    `force_exit` in that window, so the escalation ladder is guaranteed to
+    reach `os._exit(0)`: two joins of `JOIN_TIMEOUT` and out.
+
+    The copy itself survives (`legacy_import` stages then renames), but
+    `run_first_run_import`'s `finally: lock.unlink()` never runs, and
+    `_LOCK_STALE_SECONDS` is 3600 — so for the next hour every relaunch
+    silently skips the import and the user's projects simply do not appear.
+
+    `Server.started` is uvicorn's own flag for "startup finished", so it is
+    what distinguishes the two budgets.
+    """
+    server = _serving(_health_app(), join_timeout=3.0, startup_join_timeout=90.0)
+
+    assert server._server.started is False
+    assert server._join_budget() == 90.0, "a quit during startup gets the long budget"
+
+    server._server.started = True
+    assert server._join_budget() == 3.0, "once serving, the normal bound applies"
+
+
+def test_abandoning_the_server_does_not_exit_with_success():
+    """
+    `os._exit(0)` tells an installer, a supervisor or a crash reporter that the
+    app quit cleanly, when in fact a thread had to be abandoned — possibly
+    mid-copy. The status is the only channel left at that point.
+    """
+    assert launcher.HARD_EXIT_STATUS != 0
+
+
+def test_starting_twice_is_refused():
+    """
+    Without a guard, the second `start()` silently replaces `self._thread`
+    while the first keeps serving on a daemon thread: two threads running one
+    `uvicorn.Server`, `main.lifespan` running twice — two first-run imports and
+    two `PyPSAService.initialize()` calls — and `stop()` joining only the
+    second.
+    """
+    server = _serving(_health_app())
+    try:
+        server.start()
+        assert server.wait_healthy(30) is True
+        with pytest.raises(RuntimeError):
+            server.start()
+    finally:
+        server.stop()
+
+
+def test_a_stopped_server_cannot_be_restarted():
+    """
+    `_stopped` latches, so a restarted server would answer "already-stopped"
+    to every future `stop()` and could never be shut down. Refusing is honest;
+    the shell creates a new one per launch anyway.
+    """
+    server = _serving(_health_app())
+    server.start()
+    assert server.wait_healthy(30) is True
+    server.stop()
+
+    with pytest.raises(RuntimeError):
+        server.start()
+
+
+def test_the_socket_is_released_even_if_the_server_never_ran():
+    """
+    If `import main` raises after `bind_socket()`, or lifespan startup fails,
+    uvicorn never reaches `shutdown()` and never closes the socket it was
+    handed — it stays listening for the life of the process, accepting
+    connections nothing will answer.
+    """
+    server = _serving(_health_app())
+    port = server.port
+    server.close()
+
+    with pytest.raises((ConnectionRefusedError, socket.timeout, OSError)):
+        with closing(socket.create_connection(("127.0.0.1", port), timeout=3)):
+            pass
+
+
+def test_web_concurrency_in_the_environment_cannot_change_the_worker_count():
+    """
+    `uvicorn.Config` reads `WEB_CONCURRENCY` when `workers` is None, and
+    `Server.startup` shares the socket via `sock.share(os.getpid())` +
+    `socket.fromshare` when `workers > 1 and is_windows`. That would have
+    uvicorn serve a DUPLICATE socket while `shutdown()` closes the original we
+    handed it — on Windows only, from a stray environment variable.
+    """
+    os.environ["WEB_CONCURRENCY"] = "4"
+    try:
+        sock = launcher.bind_socket()
+        with closing(sock):
+            server = launcher.DesktopServer(_health_app(), sock)
+            assert server.config.workers == 1
+    finally:
+        os.environ.pop("WEB_CONCURRENCY", None)
 
 
 @pytest.mark.parametrize("attr", ["log_config"])

@@ -7,10 +7,19 @@ Three properties, and the ORDER between them is the whole point:
 
 `get_settings()` and `security.allowed_origins()` are both `lru_cache`d and the
 CORS allowlist is read at import time, so an environment applied after `import
-main` is applied to nothing — the app keeps the two Vite dev origins and every
-mutation from the shell's ephemeral port is refused. The port has to exist
-before the environment is built, which is why the socket is bound first rather
-than left to uvicorn.
+main` is applied to nothing — the app silently keeps the two Vite dev origins
+and the shell's own origin is not allowlisted. The port has to exist before the
+environment is built, which is why the socket is bound first rather than left
+to uvicorn.
+
+**What that does NOT mean: mutations being refused.** `_csrf_rejection` returns
+`None` as its first statement in local mode, which `build_environment` turns
+on, and the SPA is served by the backend at the same origin as the API — so the
+window's requests are same-origin and never preflighted. The damage from a late
+environment is a wrong allowlist and a wrong database path, not a broken app.
+Overstating this is what got plan v2 rejected (verified constraint #1); it is
+restated correctly here because the same overstatement reappeared in this
+docstring three commits later.
 
 **Why the import-ordering tests are subprocesses.** `tests/conftest.py` imports
 `main` at module scope. An in-process `assert apply_environment() raises` is
@@ -47,10 +56,13 @@ def test_the_environment_pins_local_mode_and_a_headless_matplotlib():
 
 def test_the_allowlist_is_exactly_the_bound_origin():
     """
-    Not "contains" — *exactly*. The two Vite dev origins ship as the default
-    and they are `localhost:5173`, which no packaged shell ever serves; leaving
-    them allowlisted widens the CSRF trust boundary for a browser page that
-    happens to be running a dev server.
+    Not "contains" — *exactly*.
+
+    `settings.py` ships `http://localhost:5173,http://127.0.0.1:5173`. Note the
+    second one is the loopback LITERAL, on the same host the shell binds — so
+    the reason to drop them is not "no shell serves those" but that a developer
+    running the Vite dev server alongside the app would be an allowlisted,
+    credentialed origin against the desktop backend.
     """
     env = launcher.build_environment(51234)
 
@@ -125,14 +137,29 @@ def test_a_file_where_the_legacy_store_should_be_resolves_to_none(tmp_path):
 
 def test_the_default_probe_is_the_backend_project_store():
     """
-    Pins WHERE the probe looks, without depending on whether this particular
-    checkout has the directory — the same assertion holds either way.
-    """
-    expected = _BACKEND / "projects"
+    Pins WHERE the probe looks, on the CONSTANT rather than on the outcome.
 
-    assert launcher.resolve_legacy_root() == (
-        expected.resolve() if expected.is_dir() else None
-    )
+    The previous version asserted
+    `resolve_legacy_root() == (expected if expected.is_dir() else None)`, which
+    passes against `return None` on every machine where the directory is
+    absent — and `pypsa-gui/.gitignore` ignores `backend/projects/`, so that is
+    every fresh clone and every CI box. It only appeared to test something here
+    because this developer has 113 MB of real projects sitting in that path.
+    """
+    assert launcher.PRE_DESKTOP_PROJECTS_DIR == (_BACKEND / "projects").resolve()
+
+
+def test_the_default_probe_is_actually_the_one_resolve_uses():
+    """
+    Asserting on the constant is only worth anything if the function reads it.
+    Points it somewhere empty and requires the answer to follow.
+    """
+    import unittest.mock
+
+    with unittest.mock.patch.object(
+        launcher, "PRE_DESKTOP_PROJECTS_DIR", Path("/nonexistent/elsewhere")
+    ):
+        assert launcher.resolve_legacy_root() is None
 
 
 # ── the socket ──────────────────────────────────────────────────────────────
@@ -218,7 +245,7 @@ def _subprocess(body: str) -> subprocess.CompletedProcess:
     )
 
 
-@pytest.mark.parametrize("module", ["main", "pypsa", "settings"])
+@pytest.mark.parametrize("module", ["main", "pypsa", "settings", "matplotlib"])
 def test_applying_the_environment_after_the_backend_is_imported_raises(module):
     """
     The failure this prevents is silent. `get_settings()` is `lru_cache`d, so a
@@ -228,6 +255,14 @@ def test_applying_the_environment_after_the_backend_is_imported_raises(module):
 
     `pypsa` is in the list for a different reason: importing it resolves the
     matplotlib backend, and `MPLBACKEND=Agg` set afterwards is set too late.
+
+    `matplotlib` is listed in its OWN right, not covered by `pypsa`. Measured:
+    `import matplotlib` alone resolves the backend to `macosx`, and setting
+    `MPLBACKEND=Agg` after that leaves it on `macosx` with
+    `backend_macosx` already loaded. Anything reaching matplotlib without
+    going through pypsa — `gui.py`, `splash.py`, seaborn, cartopy, a
+    PyInstaller hidden import — would otherwise let `apply_environment()`
+    succeed with its most safety-critical variable already dead.
     """
     result = _subprocess(f"""
         import {module}  # noqa: F401
@@ -275,6 +310,60 @@ def test_applying_the_environment_first_is_allowed_and_takes_effect():
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OK" in result.stdout
+
+
+def test_an_inherited_legacy_root_is_CLEARED_not_left_standing():
+    """
+    `build_environment` deliberately omits `PYPSAGUI_LEGACY_IMPORT_ROOT` when
+    there is nothing to migrate — but `os.environ.update()` cannot remove a
+    key, so an inherited one survived and `run_first_run_import` fired against
+    a tree the shell never chose, `copytree`-ing it into the user's Documents.
+
+    Not a hypothetical inheritance: `tests/conftest.py` pops this exact
+    variable and says why — "a developer who exported it, exactly what the
+    importer's rehearsal instructions teach". The harness defended against a
+    state the product did not.
+
+    Subprocess because the value has to be inherited from a real parent
+    environment, which is the whole mechanism.
+    """
+    result = _subprocess("""
+        import os
+        os.environ["PYPSAGUI_LEGACY_IMPORT_ROOT"] = "/somewhere/the/shell/never/chose"
+
+        from desktop import launcher
+        launcher.apply_environment(launcher.build_environment(51234, None))
+
+        assert "PYPSAGUI_LEGACY_IMPORT_ROOT" not in os.environ, os.environ[
+            "PYPSAGUI_LEGACY_IMPORT_ROOT"
+        ]
+        print("CLEARED")
+    """)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "CLEARED" in result.stdout
+
+
+def test_a_resolved_legacy_root_still_overrides_an_inherited_one():
+    """The clearing must not throw away the value the shell DID choose."""
+    result = _subprocess("""
+        import os
+        os.environ["PYPSAGUI_LEGACY_IMPORT_ROOT"] = "/the/stale/inherited/one"
+
+        from desktop import launcher
+        from pathlib import Path
+        launcher.apply_environment(
+            launcher.build_environment(51234, Path("/the/chosen/one"))
+        )
+
+        assert os.environ["PYPSAGUI_LEGACY_IMPORT_ROOT"] == "/the/chosen/one", (
+            os.environ["PYPSAGUI_LEGACY_IMPORT_ROOT"]
+        )
+        print("OVERRIDDEN")
+    """)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OVERRIDDEN" in result.stdout
 
 
 def test_the_launcher_imports_no_part_of_the_backend():
