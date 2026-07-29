@@ -150,7 +150,7 @@ export default function VintagePeriodBoundsModal({ componentClass, name, onClose
           <span id={titleId} className="text-sm font-semibold text-text">Per-period capacity bounds</span>
           <span className="text-[11px] text-muted font-mono">{componentClass} · {name}</span>
         </div>
-        <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors">
+        <button onClick={onClose} aria-label="Close per-period bounds dialog" className="p-1 text-muted hover:text-text transition-colors">
           <X size={15} />
         </button>
       </div>

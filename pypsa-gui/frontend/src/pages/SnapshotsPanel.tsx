@@ -319,7 +319,7 @@ function CreateSnapshotModal({
     >
       <div className="flex items-center justify-between mb-3">
         <span id={titleId} className="text-base font-semibold text-text">Save snapshot</span>
-        <button onClick={onClose} className="text-muted hover:text-text">
+        <button onClick={onClose} aria-label="Close save snapshot dialog" className="text-muted hover:text-text">
           <X size={16} />
         </button>
       </div>

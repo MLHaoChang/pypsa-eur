@@ -72,7 +72,7 @@ export default function NewProjectWizard({
           <FilePlus size={15} className="text-accent" />
           <span id={titleId} className="text-sm font-semibold text-text">New project</span>
         </div>
-        <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors">
+        <button onClick={onClose} aria-label="Close new project dialog" className="p-1 text-muted hover:text-text transition-colors">
           <X size={15} />
         </button>
       </div>

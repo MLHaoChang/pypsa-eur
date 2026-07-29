@@ -39,7 +39,7 @@ function NewTabNameModal({
     <Dialog open onClose={onClose} aria-labelledby={titleId} panelClassName="bg-bg rounded-xl shadow-2xl w-80 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <span id={titleId} className="text-sm font-semibold text-text">New project</span>
-        <button onClick={onClose} className="p-1 text-muted hover:text-text"><X size={15} /></button>
+        <button onClick={onClose} aria-label="Close new project dialog" className="p-1 text-muted hover:text-text"><X size={15} /></button>
       </div>
       <div className="p-4 space-y-3">
         <label className="flex flex-col gap-1">

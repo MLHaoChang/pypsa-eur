@@ -88,6 +88,7 @@ export default function BusAutocomplete({
             type="button"
             tabIndex={-1}
             onClick={() => { setOpen(o => !o); inputRef.current?.focus() }}
+            aria-label="Show bus suggestions"
             className="px-1.5 border border-l-0 border-border rounded-r text-muted hover:text-text hover:border-accent transition-colors"
           >
             <svg width="10" height="7" viewBox="0 0 10 7" fill="none">
