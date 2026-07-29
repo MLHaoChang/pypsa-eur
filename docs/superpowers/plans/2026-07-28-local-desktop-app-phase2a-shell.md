@@ -305,6 +305,39 @@ Feature-detect **once, behind `pywebviewready`** (constraint #14), not per call.
 
 ---
 
+## Acceptance results — macOS arm64, measured 2026-07-29
+
+Run against a throwaway app-data directory with the real `gui.main()`, two
+sequential launches sharing that directory.
+
+| Step | Result |
+|---|---|
+| 2 — first launch, ZERO projects | window opens, `/api/network/reset` 200, bus created 201, project saved 200, clean quit, **exit status 0** |
+| 3 — a project opens and returns buses | `GET /api/projects/AcceptanceProject` 200, `/api/network/buses` returns the bus |
+| 4 — **H5: the edit survives a relaunch** | launch 2 lists `AcceptanceProject`, loads it, and `AcceptanceBus` is present. **This is the property the whole conversion exists for.** |
+| 6 — second launch while the first runs | refused, "already running" message shown (NOT the lock-failed one), incumbent's lock unaffected, status 0 |
+| 7 — the process actually exits | both sessions exited; `ps` shows no strays |
+
+Also observed in a separate live run: `/api/health` reports **pypsa 1.1.2** —
+direct evidence the solve-group pinning holds in the shipped configuration, an
+unpinned `desktop` env would report 1.2.4 — `auth_enabled: false`, the SPA
+served as real HTML rather than the 503 page, `pypsa-gui.log` written and
+ending "Application shutdown complete" (the graceful uvicorn path, not the
+forced one), and the first-run import firing so D10 works end to end.
+
+**NOT run: step 5** (start a solve, close, Cancel, assert still usable, quit).
+It needs a real solve and was not automated here.
+
+**NOT run: step 8, Windows.** Everything platform-specific in this workstream
+is still reasoned-from-documentation: the `msvcrt` lock and its
+release-after-death delay, `SO_EXCLUSIVEADDRUSE`, the ProactorEventLoop under
+the socket handoff, `pandas 3.0.3` on win-64 which no test has executed, and
+the `destroy()` re-entrancy that `CloseHandler` depends on — which macOS
+provably CANNOT exercise, so the ordering has no coverage on the platform that
+needs it.
+
+---
+
 ## Rollback
 
 Additive under `backend/desktop/`, one backend service, one middleware gate, one frontend helper, 14 call-site edits. `git revert` the range; the web deployment imports none of it.
