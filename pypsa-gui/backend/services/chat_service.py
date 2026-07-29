@@ -925,6 +925,20 @@ def append_turn(ctx: ProjectContext, turn: dict[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(turn, ensure_ascii=False))
             f.write("\n")
+            # Durability, and it is worth being precise about what this buys.
+            # Closing the file (which the `with` already does) flushes Python's
+            # userspace buffer into the OS page cache, so the desktop shell's
+            # `os._exit()` shutdown rung never loses a turn — page-cache data
+            # is kernel-side and survives a process that skips its exit
+            # handlers. What it does NOT survive is a power cut or a kernel
+            # panic, and that is the gap `fsync` closes.
+            #
+            # One turn per user message, so the cost is a disk round-trip at
+            # human typing speed, not a hot loop. On macOS `fsync` is not a
+            # barrier down to the platter (`F_FULLFSYNC` is), which is
+            # accepted here: this protects a chat transcript, not a ledger.
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def flush_to_disk(ctx: ProjectContext) -> None:

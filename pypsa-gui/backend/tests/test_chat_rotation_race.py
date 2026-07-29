@@ -219,3 +219,51 @@ def test_concurrent_read_during_rotation_never_empty_spuriously(
     # only require a non-empty well-formed union after the writer finishes.
     assert len(final) >= 1
     assert all(isinstance(rec, dict) and "i" in rec for rec in final)
+
+
+def test_append_turn_fsyncs_the_chat_jsonl_descriptor(
+    tmp_projects_dir, monkeypatch,
+):
+    """
+    QA #9 — `append_turn` must fsync, not merely close.
+
+    Closing the file hands the bytes to the OS page cache, which already
+    survives the desktop shell's `os._exit()` rung. `fsync` is what carries
+    them past a power cut or a kernel panic.
+
+    Asserted by INODE rather than by call count alone, so the test fails if
+    the fsync is dropped AND if it is retargeted at some other descriptor.
+    Correlating on the inode keeps this honest without depending on fd
+    numbering, which is not stable across platforms.
+    """
+    import os as _os
+
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+
+    ctx = _make_bound_ctx("fsync_proj", tmp_projects_dir)
+    path = chat_service.get_persist_path(ctx)
+    assert path is not None
+
+    synced_inodes: list[int] = []
+    real_fsync = _os.fsync
+
+    def recording_fsync(fd: int) -> None:
+        # fstat BEFORE the real call — the fd is guaranteed open here.
+        synced_inodes.append(_os.fstat(fd).st_ino)
+        real_fsync(fd)
+
+    monkeypatch.setattr(chat_service.os, "fsync", recording_fsync)
+
+    chat_service.append_turn(ctx, {"role": "user", "content": "durable?"})
+
+    assert path.exists(), "append_turn wrote nothing"
+    assert synced_inodes, "append_turn closed the file but never fsynced it"
+    assert path.stat().st_ino in synced_inodes, (
+        "append_turn fsynced a descriptor that is not chat.jsonl "
+        f"(synced inodes {synced_inodes}, chat.jsonl {path.stat().st_ino})"
+    )
+
+    # The turn is still readable — fsync must not disturb the write path.
+    turns = chat_service.read_all_turns(ctx)
+    assert [t.get("content") for t in turns] == ["durable?"]
