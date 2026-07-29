@@ -289,6 +289,29 @@ generate-config = "pytest test/test_config_schema.py --fix"
 # download policy in `cocoa.py`. A minor bump can move any of those.
 pywebview = "==6.2.1"
 
+# Defined HERE rather than in the root `[tasks]` table, for the reason
+# `gui-tests` is under `[feature.test.tasks]`: in the root table it resolves to
+# `default`, which deliberately has no pywebview, so the launch would fail on
+# `import webview` with a message about the environment instead of the app.
+#
+# `cwd` is load-bearing — `python -m desktop.gui` needs `pypsa-gui/backend` on
+# `sys.path[0]` to reach `import main`. Nothing else is pinned here on purpose:
+# storage locations come from `app_paths`, and the ONE variable the shell pins
+# (`DATABASE_URL`) it pins itself, because a cwd-relative value in
+# `backend/.env` otherwise outranks the absolute app-data default and the app
+# cannot start from a directory it may not write.
+#
+# **Invoke it as `pixi run -e desktop desktop-gui`.** Bare `pixi run desktop-gui`
+# fails with "the task 'desktop-gui' is ambiguous", because the `test`
+# environment also carries the `desktop` feature (it needs pywebview, or the two
+# download tests silently skip) and so provides this task too. The `-e` is not
+# optional and is not avoidable: any table that is unambiguous is one that
+# resolves to an environment without pywebview.
+#
+# `test_desktop_environment.py` asserts this task stays here.
+[feature.desktop.tasks]
+desktop-gui = { cmd = "python -m desktop.gui", cwd = "pypsa-gui/backend" }
+
 [feature.test.dependencies]
 pytest = ">=8.4.2"
 

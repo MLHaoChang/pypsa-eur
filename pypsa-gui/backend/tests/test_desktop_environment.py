@@ -256,6 +256,45 @@ def test_the_backend_suite_environment_can_run_the_desktop_tests(platform):
     )
 
 
+def test_there_is_a_one_command_way_to_launch_the_desktop_app():
+    """
+    Until 2026-07-30 there was none, and "installation to running" was three
+    hand-typed lines nobody had written down. The task lives under
+    `[feature.desktop.tasks]` for the same reason `gui-tests` lives under
+    `[feature.test.tasks]`: in the root table it resolves to `default`, which
+    deliberately has no pywebview, so the launch would die on `import webview`
+    with a message about the environment rather than the app.
+
+    **It must be invoked as `pixi run -e desktop desktop-gui`.** Measured: bare
+    `pixi run desktop-gui` fails with *"the task 'desktop-gui' is ambiguous …
+    These environments provide the task: test, desktop"*, because the `test`
+    environment also carries the `desktop` feature. That is unavoidable rather
+    than untidy — every table that would be unambiguous resolves to an
+    environment without pywebview — so the `-e` belongs in the documentation,
+    which is why both run-books spell it out.
+
+    Recorded because `pixi task list --environment desktop` shows the task and
+    looks like confirmation while testing nothing about invoking it.
+    """
+    manifest = tomllib.loads((_LOCK.parent / "pixi.toml").read_text())
+
+    root_tasks = manifest.get("tasks", {})
+    desktop_tasks = manifest.get("feature", {}).get("desktop", {}).get("tasks", {})
+
+    assert "desktop-gui" not in root_tasks, (
+        "`desktop-gui` is in the root [tasks] table, so it resolves to "
+        "`default`, which has no pywebview"
+    )
+    assert "desktop-gui" in desktop_tasks, (
+        "`desktop-gui` is not defined under [feature.desktop.tasks]"
+    )
+
+    task = desktop_tasks["desktop-gui"]
+    # `cwd` is load-bearing, not cosmetic: `python -m desktop.gui` needs
+    # `pypsa-gui/backend` on `sys.path[0]` to reach `import main`.
+    assert task["cwd"] == "pypsa-gui/backend", task
+
+
 def test_gui_tests_resolves_to_the_environment_that_has_pywebview():
     """
     The other half. A `gui-tests` back in the root `[tasks]` table resolves to
