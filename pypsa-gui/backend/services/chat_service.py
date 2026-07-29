@@ -1373,6 +1373,73 @@ def _safety_tier_for(tool_name: str) -> str:
     return "read"
 
 
+def _with_history_cache_breakpoint(
+    messages: list[dict[str, Any]], anchor: int | None
+) -> list[dict[str, Any]]:
+    """
+    Improvement #18 — a third cache breakpoint, on the conversation history.
+
+    The system prompt and the ~100-tool catalog are already cached, but they
+    are FIXED size. The conversation is what actually grows, so on a long
+    session it becomes the dominant uncached input.
+
+    `anchor` is the index of the last COMPLETED history message, captured
+    before the current user turn is appended. Anchoring there rather than at
+    `messages[-1]` is the whole point:
+
+      * The agentic loop appends assistant tool_use and user tool_result
+        messages to `messages` between API calls. Marking the moving tail
+        would write a NEW cache entry on every iteration — paying the 1.25x
+        write premium repeatedly to cache bytes that are discarded when the
+        turn ends.
+      * Anchored to completed turns, the cached prefix only ever grows by
+        whole turns, so each turn writes once and every later call in that
+        turn reads.
+
+    Returns a shallow-copied list; `messages` and the session's own deque are
+    never mutated, because the retry path rebuilds this from the same input
+    and must produce byte-identical output.
+
+    No-op when there is no history (first turn of a session) — there is no
+    stable prefix to cache, and a breakpoint on the user's own first message
+    would only ever write, never read.
+
+    Budget: Anthropic allows 4 breakpoints per request. This is the third
+    (system, tools, history), so it stays inside the cap.
+    """
+    if anchor is None or anchor < 0 or anchor >= len(messages):
+        return messages
+
+    out = list(messages)
+    target = dict(out[anchor])
+    content = target.get("content")
+
+    if isinstance(content, str):
+        # A plain-string message cannot carry cache_control; promote it to a
+        # single text block. Semantically identical to the SDK.
+        target["content"] = [{
+            "type": "text",
+            "text": content,
+            "cache_control": {"type": "ephemeral"},
+        }]
+    elif isinstance(content, list) and content:
+        blocks = [dict(b) if isinstance(b, dict) else b for b in content]
+        last = blocks[-1]
+        if not isinstance(last, dict):
+            # Nothing markable — leave the request untouched rather than
+            # risk an API 400 on a malformed block.
+            return messages
+        last["cache_control"] = {"type": "ephemeral"}
+        blocks[-1] = last
+        target["content"] = blocks
+    else:
+        # Empty or unexpected content — nothing to anchor to.
+        return messages
+
+    out[anchor] = target
+    return out
+
+
 def _redact_for_log(value: Any) -> str:
     """
     Strip plausible secrets from a string before logging. Phase 3 invariant
@@ -1982,6 +2049,12 @@ def _run_turn_body(
     else:
         user_content = message
 
+    # Improvement #18 — anchor the history cache breakpoint at the last
+    # COMPLETED message, captured BEFORE this turn's user message is appended
+    # and before the agentic loop starts appending tool_use / tool_result.
+    # `None` on the first turn of a session, where there is no stable prefix.
+    history_cache_anchor: int | None = len(messages) - 1 if messages else None
+
     messages.append({"role": "user", "content": user_content})
     with session._lock:
         session.append_history_message({"role": "user", "content": user_content})
@@ -2047,7 +2120,9 @@ def _run_turn_body(
                     max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
                     system=system_blocks,
                     tools=tools_with_cache,
-                    messages=messages,
+                    messages=_with_history_cache_breakpoint(
+                        messages, history_cache_anchor
+                    ),
                 ) as stream:
                     for event in stream:
                         if session.abort_event.is_set():
