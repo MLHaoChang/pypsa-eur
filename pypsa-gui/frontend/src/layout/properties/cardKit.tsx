@@ -745,10 +745,10 @@ export function CardShell({ title, badge, meta, onEdit, onDelete, delPending, ch
             </button>
           )}
           <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={onEdit} className="p-1 text-muted hover:text-accent rounded hover:bg-accent/10 transition-colors">
+            <button onClick={onEdit} aria-label={`Edit ${title}`} className="p-1 text-muted hover:text-accent rounded hover:bg-accent/10 transition-colors">
               <Pencil size={11} />
             </button>
-            <button onClick={onDelete} disabled={delPending}
+            <button onClick={onDelete} disabled={delPending} aria-label={`Delete ${title}`}
               className="p-1 text-muted hover:text-danger rounded hover:bg-danger/10 transition-colors disabled:opacity-40">
               <Trash2 size={11} />
             </button>
@@ -768,7 +768,7 @@ export function EditShell({ title, onSave, onCancel, saving, children }: {
     <div className="bg-bg border border-accent/30 rounded-lg px-3 pt-2 pb-3 mb-2">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-text truncate">{title}</span>
-        <button onClick={onCancel} className="text-muted hover:text-text transition-colors"><X size={12} /></button>
+        <button onClick={onCancel} aria-label={`Close ${title} editor`} className="text-muted hover:text-text transition-colors"><X size={12} /></button>
       </div>
       <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
         {children}
