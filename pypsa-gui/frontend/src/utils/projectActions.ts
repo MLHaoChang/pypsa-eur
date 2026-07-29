@@ -618,14 +618,9 @@ export async function downloadProjectBundle(
   if (typeof w.showSaveFilePicker !== 'function') {
     // Browser doesn't expose the File System Access API — there's no concept
     // of a persistent file handle, so the per-project cache is moot. Just
-    // download to the browser's default folder.
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${name}.pypsaproj.zip`
-    a.click()
-    URL.revokeObjectURL(url)
-    return 'download'
+    // download to the browser's default folder. This is also the path the
+    // pywebview desktop shell always takes; WKWebView has no picker.
+    return anchorDownload(blob, name)
   }
 
   // Try the cached handle first when caller hasn't opted out.
@@ -674,8 +669,35 @@ export async function downloadProjectBundle(
     return 'picker'
   } catch (e) {
     if ((e as { name?: string })?.name === 'AbortError') return 'cancelled'
-    throw e
+    // The picker failed for a reason that is NOT the user cancelling. The
+    // common one is `SecurityError`: `showSaveFilePicker` requires transient
+    // user activation (~5 s in Chrome), and the bundle fetch above can outlive
+    // it — which is exactly what happens on the large projects the 180 s
+    // timeout exists to serve. Rethrowing discarded bytes we already have and
+    // showed the user a browser-internals string ("Must be handling a user
+    // gesture to show a file picker") with no file and no way to succeed on
+    // retry, because the retry hits the same wall.
+    //
+    // The anchor needs no activation, so fall back to it: the file lands in
+    // the browser's default download folder instead of a chosen one. A worse
+    // location beats no file.
+    appLog('WARN', `Save dialog unavailable (${(e as Error)?.name ?? 'unknown'}) — downloading to the default folder instead`)
+    return anchorDownload(blob, name)
   }
+}
+
+// Save an already-fetched blob via a download anchor. No File System Access
+// API, no user activation required. Used both when the browser has no picker
+// (Firefox, Safari, and the pywebview WKWebView shell) and as the fallback
+// when the picker cannot be shown.
+function anchorDownload(blob: Blob, name: string): BundleSaveResult {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${name}.pypsaproj.zip`
+  a.click()
+  URL.revokeObjectURL(url)
+  return 'download'
 }
 
 // Forget the cached file handle for a project — call when a project is

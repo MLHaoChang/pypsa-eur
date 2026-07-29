@@ -23,7 +23,8 @@ gui          = { depends-on = ["gui-backend", "gui-frontend"] }
 # `gui-tests` is NOT here — it lives in `[feature.test.tasks]` so it resolves
 # to the `test` environment, which is the only one carrying `pywebview`. Run
 # from `[tasks]` it resolved to `default`, where the two desktop-download
-# tests SKIPPED and the suite still read green. See the comment there.
+# tests SKIPPED and the suite still read green. (They fail loudly now rather
+# than skipping, but the task still belongs where the dependency is.)
 gui-db-up    = { cmd = "docker compose up -d", cwd = "pypsa-gui" }
 gui-db-down  = { cmd = "docker compose down", cwd = "pypsa-gui" }
 setup-ssl-bypass = "python scripts/install_ssl_bypass.py"
@@ -229,7 +230,9 @@ tsam = "==2.3.9"
 # setting were reported as SKIPPED — and a skipped test reads as a green
 # suite. Deleting `downloads.apply(...)` from `gui.py` would then have passed
 # the canonical gate while shipping an app whose every CSV export navigates
-# the SPA away from itself.
+# the SPA away from itself. Those tests now FAIL rather than skip when
+# pywebview is absent, and `test_desktop_environment.py` asserts this task
+# stays here.
 gui-tests = { cmd = "python -m pytest", cwd = "pypsa-gui/backend" }
 
 integration-tests = """

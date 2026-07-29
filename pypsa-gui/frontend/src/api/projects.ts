@@ -1,5 +1,5 @@
 import axios from 'axios'
-import client from './client'
+import client, { formatApiDetail } from './client'
 import type {
   ProjectInfo, ImportSummary, SaveResult, BundleImportResult,
   CompareState, ResultsSummary,
@@ -17,7 +17,14 @@ export async function bundleErrorMessage(e: unknown): Promise<string> {
   if (data instanceof Blob) {
     try {
       const parsed = JSON.parse(await data.text())
-      if (typeof parsed?.detail === 'string') return parsed.detail
+      if (parsed?.detail != null) {
+        // `formatApiDetail`, not a `typeof === 'string'` check: FastAPI's 422
+        // returns `detail` as a LIST of {loc, msg} objects, and several of the
+        // project routes raise `detail={...}` objects. A string-only gate
+        // silently degrades those to the opaque axios message — the exact
+        // failure this helper exists to fix.
+        return formatApiDetail(parsed.detail)
+      }
     } catch {
       // Not JSON (an HTML error page, or a truncated body). Fall through to
       // the axios message rather than showing the user raw markup.

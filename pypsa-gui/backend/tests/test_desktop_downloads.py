@@ -83,7 +83,10 @@ def _webview():
     """
     try:
         import webview
-    except ImportError as exc:  # pragma: no cover - environment defect
+    except Exception as exc:  # pragma: no cover - environment defect
+        # Not just ImportError: a pywebview that is present but unimportable
+        # (a headless box with no GUI backend) should get the same guidance,
+        # not a raw traceback from deep inside the package.
         raise AssertionError(
             "pywebview is missing. These tests guard the desktop download "
             "setting and must not be skipped — run `pixi run gui-tests`, which "

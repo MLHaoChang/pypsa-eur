@@ -42,6 +42,7 @@ environment ended up 85-105 packages from it. Same defect, relocated.
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -234,56 +235,62 @@ def test_the_desktop_environment_carries_pywebview(platform):
 def test_the_backend_suite_environment_can_run_the_desktop_tests(platform):
     """
     `test` must carry pywebview, or the tests guarding the desktop download
-    setting SKIP — and a skipped test reads as a green suite.
+    setting cannot run.
 
-    This is not hypothetical. It shipped: `desktop` was added to the `test`
-    environment for exactly this reason, but `gui-tests` stayed in the root
-    `[tasks]` table, so the canonical command still resolved to `default` and
-    both tests still skipped. Two edits re-open it — dropping `desktop` from
-    `test`, or moving the task back — and neither would fail anything without
-    this test and the next one.
+    This is not hypothetical. It shipped: those tests used `importorskip` and
+    SKIPPED for a whole review cycle, because `desktop` was added to the `test`
+    environment but `gui-tests` stayed in the root `[tasks]` table, so the
+    canonical command still resolved to `default`. A skipped test reads as a
+    green suite.
+
+    Both halves are now closed — `test_desktop_downloads.py` fails rather than
+    skips, and the next test pins the task's placement. What THIS test adds
+    beyond those is coverage of every platform in the lock rather than only
+    the one the suite happens to be running on.
     """
     _, test_pypi = _packages("test", platform)
 
     assert "pywebview" in test_pypi, (
         f"`test` has no pywebview on {platform} — the desktop download tests "
-        f"will skip and the suite will still look green: {sorted(test_pypi)}"
+        f"cannot run there: {sorted(test_pypi)}"
     )
 
 
 def test_gui_tests_resolves_to_the_environment_that_has_pywebview():
     """
     The other half. A `gui-tests` back in the root `[tasks]` table resolves to
-    `default`, where pywebview is deliberately absent — so the task would run
-    the suite in the one environment that cannot execute its desktop tests.
+    `default`, where pywebview is deliberately absent — so the canonical
+    command would run the suite in the one environment that cannot execute its
+    desktop tests.
     """
-    manifest = (_LOCK.parent / "pixi.toml").read_text()
+    manifest = tomllib.loads((_LOCK.parent / "pixi.toml").read_text())
 
-    def section(header: str) -> str:
-        """
-        The body of one TOML table, matched by a line-anchored header.
+    # Parsed, not pattern-matched. Three hand-rolled versions of this were
+    # wrong before the parser went in: `split("[tasks]")` matches the substring
+    # inside `[feature.test.tasks]`; `split("[feature.test.tasks]")` matches the
+    # comment in the root table explaining why the task is not there; and an
+    # `rf"^\{header}"` regex turned a header starting with "t" into the escape
+    # `\t`. A line-anchored regex still truncated a section at any `[` in
+    # column 0 inside one of this file's `"""` task bodies — the one failure
+    # mode of the three that would have passed silently.
+    root_tasks = manifest.get("tasks", {})
+    feature_tasks = manifest.get("feature", {}).get("test", {}).get("tasks", {})
 
-        Both naive forms of this were wrong, and both failed loudly rather than
-        silently only because the assertions below are positive as well as
-        negative: `split("[tasks]")` matches the substring inside
-        `[feature.test.tasks]`, and `split("[feature.test.tasks]")` matches the
-        comment in the root table that explains why the task is not there.
-        """
-        # Built by concatenation, not an f-string: `rf"^\{...}"` makes `\` +
-        # the interpolation, so a header starting with "t" became the regex
-        # escape `\t` and matched a tab.
-        pattern = r"^\[" + re.escape(header) + r"\]\s*$(.*?)(?=^\[|\Z)"
-        m = re.search(pattern, manifest, re.MULTILINE | re.DOTALL)
-        assert m, f"[{header}] table not found in pixi.toml"
-        return m.group(1)
-
-    # A DEFINITION at the start of a line, not the mere string.
-    defines = re.compile(r"^gui-tests\s*=", re.MULTILINE)
-
-    assert not defines.search(section("tasks")), (
+    assert "gui-tests" not in root_tasks, (
         "`gui-tests` is back in the root [tasks] table, so it resolves to "
-        "`default` and the desktop download tests will silently skip"
+        "`default`, which has no pywebview — the desktop download tests then "
+        "FAIL there rather than guarding anything useful"
     )
-    assert defines.search(section("feature.test.tasks")), (
+    assert "gui-tests" in feature_tasks, (
         "`gui-tests` is not defined under [feature.test.tasks]"
+    )
+
+    # The lock is what pixi materialises, so the pywebview assertion above is
+    # rightly made against it — but a consumer running `--frozen`/`--locked`
+    # never re-solves, so manifest and lock can drift apart. This is the only
+    # assertion on the INTENT, and it is the edit the docstring warns about.
+    features = manifest["environments"]["test"]["features"]
+    assert "desktop" in features, (
+        f"the `test` environment no longer includes the `desktop` feature, so "
+        f"it will lose pywebview on the next solve: {features}"
     )

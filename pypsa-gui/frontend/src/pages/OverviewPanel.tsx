@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, Box, Save, Pencil, Check, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
+import { appLog } from '../store/simulationStore'
 import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
@@ -180,7 +181,14 @@ export default function OverviewPanel() {
                     toast.success(`Exported ${currentProject}.pypsaproj.zip`)
                   }
                 } catch (e) {
-                  toast.error(`Export failed: ${await bundleErrorMessage(e)}`)
+                  const why = await bundleErrorMessage(e)
+                  // `skipErrorToast` suppresses the interceptor's appLog line
+                  // as well as its toast — one flag gates both. Without this
+                  // the export is the only one of the three bundle-export
+                  // paths with no entry in the Log tab, and toasts dismiss
+                  // themselves.
+                  appLog('ERROR', `Export bundle '${currentProject}' failed: ${why}`)
+                  toast.error(`Export failed: ${why}`)
                 } finally {
                   setExporting(false)
                 }

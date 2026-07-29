@@ -72,10 +72,15 @@ beforeEach(() => {
   vi.spyOn(toast, 'success').mockImplementation((m) => { successes.push(String(m)); return '' })
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks()
   useUIStore.setState({ currentProject: null })
   delete (window as unknown as Record<string, unknown>).showSaveFilePicker
+  // `_bundleHandles` is MODULE state and outlives the test that filled it.
+  // Leaving it set made one test's assertion depend on another test having
+  // run first, which is how a mutation escaped a whole review round.
+  const { forgetBundleLocation } = await import('../utils/projectActions')
+  forgetBundleLocation('Demo')
 })
 
 function exportButton() {
@@ -115,29 +120,55 @@ it('always asks where to put it, and never poisons the Save destination', async 
   //   skipCache:true   -> the export's destination is NOT remembered, so a
   //                       later Save cannot silently overwrite the archive
   //                       the user just exported.
-  const picker = vi.fn().mockResolvedValue({
-    createWritable: async () => ({ write: async () => {}, close: async () => {} }),
-    queryPermission: async () => 'granted',
+  // Each pick returns a DISTINCT handle, and every write records which one it
+  // landed in. Counting picker calls is not enough: with `skipCache` dropped,
+  // the export overwrites the cache with its own handle and a later Save is
+  // silently redirected there — without ever showing the picker again. The
+  // call count is identical in both worlds; only the destination differs.
+  const writes: string[] = []
+  let nth = 0
+  const picker = vi.fn().mockImplementation(async () => {
+    const id = `handle#${++nth}`
+    return {
+      createWritable: async () => ({
+        write: async () => { writes.push(id) },
+        close: async () => {},
+      }),
+      queryPermission: async () => 'granted',
+    }
   })
   ;(window as unknown as Record<string, unknown>).showSaveFilePicker = picker
   vi.mocked(projectsApi.downloadBundle).mockResolvedValue(new Blob(['zip']))
+  const { downloadProjectBundle } = await import('../utils/projectActions')
+
+  // SEED the cache the way a Save does, so `askLocation` has something to
+  // override. Without this the cache is empty, the export takes the picker
+  // path regardless, and the assertion passes whether or not `askLocation` is
+  // set — which is how this test previously killed its mutation only by
+  // accident, via state an unrelated earlier test left behind.
+  await downloadProjectBundle('Demo')
+  await downloadProjectBundle('Demo')
+  expect(picker, 'the seed did not cache a handle — the premise is broken')
+    .toHaveBeenCalledTimes(1)
+  expect(writes).toEqual(['handle#1', 'handle#1'])
 
   renderPanel()
   await userEvent.click(exportButton())
-  await waitFor(() => expect(picker).toHaveBeenCalledTimes(1))
-  await waitFor(() => expect(isExportDisabled()).toBe(false))
-  await userEvent.click(exportButton())
-  await waitFor(() => expect(picker).toHaveBeenCalledTimes(2))
+  await waitFor(() =>
+    expect(picker, 'the export reused the Save destination instead of asking')
+      .toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(writes).toHaveLength(3))
+  expect(writes[2], 'the export did not write to its own chosen file').toBe('handle#2')
 
-  // And nothing was cached under this project: a default-options call — which
-  // is what an ordinary Save does — still has to ask.
-  const { downloadProjectBundle } = await import('../utils/projectActions')
+  // The export must NOT have replaced the cache: an ordinary Save still lands
+  // in the file Save has always used, not in the one the export just created.
+  await waitFor(() => expect(isExportDisabled()).toBe(false))
   await downloadProjectBundle('Demo')
-  expect(picker, 'the export cached its handle; a later Save would overwrite it')
-    .toHaveBeenCalledTimes(3)
+  expect(writes[3], 'the export poisoned the cache — Save now overwrites the export')
+    .toBe('handle#1')
 })
 
-it('saves NOTHING when the server refuses, and says WHY', async () => {
+it('saves NOTHING when the server refuses', async () => {
   vi.mocked(projectsApi.downloadBundle).mockRejectedValue(
     new Error('Request failed with status code 404'),
   )
@@ -150,6 +181,102 @@ it('saves NOTHING when the server refuses, and says WHY', async () => {
   )
   expect(clicks, 'an error body was saved to disk as a bundle').toHaveLength(0)
   expect(successes.filter(m => m.includes('Export'))).toHaveLength(0)
+})
+
+it('records the failure in the log, not only in a toast', async () => {
+  // `skipErrorToast` suppresses the interceptor's `appLog` line as well as its
+  // toast — one flag gates both. Toasts dismiss themselves; the Log tab is the
+  // record, and the other two bundle-export paths both write one.
+  // Asserted through the store the log actually lands in, not a spy.
+  const { useSimulationStore } = await import('../store/simulationStore')
+  useSimulationStore.setState({ logLines: [] })
+  vi.mocked(projectsApi.downloadBundle).mockRejectedValue(new Error('boom'))
+
+  await clickExport()
+
+  await waitFor(() =>
+    expect(
+      useSimulationStore.getState().logLines.some(l => l.includes('Export bundle')),
+    ).toBe(true),
+  )
+})
+
+it("reports a structured FastAPI detail, not just a plain string one", async () => {
+  // The mutation this kills: gating on `typeof detail === 'string'`. FastAPI's
+  // 422 returns `detail` as a LIST of {loc, msg}, and several project routes
+  // raise object details — a string-only gate degrades all of them back to the
+  // opaque axios message, which is the bug this helper exists to fix.
+  vi.mocked(projectsApi.downloadBundle).mockRejectedValue({
+    message: 'Request failed with status code 422',
+    response: {
+      status: 422,
+      data: new Blob([JSON.stringify({
+        detail: [{ loc: ['body', 'name'], msg: 'field required' }],
+      })]),
+    },
+  })
+
+  await clickExport()
+
+  await waitFor(() =>
+    expect(errors.some(m => m.includes('field required'))).toBe(true),
+  )
+})
+
+it("reports the server's reason, not axios's status line", async () => {
+  // The reason `bundleErrorMessage` exists. `downloadBundle` sets
+  // `responseType: 'blob'`, so the error body arrives as a BLOB and every
+  // ordinary `data?.detail` lookup — including the interceptor's — misses it.
+  // Rejecting with a bare Error (which the test above does) never reaches that
+  // code at all: it has no `.response`, so the helper falls straight through
+  // to `e.message` and the whole decode path stayed unexercised.
+  vi.mocked(projectsApi.downloadBundle).mockRejectedValue({
+    message: 'Request failed with status code 404',
+    response: {
+      status: 404,
+      data: new Blob([JSON.stringify({ detail: "Project 'Demo' not found" })]),
+    },
+  })
+
+  await clickExport()
+
+  await waitFor(() =>
+    expect(errors.some(m => m.includes("Project 'Demo' not found"))).toBe(true),
+  )
+})
+
+it('re-enables the button after a failed export', async () => {
+  // Otherwise a single failure disables Export for the life of the mount and
+  // the user has to navigate away and back. `setExporting(false)` lives in a
+  // `finally` for this reason; moving it to the success path passed every
+  // other test in this file.
+  vi.mocked(projectsApi.downloadBundle).mockRejectedValue(new Error('nope'))
+
+  await clickExport()
+
+  await waitFor(() => expect(errors.some(m => m.includes('Export failed'))).toBe(true))
+  expect(isExportDisabled()).toBe(false)
+})
+
+it('still saves the file when the save dialog cannot be shown', async () => {
+  // `showSaveFilePicker` needs transient user activation (~5 s in Chrome) and
+  // is called AFTER the bundle fetch, which for a large project outlives it.
+  // The picker then throws SecurityError — not AbortError — and the bytes are
+  // already in hand. Discarding them left the user with a browser-internals
+  // string, no file, and a retry that hits the same wall every time.
+  const denied = Object.assign(new Error('Must be handling a user gesture'), {
+    name: 'SecurityError',
+  })
+  ;(window as unknown as Record<string, unknown>).showSaveFilePicker = vi
+    .fn()
+    .mockRejectedValue(denied)
+  vi.mocked(projectsApi.downloadBundle).mockResolvedValue(new Blob(['zip']))
+
+  await clickExport()
+
+  await waitFor(() => expect(clicks).toHaveLength(1))
+  expect(clicks[0].download).toBe('Demo.pypsaproj.zip')
+  expect(errors.filter(m => m.includes('Export failed'))).toHaveLength(0)
 })
 
 it('claims nothing when the user cancels the save dialog', async () => {
