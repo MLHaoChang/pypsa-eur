@@ -1,0 +1,98 @@
+name: GUI
+
+# Runs the pypsa-gui subproject's own test suites, which no other workflow
+# covers: 62 pytest files under pypsa-gui/backend/tests and the Vitest specs
+# under pypsa-gui/frontend/src.
+
+on:
+  push:
+    branches:
+    - master
+    paths:
+    - 'pypsa-gui/**'
+    - 'pixi.toml'
+    - 'pixi.lock'
+    - '.github/workflows/gui.yaml'
+  pull_request:
+    branches:
+    - master
+    paths:
+    - 'pypsa-gui/**'
+    - 'pixi.toml'
+    - 'pixi.lock'
+    - '.github/workflows/gui.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+    - uses: actions/checkout@v7
+
+      # The backend needs the pixi environment, not requirements.txt: that file
+      # carries the web tier only ("all other packages (pypsa, pandas, linopy,
+      # etc.) are in the pixi environment"), while tests/conftest.py imports
+      # pandas and pypsa at module scope. Same action/version/cache settings as
+      # the unit-tests job in test.yaml so both share one cache entry.
+    - name: Setup Pixi
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        cache: true
+        cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+
+      # `gui-tests` is the task developers run locally (pixi.toml), so the
+      # command stays in one place. No ANTHROPIC_API_KEY is set: the chat tests
+      # manage that variable themselves via monkeypatch and none of them call a
+      # live API.
+    - name: Run backend tests
+      run: |
+        pixi run gui-tests
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: pypsa-gui/frontend
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22 # matches `nodejs = ">=22"` in pixi.toml
+        cache: npm
+        cache-dependency-path: pypsa-gui/frontend/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run frontend tests
+      run: npm test
+
+      # Typecheck only, deliberately not `npm run build` (= `tsc -b && vite
+      # build`). The Vite entry point pypsa-gui/frontend/index.html is not
+      # tracked -- the root .gitignore's `*.html` rule swallows it -- so
+      # `vite build` fails on a clean checkout with "Could not resolve entry
+      # module index.html". `tsc -b` is the part that catches regressions, and
+      # it passes today. Switch this step to `npm run build` once the entry
+      # HTML is un-ignored and committed.
+    - name: Typecheck
+      run: npx tsc -b --force
