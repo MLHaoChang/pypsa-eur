@@ -321,6 +321,18 @@ Additive under `backend/desktop/`, one backend service, one middleware gate, one
 - **`settings.frontend_dist` binds bare `FRONTEND_DIST`** with no `PYPSAGUI_` alias. Workstream I will set it through `build_environment`; it needs the alias first.
 - **Raising the incumbent window on a second launch is not implemented.** Named follow-up, not a gap discovered later.
 
+### pywebview 6.2.1 API, measured before Task 5 rather than assumed
+
+Run against the installed package, because Task 4's worst defect was code
+written against `_state["ac_pf_thread"]` — a key nothing has ever written —
+with a test that mocked the function containing the assumption.
+
+- `webview.__version__` **does not exist**; use `importlib.metadata.version("pywebview")`.
+- Present: `create_window`, `start`, `initialize`, `token`, `settings`, `screens`, `windows`; on a window `destroy`, `hide`, `show`, `load_url`, `evaluate_js`, `create_file_dialog`, `set_title`.
+- `create_window` accepts `hidden`, `confirm_close`, `min_size`, `js_api`, `focus`, `on_top` — the splash can be created hidden, and pywebview has its OWN confirm-close dialog which the shell must NOT enable, since D12 is our sequence's step 2.
+- Events: `before_load, before_show, closed, closing, initialized, loaded, maximized, minimized, moved, request_sent, resized, response_received, restored, shown`. **`closing` is the only one with `_should_lock=True`** — handlers run synchronously on the caller's thread and the return value vetoes. That is what makes the tri-state handler work.
+- **`destroy()` re-fires `closing` on winforms and gtk but NOT on cocoa** — verified with a real window: `closing fired 0 time(s)`. `CloseHandler`'s ordering is load-bearing on Windows and inert on macOS, so the macOS half of Task 7 cannot detect a regression in it.
+
 ### Added after review rounds 1 and 2 (Tasks 0–3 implemented)
 
 - **DECLARED DEVIATION from spec §4.** The spec lists `DATABASE_URL`, `PROJECTS_ROOT` and `LEGACY_ROOT` among the variables the entrypoint sets before `import main`. `build_environment` deliberately sets **none** of the six storage variables, and a parametrised test asserts their absence: `app_paths` already resolves them per-user and per-platform, and anything the shell computed would be relative to wherever the frozen app runs — a Finder-launched `.app` has cwd `/`. Sound, but it was an undeclared deviation until a reviewer caught it. Declared now.

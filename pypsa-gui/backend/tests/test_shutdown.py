@@ -722,10 +722,14 @@ def test_a_second_close_while_running_vetoes_without_starting_another_sequence()
 
 def test_the_state_flips_to_complete_BEFORE_destroy_is_called():
     """
-    The deadlock this prevents is subtle and total. `window.destroy()` re-fires
-    the `closing` event, so if the state were flipped AFTER the call, the
-    re-entrant handler would still see "in progress", veto its own destroy, and
-    the window would never close — with the backend already stopped behind it.
+    The deadlock this prevents is subtle, total, and WINDOWS-ONLY.
+
+    `destroy()` re-fires `closing` on winforms and gtk; measured with a real
+    window against the installed pywebview 6.2.1, it does NOT on cocoa. So this
+    test fakes the re-entry on purpose — on the development platform the real
+    thing never happens, and without the fake there would be no coverage at all
+    for the platform where flipping the state late leaves a window that can
+    never close with the backend already stopped behind it.
     """
     observed: list[bool] = []
     handler = None

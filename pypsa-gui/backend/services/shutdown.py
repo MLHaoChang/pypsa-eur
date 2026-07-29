@@ -545,12 +545,23 @@ class CloseHandler:
     far past that — `abort_and_wait` alone allows 30 s. So the eight steps run
     on a worker and this only ever answers a question.
 
-    **The state flips to complete BEFORE `destroy()`.** `window.destroy()`
-    re-fires `closing`, so flipping afterwards would have the re-entrant call
-    still see "in progress", veto its own destroy, and leave a window that can
-    never close — with the backend already stopped behind it. That is a total
-    deadlock and the only way out is Force Quit, which is the outcome this
-    workstream exists to prevent.
+    **The state flips to complete BEFORE `destroy()`** — and this is
+    PLATFORM-SPECIFIC, which an earlier version of this docstring asserted
+    unqualified.
+
+    Measured against the installed pywebview 6.2.1 with a real window: on
+    **cocoa the `closing` event does NOT re-fire** (`destroy()` is
+    `AppHelper.callAfter(self.window.close)`, and `NSWindow.close()` does not
+    send `windowShouldClose:`). On **winforms** it does — `destroy_window` ->
+    `i.Close()` -> `on_closing` — and on **gtk** it does, via an explicit
+    `emit('delete-event')`.
+
+    So the ordering is load-bearing on Windows and GTK and inert on macOS. It
+    stays, because Windows needs it — but note the consequence for testing:
+    the macOS half of Task 7 CANNOT detect a regression here, and
+    `test_the_state_flips_to_complete_BEFORE_destroy_is_called` asserts a
+    re-entry that only ever happens on a platform nobody here can run. The unit
+    test fakes the re-entry deliberately for that reason.
     """
 
     def __init__(
