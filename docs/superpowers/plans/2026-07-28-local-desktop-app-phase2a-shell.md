@@ -477,7 +477,7 @@ sequential launches sharing that directory.
 |---|---|
 | 2 — first launch, ZERO projects | window opens, `/api/network/reset` 200, bus created 201, project saved 200, clean quit, **exit status 0** |
 | 3 — a project opens and returns buses | `GET /api/projects/AcceptanceProject` 200, `/api/network/buses` returns the bus |
-| 4 — **H5: the edit survives a relaunch** | launch 2 lists `AcceptanceProject`, loads it, and `AcceptanceBus` is present. **This is the property the whole conversion exists for.** |
+| 4 — **H5: the edit survives a relaunch** | launch 2 lists `AcceptanceProject`, loads it, and `AcceptanceBus` is present. ⚠️ **See the correction below — this passed, but not for the reason it appears to.** |
 | 6 — second launch while the first runs | refused, "already running" message shown (NOT the lock-failed one), incumbent's lock unaffected, status 0 |
 | 7 — the process actually exits | both sessions exited; `ps` shows no strays |
 
@@ -488,8 +488,73 @@ served as real HTML rather than the 503 page, `pypsa-gui.log` written and
 ending "Application shutdown complete" (the graceful uvicorn path, not the
 forced one), and the first-run import firing so D10 works end to end.
 
-**NOT run: step 5** (start a solve, close, Cancel, assert still usable, quit).
-It needs a real solve and was not automated here.
+### Correction to step 4, made 2026-07-29 after step 5 ran
+
+**Step 4 above proved less than it claimed.** Its edit was made BEFORE an
+explicit `POST /api/projects/AcceptanceProject`, so the SAVE ENDPOINT persisted
+it. The shutdown flush was never load-bearing, and the flush was broken: it
+wrote to `flat_projects_root` while `load_project` reads `projects_root`. Any
+edit depending on the quit-flush was silently lost, with the report saying
+`unflushed: []`.
+
+A test can pass for the wrong reason. This one did, and it was the headline
+result of the whole workstream.
+
+## Acceptance step 5 — macOS arm64, measured 2026-07-29
+
+Driven through the shipped `gui.main()` against a REAL solve (8760 snapshots, 12
+extendable generators, and a cyclic-SoC storage unit — the storage is what makes
+the LP slow enough to still be running when the close arrives; without it HiGHS
+finishes before the close and the confirm is never reached, so the step passes
+while testing nothing). Two substitutions, both requiring a human:
+`create_confirmation_dialog` answers from a script, and `hide` is recorded
+rather than performed so the cancel path can be asserted never to hide.
+Driver: `scratchpad/accept/step5.py`.
+
+| Property | Result |
+|---|---|
+| A real solve is in flight at close | `["SolveCancelProject"]` |
+| `on_closing` vetoes rather than blocking the UI thread | veto |
+| Confirm shown, with the real message | *"A solve is still running (SolveCancelProject). Quitting will stop it."* |
+| Cancel → does not quit | `quit: false` |
+| Cancel → **the window is never hidden** | `window_hidden: 0` |
+| Cancel → the mutation gate is released | `still_gated: false` |
+| App still usable: refused by the SOLVER gate, not the shutdown gate | `409 solver_in_flight` (**not** 503) |
+| Cancelling the quit does NOT cancel the solve | `solve_still_running: true` |
+| Quit → the bounded abort completes | `abort_timed_out: false` |
+| Quit → nothing left unwritten, uvicorn graceful | `unflushed: []`, `server_stage: "clean"`, status 0 |
+| **Relaunch → the edit survived** | `["Bus0", "Bus1", "Bus2", "SurvivedQuit"]` |
+
+The last row is H5 proven **through the flush** for the first time: the edit was
+made after the save and only the shutdown could persist it. Exactly one
+`network.nc` exists afterwards, under `projects_root` — before the fix there
+were two, in different roots, with different contents.
+
+### What step 5 cost, and what it bought
+
+It found a data-loss defect that four review rounds, 59 shutdown unit tests and
+the entire Task 4 workstream had not — because those tests INJECT the saver, so
+none of them ever executed the real path resolution. See
+`shutdown.make_saver`.
+
+**Two harness errors are recorded here because both produced confident wrong
+answers**, and the second is the more dangerous kind:
+
+1. `PYPSAGUI_APP_DATA_DIR` does not isolate projects. It moves the database,
+   the log, the lock and the flat store; project storage is governed by
+   `PYPSAGUI_PROJECTS_ROOT`. Earlier harness runs therefore wrote throwaway
+   projects into the developer's real `~/Documents/PyPSA GUI/Projects` while
+   reporting app-data had been redirected — true, and beside the point. Both
+   harnesses now require both variables and refuse any path under Documents.
+2. Because only one root was redirected, the two roots diverged *more* than in
+   a default install, which is what made the split visible at all. The
+   underlying defect was real either way — the roots differ unconditionally —
+   but it was found by accident, not by the test that was written for it.
+
+Also: do NOT import `pypsa` at module scope in an acceptance driver.
+`launcher.apply_environment` refuses to run once the backend is imported
+(`BackendAlreadyImported: already imported: pypsa, matplotlib`) and the launch
+dies on the splash. Two runs were lost to netcdf I/O spies installed too early.
 
 **NOT run: step 8, Windows.** Everything platform-specific in this workstream
 is still reasoned-from-documentation: the `msvcrt` lock and its
