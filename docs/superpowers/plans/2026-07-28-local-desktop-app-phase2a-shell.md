@@ -275,20 +275,91 @@ The port comes from `sock.getsockname()[1]`, so **bind precedes `build_environme
 
 ---
 
-## Task 6: One download chokepoint, 14 sites
+## Task 6: Downloads — REWRITTEN 2026-07-29 after measuring
 
-**Files:** Create `frontend/src/utils/download.ts`; modify 14 sites; add the JS API in `backend/desktop/gui.py`
+> **The original design here was wrong and has been replaced.** It specified a
+> `frontend/src/utils/download.ts` chokepoint, a `js_api` bridge, feature
+> detection behind `pywebviewready`, and migration of all 14 sites. It was
+> written against an assumed pywebview API. Measured against the real cocoa
+> WKWebView, **13 of the 14 sites need no frontend change at all** and the
+> bridge solves a problem that does not exist. The original text is in git
+> history at `c1d8445d`.
 
-**Two entry points on one helper**, because the sites are two shapes (constraint #13):
+### What was measured
 
-- `saveFile(filename, mimetype, bytes)` — the 12 `createObjectURL` sites. Bytes are already in JS and these are small (CSV, SVG, xlsx templates).
-- `saveFromUrl(url, filename)` — `OverviewPanel`'s bundle and `ChatPanel`'s export artifact. **Python does the loopback fetch and streams to the chosen path.** pywebview marshals JS→Python arguments as JSON, so pushing a multi-hundred-megabyte bundle through `saveFile` would become a JSON array of integers.
+Real `webview.create_window` + `webview.start()` on macOS arm64, pywebview
+6.2.1, one case per process (sequencing them in one page is unsound — the
+failure mode under test destroys the JS context, so every later case would
+report nothing and be scored as the wrong failure). Only the human clicking
+Save was faked; whether the delegate fires at all is WebKit's decision, and
+that is the measurement. Harness verified honest before use: 14 heartbeats and
+a byte-exact file on the first positive case.
 
-Feature-detect **once, behind `pywebviewready`** (constraint #14), not per call. Fall back to the existing paths so the web deployment and the browser dev workflow are untouched — the frontend test asserts the fallback.
+| Site shape | `ALLOW_DOWNLOADS=True` | `ALLOW_DOWNLOADS=False` (the default) |
+|---|---|---|
+| blob + `a.download`, `text/csv` | saves, page intact | **navigates to `blob:…`; the SPA is gone** |
+| blob + `a.download`, `application/json` | saves, page intact | **navigates away; the SPA is gone** |
+| blob + `a.download`, `.xlsx` | saves, page intact | silent no-op |
+| blob + revoke on the same tick, 1 MB | saves **byte-exact** (1048576) | — |
+| `<a href download>` at a URL (ChatPanel) | saves, page intact | **navigates to the file; the SPA is gone** |
+| `window.open(url, '_blank')` (bundle) | **nothing; returns `null`** | nothing |
+| `<a href download>` at the bundle URL | saves, page intact | nothing |
+| the same, 64 MB | saves **byte-exact** (67108864), page responsive | — |
 
-`create_file_dialog(SAVE_DIALOG)` from a `js_api` handler runs on a pywebview worker thread; a modal save panel off the main thread is a classic macOS hang. Marshal the dialog onto the GUI thread and say so.
+Three findings the original design had backwards:
 
-- [ ] **Also:** absorb or delete `utils/projectActions.ts::saveBlobToDisk` (zero callers). Leaving it is two competing chokepoints, which is what the repo's "cross-cutting concern → edit the generic helpers" rule exists to prevent.
+1. **`webview.settings['ALLOW_DOWNLOADS']` defaults to `False`**, and
+   [`cocoa.py:279`](../../../.pixi/envs/desktop/lib/python3.13/site-packages/webview/platforms/cocoa.py)
+   gates the whole download path on it:
+   `if action.shouldPerformDownload() and webview_settings['ALLOW_DOWNLOADS']`.
+   With it off, a `download` anchor falls through to *ordinary navigation* —
+   so for any MIME type WebKit can render, the app replaces itself with the
+   file, in a window with no back button and no address bar. That is worse
+   than the "downloads don't work" the plan assumed.
+2. **Turning it on needs no frontend change for 13 sites.** The native
+   `NSSavePanel` path saves the correct bytes, survives `revokeObjectURL` on
+   the same tick (which all 12 real sites do), and streams 64 MB without
+   marshalling. The plan's own objection to `saveFile` — that a large bundle
+   "would become a JSON array of integers" — was an argument against a bridge
+   that is not needed.
+3. **Windows uses the same switch.**
+   [`edgechromium.py:316`](../../../.pixi/envs/desktop/lib/python3.13/site-packages/webview/platforms/edgechromium.py)
+   opens `on_download_starting` with `if not webview_settings['ALLOW_DOWNLOADS']: args.Cancel = True`.
+   One setting covers both platforms. *Unverified on Windows* — read, not run.
+
+`window.open` is the sole genuine failure, on both settings, because
+`webView_createWebViewWithConfiguration_…` acts only on
+`WKNavigationTypeLinkActivated` and a JS `window.open` is not that, so it
+returns `nil`.
+
+### What to build
+
+**Files:** create `backend/desktop/downloads.py`; modify `backend/desktop/gui.py`,
+`frontend/src/pages/OverviewPanel.tsx`, `frontend/src/utils/projectActions.ts`
+
+- [ ] **Step 1:** `desktop/downloads.py` — webview-free, so the headless suite
+      covers it, same rule as `launcher.py` and `bootstrap.py`. One function
+      that sets `ALLOW_DOWNLOADS` on a settings mapping, carrying the measured
+      reason in a comment. The test pins the invariant: flipping it off does
+      not merely disable saving, it makes 13 export controls navigate the app
+      away from itself.
+- [ ] **Step 2:** `gui.py` calls it before `webview.start()`.
+- [ ] **Step 3:** `OverviewPanel` — replace `window.open(bundleUrl, '_blank')`
+      with an anchor carrying `download`. No `target`: a `target=_blank` that
+      *is* `LinkActivated` reaches `OPEN_EXTERNAL_LINKS_IN_BROWSER` (default
+      `True`) and hands the URL to the system browser, which downloads it
+      outside the app. Measured with that setting at its real default.
+- [ ] **Step 4:** delete `utils/projectActions.ts::saveBlobToDisk` (zero
+      callers). It is a second chokepoint competing with the native path, and
+      its `showSaveFilePicker` branch does not exist in WKWebView anyway.
+
+### What this does NOT cover
+
+`ALLOW_DOWNLOADS=True` also lets *any* navigation response with a
+non-renderable MIME type raise a save panel. In this app navigations to API
+URLs do not otherwise happen — the SPA routes client-side and fetches with
+XHR, which is not a navigation — but this is a widened surface, stated rather
+than discovered later.
 
 ---
 
