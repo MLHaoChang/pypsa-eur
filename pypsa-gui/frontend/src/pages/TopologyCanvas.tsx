@@ -1653,7 +1653,7 @@ function BusEditor({ busName, anchorX, anchorY, bus, allBuses, getConnectedCount
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm font-medium text-text truncate">{busName}</span>
-        <button onClick={onClose} className="text-muted hover:text-text text-base leading-none ml-2">×</button>
+        <button onClick={onClose} aria-label="Close bus editor" className="text-muted hover:text-text text-base leading-none ml-2">×</button>
       </div>
 
       <div className="flex flex-col gap-2.5">
@@ -1875,7 +1875,7 @@ function NewConnectionDialog({
     >
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-semibold text-text">{kind === 'line' ? 'New Line' : 'New Transformer'}</span>
-        <button onClick={onClose} className="text-muted hover:text-text"><XIcon size={13} /></button>
+        <button onClick={onClose} aria-label="Close new connection dialog" className="text-muted hover:text-text"><XIcon size={13} /></button>
       </div>
       <div className="text-[10px] text-muted mb-2.5 leading-snug">
         <span className="font-medium text-text">{source}</span>
@@ -3518,7 +3518,7 @@ export default function TopologyCanvas() {
                       >
                         Undo
                       </button>
-                      <button onClick={() => toast.dismiss(t.id)} className="p-0.5 text-muted hover:text-text transition-colors">
+                      <button onClick={() => toast.dismiss(t.id)} aria-label="Dismiss notification" className="p-0.5 text-muted hover:text-text transition-colors">
                         <XIcon size={11} />
                       </button>
                     </div>
