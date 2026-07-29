@@ -271,7 +271,12 @@ pytest = ">=8.4.2"
 
 [environments]
 doc = { features = ["doc"], no-default-feature = true }
-test = { features = ["test", "dev"], solve-group = "gui" }
+# `desktop` is here for ONE package, `pywebview`, and it is not optional:
+# without it `test_desktop_downloads.py` silently SKIPS the two tests that
+# matter — the one pinning pywebview's dangerous default and the one that
+# fails if `gui.py` stops enabling downloads. A skipped test reads as a green
+# suite, which is how a hole this size stays open.
+test = { features = ["test", "dev", "desktop"], solve-group = "gui" }
 dev = { features = ["dev"], solve-group = "gui" }
 # ONE solve group. `desktop` runs the pypsa-gui backend and the backend suite
 # runs in `default`, so the two must resolve identically or the app that ships

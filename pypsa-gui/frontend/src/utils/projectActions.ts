@@ -675,42 +675,13 @@ export function forgetBundleLocation(name: string): void {
   _bundleHandles.delete(name)
 }
 
-// Trigger a browser file save for the given blob.
-// Uses File System Access API (showSaveFilePicker) where available so the user
-// gets a real "Save As" dialog with folder choice; falls back to a download
-// anchor (browser-default download folder) elsewhere.
-export async function saveBlobToDisk(
-  blob: Blob,
-  suggestedName: string,
-  description: string,
-  acceptExt: string,
-): Promise<'picker' | 'download'> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any
-  if (typeof w.showSaveFilePicker === 'function') {
-    try {
-      const handle = await w.showSaveFilePicker({
-        suggestedName,
-        types: [{ description, accept: { 'application/zip': [acceptExt] } }],
-      })
-      const writable = await handle.createWritable()
-      await writable.write(blob)
-      await writable.close()
-      return 'picker'
-    } catch (e) {
-      // AbortError → user cancelled; rethrow so caller can no-op
-      if ((e as { name?: string })?.name === 'AbortError') throw e
-      // Otherwise fall through to download fallback
-    }
-  }
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = suggestedName
-  a.click()
-  URL.revokeObjectURL(url)
-  return 'download'
-}
+// `saveBlobToDisk` was removed here in phase 2a Task 6. It had zero callers,
+// and it was a second download path competing with the anchor every other
+// export in this app already uses. Its `showSaveFilePicker` branch does not
+// exist in WKWebView at all, so in the desktop shell it could only ever have
+// taken its own fallback. If a blob save is needed again, the twelve existing
+// `URL.createObjectURL` + `a.download` sites are the pattern that is measured
+// to work — see `utils/download.ts` for why.
 
 // Reset the in-memory backend network and clear the cached diagram layout.
 // The diagram state is now keyed per-project (`network-diagram:<project>:state`);
