@@ -1,10 +1,10 @@
 """
 Downloads (phase 2a, Task 6).
 
-Every export in the app — 12 `createObjectURL` sites, ChatPanel's artifact
-anchor, the project bundle — depends on ONE pywebview setting, and its default
-is the wrong one. Measured on a real cocoa WKWebView (the harness is
-`smoke/audit_downloads.py`, the results are in the plan):
+Every export in the app — 11 `createObjectURL` sites and ChatPanel's artifact
+anchor — depends on ONE pywebview setting, and its default is the wrong one.
+Measured on a real cocoa WKWebView (the harness is `smoke/audit_downloads.py`,
+the results are in the plan):
 
     ALLOW_DOWNLOADS=True   save panel, correct bytes, page intact
     ALLOW_DOWNLOADS=False  csv/json: THE WEBVIEW NAVIGATES TO THE FILE and the
@@ -87,29 +87,52 @@ def test_the_real_pywebview_default_is_the_dangerous_one():
     )
 
 
-def test_the_gui_enables_downloads_before_the_window_can_reach_a_link(tmp_path, monkeypatch):
+def test_the_gui_enables_downloads_BEFORE_any_window_exists(tmp_path, monkeypatch):
     """
     The unit tests above pass whether or not anything CALLS `apply`. This is
-    the one that fails if the line is dropped from `gui.py` — which is the
-    realistic regression, since nothing else in the app references the setting.
+    the one that fails if the line is dropped from `gui.py` — the realistic
+    regression, since nothing else in the app references the setting.
 
-    Drives the real `gui.main()` with `webview.start` stubbed, so the assertion
-    is against pywebview's actual settings object, not a copy.
+    Asserted from INSIDE the `create_window` stub, not after `main()` returns.
+    Checking afterwards proved only that `apply` ran somewhere in `main()`: an
+    earlier version passed with the call moved below `_start_gui(...)`, where
+    in the real app it would land after `webview.start()` had blocked for the
+    whole session — every export taking the navigate-away path, suite green.
     """
     webview = pytest.importorskip("webview")
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
 
-    from desktop import bootstrap, gui
+    from desktop import bootstrap, gui, launcher
 
+    seen: dict = {}
+    sockets: list = []
+
+    real_bind = launcher.bind_socket
+
+    def bind_and_record():
+        # `main()` binds a listening socket that only `_bootstrap` takes
+        # ownership of, and `start` is stubbed so `_bootstrap` never runs.
+        # Without this the test leaks a bound port and an fd per run.
+        sock = real_bind()
+        sockets.append(sock)
+        return sock
+
+    monkeypatch.setattr(launcher, "bind_socket", bind_and_record)
     monkeypatch.setitem(webview.settings, "ALLOW_DOWNLOADS", False)
-    monkeypatch.setattr(webview, "create_window", lambda *a, **k: object())
-    # Never runs the bootstrap callable: this is about what is true BEFORE the
-    # GUI loop hands the user a page with an Export button on it.
+    monkeypatch.setattr(
+        webview, "create_window",
+        lambda *a, **k: seen.setdefault("at_first_window",
+                                        webview.settings["ALLOW_DOWNLOADS"]) or object(),
+    )
     monkeypatch.setattr(webview, "start", lambda *a, **k: None)
 
     try:
         assert gui.main() == 0
     finally:
         bootstrap.remove_file_logging()
+        for sock in sockets:
+            sock.close()
 
-    assert webview.settings["ALLOW_DOWNLOADS"] is True
+    assert seen.get("at_first_window") is True, (
+        "downloads were not enabled before the first window was created"
+    )

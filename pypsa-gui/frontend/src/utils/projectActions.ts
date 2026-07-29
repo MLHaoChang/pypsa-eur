@@ -675,13 +675,16 @@ export function forgetBundleLocation(name: string): void {
   _bundleHandles.delete(name)
 }
 
-// `saveBlobToDisk` was removed here in phase 2a Task 6. It had zero callers,
-// and it was a second download path competing with the anchor every other
-// export in this app already uses. Its `showSaveFilePicker` branch does not
-// exist in WKWebView at all, so in the desktop shell it could only ever have
-// taken its own fallback. If a blob save is needed again, the twelve existing
-// `URL.createObjectURL` + `a.download` sites are the pattern that is measured
-// to work — see `utils/download.ts` for why.
+// `saveBlobToDisk` was removed here in phase 2a Task 6. It had zero callers —
+// verified across every ref in the repo, not just this branch — and it was a
+// second download path competing with the anchor every other export already
+// uses. Its `showSaveFilePicker` branch does not exist in WKWebView, so in the
+// desktop shell it could only ever have taken its own fallback.
+//
+// If a blob save is needed again, `downloadProjectBundle` above is the shape
+// to copy: fetch through the axios client FIRST, then save the bytes. Saving
+// straight from a URL with `<a download>` cannot see a status code, so a
+// 401/403/404 body gets written to disk as a valid-looking file.
 
 // Reset the in-memory backend network and clear the cached diagram layout.
 // The diagram state is now keyed per-project (`network-diagram:<project>:state`);
