@@ -2375,6 +2375,45 @@ def _dispatch_real_tool_call(
         "safety_tier": tier,
     }
 
+    # Resolve the handler BEFORE the confirmation gate.
+    #
+    # Scope, stated precisely because the obvious reading is wrong: this does
+    # NOT catch a hallucinated tool name. `_safety_tier_for` returns "read" for
+    # any name absent from `TOOLS`, so an invented name never reaches the
+    # confirmation gate in the first place.
+    #
+    # What it catches is a tool declared in `chat_tools_schema.TOOLS` with
+    # `Safety: destructive` but missing from `DISPATCHERS` — a registration
+    # mismatch. In that state the old order showed the user "permanently
+    # delete …?", blocked on a live modal, took their approval, and only then
+    # answered `unknown_tool`. Teaching a user that confirming is harmless is
+    # the one habit a destructive prompt must not build.
+    #
+    # `test_chat_tools_schema_match.py` already guards that parity, so this is
+    # defence in depth against a regression rather than a live defect. It is
+    # deliberately NOT the `pre_dispatch_validate` hook Improvement #19 asks
+    # for — validating destructive tool ARGUMENTS before prompting (deleting a
+    # component that does not exist) is still open and needs a per-tool hook.
+    #
+    # `tool_request` has already fired above, so the audit trail is intact, and
+    # the confirmation gate below is unchanged for every tool that exists.
+    from services.chat_tools import DISPATCHERS
+    handler = DISPATCHERS.get(tool_name)
+    if handler is None:
+        yield "tool_error", {
+            "tool_use_id": tool_use_id,
+            "tool_name": tool_name,
+            "error_kind": "unknown_tool",
+            "message": f"no dispatcher for tool {tool_name!r}",
+        }
+        tool_results_collector.append({
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "is_error": True,
+            "content": "unknown_tool",
+        })
+        return
+
     # #18 — per-tier auto-approve policy. The tool_request frame already fired
     # above (audit trail intact), so an auto-approved destructive tool is still
     # visible in the stream — it just SKIPS the issue_confirmation +
@@ -2418,23 +2457,8 @@ def _dispatch_real_tool_call(
 
     yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
 
-    # Execute via the chat_tools dispatcher.
-    from services.chat_tools import DISPATCHERS
-    handler = DISPATCHERS.get(tool_name)
-    if handler is None:
-        yield "tool_error", {
-            "tool_use_id": tool_use_id,
-            "tool_name": tool_name,
-            "error_kind": "unknown_tool",
-            "message": f"no dispatcher for tool {tool_name!r}",
-        }
-        tool_results_collector.append({
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "is_error": True,
-            "content": "unknown_tool",
-        })
-        return
+    # Execute via the chat_tools dispatcher. `handler` was resolved above the
+    # confirmation gate — see Improvement #19 there.
 
     # #16 — per-tool execution deadline for NON-solver tools. A hung read/write
     # handler would otherwise freeze this SSE worker thread forever. We run it
