@@ -353,6 +353,42 @@ returns `nil`.
       callers). It is a second chokepoint competing with the native path, and
       its `showSaveFilePicker` branch does not exist in WKWebView anyway.
 
+### Task 6 acceptance — macOS arm64, measured 2026-07-29
+
+Driven through the shipped `gui.main()` — real lock, real socket, real backend,
+real uvicorn, real SPA — clicking the real controls with `evaluate_js`. The
+only substitution is the human clicking Save in the native panel; whether the
+panel is reached is WebKit's decision and is what is being measured. Driver:
+`scratchpad/accept/download.py`.
+
+| What | Result |
+|---|---|
+| `ALLOW_DOWNLOADS` read live from `webview.settings` in the shipped path | `true` |
+| Open project through the launcher, open the Project info panel | `/app`, panel opens |
+| Click the real **Export bundle** button | anchor clicked with `href=/api/projects/DownloadProject/bundle`, `download=DownloadProject.pypsaproj.zip`, attached |
+| File lands | `DownloadProject.pypsaproj.zip`, 3689 B, **1 s** |
+| A real **blob** export (Sidebar export modal → Download File) | `downloadproject.pypsaproj.zip`, 3692 B, **1 s** |
+| The SPA after both | still `/app`, no page errors |
+
+The blob case is there because "13 sites need no change" otherwise rests on
+the audit page rather than on the app.
+
+**Three false results this run produced before it produced a true one**, all
+worth knowing:
+
+1. There are **two** "Export bundle" buttons. The sidebar one opens an export
+   *modal* and downloads nothing by itself. Clicking the first match hit that
+   one and landed no file — indistinguishable from a broken download.
+2. The bundle endpoint's `Content-Disposition` **overrides the anchor's
+   `download` attribute**, so a hand-built probe anchor and the real button
+   produce the same filename. Running both in one session made the single
+   landed file unattributable; they had to be split into separate runs.
+3. **The desktop app serves the BUILT SPA.** The first honest run showed the
+   button firing no anchor at all, with no error — because `dist/` was a day
+   old and still contained `window.open`. Any frontend change needs
+   `npm run build` before an end-to-end means anything. `dist/` is gitignored,
+   so nothing in the repo records this.
+
 ### What this does NOT cover
 
 `ALLOW_DOWNLOADS=True` also lets *any* navigation response with a
