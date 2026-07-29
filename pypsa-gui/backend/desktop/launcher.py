@@ -110,13 +110,29 @@ def build_environment(port: int, legacy_root: Path | None = None) -> dict[str, s
     """
     The complete set of variables the shell pins. Deliberately small.
 
-    Storage locations are conspicuously absent — `DATABASE_URL`,
-    `PROJECTS_ROOT`, `LEGACY_ROOT`, `FLAT_PROJECTS_ROOT`,
-    `PYPSAGUI_PROJECTS_ROOT`, `PYPSAGUI_APP_DATA_DIR`. `app_paths` already
-    resolves those per-user and per-platform, and anything this process
-    computed would be relative to wherever the frozen app happens to be
-    running: a macOS `.app` launched from Finder has cwd `/`.
+    Storage locations are conspicuously absent — `PROJECTS_ROOT`,
+    `LEGACY_ROOT`, `FLAT_PROJECTS_ROOT`, `PYPSAGUI_PROJECTS_ROOT`,
+    `PYPSAGUI_APP_DATA_DIR`. `app_paths` already resolves those per-user and
+    per-platform, and anything this process computed would be relative to
+    wherever the frozen app happens to be running: a macOS `.app` launched from
+    Finder has cwd `/`.
+
+    `DATABASE_URL` **is** pinned, and was in that list until a cold start from
+    cwd `/` died with `sqlite3.OperationalError: unable to open database file`
+    before any window appeared. The argument above inverts for this one
+    variable: `Settings` binds `env_file=<backend>/.env`, pydantic ranks an
+    env-file entry above a field default, and `.env` carries a **cwd-relative**
+    `sqlite+pysqlite:///./auth_dev.db` for development. So not pinning it is
+    what introduces the cwd dependency. `app_paths.default_database_url()` is
+    anchored in the per-user app-data directory and never in cwd.
+
+    An explicitly exported `DATABASE_URL` is left alone. This is the only point
+    in the chain where an operator's choice and a file on disk are still
+    distinguishable — `apply_environment` runs before `import main`, so
+    `load_dotenv` has not yet copied `.env` into `os.environ`.
     """
+    import app_paths
+
     env = {
         "PYPSAGUI_LOCAL_MODE": "1",
         # Before `import pypsa`, in a process that is about to own the GUI
@@ -127,6 +143,8 @@ def build_environment(port: int, legacy_root: Path | None = None) -> dict[str, s
         # widens the trust boundary to any page on a running dev server.
         "CORS_ALLOWED_ORIGINS": origin_for_port(port),
     }
+    if "DATABASE_URL" not in os.environ:
+        env["DATABASE_URL"] = app_paths.default_database_url()
     if legacy_root is not None:
         # Absent, never empty: `settings.legacy_import_root` is `Path | None`
         # and an empty string coerces to `Path(".")` — the cwd, which the

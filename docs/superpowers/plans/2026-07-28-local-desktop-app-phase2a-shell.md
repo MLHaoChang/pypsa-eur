@@ -465,6 +465,7 @@ than discovered later.
 - [ ] **Step 6:** second launch while the first is open — **refused with a visible message**, first instance unaffected. (Focus is not built; see Task 1.)
 - [ ] **Step 7:** the process actually exits (`ps`), not just the window.
 - [ ] **Step 8: run steps 2–7 on Windows.** D1 makes it first-class, spec §9.1 says it is unmeasured, and this is the workstream whose entire risk is the platform the author cannot see.
+- [x] **Step 9: cold start from cwd `/`** — added 2026-07-30, and it is a PRECONDITION for workstream I rather than a nicety. Steps 2–7 are all launched from a shell sitting in the repo, so every relative path in the configuration resolves to something that happens to exist. A macOS `.app` launched from Finder has cwd `/`. Harness: `smoke/accept_coldstart.py`.
 
 ---
 
@@ -563,6 +564,85 @@ the socket handoff, `pandas 3.0.3` on win-64 which no test has executed, and
 the `destroy()` re-entrancy that `CloseHandler` depends on — which macOS
 provably CANNOT exercise, so the ordering has no coverage on the platform that
 needs it.
+
+## Acceptance step 9 — cold start from cwd `/`, macOS arm64, measured 2026-07-30
+
+Asked because the user asked whether macOS works "from installation to running".
+It does not, and the reason had nothing to do with packaging not existing yet.
+
+**The launch failed outright**, both throwaway roots isolated, nothing else
+changed except the working directory:
+
+```
+sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) unable to open database file
+uvicorn.error: Application startup failed. Exiting.
+```
+
+`Settings.model_config` binds `env_file=<backend>/.env`; pydantic ranks an
+env-file entry **above** a field default; `.env` carries a cwd-relative
+`sqlite+pysqlite:///./auth_dev.db`. So `app_paths.default_database_url()` — the
+absolute app-data path, written specifically because "a relative SQLite URL
+resolves against cwd" — never applied on any machine where that file exists,
+which is every developer machine and any frozen build that bundles the backend
+tree. With cwd `/` the target is `/auth_dev.db`, which no user can create.
+
+This was **not** a harness artefact. `build_environment` deliberately sets none
+of the storage variables (see the declared deviation from spec §4 below), so
+nothing overrode the env file. The app dies on the splash with the honest
+"could not start" message, which is the correct failure mode and also the reason
+nobody would have diagnosed it from the UI.
+
+### Fix, and why it is not a reversal of the §4 deviation
+
+`build_environment` now pins `DATABASE_URL` — and only that one — to
+`app_paths.default_database_url()`, unless the environment already carries one.
+The deviation's argument is *"anything the shell computed would be relative to
+wherever the frozen app happens to be running"*. That argument does not reach
+this variable: `app_data_dir()` is anchored at `~/Library/Application Support`,
+`%LOCALAPPDATA%` or `$XDG_DATA_HOME` and never at cwd, so pinning it **removes**
+a cwd dependency instead of adding one. The other five stay absent.
+
+The operator carve-out is load-bearing and only possible here: `apply_environment`
+runs before `import main`, so `main.py`'s `load_dotenv` has not yet copied the
+file into `os.environ`. Anything already there was exported by a human and is
+respected. `DATABASE_URL` is deliberately **not** in `_MANAGED` — membership
+would make `apply_environment` pop exactly that value.
+
+### Result after the fix — same command, no `DATABASE_URL` set
+
+| Property | `first` | `relaunch` |
+|---|---|---|
+| cwd | `/` | `/` |
+| database actually opened | `<app-data>/pypsa-gui.db` | same file |
+| `/` serves the SPA, not the 503 page | 200, `is_spa: true` | 200, `is_spa: true` |
+| `auth_enabled` | `false` | `false` |
+| projects listed | `[]` (step 2: zero-project first launch) | `["ColdStart"]` |
+| save / load | `200` | `200` |
+| **the post-save edit survived the flush** | — | `["ColdBus", "SurvivedColdStart"]` |
+| quit | clean, `unflushed: []`, status 0 | clean, `unflushed: []`, status 0 |
+
+App-data afterwards is exactly `flat_projects/ legacy_unclaimed/ pypsa-gui.db
+pypsa-gui.log single-instance.lock webview/`, and the project directory is
+`ColdStart/{metadata.json, network.nc, solver_config.json}` under
+`projects_root` — human-readable per D13, with no org segment in local mode.
+
+### What this says about the earlier acceptance runs
+
+`accept/appdata-step5/` and `accept/appdata-download/` contain **no database
+file at all** — only the log, the lock, `webview/`, `flat_projects/` and
+`legacy_unclaimed/`. Those runs' databases were therefore somewhere else
+entirely, resolved from cwd. Their results stand (they assert project files
+under `projects_root` and buses after a reload, neither of which depends on
+where the auth database lived), but "app-data was redirected" was a weaker
+statement than it appeared for the second time in this workstream. The first
+time was `PYPSAGUI_PROJECTS_ROOT`.
+
+Worth recording: `tests/conftest.py:41` exports `DATABASE_URL=…:memory:` at
+import *for this exact reason* — "otherwise the suite picks up the real
+`DATABASE_URL` from `.env`". The suite had the guard; the shell did not. Two
+consequences: the defect was invisible to 1645 tests, and the two new pinning
+tests must `monkeypatch.delenv("DATABASE_URL")` or they exercise the operator
+branch and pass vacuously.
 
 ---
 

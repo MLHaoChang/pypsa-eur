@@ -74,7 +74,6 @@ def test_the_allowlist_is_exactly_the_bound_origin():
 @pytest.mark.parametrize(
     "name",
     [
-        "DATABASE_URL",
         "PROJECTS_ROOT",
         "LEGACY_ROOT",
         "FLAT_PROJECTS_ROOT",
@@ -86,13 +85,91 @@ def test_the_shell_does_not_pin_any_storage_location(name):
     """
     Both spellings are live — `settings` binds the bare names through pydantic
     while `app_paths` reads the `PYPSAGUI_`-prefixed ones from `os.environ`
-    directly — so all six are asserted.
+    directly — so both are asserted.
 
     `app_paths` already resolves these per-user and per-platform. A shell that
     pinned them would compute them from wherever the frozen app happens to be
     running, and a macOS `.app` launched from Finder has cwd `/`.
+
+    **`DATABASE_URL` was in this list and has been removed** — see
+    `test_the_shell_pins_the_database_because_a_stray_dotenv_outranks_the_default`.
+    The reasoning above inverts for that one variable: not pinning it is what
+    lets a cwd-relative value win.
     """
     assert name not in launcher.build_environment(51234)
+
+
+def test_the_shell_pins_the_database_because_a_stray_dotenv_outranks_the_default(monkeypatch):
+    """
+    Measured, cwd `/`, nothing else changed:
+
+        sqlalchemy.exc.OperationalError: (sqlite3.OperationalError)
+        unable to open database file
+        uvicorn.error: Application startup failed. Exiting.
+
+    `Settings.model_config` binds `env_file=<backend>/.env`, and pydantic ranks
+    an env-file entry ABOVE a field default. `.env` ships a cwd-relative
+    `sqlite+pysqlite:///./auth_dev.db` for dev, so `default_database_url()` —
+    the absolute app-data path — never applies whenever that file exists. A
+    macOS `.app` launched from Finder has cwd `/`, which no user can write to,
+    so the app dies on the splash before any window appears.
+
+    The five siblings above stay unpinned for the reason their test gives:
+    anything the shell computed would be relative to where the frozen app
+    happens to run. That argument does not reach this one. `app_data_dir()` is
+    anchored at `~/Library/Application Support` / `%LOCALAPPDATA%` / `$XDG_DATA_HOME`
+    and never at cwd, so pinning it removes a cwd dependency instead of adding one.
+    """
+    import app_paths
+
+    # `tests/conftest.py:41` exports `DATABASE_URL=…:memory:` at import — for
+    # the same reason this fix exists, so the suite never opens the developer's
+    # real database. That makes every test in this file look to
+    # `build_environment` like an operator who chose one, so the default branch
+    # is unreachable until it is cleared.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    env = launcher.build_environment(51234)
+
+    assert env["DATABASE_URL"] == app_paths.default_database_url()
+
+
+def test_the_pinned_database_url_is_an_absolute_path(monkeypatch):
+    """
+    The property, not the spelling. `./auth_dev.db` is what broke the launch;
+    asserting equality with `default_database_url()` alone would still pass if
+    that helper ever regressed to a relative path.
+    """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    url = launcher.build_environment(51234)["DATABASE_URL"]
+
+    assert url.startswith("sqlite")
+    path = url.split("///", 1)[1]
+    assert Path(path).is_absolute(), url
+
+
+def test_an_operator_who_exported_a_database_url_keeps_it(monkeypatch):
+    """
+    A deliberate `DATABASE_URL=postgresql://…` in the environment is an operator
+    decision; a `.env` on disk is not. They are distinguishable at this point in
+    the chain and only here: `apply_environment` runs BEFORE `import main`, so
+    `main.py`'s `load_dotenv` has not yet copied the file into `os.environ`.
+    Anything already there was exported by a human.
+    """
+    monkeypatch.setenv("DATABASE_URL", "postgresql://someone@example/db")
+
+    assert "DATABASE_URL" not in launcher.build_environment(51234)
+
+
+def test_the_shell_must_not_manage_the_database_url():
+    """
+    `apply_environment` POPS every `_MANAGED` name that `build_environment`
+    omitted — that is how an inherited `PYPSAGUI_LEGACY_IMPORT_ROOT` is
+    neutralised. `DATABASE_URL` is omitted precisely when the operator set one,
+    so managing it would delete the value the test above exists to protect.
+    """
+    assert "DATABASE_URL" not in launcher._MANAGED
 
 
 def test_the_legacy_root_is_passed_through_when_there_is_one(tmp_path):
