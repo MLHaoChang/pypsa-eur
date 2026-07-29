@@ -655,35 +655,48 @@ export async function downloadProjectBundle(
   }
 
   // Show the picker (first save for this project, or askLocation requested).
+  //
+  // The picker and the WRITE get separate try blocks, and the difference is
+  // load-bearing. One block covering both meant a write failure — a full disk,
+  // a revoked permission — was caught by the picker's fallback: the user was
+  // told "Exported", while what existed was a 0-byte file at the location they
+  // chose plus a second doomed write to the same full disk.
+  let handle
   try {
-    const handle = await w.showSaveFilePicker({
+    handle = await w.showSaveFilePicker({
       suggestedName: `${name}.pypsaproj.zip`,
       types: [{ description: 'PyPSA project bundle', accept: { 'application/zip': ['.pypsaproj.zip'] } }],
     })
-    const writable = await handle.createWritable()
-    await writable.write(blob)
-    await writable.close()
-    if (!skipCache) {
-      _bundleHandles.set(name, handle)
-    }
-    return 'picker'
   } catch (e) {
     if ((e as { name?: string })?.name === 'AbortError') return 'cancelled'
-    // The picker failed for a reason that is NOT the user cancelling. The
-    // common one is `SecurityError`: `showSaveFilePicker` requires transient
-    // user activation (~5 s in Chrome), and the bundle fetch above can outlive
-    // it — which is exactly what happens on the large projects the 180 s
-    // timeout exists to serve. Rethrowing discarded bytes we already have and
-    // showed the user a browser-internals string ("Must be handling a user
-    // gesture to show a file picker") with no file and no way to succeed on
-    // retry, because the retry hits the same wall.
+    // The picker could not be SHOWN, which is not the user declining it. The
+    // common cause is `SecurityError`: `showSaveFilePicker` requires transient
+    // user activation (~5 s in Chrome) and the bundle fetch above can outlive
+    // it — exactly what happens on the large projects the 180 s timeout exists
+    // to serve. Rethrowing discarded bytes already in hand and showed a
+    // browser-internals string ("Must be handling a user gesture to show a
+    // file picker") with no file and no way to succeed on retry, because the
+    // retry hits the same wall.
     //
     // The anchor needs no activation, so fall back to it: the file lands in
-    // the browser's default download folder instead of a chosen one. A worse
-    // location beats no file.
+    // the browser's default download folder rather than a chosen one. A worse
+    // location beats no file. Nothing has been written at this point, so there
+    // is no half-saved file to contradict.
     appLog('WARN', `Save dialog unavailable (${(e as Error)?.name ?? 'unknown'}) — downloading to the default folder instead`)
     return anchorDownload(blob, name)
   }
+
+  // Deliberately NOT covered by the fallback above: if the write fails the
+  // user has a file at their chosen location that is empty or truncated, and
+  // quietly downloading a second copy while reporting success would hide that.
+  // Let it reach the caller.
+  const writable = await handle.createWritable()
+  await writable.write(blob)
+  await writable.close()
+  if (!skipCache) {
+    _bundleHandles.set(name, handle)
+  }
+  return 'picker'
 }
 
 // Save an already-fetched blob via a download anchor. No File System Access

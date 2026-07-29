@@ -277,6 +277,43 @@ it('still saves the file when the save dialog cannot be shown', async () => {
   await waitFor(() => expect(clicks).toHaveLength(1))
   expect(clicks[0].download).toBe('Demo.pypsaproj.zip')
   expect(errors.filter(m => m.includes('Export failed'))).toHaveLength(0)
+  // The RESULT the fallback returns, not just its side effect. Returning
+  // 'cancelled' instead makes the export silently show no toast at all in
+  // Firefox, Safari and the desktop shell — the platforms this path exists
+  // for — and returning 'reused' makes the two sibling callers claim
+  // "updated saved file" while the bytes went to the Downloads folder.
+  // Both mutations passed all 183 tests before this assertion.
+  expect(successes.some(m => m.includes('Exported Demo.pypsaproj.zip'))).toBe(true)
+})
+
+it('does NOT claim success when the file cannot be written', async () => {
+  // A quota or permission failure during the write leaves a 0-byte file at the
+  // location the user chose. Falling back to a download and reporting
+  // "Exported" would hide that behind a second doomed write — so the picker
+  // and the write get separate try blocks, and only the picker gets a
+  // fallback.
+  const quota = Object.assign(new Error('The quota has been exceeded.'), {
+    name: 'QuotaExceededError',
+  })
+  ;(window as unknown as Record<string, unknown>).showSaveFilePicker = vi
+    .fn()
+    .mockResolvedValue({
+      createWritable: async () => ({
+        write: async () => { throw quota },
+        close: async () => {},
+      }),
+      queryPermission: async () => 'granted',
+    })
+  vi.mocked(projectsApi.downloadBundle).mockResolvedValue(new Blob(['zip']))
+
+  await clickExport()
+
+  await waitFor(() =>
+    expect(errors.some(m => m.includes('quota'))).toBe(true),
+  )
+  expect(successes.filter(m => m.includes('Exported'))).toHaveLength(0)
+  expect(clicks, 'a second copy was downloaded to hide the failed write')
+    .toHaveLength(0)
 })
 
 it('claims nothing when the user cancels the save dialog', async () => {

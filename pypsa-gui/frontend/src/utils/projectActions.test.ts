@@ -1,5 +1,91 @@
-import { describe, expect, it } from 'vitest'
-import { formatRelativeTime, nextUntitledName, slugify } from './projectActions'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  downloadProjectBundle, forgetBundleLocation,
+  formatRelativeTime, nextUntitledName, slugify,
+} from './projectActions'
+import { projectsApi } from '../api/projects'
+import { useSimulationStore } from '../store/simulationStore'
+
+vi.mock('../api/projects', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/projects')>()
+  return { ...actual, projectsApi: { ...actual.projectsApi, downloadBundle: vi.fn() } }
+})
+
+// The RETURN VALUE is this helper's contract, and its three callers branch on
+// it: `AppHeader` and `Sidebar` render "— updated saved file" for 'reused' and
+// "(server only)" for 'cancelled'. Pinning it from a component test cannot
+// work — `OverviewPanel` treats every non-'cancelled' result identically, so a
+// helper returning 'reused' from the anchor fallback passed all 183 tests
+// while making the other two callers claim the user's chosen file was updated
+// when the bytes went to the Downloads folder.
+describe('downloadProjectBundle — the result each caller branches on', () => {
+  beforeEach(() => {
+    vi.mocked(projectsApi.downloadBundle).mockReset()
+    vi.mocked(projectsApi.downloadBundle).mockResolvedValue(new Blob(['zip']))
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    useSimulationStore.setState({ logLines: [] })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    forgetBundleLocation('Demo')
+    delete (window as unknown as Record<string, unknown>).showSaveFilePicker
+  })
+
+  it("reports 'download' when the browser has no picker at all", async () => {
+    // Firefox, Safari, and the pywebview WKWebView shell.
+    expect(await downloadProjectBundle('Demo')).toBe('download')
+  })
+
+  it("reports 'cancelled' when the user dismisses the picker", async () => {
+    ;(window as unknown as Record<string, unknown>).showSaveFilePicker = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('abort'), { name: 'AbortError' }))
+
+    expect(await downloadProjectBundle('Demo')).toBe('cancelled')
+  })
+
+  it("reports 'download', NOT 'reused', when the picker cannot be shown", async () => {
+    // `SecurityError` — transient user activation expired during the fetch.
+    // 'reused' here would make AppHeader and Sidebar tell the user their
+    // chosen file was updated.
+    ;(window as unknown as Record<string, unknown>).showSaveFilePicker = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('gesture'), { name: 'SecurityError' }))
+
+    expect(await downloadProjectBundle('Demo')).toBe('download')
+  })
+
+  it('leaves a record when it silently changes the destination', async () => {
+    // The fallback puts the file somewhere other than where the user would
+    // have chosen. The toast only says "— downloaded"; the Log tab is where
+    // that becomes diagnosable.
+    ;(window as unknown as Record<string, unknown>).showSaveFilePicker = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('gesture'), { name: 'SecurityError' }))
+
+    await downloadProjectBundle('Demo')
+
+    expect(
+      useSimulationStore.getState().logLines.some(l => l.includes('Save dialog unavailable')),
+    ).toBe(true)
+  })
+
+  it('lets a failed WRITE reach the caller instead of downloading a second copy', async () => {
+    ;(window as unknown as Record<string, unknown>).showSaveFilePicker = vi
+      .fn()
+      .mockResolvedValue({
+        createWritable: async () => ({
+          write: async () => {
+            throw Object.assign(new Error('full'), { name: 'QuotaExceededError' })
+          },
+          close: async () => {},
+        }),
+      })
+
+    await expect(downloadProjectBundle('Demo')).rejects.toThrow('full')
+  })
+})
 
 describe('slugify', () => {
   it('lowercases and collapses runs of non-alphanumerics to a single _', () => {
