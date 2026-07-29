@@ -34,14 +34,33 @@ HERE.mkdir(parents=True, exist_ok=True)
 DEST = HERE / "download-dest"
 
 # GUARD: a destructive save (POST /api/projects/<name>) runs below. It must
-# never be able to reach the real projects tree, which is irreplaceable.
-# Asserted rather than assumed — an unset variable would silently target it.
+# never be able to reach a real projects tree.
+#
+# **`PYPSAGUI_APP_DATA_DIR` ALONE DOES NOT ISOLATE PROJECTS.** Learned the hard
+# way: `app_paths.default_projects_root()` is `~/Documents/PyPSA GUI/Projects`
+# and is overridden by `PYPSAGUI_PROJECTS_ROOT`, a DIFFERENT variable.
+# `PYPSAGUI_APP_DATA_DIR` moves the database, the log, the single-instance lock
+# and the *flat* legacy store — not the project store. Earlier runs of this
+# harness therefore wrote their throwaway projects into the developer's real
+# Documents folder while reporting that app-data had been redirected, which was
+# true and beside the point.
+#
+# Both are required, and both are asserted, because an unset one is silent.
 _appdata = os.environ.get("PYPSAGUI_APP_DATA_DIR", "")
+_projects = os.environ.get("PYPSAGUI_PROJECTS_ROOT", "")
 assert _appdata, "refusing to run: set PYPSAGUI_APP_DATA_DIR to a throwaway directory"
-assert BACKEND / "projects" not in Path(_appdata).resolve().parents, \
-    f"refusing to run: PYPSAGUI_APP_DATA_DIR is inside the real projects tree ({_appdata})"
-assert Path(_appdata).resolve() != (BACKEND / "projects").resolve(), \
-    "refusing to run: PYPSAGUI_APP_DATA_DIR IS the real projects tree"
+assert _projects, (
+    "refusing to run: set PYPSAGUI_PROJECTS_ROOT to a throwaway directory. "
+    "Without it, projects are written to ~/Documents/PyPSA GUI/Projects — "
+    "PYPSAGUI_APP_DATA_DIR does NOT cover them."
+)
+for _label, _value in (("PYPSAGUI_APP_DATA_DIR", _appdata),
+                       ("PYPSAGUI_PROJECTS_ROOT", _projects)):
+    _p = Path(_value).expanduser().resolve()
+    assert (BACKEND / "projects") not in _p.parents and _p != (BACKEND / "projects").resolve(), \
+        f"refusing to run: {_label} points at the repo's real projects tree ({_value})"
+    assert Path.home() / "Documents" not in _p.parents, \
+        f"refusing to run: {_label} points inside the user's Documents folder ({_value})"
 
 DEST.mkdir(parents=True, exist_ok=True)
 for p in DEST.iterdir():

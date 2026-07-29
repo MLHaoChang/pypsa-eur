@@ -190,9 +190,18 @@ def _bootstrap(state: dict) -> None:
 
 
 def _wire_close_handler(state: dict) -> None:
+    from routers.projects import _save_context
     from services import shutdown as shutdown_service
 
     window = state["main_window"]
+
+    # Built HERE, at wire time, not inside `flush`. Two reasons, and the second
+    # is the one that matters: WHERE the flush writes is a decision (see
+    # `make_saver` — omitting `storage_dir` sent it to `flat_projects_root`
+    # while `load_project` reads `projects_root`), and building it at wire time
+    # is what lets a test assert this module still uses it. Constructed inside
+    # `flush`, the only way to reach it was to run a whole shutdown.
+    save = shutdown_service.make_saver(_save_context)
 
     def confirm(in_flight) -> bool:
         names = ", ".join(s.label for s in in_flight)
@@ -219,18 +228,8 @@ def _wire_close_handler(state: dict) -> None:
             project_locks.release_all_for_user(db, local_mode.LOCAL_USER_ID)
 
     def flush(*, safe: bool):
-        from routers.projects import _save_context
-
         contexts = shutdown_service.resident_contexts()
         active = _active_context()
-
-        def save(ctx, persist_user_ts: bool) -> None:
-            name = getattr(ctx, "loaded_project", None)
-            if not name:
-                # A never-saved draft has nowhere to go. Declared residual
-                # risk; skipped rather than invented a filename for.
-                return
-            _save_context(ctx, name, persist_user_ts=persist_user_ts)
 
         from services import chat_service
 

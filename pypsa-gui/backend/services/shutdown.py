@@ -348,6 +348,53 @@ def _default_tool_executor():
     return _TOOL_EXECUTOR
 
 
+def make_saver(save_context: Callable[..., Any]) -> Callable[..., None]:
+    """
+    Build the per-context save the flush uses.
+
+    Lives here rather than inline in `gui.py` for the usual reason — `gui.py`
+    is wiring and this is a decision — but the decision itself was found by
+    acceptance step 5, not by design:
+
+    **Pass the directory the context was LOADED FROM.** Omitting `storage_dir`
+    makes `_save_context` re-derive the destination from the display name via
+    `_safe_project_dir`, which resolves against `flat_projects_root`
+    (`<app-data>/flat_projects`). `load_project` reads
+    `project_registry.project_dir(project)`, which resolves against
+    `projects_root` (`~/Documents/PyPSA GUI/Projects`). `settings.py` makes
+    those different on purpose, so a flush that re-derives writes somewhere the
+    app will never read — and reports success.
+
+    Measured before this existed: a quit flushed 4 buses into `flat_projects`,
+    the next launch loaded 3 from `Documents`, and the report carried
+    `unflushed: []` with no errors. That is constraint #4's hazard exactly — a
+    clean-looking quit over dropped work — reached by a route the workstream's
+    own tests could not see, because they injected the saver.
+
+    `PyPSAService._evict_if_over_cap` already passes `storage_dir` for the same
+    reason, with the same warning in its comment. The desktop flush was the
+    last caller still deriving a path from a display name.
+    """
+    import pathlib
+
+    def save(ctx, persist_user_ts: bool) -> None:
+        name = getattr(ctx, "loaded_project", None)
+        if not name:
+            # A never-saved draft has nowhere to go. Declared residual risk;
+            # skipped rather than invented a filename for.
+            return
+        raw = getattr(ctx, "storage_dir", None)
+        save_context(
+            ctx, name,
+            persist_user_ts=persist_user_ts,
+            # None is `_save_context`'s "derive it yourself" signal, and is
+            # correct for a context that was never bound to a directory.
+            storage_dir=pathlib.Path(raw) if raw else None,
+        )
+
+    return save
+
+
 def stop_tool_executor(executor: Any = None) -> None:
     """
     Step 7. `chat_service` creates a module-level `ThreadPoolExecutor` that is

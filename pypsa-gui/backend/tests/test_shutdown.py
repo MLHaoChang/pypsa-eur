@@ -1276,3 +1276,128 @@ def test_the_sequence_has_an_overall_deadline():
                    for e in handler.report.errors), handler.report.errors
     finally:
         release.set()
+
+
+# ── where the flush writes (found by acceptance step 5) ─────────────────────
+
+
+class _Ctx:
+    """Minimal stand-in for a ProjectContext: only what the saver reads."""
+
+    def __init__(self, loaded_project, storage_dir):
+        self.loaded_project = loaded_project
+        self.storage_dir = storage_dir
+
+
+def test_the_flush_writes_where_the_context_was_LOADED_FROM():
+    """
+    The defect acceptance step 5 found, and the reason this helper exists.
+
+    `gui.py` used to call `_save_context(ctx, name)` with no `storage_dir`, so
+    the destination was re-derived from the DISPLAY NAME via
+    `_safe_project_dir`, which resolves against
+    `get_settings().flat_projects_root` — `<app-data>/flat_projects`.
+    `load_project` reads `project_registry.project_dir(project)`, which
+    resolves against `get_settings().projects_root` — `~/Documents/PyPSA GUI/
+    Projects`. Those are different directories in every install, deliberately
+    (see `settings.py`), so the quit-flush persisted somewhere the app never
+    reads.
+
+    Measured before the fix: one run wrote 4 buses to `flat_projects` and then
+    loaded 3 from `Documents`, while the report said `unflushed: []` and
+    `errors: []` — a clean-looking quit over dropped work, which is precisely
+    the hazard constraint #4 names.
+
+    `PyPSAService._evict_if_over_cap` already passes `storage_dir` for the same
+    reason; the desktop flush was the last caller re-deriving from the name.
+    """
+    calls = []
+
+    def record(ctx, name, **kwargs):
+        calls.append({"name": name, **kwargs})
+
+    save = shutdown_service.make_saver(record)
+    save(_Ctx("Demo", "/somewhere/orgs/abc/def"), persist_user_ts=True)
+
+    assert calls, "the saver never called through"
+    assert calls[0]["storage_dir"] == pathlib.Path("/somewhere/orgs/abc/def"), (
+        "the flush re-derived the path from the display name — it will write "
+        "to flat_projects while load_project reads projects_root"
+    )
+
+
+def test_a_context_with_no_storage_dir_still_saves():
+    """
+    `storage_dir=None` is `_save_context`'s documented "derive it yourself"
+    signal. A context that was never bound to a directory must still be
+    written rather than skipped — skipping is the data loss.
+    """
+    calls = []
+    save = shutdown_service.make_saver(lambda ctx, name, **kw: calls.append(kw))
+
+    save(_Ctx("Demo", None), persist_user_ts=False)
+
+    assert calls and calls[0]["storage_dir"] is None
+
+
+def test_a_never_saved_draft_is_skipped_not_invented():
+    """A context with no project name has nowhere to go. Declared residual risk."""
+    calls = []
+    save = shutdown_service.make_saver(lambda ctx, name, **kw: calls.append(kw))
+
+    save(_Ctx(None, "/somewhere"), persist_user_ts=True)
+
+    assert calls == []
+
+
+def test_the_GUI_actually_uses_the_saver(monkeypatch):
+    """
+    The tests above pass whether or not `gui.py` calls `make_saver`. This is
+    the one that fails if it stops — the realistic regression, since the old
+    inline form looked correct and silently wrote to the wrong root.
+
+    Drives the real `_wire_close_handler` against a fake window, so the
+    assertion is about this module's wiring rather than about a helper nobody
+    may be calling.
+    """
+    pytest.importorskip("webview")
+    from desktop import gui
+
+    built = []
+    real_make_saver = shutdown_service.make_saver
+
+    def spy(save_context):
+        built.append(save_context)
+        return real_make_saver(save_context)
+
+    monkeypatch.setattr(shutdown_service, "make_saver", spy)
+
+    class _Events:
+        def __init__(self):
+            self.closing = self
+
+        def __iadd__(self, handler):
+            return self
+
+    class _Window:
+        events = _Events()
+
+        def hide(self):
+            pass
+
+        def destroy(self):
+            pass
+
+        def create_confirmation_dialog(self, *a):
+            return True
+
+    state = {"main_window": _Window(), "server": None}
+    gui._wire_close_handler(state)
+
+    from routers.projects import _save_context
+
+    assert built == [_save_context], (
+        "gui.py no longer builds its saver through shutdown.make_saver — the "
+        "flush will re-derive the path from the display name and write to "
+        "flat_projects_root, which load_project never reads"
+    )
