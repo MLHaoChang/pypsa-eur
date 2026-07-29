@@ -1,0 +1,340 @@
+"""
+The ONLY module that imports `webview`.
+
+Everything with logic lives in `launcher.py`, `bootstrap.py` and
+`services/shutdown.py`, all of which are webview-free and covered by the
+backend suite on a headless box. This file is wiring: it owns the windows and
+the main thread, and delegates every decision.
+
+**The chain is fixed by `webview.start()`**, which blocks, must own the main
+thread, and may be called once per process:
+
+    main thread:  logging -> lock -> bind_socket() -> build_environment(port)
+                  -> splash window -> webview.start(bootstrap)
+
+    bootstrap:    apply_environment() -> import main -> serve(sockets=[sock])
+                  -> wait_healthy() -> main window -> destroy splash
+
+The bind precedes `build_environment` because the port comes from
+`sock.getsockname()[1]`; get that wrong and the wrong CORS allowlist is frozen
+at `import main`, silently. The main window is created before the splash is
+destroyed because destroying the last window makes `start()` return.
+
+API notes, measured against the installed pywebview 6.2.1 rather than assumed —
+the one defect that most damaged the shutdown workstream was code written
+against an API that did not exist:
+
+  * `webview.__version__` does NOT exist; `importlib.metadata` does.
+  * `closing` is the only event with `_should_lock=True`: handlers run
+    synchronously on the caller's thread and the return value vetoes. That is
+    what makes the tri-state `CloseHandler` work.
+  * `destroy()` re-fires `closing` on winforms and gtk but NOT on cocoa.
+  * `create_window(confirm_close=...)` is pywebview's OWN dialog and stays off:
+    D12 is our shutdown sequence's step 2.
+  * `start(private_mode=True)` is the DEFAULT and would be wrong here — see
+    `_start_gui`.
+"""
+from __future__ import annotations
+
+import logging
+import sys
+import threading
+
+import webview
+
+from desktop import bootstrap, launcher, splash
+from desktop.single_instance import AlreadyRunning, SingleInstance
+
+logger = logging.getLogger(__name__)
+
+WINDOW_TITLE = "PyPSA GUI"
+INITIAL_SIZE = (1440, 900)
+# Below roughly this the workbench's side panels and canvas overlap. Enforced
+# rather than advisory, because a window dragged smaller is indistinguishable
+# from a broken layout.
+MINIMUM_SIZE = (1024, 700)
+
+SPLASH_SIZE = (460, 260)
+
+
+def _app_data():
+    import app_paths
+
+    return app_paths.app_data_dir()
+
+
+def main() -> int:
+    """Entry point. Returns a process exit status."""
+    bootstrap.install_file_logging()
+
+    lock = SingleInstance(_app_data() / "single-instance.lock")
+    try:
+        lock.acquire()
+    except AlreadyRunning:
+        # A held lock says "someone is here"; it is not a channel, so we cannot
+        # raise their window (a named follow-up). Telling the user plainly is
+        # what this delivers.
+        _tell_user_already_running()
+        return 0
+    except OSError:
+        # NOT "already running" — `flock` also fails for ENOLCK/EOPNOTSUPP on
+        # filesystems without advisory locking, which `PYPSAGUI_APP_DATA_DIR`
+        # can point at. Saying "another instance is running" there is a lie
+        # with no recovery.
+        logger.exception("could not take the single-instance lock")
+        _tell_user_lock_failed()
+        return 70
+
+    sock = launcher.bind_socket()
+    port = sock.getsockname()[1]
+    env = launcher.build_environment(port, launcher.resolve_legacy_root())
+
+    window = webview.create_window(
+        WINDOW_TITLE,
+        html=splash.HTML,
+        width=SPLASH_SIZE[0], height=SPLASH_SIZE[1],
+        resizable=False,
+        # pywebview's own close dialog stays OFF: our shutdown sequence's
+        # step 2 is the confirmation, and two competing prompts would race.
+        confirm_close=False,
+    )
+
+    state: dict = {"sock": sock, "env": env, "port": port, "splash": window,
+                   "lock": lock, "server": None, "main_window": None}
+    _start_gui(lambda: _bootstrap(state))
+
+    # `start()` returned, so the last window is gone. Anything still holding
+    # the process is a bug in the shutdown, not a reason to hang here.
+    lock.release()
+    return 0
+
+
+def _start_gui(func) -> None:
+    webview.start(
+        func,
+        # private_mode=True is pywebview's DEFAULT and is WRONG for this app:
+        # it discards localStorage between launches, and the frontend keeps
+        # `currentProject` there — so every launch would forget which project
+        # was open. `storage_path` puts that state beside the database rather
+        # than in a temporary directory.
+        private_mode=False,
+        storage_path=str(_app_data() / "webview"),
+    )
+
+
+def _bootstrap(state: dict) -> None:
+    """Runs on pywebview's worker thread once the GUI loop is up."""
+    window = state["splash"]
+
+    def progress(stage: str) -> None:
+        try:
+            window.evaluate_js(splash.set_stage_js(stage))
+        except Exception:
+            logger.exception("could not update the splash")
+
+    def import_backend():
+        import main as backend
+
+        return backend.app
+
+    def serve(app) -> None:
+        server = launcher.DesktopServer(app, state["sock"])
+        state["server"] = server
+        server.start()
+
+    def wait_healthy() -> bool:
+        server = state["server"]
+        return server is not None and server.wait_healthy(bootstrap.HEALTH_TIMEOUT)
+
+    def show_main_window() -> None:
+        state["main_window"] = webview.create_window(
+            WINDOW_TITLE,
+            url=launcher.app_url(state["port"]),
+            width=INITIAL_SIZE[0], height=INITIAL_SIZE[1],
+            min_size=MINIMUM_SIZE,
+            confirm_close=False,
+        )
+        _wire_close_handler(state)
+
+    def destroy_splash() -> None:
+        window.destroy()
+
+    def report_failure(message: str) -> None:
+        try:
+            window.evaluate_js(splash.failed_js(message))
+        except Exception:
+            logger.exception("could not report the failure on the splash")
+
+    try:
+        bootstrap.bootstrap_sequence(
+            apply_environment=lambda: launcher.apply_environment(state["env"]),
+            import_backend=import_backend,
+            serve=serve,
+            wait_healthy=wait_healthy,
+            show_main_window=show_main_window,
+            destroy_splash=destroy_splash,
+            report_failure=report_failure,
+            progress=progress,
+        )
+    except Exception:
+        logger.exception("the launch failed")
+        report_failure(
+            "PyPSA GUI could not start. See pypsa-gui.log in your application "
+            "data folder."
+        )
+
+
+def _wire_close_handler(state: dict) -> None:
+    from services import shutdown as shutdown_service
+
+    window = state["main_window"]
+
+    def confirm(in_flight) -> bool:
+        names = ", ".join(s.label for s in in_flight)
+        interruptible = all(s.interruptible for s in in_flight)
+        detail = "" if interruptible else (
+            "\n\nOne of these is an AC power flow, which cannot be "
+            "interrupted — quitting may not save its project."
+        )
+        # `create_confirmation_dialog` runs the modal on the GUI thread even
+        # when called from this worker, which is what keeps it from hanging on
+        # macOS. The shutdown sequence guards this call regardless: if it
+        # raises we flush anyway rather than quit clean.
+        return bool(window.create_confirmation_dialog(
+            "Quit PyPSA GUI?",
+            f"A solve is still running ({names}). Quitting will stop it.{detail}",
+        ))
+
+    def release_locks() -> None:
+        import local_mode
+        from db import session as db_session
+        from services import project_locks
+
+        with db_session.SessionLocal() as db:
+            project_locks.release_all_for_user(db, local_mode.LOCAL_USER_ID)
+
+    def flush(*, safe: bool):
+        from routers.projects import _save_context
+
+        contexts = shutdown_service.resident_contexts()
+        active = _active_context()
+
+        def save(ctx, persist_user_ts: bool) -> None:
+            name = getattr(ctx, "loaded_project", None)
+            if not name:
+                # A never-saved draft has nowhere to go. Declared residual
+                # risk; skipped rather than invented a filename for.
+                return
+            _save_context(ctx, name, persist_user_ts=persist_user_ts)
+
+        from services import chat_service
+
+        def flush_chat() -> None:
+            # `flush_to_disk(ctx)` takes a CONTEXT — it is per-project, not
+            # global. Wiring it as a bare zero-arg callable (which is what
+            # `flush_all` expects) would have raised TypeError in the middle of
+            # a shutdown. Caught by checking the signature rather than assuming
+            # it, which is the discipline the ac_pf_thread defect earned.
+            for ctx in contexts:
+                chat_service.flush_to_disk(ctx)
+
+        return shutdown_service.flush_all(
+            contexts=contexts, active=active, save=save,
+            flush_chat=flush_chat, safe=safe,
+        )
+
+    def run():
+        return shutdown_service.shutdown_sequence(
+            confirm=confirm,
+            hide=window.hide,
+            abort_and_wait=lambda: _abort_everything(),
+            flush=flush,
+            release_locks=release_locks,
+            stop_executor=shutdown_service.stop_tool_executor,
+            stop_server=lambda: state["server"].stop() if state["server"] else "no-server",
+        )
+
+    handler = shutdown_service.CloseHandler(run=run, destroy=window.destroy)
+    window.events.closing += handler.on_closing
+    state["close_handler"] = handler
+
+
+def _active_context():
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService._active
+
+
+def _abort_everything() -> bool:
+    from services import shutdown as shutdown_service
+
+    def abort_active() -> None:
+        from routers.simulation import abort
+
+        abort()
+
+    def abort_queue() -> None:
+        from services.solve_queue import solve_queue
+
+        for job in solve_queue.list_jobs():
+            if job.get("status") in ("queued", "running"):
+                solve_queue.abort(job["id"])
+
+    def wait(timeout: float) -> bool:
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not shutdown_service.solves_in_flight():
+                return True
+            time.sleep(0.25)
+        return not shutdown_service.solves_in_flight()
+
+    return shutdown_service.abort_and_wait(
+        in_flight=shutdown_service.solves_in_flight(),
+        abort_active=abort_active, abort_queue=abort_queue, wait=wait,
+    )
+
+
+def _tell_user_already_running() -> None:
+    window = webview.create_window(
+        WINDOW_TITLE,
+        html=_message_html(
+            "PyPSA GUI is already running",
+            "Switch to the window that is already open. If you cannot find "
+            "it, quit that copy first and try again.",
+        ),
+        width=440, height=200, resizable=False,
+    )
+    webview.start(private_mode=False, storage_path=str(_app_data() / "webview"))
+    del window
+
+
+def _tell_user_lock_failed() -> None:
+    webview.create_window(
+        WINDOW_TITLE,
+        html=_message_html(
+            "PyPSA GUI could not start",
+            "The application data folder could not be locked. If it is on a "
+            "network drive, try a local folder instead. Details are in "
+            "pypsa-gui.log.",
+        ),
+        width=440, height=220, resizable=False,
+    )
+    webview.start(private_mode=False, storage_path=str(_app_data() / "webview"))
+
+
+def _message_html(title: str, body: str) -> str:
+    import html as _html
+
+    return (
+        splash.HTML.split("<script>")[0]
+        .replace("<h1>PyPSA GUI</h1>", f"<h1>{_html.escape(title)}</h1>")
+        .replace('<div id="stage">Starting…</div>',
+                 f'<div id="stage">{_html.escape(body)}</div>')
+        .replace('<div class="bar"><i></i></div>', "")
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
