@@ -30,7 +30,7 @@ v1 and v2 were each rejected partly for stale or wrong `file:line` references �
 | 2 | **Quiesce-first + "Cancel = veto" wedged the app permanently.** Window hidden, mutations gated, idempotency latch set — and no reverse path. Worse than the re-entrancy bug it replaced. A confirm dialog raised against a just-hidden window is also invisible on macOS. | Quiesce splits into *gate* (reversible, no GUI, step 1) and *hide* (after the user chooses Quit). The veto branch un-gates and clears the latch, with a test. |
 | 3 | **`shutdown_sequence()` was named but never given a signature**, and two of its steps live outside `services/` — so "assert the ORDER with a recording double", which v2 called the point of the task, was not writable. | Explicit signature taking its seven collaborators as injected callables. |
 | 4 | **Task 7 asserted "first window focused" — no task built focus.** Byte-for-byte the defect v2's own revision log row 5 claims to have fixed, one row further down. | Downgraded to what Task 1 actually delivers: refused, with a visible message. Focus moves to a named follow-up. |
-| 5 | **13 download sites; there are 14.** `components/ChatPanel.tsx` has an `<a download>` for chat export artifacts whose server sends `Content-Disposition: inline` — so it depends *entirely* on the `download` attribute a webview ignores. Mechanically executing v2 left it dead and reported success. Also: `utils/projectActions.ts` already exports `saveBlobToDisk` with **zero callers**. | 14 sites, two shapes, and the dead helper is absorbed or deleted. |
+| 5 | ~~**13 download sites; there are 14.** `components/ChatPanel.tsx` has an `<a download>` … it depends *entirely* on the `download` attribute a webview ignores.~~ **SUPERSEDED 2026-07-29 — the premise was false.** A webview does NOT ignore the attribute: `ALLOW_DOWNLOADS` gates it, and with the setting on, ChatPanel's anchor saves correctly with no change. Measured; see the Task 6 table. The live inventory is 11 `createObjectURL` + 1 declarative anchor — the old count of 12 blob sites included one inside `saveBlobToDisk`, which is now deleted. | The dead helper is deleted; no site needed migrating. |
 | 6 | **"A hand-rolled flush drops the transcript" was FALSE.** `chat_service.flush_to_disk` is documented as a Phase-0 no-op. Asserting a data loss the code does not exhibit is exactly what got v1's constraint #4 rejected. | Corrected: call it for contract stability, not for present data loss. |
 | 7 | **Two headline tests were vacuous.** `apply_environment()` "raises if `main` is imported" is trivially true — `tests/conftest.py` imports `main` at module scope, so it holds for every test in the suite. And "stop() returns with a live SSE connection" passes without exercising the hang, because the stream returns immediately when no solve is running. | Both run in a subprocess; the SSE test seeds the log queue first. |
 | 8 | **`launcher.py` under `backend/` is imported by two backend test files AND was where v2 put the pywebview surface** — violating the plan's own "the backend suite must not import `webview`". v2 stated that reasoning for `shutdown.py` and did not apply it here. | `gui.py` holds every `webview` reference; `launcher.py` is webview-free, with a test asserting `"webview" not in sys.modules` after importing it. |
@@ -61,8 +61,8 @@ Re-derived at `f367ecab` by two reviewers independently.
 | 10 | `chat_service` creates a module-level `ThreadPoolExecutor` never shut down; CPython's atexit joiner blocks interpreter exit. `cancel_futures=True` cancels only PENDING work | Necessary, not sufficient. Pair with the bounded exit in #11. |
 | 11 | uvicorn 0.51.0: `capture_signals` returns early off the main thread; `Server.shutdown` wraps `_wait_tasks_to_complete()` in `asyncio.wait_for(..., timeout=self.config.timeout_graceful_shutdown)`, default **`None`**; `_wait_tasks_to_complete` polls `while ... and not self.force_exit`. The app holds an SSE stream open until the client disconnects | `should_exit` alone can wait forever. **`force_exit` set from another thread does break the wait** — verified in the installed source. |
 | 12 | `Server.run/serve/startup` accept `sockets: list[socket.socket]` and go through `loop.create_server(..., sock=sock)`; `shutdown` closes them | The socket handoff is real and closes the bind→serve race. |
-| 13 | **14 download sites, three shapes.** 12 × `createObjectURL` (bytes already in JS) across `utils/projectActions.ts`, `layout/Sidebar.tsx`, `pages/TimeSeriesManager.tsx`, `pages/results/shared.tsx`, `pages/LoadProfileManager.tsx`, `pages/ImportExport.tsx`, `pages/ModelHorizon.tsx`; 1 × `window.open` on a URL (`pages/OverviewPanel.tsx`); 1 × `<a download>` on a URL (`components/ChatPanel.tsx`), whose server sends `Content-Disposition: inline` so it depends entirely on the attribute a webview ignores. `utils/projectActions.ts` also exports `saveBlobToDisk` with **zero callers** | Two entry points, not one signature — and the dead helper must not become a second competing chokepoint. |
-| 14 | `window.pywebview.api` is injected ASYNCHRONOUSLY; `pywebviewready` is the event | Per-call feature detection races the injection and silently takes the dead path. |
+| 13 | ~~**14 download sites, three shapes** … 1 × `<a download>` … depends entirely on the attribute a webview ignores. Two entry points, not one signature.~~ **SUPERSEDED 2026-07-29.** The shapes were right; the conclusion was not. Measured inventory: **11** × `createObjectURL` (`layout/Sidebar.tsx`, `utils/projectActions.ts`, `pages/TimeSeriesManager.tsx` ×4, `pages/results/shared.tsx` ×2, `pages/LoadProfileManager.tsx`, `pages/ImportExport.tsx`, `pages/ModelHorizon.tsx`) + **1** × `<a download>` (`components/ChatPanel.tsx`). All 12 work unchanged under `ALLOW_DOWNLOADS=True`. The 13th, `window.open` in `pages/OverviewPanel.tsx`, never worked in a webview and now uses `downloadProjectBundle`. `saveBlobToDisk` had zero callers and is deleted. | One setting; no entry points; the dead helper deleted. |
+| 14 | ~~`window.pywebview.api` is injected ASYNCHRONOUSLY; `pywebviewready` is the event~~ **ORPHANED 2026-07-29.** True of pywebview, but nothing shipped touches `window.pywebview.api`: the JS→Python bridge this guarded was never needed. Retained only so a future bridge does not rediscover it. | n/a — no feature detection shipped. |
 | 15 | The frontend has **20** `refetchInterval` sites, a 5-minute autosave, and a 45 s lock heartbeat. Hiding a window does **not** stop its timers or close its SSE stream | Quiesce must gate the API, not hide the window. |
 | 16 | `logging.getLogger(__name__)` with **no `basicConfig` and no `FileHandler` anywhere in the backend**. `local_bootstrap` already disables alembic's logger because "on a windowed Windows build with no console, writing to that handle can raise" | In a frozen windowed build every `logger.exception` goes nowhere. H creates that condition. |
 | 17 | uvicorn calls `sys.exit(STARTUP_FAILURE)` on lifespan failure — on a worker thread that raises `SystemExit` in that thread only, silently | `wait_healthy` returning False needs a defined UX, or the splash sits on "Starting…" forever. |
@@ -91,7 +91,7 @@ Re-derived at `f367ecab` by two reviewers independently.
 3  bounded threaded uvicorn
 4  shutdown: gate, confirm, abort, flush, exit   ← the workstream
 5  gui.py: splash, window, bootstrap chain
-6  one download chokepoint for 14 sites
+6  downloads: one pywebview setting + one call site (was: a chokepoint for 14 sites)
 7  acceptance — on BOTH platforms
 ```
 
@@ -335,23 +335,84 @@ returns `nil`.
 ### What to build
 
 **Files:** create `backend/desktop/downloads.py`; modify `backend/desktop/gui.py`,
-`frontend/src/pages/OverviewPanel.tsx`, `frontend/src/utils/projectActions.ts`
+`frontend/src/pages/OverviewPanel.tsx`, `frontend/src/utils/projectActions.ts`,
+`pixi.toml`
 
-- [ ] **Step 1:** `desktop/downloads.py` — webview-free, so the headless suite
+- [x] **Step 1:** `desktop/downloads.py` — webview-free, so the headless suite
       covers it, same rule as `launcher.py` and `bootstrap.py`. One function
       that sets `ALLOW_DOWNLOADS` on a settings mapping, carrying the measured
       reason in a comment. The test pins the invariant: flipping it off does
-      not merely disable saving, it makes 13 export controls navigate the app
+      not merely disable saving, it makes every CSV export navigate the app
       away from itself.
-- [ ] **Step 2:** `gui.py` calls it before `webview.start()`.
-- [ ] **Step 3:** `OverviewPanel` — replace `window.open(bundleUrl, '_blank')`
-      with an anchor carrying `download`. No `target`: a `target=_blank` that
-      *is* `LinkActivated` reaches `OPEN_EXTERNAL_LINKS_IN_BROWSER` (default
-      `True`) and hands the URL to the system browser, which downloads it
-      outside the app. Measured with that setting at its real default.
-- [ ] **Step 4:** delete `utils/projectActions.ts::saveBlobToDisk` (zero
-      callers). It is a second chokepoint competing with the native path, and
-      its `showSaveFilePicker` branch does not exist in WKWebView anyway.
+- [x] **Step 2:** `gui.py` calls it **before the first window is created**.
+      The test asserts from inside the `create_window` stub, not after
+      `main()` returns — asserting afterwards passed with the call moved below
+      `_start_gui()`, where in the real app it would land after
+      `webview.start()` had blocked for the entire session.
+- [x] **Step 3:** `OverviewPanel` — replace `window.open(bundleUrl, '_blank')`
+      with `downloadProjectBundle(currentProject)`, the helper `AppHeader` and
+      the Sidebar modal already use. **Fetch through axios, THEN save the
+      blob.** The first attempt used a bare anchor at the API URL; it worked
+      in the shell, and two independent reviewers caught that it also writes
+      401/403/404 JSON bodies to disk as a valid-looking `.pypsaproj.zip`,
+      because an anchor cannot see a status code. `window.open` at least
+      showed the error in a tab. Regression test:
+      `OverviewPanel.download.test.tsx::saves NOTHING when the server refuses`.
+- [x] **Step 4:** delete `utils/projectActions.ts::saveBlobToDisk` (zero
+      callers, verified across every ref in the repo). It is a second path
+      competing with the one every other export uses, and its
+      `showSaveFilePicker` branch does not exist in WKWebView anyway.
+- [x] **Step 5:** `pixi.toml` — the `test` environment gains the `desktop`
+      feature (for `pywebview` alone), **and `gui-tests` moves into
+      `[feature.test.tasks]`**. The first half alone was useless: `gui-tests`
+      sat in the root `[tasks]` table, so the canonical command resolved to
+      `default`, where both guarding tests still SKIPPED and the suite still
+      read green. `pywebview` is pinned `==6.2.1` now that it is in a gating
+      environment — this workstream reads its non-public behaviour in three
+      places.
+
+### Task 6 acceptance — macOS arm64, measured 2026-07-29
+
+Driven through the shipped `gui.main()` — real lock, real socket, real backend,
+real uvicorn, real SPA — clicking the real controls with `evaluate_js`. The
+only substitution is the human clicking Save in the native panel; whether the
+panel is reached is WebKit's decision and is what is being measured. Driver:
+`pypsa-gui/backend/smoke/accept_downloads.py`.
+
+| What | Result |
+|---|---|
+| `ALLOW_DOWNLOADS` read live from `webview.settings` in the shipped path | `true` |
+| Open project through the launcher, open the Project info panel | `/app`, panel opens |
+| Click the real **Export bundle** button | anchor clicked with `href=blob:http://127.0.0.1:…`, `download=DownloadProject.pypsaproj.zip`, **detached** |
+| File lands | `DownloadProject.pypsaproj.zip`, 3682 B, **1 s** |
+| A real **blob** export (Sidebar export modal → Download File) | `downloadproject.pypsaproj.zip`, 3723 B, **1 s** |
+| The SPA after both | still `/app`, no page errors |
+
+The `attached: false` is worth keeping. An earlier version of this work asserted
+that WebKit ignores a click on a detached anchor, and attached one on that
+basis — an assumption, never measured. Every one of the 11 real
+`createObjectURL` sites clicks a **detached** anchor, so had the assumption
+been true, "they need no change" would have been false for all of them. It is
+measured here and it is false: detached works.
+
+The blob case is there because "13 sites need no change" otherwise rests on
+the audit page rather than on the app.
+
+**Three false results this run produced before it produced a true one**, all
+worth knowing:
+
+1. There are **two** "Export bundle" buttons. The sidebar one opens an export
+   *modal* and downloads nothing by itself. Clicking the first match hit that
+   one and landed no file — indistinguishable from a broken download.
+2. The bundle endpoint's `Content-Disposition` **overrides the anchor's
+   `download` attribute**, so a hand-built probe anchor and the real button
+   produce the same filename. Running both in one session made the single
+   landed file unattributable; they had to be split into separate runs.
+3. **The desktop app serves the BUILT SPA.** The first honest run showed the
+   button firing no anchor at all, with no error — because `dist/` was a day
+   old and still contained `window.open`. Any frontend change needs
+   `npm run build` before an end-to-end means anything. `dist/` is gitignored,
+   so nothing in the repo records this.
 
 ### What this does NOT cover
 

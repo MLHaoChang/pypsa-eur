@@ -20,7 +20,10 @@ atlite = "0d"
 gui-backend  = { cmd = "uvicorn main:app --reload --port 8000", cwd = "pypsa-gui/backend" }
 gui-frontend = { cmd = "npm run dev", cwd = "pypsa-gui/frontend" }
 gui          = { depends-on = ["gui-backend", "gui-frontend"] }
-gui-tests    = { cmd = "python -m pytest", cwd = "pypsa-gui/backend" }
+# `gui-tests` is NOT here — it lives in `[feature.test.tasks]` so it resolves
+# to the `test` environment, which is the only one carrying `pywebview`. Run
+# from `[tasks]` it resolved to `default`, where the two desktop-download
+# tests SKIPPED and the suite still read green. See the comment there.
 gui-db-up    = { cmd = "docker compose up -d", cwd = "pypsa-gui" }
 gui-db-down  = { cmd = "docker compose down", cwd = "pypsa-gui" }
 setup-ssl-bypass = "python scripts/install_ssl_bypass.py"
@@ -220,6 +223,15 @@ tsam = "==2.3.9"
 
 [feature.test.tasks]
 
+# Defined HERE, not in the root `[tasks]` table, so `pixi run gui-tests`
+# resolves to the `test` environment. In `[tasks]` it resolved to `default`,
+# which has no `pywebview`, so the two tests guarding the desktop download
+# setting were reported as SKIPPED — and a skipped test reads as a green
+# suite. Deleting `downloads.apply(...)` from `gui.py` would then have passed
+# the canonical gate while shipping an app whose every CSV export navigates
+# the SPA away from itself.
+gui-tests = { cmd = "python -m pytest", cwd = "pypsa-gui/backend" }
+
 integration-tests = """
     snakemake -call solve_elec_networks --configfile config/test/config.electricity.yaml &&
     snakemake -call --configfile config/test/config.overnight.yaml &&
@@ -264,14 +276,27 @@ generate-config = "pytest test/test_config_schema.py --fix"
 # OpenBLAS, invisible because numpy and scipy were pinned identically.
 
 [feature.desktop.pypi-dependencies]
-pywebview = "*"
+# Pinned, like the optimisation stack above and for the same reason. This
+# feature is now part of the `test` environment (see `[environments]`), and
+# `update-lockfile.yaml` deletes pixi.lock and re-solves — so `*` would let an
+# arbitrary new pywebview into the environment that gates the suite. The
+# shutdown and download workstreams both read pywebview's NON-PUBLIC
+# behaviour: `closing` being the only `_should_lock=True` event, `destroy()`
+# not re-firing `closing` on cocoa, and `ALLOW_DOWNLOADS` gating the whole
+# download policy in `cocoa.py`. A minor bump can move any of those.
+pywebview = "==6.2.1"
 
 [feature.test.dependencies]
 pytest = ">=8.4.2"
 
 [environments]
 doc = { features = ["doc"], no-default-feature = true }
-test = { features = ["test", "dev"], solve-group = "gui" }
+# `desktop` is here for ONE package, `pywebview`, and it is not optional:
+# without it `test_desktop_downloads.py` silently SKIPS the two tests that
+# matter — the one pinning pywebview's dangerous default and the one that
+# fails if `gui.py` stops enabling downloads. A skipped test reads as a green
+# suite, which is how a hole this size stays open.
+test = { features = ["test", "dev", "desktop"], solve-group = "gui" }
 dev = { features = ["dev"], solve-group = "gui" }
 # ONE solve group. `desktop` runs the pypsa-gui backend and the backend suite
 # runs in `default`, so the two must resolve identically or the app that ships

@@ -42,7 +42,7 @@ import threading
 
 import webview
 
-from desktop import bootstrap, launcher, splash
+from desktop import bootstrap, downloads, launcher, splash
 from desktop.single_instance import AlreadyRunning, SingleInstance
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,11 @@ def _app_data():
 def main() -> int:
     """Entry point. Returns a process exit status."""
     bootstrap.install_file_logging()
+
+    # Before any window exists, because the default is not merely "no
+    # downloads": a `download` anchor then navigates the webview to the file
+    # and the SPA is gone. See `downloads.py` — the reasoning is measured.
+    downloads.apply(webview.settings)
 
     lock = SingleInstance(_app_data() / "single-instance.lock")
     try:

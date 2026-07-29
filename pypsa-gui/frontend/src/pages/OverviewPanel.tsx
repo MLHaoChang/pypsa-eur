@@ -8,7 +8,7 @@ import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { projectsApi } from '../api/projects'
 import { changelogApi, type ChangeLogEntry } from '../api/changelog'
-import { formatRelativeTime, saveProjectQuietly } from '../utils/projectActions'
+import { downloadProjectBundle, formatRelativeTime, saveProjectQuietly } from '../utils/projectActions'
 import { isRenewableCarrier } from './results/shared'
 import { PageHeader, PageBody, PageSection, RowGrid, StatCard, Btn, BarList } from '../components/PageKit'
 import type { Bus, Generator, StorageUnit, Load, Link } from '../api/types'
@@ -144,7 +144,25 @@ export default function OverviewPanel() {
         actions={
           <>
             <Btn
-              onClick={() => window.open(`/api/projects/${encodeURIComponent(currentProject)}/bundle`, '_blank')}
+              // Fetch THEN save, via the same helper AppHeader and the Sidebar
+              // modal use. Two things this is not:
+              //   * not `window.open` — it returns null and downloads nothing
+              //     inside the desktop shell (measured on a real WKWebView).
+              //   * not a bare anchor at the API URL — an anchor cannot see a
+              //     status code, so a 401/403/404 JSON body would be written
+              //     to disk as a `.pypsaproj.zip` with nothing to indicate it.
+              onClick={async () => {
+                try {
+                  const mode = await downloadProjectBundle(currentProject)
+                  if (mode !== 'cancelled') {
+                    toast.success(`Exported ${currentProject}.pypsaproj.zip`)
+                  }
+                } catch (e) {
+                  toast.error(
+                    `Export failed: ${String((e as Error)?.message ?? e)}`,
+                  )
+                }
+              }}
               title="Download the project as a .pypsaproj.zip bundle"
             >
               <Box size={12} /> Export bundle
