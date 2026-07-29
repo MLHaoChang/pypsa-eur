@@ -106,7 +106,7 @@ sync-on-write filesystem.
 
 | # | Command | Pass criteria |
 |---|---|---|
-| A1 | `pixi run gui-tests -q -p no:warnings -rs` | 1649 collected, **1 skipped** (the intentional `KNOWN_BROKEN is empty` placeholder), 0 failed |
+| A1 | `pixi run gui-tests -q -p no:warnings -rs` | 1650 collected, **1 skipped** (the intentional `KNOWN_BROKEN is empty` placeholder), 0 failed |
 | A2 | `cd pypsa-gui\frontend; npm test` | 28 files / 189 tests, 0 failed |
 | A3 | `cd pypsa-gui\frontend; npx tsc --noEmit -p tsconfig.json` | no output |
 

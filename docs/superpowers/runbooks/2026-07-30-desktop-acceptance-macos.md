@@ -9,10 +9,11 @@ rather than the one it was developed on.
 you are running is the shell out of the source tree, in the pixi `desktop`
 environment. See §7.
 
-**Status when written (2026-07-30):** steps A1–A6 and B1 already passed on
-macOS arm64 in the development session. They are here so you can reproduce them
-as a regression gate. **C1–C5 have never been run by anyone** — they need a
-human to look at a window and click things.
+**Status when written (2026-07-30):** A1–A3, B1 and B2 already passed on macOS
+arm64 in the development session. They are here so you can reproduce them as a
+regression gate. **C1–C6 have never been run by anyone** — they need a human to
+look at a window and click things. C3 in particular (a real save panel) was
+only ever driven through `evaluate_js`, never with a mouse.
 
 ---
 
@@ -71,7 +72,7 @@ export SHUT="$PWD/pypsa-gui/backend/smoke/accept_shutdown.py"
 
 | # | Command | Pass criteria |
 |---|---|---|
-| A1 | `pixi run gui-tests -q -p no:warnings` | 1649 collected, **1 skipped** (the intentional `KNOWN_BROKEN is empty` placeholder), 0 failed |
+| A1 | `pixi run gui-tests -q -p no:warnings` | 1650 collected, **1 skipped** (the intentional `KNOWN_BROKEN is empty` placeholder), 0 failed |
 | A2 | `cd pypsa-gui/frontend && npm test` | 28 files / 189 tests, 0 failed |
 | A3 | `cd pypsa-gui/frontend && PATH="$(git rev-parse --show-toplevel)/.pixi/envs/default/bin:$PATH" npx tsc --noEmit -p tsconfig.json` | no output |
 
