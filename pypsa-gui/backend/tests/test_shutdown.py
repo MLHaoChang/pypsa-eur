@@ -319,14 +319,20 @@ def test_the_active_context_persists_its_time_series_and_others_do_not():
     saved: list[tuple[str, bool]] = []
 
     class _Ctx:
-        def __init__(self, name): self.name = name
+        # `loaded_project`, NOT `name` — `ProjectContext` has no `name`, and
+        # doubles that invented one meant these tests only ever exercised a
+        # branch production never takes. Round 5 found the naming code was
+        # therefore falling through to `repr(ctx)`, a multi-line dump of the
+        # whole pypsa.Network, as the user-facing "which project was not
+        # saved" string.
+        def __init__(self, name): self.loaded_project = name
 
     active, other = _Ctx("active"), _Ctx("other")
 
     shutdown_service.flush_all(
         contexts=[active, other],
         active=active,
-        save=lambda ctx, persist_user_ts: saved.append((ctx.name, persist_user_ts)),
+        save=lambda ctx, persist_user_ts: saved.append((ctx.loaded_project, persist_user_ts)),
         flush_chat=lambda: None,
         safe=True,
     )
@@ -338,14 +344,20 @@ def test_one_context_failing_does_not_strand_the_others():
     saved: list[str] = []
 
     class _Ctx:
-        def __init__(self, name): self.name = name
+        # `loaded_project`, NOT `name` — `ProjectContext` has no `name`, and
+        # doubles that invented one meant these tests only ever exercised a
+        # branch production never takes. Round 5 found the naming code was
+        # therefore falling through to `repr(ctx)`, a multi-line dump of the
+        # whole pypsa.Network, as the user-facing "which project was not
+        # saved" string.
+        def __init__(self, name): self.loaded_project = name
 
     a, b, c = _Ctx("a"), _Ctx("b"), _Ctx("c")
 
     def save(ctx, persist_user_ts):
-        if ctx.name == "b":
+        if ctx.loaded_project == "b":
             raise RuntimeError("disk full")
-        saved.append(ctx.name)
+        saved.append(ctx.loaded_project)
 
     problems = shutdown_service.flush_all(
         contexts=[a, b, c], active=a, save=save, flush_chat=lambda: None, safe=True,
@@ -364,7 +376,7 @@ def test_a_409_is_caught_specifically_and_reported():
     the thing at stake.
     """
     class _Ctx:
-        name = "still-solving"
+        loaded_project = "still-solving"
 
     def save(ctx, persist_user_ts):
         raise HTTPException(status_code=409, detail="solver in flight")
@@ -387,7 +399,7 @@ def test_a_non_409_failure_reads_differently_from_a_409():
     both tests and the branch would be decorative.
     """
     class _Ctx:
-        name = "broken"
+        loaded_project = "broken"
 
     def save(ctx, persist_user_ts):
         raise HTTPException(status_code=500, detail="something else entirely")
@@ -710,10 +722,14 @@ def test_a_second_close_while_running_vetoes_without_starting_another_sequence()
 
 def test_the_state_flips_to_complete_BEFORE_destroy_is_called():
     """
-    The deadlock this prevents is subtle and total. `window.destroy()` re-fires
-    the `closing` event, so if the state were flipped AFTER the call, the
-    re-entrant handler would still see "in progress", veto its own destroy, and
-    the window would never close — with the backend already stopped behind it.
+    The deadlock this prevents is subtle, total, and WINDOWS-ONLY.
+
+    `destroy()` re-fires `closing` on winforms and gtk; measured with a real
+    window against the installed pywebview 6.2.1, it does NOT on cocoa. So this
+    test fakes the re-entry on purpose — on the development platform the real
+    thing never happens, and without the fake there would be no coverage at all
+    for the platform where flipping the state late leaves a window that can
+    never close with the backend already stopped behind it.
     """
     observed: list[bool] = []
     handler = None
@@ -1145,3 +1161,118 @@ def test_the_SEQUENCE_persists_a_report_when_something_could_not_be_saved(
     written = json.loads((tmp_path / "last-shutdown-report.json").read_text())
     assert written["unflushed"], written
     assert written["abort_timed_out"] is True
+
+
+# ── review round 5 leftovers ────────────────────────────────────────────────
+
+
+def test_a_running_queue_job_is_seen_deterministically():
+    """
+    The original path-(b) test called `solve_queue.enqueue(...)`, which starts
+    a REAL dispatcher that tries to solve a project that does not exist. The
+    job goes terminal in ~340 ms, so the test passed only by winning that race
+    — and it only ever observed status `"queued"`, never `"running"`, which is
+    the state constraint #6 is actually about. `reset_for_tests` does not join
+    the dispatcher either, so a background `_run_job` could bleed into later
+    tests.
+
+    This builds the job table directly and drives the same `list_jobs()` the
+    detector reads, covering BOTH live statuses with no dispatcher and no race.
+    """
+    from services.solve_queue import SolveJob, solve_queue
+
+    solve_queue.reset_for_tests()
+    try:
+        for jid, status in ((901, "queued"), (902, "running")):
+            with solve_queue._lock:
+                solve_queue._jobs[jid] = SolveJob(
+                    id=jid, project_id=f"project-{status}", enqueued_at=0.0,
+                )
+                solve_queue._jobs[jid].status = status
+                solve_queue._order.append(jid)
+
+        paths = [s.path for s in shutdown_service.solves_in_flight()]
+
+        assert paths.count("queue") == 2, paths
+    finally:
+        solve_queue.reset_for_tests()
+
+
+def test_a_finished_queue_job_is_not_reported_as_in_flight():
+    """
+    Otherwise every completed solve since boot prompts a confirm dialog, and a
+    dialog that always appears is a dialog nobody reads.
+    """
+    from services.solve_queue import SolveJob, solve_queue
+
+    solve_queue.reset_for_tests()
+    try:
+        for jid, status in ((911, "completed"), (912, "failed"), (913, "aborted")):
+            with solve_queue._lock:
+                solve_queue._jobs[jid] = SolveJob(id=jid, project_id="done", enqueued_at=0.0)
+                solve_queue._jobs[jid].status = status
+                solve_queue._order.append(jid)
+
+        assert [s.path for s in shutdown_service.solves_in_flight()] == []
+    finally:
+        solve_queue.reset_for_tests()
+
+
+def test_an_unsaved_context_is_named_readably_not_by_its_repr():
+    """
+    `flush_all` did `getattr(ctx, "name", None) or ... or repr(ctx)`, and
+    `ProjectContext` has no `name` — it has `loaded_project`, `org_id`,
+    `project_uuid`, `storage_dir`. Every test double defined `name`, so the only
+    branch the tests exercised was the one that never runs in production.
+
+    For an unbound context the fallback was `repr(ctx)`: a multi-line dataclass
+    repr embedding the entire `pypsa.Network` repr. That string is what a user
+    would have been shown as "which project was not saved".
+    """
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.build_context()          # unbound: loaded_project is None
+
+    def save(c, persist_user_ts):
+        raise RuntimeError("disk full")
+
+    problems = shutdown_service.flush_all(
+        contexts=[ctx], active=None, save=save, flush_chat=lambda: None, safe=True,
+    )
+
+    assert len(problems) == 1
+    assert "\n" not in problems[0], f"multi-line repr leaked into the report: {problems[0]!r}"
+    assert len(problems[0]) < 200, f"{len(problems[0])} chars: {problems[0][:120]}"
+    assert "PyPSA" not in problems[0], problems[0]
+
+
+def test_the_sequence_has_an_overall_deadline():
+    """
+    Nothing bounded the whole sequence. `CloseHandler.on_closing` vetoes for as
+    long as the worker lives, and on macOS `applicationShouldTerminate` routes
+    through the same event — so Cmd-Q and Dock->Quit are vetoed too. Step 3 has
+    already hidden the window, so the user sees a vanished app, a live process,
+    and Force Quit as the only exit: the outcome this workstream exists to
+    prevent.
+
+    `_save_context` takes `ctx.mutation_lock` with no timeout, so an unbounded
+    flush is reachable without anything being wrong.
+    """
+    release = threading.Event()
+    destroyed: list[int] = []
+
+    handler = shutdown_service.CloseHandler(
+        run=lambda: (release.wait(60), shutdown_service.ShutdownReport(quit=True))[1],
+        destroy=lambda: destroyed.append(1),
+        deadline=1.0,
+    )
+    try:
+        assert handler.on_closing() is False
+
+        assert handler.wait_for_completion(20), "the deadline never fired"
+        assert destroyed == [1], "the window was never released"
+        assert handler.report is not None
+        assert any("did not finish" in e or "abandoned" in e
+                   for e in handler.report.errors), handler.report.errors
+    finally:
+        release.set()

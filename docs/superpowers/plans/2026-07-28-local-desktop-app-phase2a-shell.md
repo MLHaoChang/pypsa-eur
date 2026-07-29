@@ -54,7 +54,7 @@ Re-derived at `f367ecab` by two reviewers independently.
 | 3 | `run_first_run_import()` is called **synchronously inside `lifespan`, before `yield`**, and uvicorn accepts no connection until lifespan startup returns. It returns early unless `PYPSAGUI_LEGACY_IMPORT_ROOT` is set | The first launch that matters blocks readiness by a `copytree` of the whole legacy tree. The splash's import stage must POLL, not time out. The shell must set the variable or D10 never fires. |
 | 4 | **A hard quit mid-solve LOSES THE SOLVE; it does not corrupt the project.** The modelling assumptions are in-memory only, `atomic_io` leaves the previous file intact on a killed export, and `_save_context` **refuses with 409** while `_solver_in_flight_ctx(ctx)` | The real hazard is the inverse: an incomplete abort makes the flush 409 and unsaved edits are dropped **while the app reports a clean quit**. |
 | 5 | **THREE solve paths.** (a) the active context's stop event via `/api/simulation/abort`; (b) queue jobs, each with its own event, aborted by `solve_queue.abort(job_id)`; (c) `run_ac_pf`, which creates a stop event that **nothing reads** — `services/ac_pf_service.py` contains zero occurrences of `stop_event` | (a) and (b) can be aborted; (c) **cannot be interrupted at all**. |
-| 6 | **A running queue job's context is in NEITHER `_contexts` NOR `_active`.** `solve_queue._run_job` builds it with `PyPSAService.build_context()` — documented as "off to the side, not activated" — and the module never calls `register` | `solves_in_flight()` must consult the job table for path (b). Iterating the context registry misses it. |
+| 6 | **A running queue job's context is in neither `_contexts` nor `_active` — ONLY when the project is not already resident.** `solve_queue._run_job` first calls `PyPSAService.get_context(job.project_key)` and solves the RESIDENT instance in place when there is one, "so the user's unsaved edits are included"; only the non-resident branch calls `build_context()`, which is documented as "off to the side, not activated", and the module never calls `register` | `solves_in_flight()` must consult the job table for path (b): iterating the context registry misses the non-resident case entirely. **Corrected after Task 4 — the original wording was unqualified and is half wrong.** It also means `resident_contexts()` can hand `flush_all` a context with a live solver thread, which `_save_context` correctly 409s and the report now surfaces |
 | 7 | `PyPSAService._contexts` is capped by `RESIDENT_CAP` (env `PYPSA_GUI_RESIDENT_CAP`, default 5). Non-active contexts are persisted by LRU eviction (`_save_evicted_ctx`) **and** by the solve queue | Up to five projects can hold unsaved edits at quit. |
 | 8 | `_save_evicted_ctx` passes `persist_user_ts=False`; the solve queue passes `(ctx is PyPSAService._active)`, because `_serialize_user_ts` reads a process-global belonging to the foreground | Copying either blindly loses the active project's time series, or stamps the foreground's onto every other project. |
 | 9 | `chat_service.flush_to_disk` is documented as a **Phase-0 no-op** — `append_turn` writes synchronously | Call it for a stable call site, NOT because omitting it loses data. v2 claimed a loss the code does not exhibit. |
@@ -305,6 +305,39 @@ Feature-detect **once, behind `pywebviewready`** (constraint #14), not per call.
 
 ---
 
+## Acceptance results — macOS arm64, measured 2026-07-29
+
+Run against a throwaway app-data directory with the real `gui.main()`, two
+sequential launches sharing that directory.
+
+| Step | Result |
+|---|---|
+| 2 — first launch, ZERO projects | window opens, `/api/network/reset` 200, bus created 201, project saved 200, clean quit, **exit status 0** |
+| 3 — a project opens and returns buses | `GET /api/projects/AcceptanceProject` 200, `/api/network/buses` returns the bus |
+| 4 — **H5: the edit survives a relaunch** | launch 2 lists `AcceptanceProject`, loads it, and `AcceptanceBus` is present. **This is the property the whole conversion exists for.** |
+| 6 — second launch while the first runs | refused, "already running" message shown (NOT the lock-failed one), incumbent's lock unaffected, status 0 |
+| 7 — the process actually exits | both sessions exited; `ps` shows no strays |
+
+Also observed in a separate live run: `/api/health` reports **pypsa 1.1.2** —
+direct evidence the solve-group pinning holds in the shipped configuration, an
+unpinned `desktop` env would report 1.2.4 — `auth_enabled: false`, the SPA
+served as real HTML rather than the 503 page, `pypsa-gui.log` written and
+ending "Application shutdown complete" (the graceful uvicorn path, not the
+forced one), and the first-run import firing so D10 works end to end.
+
+**NOT run: step 5** (start a solve, close, Cancel, assert still usable, quit).
+It needs a real solve and was not automated here.
+
+**NOT run: step 8, Windows.** Everything platform-specific in this workstream
+is still reasoned-from-documentation: the `msvcrt` lock and its
+release-after-death delay, `SO_EXCLUSIVEADDRUSE`, the ProactorEventLoop under
+the socket handoff, `pandas 3.0.3` on win-64 which no test has executed, and
+the `destroy()` re-entrancy that `CloseHandler` depends on — which macOS
+provably CANNOT exercise, so the ordering has no coverage on the platform that
+needs it.
+
+---
+
 ## Rollback
 
 Additive under `backend/desktop/`, one backend service, one middleware gate, one frontend helper, 14 call-site edits. `git revert` the range; the web deployment imports none of it.
@@ -320,6 +353,18 @@ Additive under `backend/desktop/`, one backend service, one middleware gate, one
 - **`PYPSA_GUI_RESIDENT_CAP`** still uses the prefix spec §5.12 says collides with PyPSA's option namespace, printing `Unknown option` on every boot — and on a windowless build writing to a closed stderr can raise. H creates the windowless condition, so it is H's to hand over.
 - **`settings.frontend_dist` binds bare `FRONTEND_DIST`** with no `PYPSAGUI_` alias. Workstream I will set it through `build_environment`; it needs the alias first.
 - **Raising the incumbent window on a second launch is not implemented.** Named follow-up, not a gap discovered later.
+
+### pywebview 6.2.1 API, measured before Task 5 rather than assumed
+
+Run against the installed package, because Task 4's worst defect was code
+written against `_state["ac_pf_thread"]` — a key nothing has ever written —
+with a test that mocked the function containing the assumption.
+
+- `webview.__version__` **does not exist**; use `importlib.metadata.version("pywebview")`.
+- Present: `create_window`, `start`, `initialize`, `token`, `settings`, `screens`, `windows`; on a window `destroy`, `hide`, `show`, `load_url`, `evaluate_js`, `create_file_dialog`, `set_title`.
+- `create_window` accepts `hidden`, `confirm_close`, `min_size`, `js_api`, `focus`, `on_top` — the splash can be created hidden, and pywebview has its OWN confirm-close dialog which the shell must NOT enable, since D12 is our sequence's step 2.
+- Events: `before_load, before_show, closed, closing, initialized, loaded, maximized, minimized, moved, request_sent, resized, response_received, restored, shown`. **`closing` is the only one with `_should_lock=True`** — handlers run synchronously on the caller's thread and the return value vetoes. That is what makes the tri-state handler work.
+- **`destroy()` re-fires `closing` on winforms and gtk but NOT on cocoa** — verified with a real window: `closing fired 0 time(s)`. `CloseHandler`'s ordering is load-bearing on Windows and inert on macOS, so the macOS half of Task 7 cannot detect a regression in it.
 
 ### Added after review rounds 1 and 2 (Tasks 0–3 implemented)
 
