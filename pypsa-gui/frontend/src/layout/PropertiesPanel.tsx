@@ -84,7 +84,7 @@ function showDeleteUndoToast(label: string, qc: QueryClient) {
         >
           Undo
         </button>
-        <button onClick={() => toast.dismiss(t.id)} className="p-0.5 text-muted hover:text-text transition-colors">
+        <button onClick={() => toast.dismiss(t.id)} aria-label="Dismiss notification" className="p-0.5 text-muted hover:text-text transition-colors">
           <X size={11} />
         </button>
       </div>
@@ -1461,7 +1461,7 @@ function AddForm({ bus, type, onClose }: { bus: string; type: AddType; onClose: 
     <div className="bg-bg border border-accent/30 rounded-lg p-3 mb-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-accent">Add {type}</span>
-        <button onClick={onClose} className="text-muted hover:text-text"><X size={12} /></button>
+        <button onClick={onClose} aria-label="Close add form" className="text-muted hover:text-text"><X size={12} /></button>
       </div>
       {inp('Name *', 'name')}
       <label className="flex flex-col gap-0.5 mb-1.5">
