@@ -41,6 +41,11 @@ logger = logging.getLogger(__name__)
 # in this budget because nothing reads its event — see `InFlightSolve`.
 ABORT_TIMEOUT = 30.0
 
+# Hard bound on the WHOLE sequence, enforced by `CloseHandler`. Generous enough
+# for a 30 s abort plus a large flush, short enough that a user is not left
+# staring at a vanished window. See `CloseHandler._run_with_deadline`.
+SHUTDOWN_DEADLINE = 90.0
+
 
 @dataclass(frozen=True)
 class InFlightSolve:
@@ -137,11 +142,15 @@ def solves_in_flight() -> list[InFlightSolve]:
     Every running solve, across all three paths.
 
     Path (b) consults the QUEUE'S OWN JOB TABLE, not the context registry.
-    `solve_queue._run_job` builds its context with `PyPSAService.build_context()`
-    — "off to the side, not activated" — and never calls `register`, so a
-    running queue job's context is in neither `_contexts` nor `_active`.
-    Iterating the registry finds nothing and reports a clean quit over a live
-    solve.
+    `solve_queue._run_job` reuses the RESIDENT context when the project already
+    has one — so that a foreground edit is included in the solve — and only
+    otherwise calls `PyPSAService.build_context()`, which is documented as "off
+    to the side, not activated" and is never registered.
+
+    So the registry finds SOME queue solves and not others, which is worse than
+    finding none: it looks like it works. The job table is the only complete
+    source. (Constraint #6 originally stated the unqualified "neither", which
+    is half wrong; corrected in the plan.)
     """
     found: list[InFlightSolve] = []
 
@@ -172,6 +181,31 @@ def solves_in_flight() -> list[InFlightSolve]:
     return found
 
 
+def _context_label(ctx: Any) -> str:
+    """
+    A short, human-readable name for a context.
+
+    `ProjectContext` has `loaded_project`, `org_id`, `project_uuid` and
+    `storage_dir` — it has NO `name`. An earlier version tried `name` first and
+    fell back to `repr(ctx)`, which is a multi-line dataclass repr embedding the
+    entire `pypsa.Network` repr. Every test double defined `name`, so the only
+    branch the tests exercised was the one that never runs, and the string a
+    user would have been shown as "which project was not saved" was a wall of
+    network internals.
+    """
+    label = getattr(ctx, "loaded_project", None)
+    if label:
+        return str(label)
+
+    uuid = getattr(ctx, "project_uuid", None)
+    if uuid:
+        return f"project {uuid}"
+
+    # A never-saved draft: it genuinely has no name. Say so plainly rather than
+    # inventing one — the user needs to recognise what is at stake.
+    return "an unsaved draft"
+
+
 def flush_all(
     *,
     contexts: list[Any],
@@ -197,7 +231,7 @@ def flush_all(
     problems: list[str] = []
 
     for ctx in contexts:
-        name = getattr(ctx, "name", None) or getattr(ctx, "loaded_project", None) or repr(ctx)
+        name = _context_label(ctx)
         try:
             save(ctx, ctx is active)
         except HTTPException as exc:
@@ -524,9 +558,11 @@ class CloseHandler:
         *,
         run: Callable[[], ShutdownReport],
         destroy: Callable[[], None],
+        deadline: float = SHUTDOWN_DEADLINE,
     ) -> None:
         self._run = run
         self._destroy = destroy
+        self._deadline = deadline
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
         self._complete = threading.Event()
@@ -553,7 +589,7 @@ class CloseHandler:
 
     def _work(self) -> None:
         try:
-            report = self._run()
+            report = self._run_with_deadline()
         except Exception as exc:
             # A window that cannot be closed is worse than whatever failed.
             report = ShutdownReport(quit=True)
@@ -578,6 +614,50 @@ class CloseHandler:
                     self._may_close = False
         finally:
             self._complete.set()
+
+    def _run_with_deadline(self) -> ShutdownReport:
+        """
+        Bound the whole sequence, not just its steps.
+
+        `on_closing` vetoes for as long as this worker lives, and on macOS
+        `applicationShouldTerminate` routes through the same event — so Cmd-Q
+        and Dock->Quit are vetoed too. Step 3 has already hidden the window, so
+        past this point the user sees a vanished app, a live process, and Force
+        Quit as the only way out: exactly what this workstream exists to
+        prevent. `_save_context` takes `ctx.mutation_lock` with no timeout, so
+        an unbounded flush is reachable without anything being wrong.
+
+        On expiry the inner worker is ABANDONED rather than killed — it is a
+        daemon thread and the process is on its way out. What matters is that
+        the window is released and the report says why.
+        """
+        outcome: list[ShutdownReport] = []
+        failure: list[BaseException] = []
+
+        def target() -> None:
+            try:
+                outcome.append(self._run())
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                failure.append(exc)
+
+        inner = threading.Thread(target=target, name="pypsa-gui-shutdown-steps",
+                                 daemon=True)
+        inner.start()
+        inner.join(self._deadline)
+
+        if inner.is_alive():
+            report = ShutdownReport(quit=True)
+            report.errors.append(
+                f"the shutdown sequence did not finish within {self._deadline:g}s "
+                "and was abandoned — some work may not have been saved"
+            )
+            logger.error("shutdown deadline of %ss expired; abandoning", self._deadline)
+            persist_report(report)
+            return report
+
+        if failure:
+            raise failure[0]
+        return outcome[0]
 
     def wait_for_completion(self, timeout: float) -> bool:
         """For tests and for a caller that wants to join the worker."""
