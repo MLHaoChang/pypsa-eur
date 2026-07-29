@@ -5,6 +5,27 @@ import type {
   CompareState, ResultsSummary,
 } from './types'
 
+// Recover the server's error message from a request made with
+// `responseType: 'blob'`.
+//
+// axios hands back `err.response.data` as a Blob for those, so every ordinary
+// `data?.detail` lookup — including the one in the client's error interceptor
+// — silently misses and falls back to the generic "Request failed with status
+// code 404". The reason the server actually gave is sitting inside the Blob.
+export async function bundleErrorMessage(e: unknown): Promise<string> {
+  const data = (e as { response?: { data?: unknown } })?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await data.text())
+      if (typeof parsed?.detail === 'string') return parsed.detail
+    } catch {
+      // Not JSON (an HTML error page, or a truncated body). Fall through to
+      // the axios message rather than showing the user raw markup.
+    }
+  }
+  return String((e as Error)?.message ?? e)
+}
+
 // Snapshot — point-in-time copy of a project bundle. Returned by the
 // /api/projects/{name}/snapshots endpoints.
 export interface SnapshotInfo {
@@ -220,9 +241,23 @@ export const projectsApi = {
   // Stream the project's full state as a .pypsaproj.zip bundle (network.nc +
   // user_ts.json + solver_config.json + metadata.json). Returns a Blob so the
   // caller can hand it to showSaveFilePicker or a download anchor.
-  downloadBundle: (name: string) =>
-    client.get<Blob>(`/projects/${encodeURIComponent(name)}/bundle`, { responseType: 'blob' })
-      .then(r => r.data),
+  //
+  // NOTE for error handling: because this sets `responseType: 'blob'`, a
+  // failure arrives with `err.response.data` as a *Blob*, so neither the axios
+  // interceptor nor a caller can read `detail` off it directly. Use
+  // `bundleErrorMessage` to recover the server's reason.
+  downloadBundle: (name: string, opts?: { skipErrorToast?: boolean }) =>
+    client.get<Blob>(`/projects/${encodeURIComponent(name)}/bundle`, {
+      responseType: 'blob',
+      // Same reason `importBundle` below overrides it, for the same artifact:
+      // the backend builds the entire zip in memory before sending a byte, and
+      // for a year-of-hourly-data project that exceeds the 30 s default. This
+      // was previously served by a plain download anchor, which has no timeout
+      // at all — so inheriting the default here would make big projects fail
+      // where they used to work.
+      timeout: 180_000,
+      skipErrorToast: opts?.skipErrorToast,
+    }).then(r => r.data),
   // Create a new project from a bundled starter network (backend/project_
   // templates/<id>). The backend copies the template's network.nc into a
   // fresh project dir, loads it, and returns the same shape as importBundle.

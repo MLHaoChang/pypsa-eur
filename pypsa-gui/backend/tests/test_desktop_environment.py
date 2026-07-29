@@ -2,8 +2,10 @@
 Every environment that runs this code must resolve the same packages.
 
 `pixi run -e desktop` is how the shell runs, `pixi run gui-tests` runs the
-backend suite in `default`, and `.github/workflows/test.yaml` runs PyPSA-Eur's
-own suites in `test`. If those disagree, the app that ships is not the app
+backend suite in `test` (it was `default` until phase 2a Task 6 — see
+`test_the_backend_suite_environment_can_run_the_desktop_tests` below for why
+that mattered), and `.github/workflows/test.yaml` runs PyPSA-Eur's own suites
+in `test`. If those disagree, the app that ships is not the app
 anything validated — and the disagreement is invisible, because every suite
 still passes in whichever environment it happens to use.
 
@@ -225,4 +227,63 @@ def test_the_desktop_environment_carries_pywebview(platform):
     assert "pywebview" not in default_pypi, (
         "pywebview leaked into `default` — the GUI toolkit must stay out of the "
         "environment `snakemake -call` solves PyPSA-Eur with"
+    )
+
+
+@pytest.mark.parametrize("platform", _PLATFORMS)
+def test_the_backend_suite_environment_can_run_the_desktop_tests(platform):
+    """
+    `test` must carry pywebview, or the tests guarding the desktop download
+    setting SKIP — and a skipped test reads as a green suite.
+
+    This is not hypothetical. It shipped: `desktop` was added to the `test`
+    environment for exactly this reason, but `gui-tests` stayed in the root
+    `[tasks]` table, so the canonical command still resolved to `default` and
+    both tests still skipped. Two edits re-open it — dropping `desktop` from
+    `test`, or moving the task back — and neither would fail anything without
+    this test and the next one.
+    """
+    _, test_pypi = _packages("test", platform)
+
+    assert "pywebview" in test_pypi, (
+        f"`test` has no pywebview on {platform} — the desktop download tests "
+        f"will skip and the suite will still look green: {sorted(test_pypi)}"
+    )
+
+
+def test_gui_tests_resolves_to_the_environment_that_has_pywebview():
+    """
+    The other half. A `gui-tests` back in the root `[tasks]` table resolves to
+    `default`, where pywebview is deliberately absent — so the task would run
+    the suite in the one environment that cannot execute its desktop tests.
+    """
+    manifest = (_LOCK.parent / "pixi.toml").read_text()
+
+    def section(header: str) -> str:
+        """
+        The body of one TOML table, matched by a line-anchored header.
+
+        Both naive forms of this were wrong, and both failed loudly rather than
+        silently only because the assertions below are positive as well as
+        negative: `split("[tasks]")` matches the substring inside
+        `[feature.test.tasks]`, and `split("[feature.test.tasks]")` matches the
+        comment in the root table that explains why the task is not there.
+        """
+        # Built by concatenation, not an f-string: `rf"^\{...}"` makes `\` +
+        # the interpolation, so a header starting with "t" became the regex
+        # escape `\t` and matched a tab.
+        pattern = r"^\[" + re.escape(header) + r"\]\s*$(.*?)(?=^\[|\Z)"
+        m = re.search(pattern, manifest, re.MULTILINE | re.DOTALL)
+        assert m, f"[{header}] table not found in pixi.toml"
+        return m.group(1)
+
+    # A DEFINITION at the start of a line, not the mere string.
+    defines = re.compile(r"^gui-tests\s*=", re.MULTILINE)
+
+    assert not defines.search(section("tasks")), (
+        "`gui-tests` is back in the root [tasks] table, so it resolves to "
+        "`default` and the desktop download tests will silently skip"
+    )
+    assert defines.search(section("feature.test.tasks")), (
+        "`gui-tests` is not defined under [feature.test.tasks]"
     )

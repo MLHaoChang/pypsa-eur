@@ -70,16 +70,35 @@ def test_apply_is_idempotent():
     assert settings["ALLOW_DOWNLOADS"] is True
 
 
+def _webview():
+    """
+    Import pywebview, FAILING loudly if it is missing.
+
+    Deliberately not `pytest.importorskip`. A skip is exactly the failure mode
+    this file exists to prevent: these two tests already silently skipped for a
+    whole review cycle because the canonical `pixi run gui-tests` resolved to
+    an environment without pywebview, and the suite read green while the
+    setting they guard could have been deleted. `test_desktop_environment.py`
+    states the same rule — "a skip here is the test quietly evaporating".
+    """
+    try:
+        import webview
+    except ImportError as exc:  # pragma: no cover - environment defect
+        raise AssertionError(
+            "pywebview is missing. These tests guard the desktop download "
+            "setting and must not be skipped — run `pixi run gui-tests`, which "
+            "resolves to the `test` environment."
+        ) from exc
+    return webview
+
+
 def test_the_real_pywebview_default_is_the_dangerous_one():
     """
     Pins the premise rather than trusting it. If a future pywebview ships with
     `ALLOW_DOWNLOADS=True`, `apply` becomes a no-op and this test says so
     loudly instead of leaving a comment that quietly stopped being true.
-
-    Skipped rather than failed where pywebview is absent: this asserts a fact
-    about the dependency, not about our code.
     """
-    webview = pytest.importorskip("webview")
+    webview = _webview()
 
     assert webview.settings["ALLOW_DOWNLOADS"] is False, (
         "pywebview's default changed — re-read desktop/downloads.py, the "
@@ -99,7 +118,7 @@ def test_the_gui_enables_downloads_BEFORE_any_window_exists(tmp_path, monkeypatc
     in the real app it would land after `webview.start()` had blocked for the
     whole session — every export taking the navigate-away path, suite green.
     """
-    webview = pytest.importorskip("webview")
+    webview = _webview()
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
 
     from desktop import bootstrap, gui, launcher
@@ -119,11 +138,11 @@ def test_the_gui_enables_downloads_BEFORE_any_window_exists(tmp_path, monkeypatc
 
     monkeypatch.setattr(launcher, "bind_socket", bind_and_record)
     monkeypatch.setitem(webview.settings, "ALLOW_DOWNLOADS", False)
-    monkeypatch.setattr(
-        webview, "create_window",
-        lambda *a, **k: seen.setdefault("at_first_window",
-                                        webview.settings["ALLOW_DOWNLOADS"]) or object(),
-    )
+    def fake_create_window(*_args, **_kwargs):
+        seen.setdefault("at_first_window", webview.settings["ALLOW_DOWNLOADS"])
+        return object()
+
+    monkeypatch.setattr(webview, "create_window", fake_create_window)
     monkeypatch.setattr(webview, "start", lambda *a, **k: None)
 
     try:
@@ -133,6 +152,11 @@ def test_the_gui_enables_downloads_BEFORE_any_window_exists(tmp_path, monkeypatc
         for sock in sockets:
             sock.close()
 
+    # Without this the socket cleanup above silently becomes a no-op if
+    # `gui.py` ever switches to `from desktop.launcher import bind_socket` —
+    # the patch is on the module attribute, so a direct import bypasses it and
+    # the test leaks a bound port per run while still passing.
+    assert sockets, "bind_socket was not intercepted — the cleanup did nothing"
     assert seen.get("at_first_window") is True, (
         "downloads were not enabled before the first window was created"
     )

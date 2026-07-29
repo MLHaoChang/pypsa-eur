@@ -230,9 +230,16 @@ def work():
 
         elif ACTION == "spy":
             # Record every anchor click the page makes, and every error, then
-            # press the real button. This distinguishes "saveFromUrl never
-            # ran" from "it ran and WebKit ignored the anchor" — which the
-            # empty destination directory cannot.
+            # press the real button. This distinguishes "the export handler
+            # never ran" from "it ran and WebKit ignored the anchor" — which an
+            # empty destination directory cannot. It is also how the stale-build
+            # trap was caught: zero anchor clicks with zero errors meant the
+            # served bundle predated the source change.
+            #
+            # `href` should be a `blob:` URL. The export fetches the bytes
+            # through axios first and saves those, so that an error RESPONSE is
+            # never written to disk as a bundle; an `/api/...` href here would
+            # mean that regression is back.
             js(window, """
               window.__clicks = [];
               window.__errors = [];

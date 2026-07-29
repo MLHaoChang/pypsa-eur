@@ -350,14 +350,38 @@ returns `nil`.
       `_start_gui()`, where in the real app it would land after
       `webview.start()` had blocked for the entire session.
 - [x] **Step 3:** `OverviewPanel` — replace `window.open(bundleUrl, '_blank')`
-      with `downloadProjectBundle(currentProject)`, the helper `AppHeader` and
-      the Sidebar modal already use. **Fetch through axios, THEN save the
-      blob.** The first attempt used a bare anchor at the API URL; it worked
-      in the shell, and two independent reviewers caught that it also writes
-      401/403/404 JSON bodies to disk as a valid-looking `.pypsaproj.zip`,
-      because an anchor cannot see a status code. `window.open` at least
-      showed the error in a tab. Regression test:
-      `OverviewPanel.download.test.tsx::saves NOTHING when the server refuses`.
+      with `downloadProjectBundle(currentProject, { askLocation: true,
+      skipCache: true, skipErrorToast: true })`, the helper `AppHeader` and the
+      Sidebar modal already use. **Fetch through axios, THEN save the blob.**
+      This step took two review rounds and every option in it is a finding:
+
+      * *Round 1* — the first attempt used a bare anchor at the API URL. It
+        worked in the shell, and two independent reviewers caught that it also
+        writes 401/403/404 JSON bodies to disk as a valid-looking
+        `.pypsaproj.zip`, because an anchor cannot see a status code.
+        `window.open` at least showed the error in a tab.
+      * *Round 2* — calling the helper with its DEFAULT options reused the
+        **Save-destination handle cache**. Export then silently rewrote the
+        file the user had picked for Save, showing no picker and a success
+        toast; and the export's own destination was cached, so a later Save
+        silently overwrote the archive the user had just exported. Both are
+        data loss. `askLocation` + `skipCache` are what "Save a Copy" passes,
+        for exactly this reason.
+      * *Round 2* — `skipErrorToast` because `downloadBundle` sets
+        `responseType: 'blob'`, so the interceptor's `data?.detail` lookup
+        reads a **Blob** and can never find the server's message. It toasted
+        the opaque "Request failed with status code 404" *and* the handler
+        toasted again. `bundleErrorMessage` decodes the blob; one accurate
+        toast replaces two useless ones.
+      * *Round 2* — `disabled={exporting}`: a double-click ran two exports,
+        two save dialogs, two full server-side zip builds.
+      * *Round 2* — `downloadBundle` now sets `timeout: 180_000`, matching
+        `importBundle` for the same artifact. It had inherited the 30 s
+        default, where the plain anchor it replaced had no timeout at all — a
+        regression for any project big enough to matter.
+
+      Regression tests in `OverviewPanel.download.test.tsx`; all six
+      corresponding mutations verified to kill.
 - [x] **Step 4:** delete `utils/projectActions.ts::saveBlobToDisk` (zero
       callers, verified across every ref in the repo). It is a second path
       competing with the one every other export uses, and its
@@ -370,6 +394,13 @@ returns `nil`.
       read green. `pywebview` is pinned `==6.2.1` now that it is in a gating
       environment — this workstream reads its non-public behaviour in three
       places.
+- [x] **Step 6:** guard the guard. Two edits silently re-open the hole —
+      dropping `desktop` from `test`, or moving the task back — and neither
+      failed anything. `test_desktop_environment.py` now asserts pywebview is
+      in `test` on every platform, and that `gui-tests` is defined under
+      `[feature.test.tasks]` and not in the root table. The `importorskip` in
+      `test_desktop_downloads.py` is replaced by a hard failure with an
+      actionable message: a skip is the exact failure mode this task is about.
 
 ### Task 6 acceptance — macOS arm64, measured 2026-07-29
 

@@ -6,7 +6,7 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
-import { projectsApi } from '../api/projects'
+import { bundleErrorMessage, projectsApi } from '../api/projects'
 import { changelogApi, type ChangeLogEntry } from '../api/changelog'
 import { downloadProjectBundle, formatRelativeTime, saveProjectQuietly } from '../utils/projectActions'
 import { isRenewableCarrier } from './results/shared'
@@ -24,6 +24,11 @@ export default function OverviewPanel() {
   const autosaveEnabled = useUIStore(s => s.autosaveEnabled)
   const markProjectSaved = useUIStore(s => s.markProjectSaved)
   const renameProjectInStore = useUIStore(s => s.renameProject)
+
+  // Guards the bundle export. Without it a double-click ran two exports: two
+  // save dialogs, two full server-side zip builds, and two success toasts for
+  // one intent. Same shape as ImportExport's Download button.
+  const [exporting, setExporting] = useState(false)
 
   // Network-level data. All cached by other consumers, so this page rarely
   // triggers fresh requests.
@@ -144,23 +149,40 @@ export default function OverviewPanel() {
         actions={
           <>
             <Btn
+              disabled={exporting}
               // Fetch THEN save, via the same helper AppHeader and the Sidebar
-              // modal use. Two things this is not:
+              // modal use. Three things this is not:
               //   * not `window.open` — it returns null and downloads nothing
               //     inside the desktop shell (measured on a real WKWebView).
               //   * not a bare anchor at the API URL — an anchor cannot see a
               //     status code, so a 401/403/404 JSON body would be written
               //     to disk as a `.pypsaproj.zip` with nothing to indicate it.
+              //   * not the helper's DEFAULT options. An export is a one-off
+              //     copy, not a Save: `askLocation` so it can never silently
+              //     rewrite the file the user chose for Save, and `skipCache`
+              //     so a later Save can never silently overwrite this export.
+              //     Same pair, same reason, as "Save a Copy".
+              // No `if (exporting) return` guard here: `disabled` above already
+              // blocks the second click, and a browser fires no click event on
+              // a disabled button at all. Mutation testing confirmed it —
+              // deleting the guard changed nothing, deleting `disabled` broke
+              // the double-click test. An unreachable guard is a line that
+              // looks tested and is not.
               onClick={async () => {
+                setExporting(true)
                 try {
-                  const mode = await downloadProjectBundle(currentProject)
+                  const mode = await downloadProjectBundle(currentProject, {
+                    askLocation: true,
+                    skipCache: true,
+                    skipErrorToast: true,
+                  })
                   if (mode !== 'cancelled') {
                     toast.success(`Exported ${currentProject}.pypsaproj.zip`)
                   }
                 } catch (e) {
-                  toast.error(
-                    `Export failed: ${String((e as Error)?.message ?? e)}`,
-                  )
+                  toast.error(`Export failed: ${await bundleErrorMessage(e)}`)
+                } finally {
+                  setExporting(false)
                 }
               }}
               title="Download the project as a .pypsaproj.zip bundle"

@@ -581,6 +581,13 @@ interface BundleSaveOptions {
   // so subsequent regular Saves of the original project don't get redirected
   // to the copy's destination.
   skipCache?: boolean
+  // Suppress the axios interceptor's own error toast, for callers that show a
+  // better one. Because `downloadBundle` sets `responseType: 'blob'`, the
+  // interceptor's `data?.detail` lookup reads a Blob and can never find the
+  // message — so its toast is the opaque "Request failed with status code 404"
+  // even when the server sent a perfectly good reason. A caller that opts out
+  // here should use `bundleErrorMessage` to recover that reason.
+  skipErrorToast?: boolean
 }
 
 // Fetch the freshly-saved bundle for `name` and write it to disk.
@@ -600,7 +607,9 @@ export async function downloadProjectBundle(
   name: string,
   options?: BundleSaveOptions,
 ): Promise<BundleSaveResult> {
-  const blob = await projectsApi.downloadBundle(name)
+  const blob = await projectsApi.downloadBundle(
+    name, { skipErrorToast: options?.skipErrorToast },
+  )
   const askLocation = options?.askLocation ?? false
   const skipCache = options?.skipCache ?? false
 
