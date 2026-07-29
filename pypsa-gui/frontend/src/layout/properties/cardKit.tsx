@@ -191,9 +191,15 @@ export function ExpandedProps({ items }: { items: ExpandedItem[] }) {
 // same pattern as BusPanel's "Edit Bus" footer so the layout matches across
 // every asset type in the single-asset right panel.
 export function DetailFooter({
-  editLabel, onEdit, onDelete, deletePending, hasProfile, showChart, onToggleChart,
+  editLabel, assetName, onEdit, onDelete, deletePending, hasProfile, showChart, onToggleChart,
 }: {
   editLabel: string
+  // The asset's own name (gen.name / su.name / …) — used only to disambiguate
+  // the Delete button's accessible name when several DetailFooters stack in
+  // the "all connected assets" view (PropertiesPanel's per-bus asset list).
+  // editLabel itself is per-type ("Edit Generator"), not per-instance, so it
+  // can't do this job.
+  assetName: string
   onEdit: () => void
   onDelete?: () => void
   deletePending?: boolean
@@ -225,6 +231,7 @@ export function DetailFooter({
             disabled={deletePending}
             className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:border-danger hover:text-danger transition-colors disabled:opacity-40 flex items-center justify-center"
             title="Delete"
+            aria-label={`Delete ${assetName}`}
           >
             <Trash2 size={11} />
           </button>
@@ -740,6 +747,7 @@ export function CardShell({ title, badge, meta, onEdit, onDelete, delPending, ch
               onClick={onToggleChart}
               className={`p-1 rounded transition-colors ${chartActive ? 'text-accent bg-accent/10' : 'text-muted hover:text-accent hover:bg-accent/10'}`}
               title="Toggle profile chart"
+              aria-label={`Toggle profile chart — ${title}`}
             >
               <TrendingUp size={11} />
             </button>

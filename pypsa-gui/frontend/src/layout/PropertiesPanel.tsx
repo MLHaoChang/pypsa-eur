@@ -280,6 +280,7 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
         )}
         <DetailFooter
           editLabel="Edit Generator"
+          assetName={gen.name}
           onEdit={startEdit}
           onDelete={() => delMut.mutate()}
           deletePending={delMut.isPending}
@@ -552,6 +553,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
         </Section>
         <DetailFooter
           editLabel="Edit Storage"
+          assetName={su.name}
           onEdit={startEdit}
           onDelete={() => delMut.mutate()}
           deletePending={delMut.isPending}
@@ -755,6 +757,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
         </Section>
         <DetailFooter
           editLabel="Edit Store"
+          assetName={store.name}
           onEdit={startEdit}
           onDelete={() => delMut.mutate()}
           deletePending={delMut.isPending}
@@ -922,6 +925,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
         )}
         <DetailFooter
           editLabel="Edit Load"
+          assetName={load.name}
           onEdit={startEdit}
           onDelete={() => delMut.mutate()}
           deletePending={delMut.isPending}
@@ -1166,6 +1170,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
         )}
         <DetailFooter
           editLabel="Edit Link"
+          assetName={link.name}
           onEdit={startEdit}
           // Link delete is exposed in the panel header (canDelete === true)
           // so we omit a duplicate Delete button here.
@@ -1608,7 +1613,7 @@ function BusPanel({ name }: { name: string }) {
         </Section>
       )}
       {bus && editing && (
-        <EditShell title="Edit Bus Properties" onSave={() => updateMut.mutate()} onCancel={() => setEditing(false)} saving={updateMut.isPending}>
+        <EditShell title={bus.name} onSave={() => updateMut.mutate()} onCancel={() => setEditing(false)} saving={updateMut.isPending}>
           <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('bus.name')} />
           <NumInput label="Voltage" k="v_nom" fs={form} set={setForm} unit="kV" tip={docTip('bus.v_nom')} />
           <SelInput label="Control" k="control" fs={form} set={setForm} options={['PQ', 'PV', 'Slack']} tip={docTip('bus.control')} />
