@@ -21,6 +21,9 @@ on:
     - 'pixi.toml'
     - 'pixi.lock'
     - '.github/workflows/gui.yaml'
+  # Weekly slot for the Windows install smoke (see the job's own comment).
+  schedule:
+  - cron: "0 6 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -96,3 +99,86 @@ jobs:
       # HTML is un-ignored and committed.
     - name: Typecheck
       run: npx tsc -b --force
+
+  # Walks the Windows install exactly as pypsa-gui/README.md documents it, then
+  # starts both services headlessly and probes them. Not on the PR path: a cold
+  # pixi solve on Windows costs far more than the Linux jobs, and this answers
+  # "does a fresh Windows clone come up?", which is a release question rather
+  # than a per-commit one. Run it from the Actions tab, or wait for Monday.
+  windows-install:
+    name: Windows install smoke
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+    - uses: actions/checkout@v7
+
+      # README step 1.
+    - name: Setup Pixi
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        cache: true
+        cache-write: false
+
+      # README step 2. Redundant with pixi.toml on paper, but it is what the
+      # documented install tells a user to run, so it is what gets tested.
+    - name: Install backend web dependencies
+      run: pixi run -- pip install -r pypsa-gui/backend/requirements.txt
+
+      # README step 3.
+    - name: Install frontend dependencies
+      working-directory: pypsa-gui/frontend
+      run: npm ci
+
+    - name: Backend starts and answers /api/health
+      run: |
+        $backend = Start-Process -PassThru -NoNewWindow -WorkingDirectory pypsa-gui/backend `
+          -FilePath pixi -ArgumentList 'run','--','python','-m','uvicorn','main:app','--host','127.0.0.1','--port','8000'
+        try {
+          $ok = $false
+          foreach ($i in 1..60) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:8000/api/health
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { }
+          }
+          if (-not $ok) { throw 'backend did not answer /api/health within 120s' }
+          Write-Host 'backend OK'
+        } finally {
+          if (-not $backend.HasExited) { Stop-Process -Id $backend.Id -Force }
+        }
+
+      # The Vite entry point pypsa-gui/frontend/index.html is excluded by the
+      # root .gitignore's `*.html` rule, so on a clean checkout there is nothing
+      # for the dev server to serve. Report that as the specific, actionable
+      # problem it is instead of a rollup "could not resolve entry" trace; the
+      # step starts probing for real as soon as the file is tracked.
+    - name: Frontend dev server serves the app
+      working-directory: pypsa-gui/frontend
+      run: |
+        if (-not (Test-Path index.html)) {
+          Write-Host '::warning::index.html is not tracked (root .gitignore `*.html`) - skipping dev server probe. A fresh clone cannot serve the front end until it is un-ignored and committed.'
+          exit 0
+        }
+        $vite = Start-Process -PassThru -NoNewWindow -FilePath npm -ArgumentList 'run','dev'
+        try {
+          $ok = $false
+          foreach ($i in 1..30) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:5173/
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { }
+          }
+          if (-not $ok) { throw 'vite dev server did not serve / within 60s' }
+          Write-Host 'frontend OK'
+        } finally {
+          if (-not $vite.HasExited) { Stop-Process -Id $vite.Id -Force }
+        }
