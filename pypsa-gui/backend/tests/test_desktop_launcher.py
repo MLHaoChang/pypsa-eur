@@ -496,3 +496,40 @@ def test_the_launcher_imports_no_part_of_the_backend():
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OK" in result.stdout
+
+
+def test_a_frozen_build_is_told_where_its_SPA_is(monkeypatch, tmp_path):
+    """
+    Measured on the first frozen build that started: `/` returned **503
+    "Frontend not built"** while `frontend/dist/spa.html` was sitting in the
+    bundle.
+
+    `settings.frontend_dist` defaults to `<backend>/../frontend/dist`, derived
+    from `settings.__file__`. Inside a PyInstaller bundle that resolves to
+    `Contents/frontend/dist`, one level above where the data actually lands.
+    The user sees a JSON error page instead of the app, which reads as a broken
+    backend rather than a packaging problem.
+
+    The plan predicted this and left it to workstream I: *"`settings.frontend_dist`
+    binds bare `FRONTEND_DIST` with no `PYPSAGUI_` alias. Workstream I will set
+    it through `build_environment`."*
+
+    Pinned to `sys._MEIPASS`, so it says nothing about an unfrozen run.
+    """
+    dist = tmp_path / "frontend" / "dist"
+    dist.mkdir(parents=True)
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    env = launcher.build_environment(51234)
+
+    assert env["FRONTEND_DIST"] == str(dist)
+
+
+def test_an_unfrozen_run_is_not_told_where_its_SPA_is():
+    """
+    The obvious mutation is to set it unconditionally from `_MEIPASS`, which is
+    absent outside a bundle and would pin the SPA to a path built from `""`.
+    Development must keep using the `settings` default.
+    """
+    assert "FRONTEND_DIST" not in launcher.build_environment(51234)

@@ -17,6 +17,23 @@
 # netCDF4's macOS arm64 wheel is `cp311-abi3-macosx_14_0_arm64`, which is why
 # the .spec sets LSMinimumSystemVersion 14.0. It is abi3, so it covers 3.13
 # despite the cp311 tag.
+# ── the numerics stack: pinned to the TESTED versions ───────────────────────
+#
+# NOT transitive leftovers. Left to pip, `pypsa==1.1.2` resolved
+# `pandas 3.0.5` and `numpy 2.5.1`, while the whole backend suite runs against
+# `pandas 2.3.3` / `numpy 2.4.6` in the pixi `desktop` environment — a MAJOR
+# pandas version between the app that ships and the app that was tested, in a
+# codebase whose CLAUDE.md documents pandas-version-specific workarounds for
+# MultiIndex reindexing and dtype coercion.
+#
+# This is the same discipline `pixi.toml`'s single solve group enforces for the
+# conda side, applied to the pip side, and it is the reason this file pins more
+# than the direct imports. Verified installable from wheels for cp313/arm64.
+pandas==2.3.3
+numpy==2.4.6
+scipy==1.17.1
+matplotlib==3.10.9
+
 pypsa==1.1.2
 linopy==0.8.0
 highspy==1.14.0

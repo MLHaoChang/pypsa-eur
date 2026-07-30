@@ -57,6 +57,18 @@ FORBIDDEN_DIRS = {
 # Suffixes that are secret-shaped wherever they turn up.
 FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keychain"}
 
+# PUBLIC certificate material that legitimately ships. The suffix rule above is
+# about PRIVATE keys; a CA bundle is the opposite — it is public by design and
+# TLS breaks without it. Found by running this gate on the first real build,
+# where `certifi/cacert.pem` was its only complaint: a false positive on the
+# one file the app cannot work without.
+#
+# Kept as an exact-basename allowlist rather than a path or a directory rule,
+# because the layout differs between a `.app`, a onedir build and Windows.
+ALLOWED_DESPITE_SUFFIX = {
+    "cacert.pem",       # certifi
+}
+
 # What SHOULD be there. Absence is not fatal here — a missing template breaks
 # the app loudly on first use, which is a different (and recoverable) problem —
 # but reporting it turns one manual check into zero.
@@ -82,7 +94,7 @@ def scan(root: Path) -> tuple[list[str], list[str]]:
 
         if name in FORBIDDEN_FILES:
             problems.append(f"FORBIDDEN FILE       {rel}")
-        elif path.suffix.lower() in FORBIDDEN_SUFFIXES:
+        elif path.suffix.lower() in FORBIDDEN_SUFFIXES and name not in ALLOWED_DESPITE_SUFFIX:
             problems.append(f"SECRET-SHAPED FILE   {rel}")
 
     missing = [want for want in EXPECTED if want not in seen]

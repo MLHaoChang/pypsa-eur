@@ -152,6 +152,23 @@ def build_environment(port: int, legacy_root: Path | None = None) -> dict[str, s
     }
     if not os.environ.get("DATABASE_URL"):
         env["DATABASE_URL"] = app_paths.default_database_url()
+
+    # A FROZEN build has to be told where its SPA is. `settings.frontend_dist`
+    # defaults to `<backend>/../frontend/dist` derived from `settings.__file__`,
+    # which inside a bundle resolves one level above where PyInstaller puts the
+    # data — measured on the first frozen build that started, which served
+    # **503 "Frontend not built"** at `/` with `spa.html` sitting in the bundle.
+    # A JSON error page where the app should be reads as a broken backend.
+    #
+    # This is the one path the shell cannot leave to `settings`, because
+    # `_MEIPASS` is knowable only from inside the running bundle. Unfrozen runs
+    # are untouched and keep using the default.
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            dist = Path(meipass) / "frontend" / "dist"
+            if dist.is_dir():
+                env["FRONTEND_DIST"] = str(dist)
     if legacy_root is not None:
         # Absent, never empty: `settings.legacy_import_root` is `Path | None`
         # and an empty string coerces to `Path(".")` — the cwd, which the

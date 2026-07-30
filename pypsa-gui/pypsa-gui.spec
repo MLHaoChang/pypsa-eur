@@ -130,6 +130,26 @@ a = Analysis(                              # noqa: F821 - injected
     runtime_hooks=[],
     excludes=excludes,
     noarchive=False,
+    # ── packages that must exist as REAL DIRECTORIES on disk ────────────────
+    #
+    # Measured on the first frozen build, which died on the splash with:
+    #
+    #   FileNotFoundError: .../Contents/Frameworks/pypsa/optimization/../data/variables.csv
+    #
+    # `pypsa/optimization/constraints.py` does a `__file__`-relative
+    # `read_csv("../data/variables.csv")` AT IMPORT TIME. The data file was
+    # collected correctly and is present — but by default the package's code
+    # goes into the PYZ archive, so `pypsa/optimization/` never exists as a
+    # directory, and POSIX cannot resolve `optimization/../data` through a
+    # path component that is not there. The file being present is exactly why
+    # this is confusing to debug: the error names a path whose target exists.
+    #
+    # `pyz+py` keeps the archive copy and ALSO writes the package out, so
+    # `__file__` resolves the way the library assumes.
+    module_collection_mode={
+        "pypsa": "pyz+py",
+        "linopy": "pyz+py",
+    },
 )
 
 pyz = PYZ(a.pure)                          # noqa: F821 - injected
