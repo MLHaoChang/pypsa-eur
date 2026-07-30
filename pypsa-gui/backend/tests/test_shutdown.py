@@ -1360,7 +1360,18 @@ def test_the_GUI_actually_uses_the_saver(monkeypatch):
     assertion is about this module's wiring rather than about a helper nobody
     may be calling.
     """
-    pytest.importorskip("webview")
+    # Deliberately NOT `pytest.importorskip`. A skip is how the two desktop
+    # download tests silently passed for a whole review cycle; this is the only
+    # test standing between the codebase and a silent-wrong-directory flush, so
+    # a missing pywebview must FAIL here. See `test_desktop_downloads._webview`.
+    try:
+        import webview  # noqa: F401
+    except ImportError as exc:  # pragma: no cover - environment defect
+        raise AssertionError(
+            "pywebview is missing from this environment, so the one test "
+            f"guarding gui.py's wiring cannot run: {exc}"
+        ) from exc
+
     from desktop import gui
 
     built = []
@@ -1368,16 +1379,45 @@ def test_the_GUI_actually_uses_the_saver(monkeypatch):
 
     def spy(save_context):
         built.append(save_context)
-        return real_make_saver(save_context)
+        saver = real_make_saver(save_context)
+        built.append(saver)
+        return saver
 
     monkeypatch.setattr(shutdown_service, "make_saver", spy)
+
+    # Capture what actually REACHES the flush, not merely what was constructed.
+    # An earlier version asserted only that `make_saver` had been called, and a
+    # partial revert — keeping the wire-time call while shadowing `save` inside
+    # `flush` with the old inline form — was measured to SURVIVE it. That is
+    # the realistic regression, and it restores the original data-loss defect.
+    seen: dict = {}
+
+    def fake_flush_all(**kw):
+        seen["save"] = kw["save"]
+        return []          # `flush_all` returns the list of problem strings
+
+    def fake_shutdown_sequence(**kw):
+        seen["flush"] = kw["flush"]
+        return shutdown_service.ShutdownReport(quit=True)
+
+    monkeypatch.setattr(shutdown_service, "flush_all", fake_flush_all)
+    monkeypatch.setattr(shutdown_service, "shutdown_sequence", fake_shutdown_sequence)
+
+    subscribed = []
 
     class _Events:
         def __init__(self):
             self.closing = self
 
         def __iadd__(self, handler):
+            # RECORDED, not discarded. Dropping it made `window.events.closing
+            # += handler.on_closing` deletable with every test still green —
+            # and with that line gone the app closes with no flush, no abort
+            # and no lock release, silently.
+            subscribed.append(handler)
             return self
+
+    destroyed = []
 
     class _Window:
         events = _Events()
@@ -1386,7 +1426,7 @@ def test_the_GUI_actually_uses_the_saver(monkeypatch):
             pass
 
         def destroy(self):
-            pass
+            destroyed.append(True)
 
         def create_confirmation_dialog(self, *a):
             return True
@@ -1396,8 +1436,25 @@ def test_the_GUI_actually_uses_the_saver(monkeypatch):
 
     from routers.projects import _save_context
 
-    assert built == [_save_context], (
+    assert built[0] is _save_context, (
         "gui.py no longer builds its saver through shutdown.make_saver — the "
         "flush will re-derive the path from the display name and write to "
         "flat_projects_root, which load_project never reads"
+    )
+    the_saver = built[1]
+
+    handler = state["close_handler"]
+    assert subscribed == [handler.on_closing], (
+        "gui.py no longer subscribes the close handler to `closing`; the "
+        "window then closes with no flush, no abort and no lock release"
+    )
+
+    # Drive the real wiring: run -> shutdown_sequence(flush=...) -> flush_all.
+    handler._run()
+    seen["flush"](safe=False)
+
+    assert seen["save"] is the_saver, (
+        "the saver reaching flush_all is not the one make_saver returned — a "
+        "shadowed inline saver drops storage_dir and writes to "
+        "flat_projects_root, which is the defect 11806022 fixed"
     )

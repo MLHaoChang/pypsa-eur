@@ -71,6 +71,16 @@ for _label, _v in (("PYPSAGUI_APP_DATA_DIR", _appdata), ("PYPSAGUI_PROJECTS_ROOT
     assert _p != (BACKEND / "projects").resolve(), f"refusing to run: {_label} IS the real projects tree"
     assert Path.home() / "Documents" not in _p.parents, f"refusing to run: {_label} is inside Documents"
 
+# An EXPORTED `DATABASE_URL` takes the operator branch in `build_environment`,
+# so the pin this harness exists to prove is never exercised and the run passes
+# while testing nothing. That is the same vacuous-pass trap the unit tests avoid
+# with `monkeypatch.delenv` — left open here until a reviewer pointed out that
+# the one harness proving the fix had no guard for it.
+assert not os.environ.get("DATABASE_URL"), (
+    "refusing to run: DATABASE_URL is exported, so the shell's pin is skipped "
+    "and this run would prove nothing about it — unset it and re-run"
+)
+
 # Do NOT import pypsa (or anything that pulls it) at module scope:
 # `launcher.apply_environment` refuses to run once the backend is imported and
 # the whole launch then dies on the splash.

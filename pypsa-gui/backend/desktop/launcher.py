@@ -130,6 +130,13 @@ def build_environment(port: int, legacy_root: Path | None = None) -> dict[str, s
     in the chain where an operator's choice and a file on disk are still
     distinguishable — `apply_environment` runs before `import main`, so
     `load_dotenv` has not yet copied `.env` into `os.environ`.
+
+    **Set, never empty** — the same rule this function states below for
+    `PYPSAGUI_LEGACY_IMPORT_ROOT`, and it was missed here on the first pass. A
+    membership test reads `DATABASE_URL=""` (a `setx` on Windows, a CI `env:`
+    entry, a bare `export` in a profile) as an operator decision and suppresses
+    the pin; `env_ignore_empty` is False by default, so the empty string
+    survives into `Settings` and `create_engine("")` raises at `import main`.
     """
     import app_paths
 
@@ -143,7 +150,7 @@ def build_environment(port: int, legacy_root: Path | None = None) -> dict[str, s
         # widens the trust boundary to any page on a running dev server.
         "CORS_ALLOWED_ORIGINS": origin_for_port(port),
     }
-    if "DATABASE_URL" not in os.environ:
+    if not os.environ.get("DATABASE_URL"):
         env["DATABASE_URL"] = app_paths.default_database_url()
     if legacy_root is not None:
         # Absent, never empty: `settings.legacy_import_root` is `Path | None`

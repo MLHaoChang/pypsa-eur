@@ -162,6 +162,29 @@ def test_an_operator_who_exported_a_database_url_keeps_it(monkeypatch):
     assert "DATABASE_URL" not in launcher.build_environment(51234)
 
 
+def test_an_empty_database_url_is_not_an_operator_decision(monkeypatch):
+    """
+    `DATABASE_URL=""` is inheritance noise, not a choice — `setx DATABASE_URL ""`
+    on Windows persists across reboots and every shell, and a CI `env:` entry or
+    a bare `export DATABASE_URL=` in a profile produces the same thing.
+
+    A membership test (`"DATABASE_URL" not in os.environ`) reads it as an
+    operator decision and suppresses the pin. Measured consequence, end to end:
+    `env_ignore_empty` defaults to False, so `Settings().database_url` stays
+    `''`; `db/session.py` builds the engine at module import; `import main` then
+    raises `ArgumentError: Could not parse SQLAlchemy URL from given URL string`
+    and the app dies on the splash — the exact failure this pin exists to
+    eliminate, reached by a different door.
+
+    `build_environment` states the identical rule eleven lines below this one,
+    for `PYPSAGUI_LEGACY_IMPORT_ROOT`: *"Absent, never empty"*. It was not
+    applied here.
+    """
+    monkeypatch.setenv("DATABASE_URL", "")
+
+    assert "DATABASE_URL" in launcher.build_environment(51234)
+
+
 def test_the_shell_must_not_manage_the_database_url():
     """
     `apply_environment` POPS every `_MANAGED` name that `build_environment`

@@ -559,7 +559,9 @@ dies on the splash. Two runs were lost to netcdf I/O spies installed too early.
 
 **NOT run: step 8, Windows.** Everything platform-specific in this workstream
 is still reasoned-from-documentation: the `msvcrt` lock and its
-release-after-death delay, `SO_EXCLUSIVEADDRUSE`, the ProactorEventLoop under
+release-after-death delay, the deliberate refusal to set `SO_REUSEADDR`
+(earlier drafts of this list said `SO_EXCLUSIVEADDRUSE`, which the code has
+never set and which is not in play), the ProactorEventLoop under
 the socket handoff, `pandas 3.0.3` on win-64 which no test has executed, and
 the `destroy()` re-entrancy that `CloseHandler` depends on — which macOS
 provably CANNOT exercise, so the ordering has no coverage on the platform that
@@ -700,4 +702,4 @@ with a test that mocked the function containing the assumption.
 - **`.pixi/envs/desktop` on the development machine is stale** relative to the fixed lockfile. `pixi run` re-syncs, so this is a verification gap rather than a shipped defect — but nobody has yet run `pixi run -e desktop python -c "import pypsa"` since the pin landed.
 - **`SingleInstance.acquire()` now propagates a non-contended `OSError`** (ENOLCK/EOPNOTSUPP on a network `PYPSAGUI_APP_DATA_DIR`) instead of mislabelling it "already running". Correct, but no caller exists yet to turn it into a message, so today it would surface as a traceback and no window. **Task 5 owns this.**
 - **`stop()`'s worst case is 240 s during lifespan startup** (2 × `STARTUP_JOIN_TIMEOUT`; the ladder waits after `should_exit` and again after `force_exit`). Task 4 drives `stop()` from the close handler, and a UI thread blocked past ~5 s is ghosted as *Not Responding* on Windows — so that step must run on a worker.
-- **Everything Windows-specific remains reasoned-from-documentation, not measured.** The `msvcrt` lock's release-after-death delay (mitigated by a bounded retry), `SO_EXCLUSIVEADDRUSE` not being set, the ProactorEventLoop rather than uvloop under the socket handoff, and `app_paths.default_projects_root()` using `Path.home()/"Documents"` rather than `SHGetKnownFolderPath` — which OneDrive Known Folder Move and Group Policy both redirect. Task 7 Step 8.
+- **Everything Windows-specific remains reasoned-from-documentation, not measured.** The `msvcrt` lock's release-after-death delay (mitigated by a bounded retry), the deliberate refusal to set `SO_REUSEADDR` — which on Windows permits binding a port another socket is actively listening on, the inverse of its POSIX meaning; earlier drafts named `SO_EXCLUSIVEADDRUSE`, an option this code has never set — the ProactorEventLoop rather than uvloop under the socket handoff, and `app_paths.default_projects_root()` using `Path.home()/"Documents"` rather than `SHGetKnownFolderPath` — which OneDrive Known Folder Move and Group Policy both redirect. Task 7 Step 8.
