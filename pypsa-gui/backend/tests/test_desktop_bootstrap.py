@@ -361,3 +361,64 @@ def test_a_successful_launch_releases_nothing(monkeypatch):
     gui._bootstrap(_failing_state(sock, server))
 
     assert (server.stopped, sock.closed) == (0, 0)
+
+
+# ── the splash and the message windows ──────────────────────────────────────
+
+
+def test_the_splash_speaks_the_apps_own_brand_and_stays_self_contained():
+    """
+    The splash is the first thing a user sees, and on a first-run import it is
+    on screen for minutes. It must look like the product that replaces it.
+
+    Self-contained is not a style choice: the backend is NOT UP yet, so any
+    external stylesheet, font or image request renders a blank rectangle for
+    however long the fetch takes — precisely when the user is least sure the
+    app is working.
+    """
+    from desktop import splash
+
+    assert "#ff5252" in splash.HTML, "the splash is not using the brand red"
+    assert "PyPSA" in splash.HTML
+
+    for forbidden in ("<link", "src=\"http", "src='http", "@import", "url(http"):
+        assert forbidden not in splash.HTML, f"the splash fetches something: {forbidden}"
+
+    # The three hooks `gui.py` drives through `evaluate_js`. A redesign that
+    # renames a hook fails here rather than at runtime on a user's machine,
+    # where the only symptom is a splash frozen on "Starting…".
+    for hook in ("window.__stage", "window.__detail", "window.__failed"):
+        assert hook in splash.HTML, f"{hook} is gone; gui.py calls it"
+    assert 'id="stage"' in splash.HTML
+
+
+def test_a_message_window_actually_contains_its_message():
+    """
+    `gui.py` built these by `HTML.split("<script>")[0]` plus three `.replace()`
+    calls against exact markup — a coupling with NO test and no failure mode.
+    Change a tag in the splash and the replacements stop matching, so the user
+    gets the splash's own text instead of "PyPSA GUI is already running".
+    Nothing raises and nothing logs.
+    """
+    from desktop import splash
+
+    out = splash.message_html("PyPSA GUI is already running", "Switch to the open window.")
+
+    assert "PyPSA GUI is already running" in out
+    assert "Switch to the open window." in out
+    # No progress bar and no stage hooks: nothing here is going to progress.
+    assert "window.__stage" not in out
+    assert 'class="bar"' not in out
+
+
+def test_a_message_window_escapes_what_it_is_given():
+    """
+    The lock-failure path puts a filesystem path in here, and app-data
+    directories are user-named.
+    """
+    from desktop import splash
+
+    out = splash.message_html("Could not start", "Locking /tmp/<script>alert(1)</script> failed")
+
+    assert "<script>alert(1)</script>" not in out
+    assert "&lt;script&gt;" in out

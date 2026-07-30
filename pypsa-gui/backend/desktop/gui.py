@@ -54,7 +54,10 @@ INITIAL_SIZE = (1440, 900)
 # from a broken layout.
 MINIMUM_SIZE = (1024, 700)
 
-SPLASH_SIZE = (460, 260)
+# Sized for the two-column launch screen, and deliberately smaller than
+# INITIAL_SIZE so the handoff to the main window reads as opening up rather
+# than as one window replacing another. The SVG viewBox matches these numbers.
+SPLASH_SIZE = (920, 580)
 
 
 def _app_data():
@@ -359,15 +362,17 @@ def _tell_user_lock_failed() -> None:
 
 
 def _message_html(title: str, body: str) -> str:
-    import html as _html
+    """
+    Delegated to `splash.message_html`.
 
-    return (
-        splash.HTML.split("<script>")[0]
-        .replace("<h1>PyPSA GUI</h1>", f"<h1>{_html.escape(title)}</h1>")
-        .replace('<div id="stage">Starting…</div>',
-                 f'<div id="stage">{_html.escape(body)}</div>')
-        .replace('<div class="bar"><i></i></div>', "")
-    )
+    This used to be string surgery on `splash.HTML` — `split("<script>")[0]`
+    plus three `.replace()` calls against exact markup. That has no failure
+    mode: redesign the splash and the replacements stop matching, so the user
+    sees the splash's own text instead of "PyPSA GUI is already running", with
+    nothing raised and nothing logged. It broke the moment the splash was
+    rebranded, which is when the tests for it were finally written.
+    """
+    return splash.message_html(title, body)
 
 
 if __name__ == "__main__":
