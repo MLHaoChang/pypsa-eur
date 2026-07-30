@@ -14,6 +14,8 @@ import { networkApi } from '../api/network'
 import { appLog } from '../store/simulationStore'
 import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '../components/CanvasResultsContext'
+import { busLatLng, unplacedBusNames } from '../utils/geo'
+import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
 
 // Draggable bus marker. Mimics the previous CircleMarker visually (12 px,
 // 2 px coloured border, white fill) but uses a Marker + divIcon so leaflet
@@ -204,24 +206,18 @@ interface MapCanvasProps {
   mode: Exclude<CanvasView, 'blank'>
 }
 
-// PyPSA convention: bus.x = longitude, bus.y = latitude. Leaflet expects
-// [lat, lng] tuples — convertCoord centralises the swap.
-function busLatLng(b: Bus): [number, number] | null {
-  const lat = Number(b.y)
-  const lng = Number(b.x)
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null
-  return [lat, lng]
-}
-
 // One-shot helper that fits the map view to the network bounds the first
 // time data lands. Subsequent renders don't re-fit so the user's pan/zoom
 // is preserved.
-function FitToNetwork({ buses }: { buses: Bus[] }) {
+//
+// `suspended` is true while click-to-place is running. Without it, placing the
+// first bus makes `points.length === 1` and this calls setView(..., 11) —
+// snapping the map to that bus while the user is lining up the next click.
+function FitToNetwork({ buses, suspended }: { buses: Bus[]; suspended: boolean }) {
   const map = useMap()
   const fittedRef = useRef(false)
   useEffect(() => {
-    if (fittedRef.current) return
+    if (fittedRef.current || suspended) return
     const points = buses.map(busLatLng).filter((p): p is [number, number] => p !== null)
     if (points.length === 0) return
     if (points.length === 1) {
@@ -230,7 +226,7 @@ function FitToNetwork({ buses }: { buses: Bus[] }) {
       map.fitBounds(L.latLngBounds(points), { padding: [40, 40] })
     }
     fittedRef.current = true
-  }, [buses, map])
+  }, [buses, map, suspended])
   return null
 }
 
@@ -553,7 +549,7 @@ function PolylineCtxMenu({
 // marker / line / asset bubble below) can read the per-snapshot results
 // overlay via useCanvasResults().
 function MapCanvasInner({ mode }: MapCanvasProps) {
-  const { setSelectedComponent, currentProject } = useUIStore()
+  const { setSelectedComponent, currentProject, activeSlidePanel, paletteMode } = useUIStore()
   const qc = useQueryClient()
   // Per-snapshot results overlay (LOPF / AC PF dispatch + line loading).
   // `enabled` is false unless the user turns the overlay on in SnapshotPicker.
@@ -576,19 +572,14 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     return m
   }, [buses])
 
-  // Warn once if many buses are missing usable coordinates — otherwise the
-  // user just sees an empty map and wonders why nothing rendered.
-  const missingWarnedRef = useRef(false)
-  useEffect(() => {
-    if (missingWarnedRef.current) return
-    if ((buses as Bus[]).length === 0) return
-    const missing = (buses as Bus[]).filter(b => busLatLng(b) === null).length
-    if (missing > 0 && missing >= (buses as Bus[]).length / 2) {
-      toast(`Map view: ${missing} of ${(buses as Bus[]).length} buses have no coordinates — they're hidden.`,
-        { icon: '🌍', duration: 4500 })
-    }
-    missingWarnedRef.current = true
-  }, [buses])
+  // Buses still at PyPSA's (0, 0) default. Derived on every render (D2) — the
+  // previous code toasted this once per mount and then forgot it, which is
+  // most of why a network of unplaced buses read as a broken basemap.
+  const unplaced = useMemo(() => unplacedBusNames(buses as Bus[]), [buses])
+
+  // Set by UnplacedBusesPanel / the placement strip; consumed by ClickToPlace
+  // and by FitToNetwork's `suspended` prop.
+  const [placing, setPlacing] = useState(false)
 
   const recalcMut = useMutation({
     mutationFn: () => networkApi.recalculateLineLengths(),
@@ -766,7 +757,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           </>
         )}
 
-        <FitToNetwork buses={buses as Bus[]} />
+        <FitToNetwork buses={buses as Bus[]} suspended={placing} />
 
         {/* Lines — colour by the lower of the two bus voltages. Routable. */}
         {(lines as LineT[]).map(line => {
@@ -992,6 +983,19 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           <Ruler size={14} />
         </button>
       </div>
+
+      {/* Hidden while a slide panel or the command palette is open — both are
+          higher-priority z-[500]/z-[300] overlays and the panel's z-[900]
+          would otherwise float on top of them (same guard MapModeSwitcher
+          applies for the same reason). */}
+      {!activeSlidePanel && paletteMode === null && (
+        <UnplacedBusesPanel
+          unplacedCount={unplaced.length}
+          totalCount={(buses as Bus[]).length}
+          placing={placing}
+          onStartPlacing={() => setPlacing(true)}
+        />
+      )}
 
       {/* Bus right-click context menu — same layout & options as the blank
           canvas equivalent. Local visibleGroups state means the two views
