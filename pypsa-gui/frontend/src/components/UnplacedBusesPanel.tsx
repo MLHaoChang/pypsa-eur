@@ -56,7 +56,8 @@ export default function UnplacedBusesPanel({
       </div>
       <p className="mt-2 text-xs text-muted leading-relaxed">
         Satellite and Hybrid plot buses by longitude (x) and latitude (y).
-        All {totalCount} buses are still at PyPSA&rsquo;s default 0, 0.
+        All {totalCount} buses have no usable location yet — most commonly
+        PyPSA&rsquo;s default 0, 0, but also missing or out-of-range values.
       </p>
       <button
         type="button"

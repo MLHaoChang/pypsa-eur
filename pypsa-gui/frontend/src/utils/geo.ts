@@ -29,6 +29,15 @@ export interface BusCoords {
 
 /** Leaflet-ordered [lat, lng], or null when the bus has no usable location. */
 export function busLatLng(b: BusCoords): [number, number] | null {
+  // Explicit null/undefined check BEFORE the numeric coercion below.
+  // `Number(null) === 0`, so without this a bus missing only ONE coordinate
+  // (x null, y set, or vice versa) would coerce the missing half to 0 and
+  // render on a fabricated meridian/equator instead of being treated as
+  // unplaced. `== null` catches both `null` and `undefined` in one check.
+  // Reachable in practice: a NaN coordinate serialises to JSON `null`
+  // (backend `services/serialization.py`'s `clean_scalar`), so this isn't a
+  // hypothetical shape.
+  if (b.x == null || b.y == null) return null
   const lat = Number(b.y)
   const lng = Number(b.x)
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null

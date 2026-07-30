@@ -15,6 +15,7 @@ import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import type { Bus, Carrier, Generator, Line, Link, LinkProfileMeta, Load, StorageUnit, Store, Transformer, LoadProfileMeta, GeneratorProfileMeta } from '../api/types'
 import { safeMax } from '../utils/numeric'
+import { isPlaced } from '../utils/geo'
 import toast from 'react-hot-toast'
 import CreationForm from './CreationForm'
 import { tip as docTip } from '../utils/propertyDocs'
@@ -1605,7 +1606,14 @@ function BusPanel({ name }: { name: string }) {
           <Row label="Control"     value={bus.control}  tip={docTip('bus.control')} />
           <Row label="Country"     value={bus.country}  tip={docTip('bus.country')} />
           <Row label="Sub-network" value={bus.sub_network || '—'} tip="Manual region label for the 'region' clustering mode. Buses sharing this value collapse to one node. Empty = auto-determine from electrical topology." />
-          <Row label="Coordinates" value={bus.x != null ? `${bus.x?.toFixed(3)}, ${bus.y?.toFixed(3)}` : null} tip={docTip('bus.coordinates')} />
+          {/* isPlaced (utils/geo, D4-compliant single import) — not a bare
+              `bus.x != null` check. PyPSA's Bus.x/y default to 0.0, so an
+              unplaced bus always has non-null x/y and the old check rendered
+              "0.000, 0.000" as if it were a real position: this is exactly
+              the surface the empty-state panel sends the user to ("paste a
+              lat, lng pair into its properties"), so showing Null Island
+              here undermines that guidance. */}
+          <Row label="Coordinates" value={isPlaced(bus) ? `${bus.x?.toFixed(3)}, ${bus.y?.toFixed(3)}` : 'not set'} tip={docTip('bus.coordinates')} />
           <button onClick={startEdit}
             className="w-full mt-2 py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors flex items-center justify-center gap-1.5">
             <Pencil size={11} /> Edit Bus

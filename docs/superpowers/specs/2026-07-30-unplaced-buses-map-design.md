@@ -230,3 +230,15 @@ with real dimensions, against no Leaflet-test precedent in this suite.
 Gulf of Guinea. The alternative is a persisted "is placed" flag on every bus
 (D2), which costs a schema migration to serve a case that does not occur in a
 power system. Stated here rather than discovered later.
+
+**Each placement click has typically already written line lengths, before the
+completion toast offers to.** `update_bus` (`network.py:427-435`, pre-existing
+and out of scope here) auto-rewrites the length of every line connected to a
+bus whenever that bus's coordinates change — so during click-to-place, each
+click that lands next to an already-placed bus writes that connecting line's
+length immediately, not just at the end. The completion toast's "Recalculate
+line lengths" action (D6) is offered as though nothing has been written yet;
+in practice it is a fleet-wide catch-up pass, not the first write. Not a
+correctness bug — the auto-rewrite is scoped per-bus and skips unplaced
+endpoints (via `_bus_coord`) the same as the fleet-wide recalculation — but
+worth knowing before reading the toast copy as "nothing has happened yet."

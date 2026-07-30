@@ -22,9 +22,14 @@ describe('UnplacedBusesPanel', () => {
       <UnplacedBusesPanel unplacedCount={3} totalCount={3} placing={false} onStartPlacing={noop} />,
     )
     expect(screen.getByText(/no bus has a location yet/i)).toBeDefined()
-    // The count and the cause both have to be on screen: "3 buses" tells the
-    // user it is their whole network, "0, 0" tells them why the map is blank.
+    // The count has to be on screen: "3 buses" tells the user it is their
+    // whole network. The copy must be true of every bus the predicate
+    // rejects — NaN, null and out-of-range coordinates, not just the exact
+    // (0, 0) default — so it says "no usable location" rather than claiming
+    // every bus is AT 0, 0. "0, 0" stays as the common-case explanation
+    // without over-claiming it's the only one.
     expect(screen.getByText(/all 3 buses/i)).toBeDefined()
+    expect(screen.getByText(/no usable location/i)).toBeDefined()
     expect(screen.getByText(/0, 0/)).toBeDefined()
   })
 

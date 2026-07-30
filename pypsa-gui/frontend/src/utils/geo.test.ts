@@ -33,6 +33,19 @@ describe('busLatLng', () => {
     expect(busLatLng({ x: 181, y: 50 })).toBeNull()
     expect(busLatLng({ x: -181, y: 50 })).toBeNull()
   })
+
+  it('rejects a MIXED null/set pair rather than coercing the null half to 0', () => {
+    // `Number(null) === 0`, so a naive `Number(b.x)` coercion turns a bus with
+    // only ONE coordinate missing into a fabricated point on the meridian or
+    // equator instead of "not placed". This is reachable: NaN coordinates
+    // serialise to JSON `null` (services/serialization.py `clean_scalar`), so
+    // a bus that is finite on one axis and NaN on the other arrives here as
+    // exactly this shape.
+    expect(busLatLng({ x: null, y: 51.5 })).toBeNull()
+    expect(busLatLng({ x: 6.96, y: null })).toBeNull()
+    expect(busLatLng({ x: undefined, y: 51.5 })).toBeNull()
+    expect(busLatLng({ x: 6.96, y: undefined })).toBeNull()
+  })
 })
 
 describe('isPlaced', () => {

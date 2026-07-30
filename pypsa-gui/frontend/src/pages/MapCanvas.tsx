@@ -15,6 +15,7 @@ import { appLog } from '../store/simulationStore'
 import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '../components/CanvasResultsContext'
 import { busLatLng, unplacedBusNames } from '../utils/geo'
+import { nextBusToPlace, canSkip } from '../utils/placement'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
 
 // Draggable bus marker. Mimics the previous CircleMarker visually (12 px,
@@ -570,6 +571,13 @@ function PolylineCtxMenu({
 function MapCanvasInner({ mode }: MapCanvasProps) {
   const { setSelectedComponent, currentProject, activeSlidePanel, paletteMode } = useUIStore()
   const qc = useQueryClient()
+  // True unless a higher-priority overlay (a slide panel or the command
+  // palette) is open. Gates every piece of placement UI — the empty-state /
+  // chip panel, the placement strip, AND the ClickToPlace map-click handler
+  // — so a click landing on map exposed behind an open modal can't silently
+  // place a bus with no visible indicator, and so the strip can't float on
+  // top of the command palette.
+  const placementUiAllowed = !activeSlidePanel && paletteMode === null
   // Per-snapshot results overlay (LOPF / AC PF dispatch + line loading).
   // `enabled` is false unless the user turns the overlay on in SnapshotPicker.
   const results = useCanvasResults()
@@ -623,18 +631,30 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // this specific bus been skipped" well-defined regardless of how the
   // array reshuffles, and keeps Skip enabled as long as more than one
   // unplaced bus remains.
+  //
+  // The derivation itself lives in utils/placement.ts (nextBusToPlace /
+  // canSkip) — a separate pure module with its own test coverage, imported
+  // here rather than re-inlined.
   const [skippedNames, setSkippedNames] = useState<Set<string>>(new Set())
-  const placingBus = placing
-    ? (unplaced.find(n => !skippedNames.has(n)) ?? unplaced[0])
-    : undefined
+  const placingBus = placing ? nextBusToPlace(unplaced, skippedNames) : undefined
 
   // Escape exits placement mode without waiting for the last bus. Clears the
   // skip set too, so a later "Place buses on the map" starts from a clean
   // queue rather than resuming an order the user may not remember setting.
+  //
+  // Ignore Escape events that originate from an editable element (a focused
+  // input/textarea/select, or anything contenteditable). Without this check,
+  // a bare `window` keydown listener catches EVERY Escape press — including
+  // one meant to close the command palette's search box or blur a form
+  // field — and silently ends the placement session underneath it.
   useEffect(() => {
     if (!placing) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setPlacing(false); setSkippedNames(new Set()) }
+      if (e.key !== 'Escape') return
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return
+      setPlacing(false); setSkippedNames(new Set())
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -704,7 +724,13 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // (below `handleRecalc`) rather than beside the rest of the placement
   // state above it, so the reference below isn't a use-before-define.
   useEffect(() => {
-    if (placing && unplaced.length === 0) {
+    // `(buses as Bus[]).length > 0` matters: switching project mid-placement
+    // changes the query key, `data` falls back to `[]` for an instant, and
+    // `unplaced.length === 0` is ALSO true for a genuinely empty bus list —
+    // without this guard the user gets a false "Every bus now has a
+    // location" toast offering a line-length rewrite against the NEW
+    // project's (empty) network.
+    if (placing && unplaced.length === 0 && (buses as Bus[]).length > 0) {
       setPlacing(false)
       setSkippedNames(new Set())
       toast.success(
@@ -721,7 +747,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         { duration: 8000 },
       )
     }
-  }, [placing, unplaced.length])
+  }, [placing, unplaced.length, buses])
 
   // ── Per-bus asset-category counts (for the right-click menu + group markers).
   // Mirrors the blank canvas: Thermal / Renewables / Storage / Load. Stores
@@ -844,8 +870,17 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
 
         <FitToNetwork buses={buses as Bus[]} suspended={placing} />
 
-        {placing && placingBus && (
-          <ClickToPlace onPick={(lat, lng) => updateBusPosMut.mutate({ name: placingBus, lat, lng })} />
+        {placing && placingBus && placementUiAllowed && (
+          <ClickToPlace onPick={(lat, lng) => {
+            // `unplaced` only shrinks after the PUT round-trips and the buses
+            // query refetches, so without this guard two quick clicks both
+            // target the current `placingBus` — the second overwrites the
+            // first instead of advancing to the next bus. Ignoring the click
+            // while a placement PUT is already in flight makes each click
+            // advance the queue by exactly one bus.
+            if (updateBusPosMut.isPending) return
+            updateBusPosMut.mutate({ name: placingBus, lat, lng })
+          }} />
         )}
 
         {/* Lines — colour by the lower of the two bus voltages. Routable. */}
@@ -1077,7 +1112,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           higher-priority z-[500]/z-[300] overlays and the panel's z-[900]
           would otherwise float on top of them (same guard MapModeSwitcher
           applies for the same reason). */}
-      {!activeSlidePanel && paletteMode === null && (
+      {placementUiAllowed && (
         <UnplacedBusesPanel
           unplacedCount={unplaced.length}
           totalCount={(buses as Bus[]).length}
@@ -1089,9 +1124,12 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       {/* Placement strip. z-[900], not the brief's z-[500]: Leaflet's own
           zoom control sits at z-800 (documented pitfall in this codebase —
           "Floating UI z-index < 800 over Leaflet map"), and z-500 would
-          render the strip UNDER it. Matches UnplacedBusesPanel's z-[900]
-          just above, which the same fix already applies to. */}
-      {placing && placingBus && (
+          render the strip UNDER it. Also gated on `placementUiAllowed` — the
+          UnplacedBusesPanel guard just above applies to this strip too, so a
+          Cmd+K command-palette open (z-500) can't be covered by this strip's
+          higher z-[900], and ClickToPlace (gated the same way) can't leave a
+          bus-placing click live on the map with no visible indicator. */}
+      {placing && placingBus && placementUiAllowed && (
         <div
           className="absolute z-[900] left-1/2 -translate-x-1/2 flex items-center gap-3 px-3 py-2
                      bg-bg border border-border rounded-lg shadow-lg text-xs"
@@ -1104,7 +1142,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           <button
             type="button"
             onClick={() => setSkippedNames(prev => new Set(prev).add(placingBus))}
-            disabled={unplaced.every(n => skippedNames.has(n))}
+            disabled={!canSkip(unplaced, skippedNames)}
             className="px-2 py-1 rounded border border-border text-text hover:bg-border/30
                        transition-colors disabled:opacity-35"
           >Skip</button>

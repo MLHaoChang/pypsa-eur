@@ -304,6 +304,18 @@ def _bus_coord(n, bus_name: str) -> tuple[float, float] | None:
     # BOTH exactly zero: a bus at (0, 51.478) is Greenwich and stays valid.
     if x == 0.0 and y == 0.0:
         return None
+    # Mirrors the range check in frontend/src/utils/geo.ts's busLatLng. The
+    # frontend hides a bus outside these bounds and counts it as "unplaced"
+    # in UnplacedBusesPanel, but until this check _bus_coord had no range
+    # check at all — a bus at y == 91 was hidden by the map and reported as
+    # unplaced while recalculate_lengths still measured a haversine distance
+    # to it and wrote that into n.lines.length. Reachable in practice:
+    # PropertiesPanel's Longitude/Latitude fields are unbounded NumInputs and
+    # BusCreate.x / BusCreate.y (models/schemas.py) are plain unbounded
+    # floats. Do not remove the frontend's check when reading this — both
+    # layers must reject out-of-range coordinates.
+    if not (-90.0 <= y <= 90.0 and -180.0 <= x <= 180.0):
+        return None
     return x, y
 
 

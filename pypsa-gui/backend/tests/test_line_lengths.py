@@ -77,3 +77,25 @@ def test_a_bus_on_the_prime_meridian_is_still_placed(client):
     assert r.status_code == 200, r.text
     assert r.json() == {"updated": 1, "skipped": 0, "total": 1}
     assert 480.0 < _lengths(client)["L1"] < 520.0
+
+
+def test_recalculate_skips_a_line_touching_an_out_of_range_bus(client):
+    # The frontend's busLatLng (utils/geo.ts) rejects |lat| > 90 / |lng| > 180
+    # so an out-of-range bus is hidden on the map and counted as "unplaced" in
+    # UnplacedBusesPanel. Before this guard, _bus_coord had no range check at
+    # all, so recalculate_lengths still measured a real haversine distance to
+    # that impossible point and wrote it into n.lines.length as fact — a bus
+    # the map shows as MISSING was silently treated as PLACED by the model.
+    # y = 91 is reachable: PropertiesPanel's Latitude field is an unbounded
+    # NumInput and BusCreate.y (schemas.py) is a plain unbounded float.
+    _place(client, "COLOGNE", 6.960, 50.938)
+    _place(client, "OUT_OF_RANGE", 6.960, 91.0)
+    _line(client, "L1", "COLOGNE", "OUT_OF_RANGE", 42.0)
+
+    r = client.post("/api/network/lines/recalculate_lengths")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"updated": 0, "skipped": 1, "total": 1}
+
+    # The pre-existing value survives untouched — same contract as an
+    # unplaced (0, 0) bus.
+    assert _lengths(client)["L1"] == 42.0
