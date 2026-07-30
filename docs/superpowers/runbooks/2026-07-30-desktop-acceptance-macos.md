@@ -112,13 +112,46 @@ line and one `EXITED {…}` line.
 | `save` / `load` | `200` | `200` |
 | `buses` | — | `["ColdBus","SurvivedColdStart"]` |
 | `quit` | `unflushed: []`, `errors: []`, `server_stage: "clean"` | same |
+| `bundle.looks_like_js` | `true` | `true` |
+| `reset` / `bus` | `200` / `201` | — |
+| `edit_after_save` | **`201`** | — |
 | `EXITED.status` | `0` | `0` |
+
+**Three caveats that decide whether a FAIL is real.** All three come from an
+adversarial review of this harness, and each one produced a wrong reading:
+
+1. **`edit_after_save` must be `201`.** If that POST is refused (a 503 from the
+   shutdown gate, a 409 from the solver gate, a 500), `first` still satisfies
+   every other criterion — `save: 200`, clean quit, exit 0 — and `relaunch`
+   then reports `buses: ["ColdBus"]`. Read naively that says "the flush lost
+   the edit"; in fact the edit was never created. Check it before filing
+   anything against the flush.
+2. **`relaunch` overwrites its own evidence.** It loads the project and then
+   quits cleanly, and a clean quit flushes memory back to disk. So re-running
+   `relaunch` to confirm a FAIL cannot confirm anything — the first run already
+   rewrote `network.nc` from whatever it loaded. Copy the project directory
+   aside before re-running. (`accept_shutdown.py` has a dedicated `load-only`
+   mode for this reason; `accept_coldstart.py` does not.)
+3. **`never_up: true` is not always "the launch failed".** Two reachable causes
+   leave the log empty or absent: another instance holding the single-instance
+   lock (`gui.py` catches `AlreadyRunning` with no logging and opens a blocking
+   message window — likely here, because the same app-data directory is shared
+   with §4), and an app-data directory that cannot be written (file logging
+   returns None by design, since the handler that would record it is what
+   failed). A genuinely slow first launch is a third: the health budget is
+   3600 s, this harness gives up at 150 s.
+
+**`projects_seen: []` on `first` is a property of the harness, not of a first
+launch.** It stubs `resolve_legacy_root` to `None`, so D10's first-run import
+never runs. The real first launch imports whatever is in the legacy tree — see
+the note under §4.
 
 `buses` is the load-bearing one: `SurvivedColdStart` was created *after* the
 save, so only the quit-flush can have persisted it.
 
-If `never_up: true` appears, the launch failed — the reason is in
-`$ACC/appdata/pypsa-gui.log`, near the end.
+When `never_up: true` appears, start with `$ACC/appdata/pypsa-gui.log` — but
+read caveat 3 first: for two of the reachable causes that file is empty or
+absent, and the absence is itself the diagnosis.
 
 **B2 — solve, cancel, quit** (about 4 minutes; runs a real 8760-snapshot LP):
 

@@ -71,11 +71,21 @@ cd ..\..
 ships the Evergreen runtime; on Windows 10 it may be absent. Check:
 
 ```powershell
-Get-ChildItem "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
+$g = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+"HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$g",
+"HKCU:\Software\Microsoft\EdgeUpdate\Clients\$g" |
+  ForEach-Object { Get-ItemProperty $_ -ErrorAction SilentlyContinue } |
+  Select-Object pv, name
 ```
 
-Nothing returned means install the *Evergreen Standalone Installer* first, or
-the window never appears and the log shows a backend-initialisation failure.
+**Both hives, not just HKLM** — the Evergreen runtime also installs per-user
+under HKCU, where the HKLM key is simply absent. Checking only HKLM tells a
+reader with a working runtime that it is missing, which is then the first
+(wrong) thing they blame for any launch failure.
+
+Nothing returned from EITHER means install the *Evergreen Standalone Installer*
+first; otherwise the window never appears and the log shows a
+backend-initialisation failure.
 
 Throwaway roots and absolute script paths:
 
@@ -129,11 +139,18 @@ non-elevated PowerShell.** As Administrator the directory *is* writable and the
 test passes vacuously.
 
 ```powershell
-pixi run -e desktop cmd /c "cd /d C:\Windows\System32 && python %COLD% first"
-pixi run -e desktop cmd /c "cd /d C:\Windows\System32 && python %COLD% relaunch"
+pixi run -e desktop cmd /c "cd /d C:\Windows\System32 && python ""%COLD%"" first"
+pixi run -e desktop cmd /c "cd /d C:\Windows\System32 && python ""%COLD%"" relaunch"
 ```
 
-If pixi's argument passthrough mangles that quoting, resolve the interpreter
+**The inner quotes around `%COLD%` are load-bearing** and were missing in the
+first version of this file. `%COLD%` is built from `$PWD`, and both a checkout
+path and `%USERPROFILE%` commonly contain a space — the developer's own macOS
+checkout is `…/Desktop/Code Test/pypsa-eur`. Unquoted, cmd splits the argument
+and Python reports `can't open file 'C:\Users\Hao'`, which reads as a missing
+file rather than a quoting bug. (The macOS book always quoted `"$COLD"`.)
+
+If pixi's argument passthrough still mangles it, resolve the interpreter
 through pixi instead of hardcoding it, then call it directly:
 
 ```powershell
@@ -157,7 +174,39 @@ one `EXITED {…}` line.
 | `save` / `load` | `200` | `200` |
 | `buses` | — | `["ColdBus","SurvivedColdStart"]` |
 | `quit` | `unflushed: []`, `errors: []`, `server_stage: "clean"` | same |
+| `bundle.looks_like_js` | `true` | `true` |
+| `reset` / `bus` | `200` / `201` | — |
+| `edit_after_save` | **`201`** | — |
 | `EXITED.status` | `0` | `0` |
+
+**Three caveats that decide whether a FAIL is real.** All three come from an
+adversarial review of this harness, and each one produced a wrong reading:
+
+1. **`edit_after_save` must be `201`.** If that POST is refused (a 503 from the
+   shutdown gate, a 409 from the solver gate, a 500), `first` still satisfies
+   every other criterion — `save: 200`, clean quit, exit 0 — and `relaunch`
+   then reports `buses: ["ColdBus"]`. Read naively that says "the flush lost
+   the edit"; in fact the edit was never created. Check it before filing
+   anything against the flush.
+2. **`relaunch` overwrites its own evidence.** It loads the project and then
+   quits cleanly, and a clean quit flushes memory back to disk. So re-running
+   `relaunch` to confirm a FAIL cannot confirm anything — the first run already
+   rewrote `network.nc` from whatever it loaded. Copy the project directory
+   aside before re-running. (`accept_shutdown.py` has a dedicated `load-only`
+   mode for this reason; `accept_coldstart.py` does not.)
+3. **`never_up: true` is not always "the launch failed".** Two reachable causes
+   leave the log empty or absent: another instance holding the single-instance
+   lock (`gui.py` catches `AlreadyRunning` with no logging and opens a blocking
+   message window — likely here, because the same app-data directory is shared
+   with §4), and an app-data directory that cannot be written (file logging
+   returns None by design, since the handler that would record it is what
+   failed). A genuinely slow first launch is a third: the health budget is
+   3600 s, this harness gives up at 150 s.
+
+**`projects_seen: []` on `first` is a property of the harness, not of a first
+launch.** It stubs `resolve_legacy_root` to `None`, so D10's first-run import
+never runs. The real first launch imports whatever is in the legacy tree — see
+the note under §4.
 
 `buses` is the load-bearing row: `SurvivedColdStart` is created *after* the save,
 so only the quit-flush can have persisted it. **This is the first Windows
@@ -165,8 +214,11 @@ execution of the flush-destination fix** (`shutdown.make_saver`) — before that
 fix the flush wrote to `flat_projects_root` while the load read `projects_root`,
 and the report still said `unflushed: []`.
 
-`never_up: true` means the launch failed; the reason is at the end of
-`%ACC%\appdata\pypsa-gui.log`.
+When `never_up: true` appears, start with `%ACC%\appdata\pypsa-gui.log` — but
+read caveat 3 first. On Windows the lock cause is the likely one: this file
+exports `PYPSAGUI_APP_DATA_DIR` session-wide, so §3's harnesses and §4's real
+app share one `single-instance.lock`, and C6 tells you to hard-kill and
+relaunch.
 
 **B2 — solve, cancel, quit** (~4 min; runs a real 8760-snapshot LP):
 
