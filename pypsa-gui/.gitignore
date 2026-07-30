@@ -5,6 +5,16 @@ frontend/node_modules/
 frontend/dist/
 *.tsbuildinfo
 
+# ── macOS app build artifacts (build-macos.sh) ───────────────────
+# .build-venv/ self-ignores today only because `python -m venv` writes its
+# own internal `.gitignore` (`*`) — that's an accident of the venv tool, not
+# a repo rule, and doesn't cover a BUILD_VENV pointed elsewhere. dist-app/
+# (the frozen .app + .dmg) and .build-work/ (PyInstaller's workpath) had no
+# rule at all and showed up as untracked after every build.
+.build-venv/
+.build-work/
+dist-app/
+
 # ── Python ──────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
