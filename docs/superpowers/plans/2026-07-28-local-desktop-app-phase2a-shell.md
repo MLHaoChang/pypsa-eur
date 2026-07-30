@@ -630,12 +630,28 @@ pypsa-gui.log single-instance.lock webview/`, and the project directory is
 
 `accept/appdata-step5/` and `accept/appdata-download/` contain **no database
 file at all** — only the log, the lock, `webview/`, `flat_projects/` and
-`legacy_unclaimed/`. Those runs' databases were therefore somewhere else
-entirely, resolved from cwd. Their results stand (they assert project files
-under `projects_root` and buses after a reload, neither of which depends on
-where the auth database lived), but "app-data was redirected" was a weaker
-statement than it appeared for the second time in this workstream. The first
-time was `PYPSAGUI_PROJECTS_ROOT`.
+`legacy_unclaimed/`. So "app-data was redirected" was a weaker statement than it
+appeared, for the second time in this workstream; the first time was
+`PYPSAGUI_PROJECTS_ROOT`. Their results stand — both assert project files under
+`projects_root` and buses after a reload, neither of which depends on where the
+auth database lived.
+
+**Where those databases actually went is NOT established, and the first version
+of this paragraph asserted it was.** What is established:
+
+  * the mechanism, measured directly — `settings.database_url` resolves to
+    `sqlite+pysqlite:///./auth_dev.db` under both cwds tested;
+  * that it fires outside the repo in practice: a stray `auth_dev.db` sits at
+    `~/Desktop/Code Test/` — the VS Code workspace root, one level ABOVE the
+    checkout — created 2026-07-28 08:54 and never touched again. Read-only
+    inspection: 9 tables, alembic stamped, 1 user, 1 organization, **0
+    projects**. That is local-mode first-run seeding and nothing else, i.e. a
+    launch whose cwd was the workspace root;
+  * that it is NOT the development database — `backend/auth_dev.db` has mtime
+    2026-07-27 15:58 and was not touched by any run on the 28th or 29th.
+
+The step-5 run's own database file was not located. Recorded as unresolved
+rather than attributed, because the attribution is what would be wrong.
 
 Worth recording: `tests/conftest.py:41` exports `DATABASE_URL=…:memory:` at
 import *for this exact reason* — "otherwise the suite picks up the real
