@@ -59,13 +59,23 @@ across one solve group) and re-solving is a separate decision. Upgrade pixi
 instead. Confirm the pin survived once the app is up: `/api/health` must report
 **pypsa 1.1.2** — an unpinned `desktop` environment reports 1.2.4.
 
+
+**node and npm come from pixi, not the system.** `nodejs >=22` is a pixi
+dependency and there is no separate nodeenv (CLAUDE.md), so a bare `npm` is
+`command not found` on a box provisioned with pixi alone — measured, while
+writing `build-macos.sh`. Put the environment's bin directory on PATH first:
+
 ```powershell
+$env:PATH = "$PWD\.pixi\envs\default;$PWD\.pixi\envs\default\Scripts;$env:PATH"
 cd pypsa-gui\frontend
 npm install
 npm run build
 Test-Path dist\index.html                  # must be True
 cd ..\..
 ```
+
+Note the Windows layout differs: pixi puts executables in the environment root
+and in `Scripts\`, not in `bin/`.
 
 **WebView2 runtime.** pywebview's Windows backend is EdgeChromium. Windows 11
 ships the Evergreen runtime; on Windows 10 it may be absent. Check:

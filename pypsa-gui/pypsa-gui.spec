@@ -89,20 +89,27 @@ hiddenimports = [
     # solve time
     "highspy",
     "dask", "dask.array", "dask.dataframe",
-    "toolz", "cytoolz", "tlz",
+    "toolz", "tlz",
     "yaml", "psutil", "tblib",
     # netCDF IO
     "netCDF4", "netCDF4.utils", "cftime",
     "scipy.sparse.csgraph._validation",
-    "scipy.special._cdflib",
     # uvicorn's own late imports
     "uvicorn.logging", "uvicorn.loops", "uvicorn.loops.asyncio",
     "uvicorn.protocols", "uvicorn.protocols.http",
     "uvicorn.protocols.http.h11_impl",
     "uvicorn.protocols.websockets", "uvicorn.lifespan",
     "uvicorn.lifespan.on",
-    # database drivers resolved by URL string, never imported by name
-    "sqlalchemy.dialects.sqlite", "pysqlite3",
+    # Resolved by URL string, never imported by name. `pysqlite3` is NOT here:
+    # the app uses the stdlib `sqlite3`, and listing the third-party package
+    # only produced `ERROR: Hidden import 'pysqlite3' not found` on every build.
+    #
+    # Three entries were removed after the first build from the pip venv said
+    # so — `cytoolz`, `scipy.special._cdflib` and `pysqlite3` are all present in
+    # the CONDA environment the hidden-import measurement was taken in, and
+    # absent from the wheel venv this actually builds from. The measurement was
+    # right about what loads lazily; it was taken in the wrong environment.
+    "sqlalchemy.dialects.sqlite",
     # the desktop shell
     "webview", "webview.platforms.cocoa",
 ]

@@ -51,10 +51,20 @@ If `pixi install` wants to re-solve, **stop** — the lockfile is pinned (pypsa
 1.1.2 across one solve group) and re-solving it is a separate decision. Upgrade
 pixi rather than regenerating the lock.
 
+
+**node and npm come from pixi, not the system.** `nodejs >=22` is a pixi
+dependency and there is no separate nodeenv (CLAUDE.md), so a bare `npm` is
+`command not found` on a box provisioned with pixi alone — measured, while
+writing `build-macos.sh`. Put the environment's bin directory on PATH first:
+
 ```bash
+export PATH="$PWD/.pixi/envs/default/bin:$PATH"
 cd pypsa-gui/frontend && npm install && npm run build && cd ../..
 ls -la pypsa-gui/frontend/dist/index.html      # must exist and be newer than src/
 ```
+
+Or skip §1-§3 entirely and run `bash pypsa-gui/build-macos.sh`, which does the
+SPA build, the freeze and the secret-scan as one gated step.
 
 Set up a throwaway pair of roots **outside Documents** and an absolute path to
 the harness, because the harnesses deliberately run from `/`:
