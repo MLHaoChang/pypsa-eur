@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
@@ -227,6 +227,25 @@ function FitToNetwork({ buses, suspended }: { buses: Bus[]; suspended: boolean }
     }
     fittedRef.current = true
   }, [buses, map, suspended])
+  return null
+}
+
+// Click-to-place. Mounted inside <MapContainer> only while placement is
+// running, so the map has no click handler at all the rest of the time.
+//
+// Leaflet does not fire `click` at the end of a drag — the same guarantee the
+// bus markers already rely on (see the comment above the bus Marker layer) —
+// so panning to find a location cannot drop a bus by accident.
+function ClickToPlace({ onPick }: { onPick: (lat: number, lng: number) => void }) {
+  const map = useMapEvents({
+    click: (e) => onPick(e.latlng.lat, e.latlng.lng),
+  })
+  useEffect(() => {
+    const el = map.getContainer()
+    const previous = el.style.cursor
+    el.style.cursor = 'crosshair'
+    return () => { el.style.cursor = previous }
+  }, [map])
   return null
 }
 
@@ -581,6 +600,46 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // and by FitToNetwork's `suspended` prop.
   const [placing, setPlacing] = useState(false)
 
+  // Bus names the user has deferred via "Skip", in no particular order.
+  // `placingBus` (below `unplaced` is already declared, so no use-before-
+  // declare) is the first still-unplaced bus that hasn't been skipped,
+  // falling back to the very first unplaced bus once every remaining one has
+  // been skipped over — so skipping only ever REORDERS the queue, it never
+  // drops a bus. Recomputed from `unplaced` on every render rather than a
+  // stale local queue: placing a bus removes it from `unplaced` when the
+  // buses query invalidates, which advances the picker on its own.
+  //
+  // This diverges from the task brief's `unplaced[skipped] ?? unplaced[0]`
+  // numeric-index scheme. That index is a position into an array that
+  // shrinks by one on every successful placement, so "skip" followed by a
+  // "place" silently re-points the same index at whichever bus shifted into
+  // that slot — not the bus the user actually meant to defer. It still
+  // terminates and never resolves to nothing while buses remain (the
+  // `?? unplaced[0]` fallback catches every out-of-bounds case), so no bus
+  // is ever permanently unreachable — but the Skip button ends up disabled
+  // for the rest of the session as soon as the numeric pointer runs off the
+  // shrinking tail, even with several buses still left to place, which reads
+  // as broken. Tracking skipped bus NAMES instead of an index makes "has
+  // this specific bus been skipped" well-defined regardless of how the
+  // array reshuffles, and keeps Skip enabled as long as more than one
+  // unplaced bus remains.
+  const [skippedNames, setSkippedNames] = useState<Set<string>>(new Set())
+  const placingBus = placing
+    ? (unplaced.find(n => !skippedNames.has(n)) ?? unplaced[0])
+    : undefined
+
+  // Escape exits placement mode without waiting for the last bus. Clears the
+  // skip set too, so a later "Place buses on the map" starts from a clean
+  // queue rather than resuming an order the user may not remember setting.
+  useEffect(() => {
+    if (!placing) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setPlacing(false); setSkippedNames(new Set()) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [placing])
+
   const recalcMut = useMutation({
     mutationFn: () => networkApi.recalculateLineLengths(),
     onSuccess: (r) => {
@@ -637,6 +696,32 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       { confirmLabel: 'Recalculate' },
     )
   }
+
+  // Leave placement mode when there is nothing left to place. The toast
+  // OFFERS the line-length recalculation (D6) rather than running it —
+  // `handleRecalc` still confirms before it writes, so accepting the offer
+  // stays two deliberate clicks away from the model edit. Declared here
+  // (below `handleRecalc`) rather than beside the rest of the placement
+  // state above it, so the reference below isn't a use-before-define.
+  useEffect(() => {
+    if (placing && unplaced.length === 0) {
+      setPlacing(false)
+      setSkippedNames(new Set())
+      toast.success(
+        (t) => (
+          <span className="flex items-center gap-2">
+            Every bus now has a location.
+            <button
+              type="button"
+              onClick={() => { toast.dismiss(t.id); handleRecalc() }}
+              className="px-2 py-0.5 rounded border border-border text-[11px] hover:bg-border/30"
+            >Recalculate line lengths</button>
+          </span>
+        ),
+        { duration: 8000 },
+      )
+    }
+  }, [placing, unplaced.length])
 
   // ── Per-bus asset-category counts (for the right-click menu + group markers).
   // Mirrors the blank canvas: Thermal / Renewables / Storage / Load. Stores
@@ -758,6 +843,10 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         )}
 
         <FitToNetwork buses={buses as Bus[]} suspended={placing} />
+
+        {placing && placingBus && (
+          <ClickToPlace onPick={(lat, lng) => updateBusPosMut.mutate({ name: placingBus, lat, lng })} />
+        )}
 
         {/* Lines — colour by the lower of the two bus voltages. Routable. */}
         {(lines as LineT[]).map(line => {
@@ -995,6 +1084,36 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           placing={placing}
           onStartPlacing={() => setPlacing(true)}
         />
+      )}
+
+      {/* Placement strip. z-[900], not the brief's z-[500]: Leaflet's own
+          zoom control sits at z-800 (documented pitfall in this codebase —
+          "Floating UI z-index < 800 over Leaflet map"), and z-500 would
+          render the strip UNDER it. Matches UnplacedBusesPanel's z-[900]
+          just above, which the same fix already applies to. */}
+      {placing && placingBus && (
+        <div
+          className="absolute z-[900] left-1/2 -translate-x-1/2 flex items-center gap-3 px-3 py-2
+                     bg-bg border border-border rounded-lg shadow-lg text-xs"
+          style={{ bottom: 24 }}
+        >
+          <span className="text-text">
+            Placing <span className="font-mono font-medium">{placingBus}</span> — click the map
+            <span className="text-muted"> ({unplaced.length} left)</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setSkippedNames(prev => new Set(prev).add(placingBus))}
+            disabled={unplaced.every(n => skippedNames.has(n))}
+            className="px-2 py-1 rounded border border-border text-text hover:bg-border/30
+                       transition-colors disabled:opacity-35"
+          >Skip</button>
+          <button
+            type="button"
+            onClick={() => { setPlacing(false); setSkippedNames(new Set()) }}
+            className="px-2 py-1 rounded bg-accent text-white hover:opacity-90 transition-opacity"
+          >Done</button>
+        </div>
       )}
 
       {/* Bus right-click context menu — same layout & options as the blank
