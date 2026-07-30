@@ -124,6 +124,90 @@ if [ -n "${CODESIGN_IDENTITY:-}" ]; then
   fi
 fi
 
+# ── the DMG (workstream J) ──────────────────────────────────────────────────
+#
+# The `.app` alone is not a distributable: handing someone a folder-that-is-
+# really-a-bundle invites them to run it from Downloads, where the first
+# `/Applications` copy they do later leaves two installs. A DMG with an
+# `Applications` symlink makes drag-to-install the obvious move.
+#
+# Skip with SKIP_DMG=1 during fast iteration.
+if [ -z "${SKIP_DMG:-}" ]; then
+  step "Building the DMG"
+  STAGE="$WORK/dmg-stage"
+  rm -rf "$STAGE" && mkdir -p "$STAGE"
+  # ditto, not cp: preserves symlinks, resource forks and the signature.
+  /usr/bin/ditto "$APP" "$STAGE/PyPSA GUI.app"
+  ln -s /Applications "$STAGE/Applications"
+
+  # MEASURED instructions, not the usual folklore. On macOS 15.0.1 with this
+  # bundle: `xattr -dr` fails with `Operation not permitted` on 1855 paths
+  # INCLUDING the bundle root and the app stays blocked; the non-recursive
+  # form on the .app alone works and the app launches. And Sequoia removed the
+  # Control-click -> Open override that spec J.3 tells us to document, so that
+  # instruction would have shipped broken.
+  cat > "$STAGE/README.txt" <<'READ'
+PyPSA GUI — installation
+========================
+
+1. Drag "PyPSA GUI" onto the Applications folder in this window.
+2. Open it from Applications (Spotlight, Launchpad, or double-click).
+
+
+If macOS says "cannot be opened because the developer cannot be verified"
+-------------------------------------------------------------------------
+
+This build is not signed with an Apple Developer ID, so macOS blocks it the
+first time IF the file was downloaded through a browser or mail client. A copy
+handed over on a USB stick, by scp, or from an internal file share usually
+carries no such mark and just opens.
+
+Two ways past it, either is fine:
+
+  * System Settings -> Privacy & Security. After the first refusal there is an
+    "Open Anyway" button near the bottom of that page. Press it, then open the
+    app again.
+
+  * Or, in Terminal, one line:
+
+        xattr -d com.apple.quarantine "/Applications/PyPSA GUI.app"
+
+    Note: NOT `xattr -dr`. The recursive form fails on this app with
+    "Operation not permitted" and leaves it blocked.
+
+On macOS 15 (Sequoia) and later, right-clicking the app and choosing Open no
+longer works — Apple removed that shortcut. Use one of the two above.
+
+
+Where your data lives
+---------------------
+
+  Projects:  ~/Documents/PyPSA GUI/Projects/       (ordinary folders)
+  App data:  ~/Library/Application Support/PyPSA GUI/
+  Log:       ~/Library/Application Support/PyPSA GUI/pypsa-gui.log
+
+Already have projects from a pre-desktop install? In the app choose
+New project -> From folder, and point it at your old projects directory.
+It copies; your originals are left untouched.
+READ
+
+  DMG="$DIST/PyPSA-GUI.dmg"
+  rm -f "$DMG"
+  hdiutil create -volname "PyPSA GUI" -srcfolder "$STAGE" -ov -format UDZO -quiet "$DMG"
+  rm -rf "$STAGE"
+
+  if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+    # The DMG is signed and notarised in its OWN right. A notarised app inside
+    # an unsigned DMG still warns on the container.
+    codesign --force --sign "$CODESIGN_IDENTITY" "$DMG"
+    if [ -n "${NOTARY_PROFILE:-}" ]; then
+      xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+      xcrun stapler staple "$DMG"
+    fi
+  fi
+  echo "  $DMG  ($(du -h "$DMG" | cut -f1))"
+fi
+
 step "Done"
 echo "  $APP"
 echo
