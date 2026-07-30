@@ -9,8 +9,11 @@
 // could match stale nodes left by earlier tests. Dialog.test.tsx was the
 // first file to call `render()` more than once per file and is what
 // surfaced this.
-import { afterEach } from 'vitest'
+import { afterEach, expect } from 'vitest'
 import { cleanup } from '@testing-library/react'
+import * as matchers from '@testing-library/jest-dom/matchers'
+
+expect.extend(matchers)
 
 afterEach(() => {
   cleanup()
