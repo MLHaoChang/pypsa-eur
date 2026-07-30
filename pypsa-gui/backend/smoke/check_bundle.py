@@ -36,13 +36,19 @@ from pathlib import Path
 
 # Exact basenames that must never appear.
 FORBIDDEN_FILES = {
-    ".env",              # ANTHROPIC_API_KEY, SECRET_KEY
-    ".env.example",      # a template, but it teaches the layout and has a DATABASE_URL
     "auth_dev.db",       # a password hash plus absolute developer paths
     "auth_dev.db-wal",
     "auth_dev.db-shm",
     "pypsa-gui.db",      # a real user's database, if a build ran from app-data
 }
+
+# Anything starting `.env`, not an enumeration of the two that exist today.
+# The rest of this file matches by NAME ANYWHERE IN THE TREE precisely so it
+# survives layout changes — but the secret list itself was a list of current
+# filenames, which is the same brittleness one level down. `.env.local` and
+# `.env.production` are gitignored by convention, so they are exactly the ones
+# a reviewer would never see in a diff.
+FORBIDDEN_PREFIXES = (".env",)
 
 # Directory names that must never appear. `projects` is 113 MB of real user
 # work; the others are development state that would ship absolute local paths.
@@ -55,7 +61,7 @@ FORBIDDEN_DIRS = {
 }
 
 # Suffixes that are secret-shaped wherever they turn up.
-FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keychain"}
+FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keychain", ".db"}
 
 # PUBLIC certificate material that legitimately ships. The suffix rule above is
 # about PRIVATE keys; a CA bundle is the opposite — it is public by design and
@@ -67,6 +73,13 @@ FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keychain"}
 # because the layout differs between a `.app`, a onedir build and Windows.
 ALLOWED_DESPITE_SUFFIX = {
     "cacert.pem",       # certifi
+    # PROJ's coordinate-reference database, 9 MB, shipped by pyproj and
+    # REQUIRED. Measured the hard way: when a running app lost access to this
+    # file, saving a project failed with
+    #   CRSError: Invalid projection: EPSG:4326 (... SQLite ... disk I/O error)
+    # so a `.db` rule without this entry would fail every build, and "nothing
+    # legitimate ships a .db" is not true of this bundle.
+    "proj.db",
 }
 
 # What SHOULD be there. Absence is not fatal here — a missing template breaks
@@ -92,7 +105,7 @@ def scan(root: Path) -> tuple[list[str], list[str]]:
                 problems.append(f"FORBIDDEN DIRECTORY  {rel}")
             continue
 
-        if name in FORBIDDEN_FILES:
+        if name in FORBIDDEN_FILES or name.startswith(FORBIDDEN_PREFIXES):
             problems.append(f"FORBIDDEN FILE       {rel}")
         elif path.suffix.lower() in FORBIDDEN_SUFFIXES and name not in ALLOWED_DESPITE_SUFFIX:
             problems.append(f"SECRET-SHAPED FILE   {rel}")
