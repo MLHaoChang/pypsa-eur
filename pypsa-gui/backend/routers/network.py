@@ -295,6 +295,15 @@ def _bus_coord(n, bus_name: str) -> tuple[float, float] | None:
         return None
     if not (math.isfinite(x) and math.isfinite(y)):
         return None
+    # PyPSA's Bus.x / Bus.y default to 0.0, so the exact pair means "never
+    # set", not "the Gulf of Guinea". Without this, every line touching an
+    # unplaced bus is rewritten to the great-circle distance to Null Island
+    # and stored as fact — see tests/test_line_lengths.py and
+    # docs/superpowers/specs/2026-07-30-unplaced-buses-map-design.md.
+    #
+    # BOTH exactly zero: a bus at (0, 51.478) is Greenwich and stays valid.
+    if x == 0.0 and y == 0.0:
+        return None
     return x, y
 
 
