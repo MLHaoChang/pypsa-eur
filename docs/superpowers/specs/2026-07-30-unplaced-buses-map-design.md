@@ -90,9 +90,10 @@ JavaScript `-0.0 === 0`, so negative zero is covered without a special case.
 **D2. Derived, not stored.** No `placed` column, no schema change, no
 migration, nothing to keep in sync with `x`/`y`.
 
-**D3. Frontend and backend change together, in one commit.** A map that hides a
-bus while the backend still measures a line to it is worse than today's
-behaviour.
+**D3. The backend guard lands first; the frontend is never ahead of it.** A map
+that hides a bus while the backend still measures a line to it is worse than
+today's behaviour. Ordering satisfies that invariant without forcing one large
+commit: backend-only is a strict improvement on its own, frontend-only is not.
 
 **D4. The predicate moves to `utils/geo.ts`.** `carriers.ts` exists precisely
 because a shared predicate was copy-pasted into four files and drifted — two
@@ -197,11 +198,20 @@ Written before the implementation, per `CLAUDE.md`.
 
 - `frontend/src/utils/geo.test.ts` — `(0,0)` unset; Greenwich `(0, 51.5)`
   placed; `-0.0`; `NaN`; out-of-range; ordinary coordinates.
-- MapCanvas component test — all-default buses render **no** markers and show
-  the empty state.
+- `frontend/src/components/UnplacedBusesPanel.test.tsx` — the empty state's
+  copy and its two shapes (full panel vs. partial chip), mounted in jsdom.
 - `backend/tests/test_line_lengths.py` — success criterion 3. This is the
   regression test for the corruption path, and the mutation target for
   criterion 5.
+
+**Why there is no `MapCanvas` component test.** The empty state is extracted
+into `UnplacedBusesPanel`, a unit with no Leaflet import, so the copy the user
+reads is genuinely under test. The other half of the guarantee — that an
+unplaced bus renders nothing — is covered by `geo.test.ts`, because every
+marker, line and asset-bubble call site already does `if (!c) return null`; a
+null coordinate *is* the non-render. Mounting `MapCanvas` itself would need
+react-query, the zustand store, `CanvasResultsProvider` and a Leaflet container
+with real dimensions, against no Leaflet-test precedent in this suite.
 
 ## Out of scope
 
