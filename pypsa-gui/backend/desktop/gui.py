@@ -47,7 +47,7 @@ from desktop.single_instance import AlreadyRunning, SingleInstance
 
 logger = logging.getLogger(__name__)
 
-WINDOW_TITLE = "PyPSA GUI"
+WINDOW_TITLE = "PyPSA Studio"
 INITIAL_SIZE = (1440, 900)
 # Below roughly this the workbench's side panels and canvas overlap. Enforced
 # rather than advisory, because a window dragged smaller is indistinguishable

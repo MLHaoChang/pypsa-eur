@@ -340,7 +340,7 @@ def test_admin_email_status_and_test_email(admin_client, mail_outbox) -> None:
     assert test_response.json() == {"ok": True, "to": "deliver@example.com"}
     assert len(mail_outbox) == 1
     assert mail_outbox[0]["to"] == "deliver@example.com"
-    assert mail_outbox[0]["subject"] == "PyPSA GUI email test"
+    assert mail_outbox[0]["subject"] == "PyPSA Studio email test"
 
 
 def test_bootstrap_super_admin_script_creates_active_super_admin(tmp_path, monkeypatch) -> None:

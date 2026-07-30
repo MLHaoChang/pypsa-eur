@@ -21,7 +21,7 @@ REPO="$(cd "$HERE/.." && pwd)"
 VENV="${BUILD_VENV:-$HERE/.build-venv}"
 DIST="${DIST_DIR:-$HERE/dist-app}"
 WORK="${WORK_DIR:-$HERE/.build-work}"
-APP="$DIST/PyPSA GUI.app"
+APP="$DIST/PyPSA Studio.app"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
@@ -137,7 +137,7 @@ if [ -z "${SKIP_DMG:-}" ]; then
   STAGE="$WORK/dmg-stage"
   rm -rf "$STAGE" && mkdir -p "$STAGE"
   # ditto, not cp: preserves symlinks, resource forks and the signature.
-  /usr/bin/ditto "$APP" "$STAGE/PyPSA GUI.app"
+  /usr/bin/ditto "$APP" "$STAGE/PyPSA Studio.app"
   ln -s /Applications "$STAGE/Applications"
 
   # MEASURED instructions, not the usual folklore. On macOS 15.0.1 with this
@@ -147,10 +147,10 @@ if [ -z "${SKIP_DMG:-}" ]; then
   # Control-click -> Open override that spec J.3 tells us to document, so that
   # instruction would have shipped broken.
   cat > "$STAGE/README.txt" <<'READ'
-PyPSA GUI — installation
-========================
+PyPSA Studio — installation
+===========================
 
-1. Drag "PyPSA GUI" onto the Applications folder in this window.
+1. Drag "PyPSA Studio" onto the Applications folder in this window.
 2. Open it from Applications (Spotlight, Launchpad, or double-click).
 
 
@@ -170,7 +170,7 @@ Two ways past it, either is fine:
 
   * Or, in Terminal, one line:
 
-        xattr -d com.apple.quarantine "/Applications/PyPSA GUI.app"
+        xattr -d com.apple.quarantine "/Applications/PyPSA Studio.app"
 
     Note: NOT `xattr -dr`. The recursive form fails on this app with
     "Operation not permitted" and leaves it blocked.
@@ -182,18 +182,22 @@ longer works — Apple removed that shortcut. Use one of the two above.
 Where your data lives
 ---------------------
 
-  Projects:  ~/Documents/PyPSA GUI/Projects/       (ordinary folders)
-  App data:  ~/Library/Application Support/PyPSA GUI/
-  Log:       ~/Library/Application Support/PyPSA GUI/pypsa-gui.log
+  Projects:  ~/Documents/PyPSA Studio/Projects/     (ordinary folders)
+  App data:  ~/Library/Application Support/PyPSA Studio/
+  Log:       ~/Library/Application Support/PyPSA Studio/pypsa-gui.log
+
+Upgrading from a build called "PyPSA GUI"? Your existing folders keep
+working — the app uses them when they are there, so nothing moves and
+nothing is lost.
 
 Already have projects from a pre-desktop install? In the app choose
 New project -> From folder, and point it at your old projects directory.
 It copies; your originals are left untouched.
 READ
 
-  DMG="$DIST/PyPSA-GUI.dmg"
+  DMG="$DIST/PyPSA-Studio.dmg"
   rm -f "$DMG"
-  hdiutil create -volname "PyPSA GUI" -srcfolder "$STAGE" -ov -format UDZO -quiet "$DMG"
+  hdiutil create -volname "PyPSA Studio" -srcfolder "$STAGE" -ov -format UDZO -quiet "$DMG"
   rm -rf "$STAGE"
 
   if [ -n "${CODESIGN_IDENTITY:-}" ]; then
@@ -211,8 +215,8 @@ fi
 step "Done"
 echo "  $APP"
 echo
-echo "Install:  rm -rf '/Applications/PyPSA GUI.app' && cp -R '$APP' /Applications/"
-echo "Run:      open -a 'PyPSA GUI'"
+echo "Install:  rm -rf '/Applications/PyPSA Studio.app' && cp -R '$APP' /Applications/"
+echo "Run:      open -a 'PyPSA Studio'"
 
 if [ -z "${CODESIGN_IDENTITY:-}" ]; then
   cat <<'MSG'

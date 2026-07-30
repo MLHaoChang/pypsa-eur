@@ -296,8 +296,8 @@ def email_test_endpoint(
     try:
         email_service.send_email(
             to=target_email,
-            subject="PyPSA GUI email test",
-            body_text="PyPSA GUI SMTP delivery is working.",
+            subject="PyPSA Studio email test",
+            body_text="PyPSA Studio SMTP delivery is working.",
             metadata={"purpose": "admin_test"},
         )
     except email_service.EmailServiceError as exc:

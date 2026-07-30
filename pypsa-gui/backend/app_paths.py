@@ -15,7 +15,30 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME = "PyPSA GUI"
+APP_NAME = "PyPSA Studio"
+
+# What the app was called before. `APP_NAME` is not a label — it is the
+# directory the user's projects live in, so renaming it outright points a
+# working install at empty folders: the app opens, lists nothing, and the
+# projects are still on disk under the old name with nothing saying so. To the
+# person it happens to that is indistinguishable from data loss.
+LEGACY_APP_NAME = "PyPSA GUI"
+
+
+def _preferred(base: Path) -> Path:
+    """
+    The new directory, unless only the OLD one exists.
+
+    Ordered this way on purpose: the NEW path wins as soon as it exists, so a
+    stale empty `PyPSA GUI` folder — one `mkdir` from any earlier launch —
+    cannot pin every future install to the old name forever. The legacy path is
+    a fallback for machines that have real data there, not a permanent alias.
+    """
+    new = (base / APP_NAME).resolve()
+    if new.exists():
+        return new
+    legacy = (base / LEGACY_APP_NAME).resolve()
+    return legacy if legacy.exists() else new
 
 
 def app_data_dir() -> Path:
@@ -29,7 +52,7 @@ def app_data_dir() -> Path:
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
     else:
         base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    return (base / APP_NAME).resolve()
+    return _preferred(base)
 
 
 def default_projects_root() -> Path:
@@ -37,12 +60,14 @@ def default_projects_root() -> Path:
     Org-scoped project store, ``<root>/<org_uuid>/<project_uuid>/``.
 
     User-visible on purpose — being able to find, back up and zip your own
-    projects is most of the point of a local app.
+    projects is most of the point of a local app. Which is exactly why the
+    rename has to keep an existing install pointing at its own projects; see
+    `_preferred`.
     """
     override = os.environ.get("PYPSAGUI_PROJECTS_ROOT")
     if override:
         return Path(override).expanduser().resolve()
-    return (Path.home() / "Documents" / APP_NAME / "Projects").resolve()
+    return _preferred(Path.home() / "Documents") / "Projects"
 
 
 def default_flat_projects_root() -> Path:

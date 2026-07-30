@@ -155,7 +155,7 @@ def bootstrap_sequence(
         # it, leaving the user with an app that vanished instead of an app that
         # told them something.
         report_failure(
-            "The PyPSA GUI backend did not start. Details are in the log file "
+            "The PyPSA Studio backend did not start. Details are in the log file "
             "in your application data folder."
         )
         return False

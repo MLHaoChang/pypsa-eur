@@ -29,7 +29,7 @@ if [ ! -d "$FRONTEND/node_modules" ]; then
   (cd "$FRONTEND" && PATH="$ENV_BIN:$PATH" "$NPM" install) || exit 1
 fi
 
-echo "Starting PyPSA GUI..."
+echo "Starting PyPSA Studio..."
 echo "Backend:  http://localhost:8000"
 echo "Frontend: http://localhost:5173"
 echo

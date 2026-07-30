@@ -305,7 +305,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="PyPSA GUI API",
+    title="PyPSA Studio API",
     version="1.0.0",
     lifespan=lifespan,
     # Runs before every endpoint on every router: binds the caller's session to
@@ -449,7 +449,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
                 # the realistic cause is a second copy holding the SQLite file.
                 detail = (
                     "Local database unavailable. Close any other running copy "
-                    "of PyPSA GUI and try again."
+                    "of PyPSA Studio and try again."
                 )
             else:
                 detail = (
@@ -524,7 +524,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
             content={
                 "code": shutdown_service.SHUTTING_DOWN_CODE,
                 "detail": (
-                    "PyPSA GUI is shutting down and is no longer accepting "
+                    "PyPSA Studio is shutting down and is no longer accepting "
                     "changes. If you cancelled the quit, this clears itself."
                 ),
             },

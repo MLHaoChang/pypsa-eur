@@ -28,7 +28,7 @@ export default function AdminLayout() {
         <aside className="flex w-full flex-col justify-between gap-8 rounded-[32px] bg-gradient-to-br from-[#14090a] via-[#4a1418] to-[#8c1d22] p-8 text-white shadow-[0_24px_80px_rgba(0,0,0,0.55)] lg:max-w-[320px]">
           <div className="space-y-6">
             <div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--brand-ink)]">PyPSA GUI</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--brand-ink)]">PyPSA Studio</p>
               <h1 className="text-4xl font-semibold tracking-[-0.03em]">Admin console</h1>
               <p className="text-sm leading-6 text-[var(--brand-ink-dim)]">
                 Manage organizations, onboard users, migrate legacy projects, and verify outbound email delivery.
