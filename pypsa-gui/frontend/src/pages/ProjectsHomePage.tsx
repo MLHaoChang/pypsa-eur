@@ -366,7 +366,14 @@ export default function ProjectsHomePage() {
             <button className={PRIMARY_BUTTON} onClick={() => setWizardTab('blank')} type="button">
               New project
             </button>
-            {hasAdminConsoleAccess(user) && (
+            {/* `authEnabled` FIRST, for the same reason as Sign out below.
+                Local mode synthesizes an admin identity (`localAdminUser()`
+                sets `is_super_admin: true`), so `hasAdminConsoleAccess` is
+                true in the desktop app and cannot hide this on its own — while
+                the backend does not mount `routers/admin.py` at all there, so
+                every admin route 404s. Found on screen in the packaged app:
+                the first thing that looks like a feature was a dead end. */}
+            {authEnabled && hasAdminConsoleAccess(user) && (
               <Link className={GHOST_BUTTON} to="/admin">
                 Open admin
               </Link>
