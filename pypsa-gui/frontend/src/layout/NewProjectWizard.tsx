@@ -1,12 +1,15 @@
 import { useState, useRef, useEffect, useCallback, useId } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  FolderInput,
   FilePlus, FolderOpen, BookOpen, Upload, Copy as CopyIcon, X, AlertTriangle,
   Sparkles,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { ProjectInfo } from '../api/types'
 import { projectsApi } from '../api/projects'
+import { useAuthMode } from '../auth/AuthModeProvider'
+import FromFolderTab from './FromFolderTab'
 import { ioApi } from '../api/io'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -39,7 +42,7 @@ export interface NewProjectWizardProps {
   initialTab?: NewProjectTab
 }
 
-export type NewProjectTab = 'blank' | 'template' | 'file' | 'clone'
+export type NewProjectTab = 'blank' | 'template' | 'file' | 'clone' | 'folder'
 type Tab = NewProjectTab
 
 // Curated example networks. `available: true` templates are backed by a real
@@ -57,6 +60,7 @@ export default function NewProjectWizard({
   existingProjects, onConfirm, onClose, isPending, initialTab = 'blank',
 }: NewProjectWizardProps) {
   const [tab, setTab] = useState<Tab>(initialTab)
+  const { authEnabled } = useAuthMode()
   const titleId = useId()
 
   return (
@@ -83,6 +87,12 @@ export default function NewProjectWizard({
         <TabBtn id="template" active={tab === 'template'} onClick={() => setTab('template')} icon={<BookOpen size={12} />}    label="From template" />
         <TabBtn id="file"     active={tab === 'file'}     onClick={() => setTab('file')}     icon={<Upload size={12} />}     label="From file" />
         <TabBtn id="clone"    active={tab === 'clone'}    onClick={() => setTab('clone')}    icon={<CopyIcon size={12} />}   label="Clone" />
+        {/* DESKTOP ONLY. The route it calls takes a server-side path, so it
+            404s when auth is on — offering the tab there would be a dead end
+            of exactly the kind the "Open admin" button turned out to be. */}
+        {!authEnabled && (
+          <TabBtn id="folder" active={tab === 'folder'} onClick={() => setTab('folder')} icon={<FolderInput size={12} />} label="From folder" />
+        )}
       </div>
 
       {/* Body */}
@@ -91,6 +101,7 @@ export default function NewProjectWizard({
         {tab === 'template' && <TemplateTab onClose={onClose} />}
         {tab === 'file'     && <FromFileTab onClose={onClose} />}
         {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} />}
+        {tab === 'folder' && !authEnabled && <FromFolderTab onClose={onClose} />}
       </div>
     </Dialog>
   )

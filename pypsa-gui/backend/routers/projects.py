@@ -24,6 +24,7 @@ from db.session import get_db
 from deps import current_session, optional_user
 from models.schemas import (
     CreateScenarioRequest,
+    ImportFolderRequest,
     ImportSummary,
     ProjectInfo,
     RenameProjectRequest,
@@ -686,6 +687,80 @@ def list_unclaimed_projects(
         }
         for project in list_legacy_projects()
     ]
+
+
+@router.post(
+    "/import-folder",
+    dependencies=[Depends(local_mode.reject_unless_local_mode)],
+)
+def import_projects_from_folder(
+    body: ImportFolderRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Import every project under a folder the user names. Desktop app only.
+
+    **Why this route exists.** The packaged app cannot reach a pre-desktop
+    project tree at all: `resolve_legacy_root()` looks for `backend/projects`,
+    which no bundle contains, and `PYPSAGUI_LEGACY_IMPORT_ROOT` is in the
+    shell's `_MANAGED` set and therefore CLEARED on every frozen launch —
+    deliberately, so a stale inherited variable cannot copy a tree the app never
+    chose into the user's Documents. Correct, and it left a user who installed
+    the app with no way in short of importing one file at a time.
+
+    **Its position in this file is load-bearing.** It must stay above the
+    dynamic `POST /{name}` further down, exactly as the `/unclaimed` note says.
+    Measured while writing the tests: with the route declared below,
+    `POST /api/projects/import-folder` matched `{name}` and ran the DESTRUCTIVE
+    SAVE, serialising the in-memory network over a project literally called
+    "import-folder" — and answered 200, so the test read as a passing preview.
+
+    `apply=false` by default: the destructive version of this is one click on a
+    path somebody typed, and `import_all` already has a faithful dry run.
+    """
+    from services import legacy_import, project_registry
+
+    project_registry.require_user(user)
+
+    source = pathlib.Path(body.path).expanduser()
+    if not source.exists():
+        raise HTTPException(400, f"That folder does not exist: {source}")
+    if not source.is_dir():
+        raise HTTPException(400, f"That path is not a folder: {source}")
+
+    manifest = None
+    if body.apply:
+        # Same shape as the first-run import, including the timestamped
+        # manifest — an import that cannot be rolled back is refused up front
+        # rather than discovered afterwards.
+        import app_paths
+
+        stamp = datetime.now(tz=timezone.utc)
+        manifest = app_paths.app_data_dir() / f"import-manifest-{stamp:%Y%m%dT%H%M%S}.json"
+
+    report = legacy_import.import_all(
+        db, source, local_mode.LOCAL_ORG_ID, user.id,
+        apply=body.apply, manifest_path=manifest,
+    )
+    if body.apply and manifest is not None and not report.records:
+        manifest.unlink(missing_ok=True)
+
+    return {
+        "source": str(source),
+        "applied": body.apply,
+        # A DRY RUN fills `would_import`; only an applied run fills `imported`.
+        # Returning just the latter made a preview of a folder full of projects
+        # answer with every list empty, which reads as "nothing to import" —
+        # the precise wrong answer this preview exists to prevent.
+        "would_import": report.would_import,
+        "imported": report.imported,
+        "already_imported": report.already_imported,
+        "skipped": report.skipped,
+        "collisions": report.collisions,
+        "failed": report.failed,
+        "warnings": report.warnings,
+    }
 
 
 @router.post(

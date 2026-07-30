@@ -127,3 +127,119 @@ def test_a_project_whose_directory_is_gone_is_reported_as_MISSING(local_client, 
         "the project's files are gone but the list reports it as an ordinary "
         "empty project — clicking it 404s with no explanation"
     )
+
+
+# ── importing a folder of pre-desktop projects (packaged app) ───────────────
+
+
+def test_import_folder_is_REFUSED_when_auth_is_on(client, tmp_path):
+    """
+    The security property, asserted before the feature.
+
+    This route takes a SERVER-SIDE PATH from the request body and copies what it
+    finds into the caller's project store. In the desktop app the server and the
+    user are the same person, so that is merely a file dialog. On a web
+    deployment it is an arbitrary-filesystem read for any authenticated user —
+    point it at `/etc`, or at another tenant's storage root, and the importer
+    inventories and copies whatever it can parse.
+
+    So the gate is not "admin only", it is "this deployment has no other
+    tenants". 404 rather than 403, matching the four `unclaimed` doors which
+    are closed the same way and for the same reason.
+    """
+    r = client.post("/api/projects/import-folder", json={"path": str(tmp_path)})
+
+    assert r.status_code == 404, r.text
+
+
+def test_import_folder_previews_without_copying_anything(local_client, monkeypatch, tmp_path):
+    """
+    `apply=false` is the default because the destructive version of this button
+    is one click on a path the user typed. `import_all(apply=False)` already
+    reports what WOULD happen and touches nothing.
+    """
+    monkeypatch.setenv("PYPSAGUI_PROJECTS_ROOT", str(tmp_path / "dest"))
+    source = tmp_path / "legacy"
+    (source / "OldProject").mkdir(parents=True)
+    (source / "OldProject" / "network.nc").write_bytes(b"not really a network")
+
+    r = local_client.post("/api/projects/import-folder", json={"path": str(source)})
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # `would_import`, NOT `imported` — a dry run fills the former and leaves the
+    # latter empty. Returning only `imported` made a preview of a folder full of
+    # projects answer with every list empty, i.e. "nothing to import".
+    assert body["applied"] is False
+    assert "OldProject" in body["would_import"], body
+    assert body["imported"] == [], body
+    assert not (tmp_path / "dest" / "OldProject").exists(), "a preview must copy nothing"
+
+
+def test_import_folder_rejects_a_path_that_is_not_a_directory(local_client, tmp_path):
+    """
+    A typed path is the input. Saying which of "does not exist" and "is a file"
+    went wrong is the difference between a fixable mistake and a shrug.
+    """
+    missing = local_client.post("/api/projects/import-folder", json={"path": str(tmp_path / "nope")})
+    assert missing.status_code == 400
+    assert "does not exist" in missing.json()["detail"].lower()
+
+    afile = tmp_path / "a.txt"
+    afile.write_text("x")
+    not_dir = local_client.post("/api/projects/import-folder", json={"path": str(afile)})
+    assert not_dir.status_code == 400
+    assert "not a folder" in not_dir.json()["detail"].lower()
+
+
+def test_import_folder_actually_copies_when_applied(local_client, monkeypatch, tmp_path):
+    """
+    The preview test passing says nothing about the path that writes. And the
+    property that matters most here is that the SOURCE survives: this is the
+    button a user points at their old working directory, and `legacy_import`
+    copies rather than moves for exactly that reason.
+    """
+    dest = tmp_path / "dest"
+    monkeypatch.setenv("PYPSAGUI_PROJECTS_ROOT", str(dest))
+    source = tmp_path / "legacy"
+    (source / "OldProject").mkdir(parents=True)
+    (source / "OldProject" / "network.nc").write_bytes(b"not really a network")
+
+    r = local_client.post(
+        "/api/projects/import-folder", json={"path": str(source), "apply": True}
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["applied"] is True
+    assert "OldProject" in body["imported"], body
+    assert body["failed"] == [] and body["collisions"] == [], body
+    assert (source / "OldProject" / "network.nc").exists(), (
+        "the importer moved the user's source instead of copying it"
+    )
+    assert "OldProject" in {p["name"] for p in local_client.get("/api/projects/").json()}
+
+
+def test_importing_the_same_folder_twice_does_not_duplicate(local_client, monkeypatch, tmp_path):
+    """
+    A user who clicks Import twice, or points at the same folder next week,
+    must not get `OldProject (2)`. Idempotence comes from the receipts the
+    importer writes, not from a marker.
+    """
+    monkeypatch.setenv("PYPSAGUI_PROJECTS_ROOT", str(tmp_path / "dest"))
+    source = tmp_path / "legacy"
+    (source / "OldProject").mkdir(parents=True)
+    (source / "OldProject" / "network.nc").write_bytes(b"not really a network")
+
+    first = local_client.post(
+        "/api/projects/import-folder", json={"path": str(source), "apply": True}
+    ).json()
+    second = local_client.post(
+        "/api/projects/import-folder", json={"path": str(source), "apply": True}
+    ).json()
+
+    assert first["imported"] == ["OldProject"]
+    assert second["imported"] == [], second
+    assert second["already_imported"] == ["OldProject"], second
+    names = [p["name"] for p in local_client.get("/api/projects/").json()]
+    assert names.count("OldProject") == 1, names

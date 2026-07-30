@@ -50,6 +50,31 @@ afterEach(() => {
   authMode.authEnabled = false
 })
 
+describe('the import-a-folder entry point', () => {
+  it('is offered in the desktop app, where it is the only way in', async () => {
+    // The packaged app cannot reach a pre-desktop tree: `resolve_legacy_root()`
+    // finds no `backend/projects` in a bundle, and the shell CLEARS
+    // `PYPSAGUI_LEGACY_IMPORT_ROOT` on every frozen launch. Without this card a
+    // user who installed the app has no route in but one file at a time.
+    authMode.authEnabled = false
+
+    renderPage()
+
+    expect(await screen.findByText('Import a folder')).toBeTruthy()
+  })
+
+  it('is absent on the web deployment, where the route 404s', async () => {
+    // It takes a SERVER-SIDE path and copies what it finds, so it is refused
+    // when auth is on. Offering it there would be another "Open admin".
+    authMode.authEnabled = true
+
+    renderPage()
+
+    await screen.findByRole('navigation', { name: 'Account' })
+    expect(screen.queryByText('Import a folder')).toBeNull()
+  })
+})
+
 describe('the admin console entry point', () => {
   it('is absent in the desktop app, where /api/admin/* is not mounted', async () => {
     // `localAdminUser()` sets `is_super_admin: true` and `role: 'admin'`, so

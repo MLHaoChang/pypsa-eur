@@ -464,6 +464,19 @@ class ImportSummary(BaseModel):
     snapshots: int
 
 
+class ImportFolderRequest(BaseModel):
+    """
+    A folder the desktop user points at, to import pre-desktop projects from.
+
+    `apply` defaults to False: the destructive version of this is one click on
+    a path somebody typed, and `legacy_import.import_all` already offers a
+    faithful dry run. The UI previews first and asks.
+    """
+
+    path: str
+    apply: bool = False
+
+
 class ProjectInfo(BaseModel):
     name: str
     # Stable project identifier. Populated with the DB-registry UUID (as a

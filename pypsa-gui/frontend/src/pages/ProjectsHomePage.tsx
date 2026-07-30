@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { BookOpen, Copy as CopyIcon, FilePlus, Upload } from 'lucide-react'
+import { BookOpen, Copy as CopyIcon, FilePlus, FolderInput, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { projectsApi, type UnclaimedProject } from '../api/projects'
 import { networkApi } from '../api/network'
@@ -78,6 +78,16 @@ const START_ACTIONS: ReadonlyArray<{
   { tab: 'file', label: 'Import from disk', hint: '.pypsaproj.zip or .nc', Icon: Upload },
   { tab: 'clone', label: 'Duplicate a project', hint: 'Fork one you can access', Icon: CopyIcon },
 ]
+
+// DESKTOP ONLY, appended to the grid in local mode. The route behind it
+// takes a server-side path, so it 404s when auth is on — and a card that
+// cannot work is the defect the "Open admin" button already was.
+const FOLDER_STARTER = {
+  tab: 'folder' as const,
+  label: 'Import a folder',
+  hint: 'Bring in pre-desktop projects',
+  Icon: FolderInput,
+}
 
 interface RowFeedback {
   tone: 'ok' | 'error'
@@ -459,7 +469,8 @@ export default function ProjectsHomePage() {
             </p>
           </div>
           <ul className="grid list-none gap-3 p-0 sm:grid-cols-2 xl:grid-cols-4">
-            {START_ACTIONS.map(({ tab, label, hint, Icon }) => (
+            {(authEnabled ? START_ACTIONS : [...START_ACTIONS, FOLDER_STARTER])
+              .map(({ tab, label, hint, Icon }) => (
               <li key={tab}>
                 <button
                   className={`group flex h-full w-full flex-col items-start gap-2 rounded-[18px] border border-white/12 bg-[rgba(33,27,28,0.7)] p-4 text-left backdrop-blur-[18px] transition duration-200 hover:border-[rgba(255,82,82,0.4)] hover:bg-[rgba(40,33,34,0.85)] motion-safe:hover:-translate-y-0.5 ${FOCUS_RING}`}

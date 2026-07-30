@@ -135,9 +135,40 @@ function listProjects(options?: ListProjectsOptions): Promise<ProjectInfo[]> {
   })
 }
 
+/**
+ * What `POST /projects/import-folder` reports back.
+ *
+ * `would_import` is filled by a PREVIEW (`apply: false`); `imported` only by a
+ * real run. Reading only `imported` makes a preview of a full folder look like
+ * "nothing to import" — the exact wrong answer the preview exists to prevent.
+ *
+ * Desktop app only: the route 404s when auth is on, because it takes a
+ * server-side path and copies what it finds there.
+ */
+export interface ImportFolderReport {
+  source: string
+  applied: boolean
+  would_import: string[]
+  imported: string[]
+  already_imported: string[]
+  skipped: string[]
+  collisions: string[]
+  failed: string[]
+  warnings: string[]
+}
+
 export const projectsApi = {
   list: listProjects,
   listUnclaimed: listUnclaimedProjects,
+  // `apply: false` previews and copies nothing; the UI asks before the real
+  // run. `skipErrorToast` because a 400 ("that folder does not exist") is
+  // rendered inline next to the input the user just typed into.
+  importFolder: (path: string, apply = false) =>
+    client.post<ImportFolderReport>(
+      '/projects/import-folder',
+      { path, apply },
+      { skipErrorToast: true },
+    ).then(r => r.data),
   // 400/403/409 carry a `{detail}` the caller renders inline next to the row,
   // so the global error toast is suppressed.
   importUnclaimed: (name: string) =>

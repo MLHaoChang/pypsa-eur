@@ -75,6 +75,28 @@ def reject_in_local_mode() -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
+def reject_unless_local_mode() -> None:
+    """
+    FastAPI dependency: 404 the route unless running as the desktop app.
+
+    The mirror of `reject_in_local_mode`, and it exists for a sharper reason
+    than symmetry. It guards routes that take a SERVER-SIDE PATH from the
+    caller — `POST /api/projects/import-folder` inventories and copies whatever
+    it finds there.
+
+    In the desktop app the server and the user are the same person, so such a
+    route is a file dialog. On a web deployment it is an arbitrary-filesystem
+    read for any authenticated user: point it at another tenant's storage root
+    and the importer copies what it can parse. So the gate is not "admin only",
+    it is "this deployment has exactly one tenant, and they own the disk".
+
+    404 rather than 403, matching the doors closed the other way: the surface
+    genuinely does not exist there.
+    """
+    if not is_local_mode():
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
