@@ -152,6 +152,17 @@ function StatChips({ project, scenarios }: { project: ProjectInfo; scenarios: nu
   const scenarioLabel = scenarioCountLabel(scenarios)
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--brand-ink-dim)]">
+      {/* First, because it changes what every other chip MEANS: a missing
+          project reports zero buses and zero snapshots, which is exactly what
+          a brand-new project reports. */}
+      {project.missing && (
+        <span
+          className="inline-flex items-center rounded-full border border-[rgba(255,82,82,0.45)] bg-[rgba(255,82,82,0.12)] px-2.5 py-1 font-medium text-[var(--brand-red-soft)]"
+          title="This project's folder is no longer on disk. It was probably deleted or moved outside the app."
+        >
+          Files missing
+        </span>
+      )}
       <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
         {formatCount(project.bus_count, 'bus', 'buses')}
       </span>
@@ -536,20 +547,33 @@ export default function ProjectsHomePage() {
                             scenarios={countScenarios(projects, project.name)}
                           />
                         </div>
-                        <span
-                          aria-hidden="true"
-                          className="inline-flex items-center gap-2 text-sm font-medium text-[var(--brand-red-soft)] transition group-hover:gap-3"
-                        >
-                          {isLaunching ? 'Opening…' : 'Open project'}
-                          <span>→</span>
-                        </span>
-                        <Link
-                          className={`absolute inset-0 rounded-[20px] ${FOCUS_RING}`}
-                          onClick={event => openProject(event, project)}
-                          to={projectHref(project)}
-                        >
-                          <span className="sr-only">Open {project.name}</span>
-                        </Link>
+                        {/* No open affordance when the files are gone — the
+                            request 404s, and an inviting card that fails is
+                            worse than one that explains itself. The whole-card
+                            <Link> goes with it, or the card stays clickable
+                            while only the label changes. */}
+                        {project.missing ? (
+                          <span className="text-sm font-medium text-[var(--brand-ink-dim)]">
+                            Folder not found — delete this entry, or restore the folder
+                          </span>
+                        ) : (
+                          <>
+                            <span
+                              aria-hidden="true"
+                              className="inline-flex items-center gap-2 text-sm font-medium text-[var(--brand-red-soft)] transition group-hover:gap-3"
+                            >
+                              {isLaunching ? 'Opening…' : 'Open project'}
+                              <span>→</span>
+                            </span>
+                            <Link
+                              className={`absolute inset-0 rounded-[20px] ${FOCUS_RING}`}
+                              onClick={event => openProject(event, project)}
+                              to={projectHref(project)}
+                            >
+                              <span className="sr-only">Open {project.name}</span>
+                            </Link>
+                          </>
+                        )}
                       </article>
                     </li>
                   )

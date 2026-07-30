@@ -482,6 +482,18 @@ class ProjectInfo(BaseModel):
     # decide whether to commit or discard the partial write. Surfaced in the
     # crash-recovery banner on the next app open.
     has_orphan_tmp: bool = False
+    # The registry row exists but its files do not. Specific to the LOCAL app:
+    # D13 puts projects in `~/Documents/PyPSA GUI/Projects/<name>/` so a human
+    # can navigate them, which means deleting one in Finder is the designed
+    # workflow meeting its obvious consequence — not misuse, and impossible in
+    # the web deployment where nobody has the disk.
+    #
+    # Without this the stub branch reports `bus_count: 0`, which is exactly
+    # what a real empty project reports, so the list shows an ordinary entry
+    # that 404s when opened. Reported rather than hidden (the user still needs
+    # a handle to delete the row) or purged (a project on an unmounted share
+    # would be destroyed).
+    missing: bool = False
     # Name of the parent project (None = root scenario, not a child).
     # A non-null value means this project is a scenario branched off another.
     # The frontend reconstructs the scenario tree by walking these pointers.

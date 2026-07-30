@@ -680,7 +680,7 @@ TOOLS: list[dict[str, Any]] = [
         "list_projects",
         "All projects on disk as ProjectInfo entries: name, id, created_at, "
         "has_solver_config, bus_count, snapshot_count, objective, "
-        "has_orphan_tmp, parent_project, scenario_description (per "
+        "has_orphan_tmp, missing, parent_project, scenario_description (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
         "augmented with `resident: bool` "
@@ -788,7 +788,7 @@ TOOLS: list[dict[str, Any]] = [
         "Derived tool (no /scenarios endpoint exists — B2 fix). Returns "
         "list_projects filtered to entries where parent_project == name. Each "
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
-        "bus_count, snapshot_count, objective, has_orphan_tmp, "
+        "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
         "parent_project, scenario_description} per schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},

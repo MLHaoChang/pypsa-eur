@@ -295,6 +295,11 @@ export interface ProjectInfo {
   // been explicitly committed or discarded. Surfaced in the crash-recovery
   // banner on App startup.
   has_orphan_tmp?: boolean
+  // The registry row exists but its files do not — a local user deleted the
+  // folder in Finder, which D13's human-navigable layout invites. Without
+  // this the card is indistinguishable from a real empty project and Open
+  // project 404s. Never true in the web deployment; nobody has the disk.
+  missing?: boolean
   // Phase 8 scenario-tree fields. `parent_project` is non-null when this
   // project is a scenario branched off another; the scenario tree is the
   // graph reconstructed by walking these pointers across the list.

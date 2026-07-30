@@ -575,6 +575,12 @@ def _project_info_db(db, project) -> ProjectInfo:
             has_solver_config=(d / "solver_config.json").exists(),
             bus_count=0,
             snapshot_count=0,
+            # This branch is reached BOTH by a project that was never written
+            # and by one whose files a local user deleted in Finder — and until
+            # now the two were indistinguishable, because an empty project also
+            # reports zero buses. `GET /{name}` already 404s for the second, so
+            # the list was the only place still claiming it was fine.
+            missing=not d.is_dir(),
         )
     info.name = project.name
     info.id = str(project.id)

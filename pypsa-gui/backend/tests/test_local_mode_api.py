@@ -77,3 +77,53 @@ def test_web_mode_still_401s_without_a_cookie(_auth_db, monkeypatch):
     with TestClient(main.app) as c:
         c.cookies.clear()
         assert c.get("/api/projects/").status_code == 401
+
+
+# ── a project whose folder the user deleted in Finder ───────────────────────
+
+
+def test_a_project_whose_directory_is_gone_is_reported_as_MISSING(local_client, monkeypatch, tmp_path):
+    """
+    D13 puts projects in `~/Documents/PyPSA GUI/Projects/<name>/` **so a human
+    can navigate them**. So a local user deleting a folder in Finder is the
+    designed workflow meeting its obvious consequence, not misuse — and it
+    cannot happen in the web deployment at all, where nobody has the disk.
+
+    Measured in the packaged app: the folder was gone, `GET /api/projects/`
+    still listed the project, and `GET /api/projects/<name>` returned **404**.
+    The list is DB-backed by design ("a storage key with no row is invisible
+    here"), and the reverse — a row with no storage — had no signal at all: the
+    stub branch reports `bus_count: 0`, which is exactly what a real, empty
+    project reports.
+
+    Reported rather than hidden or purged. Hiding it loses the user's only
+    handle on a row they still need to delete; purging it would drop rows for a
+    project on a network share or external disk that simply is not mounted yet.
+    """
+    monkeypatch.setenv("PYPSAGUI_PROJECTS_ROOT", str(tmp_path / "projects"))
+
+    assert local_client.post("/api/network/reset").status_code == 200
+    assert local_client.post(
+        "/api/network/buses", json={"name": "B0", "v_nom": 380.0}
+    ).status_code == 201
+    assert local_client.post("/api/projects/Vanishing").status_code == 200
+
+    listed = {p["name"]: p for p in local_client.get("/api/projects/").json()}
+    assert listed["Vanishing"]["missing"] is False, "a live project must not be flagged"
+
+    # The Finder delete.
+    import shutil
+    from services import project_registry
+    from db import session as db_session
+    from db.models import Project as _Project
+
+    with db_session.SessionLocal() as db:
+        row = db.query(_Project).filter(_Project.name == "Vanishing").one()
+        shutil.rmtree(project_registry.project_dir(row))
+
+    listed = {p["name"]: p for p in local_client.get("/api/projects/").json()}
+    assert "Vanishing" in listed, "the row is still there, so the user needs to see it"
+    assert listed["Vanishing"]["missing"] is True, (
+        "the project's files are gone but the list reports it as an ordinary "
+        "empty project — clicking it 404s with no explanation"
+    )
