@@ -77,7 +77,17 @@ datas = [
 # Distributions whose `importlib.metadata` is read at runtime. Without these the
 # frozen app raises PackageNotFoundError instead of starting.
 for dist in ("pypsa", "linopy", "xarray", "fastapi", "uvicorn", "starlette",
-             "pydantic", "SQLAlchemy", "alembic", "pywebview"):
+             "pydantic", "SQLAlchemy", "alembic", "pywebview",
+             # `plotly/__init__.py:34` runs
+             # `importlib.metadata.version("plotly")` UNCONDITIONALLY at
+             # import, and `import pypsa` pulls in `pypsa.plot` -> plotly. Both
+             # verified in the build venv. The frozen app launches today only
+             # because PyInstaller's contributed plotly hook happens to supply
+             # the metadata — i.e. by accident of third-party hook behaviour
+             # rather than by anything this file says. Spec §5.10 lists it;
+             # declared here so a hook change cannot turn it into
+             # PackageNotFoundError on a user's machine.
+             "plotly"):
     try:
         datas += copy_metadata(dist)
     except Exception:                      # noqa: BLE001 - absent in some builds
@@ -171,6 +181,40 @@ a = Analysis(                              # noqa: F821 - injected
     },
 )
 
+# ── free size wins (spec §I.3) ──────────────────────────────────────────────
+#
+# MEASURED against the shipped bundle rather than taken from the spec's list.
+# Two of the three §I.3 targets — `pydeck/nbextension/static/index.js.map`
+# (18 MB) and `plotly/labextension` (4.6 MB) — are ALREADY absent from a build
+# made in the pip-wheel venv, so the spec's "~28 MB" is a conda-environment
+# number. Only this one survives, at 4.8 MB.
+#
+# `widgetbundle.js` is plotly's ipywidgets renderer for Jupyter. This app draws
+# its charts in the SPA and never constructs a FigureWidget, so it is dead
+# weight in a desktop bundle. Pruned by suffix, not by absolute path, because
+# the collected name differs between onedir and .app layouts.
+_PRUNE_SUFFIXES = (
+    "plotly/package_data/widgetbundle.js",
+    "pydeck/nbextension/static/index.js.map",
+    "plotly/labextension",
+)
+
+
+def _pruned(entries):
+    kept, dropped = [], []
+    for entry in entries:
+        name = str(entry[0]).replace("\\", "/")
+        if any(name.endswith(sfx) or f"/{sfx}" in name for sfx in _PRUNE_SUFFIXES):
+            dropped.append(name)
+        else:
+            kept.append(entry)
+    for name in dropped:
+        print(f"pypsa-gui.spec: pruned {name}")
+    return kept
+
+
+a.datas = _pruned(a.datas)
+
 pyz = PYZ(a.pure)                          # noqa: F821 - injected
 
 exe = EXE(                                 # noqa: F821 - injected
@@ -235,6 +279,12 @@ app = BUNDLE(                              # noqa: F821 - injected
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "14.0",   # netCDF4's arm64 wheel floor
         "CFBundleShortVersionString": "0.1.0",
+        # The MACHINE-readable build number, distinct from the marketing
+        # string above. D9's updater and any stapling workflow key off this
+        # one, and it is awkward to retrofit once builds are in the wild:
+        # a version that only ever existed as "0.1.0" gives an updater nothing
+        # to compare.
+        "CFBundleVersion": "0.1.0",
     },
 )
 

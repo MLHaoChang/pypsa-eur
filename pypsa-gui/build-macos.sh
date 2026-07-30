@@ -150,8 +150,13 @@ if [ -z "${SKIP_DMG:-}" ]; then
 PyPSA Studio — installation
 ===========================
 
+Requires macOS 14 (Sonoma) or later, on Apple Silicon.
+
 1. Drag "PyPSA Studio" onto the Applications folder in this window.
 2. Open it from Applications (Spotlight, Launchpad, or double-click).
+
+On macOS 12 or 13 the app will not start and Finder says "requires a newer
+version of macOS" — that is this requirement, not a broken download.
 
 
 If macOS says "cannot be opened because the developer cannot be verified"

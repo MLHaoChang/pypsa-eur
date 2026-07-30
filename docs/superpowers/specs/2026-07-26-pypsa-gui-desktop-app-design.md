@@ -25,7 +25,7 @@ UI functionality is unchanged.
 
 | # | Area | Decision |
 |---|---|---|
-| D1 | Platforms | Windows x64 (10/11), macOS arm64 (12+). No Intel Mac, no Linux. |
+| D1 | Platforms | Windows x64 (10/11), macOS arm64 (**14+**). No Intel Mac, no Linux. *Was 12+; corrected 2026-07-30 after measuring.* |
 | D2 | App shell | pywebview native window (WebView2 / WKWebView). |
 | D3 | Distribution | Installer + `--onedir` app folder. Not a single self-extracting file. |
 | D4 | Auth | Local mode: seed one org + user, bypass the session gate. Auth code retained. |
@@ -40,6 +40,31 @@ UI functionality is unchanged.
 | D13 | Folder names | Human-readable project directories on disk. |
 | D14 | Build env | Separate pip-wheel venv (`gui-requirements.txt`), not the pixi/conda env. |
 | D15 | Size trim | None beyond free wins. Ship ~500–600 MB; revisit only if users complain. |
+
+### Note on D1 — the macOS floor is 14, not 12
+
+Measured against `gui-requirements.txt` on PyPI, not assumed. Lowest macOS
+floor offered by each pinned package's arm64 wheels:
+
+| Package | Floor |
+|---|---|
+| **netCDF4 1.7.3** | **14.0** |
+| scipy 1.17.1 | 12.0 |
+| numpy, pandas, matplotlib, highspy, ujson, SQLAlchemy | 11.0 |
+
+netCDF4 is the sole binding constraint, and it is not version-specific: every
+arm64 wheel it publishes from 1.7.1 through 1.7.4 floors at `macosx_14_0`.
+netCDF4 is how every project is written and read, so it cannot be dropped, and
+building it from source needs an HDF5/netcdf-c toolchain — precisely what D14's
+pip-wheel decision exists to avoid.
+
+So "12+" was never achievable through the chosen build path. `LSMinimumSystemVersion`
+in `pypsa-gui.spec` says 14.0, which is correct; this row was the stale half.
+
+Why it matters beyond bookkeeping: a macOS 12 or 13 user gets Finder's
+"requires a newer version of macOS" and **no log entry**, because the app never
+starts. It is invisible on the developer's machine and only ever surfaces on
+someone else's.
 
 ### Note on D13
 
