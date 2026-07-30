@@ -828,6 +828,22 @@ async def import_bundle(
     """
     from services.upload_guard import read_capped
     data = await read_capped(file)
+
+    # Named separately, because it is the one malformed case whose fix is
+    # somewhere else entirely. A user pointed the app at a `.pypsaproj.zip` in
+    # their Documents and reported the IMPORT as broken; the file was 0 bytes —
+    # a download that never wrote anything, from before the export path was
+    # fixed to fetch first and save second. `zipfile` says "File is not a zip
+    # file", which reads as "this app cannot open my project" and sends the
+    # user looking for a bug in the importer instead of re-exporting.
+    if not data:
+        raise HTTPException(
+            400,
+            f"'{file.filename or 'That file'}' is empty (0 bytes), so there is "
+            f"nothing to import. It is most likely a download that did not "
+            f"finish — export or download the project again and retry.",
+        )
+
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:

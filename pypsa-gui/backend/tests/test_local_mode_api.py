@@ -243,3 +243,46 @@ def test_importing_the_same_folder_twice_does_not_duplicate(local_client, monkey
     assert second["already_imported"] == ["OldProject"], second
     names = [p["name"] for p in local_client.get("/api/projects/").json()]
     assert names.count("OldProject") == 1, names
+
+
+# ── importing a project bundle ──────────────────────────────────────────────
+
+
+def test_an_EMPTY_bundle_says_it_is_empty(local_client, tmp_path):
+    """
+    A user pointed the app at `3_nodes_system.pypsaproj.zip` in Documents and
+    reported the import as broken. The file was **0 bytes** — a download that
+    never wrote anything, from before the export path was fixed to fetch first
+    and save second. The app was right to refuse it.
+
+    But it said "Not a valid zip bundle: File is not a zip file", which reads as
+    "this app cannot open my project" rather than "this file is empty". The user
+    went looking for a bug in the importer. An empty file is the one malformed
+    case worth naming, because the fix is somewhere else entirely: get the file
+    again.
+    """
+    empty = tmp_path / "3_nodes_system.pypsaproj.zip"
+    empty.write_bytes(b"")
+
+    with empty.open("rb") as fh:
+        r = local_client.post("/api/projects/import_bundle", files={"file": (empty.name, fh, "application/zip")})
+
+    assert r.status_code == 400
+    detail = r.json()["detail"].lower()
+    assert "empty" in detail, detail
+    assert "0 bytes" in detail or "no data" in detail, detail
+
+
+def test_a_truncated_bundle_still_reports_the_underlying_reason(local_client, tmp_path):
+    """
+    The empty case is special-cased; everything else must keep the reason it had.
+    A partial download is NOT empty and the user needs the distinction.
+    """
+    broken = tmp_path / "half.pypsaproj.zip"
+    broken.write_bytes(b"PK\x03\x04 truncated junk that is not a zip")
+
+    with broken.open("rb") as fh:
+        r = local_client.post("/api/projects/import_bundle", files={"file": (broken.name, fh, "application/zip")})
+
+    assert r.status_code == 400
+    assert "empty" not in r.json()["detail"].lower(), r.json()
