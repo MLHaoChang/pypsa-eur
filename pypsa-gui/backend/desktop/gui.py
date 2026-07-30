@@ -170,8 +170,33 @@ def _bootstrap(state: dict) -> None:
         except Exception:
             logger.exception("could not report the failure on the splash")
 
+    def release_socket() -> None:
+        """
+        Give the port back on a launch that failed.
+
+        `bind_socket()` runs on the main thread before `import main`, so by the
+        time anything here can fail there is already a LISTENING socket with a
+        backlog of 128 — and the process deliberately STAYS ALIVE to show the
+        error on the splash. So the socket outlives the failure unless someone
+        releases it, which partly defeats `bind_socket`'s own reason for
+        listening early: refusing connections rather than queueing them in a
+        backlog nothing reads.
+
+        Through the server when one exists — `stop()` routes to `close()` via
+        `never_ran`, and closing the raw socket underneath a live uvicorn is
+        the EBADF hazard `stop()` documents at length.
+        """
+        server = state.get("server")
+        try:
+            if server is not None:
+                server.stop()
+            elif state.get("sock") is not None:
+                state["sock"].close()
+        except Exception:
+            logger.exception("could not release the socket after a failed launch")
+
     try:
-        bootstrap.bootstrap_sequence(
+        if not bootstrap.bootstrap_sequence(
             apply_environment=lambda: launcher.apply_environment(state["env"]),
             import_backend=import_backend,
             serve=serve,
@@ -180,9 +205,14 @@ def _bootstrap(state: dict) -> None:
             destroy_splash=destroy_splash,
             report_failure=report_failure,
             progress=progress,
-        )
+        ):
+            # `bootstrap_sequence` returns False on the unhealthy-backend path
+            # and reports to the splash itself. The return value was DISCARDED
+            # here, which is how that path leaked the socket silently.
+            release_socket()
     except Exception:
         logger.exception("the launch failed")
+        release_socket()
         report_failure(
             "PyPSA GUI could not start. See pypsa-gui.log in your application "
             "data folder."

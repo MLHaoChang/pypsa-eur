@@ -389,7 +389,13 @@ def test_a_409_is_caught_specifically_and_reported():
     # NOT `"409" in message` — the generic branch echoes the status code too,
     # so that assertion passes whether or not the 409 is handled specially.
     # What distinguishes them is that the user is told what it MEANS.
-    assert "still running" in problems[0], problems
+    #
+    # This assertion used to be `"still running" in problems[0]`, which pinned
+    # a CAUSE the code asserted rather than knew. `_save_context` also raises
+    # 409 to refuse overwriting a saved project with an empty network, and that
+    # case was reported as "a solve was still running" when none was. The
+    # reason given is now echoed, so the assertion is on the detail.
+    assert "solver in flight" in problems[0], problems
     assert "abort did not finish" in problems[0], problems
 
 
@@ -1458,3 +1464,81 @@ def test_the_GUI_actually_uses_the_saver(monkeypatch):
         "shadowed inline saver drops storage_dir and writes to "
         "flat_projects_root, which is the defect 11806022 fixed"
     )
+
+
+# ── the report tells the truth about drafts and refusals ────────────────────
+
+
+class _Net:
+    def __init__(self, empty: bool):
+        import pandas as pd
+
+        self.buses = pd.DataFrame() if empty else pd.DataFrame({"v_nom": [380.0]})
+
+
+class _Draft:
+    """A context that was never saved: it has content and no binding."""
+
+    def __init__(self, empty=False):
+        self.network = _Net(empty)
+        self.loaded_project = None
+        self.project_uuid = None
+        self.storage_dir = None
+
+
+def test_a_never_saved_draft_with_work_in_it_is_REPORTED_not_silently_dropped():
+    """
+    Import a `.nc` with no project open, edit for an hour, quit. No solve is in
+    flight so there is no confirm dialog; `make_saver` returns on its first
+    line because there is no `loaded_project`; nothing raises. Before this the
+    loop recorded nothing, `unflushed` stayed empty, and `persist_report` wrote
+    no file — a quit that reports clean over work that is gone.
+    """
+    draft = _Draft()
+
+    problems = shutdown_service.flush_all(
+        contexts=[draft], active=draft,
+        save=lambda ctx, persist: None, flush_chat=lambda: None, safe=True,
+    )
+
+    assert len(problems) == 1, problems
+    assert "an unsaved draft" in problems[0]
+    assert "never been saved" in problems[0]
+
+
+def test_a_fresh_empty_scratch_context_is_not_reported():
+    """
+    Every launch creates one. Reporting it would put "NOT saved" in front of
+    the user on every clean quit, which trains them to ignore the report.
+    """
+    problems = shutdown_service.flush_all(
+        contexts=[_Draft(empty=True)], active=None,
+        save=lambda ctx, persist: None, flush_chat=lambda: None, safe=True,
+    )
+
+    assert problems == []
+
+
+def test_a_409_reports_the_reason_it_was_given_not_an_assumed_one():
+    """
+    `_save_context` raises 409 for at least two reasons reachable from the
+    flush: a solver in flight, and the guard refusing to overwrite a saved
+    project with an empty network. The message named the first unconditionally
+    — so deleting every bus and quitting produced "a solve was still running"
+    when none was, in the one artifact whose job is to be truthful.
+    """
+    from fastapi import HTTPException
+
+    ctx = _Draft()
+    ctx.loaded_project = "Baseline"
+
+    def refuse(_ctx, _persist):
+        raise HTTPException(409, "refusing to overwrite a 40-bus project with an empty network")
+
+    problems = shutdown_service.flush_all(
+        contexts=[ctx], active=ctx,
+        save=refuse, flush_chat=lambda: None, safe=True,
+    )
+
+    assert "refusing to overwrite" in problems[0], problems
+    assert "a solve was still running" not in problems[0]

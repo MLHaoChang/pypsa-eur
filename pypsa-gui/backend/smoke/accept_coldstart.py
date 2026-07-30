@@ -66,10 +66,55 @@ _appdata = os.environ.get("PYPSAGUI_APP_DATA_DIR", "")
 _projects = os.environ.get("PYPSAGUI_PROJECTS_ROOT", "")
 assert _appdata, "refusing to run: set PYPSAGUI_APP_DATA_DIR to a throwaway directory"
 assert _projects, "refusing to run: set PYPSAGUI_PROJECTS_ROOT to a throwaway directory"
+# `settings` declares NO `env_prefix`, so `projects_root` binds the BARE name
+# `PROJECTS_ROOT` through pydantic — and a bound env value outranks the
+# `default_factory`, which is the only place `PYPSAGUI_PROJECTS_ROOT` is ever
+# read. Same for the other two. So a developer with `PROJECTS_ROOT` exported or
+# sitting in `backend/.env` gets full isolation theatre from the two variables
+# below while the app writes somewhere else entirely. Measured, not reasoned:
+# `PROJECTS_ROOT=/tmp/decoy PYPSAGUI_PROJECTS_ROOT=/tmp/throwaway` resolves
+# `settings.projects_root` to `/tmp/decoy`.
+for _bare in ("PROJECTS_ROOT", "FLAT_PROJECTS_ROOT", "LEGACY_ROOT"):
+    assert not os.environ.get(_bare), (
+        f"refusing to run: {_bare} is set, and pydantic binds that bare name "
+        f"ABOVE the PYPSAGUI_* variable this harness isolates with — unset it"
+    )
+
+
+def _is_inside(child: Path, parent: Path) -> bool:
+    """
+    Containment that survives the three spellings that defeated the old check.
+
+    `parent not in child.parents` fails when: the path IS `~/Documents` (not a
+    parent of itself); the case differs on APFS, which is case-insensitive by
+    default; or `~/Documents` is a SYMLINK, which macOS "Desktop & Documents
+    Folders" in iCloud Drive makes the default — `child.resolve()` then lands
+    under the target and the literal needle never appears.
+    """
+    try:
+        child_r = child.expanduser().resolve()
+        parent_r = parent.expanduser().resolve()
+    except OSError:
+        return False
+    a, b = str(child_r), str(parent_r)
+    if sys.platform in ("darwin", "win32"):      # case-insensitive by default
+        a, b = a.lower(), b.lower()
+    return a == b or a.startswith(b.rstrip("/\\") + os.sep)
+
+
 for _label, _v in (("PYPSAGUI_APP_DATA_DIR", _appdata), ("PYPSAGUI_PROJECTS_ROOT", _projects)):
-    _p = Path(_v).expanduser().resolve()
-    assert _p != (BACKEND / "projects").resolve(), f"refusing to run: {_label} IS the real projects tree"
-    assert Path.home() / "Documents" not in _p.parents, f"refusing to run: {_label} is inside Documents"
+    _p = Path(_v)
+    assert _p.is_absolute(), (
+        f"refusing to run: {_label} is relative, so it resolves against the "
+        f"working directory — which this harness deliberately sets to one the "
+        f"app cannot write"
+    )
+    assert not _is_inside(_p, BACKEND / "projects"), (
+        f"refusing to run: {_label} is inside the real projects tree"
+    )
+    assert not _is_inside(_p, Path.home() / "Documents"), (
+        f"refusing to run: {_label} is inside Documents"
+    )
 
 # An EXPORTED `DATABASE_URL` takes the operator branch in `build_environment`,
 # so the pin this harness exists to prove is never exercised and the run passes
@@ -168,6 +213,32 @@ def work():
             "bytes": len(body),
             "is_spa": b'<div id="root"' in body or b"<div id=root" in body,
         }
+
+        # `spa.html` is 2.5 KB whose only React content is a <script src>. A
+        # `dist/` with the shell but a missing or mismatched hashed bundle —
+        # the stale build both run-books' Hard Rule #4 exists for — passes
+        # `is_spa` and every other B1 field, and opens a BLANK window. So
+        # follow the script tag.
+        import re as _re
+
+        m = _re.search(rb'<script[^>]+src="(/assets/[^"]+\.js)"', body)
+        out["bundle"] = {"found_in_html": bool(m)}
+        if m:
+            href = m.group(1).decode()
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+            c.request("GET", href)
+            br = c.getresponse()
+            blob = br.read()
+            c.close()
+            out["bundle"] = {
+                "found_in_html": True,
+                "href": href,
+                "status": br.status,
+                "bytes": len(blob),
+                # A real React bundle is hundreds of KB; a 404 handler or an
+                # index.html fallback is not.
+                "looks_like_js": br.status == 200 and len(blob) > 50_000,
+            }
 
         out["projects_seen"] = [
             p.get("name") for p in (api("GET", "/api/projects/", port=port)[1] or [])

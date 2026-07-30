@@ -206,6 +206,26 @@ def _context_label(ctx: Any) -> str:
     return "an unsaved draft"
 
 
+def _holds_work(ctx: Any) -> bool:
+    """
+    Does this context contain anything a user would miss?
+
+    Buses as the proxy, matching `_save_evicted_ctx`: every other PyPSA
+    component attaches to one, and an empty-bus network is the fresh scratch
+    context every launch creates. Defensive because this runs during a quit —
+    a context whose network cannot be inspected is reported rather than
+    silently dropped.
+    """
+    network = getattr(ctx, "network", None)
+    if network is None:
+        return False
+    try:
+        return not network.buses.empty
+    except Exception:  # noqa: BLE001 - never let reporting break the shutdown
+        logger.exception("could not inspect a context during the flush")
+        return True
+
+
 def flush_all(
     *,
     contexts: list[Any],
@@ -235,13 +255,19 @@ def flush_all(
         try:
             save(ctx, ctx is active)
         except HTTPException as exc:
-            # Caught SPECIFICALLY. A 409 means "a solver is still in flight for
-            # this context, so your edits were not written" — a different thing
-            # from a disk error, and the one the user needs to hear about.
+            # Caught SPECIFICALLY. A 409 means the write was REFUSED rather
+            # than failed, which the user needs to hear about — but the cause
+            # is reported, never assumed. `_save_context` raises 409 for at
+            # least two reasons reachable from here: a solver still in flight,
+            # and the guard that refuses to overwrite a saved project with an
+            # empty network. Naming the first unconditionally told the user "a
+            # solve was still running" when none was, in the single artifact
+            # whose whole job is to be truthful about dropped work.
             if exc.status_code == 409:
+                detail = str(getattr(exc, "detail", "") or "refused")
                 problems.append(
-                    f"{name}: not saved (409 — a solve was still running"
-                    f"{'' if safe else ', and the abort did not finish'})"
+                    f"{name}: not saved (409 — {detail}"
+                    f"{'' if safe else '; the abort did not finish'})"
                 )
             else:
                 problems.append(f"{name}: not saved ({exc.status_code} {exc.detail})")
@@ -249,6 +275,25 @@ def flush_all(
         except Exception as exc:
             problems.append(f"{name}: not saved ({exc})")
             logger.exception("shutdown flush failed for %s", name)
+        else:
+            # A context with no `loaded_project` is SKIPPED by every saver —
+            # `make_saver` returns on the first line. Nothing raised, so the
+            # loop recorded nothing, `unflushed` stayed empty, and
+            # `persist_report` therefore wrote no report file at all: a quit
+            # that looks clean over work that is gone.
+            #
+            # `_context_label`'s "an unsaved draft" branch was written for
+            # exactly this and was unreachable — computed on every iteration,
+            # consumed only inside the except arms.
+            #
+            # Gated on the network actually holding something, or every clean
+            # quit from a fresh launch would report a draft that does not
+            # exist. Same proxy `_save_evicted_ctx` uses.
+            if not getattr(ctx, "loaded_project", None) and _holds_work(ctx):
+                problems.append(
+                    f"{name}: NOT saved — it has never been saved to a project, "
+                    f"so there was nowhere to write it"
+                )
 
     try:
         # A documented Phase-0 no-op — `append_turn` already writes

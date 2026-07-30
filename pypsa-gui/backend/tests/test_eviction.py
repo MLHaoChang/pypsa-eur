@@ -211,3 +211,68 @@ def test_unbound_empty_victim_no_save(cap2, tmp_projects_dir):
     assert "__empty__" not in PyPSAService.list_ids()
     # No A/B/C folder for __empty__ was created (nothing to save).
     assert not (tmp_projects_dir / "__empty__").exists()
+
+
+# ── delete vs the quit-flush ────────────────────────────────────────────────
+
+
+def test_dropping_the_ACTIVE_project_unbinds_it_so_the_flush_cannot_resurrect_it():
+    """
+    `drop()` said "Does not touch `_active`; B9 guarantees the victim is never
+    the active one". True for LRU eviction, FALSE for delete: `_delete_project_db`
+    rmtree's the directory, deletes the row, and calls `drop()` — leaving
+    `_active` bound to a project that no longer exists, with a dangling
+    `storage_dir`.
+
+    `resident_contexts()` then yields that context to the quit-flush,
+    `make_saver` sees both fields truthy, and `_save_context` does
+    `dest.mkdir(parents=True, exist_ok=True)` — recreating the deleted project
+    on disk with no DB row: invisible in `GET /api/projects/`, and it
+    permanently reserves the name because `taken_names` unions the filesystem
+    with the database.
+
+    This became load-bearing with commit 11806022. Before it, the stray write
+    went to `flat_projects_root` — outside `projects_root`, never read, never
+    scanned. Redirecting the flush to where the app actually reads was correct
+    AND moved this bad case into the live store.
+
+    Unbind rather than discard: the user's network stays on screen as an
+    unsaved draft they can Save As, instead of vanishing.
+    """
+    from services.pypsa_service import PyPSAService
+
+    PyPSAService.reset_network()
+    PyPSAService.bind_project(
+        "Doomed", org_id="org-1", project_uuid="uuid-1",
+        storage_dir="/tmp/does-not-matter/Doomed",
+    )
+    key = PyPSAService._active.registry_key
+
+    PyPSAService.drop(key)
+
+    active = PyPSAService._active
+    assert active is not None, "the network itself must survive as a draft"
+    assert active.loaded_project is None, (
+        "the active context is still bound to a deleted project — the quit-flush "
+        "will recreate it inside projects_root"
+    )
+    assert active.storage_dir is None, "a dangling storage_dir still names the deleted directory"
+
+
+def test_dropping_a_DIFFERENT_project_leaves_the_active_one_alone():
+    """
+    The mutation the test above invites is to unbind unconditionally, which
+    would tear the user's open project out from under an ordinary LRU eviction.
+    """
+    from services.pypsa_service import PyPSAService
+
+    PyPSAService.reset_network()
+    PyPSAService.bind_project(
+        "Keeper", org_id="org-1", project_uuid="uuid-keeper",
+        storage_dir="/tmp/does-not-matter/Keeper",
+    )
+
+    PyPSAService.drop("org-1:some-other-uuid")
+
+    assert PyPSAService._active.loaded_project == "Keeper"
+    assert PyPSAService._active.storage_dir == "/tmp/does-not-matter/Keeper"

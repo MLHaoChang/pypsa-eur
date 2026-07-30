@@ -258,3 +258,106 @@ def test_importing_the_backend_resolves_no_windowing_toolkit():
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "CLEAN" in result.stdout
+
+
+# ── the socket on a FAILED launch ───────────────────────────────────────────
+#
+# `bind_socket()` runs on the main thread before `import main`, so on every
+# launch-failure path something already owns a LISTENING socket with a backlog
+# of 128. The process then deliberately stays alive to show the error on the
+# splash — so "the launch failed" and "the port is free again" are different
+# claims, and only the first was ever true.
+
+
+def _gui():
+    """
+    Deliberately not `pytest.importorskip`. A skip is how two desktop tests
+    passed silently for a whole review cycle; these guard a socket that stays
+    bound for the life of the process.
+    """
+    try:
+        from desktop import gui
+    except ImportError as exc:  # pragma: no cover - environment defect
+        raise AssertionError(f"pywebview is missing from this environment: {exc}") from exc
+    return gui
+
+
+class _Sock:
+    def __init__(self):
+        self.closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+class _Server:
+    def __init__(self):
+        self.stopped = 0
+
+    def stop(self):
+        self.stopped += 1
+        return "never-ran"
+
+
+def _failing_state(sock, server=None):
+    return {"splash": _Splash(), "sock": sock, "server": server, "port": 51234,
+            "env": {}, "main_window": None}
+
+
+class _Splash:
+    def evaluate_js(self, _js):
+        return None
+
+    def destroy(self):
+        return None
+
+
+def test_a_launch_that_raises_releases_the_listening_socket(monkeypatch):
+    """
+    `apply_environment` or `import main` raising is the common failure — a
+    missing dependency, a bad environment, a broken migration. Before this,
+    `_bootstrap`'s `except` called only `report_failure`, so the socket stayed
+    bound and listening with nothing behind it for as long as the user left the
+    error window open. A relaunch then cannot take the port either.
+    """
+    gui = _gui()
+    sock = _Sock()
+    monkeypatch.setattr(gui.launcher, "apply_environment",
+                        lambda env: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    gui._bootstrap(_failing_state(sock))
+
+    assert sock.closed == 1, "the listening socket was left bound after a failed launch"
+
+
+def test_an_unhealthy_backend_releases_the_socket_through_the_server(monkeypatch):
+    """
+    The other route, and the one `DesktopServer.close()` was written for:
+    `wait_healthy()` returns False, `bootstrap_sequence` returns False — a
+    value `_bootstrap` DISCARDED. `stop()` routes to `close()` via `never_ran`,
+    so the server owns the release when one exists.
+    """
+    gui = _gui()
+    sock, server = _Sock(), _Server()
+    monkeypatch.setattr(gui.launcher, "apply_environment", lambda env: None)
+    monkeypatch.setattr(gui.bootstrap, "bootstrap_sequence", lambda **kw: False)
+
+    gui._bootstrap(_failing_state(sock, server))
+
+    assert server.stopped == 1, "a failed launch left the server holding the socket"
+    assert sock.closed == 0, "the socket must be released THROUGH the server, not twice"
+
+
+def test_a_successful_launch_releases_nothing(monkeypatch):
+    """
+    The obvious mutation to the two above is to close unconditionally, which
+    would tear down the socket uvicorn is actively serving.
+    """
+    gui = _gui()
+    sock, server = _Sock(), _Server()
+    monkeypatch.setattr(gui.launcher, "apply_environment", lambda env: None)
+    monkeypatch.setattr(gui.bootstrap, "bootstrap_sequence", lambda **kw: True)
+
+    gui._bootstrap(_failing_state(sock, server))
+
+    assert (server.stopped, sock.closed) == (0, 0)

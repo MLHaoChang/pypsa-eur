@@ -749,10 +749,31 @@ class PyPSAService:
     @classmethod
     def drop(cls, project_id: str) -> None:
         """
-        Evict a resident context from the registry (B9 LRU eviction). Does
-        not touch `_active`; B9 guarantees the victim is never the active one.
+        Evict a resident context from the registry.
+
+        **`_active` is unbound when it IS the victim.** The previous contract
+        said this method does not touch `_active`, because "B9 guarantees the
+        victim is never the active one" — true for LRU eviction, and false for
+        DELETE, which is the other caller (`_delete_project_db` rmtree's the
+        directory, deletes the row, then calls this).
+
+        Left bound, the active context keeps a `loaded_project` and a
+        `storage_dir` naming a directory that no longer exists, and the
+        quit-flush recreates it: `_save_context` does `dest.mkdir(parents=True,
+        exist_ok=True)`. The result is a project directory with no database row
+        — absent from `GET /api/projects/`, and permanently reserving its name
+        because `taken_names` unions the filesystem with the database.
+
+        That became live with commit 11806022. Before it the stray write landed
+        in `flat_projects_root`, outside `projects_root` and read by nothing.
+
+        UNBIND, not discard: the network stays in memory as an unsaved draft
+        the user can still Save As, rather than vanishing from the canvas.
         """
         cls._contexts.pop(project_id, None)
+        active = cls._active
+        if active is not None and active.registry_key == project_id:
+            cls.bind_project(None, org_id=None, project_uuid=None, storage_dir=None)
 
     @classmethod
     def list_ids(cls) -> list[str]:
