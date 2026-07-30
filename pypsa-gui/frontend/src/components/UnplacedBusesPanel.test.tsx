@@ -14,7 +14,7 @@ describe('UnplacedBusesPanel', () => {
     const { container } = render(
       <UnplacedBusesPanel unplacedCount={0} totalCount={12} placing={false} onStartPlacing={noop} />,
     )
-    expect(container).toBeEmptyDOMElement()
+    expect(container.firstChild).toBeNull()
   })
 
   it('explains the problem in full when no bus is placed', () => {
@@ -51,6 +51,6 @@ describe('UnplacedBusesPanel', () => {
     const { container } = render(
       <UnplacedBusesPanel unplacedCount={3} totalCount={3} placing onStartPlacing={noop} />,
     )
-    expect(container).toBeEmptyDOMElement()
+    expect(container.firstChild).toBeNull()
   })
 })

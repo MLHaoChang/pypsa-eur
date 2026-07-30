@@ -29,7 +29,7 @@ export default function UnplacedBusesPanel({
         type="button"
         onClick={onStartPlacing}
         title="Place the remaining buses by clicking the map"
-        className="absolute z-[500] flex items-center gap-1.5 px-2.5 py-1.5 bg-bg border border-border
+        className="absolute z-[900] flex items-center gap-1.5 px-2.5 py-1.5 bg-bg border border-border
                    rounded-md shadow text-[11px] font-medium text-text hover:text-accent
                    hover:border-accent transition-colors"
         style={{ top: 128, left: 10 }}
@@ -42,10 +42,11 @@ export default function UnplacedBusesPanel({
 
   // Nothing is placed: the map is showing its default view and no network at
   // all. State the cause plainly — the coordinates, not the basemap.
+  // z-[900] ensures we sit above Leaflet's control/tooltip panes (z-800).
   return (
     <div
       role="status"
-      className="absolute z-[500] left-1/2 -translate-x-1/2 max-w-md w-[min(28rem,calc(100%-2rem))]
+      className="absolute z-[900] left-1/2 -translate-x-1/2 max-w-md w-[min(28rem,calc(100%-2rem))]
                  bg-bg border border-border rounded-lg shadow-lg p-4 text-center"
       style={{ top: 96 }}
     >
