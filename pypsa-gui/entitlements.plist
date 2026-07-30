@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hardened-runtime entitlements for the notarised macOS app (workstream J).
+
+  Notarisation REQUIRES the hardened runtime, and the hardened runtime breaks
+  CPython unless these are granted. The failure mode is the expensive one: the
+  app signs, notarises and staples successfully, then crashes on launch on the
+  user's machine — so the first evidence arrives after distribution.
+
+  Every key below is here for a specific reason. None is "just in case":
+  each one weakens a protection, and a Developer ID app is not sandboxed, so
+  there is no second line of defence.
+
+  NOT included, deliberately:
+    * App Sandbox — a Developer ID app distributed outside the App Store does
+      not need it, and enabling it would cut the app off from
+      ~/Documents/PyPSA GUI/Projects, which is the whole storage model (D13).
+    * com.apple.security.cs.allow-jit — CPython does not JIT. The
+      unsigned-executable-memory entitlement below is the one it actually
+      needs, and granting both would widen the surface for nothing.
+    * com.apple.security.automation.apple-events — the app sends no Apple
+      events. Only the acceptance harness does, and that is not shipped.
+-->
+<plist version="1.0">
+<dict>
+  <!-- CPython allocates writable-executable memory (ctypes closures, and
+       cffi/argon2-cffi in this app's dependency set). Without this the
+       hardened runtime kills the process at the first such allocation. -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- The bundle loads several hundred third-party .so/.dylib files — numpy,
+       scipy, pandas, netCDF4, highspy, shapely, pyproj. Library validation
+       requires every loaded library to be signed by the SAME team ID; these
+       are signed by PyInstaller as part of this bundle, but any that arrive
+       already signed by their upstream publisher would be rejected. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- PyInstaller's bootloader sets DYLD_LIBRARY_PATH so the frozen
+       interpreter finds the bundled libraries. The hardened runtime strips
+       DYLD_* variables unless this is granted, and the app then fails to
+       resolve its own dependencies. -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

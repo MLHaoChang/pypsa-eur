@@ -81,12 +81,65 @@ step "Freezing the app"
 step "Checking the bundle for secrets and user data"
 "$VENV/bin/python" "$HERE/backend/smoke/check_bundle.py" "$APP"
 
+# ── signing and notarisation (workstream J) ─────────────────────────────────
+#
+# Both are skipped when unconfigured, so the default build is unchanged. The
+# `.spec` does the SIGNING itself, as PyInstaller collects each nested binary —
+# `codesign --deep` afterwards is deprecated, unreliable across several hundred
+# `.so`/`.dylib` files, and fails notarisation naming one file and no reason.
+#
+#   CODESIGN_IDENTITY="Developer ID Application: NAME (TEAMID)"   # sign
+#   NOTARY_PROFILE=pypsa-gui                                      # notarise
+#
+# The profile is stored once, and holds the app-specific password so it never
+# appears in a command line or in this repo:
+#
+#   xcrun notarytool store-credentials pypsa-gui \
+#     --apple-id you@example.com --team-id TEAMID --password <app-specific>
+if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+  step "Verifying the signature"
+  # `--strict` because the default accepts things Gatekeeper will not.
+  codesign --verify --deep --strict --verbose=2 "$APP"
+  echo "signed by: $(codesign -dvv "$APP" 2>&1 | grep -i '^Authority' | head -1)"
+
+  if [ -n "${NOTARY_PROFILE:-}" ]; then
+    step "Notarising (Apple's service; usually a few minutes)"
+    ZIP="${APP%.app}.zip"
+    # ditto, not `zip` — `zip` does not preserve symlinks or resource forks,
+    # and the submission is rejected or, worse, notarises a broken copy.
+    /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
+    xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+    rm -f "$ZIP"
+
+    step "Stapling the ticket"
+    # So it validates with no network. Without this a first launch offline
+    # still shows the Gatekeeper warning.
+    xcrun stapler staple "$APP"
+    xcrun stapler validate "$APP"
+    spctl --assess --type execute --verbose=4 "$APP" || true
+  else
+    echo
+    echo "NOTARY_PROFILE not set — signed but NOT notarised. Gatekeeper still"
+    echo "blocks a downloaded copy: signing alone is not enough since Catalina."
+  fi
+fi
+
 step "Done"
 echo "  $APP"
 echo
 echo "Install:  rm -rf '/Applications/PyPSA GUI.app' && cp -R '$APP' /Applications/"
 echo "Run:      open -a 'PyPSA GUI'"
-echo
-echo "Unsigned and un-notarised: it opens here because a locally built app"
-echo "carries no quarantine flag. Copied or downloaded to another Mac it will"
-echo "be blocked by Gatekeeper until workstream J signs it."
+
+if [ -z "${CODESIGN_IDENTITY:-}" ]; then
+  cat <<'MSG'
+
+Unsigned and un-notarised. It opens on THIS machine because a locally built
+app carries no quarantine flag — that is not evidence it will open anywhere
+else. Copied or downloaded to another Mac it is blocked.
+
+On macOS 15 (Sequoia) the old Control-click -> Open bypass is GONE. A recipient
+must go to System Settings -> Privacy & Security and press "Open Anyway" after
+the first refusal. Signing and notarising removes that step; see the
+CODESIGN_IDENTITY / NOTARY_PROFILE block in this script.
+MSG
+fi

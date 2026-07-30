@@ -14,6 +14,7 @@ because they were present.
 
 **The second command is not optional.** See `datas` below.
 """
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
@@ -22,6 +23,17 @@ from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 ROOT = Path(SPECPATH).resolve()          # noqa: F821 - injected by PyInstaller
 BACKEND = ROOT / "backend"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
+
+# Set to a full certificate name to sign; absent means an ordinary unsigned
+# build. Read here rather than hardcoded so the same spec serves both, and so
+# CI can sign without editing a tracked file.
+CODESIGN_IDENTITY = os.environ.get("CODESIGN_IDENTITY") or None
+ENTITLEMENTS = str(ROOT / "entitlements.plist") if CODESIGN_IDENTITY else None
+if CODESIGN_IDENTITY and not Path(ENTITLEMENTS).is_file():
+    # Signing WITHOUT entitlements is worse than not signing: it notarises,
+    # staples, ships — and then the hardened runtime kills CPython on the
+    # user's machine, so the first evidence arrives after distribution.
+    raise SystemExit(f"CODESIGN_IDENTITY is set but {ENTITLEMENTS} is missing")
 
 if not FRONTEND_DIST.is_dir():
     raise SystemExit(
@@ -175,8 +187,26 @@ exe = EXE(                                 # noqa: F821 - injected
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,                      # host arch; no universal2 fat build
-    codesign_identity=None,                # workstream J
-    entitlements_file=None,
+    # ── signing (workstream J) ──────────────────────────────────────────────
+    #
+    # Absent by default, so an unsigned build is still a normal build. Set
+    # CODESIGN_IDENTITY to the full certificate name to turn it on:
+    #
+    #   CODESIGN_IDENTITY="Developer ID Application: NAME (TEAMID)" \
+    #     bash pypsa-gui/build-macos.sh
+    #
+    # Signing HERE rather than with `codesign --deep` afterwards is the whole
+    # point: PyInstaller signs every nested binary as it collects them, and
+    # this bundle contains several hundred `.so`/`.dylib` files. `--deep` is
+    # deprecated by Apple, signs inside-out unreliably at that scale, and a
+    # single unsigned nested binary fails notarisation with a report that
+    # names the file and nothing else.
+    #
+    # The entitlements are not optional once signed: notarisation requires the
+    # hardened runtime, and the hardened runtime kills CPython without them.
+    # See `entitlements.plist` — each key is justified there.
+    codesign_identity=CODESIGN_IDENTITY,
+    entitlements_file=ENTITLEMENTS,
 )
 
 coll = COLLECT(                            # noqa: F821 - injected
