@@ -37,4 +37,12 @@ describe('requestAssetDetail', () => {
     useUIStore.getState().clearAssetDetailRequest()
     expect(useUIStore.getState().assetDetailRequest).toBeNull()
   })
+
+  it('drops a pending request on project switch, like selectedComponent', () => {
+    useUIStore.getState().requestAssetDetail({
+      componentClass: 'Generator', name: 'Gas 1', category: 'dispatch',
+    })
+    useUIStore.getState().setCurrentProject('another-project')
+    expect(useUIStore.getState().assetDetailRequest).toBeNull()
+  })
 })

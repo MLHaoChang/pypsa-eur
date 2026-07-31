@@ -538,10 +538,17 @@ export const useUIStore = create<UIStore>((set) => ({
       // that happens to share the name). The PropertiesPanel auto-opens
       // when `selectedComponent` is set; surviving across switches would
       // surface a stale slide-out for an asset the user didn't pick.
+      // assetDetailRequest is structurally the same hazard (componentClass +
+      // name, resolved against whichever project's asset list happens to be
+      // loaded when AssetDetail's effect consumes it) — clear it alongside
+      // the other two so a request left pending across a project switch
+      // can't silently apply project A's category/mode/metrics to a
+      // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
         selectedComponent: null,
         highlightedComponent: null,
+        assetDetailRequest: null,
         // Per-project result-source (B8): restore the new project's choice so
         // an instant switch lands on the source the user last picked there.
         // Defaults to 'lopf' for a never-visited / fresh project.
