@@ -469,15 +469,26 @@ def _cost_wsum(ctx: Ctx, s) -> float | None:
 
 def bus_price_series(ctx: Ctx):
     """
-    Nodal price at the asset's own bus. `bus` for injecting components,
-    `bus0` for branches — Phase 1 only needs the former.
+    Nodal price at the asset's own bus, with the curtailment-cost subsidy
+    distortion removed. `bus` for injecting components, `bus0` for branches —
+    Phase 1 only needs the former.
+
+    MUST go through `corrected_marginal_prices`, which routers/results.py
+    documents as the single source of truth for the merit-order correction and
+    which `/results/asset_economics` and the Compare tab both price against.
+    Reading raw `buses_t.marginal_price` here would make revenue, capture
+    price and capture rate diverge from the Results tab for any generator
+    with `curtailment_cost > 0`.
     """
     bus = ctx.params.get("bus") or ctx.params.get("bus0")
     if not bus:
         return None
-    from routers.results import _result_df
+    from routers.results import corrected_marginal_prices
 
-    df = _result_df(ctx.n, "buses_t", "marginal_price", ctx.source)
+    try:
+        df = corrected_marginal_prices(ctx.n)
+    except Exception:
+        return None
     if df is None or getattr(df, "empty", True) or bus not in df.columns:
         return None
     return df[bus].reindex(ctx.sns)
@@ -543,8 +554,25 @@ def gen_revenue(ctx: Ctx):
 
 
 def gen_vom(ctx: Ctx):
-    p, mc = gen_p(ctx), _static(ctx, "marginal_cost")
-    return None if p is None or mc is None else _cost_wsum(ctx, p.abs() * mc)
+    # Time-varying marginal_cost first, static column as fallback — the same
+    # idiom gen_p_max_pu uses, and what /results/asset_economics does via
+    # get_switchable_as_dense. A static-only read silently diverges from the
+    # Results tab for any generator carrying a fuel-price profile.
+    p = gen_p(ctx)
+    if p is None:
+        return None
+    mc = None
+    try:
+        mc_df = ctx.n.get_switchable_as_dense(ctx.component_class, "marginal_cost")
+        if mc_df is not None and ctx.name in getattr(mc_df, "columns", []):
+            mc = mc_df[ctx.name].reindex(ctx.sns)
+    except Exception:
+        mc = None
+    if mc is None:
+        mc = _static(ctx, "marginal_cost")
+        if mc is None:
+            return None
+    return _cost_wsum(ctx, p.abs() * mc)
 
 
 def gen_fixed_cost(ctx: Ctx):
@@ -583,8 +611,11 @@ def _co2_intensity_of_carrier(ctx: Ctx) -> float | None:
 def gen_co2_rate(ctx: Ctx):
     p = gen_p(ctx)
     factor = _co2_intensity_of_carrier(ctx)
+    # `or 1.0` already guarantees `eff` is truthy (falls back to 1.0 whenever
+    # the static column is None/0/NaN) — no separate zero-efficiency guard
+    # is reachable, so none is written.
     eff = _static(ctx, "efficiency") or 1.0
-    if p is None or factor is None or not eff:
+    if p is None or factor is None:
         return None
     # PyPSA's convention: co2_emissions is per unit of PRIMARY energy, so the
     # electrical output is divided by efficiency to recover fuel input first.

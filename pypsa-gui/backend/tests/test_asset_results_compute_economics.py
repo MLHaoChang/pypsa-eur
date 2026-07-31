@@ -97,3 +97,39 @@ def test_economics_reconcile_with_the_asset_economics_endpoint(client, install_n
     assert C.gen_vom(ctx) == pytest.approx(row["vom_cost_eur"], rel=1e-6)
     assert C.gen_fixed_cost(ctx) == pytest.approx(row["fixed_cost_eur"], rel=1e-6)
     assert C.gen_net_profit(ctx) == pytest.approx(row["net_profit_eur"], rel=1e-6)
+
+
+def test_reconciles_when_a_subsidised_renewable_sets_the_price(
+        client, install_network):
+    """
+    curtailment_cost drags the bus dual negative when a subsidised
+    renewable is the price-setting unit — an LP artefact, not a real price.
+    Both implementations must strip it via corrected_marginal_prices, or
+    revenue and capture price diverge from the Results tab.
+    """
+    n = build_network(solve=False)
+    n.generators.loc["solar", "curtailment_cost"] = 30.0
+    n.optimize(solver_name="highs")
+    install_network(n)
+    rows = client.get("/api/results/asset_economics").json()["generators"]
+    row = next(r for r in rows if r["name"] == "solar")
+    ctx = C.build_ctx(n, "Generator", "solar", source="lopf", sns=n.snapshots)
+    assert C.gen_revenue(ctx) == pytest.approx(row["revenue_eur"], rel=1e-6)
+
+
+def test_reconciles_with_a_time_varying_marginal_cost(client, install_network):
+    """
+    /results/asset_economics reads marginal_cost via
+    get_switchable_as_dense. A static-only read here would understate VOM for
+    any generator with a fuel-price profile.
+    """
+    import pandas as pd
+    n = build_network(solve=False)
+    n.generators_t.marginal_cost = pd.DataFrame(
+        {"gas": [40.0, 60.0, 80.0, 100.0]}, index=n.snapshots)
+    n.optimize(solver_name="highs")
+    install_network(n)
+    rows = client.get("/api/results/asset_economics").json()["generators"]
+    row = next(r for r in rows if r["name"] == "gas")
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    assert C.gen_vom(ctx) == pytest.approx(row["vom_cost_eur"], rel=1e-6)
