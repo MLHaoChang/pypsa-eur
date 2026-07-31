@@ -7,6 +7,18 @@ over HTTP and reads real saved projects, so pytest must never collect it.
 
 Run:  pixi run python pypsa-gui/backend/smoke/qa_e2e.py
       pixi run python pypsa-gui/backend/smoke/qa_e2e.py --suite S3
+
+Precondition for suites S10-S14 (spec §5 isolation strategy): before running
+them, start the backend with PYPSAGUI_APP_DATA_DIR and PYPSAGUI_PROJECTS_ROOT
+BOTH pointed at a scratch directory (neither alone is sufficient) and
+PYPSAGUI_LOCAL_MODE=1. This script only ever talks to the backend over HTTP
+(see BACKEND below) — it cannot read or set the backend process's own
+environment, so this isolation cannot be enforced from inside the script; it
+is the operator's responsibility before launching uvicorn, e.g.:
+      PYPSAGUI_APP_DATA_DIR=/tmp/qa_e2e_scratch/appdata \
+      PYPSAGUI_PROJECTS_ROOT=/tmp/qa_e2e_scratch/projects \
+      PYPSAGUI_LOCAL_MODE=1 \
+      pixi run uvicorn main:app --host 127.0.0.1 --port 8000
 """
 from __future__ import annotations
 
@@ -18,6 +30,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any
 
 BACKEND = "http://127.0.0.1:8000"
 FRONTEND = "http://127.0.0.1:5173"
@@ -693,6 +706,131 @@ def suite_S9(project: str | None, flat: str | None):
         skip("S9.6", "no flat network")
 
 
+def _fresh_scratch_project(name: str, *, do_reset: bool = True) -> tuple[bool, int, Any]:
+    """
+    Establish a fresh, isolated `name` scratch project ready for its
+    suite's first mutation: [reset] -> DELETE {name}?cascade=true -> POST
+    from_template/3bus?name={name} -> activate {name}.
+
+    Every qa_e2e_*-scratch-project suite (S10, S11, S12, S13, S14) opens
+    with this exact sequence — Hazard 4 requires the pre-mutation reset,
+    Hazard 1 requires the qa_e2e_*-prefixed name on any destructive call.
+    Only one thing genuinely varies across those five call sites, and it is
+    a parameter here rather than a fork of this function:
+
+    `do_reset` — every caller except S13 wants this helper to also issue
+    the pre-mutation POST /api/network/reset. S13 has its own Hazard-5
+    in-flight-solve precheck that MUST run strictly before any reset, and
+    records that reset itself as its own asserted "S13.2" step — so S13
+    issues the reset itself, then calls this helper with do_reset=False so
+    the reset is neither duplicated nor reordered.
+
+    Returns (ok, status, body) from the from_template call. `ok` is True
+    iff status is 200/201, in which case the project has ALSO been
+    activated. On ok=False the project was NOT activated, and this helper
+    deliberately does NOT call skip() itself — each of the five callers
+    keeps its own skip tag and its own wording (S10/S13/S14 report the live
+    status code and response body; S11/S12 use a fixed message), so the
+    skip() call stays exactly where — and however it reads — it always was.
+
+    Pure function: reads/writes nothing but the live backend named by
+    `name`, so calling it from multiple suites cannot leak state between
+    them — every suite remains independently runnable via `--suite S1x`
+    (spec §4.1 self-containment).
+    """
+    if do_reset:
+        http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st, body = http(f"/api/projects/from_template/3bus?name={q(name)}", method="POST")
+    if st not in (200, 201):
+        return False, st, body
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+    return True, st, body
+
+
+def suite_S10():
+    print("\nS10 — Project save/load round trip (area 1)")
+    name = "qa_e2e_roundtrip"
+    # PRE-MUTATION reset (Hazard 4 — in-memory network state survives project
+    # deletion) plus the delete/create-from-template/activate boilerplate
+    # every S1x suite needs — see _fresh_scratch_project. NOT the same reset
+    # as S10.5's adversarial post-round-trip reset further down; that one
+    # exists to guard against a stale resident network papering over a
+    # disk-read bug and is unrelated to this one. Matches S13's S13.2
+    # precedent.
+    ok, st, body = _fresh_scratch_project(name)
+    if not ok:
+        skip("S10.*", f"cannot create {name} ({st}) {str(body)[:80]}")
+        return
+
+    # S10.2 — GET-then-PUT-full-object on "Bus 0" (a real bus from the 3bus
+    # template — the exact name set S7.5 already confirmed: "Bus 0", "Bus 1",
+    # "Bus 2", qa_e2e.py:481). Distinctive v_nom=987.0; carrier must survive
+    # unchanged (Hazard 2 guard, same discipline as S7.2, qa_e2e.py:417-443).
+    st_g, buses = http("/api/network/buses")
+    row = next((b for b in buses if b.get("name") == "Bus 0"), None) \
+        if isinstance(buses, list) else None
+    if not row:
+        record("S10.2", False, f"Bus 0 not found in {name}: get={st_g}")
+        skip("S10.3", "no bus to save")
+        skip("S10.4", "no bus to save")
+        skip("S10.5", "no bus to save")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+    payload = {**row, "v_nom": 987.0}
+    st_p, _ = http(f"/api/network/buses/{q('Bus 0')}", method="PUT", body=payload)
+    st_g2, buses2 = http("/api/network/buses")
+    row2 = next((b for b in buses2 if b.get("name") == "Bus 0"), None) \
+        if isinstance(buses2, list) else None
+    kept = row2 is not None and abs(float(row2.get("v_nom", 0)) - 987.0) < 1e-9 \
+        and str(row2.get("carrier")) == "AC"
+    record("S10.2", kept,
+           f"PUT {st_p}: v_nom={row2.get('v_nom') if row2 else None} "
+           f"carrier={row2.get('carrier') if row2 else None}")
+
+    # S10.3 — the destructive SAVE (Hazard 1). Only ever called with a
+    # qa_e2e_*-prefixed name.
+    st_s, _ = http(f"/api/projects/{q(name)}", method="POST")
+    record("S10.3", st_s in (200, 204), f"save -> {st_s}")
+
+    # S10.4 — the "load" side of the round trip. GET /api/projects/{name}
+    # DOES perform a real load-into-memory (verified this session:
+    # routers/projects.py load_project), but its response body is an
+    # ImportSummary of component COUNTS only (models/schemas.py
+    # ImportSummary: buses/generators/lines/links/storage_units/stores/
+    # loads/transformers/snapshots, all int) — it does NOT carry per-bus
+    # v_nom. accept_coldstart.py's own relaunch branch (:257-260) confirms
+    # this exact pattern: it captures only the status code from this GET,
+    # then makes a SEPARATE GET /api/network/buses call to inspect content.
+    # This suite follows that established precedent.
+    st_l, _ = http(f"/api/projects/{q(name)}")
+    st_b, buses3 = http("/api/network/buses")
+    row3 = next((b for b in buses3 if b.get("name") == "Bus 0"), None) \
+        if isinstance(buses3, list) else None
+    roundtrip_ok = st_l == 200 and row3 is not None \
+        and abs(float(row3.get("v_nom", 0)) - 987.0) < 1e-9
+    record("S10.4", roundtrip_ok,
+           f"load -> {st_l}; Bus 0 v_nom after reload={row3.get('v_nom') if row3 else None}")
+
+    # S10.5 (ADVERSARIAL reset — distinct from the pre-mutation reset at the
+    # top of this suite). Hazard 4: in-memory network state survives project
+    # deletion, so a stale resident network could paper over a real
+    # disk-read bug. Reset first, then re-activate, then re-read. This reset
+    # is a deliberate probe of the round-trip's persistence, not the
+    # isolation-discipline reset every suite must do before its first
+    # mutation (that one already ran above, before S10.2).
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+    st_b2, buses4 = http("/api/network/buses")
+    row4 = next((b for b in buses4 if b.get("name") == "Bus 0"), None) \
+        if isinstance(buses4, list) else None
+    reset_ok = row4 is not None and abs(float(row4.get("v_nom", 0)) - 987.0) < 1e-9
+    record("S10.5", reset_ok,
+           f"post-reset re-activate -> {st_b2}; Bus 0 v_nom={row4.get('v_nom') if row4 else None}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -734,6 +872,8 @@ def main() -> int:
         suite_S8()
     if run("S9"):
         suite_S9(target, flat)
+    if run("S10"):
+        suite_S10()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
