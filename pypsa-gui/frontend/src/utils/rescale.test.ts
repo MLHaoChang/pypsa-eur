@@ -44,15 +44,27 @@ describe('partitionRescale', () => {
     expect(blocked.map(p => p.name)).toEqual(['ZERO'])
   })
 
+  it('routes a blocked line to blocked regardless of rel_change magnitude', () => {
+    // A blocked line with high rel_change must go to blocked, not ask. If it
+    // went to ask, Task 5 would offer the user an undefined per-km rescale.
+    const { auto, ask, blocked } = partitionRescale([
+      preview({ name: 'BROKEN', skipped_reason: 'new_length<=0', rel_change: 300 }),
+    ])
+    expect(auto).toEqual([])
+    expect(ask).toEqual([])
+    expect(blocked.map(p => p.name)).toEqual(['BROKEN'])
+  })
+
   it('splits a mixed batch', () => {
     const { auto, ask, blocked } = partitionRescale([
       preview({ name: 'A', rel_change: 0.001 }),
       preview({ name: 'B', rel_change: 300 }),
       preview({ name: 'C', skipped_reason: 'new_length<=0' }),
+      preview({ name: 'D', skipped_reason: 'undefined_per_km', rel_change: 150 }),
     ])
     expect(auto.map(p => p.name)).toEqual(['A'])
     expect(ask.map(p => p.name)).toEqual(['B'])
-    expect(blocked.map(p => p.name)).toEqual(['C'])
+    expect(blocked.map(p => p.name)).toEqual(['C', 'D'])
   })
 
   it('handles an empty batch', () => {
