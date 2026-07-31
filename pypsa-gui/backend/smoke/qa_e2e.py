@@ -1067,6 +1067,34 @@ def _s11_links() -> None:
     record("S11.links.delete", st_d == 204 and gone, f"DELETE -> {st_d}; gone={gone}")
 
 
+def _s11_loads() -> None:
+    body = {"name": "qa_s11_load", "bus": "Bus 0", "p_set": 10.0, "q_set": 2.5}
+    st_c, _ = http("/api/network/loads", method="POST", body=body)
+    st_g, rows = http("/api/network/loads")
+    row = next((r for r in rows if r.get("name") == "qa_s11_load"), None) \
+        if isinstance(rows, list) else None
+    if st_c not in (200, 201) or not row:
+        record("S11.loads.create", False, f"create={st_c} get_found={row is not None}")
+        return
+    record("S11.loads.create", True, f"create -> {st_c}")
+
+    payload = {**row, "p_set": 77.0}
+    st_p, _ = http(f"/api/network/loads/{q('qa_s11_load')}", method="PUT", body=payload)
+    st_g2, rows2 = http("/api/network/loads")
+    row2 = next((r for r in rows2 if r.get("name") == "qa_s11_load"), None) \
+        if isinstance(rows2, list) else None
+    kept = row2 is not None and abs(float(row2.get("p_set", 0)) - 77.0) < 1e-9 \
+        and abs(float(row2.get("q_set", 0)) - 2.5) < 1e-9
+    record("S11.loads.put", kept,
+           f"PUT {st_p}: p_set={row2.get('p_set') if row2 else None} "
+           f"q_set={row2.get('q_set') if row2 else None}")
+
+    st_d, _ = http(f"/api/network/loads/{q('qa_s11_load')}", method="DELETE")
+    st_g3, rows3 = http("/api/network/loads")
+    gone = isinstance(rows3, list) and not any(r.get("name") == "qa_s11_load" for r in rows3)
+    record("S11.loads.delete", st_d == 204 and gone, f"DELETE -> {st_d}; gone={gone}")
+
+
 def suite_S11():
     print("\nS11 — Asset CRUD across component classes (area 2, isolated project)")
     name = _s11_setup()
@@ -1079,6 +1107,7 @@ def suite_S11():
     _s11_storage_units()
     _s11_stores()
     _s11_links()
+    _s11_loads()
     _s11_teardown(name)
 
 
