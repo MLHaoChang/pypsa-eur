@@ -874,11 +874,13 @@ def suite_S10():
 
 
 def _s11_setup() -> str | None:
-    """Create S11's own scratch project. Returns the name, or None on
+    """
+    Create S11's own scratch project. Returns the name, or None on
     failure. Thin wrapper over the shared _fresh_scratch_project (Task 1) —
     kept as its own function (rather than inlined into suite_S11) so its
     call sites (here and Task 10's completed suite_S11) don't have to know
-    the scratch project's literal name."""
+    the scratch project's literal name.
+    """
     name = "qa_e2e_assets"
     ok, _, _ = _fresh_scratch_project(name)
     return name if ok else None
