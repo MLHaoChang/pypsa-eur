@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose } from 'lucide-react'
+import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -19,6 +19,7 @@ import AggregatedOverview from './results/AggregatedOverview'
 import Curtailment from './results/Curtailment'
 import LostLoadTab from './results/LostLoadTab'
 import StorageCycling from './results/StorageCycling'
+import AssetDetail from './results/asset/AssetDetail'
 import { PageHeader } from '../components/PageKit'
 
 // ── Tabbed shell for the Results panel ────────────────────────────────────────
@@ -32,12 +33,12 @@ import { PageHeader } from '../components/PageKit'
 
 type ResultsTab =
   | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
-  | 'economics' | 'curtailment' | 'lostload' | 'storage'
+  | 'economics' | 'curtailment' | 'lostload' | 'storage' | 'asset'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
-  'economics', 'curtailment', 'lostload', 'storage',
+  'economics', 'curtailment', 'lostload', 'storage', 'asset',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -62,6 +63,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'curtailment',label: 'Curtailment',        Icon: Scissors,         tip: 'Renewable energy rejected by the LP — total + per-carrier + time series' },
   { id: 'lostload',   label: 'Lost load',          Icon: AlertTriangle,    tip: 'VOLL slack dispatch (unserved demand) — per-carrier and per-bus breakdown' },
   { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup' },
+  { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable' },
 ]
 
 // Maps the Results tab the user is viewing → the equivalent CompareView tab,
@@ -78,6 +80,7 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   curtailment: 'curtailment',
   lostload: 'lost_load',
   storage: 'storage_cycling',
+  asset: 'overview',
 }
 
 // Min px kept for BOTH the live Results pane and the comparison rail when the
@@ -269,7 +272,7 @@ export default function Results() {
         }
       />
       {/* ── Tab strip ──────────────────────────────────────────────── */}
-      <div className="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0">
+      <div className="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto">
         {TABS.filter(t => !t.multiOnly || uniquePeriods.length > 0).map(({ id, label, Icon, tip }) => {
           const active = tab === id
           return (
@@ -277,7 +280,7 @@ export default function Results() {
               key={id}
               onClick={() => setTab(id)}
               title={tip}
-              className={`h-9 px-3 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
+              className={`h-9 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
                 ${active
                   ? 'border-accent text-accent'
                   : 'border-transparent text-muted hover:text-text'}`}
@@ -434,6 +437,7 @@ export default function Results() {
                   {t === 'curtailment' && <Curtailment />}
                   {t === 'lostload'    && <LostLoadTab />}
                   {t === 'storage'     && <StorageCycling />}
+                  {t === 'asset'       && <AssetDetail />}
                 </>
               )
             })()}
