@@ -56,6 +56,19 @@ def test_looks_fossil_excludes_biogas():
     assert _looks_fossil("onwind") is False
 
 
+def test_looks_fossil_excludes_synthetic_methanol_but_not_plain_ccgt_ocgt():
+    # In this repo's PyPSA-Eur sector-coupled networks, `methanol` is
+    # SYNTHETIC (methanolisation: H2 + captured CO2) — its carbon is
+    # accounted for at capture, not at the burn. `CCGT methanol` / `OCGT
+    # methanol` would otherwise trip on the `ccgt`/`ocgt` substrings despite
+    # not being fossil gas plants. The exclusion must stay narrow: plain
+    # `CCGT` / `OCGT` (actual fossil gas turbines) must NOT be disarmed.
+    assert _looks_fossil("CCGT methanol") is False
+    assert _looks_fossil("OCGT methanol") is False
+    assert _looks_fossil("CCGT") is True
+    assert _looks_fossil("OCGT") is True
+
+
 def test_warns_for_a_fossil_carrier_with_no_intensity(client):
     client.post("/api/network/buses", json={"name": "B1", "v_nom": 380.0, "x": 6.96, "y": 50.9})
     client.post("/api/network/generators", json={

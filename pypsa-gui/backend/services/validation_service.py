@@ -97,12 +97,22 @@ def _warn(code: str, comp: str, name: str, msg: str) -> Issue:
 # Carrier names that imply combustion of fossil carbon. Substring, lower-cased,
 # because carrier naming is free-form.
 #
-# `biogas` is excluded deliberately: it contains `gas`, but its CO2 is biogenic
-# and conventionally counted as zero, so warning on it would be a false
-# positive — and a warning that cries wolf is one users learn to dismiss.
+# The exclusions below are NOT "carriers that happen to look clean" — they are
+# carriers whose carbon is biogenic (never fossil to begin with) or already
+# accounted for upstream of combustion, so a co2_emissions=0 on the carrier
+# itself is correct, not a gap:
+#   - `biogas` / `biomethane`: biogenic CO2, conventionally counted as zero.
+#   - `methanol`: in this repo's PyPSA-Eur sector-coupled networks, methanol
+#     is SYNTHETIC (`methanolisation` — built from H2 + captured CO2), so its
+#     carbon is accounted for at capture, not at the burn. `CCGT methanol` /
+#     `OCGT methanol` / `allam methanol` would otherwise trip on the `ccgt`/
+#     `ocgt` substrings despite not being fossil gas plants.
+# A warning that cries wolf is one users learn to dismiss — that's the same
+# cost whether the false positive comes from `gas` matching `biogas` or from
+# `ccgt` matching `CCGT methanol`.
 _FOSSIL_KEYWORDS = ("gas", "coal", "lignite", "oil", "diesel", "peat", "waste",
                     "ccgt", "ocgt", "methane")
-_FOSSIL_EXCLUDE = ("biogas", "biomethane")
+_FOSSIL_EXCLUDE = ("biogas", "biomethane", "methanol")
 
 
 def _looks_fossil(carrier: str) -> bool:
