@@ -6,6 +6,7 @@ import L from 'leaflet'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { isRenewableCarrier } from '../utils/carriers'
+import { uniformBadge, type BadgeDef } from '../utils/carrierBadges'
 import { Ruler, Flame, Wind, BatteryCharging, Zap } from 'lucide-react'
 import ReactDOMServer from 'react-dom/server'
 import { useUIStore, type CanvasView } from '../store/uiStore'
@@ -73,6 +74,11 @@ const CATEGORY_LABELS: Record<AssetCategory, string> = {
   Thermal: 'Thermal Generation', Renewables: 'Renewables',
   Storage: 'Storage', Load: 'Load',
 }
+
+// Per bus × category: how many assets, and which single carrier badge (if
+// any) they all share. `badge` is null for a mixed or empty group, in which
+// case the bubble falls back to the category's generic icon.
+interface CategoryEntry { count: number; badge: BadgeDef | null }
 
 // localStorage keys for the map's user layout — asset-group bubble offsets and
 // line waypoints. Keyed PER PROJECT (the `default` slot is the unsaved /
@@ -149,10 +155,20 @@ function addHandleDivIcon(color: string): L.DivIcon {
 // summed dispatch at the current snapshot — ▲ for injection, ▼ for draw.
 function assetGroupDivIcon(
   cat: AssetCategory, count: number, dx: number, dy: number, dispatchMw?: number | null,
+  badge?: BadgeDef | null,
 ): L.DivIcon {
-  const { Icon, color } = CATEGORY_STYLE[cat]
+  const { Icon: CategoryIcon, color } = CATEGORY_STYLE[cat]
+  // A group whose carriers all share one badge gets that badge's pictogram —
+  // a solar-only group is a sun, not the generic renewables turbine. A mixed
+  // group keeps the category icon, because no single icon is honest for it.
+  const Icon = badge?.Icon ?? CategoryIcon
+  // `color` via style, not the `color` prop: BadgeIcon (unlike CategoryIcon)
+  // may be H2Icon, a custom SVG that doesn't accept a `color` prop. Both
+  // lucide icons and H2Icon paint via `currentColor`, so setting the CSS
+  // `color` on the root <svg> — even through renderToStaticMarkup's static
+  // markup — resolves correctly once Leaflet inlines it into the live DOM.
   const iconSvg = ReactDOMServer.renderToStaticMarkup(
-    <Icon size={14} color={color} strokeWidth={2} />
+    <Icon size={14} style={{ color }} strokeWidth={2} />
   )
   const showDispatch = dispatchMw != null && Number.isFinite(dispatchMw)
   const dispatchHtml = showDispatch
@@ -263,7 +279,7 @@ function ClickToPlace({ onPick }: { onPick: (lat: number, lng: number) => void }
 interface AssetGroupLayerProps {
   busByName: Map<string, Bus>
   visibleGroups: Set<string>
-  categoryCountsByBus: Map<string, Record<AssetCategory, number>>
+  categoryCountsByBus: Map<string, Record<AssetCategory, CategoryEntry>>
   onSelect: (busName: string, cat: AssetCategory) => void
   offsets: AssetOffsets
   setOffsets: (o: AssetOffsets) => void
@@ -285,7 +301,8 @@ function AssetGroupLayer({
         if (!bus) return null
         const c = busLatLng(bus)
         if (!c) return null
-        const count = categoryCountsByBus.get(busName)?.[cat] ?? 0
+        const entry = categoryCountsByBus.get(busName)?.[cat]
+        const count = entry?.count ?? 0
         if (count === 0) return null
 
         const offset = offsets[id] ?? CATEGORY_STYLE[cat]
@@ -298,7 +315,7 @@ function AssetGroupLayer({
             key={id}
             position={c}
             draggable
-            icon={assetGroupDivIcon(cat, count, offset.dx, offset.dy, dispatchMw)}
+            icon={assetGroupDivIcon(cat, count, offset.dx, offset.dy, dispatchMw, entry?.badge)}
             eventHandlers={{
               click: () => onSelect(busName, cat),
               dragend: (e) => {
@@ -749,21 +766,34 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     }
   }, [placing, unplaced.length, buses])
 
-  // ── Per-bus asset-category counts (for the right-click menu + group markers).
-  // Mirrors the blank canvas: Thermal / Renewables / Storage / Load. Stores
-  // the live counts so the menu stays accurate after add / delete operations.
+  // ── Per-bus asset-category counts + resolved icon (for the right-click menu
+  // + group markers). Mirrors the blank canvas: Thermal / Renewables /
+  // Storage / Load. Count AND icon per bus × category. The badge is resolved
+  // here, once, so the decision lives in one place and consumers just render
+  // it. A parallel map keyed the same way would be the same drift risk one
+  // level down.
   const categoryCountsByBus = useMemo(() => {
-    const out = new Map<string, Record<AssetCategory, number>>()
+    const carriers = new Map<string, Record<AssetCategory, string[]>>()
+    const out = new Map<string, Record<AssetCategory, CategoryEntry>>()
     for (const b of buses as Bus[]) {
-      out.set(b.name, { Thermal: 0, Renewables: 0, Storage: 0, Load: 0 })
+      carriers.set(b.name, { Thermal: [], Renewables: [], Storage: [], Load: [] })
     }
     for (const g of generators as Generator[]) {
-      const r = out.get(g.bus); if (!r) continue
-      if (isRenewableCarrier(g.carrier)) r.Renewables += 1; else r.Thermal += 1
+      const r = carriers.get(g.bus); if (!r) continue
+      if (isRenewableCarrier(g.carrier)) r.Renewables.push(g.carrier)
+      else r.Thermal.push(g.carrier)
     }
-    for (const l of loads as Load[]) { const r = out.get(l.bus); if (r) r.Load += 1 }
-    for (const s of sus as StorageUnit[]) { const r = out.get(s.bus); if (r) r.Storage += 1 }
-    for (const s of stores as Store[]) { const r = out.get(s.bus); if (r) r.Storage += 1 }
+    for (const l of loads as Load[]) { const r = carriers.get(l.bus); if (r) r.Load.push(l.carrier ?? '') }
+    for (const s of sus as StorageUnit[]) { const r = carriers.get(s.bus); if (r) r.Storage.push(s.carrier) }
+    for (const s of stores as Store[]) { const r = carriers.get(s.bus); if (r) r.Storage.push(s.carrier) }
+    for (const [busName, byCat] of carriers) {
+      out.set(busName, {
+        Thermal:    { count: byCat.Thermal.length,    badge: uniformBadge(byCat.Thermal) },
+        Renewables: { count: byCat.Renewables.length, badge: uniformBadge(byCat.Renewables) },
+        Storage:    { count: byCat.Storage.length,    badge: uniformBadge(byCat.Storage) },
+        Load:       { count: byCat.Load.length,       badge: uniformBadge(byCat.Load) },
+      })
+    }
     return out
   }, [buses, generators, loads, sus, stores])
 
@@ -1160,7 +1190,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       {ctxMenu && (() => {
         const counts = categoryCountsByBus.get(ctxMenu.busName)
         const cats: AssetCategory[] = ['Thermal', 'Renewables', 'Storage', 'Load']
-        const withAssets = cats.filter(c => (counts?.[c] ?? 0) > 0)
+        const withAssets = cats.filter(c => (counts?.[c]?.count ?? 0) > 0)
         const expandedIds = withAssets.map(c => `${ctxMenu.busName}::${c}`)
         const allVisible = expandedIds.length > 0 && expandedIds.every(id => visibleGroups.has(id))
         const anyVisible = expandedIds.some(id => visibleGroups.has(id))
@@ -1207,7 +1237,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               </div>
             )}
             {cats.map(cat => {
-              const count = counts?.[cat] ?? 0
+              const count = counts?.[cat]?.count ?? 0
               const id = `${ctxMenu.busName}::${cat}`
               const isVisible = visibleGroups.has(id)
               const cfg = CATEGORY_STYLE[cat]
