@@ -1376,11 +1376,24 @@ def _s12_lines_asymmetry(ts: list[str]) -> None:
 def _s12_put_overwrite(ts: list[str]) -> None:
     """
     Adversarial: the inline PUT /timeseries/{component}/{attribute} writes
-    ts_store[attribute] = df wholesale (network.py:2981) — the only write
-    path that can silently clobber a sibling column outright (the
-    upload_profile/generic-upload paths write per-column via _user_ts and
-    cannot exhibit this failure mode). Records the OBSERVED behaviour either
-    way, per the ledger's ruling — this is not asserting a required outcome.
+    ts_store[attribute] = df wholesale (network.py:2970-2996) and then
+    writes only df.columns into _user_ts, never pruning the stale sibling
+    key it left behind — so the PUT genuinely destroys 'qa_s12_putB' in
+    n.generators_t.p_max_pu, but the sibling's now-stale _user_ts entry
+    survives untouched. get_timeseries's no-filter branch (network.py:
+    2879-2917) builds its response entirely from _user_ts once ANY entry
+    exists for (component, attribute), so the GET this check makes below
+    reads that stale entry back and reports 'qa_s12_putB' as present —
+    a GET-view artifact, not evidence the network table kept it. The
+    damage is self-healing: _reapply_user_ts_to_network runs on every
+    autosave and rewrites every _user_ts entry (including the stale one)
+    back into the network, restoring the column. What genuinely exists is
+    a WINDOW between this PUT and the next autosave-triggered reapply,
+    during which n.generators_t.p_max_pu truly lacks the column — this
+    check cannot see that window (S12.put_overwrite.network_loss, right
+    below, can). This check's PASS asserts HTTP status only across the
+    three calls; the 'survived' fact in its detail string is the masked
+    GET view, not evidence of preservation.
     """
     http("/api/network/generators", method="POST",
          body={"name": "qa_s12_putA", "bus": "Bus 0", "p_nom": 1.0})
@@ -1403,13 +1416,89 @@ def _s12_put_overwrite(ts: list[str]) -> None:
            f"(observed fact, not a required outcome)")
 
 
+def _s12_put_overwrite_network_loss(ts: list[str]) -> None:
+    """
+    Adversarial: the same wholesale-PUT hazard as S12.put_overwrite, but
+    observed through a path that does NOT prefer _user_ts, so it can see
+    what that check cannot. Every /timeseries/{component}/{attribute} GET
+    (filtered or not) and every /*/profiles endpoint checks _user_ts
+    before falling back to the network table, and the wholesale PUT always
+    leaves a stale _user_ts entry for the column it just destroyed — so
+    none of those reads can ever show the loss.
+    POST /api/simulation/preflight runs validate_for_run ->
+    _check_lopf -> _check_p_max_pu_bounds (validation_service.py:993-1006)
+    directly against n.generators_t.p_max_pu with no _user_ts reference
+    anywhere in that path, so it is a genuine, _user_ts-independent read
+    of the network table's real state.
+    Seeds a sibling column ('qa_s12_lossB') with an out-of-bounds value
+    (1.5 — p_max_pu > 1 always triggers _check_p_max_pu_bounds) in the
+    first PUT, then a second PUT that omits it, exactly mirroring
+    S12.put_overwrite's own two-PUT sequence but with a fresh pair of
+    generators so this check's fixtures never interact with that one's.
+    If the wholesale second PUT genuinely destroyed 'qa_s12_lossB' in the
+    network table (the current, documented behaviour), preflight's
+    p_max_pu_above_one issue for it CANNOT appear, regardless of what
+    _user_ts still masks in a GET — that issue firing would mean the
+    column survived in n.generators_t.p_max_pu itself. PASS asserts both
+    that the probe reached the network table (HTTP 200 from preflight)
+    AND that the destruction is what actually happened; this check IS a
+    required-outcome assertion; the family's "observed fact" phrasing
+    applied to S12.put_overwrite because that check had no way to verify
+    which outcome occurred at all — this one does, so it pins the outcome
+    the investigation confirmed against source.
+    """
+    http("/api/network/generators", method="POST",
+         body={"name": "qa_s12_lossA", "bus": "Bus 0", "p_nom": 1.0})
+    http("/api/network/generators", method="POST",
+         body={"name": "qa_s12_lossB", "bus": "Bus 0", "p_nom": 1.0})
+    body_two = {"index": ts, "columns": ["qa_s12_lossA", "qa_s12_lossB"],
+                "data": [[0.5, 1.5], [0.5, 1.5], [0.5, 1.5]]}
+    http("/api/network/timeseries/generators/p_max_pu",
+         method="PUT", body=body_two)
+    body_one = {"index": ts, "columns": ["qa_s12_lossA"],
+                "data": [[0.9], [0.9], [0.9]]}
+    http("/api/network/timeseries/generators/p_max_pu",
+         method="PUT", body=body_one)
+    st_p, result = http("/api/simulation/preflight", method="POST")
+    issues = result.get("issues", []) if isinstance(result, dict) else []
+    flagged = any(
+        i.get("code") == "p_max_pu_above_one" and i.get("name") == "qa_s12_lossB"
+        for i in issues)
+    record("S12.put_overwrite.network_loss", st_p == 200 and not flagged,
+           f"preflight -> {st_p}; qa_s12_lossB flagged in n.generators_t.p_max_pu="
+           f"{flagged} (flagged=True would mean the column survived the wholesale "
+           f"PUT in the network table itself)")
+
+
 def _s12_snapshot_mismatch() -> None:
     """
-    Adversarial: _ensure_snapshots_cover_user_ts (network.py:2371-2465)
-    auto-grows/realigns n.snapshots around whatever range an upload carries,
-    with no validation. Upload a profile whose timestamps have ZERO overlap
-    with the current range (shift +10 years) and record whether ts_start/
-    ts_end moved. Observed fact, not a required outcome.
+    Adversarial: this check's own upload can never reach
+    _ensure_snapshots_cover_user_ts's realign trigger (network.py:2371-
+    2465), even though that function's docstring is what originally
+    motivated this check. That function picks ONE reference series —
+    longest = max(flat_series, key=lambda s: len(s.index))
+    (network.py:2414) — across ALL of _user_ts, and realigns only around
+    THAT series, not around whatever the current upload carries. By the
+    time this check runs, _user_ts already holds 24-row 'Load 1'/'Load 2'
+    p_set series backed up from the 3bus template at project load
+    (projects.py, _backup_network_ts_to_user_ts), and this check's own
+    upload is only 3 rows — so `longest` is always a Load series, `realign`
+    is always False, and n.set_snapshots(...) is never called here.
+    Confirmed with a temporary debug probe on `longest`/`new_idx` and by
+    breaking `if realign:` directly: both showed the branch is genuinely
+    unreached for this check, in a clean run. The gate this check actually
+    exercises is _reapply_user_ts_to_network's zero-overlap column skip
+    (network.py:2611-2620): "if aligned.isna().all() and not
+    series.isna().all(): ... continue" — this check's shifted (+10 year)
+    profile is the ONLY upload anywhere in S12 whose series has zero
+    overlap with n.snapshots (every other S12 upload reuses the real `ts`
+    _s12_setup reads from the live snapshot index), so it is the only
+    upload in this suite that can reach that skip at all. A future reader
+    should not "fix" this check by chasing the realign branch — that
+    branch is dead code for this specific scenario, by construction of
+    which profiles happen to already be in _user_ts before this check
+    runs. Record whether ts_start/ts_end moved. Observed fact, not a
+    required outcome.
     """
     st0, snap0 = http("/api/network/snapshots")
     ts_start0 = snap0.get("ts_start") if isinstance(snap0, dict) else None
@@ -1445,6 +1534,7 @@ def suite_S12():
         _s12_component(component, ts)
     _s12_lines_asymmetry(ts)
     _s12_put_overwrite(ts)
+    _s12_put_overwrite_network_loss(ts)
     _s12_snapshot_mismatch()
     _s12_teardown(name)
 
