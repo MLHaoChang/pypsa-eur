@@ -215,12 +215,31 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         merged = _merge_partial_update(n, attr, name, kwargs)
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
-        n.remove(component_class, name)
         new_name = merged.pop("name", name)
-        n.add(component_class, new_name, **merged)
+        # Refuse to rename onto an occupied name. Without this the remove+add
+        # below silently destroyed the source component and (once the rename
+        # goes through PyPSA) would drag its dependents onto the target — a
+        # merge the user never asked for, reported as a 200.
+        if new_name != name and new_name in df.index:
+            raise HTTPException(409, f"{component_class} '{new_name}' already exists")
+        n.remove(component_class, name)
+        # Re-add under the OLD name and rename separately. A rename by
+        # remove+add does NOT re-point the components that REFER to this one:
+        # `loads.bus`, `generators.bus`, `lines.bus0/bus1` (and `carrier` on
+        # everything, for a Carrier rename) keep the old string, so renaming a
+        # bus orphaned everything attached to it. The orphans are invisible
+        # until the preflight reports `bus_ref_unknown`, and contribute nothing
+        # to the solve in the meantime. PyPSA's `rename_component_names` is the
+        # primitive that re-points dependents — and it also invalidates the
+        # cached `n.components` accessors and sub-network membership that a
+        # manual column rewrite would leave stale. `POST /buses/{name}/rename`
+        # already used it; this path is the one the Properties panel's edit
+        # cards take, and it did not.
+        n.add(component_class, name, **merged)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.
         if new_name != name:
+            n.rename_component_names(component_class, **{name: new_name})
             vintage_service.rename_asset(n, component_class, name, new_name)
             # Same fix for the time-series store — _user_ts keys carry the
             # column name, and without this the profile would be silently

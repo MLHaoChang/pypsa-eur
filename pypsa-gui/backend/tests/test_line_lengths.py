@@ -117,3 +117,76 @@ def test_recalculate_skips_a_line_touching_an_out_of_range_bus(client):
     # The pre-existing value survives untouched — same contract as an
     # unplaced (0, 0) bus.
     assert _lengths(client)["L1"] == 42.0
+
+
+# ── Bus renames must take their dependents with them ─────────────────────────
+# A bus has two rename paths and they did not agree. `POST /buses/{name}/rename`
+# uses PyPSA's `rename_component_names`, which re-points every referencing
+# component. `PUT /buses/{name}` with a changed `name` goes through
+# `_update_component`, which renames by remove+add — and remove+add does NOT
+# touch `loads.bus` / `generators.bus` / `lines.bus0` at all. The Properties
+# panel's Bus edit card uses the PUT, so renaming a bus there silently orphaned
+# everything attached to it: the components kept pointing at a name no bus had
+# any more. It surfaces later, at the preflight, as
+#   bus_ref_unknown: bus='Bus 5' does not match any bus
+# and the orphaned load contributes nothing to the solve in the meantime.
+
+def _load(client, name: str, bus: str):
+    r = client.post("/api/network/loads", json={"name": name, "bus": bus, "p_set": 10.0})
+    assert r.status_code == 201, r.text
+
+
+def _gen(client, name: str, bus: str):
+    r = client.post("/api/network/generators", json={"name": name, "bus": bus, "p_nom": 5.0})
+    assert r.status_code == 201, r.text
+
+
+def test_bus_rename_via_put_repoints_every_dependent(client):
+    _place(client, "Bus 5", 6.960, 50.938)
+    _place(client, "Bus 6", 7.100, 51.000)
+    _load(client, "H5 Heat", "Bus 5")
+    _gen(client, "G5", "Bus 5")
+    _line(client, "L56", "Bus 5", "Bus 6", 42.0)
+
+    # Exactly what PropertiesPanel's Bus card sends: the full current row with
+    # `name` changed.
+    r = client.put("/api/network/buses/Bus 5", json={
+        "name": "Bus 5 (Heat)", "v_nom": 380.0, "x": 6.960, "y": 50.938,
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Bus 5 (Heat)"
+
+    buses = {b["name"] for b in client.get("/api/network/buses").json()}
+    assert buses == {"Bus 5 (Heat)", "Bus 6"}
+
+    loads = {ld["name"]: ld["bus"] for ld in client.get("/api/network/loads").json()}
+    gens = {g["name"]: g["bus"] for g in client.get("/api/network/generators").json()}
+    lines = {ln["name"]: (ln["bus0"], ln["bus1"]) for ln in client.get("/api/network/lines").json()}
+
+    assert loads["H5 Heat"] == "Bus 5 (Heat)"
+    assert gens["G5"] == "Bus 5 (Heat)"
+    assert lines["L56"] == ("Bus 5 (Heat)", "Bus 6")
+
+    # The preflight is where the user actually met this, so assert the symptom
+    # itself is gone rather than only the DataFrame state.
+    pre = client.post("/api/simulation/preflight")
+    if pre.status_code == 200:
+        codes = {i["code"] for i in pre.json().get("issues", [])}
+        assert "bus_ref_unknown" not in codes
+
+
+def test_bus_rename_via_put_refuses_to_collide_with_an_existing_bus(client):
+    _place(client, "Bus 5", 6.960, 50.938)
+    _place(client, "Bus 6", 7.100, 51.000)
+    _load(client, "H5 Heat", "Bus 5")
+
+    r = client.put("/api/network/buses/Bus 5", json={
+        "name": "Bus 6", "v_nom": 380.0, "x": 6.960, "y": 50.938,
+    })
+    # Renaming onto a name that already exists must not silently merge the two
+    # buses (and re-point Bus 5's dependents onto Bus 6).
+    assert r.status_code == 409, r.text
+    buses = {b["name"] for b in client.get("/api/network/buses").json()}
+    assert buses == {"Bus 5", "Bus 6"}
+    loads = {ld["name"]: ld["bus"] for ld in client.get("/api/network/loads").json()}
+    assert loads["H5 Heat"] == "Bus 5"
