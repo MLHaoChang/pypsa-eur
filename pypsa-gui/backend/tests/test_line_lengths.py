@@ -46,7 +46,13 @@ def test_recalculate_skips_a_line_touching_an_unplaced_bus(client):
 
     r = client.post("/api/network/lines/recalculate_lengths")
     assert r.status_code == 200, r.text
-    assert r.json() == {"updated": 0, "skipped": 1, "total": 1}
+    body = r.json()
+    assert body["updated"] == 0 and body["skipped"] == 1 and body["total"] == 1
+    # Task 3: recalculate_lengths also gains "rescale" (impedance-preview
+    # entries). This line was skipped (unplaced bus), so it never reaches the
+    # preview step — the field exists but is empty. Not this file's concern;
+    # see test_line_rescale.py for the preview's own behaviour.
+    assert body["rescale"] == []
 
     # The pre-existing value survives untouched. Without the guard this became
     # the haversine distance from Cologne to Null Island — about 5,600 km.
@@ -62,7 +68,13 @@ def test_recalculate_still_measures_a_line_between_two_placed_buses(client):
 
     r = client.post("/api/network/lines/recalculate_lengths")
     assert r.status_code == 200, r.text
-    assert r.json() == {"updated": 1, "skipped": 0, "total": 1}
+    body = r.json()
+    assert body["updated"] == 1 and body["skipped"] == 0 and body["total"] == 1
+    # Task 3: the length actually changed (1.0 -> ~475 km) and L1 carries
+    # LineCreate's non-zero default x (0.01), so a rescale preview IS offered.
+    # Its content is test_line_rescale.py's concern, not this file's — just
+    # confirm the shape.
+    assert len(body["rescale"]) == 1 and body["rescale"][0]["name"] == "L1"
     assert 460.0 < _lengths(client)["L1"] < 490.0
 
 
@@ -75,7 +87,10 @@ def test_a_bus_on_the_prime_meridian_is_still_placed(client):
 
     r = client.post("/api/network/lines/recalculate_lengths")
     assert r.status_code == 200, r.text
-    assert r.json() == {"updated": 1, "skipped": 0, "total": 1}
+    body = r.json()
+    assert body["updated"] == 1 and body["skipped"] == 0 and body["total"] == 1
+    # Task 3: same as above — length changed and default x is non-zero.
+    assert len(body["rescale"]) == 1 and body["rescale"][0]["name"] == "L1"
     assert 480.0 < _lengths(client)["L1"] < 520.0
 
 
@@ -94,7 +109,10 @@ def test_recalculate_skips_a_line_touching_an_out_of_range_bus(client):
 
     r = client.post("/api/network/lines/recalculate_lengths")
     assert r.status_code == 200, r.text
-    assert r.json() == {"updated": 0, "skipped": 1, "total": 1}
+    body = r.json()
+    assert body["updated"] == 0 and body["skipped"] == 1 and body["total"] == 1
+    # Task 3: skipped line never reaches the preview step.
+    assert body["rescale"] == []
 
     # The pre-existing value survives untouched — same contract as an
     # unplaced (0, 0) bus.

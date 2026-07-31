@@ -86,6 +86,17 @@ class LineCreate(BaseModel):
     lifetime: _NoneToPosInf = Field(default=float("inf"))
 
 
+class ImpedanceRescaleEntry(BaseModel):
+    name: str
+    r: float
+    x: float
+    b: float
+
+
+class ImpedanceRescaleRequest(BaseModel):
+    lines: list[ImpedanceRescaleEntry]
+
+
 class LinkCreate(BaseModel):
     name: str
     bus0: str
