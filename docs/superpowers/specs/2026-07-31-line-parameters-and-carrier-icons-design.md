@@ -360,7 +360,10 @@ panel gains the C2 explanation. Both catalogs gain `gas` and `diesel`.
    naming `gas`, with no CO2 price and no global constraint set.
 8. Accepting the offered fix sets `co2_emissions = 0.187` on the `gas` carrier
    row, and the Results tab then reports non-zero tCO2 for `3_nodes_system`.
-9. Declining leaves the row at `0.0` and does not re-prompt within the session.
+9. Declining leaves the row at `0.0`. The warning keeps appearing while the
+   condition holds — `carrier_zero_co2` is an entry in an issues list, not a
+   modal, and a list that stopped reporting a live issue after one glance would
+   be hiding exactly the problem this part exists to surface.
 10. A network whose generators are all `solar` and `onwind` raises no warning.
 11. A generator on `biogas` raises no warning.
 12. With no fossil carrier configured, the Results tab explains the zero rather
