@@ -45,22 +45,13 @@ DEST = HERE / "download-dest"
 # Documents folder while reporting that app-data had been redirected, which was
 # true and beside the point.
 #
-# Both are required, and both are asserted, because an unset one is silent.
-_appdata = os.environ.get("PYPSAGUI_APP_DATA_DIR", "")
-_projects = os.environ.get("PYPSAGUI_PROJECTS_ROOT", "")
-assert _appdata, "refusing to run: set PYPSAGUI_APP_DATA_DIR to a throwaway directory"
-assert _projects, (
-    "refusing to run: set PYPSAGUI_PROJECTS_ROOT to a throwaway directory. "
-    "Without it, projects are written to ~/Documents/PyPSA GUI/Projects — "
-    "PYPSAGUI_APP_DATA_DIR does NOT cover them."
-)
-for _label, _value in (("PYPSAGUI_APP_DATA_DIR", _appdata),
-                       ("PYPSAGUI_PROJECTS_ROOT", _projects)):
-    _p = Path(_value).expanduser().resolve()
-    assert (BACKEND / "projects") not in _p.parents and _p != (BACKEND / "projects").resolve(), \
-        f"refusing to run: {_label} points at the repo's real projects tree ({_value})"
-    assert Path.home() / "Documents" not in _p.parents, \
-        f"refusing to run: {_label} points inside the user's Documents folder ({_value})"
+# One shared guard now — see smoke/isolation.py. It keeps every check this
+# copy had and adds DATABASE_URL, which none of the three harnesses required:
+# `backend/.env` pins a cwd-relative one and pydantic ranks the env file above
+# the app-data default, so the auth database escaped the isolation entirely.
+from smoke.isolation import require_isolated_environment  # noqa: E402
+
+require_isolated_environment()
 
 DEST.mkdir(parents=True, exist_ok=True)
 for p in DEST.iterdir():
