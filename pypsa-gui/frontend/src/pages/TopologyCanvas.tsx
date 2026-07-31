@@ -8,8 +8,8 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
-  Plus, Layers, Flame, Thermometer, BatteryCharging, PlugZap,
-  Zap, Droplets, Wind, Trash2, X as XIcon, type LucideIcon,
+  Plus, Layers, Flame, BatteryCharging,
+  Zap, Wind, Trash2, X as XIcon, type LucideIcon,
   Clock, CheckCircle2, Loader2, XCircle,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -21,7 +21,7 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { isRenewableCarrier } from '../utils/carriers'
 import { useSimulationStore } from '../store/simulationStore'
-import { H2Icon } from '../components/AssetIcons'
+import { getCarrierBadge, type BadgeDef } from '../utils/carrierBadges'
 import CarrierSelect from '../components/CarrierSelect'
 import { Dialog } from '../components/Dialog'
 import {
@@ -453,38 +453,8 @@ const CAT_DISPLAY_LABELS: Record<AssetCategory, string> = {
 // Icon may be a lucide icon OR a custom component (e.g. shared H2Icon). Both
 // accept `size` and `style`; `strokeWidth` is optional — lucide icons honour it,
 // custom SVG glyphs (H2Icon) just ignore the extra prop.
-type BadgeIcon = React.FC<{ size?: number; style?: React.CSSProperties; strokeWidth?: number }>
-interface BadgeDef { Icon: BadgeIcon; label: string }
-
-const CARRIER_BADGES: Record<string, BadgeDef> = {
-  H2:              { Icon: H2Icon,         label: 'H₂' },
-  hydrogen:        { Icon: H2Icon,         label: 'H₂' },
-  electrolysis:    { Icon: Droplets,       label: 'ELY' },
-  // Heat-carrier links are visually distinct from gas/thermal generators —
-  // use Thermometer to match the left-sidebar Heating-Demand glyph.
-  heat:            { Icon: Thermometer,    label: 'Heat' },
-  heat_pump:       { Icon: Thermometer,    label: 'HP' },
-  'heat pump':     { Icon: Thermometer,    label: 'HP' },
-  gas:             { Icon: Flame,          label: 'Gas' },
-  CCGT:            { Icon: Zap,            label: 'CCGT' },
-  OCGT:            { Icon: Zap,            label: 'OCGT' },
-  SMR:             { Icon: H2Icon,         label: 'SMR' },
-  battery:         { Icon: BatteryCharging,label: 'Batt.' },
-  BEV:             { Icon: BatteryCharging,label: 'BEV' },
-  DC:              { Icon: PlugZap,        label: 'DC' },
-  HVDC:            { Icon: PlugZap,        label: 'HVDC' },
-  AC:              { Icon: Zap,            label: 'AC' },
-  resistive:       { Icon: Zap,            label: 'Res.' },
-  wind:            { Icon: Wind,           label: 'Wind' },
-}
-
-function getCarrierBadge(carrier: string): BadgeDef {
-  if (CARRIER_BADGES[carrier]) return CARRIER_BADGES[carrier]
-  const key = Object.keys(CARRIER_BADGES).find(k =>
-    carrier.toLowerCase().includes(k.toLowerCase())
-  )
-  return key ? CARRIER_BADGES[key] : { Icon: Zap, label: carrier.slice(0, 5) }
-}
+// Table and getCarrierBadge moved to utils/carrierBadges.tsx for sharing with
+// the map component.
 
 function CarrierBadge({ carrier, color }: { carrier: string; color: string }) {
   const { Icon, label } = getCarrierBadge(carrier)
