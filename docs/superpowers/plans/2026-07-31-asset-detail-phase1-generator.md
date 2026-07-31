@@ -169,9 +169,32 @@ def test_resolve_metric_is_ok_when_every_precondition_is_ok():
 
 
 def test_resolve_category_is_na_when_the_class_has_no_metrics_there():
-    st = ap.resolve_category("loadflow", "Generator", {})
+    # Storage, not loadflow: a Generator genuinely has NO storage metric.
+    # Generator/loadflow is the spec's ○ (partial) — see the next test.
+    st = ap.resolve_category("storage", "Generator", {})
     assert st.status == "na"
-    assert "branch" in st.reason
+    assert "store energy" in st.reason
+
+
+def test_generator_loadflow_is_blocked_not_na_because_reactive_power_applies():
+    """`q` exists on a Generator but only in the AC PF snapshot, so the
+    category is blocked until that stage runs — never n/a."""
+    blocked = ap.Status("blocked", "AC power flow has not been run",
+                        ap.Remedy("run_ac_pf", "Run AC power flow"))
+    st = ap.resolve_category("loadflow", "Generator", {reg.REQ_AC_PF: blocked})
+    assert st.status == "blocked"
+    assert st.remedy.action == "run_ac_pf"
+
+
+def test_a_reason_every_member_shares_beats_the_generic_one():
+    """A phase-2 placeholder must say "not yet available", not "Dispatch does
+    not apply to Load" — Loads DO dispatch, it is simply not wired up yet."""
+    st = ap.resolve_category("dispatch", "Load", {
+        reg.REQ_NOT_YET: ap.Status(
+            "na", "not yet available — arrives in a later phase of this feature"),
+    })
+    assert st.status == "na"
+    assert "not yet available" in st.reason
 
 
 def test_resolve_category_is_ok_when_any_member_metric_is_ok():
@@ -568,6 +591,11 @@ def resolve_category(
     ok      — at least one member metric resolves ok
     blocked — members exist, none is ok, at least one is blocked
     na      — no members, or every member is na
+
+    When every member is `na` for the SAME reason, that reason wins over the
+    generic one. Without this, a phase-2 placeholder reports "Dispatch does
+    not apply to Load" — which is false. Loads dispatch; it is simply not
+    wired up yet, and the placeholder's own reason says so.
     """
     members = metrics_for(component_class, category)
     if not members:
@@ -578,6 +606,9 @@ def resolve_category(
     for r in resolved:
         if r.status == "blocked":
             return r
+    reasons = {r.reason for r in resolved if r.reason}
+    if len(reasons) == 1:
+        return _na(reasons.pop())
     return _na(category_na_reason(category, component_class))
 ```
 
