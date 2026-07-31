@@ -4133,8 +4133,14 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Test: `pypsa-gui/frontend/src/pages/results/asset/AssetDetail.test.tsx`
 
 **Interfaces:**
-- Consumes: `AssetPicker`, `MetricChecklist`, `AssetTable` (+ `tableRows`), `AssetCharts`, `assetResultsApi`, `loadSelection`/`saveSelection`/`reconcileSelection`, `useResultsFilter` from `../filterContext`, `downloadCSV` from `../shared`, `nk` from `../../../utils/queryKeys`.
+- Consumes: `AssetPicker`, `MetricChecklist`, `AssetTable` (+ `tableRows`), `AssetCharts`, `assetResultsApi`, `loadSelection`/`saveSelection`/`reconcileSelection`, `useResultsFilter` from `../filterContext`, `downloadCSV` from `../shared`, `nk` from `../../../utils/queryKeys`, and `keepPreviousData` from `@tanstack/react-query`.
 - Produces: `AssetDetail` default export (no props — reads filter + project from context/store).
+
+> **Ordering note.** This task does NOT reference `uiStore.assetDetailRequest` /
+> `clearAssetDetailRequest` — those do not exist until Task 13, which owns both
+> the store slot and the deep-link `useEffect` that consumes it. Task 13 adds
+> that effect to `AssetDetail.tsx`. Keeping the store edit in one task also
+> avoids two tasks racing on a shared file while a concurrent session is active.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4325,6 +4331,12 @@ export default function AssetDetail() {
                  filter.fromIso, filter.toIso, filter.selectedPeriod),
     queryFn: () => assetResultsApi.get(params!),
     enabled: !!params,
+    // `selected` is part of the key, and the reconcile effect below rewrites
+    // `selected` as soon as the first response lands — so the key changes
+    // immediately after mount and `data` would drop to undefined, blanking the
+    // pane on every asset load. Keep the previous payload on screen while the
+    // new key resolves.
+    placeholderData: keepPreviousData,
   })
 
   // Reconcile the remembered tick-set the moment the backend tells us what is
@@ -4548,6 +4560,10 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Test: `pypsa-gui/frontend/src/store/assetDetailRequest.test.ts`
 
 **Interfaces:**
+- Also adds to `AssetDetail.tsx` the deep-link `useEffect` that consumes
+  `assetDetailRequest` and calls `clearAssetDetailRequest()` — Task 12
+  deliberately left it out, because the store slot does not exist until now
+  and splitting the two would have had both tasks editing `uiStore.ts`.
 - Produces on `uiStore`:
   - `assetDetailRequest: AssetDetailRequest | null` where
     `AssetDetailRequest = { componentClass: string; name: string; category?: string; metrics?: string[]; mode?: ViewMode; chart?: boolean }`
