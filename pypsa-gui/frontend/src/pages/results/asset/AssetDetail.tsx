@@ -54,7 +54,7 @@ export default function AssetDetail() {
     period: filter.selectedPeriod, mode,
   }
 
-  const { data } = useQuery({
+  const qResult = useQuery({
     queryKey: nk(currentProject, 'assetResults', asset?.class, asset?.name,
                  category, selected.join(','), mode,
                  filter.fromIso, filter.toIso, filter.selectedPeriod),
@@ -69,10 +69,35 @@ export default function AssetDetail() {
     // the two if a caller ever needs to.
     placeholderData: keepPreviousData,
   })
+  const { data } = qResult
+  // `isPlaceholderData` is true while a new query key is in flight and the
+  // PREVIOUS payload is still on screen (see the comment on the query above).
+  // The table and the CSV button both read `data`, so they stay in lockstep
+  // with whatever is showing — correct by construction. The xlsx links below
+  // are built from live `params`, which updates immediately on every asset /
+  // category / mode change, ahead of `data`. Without gating on this flag, the
+  // two xlsx links would point at the NEW selection while the table/CSV still
+  // show the OLD one — three export affordances in one toolbar, disagreeing.
+  const isPlaceholderData = qResult.isPlaceholderData
 
   // Reconcile the remembered tick-set the moment the backend tells us what is
   // actually available for THIS asset. Metrics that became blocked or n/a are
   // dropped silently — their reason is already on screen in the checklist.
+  //
+  // INVARIANT this relies on: `data.metrics` (what's available) varies only
+  // with asset + category, NEVER with the `metrics`/`mode`/filter part of the
+  // query key. That's why a deliberate untick made via `toggle()` survives
+  // this effect re-running after the resulting refetch settles — `toggle()`
+  // writes `selected` + `saveSelection()` synchronously, and the ids this
+  // effect treats as "still ok" don't shrink just because the request that
+  // just landed asked for a different `metrics` param. If the backend is ever
+  // changed to scope the RETURNED `metrics` list to the requested selection
+  // (e.g. only reporting on ticked ids instead of every id applicable to this
+  // asset/category), this effect would start silently re-adding or dropping
+  // ids based on what happened to be requested last, not what's actually
+  // available — the guard above needs `data.metrics` to always be the FULL
+  // applicability list, independent of what was ticked when the request went
+  // out.
   useEffect(() => {
     if (!data || !asset) return
     const next = reconcileSelection(loadSelection(asset.class, category), data.metrics)
@@ -189,12 +214,31 @@ export default function AssetDetail() {
               </button>
               {params && (
                 <>
-                  <a href={assetResultsApi.exportXlsxUrl(params, 'view')} download
-                    className="flex items-center gap-1 text-[11px] text-muted hover:text-accent">
+                  {/* The xlsx links are built from LIVE `params`, but `data` can be
+                      the previous selection's payload while a new fetch is in
+                      flight (that is what keepPreviousData buys). Serving the links
+                      during that window would point them at a different selection
+                      than the table and the CSV button are showing — three export
+                      affordances in one toolbar, disagreeing. Disable them until
+                      the payload catches up. */}
+                  <a
+                    href={isPlaceholderData ? undefined : assetResultsApi.exportXlsxUrl(params, 'view')}
+                    download
+                    aria-disabled={isPlaceholderData || undefined}
+                    title={isPlaceholderData ? 'Refreshing — the workbook would not match the view' : undefined}
+                    className={`flex items-center gap-1 text-[11px] ${isPlaceholderData
+                      ? 'text-muted/40 pointer-events-none' : 'text-muted hover:text-accent'}`}
+                  >
                     <Download size={11} /> Export configured view
                   </a>
-                  <a href={assetResultsApi.exportXlsxUrl(params, 'full')} download
-                    className="flex items-center gap-1 text-[11px] text-muted hover:text-accent">
+                  <a
+                    href={isPlaceholderData ? undefined : assetResultsApi.exportXlsxUrl(params, 'full')}
+                    download
+                    aria-disabled={isPlaceholderData || undefined}
+                    title={isPlaceholderData ? 'Refreshing — the workbook would not match the view' : undefined}
+                    className={`flex items-center gap-1 text-[11px] ${isPlaceholderData
+                      ? 'text-muted/40 pointer-events-none' : 'text-muted hover:text-accent'}`}
+                  >
                     <Download size={11} /> Full asset report
                   </a>
                 </>

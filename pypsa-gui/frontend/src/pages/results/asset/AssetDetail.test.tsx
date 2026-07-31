@@ -104,4 +104,53 @@ describe('AssetDetail', () => {
     expect(await screen.findByRole('link', { name: /Export configured view/ })).toBeTruthy()
     expect(await screen.findByRole('link', { name: /Full asset report/ })).toBeTruthy()
   })
+
+  it('disables the xlsx export links while a refetch is showing the previous payload, and restores them once it settles', async () => {
+    // Route exportXlsxUrl through its params so a settled href reveals WHICH
+    // selection it was built from, instead of always the same fixed string.
+    vi.mocked(assetResultsApi.exportXlsxUrl).mockImplementation(
+      (p, scope) => `http://x/${scope}/${p.metrics.join(',') || 'none'}.xlsx`)
+
+    // Make `get` controllable so the in-flight window between two successive
+    // fetches (first: selected=[]; second: selected=reconciled defaults, which
+    // the reconcile effect triggers the instant the first one resolves) is
+    // observable instead of settling instantly.
+    const deferred: Array<(v: AssetResultsResponse) => void> = []
+    vi.mocked(assetResultsApi.get).mockImplementation(
+      () => new Promise(resolve => { deferred.push(resolve) }))
+
+    renderIt()
+
+    // First fetch: selected=[] (nothing ticked yet).
+    await waitFor(() => expect(deferred).toHaveLength(1))
+    deferred[0](RESPONSE)
+
+    // Capture the link references now, while `data` is real (matches the
+    // still-selected=[] params) — same DOM nodes persist across re-renders
+    // (no key on these <a>s), so reading attributes off them later reflects
+    // whatever the component currently renders without needing a fresh
+    // role-based query (which would fail once `href` is stripped, since an
+    // `<a>` with no `href` has no accessible "link" role).
+    const viewLink = await screen.findByRole('link', { name: /Export configured view/ })
+    const fullLink = await screen.findByRole('link', { name: /Full asset report/ })
+
+    // Resolving the first fetch lets the reconcile effect compute the default
+    // tick-set and write it to `selected` — changing the query key and
+    // starting a SECOND fetch. `keepPreviousData` keeps the FIRST payload on
+    // screen meanwhile (table/CSV still agree with it), but `params` already
+    // reflects the NEW selection — exactly the disagreement window the fix
+    // closes for the xlsx links.
+    await waitFor(() => expect(deferred).toHaveLength(2))
+    await waitFor(() => expect(viewLink.getAttribute('href')).toBeNull())
+    expect(viewLink.getAttribute('aria-disabled')).toBe('true')
+    expect(fullLink.getAttribute('href')).toBeNull()
+    expect(fullLink.getAttribute('aria-disabled')).toBe('true')
+
+    // Resolve the second fetch — isPlaceholderData clears, and the links must
+    // now point at the CURRENT (reconciled) selection, not the original empty one.
+    deferred[1](RESPONSE)
+    await waitFor(() => expect(viewLink.getAttribute('href'))
+      .toBe('http://x/view/p,energy_mwh.xlsx'))
+    expect(fullLink.getAttribute('href')).toBe('http://x/full/p,energy_mwh.xlsx')
+  })
 })
