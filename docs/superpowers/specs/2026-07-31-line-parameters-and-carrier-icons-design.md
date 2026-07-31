@@ -11,9 +11,15 @@ Two independent parts, requested together:
 **A.** A solar generator shows a sun, not a wind turbine.
 **B.** When a line's length changes, its length-dependent parameters follow it —
 or the user is told they didn't, and decides.
+**C.** `0 tCO2` never again means "nobody told me what this fuel emits".
 
-They share no code and could ship separately. B is a correctness fix; A is
-cosmetic.
+They share no code and could ship separately. B and C are correctness fixes; A
+is cosmetic. All three are built together at the user's request.
+
+A and C turn out to share a shape: a default value that is indistinguishable
+from a deliberate one. B's is `length`; C's is `co2_emissions`. The same
+remedy applies to both — detect it, say so, and offer the fix rather than
+applying it silently.
 
 ---
 
@@ -257,6 +263,129 @@ OPF splits flows inversely proportional to `x`, so results will move.
 - Changing the properties form's per-km presentation. It is the source of the
   invariant this spec makes the rest of the app honour.
 
+---
+
+# Part C — a zero that explains itself
+
+## Why now
+
+The reporter's Results tab shows `0 tCO2` for a network with a 300 MW gas
+plant. **The number is correct.** `carriers_co2_emissions` is absent from
+`3_nodes_system/network.nc`, so every carrier sits at PyPSA's default of `0.0`,
+and the emissions formula (`routers/results.py:1705`) is
+
+```
+tCO2[g] = Σ_t (p[g,t] × weight_t) × co2_emissions[carrier(g)] / efficiency[g]
+```
+
+Multiply by zero and the answer is zero.
+
+The intensity is missing because the generator's carrier is **`gas`**, and
+`gas` is not in the 21-entry catalog (`services/carrier_catalog.py`):
+
+```
+AC DC onwind offwind-ac offwind-dc solar solar-rooftop ror hydro geothermal
+biomass wave CCGT OCGT coal lignite oil nuclear H2 battery PHS
+```
+
+It has `CCGT` and `OCGT` — generator *technologies* — but not `gas`, the
+*fuel*, which is an ordinary PyPSA-Eur carrier name. The netCDF carries the
+fingerprint of the miss: `carriers_color = ['#70af1d', '', '#f9d002',
+'#ace37f']` — `gas`'s colour is blank — and `carriers_nice_name` shows `gas`
+where the catalog-matched carriers got `Solar PV (utility)` and `Battery`.
+
+**Nothing warned, because both existing guards are conditional.**
+`validation_service.py:438-443` fires only when `co2_price > 0`;
+`validation_service.py:1148-1153` fires only when a global constraint exists.
+The reporter's network has neither (verified: `global constraints: []`).
+
+## Constraints
+
+**The catalog lookup is exact and case-sensitive**, and `ensure_carrier`
+returns early when the carrier already exists:
+
+```python
+if carrier_name in n.carriers.index:
+    return
+meta = CARRIER_CATALOG.get(carrier_name, {"nice_name": carrier_name, "color": "", "co2_emissions": 0.0})
+```
+
+Two consequences that shape the whole design: every spelling needs its own key
+(`gas`, `Gas` and `natural gas` are three different misses), and **adding a
+catalog entry can never repair an existing project** — the row is already
+there, so the catalog is never consulted again.
+
+**The catalog exists twice** — `services/carrier_catalog.py` and
+`frontend/src/utils/carrierCatalog.ts` — kept in sync by a docstring asking
+future editors to keep them in sync. Both must be edited together.
+
+## Decisions
+
+**C1. Add only the values this repo can already justify.** `gas` → `0.187`,
+identical to the repo's own `CCGT`/`OCGT`, which burn natural gas. `diesel` →
+`0.267`, identical to the repo's own `oil`. Anything further would be inventing
+emission factors, and a wrong factor is worse than an absent one because it
+looks authoritative. Coverage of the long tail is C3's job, not the catalog's.
+
+**C2. A zero states its reason.** Where the Results tab reports `0 tCO2` and no
+carrier in the network has `co2_emissions > 0`, it says so. A bare `0` cannot
+distinguish "this system is clean" from "nobody told me what this fuel emits",
+and those call for opposite actions.
+
+**C3. The warning is ungated.** Warn whenever a generator's carrier has
+`co2_emissions == 0` and the carrier name looks fossil — not conditioned on
+`co2_price`, not conditioned on a global constraint. Those two conditions are
+exactly why nothing fired here.
+
+**C4. Offer, never rewrite** — the same consent model as Part B. The warning
+carries a one-click action that sets the intensity, pre-filled with the catalog
+value when one exists. This, not C1, is what repairs `3_nodes_system`. A user
+who deliberately wants gas at zero keeps it by declining.
+
+## What changes
+
+Fossil detection is a case-insensitive substring match over `gas`, `coal`,
+`lignite`, `oil`, `diesel`, `peat`, `waste`, `ccgt`, `ocgt`, `methane`, with
+**`biogas` explicitly excluded** — it contains `gas` but its CO2 is biogenic
+and conventionally counted as zero, so warning on it would be a false positive
+that teaches users to ignore the warning.
+
+The new warning is `carrier_zero_co2`, listing each affected carrier, the
+generators on it, and the catalog value if there is one. The Results emissions
+panel gains the C2 explanation. Both catalogs gain `gas` and `diesel`.
+
+## Success criteria
+
+7. A project whose only fossil carrier is `gas` raises `carrier_zero_co2`
+   naming `gas`, with no CO2 price and no global constraint set.
+8. Accepting the offered fix sets `co2_emissions = 0.187` on the `gas` carrier
+   row, and the Results tab then reports non-zero tCO2 for `3_nodes_system`.
+9. Declining leaves the row at `0.0` and does not re-prompt within the session.
+10. A network whose generators are all `solar` and `onwind` raises no warning.
+11. A generator on `biogas` raises no warning.
+12. With no fossil carrier configured, the Results tab explains the zero rather
+    than showing a bare `0 tCO2`.
+
+## Tests
+
+- `backend/tests/test_carrier_emissions.py` — `carrier_zero_co2` fires for
+  `gas` with no co2_price and no global constraint (the exact gap that let this
+  through); does not fire for `solar`/`onwind`; does not fire for `biogas`;
+  the offered value matches the catalog where one exists and is absent where
+  none does.
+- The existing `ensure_carrier` behaviour — early return on an existing row —
+  gets a test pinning it, because C4's necessity depends on it.
+
+## Out of scope
+
+- Emission factors for carriers this repo has no existing basis for (`waste`,
+  `peat`, `shale`). C3 catches them; inventing numbers for them is worse.
+- Deduplicating the two carrier catalogs. Real, and the same drift risk that
+  motivated `utils/carriers.ts`, but a larger refactor than this change should
+  carry. Recorded as a follow-up.
+
+---
+
 ## Known limitations
 
 **The 5% threshold will always trip on first placement.** Going from the 1 km
@@ -266,3 +395,15 @@ the prompt is "once, on the big change", not a rare event.
 
 **Accepting a rescale changes solver results.** By design, and stated in the
 dialog. `undo` is the way back.
+
+**Part C does not audit existing projects in bulk.** The warning fires for the
+project you have open. A user with twenty projects fixes them one at a time.
+
+**Not addressed here: the chat panel's missing API key.** Investigated during
+this design and deliberately excluded. `chat_health()` reads
+`os.environ["ANTHROPIC_API_KEY"]`; the packaged app has no `.env` (the
+credential gate refuses any build containing one), a Finder-launched `.app`
+inherits no shell environment, and the desktop launcher passes no key. That is
+workstream K, and it needs its own design — where a user-supplied key is stored
+(macOS Keychain vs. a mode-600 file in app-data), how it is entered, and how it
+stays out of every future bundle.
