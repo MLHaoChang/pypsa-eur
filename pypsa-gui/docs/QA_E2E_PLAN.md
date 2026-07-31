@@ -136,12 +136,14 @@ backed up before the run and diffed after. Test artefacts are prefixed
 | S13.6 | `status == "completed"` and `objective` is finite |
 | S13.7 | `RESULT_ENDPOINTS` walk against the fresh solve — no 5xx, no non-finite values |
 | S13.8 | Re-solve reproduces the first objective within `1e-6` relative tolerance |
+| S13.9 | Every `RESULT_ENDPOINTS` entry names a route that actually exists as `/api/results/{name}` in the live `/openapi.json`. Added because a dead entry is invisible to S13.7/S3.1/S3.2: a missing `/api/*` path falls through to the SPA catch-all and returns 404, which is `<500`, valid JSON, and float-free — it trips none of those checks' tripwires. FAIL means either `RESULT_ENDPOINTS` names a route that was removed/renamed, or a route it expects was never added — fix whichever is stale. |
 
 ### S14 — Scenario tree & snapshots (area 7)
 | id | Assertion |
 |----|-----------|
 | S14.2 | Snapshot creation |
 | S14.3 | Snapshot listing shows the new snapshot |
+| S14.4 | Diverge the base project from its snapshot (create a bus) — setup so S14.7's restore has a real mutation to roll back |
 | S14.5 | Scenario branch creation (`201`) |
 | S14.6 | Scenario tree listing via `parent_project` filtering shows the branch |
 | S14.7 | Snapshot restore rolls back a post-snapshot mutation |
