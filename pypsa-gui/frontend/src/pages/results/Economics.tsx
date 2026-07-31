@@ -10,6 +10,7 @@ import {
   type GeneratorEconomicsRow,
   type StorageUnitEconomicsRow,
   type StoreEconomicsRow,
+  type LinkEconomicsRow,
 } from '../../api/simulation'
 import {
   KPI, ChartCard, ChartActions, Seg, fmtCurrency, fmtEnergy, downloadCSV,
@@ -23,13 +24,14 @@ import { nk } from '../../utils/queryKeys'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 
 // ── Economics tab ──────────────────────────────────────────────────────────
-// Per-asset profitability view. Each row is one Generator / StorageUnit / Store
-// with its annualised revenue (production × bus marginal price), fixed cost
-// (capital_cost × p_nom_opt, already annualised), variable cost (marginal_cost
-// × dispatch), and the net profit + LCOE/LCOS that fall out.
+// Per-asset profitability view. Each row is one Generator / StorageUnit /
+// Store / Link with its annualised revenue (production × bus marginal price),
+// fixed cost (capital_cost × p_nom_opt, already annualised), variable cost
+// (marginal_cost × dispatch), and the net profit + LCOE/LCOS that fall out.
 //
 // Two-level drill-down:
-//   1. By group (Thermal / Renewables / Storage) — quick portfolio summary.
+//   1. By group (Thermal / Renewables / Storage / Converters) — quick
+//      portfolio summary.
 //   2. Expand a group → individual assets — for asset-level LCOE/LCOS.
 //   3. Expand an asset → per-period breakdown (multi-period only).
 //
@@ -37,7 +39,10 @@ import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 // docstring for the exact formulas. Weighting is the same convention as
 // elsewhere in Results (snapshot_weightings × investment_period_weightings.years).
 
-type GroupKey = 'Thermal' | 'Renewables' | 'Storage'
+// 'Converters' covers Links — electrolysers, heat pumps, P2X. They were absent
+// from this table entirely until 2026-07-31: the endpoint returned no `links`
+// collection, so an electrolyser had no row here whatever its costs.
+type GroupKey = 'Thermal' | 'Renewables' | 'Storage' | 'Converters'
 
 interface AggregatedAssetRow {
   group: GroupKey
@@ -54,7 +59,8 @@ interface AggregatedAssetRow {
   fixed_cost_eur: number
   fom_cost_eur: number
   net_profit_eur: number
-  lcoe_or_lcos: number | null    // €/MWh; LCOE for generators, LCOS for storage
+  lcoe_or_lcos: number | null    // €/MWh; LCOE for generators, LCOS for storage,
+                                 // all-in cost of output for converters
   spread_or_avg_price: number | null  // discharge−charge spread for storage; avg price for generators
   by_period: Array<{
     period: number | string
@@ -136,6 +142,44 @@ function makeSURow(s: StorageUnitEconomicsRow): AggregatedAssetRow {
       fom_cost_eur: p.fom_cost_eur,
       net_profit_eur: p.net_profit_eur,
       lcoe_or_lcos: p.lcos_eur_per_mwh,
+    })),
+  }
+}
+// A Link is two-sided exactly like storage — it buys at bus0 and sells at
+// bus1 — so it reuses the storage columns rather than adding new ones:
+// `revenue_eur` carries the GROSS value delivered and `charge_cost_eur` the
+// energy bought. `sumGroup` already builds its unit cost as
+// (fixed + vom + charge_cost) / energy, which is the all-in basis the backend
+// and the LCOH panel use, so group totals come out right without special-casing.
+function makeLinkRow(l: LinkEconomicsRow): AggregatedAssetRow {
+  return {
+    group: 'Converters',
+    name: l.name,
+    carrier: l.carrier,
+    bus: l.bus,
+    capacity_label: `${l.p_nom_opt_mw.toFixed(1)} MW`,
+    capacity_factor: l.capacity_factor,
+    energy_mwh: l.energy_mwh,        // output at bus1
+    charge_mwh: l.input_energy_mwh,  // input drawn at bus0
+    revenue_eur: l.gross_revenue_eur,
+    charge_cost_eur: l.input_cost_eur,
+    vom_cost_eur: l.vom_cost_eur,
+    fixed_cost_eur: l.fixed_cost_eur,
+    fom_cost_eur: l.fom_cost_eur,
+    net_profit_eur: l.net_profit_eur,
+    lcoe_or_lcos: l.lcoe_eur_per_mwh,
+    spread_or_avg_price: l.avg_price_eur_per_mwh,
+    by_period: l.by_period.map(p => ({
+      period: p.period,
+      energy_mwh: p.energy_mwh,
+      charge_mwh: 0,
+      revenue_eur: p.gross_revenue_eur,
+      charge_cost_eur: p.input_cost_eur,
+      vom_cost_eur: p.vom_cost_eur,
+      fixed_cost_eur: p.fixed_cost_eur,
+      fom_cost_eur: p.fom_cost_eur,
+      net_profit_eur: p.net_profit_eur,
+      lcoe_or_lcos: p.lcoe_eur_per_mwh,
     })),
   }
 }
@@ -297,6 +341,9 @@ export default function Economics() {
       ...payload.generators.map(makeGenRow),
       ...payload.storage_units.map(makeSURow),
       ...payload.stores.map(makeStoreRow),
+      // `?? []` so a response from an older backend (before the links block
+      // existed) renders the other three groups instead of throwing.
+      ...(payload.links ?? []).map(makeLinkRow),
     ]
   }, [payload])
 
@@ -313,7 +360,9 @@ export default function Economics() {
   // under "Battery". Component class is derived from the row's group
   // ('Storage' → StorageUnit semantics, everything else → Generator).
   const rowComponentClass = (r: AggregatedAssetRow): ComponentClass =>
-    r.group === 'Storage' ? 'StorageUnit' : 'Generator'
+    r.group === 'Storage' ? 'StorageUnit'
+    : r.group === 'Converters' ? 'Link'
+    : 'Generator'
   const availableCarriers = useMemo(() => {
     const seen = new Set<string>()
     for (const r of everyRow) seen.add(canonicaliseCarrier(rowComponentClass(r), r.carrier))
@@ -337,7 +386,7 @@ export default function Economics() {
   // row's top-level totals.
   const groupedRows = useMemo(() => {
     const out: Record<GroupKey, AggregatedAssetRow[]> = {
-      Thermal: [], Renewables: [], Storage: [],
+      Thermal: [], Renewables: [], Storage: [], Converters: [],
     }
     for (const r of allRows) out[r.group].push(r)
     return out
@@ -434,6 +483,7 @@ export default function Economics() {
       Thermal:    sumGroup(groupedRows.Thermal,    'Thermal',    filter.selectedPeriod),
       Renewables: sumGroup(groupedRows.Renewables, 'Renewables', filter.selectedPeriod),
       Storage:    sumGroup(groupedRows.Storage,    'Storage',    filter.selectedPeriod),
+      Converters: sumGroup(groupedRows.Converters, 'Converters', filter.selectedPeriod),
     }
   }, [groupedRows, filter.selectedPeriod])
 
@@ -464,7 +514,7 @@ export default function Economics() {
         value: r.lcoe_or_lcos!,
         carrier: r.carrier,
         group: r.group,
-        kind: r.group === 'Storage' ? 'LCOS' : 'LCOE',
+        kind: r.group === 'Storage' ? 'LCOS' : r.group === 'Converters' ? 'LCOX' : 'LCOE',
       }))
       .sort((a, b) => a.value - b.value)
       .slice(0, 25)
@@ -529,7 +579,7 @@ export default function Economics() {
   if (allRows.length === 0) {
     return (
       <div className="p-6 text-center text-xs text-muted">
-        The solved network has no generators, storage units, or stores to evaluate.
+        The solved network has no generators, storage units, stores or converters to evaluate.
       </div>
     )
   }
@@ -565,7 +615,7 @@ export default function Economics() {
           <KPI label="Fixed cost"
                value={fmtCurrency(kpis.fixed)}
                sub="annualised CAPEX (gens + storage)"
-               hint="Σ (overnight × annuity, or capital_cost) × p_nom_opt over generators, storage units and stores. Same basis as Dispatch CAPEX (annuitised). Excludes line / transformer CAPEX (see Capacity Expansion)." />
+               hint="Σ (overnight × annuity, or capital_cost) × p_nom_opt over generators, storage units, stores and converters (electrolysers / heat pumps / P2X). Same basis as Dispatch CAPEX (annuitised). Excludes line / transformer CAPEX (see Capacity Expansion)." />
           <KPI label="Variable cost"
                value={fmtCurrency(kpis.vom + kpis.charge_cost)}
                sub={kpis.charge_cost > 0
@@ -713,13 +763,13 @@ export default function Economics() {
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Σ |p| × marginal_cost.">VOM</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Annualised CAPEX (capital_cost × p_nom_opt).">Fixed</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Net profit</th>
-                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="LCOE for generators / LCOS for storage.">LCOE/LCOS</th>
+                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="LCOE for generators, LCOS for storage, and for converters the all-in cost per MWh of output — capital + VOM + the energy bought. That last one matches the LCOH panel exactly.">LCOE/LCOS</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Avg price for generators (€/MWh sold); discharge−charge spread for storage.">Spread / avg €</th>
               </tr>
             </thead>
             <tbody>
               {view === 'groups' ? (
-                (['Renewables', 'Thermal', 'Storage'] as GroupKey[]).map(g => {
+                (['Renewables', 'Thermal', 'Storage', 'Converters'] as GroupKey[]).map(g => {
                   const total = groupTotals[g]
                   const rows = groupedRows[g]
                   if (rows.length === 0) return null
