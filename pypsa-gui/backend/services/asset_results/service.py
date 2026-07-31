@@ -54,9 +54,12 @@ def slice_snapshots(n, from_iso: str | None, to_iso: str | None, period):
     sns = n.snapshots
     if isinstance(sns, pd.MultiIndex):
         if period is not None:
-            keep = [s for s in sns if str(s[0]) == str(period)]
-            sns = pd.MultiIndex.from_tuples(keep, names=sns.names) if keep else sns
-            sns.name = "snapshot"
+            # Positional indexing, NOT MultiIndex.from_tuples: an unmatched
+            # period must yield an EMPTY index, not the full horizon. Falling
+            # back to the unfiltered set would silently report every snapshot
+            # as belonging to a period the network does not have.
+            keep = [i for i, s in enumerate(sns) if str(s[0]) == str(period)]
+            sns = sns[keep]
         stamps = [pd.Timestamp(s[1]).isoformat() for s in sns]
     else:
         stamps = [pd.Timestamp(s).isoformat() for s in sns]
@@ -67,6 +70,12 @@ def slice_snapshots(n, from_iso: str | None, to_iso: str | None, period):
             if (not from_iso or st >= from_iso) and (not to_iso or st <= to_iso)
         ]
         sns = sns[keep_idx]
+    # Positional indexing drops a MultiIndex's OVERALL `.name` (distinct from
+    # its per-level `.names`). This repo has a documented failure class where
+    # that loss surfaces much later as an xarray `dim_0` error, so restore it
+    # unconditionally rather than only on the period branch.
+    if isinstance(sns, pd.MultiIndex):
+        sns.name = "snapshot"
     return sns
 
 

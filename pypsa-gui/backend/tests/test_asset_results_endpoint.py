@@ -203,3 +203,26 @@ def test_multi_period_energy_applies_years_exactly_once(client, install_network)
                 metrics="energy_mwh").json()
     raw = float(n.generators_t.p["gas"].sum())
     assert body["scalars"]["energy_mwh"] == pytest.approx(raw * 5.0)
+
+
+def test_horizon_filter_on_a_multi_period_network_keeps_the_index_name():
+    """
+    Positional slicing drops a MultiIndex's overall `.name`. Losing it is a
+    documented failure class here — it surfaces later as an xarray `dim_0`
+    error, far from the code that caused it.
+    """
+    from services.asset_results import service as svc
+    n = _multi_period_network()
+    sns = svc.slice_snapshots(n, "2025-01-01T01:00:00", "2025-01-01T02:00:00", None)
+    assert sns.name == "snapshot"
+    assert len(sns) == 4          # 2 timesteps x 2 periods
+
+
+def test_an_unmatched_period_yields_no_rows_not_every_row(client, install_network):
+    """
+    Falling back to the unfiltered set would report the whole horizon as
+    belonging to a period the network does not have.
+    """
+    from services.asset_results import service as svc
+    n = _multi_period_network()
+    assert len(svc.slice_snapshots(n, None, None, 9999)) == 0
