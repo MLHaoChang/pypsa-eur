@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import math
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -342,6 +342,16 @@ def _impedance_preview(
 
     The relative change is identical for r, x and b (each is multiplied by the
     same length ratio), so one number describes all three.
+
+    `rel_change` is a MAGNITUDE (`abs(ratio - 1.0)`), not a signed delta — a
+    shrinking line reports the same positive number as a growing one at the
+    same ratio. This is deliberate, not an oversight: downstream, previews
+    get partitioned by `rel_change <= <threshold>` to decide what to apply
+    WITHOUT asking the user. If this were signed, a line whose length HALVED
+    (ratio 0.5, signed change -0.5) would read as -0.5, which is <= any
+    positive threshold, and its impedance would be silently halved with no
+    prompt — the exact silent rewrite this feature exists to prevent. Keep
+    the `abs()`; a shrink must clear the same bar a growth does.
     """
     if all(float(old.get(k, 0.0) or 0.0) == 0.0 for k in _IMPEDANCE_FIELDS):
         return None
@@ -358,6 +368,10 @@ def _impedance_preview(
     else:
         ratio = new_length / old_length
         new = {k: float(old.get(k, 0.0) or 0.0) * ratio for k in _IMPEDANCE_FIELDS}
+        # Magnitude, on purpose — see the docstring above. Do NOT drop the
+        # abs(): a shrinking line (ratio < 1) must report the same positive
+        # rel_change a growing line at the same ratio would, or a threshold
+        # comparison downstream lets shrinks slip through unprompted.
         rel = abs(ratio - 1.0)
 
     return {
@@ -371,18 +385,34 @@ def _impedance_preview(
     }
 
 
-def _recompute_lengths_for_bus(n, bus_name: str) -> list[dict]:
+class _RecomputeResult(NamedTuple):
     """
-    Rewrite line.length for every line touching `bus_name`, and return one
-    preview per line whose impedance a per-km-preserving rescale would change.
+    `_recompute_lengths_for_bus` counts two different things and they are NOT
+    interchangeable: `updated` is how many lines actually had `length`
+    rewritten (every line that resolved a haversine distance); `previews` is
+    the (possibly shorter) list of impedance-rescale offers, which
+    `_impedance_preview` omits for an all-zero-impedance line even though its
+    length WAS rewritten. A changelog that reports `len(previews)` undercounts
+    whenever a zero-impedance line is among the ones touched.
+    """
+    updated: int
+    previews: list[dict]
+
+
+def _recompute_lengths_for_bus(n, bus_name: str) -> _RecomputeResult:
+    """
+    Rewrite line.length for every line touching `bus_name`, and return both
+    the rewrite count and one preview per line whose impedance a
+    per-km-preserving rescale would change.
 
     Length is rewritten here because it follows from geometry. Impedance is a
     modelling choice and is only PREVIEWED — see _impedance_preview and
     POST /lines/rescale_impedances. The caller must hold PyPSAService.get_lock().
     """
     if n.lines.empty:
-        return []
+        return _RecomputeResult(0, [])
     mask = (n.lines["bus0"] == bus_name) | (n.lines["bus1"] == bus_name)
+    updated = 0
     previews: list[dict] = []
     for line_name in n.lines.index[mask]:
         b0 = str(n.lines.at[line_name, "bus0"])
@@ -393,10 +423,11 @@ def _recompute_lengths_for_bus(n, bus_name: str) -> list[dict]:
         old_length = float(n.lines.at[line_name, "length"])
         old = {k: float(n.lines.at[line_name, k]) for k in _IMPEDANCE_FIELDS}
         n.lines.at[line_name, "length"] = float(d)
+        updated += 1
         p = _impedance_preview(str(line_name), old_length, float(d), old)
         if p is not None:
             previews.append(p)
-    return previews
+    return _RecomputeResult(updated, previews)
 
 
 def _xlsx_response(df: pd.DataFrame, fname: str) -> StreamingResponse:
@@ -492,11 +523,16 @@ def update_bus(name: str, bus: BusCreate):
     if coord_changed:
         new_name = result.get("name", name)
         with PyPSAService.get_lock():
-            rescale = _recompute_lengths_for_bus(n, new_name)
-        if rescale:
+            recompute = _recompute_lengths_for_bus(n, new_name)
+        rescale = recompute.previews
+        # Log the true rewrite count, not len(rescale): a zero-impedance line
+        # still has its length rewritten but _impedance_preview omits it (no
+        # rescale to offer), so len(rescale) alone would undercount whenever
+        # such a line is among the ones touched.
+        if recompute.updated:
             change_log_service.log(
                 "update", "Lines", "(auto)",
-                f"Auto-rewrote {len(rescale)} line length(s) after bus '{new_name}' moved",
+                f"Auto-rewrote {recompute.updated} line length(s) after bus '{new_name}' moved",
             )
     if isinstance(result, dict):
         result = {**result, "rescale": rescale}
