@@ -11,11 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from services.dispatch_status import dispatch_status as _dispatch_status
-from services.period_utils import (
-    is_multi_period,
-    period_years_map,
-    snapshot_weights,
-)
+from services.period_utils import is_multi_period, snapshot_weights
 
 # `.applicability` and `.registry` are imported LOCALLY inside the functions
 # below, never at module level. `registry.py` does `from . import compute as
@@ -72,18 +68,18 @@ def build_ctx(n, component_class: str, name: str, *, source: str, sns) -> Ctx:
                 params[k] = v
 
     # Energy basis: the `generators` weighting column, matching n.statistics()
-    # and every existing results endpoint. Multiplied by each snapshot's
-    # investment-period year count so multi-period sums are horizon totals.
+    # and every existing results endpoint.
+    #
+    # `snapshot_weights` ALREADY multiplies by investment_period_weightings.years
+    # when `sns` is a MultiIndex — that is the entire purpose of the helper
+    # (period_utils.py:123-135). Do NOT apply the years map again here. Doing so
+    # yields weight x years^2 and inflates every energy and cost total by a factor
+    # of `years` on any multi-period network.
     try:
         w = snapshot_weights(n, "generators", sns)
     except Exception:
         w = pd.Series(1.0, index=sns)
     multi = is_multi_period(n)
-    if multi:
-        years = period_years_map(n)
-        w = w * pd.Series(
-            [float(years.get(p, 1.0)) for p in sns.get_level_values(0)], index=sns
-        )
     return Ctx(n=n, component_class=component_class, name=name, source=source,
                sns=sns, weights=w, is_multi=multi, params=params)
 

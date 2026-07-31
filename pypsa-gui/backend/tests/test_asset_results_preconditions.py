@@ -1,6 +1,5 @@
 """The five causes of `blocked`, each reached by constructing the state."""
 import pandas as pd
-import pypsa
 import pytest
 
 from services.asset_results import compute as C
@@ -99,3 +98,24 @@ def test_build_ctx_carries_weights_matching_the_snapshot_count():
     ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
     assert len(ctx.weights) == len(n.snapshots)
     assert float(ctx.weights.iloc[0]) == pytest.approx(3.0)
+
+
+def test_multi_period_weights_apply_the_years_multiplier_exactly_once():
+    """
+    `snapshot_weights` already folds in investment_period_weightings.years
+    for a MultiIndex. Applying the years map a second time in build_ctx would
+    give weight x years^2 and inflate every energy and cost total.
+    """
+    n = build_network(solve=False)
+    base = n.snapshots
+    mi = pd.MultiIndex.from_product([[2026, 2031], base], names=["period", "timestep"])
+    mi.name = "snapshot"
+    n.set_snapshots(mi)
+    n.investment_periods = [2026, 2031]
+    n.investment_period_weightings["years"] = 5.0
+    n.snapshot_weightings["generators"] = 3.0
+
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    # 3.0 (snapshot weight) x 5.0 (years) = 15.0 — NOT 75.0.
+    assert float(ctx.weights.iloc[0]) == pytest.approx(15.0)
+    assert ctx.is_multi is True
