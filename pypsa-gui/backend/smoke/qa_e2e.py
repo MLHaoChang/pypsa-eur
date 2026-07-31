@@ -87,6 +87,54 @@ def http(path: str, base: str = BACKEND, method: str = "GET", body=None, timeout
         return 0, f"{type(e).__name__}: {e}"
 
 
+def multipart_post(path: str, fields: dict[str, str], file_field: str, filename: str,
+                    content: bytes, base: str = BACKEND, timeout: int = 60):
+    """
+    POST multipart/form-data with stdlib only (no `requests` — qa_e2e.py has
+    zero third-party HTTP dependencies by design; `requests` is only an
+    incidental transitive conda-lock resolution, not a declared dependency).
+
+    `fields` are extra form fields (S12 puts component/attribute/period in
+    the query string instead, so this is normally called with fields={}).
+    `file_field` is the form field name the endpoint's UploadFile parameter
+    expects (always "file" in this codebase).
+    """
+    boundary = "----qa_e2e_boundary_7f3c9a"
+    parts: list[bytes] = []
+    for key, value in fields.items():
+        parts.append(
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
+            f"{value}\r\n".encode()
+        )
+    parts.append(
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+        f"Content-Type: text/csv\r\n\r\n".encode()
+    )
+    parts.append(content)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    body = b"".join(parts)
+    url = path if path.startswith("http") else base + path
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", "replace")
+            try:
+                return r.status, json.loads(raw) if raw else None
+            except json.JSONDecodeError:
+                return r.status, raw
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(raw) if raw else None
+        except json.JSONDecodeError:
+            return e.code, raw
+    except Exception as e:                                    # noqa: BLE001
+        return 0, f"{type(e).__name__}: {e}"
+
+
 def finite_scan(obj, path="$"):
     """Yield paths of any non-finite float — these are what 500 JSONResponse."""
     if isinstance(obj, float):
@@ -1170,6 +1218,140 @@ def suite_S11():
     _s11_teardown(name)
 
 
+def _s12_csv(column: str, index: list[str], values: list[float]) -> bytes:
+    lines = ["timestamp," + column]
+    for ts, v in zip(index, values):
+        lines.append(f"{ts},{v}")
+    return ("\n".join(lines) + "\n").encode()
+
+
+def _s12_setup() -> tuple[str, list[str]] | None:
+    """
+    Create S12's own scratch project (never S11's qa_e2e_assets — per the
+    spec's self-containment rule, every suite creates its own project), via
+    the shared _fresh_scratch_project (Task 1). Then reads the real
+    snapshot index so upload fixtures use timestamps the network actually
+    spans, avoiding spurious snapshot realignment in the normal lifecycle
+    checks (S12.4 deliberately triggers realignment separately).
+    """
+    name = "qa_e2e_ts"
+    ok, _, _ = _fresh_scratch_project(name)
+    if not ok:
+        return None
+    st_s, snap = http("/api/network/snapshots")
+    ts = (snap.get("snapshots") or [])[:3] if isinstance(snap, dict) else []
+    if len(ts) < 3:
+        # The project WAS created + activated above -- delete it before
+        # bailing so this failure path doesn't orphan qa_e2e_ts. Mirrors
+        # suite_S10's equivalent early-return (Task 1, `if not row:`
+        # branch), which deletes before returning from the SAME function
+        # that created the project, rather than pushing cleanup onto the
+        # caller (suite_S12 has no `name` to delete once this returns None).
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return None
+    return name, ts
+
+
+def _s12_teardown(name: str) -> None:
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+_S12_CLASSES: dict[str, dict] = {
+    "loads": dict(
+        create_path="/api/network/loads",
+        create_body={"name": "qa_s12_load", "bus": "Bus 0", "p_set": 1.0},
+        upload_path="/api/network/loads/upload_profile",
+        attribute="p_set",
+        column="qa_s12_load",
+        values=[111.0, 222.0, 333.0],
+    ),
+    "generators": dict(
+        create_path="/api/network/generators",
+        create_body={"name": "qa_s12_gen", "bus": "Bus 0", "p_nom": 1.0},
+        upload_path="/api/network/generators/upload_profile?attribute=p_max_pu",
+        attribute="p_max_pu",
+        column="qa_s12_gen",
+        values=[0.1, 0.2, 0.3],
+    ),
+    "links": dict(
+        create_path="/api/network/links",
+        create_body={"name": "qa_s12_link", "bus0": "Bus 0", "bus1": "Bus 1", "p_nom": 1.0},
+        upload_path="/api/network/links/upload_profile?attribute=p_max_pu",
+        attribute="p_max_pu",
+        column="qa_s12_link",
+        values=[0.4, 0.5, 0.6],
+    ),
+    # No upload_profile route exists for storage_units or stores — the
+    # generic POST /api/network/timeseries/upload?component=&attribute=
+    # endpoint is the only path in for these two.
+    "storage_units": dict(
+        create_path="/api/network/storage_units",
+        create_body={"name": "qa_s12_su", "bus": "Bus 0", "p_nom": 1.0},
+        upload_path="/api/network/timeseries/upload?component=storage_units&attribute=p_max_pu",
+        attribute="p_max_pu",
+        column="qa_s12_su",
+        values=[0.15, 0.25, 0.35],
+    ),
+    "stores": dict(
+        create_path="/api/network/stores",
+        create_body={"name": "qa_s12_store", "bus": "Bus 0", "e_nom": 1.0},
+        upload_path="/api/network/timeseries/upload?component=stores&attribute=e_max_pu",
+        attribute="e_max_pu",
+        column="qa_s12_store",
+        values=[0.45, 0.55, 0.65],
+    ),
+}
+
+
+def _s12_component(component: str, ts: list[str]) -> None:
+    """
+    One parameterised lifecycle check for a single S12 component class:
+    create -> CSV upload (via that class's own `_S12_CLASSES[component]`
+    upload path) -> roundtrip GET -> listed check -> delete check. Driven
+    entirely by `_S12_CLASSES[component]` — see that table's comments for
+    why the upload path can't be derived generically from `component` alone.
+    """
+    cfg = _S12_CLASSES[component]
+    column = cfg["column"]
+    attribute = cfg["attribute"]
+    http(cfg["create_path"], method="POST", body=cfg["create_body"])
+    csv = _s12_csv(column, ts, cfg["values"])
+    st_u, body_u = multipart_post(
+        cfg["upload_path"], {}, "file", f"{column}.csv", csv)
+    if st_u not in (200, 201):
+        record(f"S12.{component}.upload", False, f"upload -> {st_u} {str(body_u)[:80]}")
+        return
+    st_g, series = http(
+        f"/api/network/timeseries/{component}/{attribute}?columns={q(column)}")
+    values = [row[0] for row in series.get("data", [])] if isinstance(series, dict) else []
+    roundtrip = values == cfg["values"]
+    record(f"S12.{component}.roundtrip", roundtrip, f"upload={st_u} values={values}")
+    st_l, listing = http("/api/network/timeseries")
+    listed = isinstance(listing, list) and any(
+        e.get("component") == component and e.get("attribute") == attribute
+        and column in (e.get("columns") or []) for e in listing)
+    record(f"S12.{component}.listed", listed, f"list -> {st_l}")
+    st_d, _ = http(
+        f"/api/network/timeseries?component={component}&attribute={attribute}&name={q(column)}",
+        method="DELETE")
+    st_g2, series2 = http(
+        f"/api/network/timeseries/{component}/{attribute}?columns={q(column)}")
+    empty = isinstance(series2, dict) and series2.get("data") == []
+    record(f"S12.{component}.delete", st_d == 200 and empty, f"delete -> {st_d}; empty={empty}")
+
+
+def suite_S12():
+    print("\nS12 — Time series load/delete (area 3, isolated project)")
+    setup = _s12_setup()
+    if not setup:
+        skip("S12.*", "cannot create qa_e2e_ts project or read its snapshots")
+        return
+    name, ts = setup
+    for component in _S12_CLASSES:
+        _s12_component(component, ts)
+    _s12_teardown(name)
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -1215,6 +1397,8 @@ def main() -> int:
         suite_S10()
     if run("S11"):
         suite_S11()
+    if run("S12"):
+        suite_S12()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
