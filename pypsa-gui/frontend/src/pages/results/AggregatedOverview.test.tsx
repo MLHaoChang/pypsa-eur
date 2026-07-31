@@ -1,0 +1,129 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { render, screen, cleanup, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useUIStore } from '../../store/uiStore'
+import { resultsApi } from '../../api/simulation'
+import { networkApi } from '../../api/network'
+import AggregatedOverview from './AggregatedOverview'
+import type { WeightCtx } from './shared'
+
+vi.mock('../../api/simulation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/simulation')>()
+  return {
+    ...actual,
+    resultsApi: {
+      ...actual.resultsApi,
+      getGeneratorResults: vi.fn(),
+      getStorageDispatchResults: vi.fn(),
+      getLoadResults: vi.fn(),
+      getCurtailment: vi.fn(),
+      getLostLoad: vi.fn(),
+      getCostBreakdown: vi.fn(),
+    },
+  }
+})
+
+vi.mock('../../api/network', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/network')>()
+  return {
+    ...actual,
+    networkApi: {
+      ...actual.networkApi,
+      getGenerators: vi.fn(),
+      getStorageUnits: vi.fn(),
+      getLoads: vi.fn(),
+    },
+  }
+})
+
+afterEach(() => cleanup())
+
+beforeEach(() => {
+  useUIStore.setState({ currentProject: 'Demo' })
+  vi.mocked(resultsApi.getGeneratorResults).mockReset().mockResolvedValue({
+    index: ['2026-01-01T00:00:00'],
+    columns: ['ThermalGen'],
+    data: [[424.24]],
+  })
+  vi.mocked(resultsApi.getStorageDispatchResults).mockReset().mockResolvedValue({
+    index: [], columns: [], data: [],
+  })
+  vi.mocked(resultsApi.getLoadResults).mockReset().mockResolvedValue({
+    index: [], columns: [], data: [],
+  })
+  vi.mocked(resultsApi.getCurtailment).mockReset().mockResolvedValue({
+    index: [], columns: [], data: [],
+  })
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: [], columns: [], data: [],
+  })
+  // Full CostBreakdown shape (api/simulation.ts:62-110). AggregatedOverview.tsx's
+  // OPEX section reads `cost.by_component.filter(...)` directly in the JSX
+  // render path (AggregatedOverview.tsx:527, no optional chaining, not
+  // behind a click handler). A `{ total: 0 }` stub leaves `by_component`
+  // `undefined`, and `undefined.filter(...)` throws `TypeError` during
+  // render, failing this test before the assertion ever runs. Every field is
+  // populated so the render path that reads them doesn't crash.
+  vi.mocked(resultsApi.getCostBreakdown).mockReset().mockResolvedValue({
+    capex: 0, capex_lifetime: 0, capex_expansion: 0, capex_expansion_lifetime: 0,
+    opex: 0, total: 0, curtailment_cost: 0,
+    storage_capex_expansion: 0, storage_capex_expansion_lifetime: 0,
+    by_component: [], by_carrier: [], by_period: [],
+  })
+  vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue([
+    { name: 'ThermalGen', bus: 'Bus 0', carrier: 'gas', p_nom: 100 },
+  ])
+  vi.mocked(networkApi.getStorageUnits).mockReset().mockResolvedValue([])
+  vi.mocked(networkApi.getLoads).mockReset().mockResolvedValue([])
+})
+
+function renderOverview() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // weightCtx is normally assembled by the AggregatedResultsBody wrapper in
+  // Results.tsx (:483-500), which is not exported and cannot be imported —
+  // this fixture matches the exact shape that wrapper builds, with a single
+  // snapshot at weight 1 so the KPI's weighted sum equals the raw mocked
+  // dispatch value.
+  const weightCtx: WeightCtx = {
+    snapshots: ['2026-01-01T00:00:00'],
+    snapshotPeriods: undefined,
+    snapshotWeights: [{ name: '2026-01-01T00:00:00', objective: 1, generators: 1, stores: 1 } as never],
+    periodWeights: undefined,
+  }
+  return render(
+    <QueryClientProvider client={client}>
+      <AggregatedOverview weightCtx={weightCtx} />
+    </QueryClientProvider>,
+  )
+}
+
+it('renders a distinctive thermal generation value sourced from the mocked results API', async () => {
+  renderOverview()
+  // Traced against AggregatedOverview.tsx directly (not left to the
+  // executor): `kpis.thermal` (:100-101) is
+  // `weightedSum(gensTS, groupCols.thermal, weightCtx, fullRange, 'generators')`.
+  // `groupCols.thermal` contains 'ThermalGen' because `generatorGroup('gas')`
+  // (shared.tsx:24-26, backed by utils/carriers.ts `isRenewableCarrier`)
+  // classifies carrier "gas" as Thermal, not Renewables. `fullRange` is the
+  // single mocked row (AggregatedOverview.tsx:73-76, `{from: 0, to: 0}` for
+  // a 1-row TS). The fixture's lone
+  // `snapshotWeights` row has no `snapshot`/`timestep` key, so
+  // `_snapshotWeightRow` (shared.tsx:181-195) takes its positional-match
+  // branch and returns it; `generators: 1` makes the weight multiplier
+  // exactly 1, and no `snapshotPeriods` entry exists to add a period-years
+  // factor. So `kpis.thermal === 424.24` unweighted, and
+  // `fmtEnergy(424.24, 2)` (shared.tsx:481-488) renders "424.24 MWh"
+  // verbatim (424.24 is >= 1 and < 1000, so no unit rescale).
+  //
+  // `kpis.totalGen` (thermal + renewable, and renewable is 0 here since
+  // there is no renewable generator in the fixture) evaluates to the SAME
+  // 424.24 and the "Total generation" KPI card renders an IDENTICAL
+  // "424.24 MWh" string. A document-wide text search on that substring
+  // therefore matches two elements and `findByText` throws. Scope the
+  // query to the "Thermal" KPI card specifically — each KPI is a `label`
+  // div followed by a sibling `value` div inside one wrapping card div
+  // (shared.tsx `KPI`, :653-692) — rather than searching the whole document.
+  const thermalLabel = await screen.findByText('Thermal')
+  const card = thermalLabel.parentElement as HTMLElement
+  expect(within(card).getByText('424.24 MWh')).toBeTruthy()
+})
