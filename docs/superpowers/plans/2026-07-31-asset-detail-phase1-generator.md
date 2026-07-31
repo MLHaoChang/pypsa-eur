@@ -2056,6 +2056,25 @@ def test_period_filter_narrows_to_one_investment_period(client, install_network)
     assert set(body["periods"]) == {2031}
 
 
+def test_horizon_filter_on_a_multi_period_network_keeps_the_index_name():
+    """Positional slicing drops a MultiIndex's overall `.name`. Losing it is a
+    documented failure class here — it surfaces later as an xarray `dim_0`
+    error, far from the code that caused it."""
+    from services.asset_results import service as svc
+    n = _multi_period_network()
+    sns = svc.slice_snapshots(n, "2025-01-01T01:00:00", "2025-01-01T02:00:00", None)
+    assert sns.name == "snapshot"
+    assert len(sns) == 4          # 2 timesteps x 2 periods
+
+
+def test_an_unmatched_period_yields_no_rows_not_every_row(client, install_network):
+    """Falling back to the unfiltered set would report the whole horizon as
+    belonging to a period the network does not have."""
+    from services.asset_results import service as svc
+    n = _multi_period_network()
+    assert len(svc.slice_snapshots(n, None, None, 9999)) == 0
+
+
 def test_multi_period_energy_applies_years_exactly_once(client, install_network):
     """Guards the same double-multiplication that shipped in Task 2: with
     years=5 and 8 snapshots, energy must be 5x the raw dispatch sum, not 25x."""
@@ -2134,9 +2153,12 @@ def slice_snapshots(n, from_iso: str | None, to_iso: str | None, period):
     sns = n.snapshots
     if isinstance(sns, pd.MultiIndex):
         if period is not None:
-            keep = [s for s in sns if str(s[0]) == str(period)]
-            sns = pd.MultiIndex.from_tuples(keep, names=sns.names) if keep else sns
-            sns.name = "snapshot"
+            # Positional indexing, NOT MultiIndex.from_tuples: an unmatched
+            # period must yield an EMPTY index, not the full horizon. Falling
+            # back to the unfiltered set would silently report every snapshot
+            # as belonging to a period the network does not have.
+            keep = [i for i, s in enumerate(sns) if str(s[0]) == str(period)]
+            sns = sns[keep]
         stamps = [pd.Timestamp(s[1]).isoformat() for s in sns]
     else:
         stamps = [pd.Timestamp(s).isoformat() for s in sns]
@@ -2147,6 +2169,12 @@ def slice_snapshots(n, from_iso: str | None, to_iso: str | None, period):
             if (not from_iso or st >= from_iso) and (not to_iso or st <= to_iso)
         ]
         sns = sns[keep_idx]
+    # Positional indexing drops a MultiIndex's OVERALL `.name` (distinct from
+    # its per-level `.names`). This repo has a documented failure class where
+    # that loss surfaces much later as an xarray `dim_0` error, so restore it
+    # unconditionally rather than only on the period branch.
+    if isinstance(sns, pd.MultiIndex):
+        sns.name = "snapshot"
     return sns
 
 
