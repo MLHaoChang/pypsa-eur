@@ -1557,18 +1557,41 @@ def test_economics_reconcile_with_the_asset_economics_endpoint(client, install_n
 
 def test_reconciles_when_a_subsidised_renewable_sets_the_price(
         client, install_network):
-    """curtailment_cost drags the bus dual negative when a subsidised
-    renewable is the price-setting unit — an LP artefact, not a real price.
-    Both implementations must strip it via corrected_marginal_prices, or
-    revenue and capture price diverge from the Results tab."""
+    """
+    curtailment_cost drags the bus dual negative when a subsidised renewable
+    is the price-setting unit — an LP artefact, not a real price. Both
+    implementations must strip it via corrected_marginal_prices.
+
+    A bare `n.optimize()` does NOT reproduce the distortion: curtailment_cost
+    is extra functionality `solver_service` injects into the objective, not
+    something PyPSA applies on its own. Measured: with the subsidy set but a
+    plain solve, raw and corrected duals are bit-identical, so a fixture built
+    that way cannot discriminate. The distorted dual is therefore written in
+    directly — which is exactly the state a real GUI solve leaves behind.
+    """
     n = build_network(solve=False)
+    n.generators.loc["solar", "p_nom"] = 200.0     # so solar, not gas,
+    n.generators.loc["solar", "p_max_pu"] = 1.0    # is the marginal unit
     n.generators.loc["solar", "curtailment_cost"] = 30.0
     n.optimize(solver_name="highs")
+    n.buses_t.marginal_price["B1"] = -30.0
     install_network(n)
+
+    from routers.results import corrected_marginal_prices
+    # Guard: prove the fixture actually exercises the correction. Without this
+    # the test can pass while asserting nothing — which is exactly what the
+    # first version of it did.
+    assert not corrected_marginal_prices(n)["B1"].equals(
+        n.buses_t.marginal_price["B1"]
+    ), "fixture does not trigger the merit-order correction"
+
     rows = client.get("/api/results/asset_economics").json()["generators"]
     row = next(r for r in rows if r["name"] == "solar")
     ctx = C.build_ctx(n, "Generator", "solar", source="lopf", sns=n.snapshots)
     assert C.gen_revenue(ctx) == pytest.approx(row["revenue_eur"], rel=1e-6)
+    # …and that the agreement is not both sides reading the raw dual.
+    raw_revenue = float((n.generators_t.p["solar"] * -30.0).sum())
+    assert C.gen_revenue(ctx) != pytest.approx(raw_revenue, rel=1e-6)
 
 
 def test_reconciles_with_a_time_varying_marginal_cost(client, install_network):
