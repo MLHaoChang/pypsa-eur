@@ -18,6 +18,8 @@ against a real solved network.
 
 ## Environment
 
+### S1–S9: real backend + frontend
+
 Backend `http://127.0.0.1:8000`, frontend `http://127.0.0.1:5173`, started via
 `bash pypsa-gui/start.sh`. Fixtures use real saved projects — `4_nodes_N-0`
 and `H2 Demand 250MW` carry 26 280 snapshots (3 × 8760), i.e. genuine
@@ -27,6 +29,28 @@ multi-period networks with a stored objective.
 load (CLAUDE.md). No test may POST to a name it did not create. Projects are
 backed up before the run and diffed after. Test artefacts are prefixed
 `qa_e2e_` and deleted on completion.
+
+### S10–S14: isolated scratch backend — required, not optional
+
+S10–S14 create, save, delete, and reset real projects and the live network
+under test. They must **never** run against the S1–S9 setup above. Before
+running any of `--suite S10` through `--suite S14` (or `--suite all`), stop
+whatever is on port 8000 and start a dedicated backend with all three of
+these set, from `pypsa-gui/backend`:
+
+```
+PYPSAGUI_APP_DATA_DIR=/path/to/scratch/appdata \
+PYPSAGUI_PROJECTS_ROOT=/path/to/scratch/projects \
+PYPSAGUI_LOCAL_MODE=1 \
+pixi run uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+All three matter. `PYPSAGUI_APP_DATA_DIR` and `PYPSAGUI_PROJECTS_ROOT`
+together keep these suites off your real project store — skip either one and
+`qa_e2e_*` scratch projects can land among your real saved projects.
+`PYPSAGUI_LOCAL_MODE=1` disables auth so the harness's unauthenticated calls
+succeed — skip it and every S10–S14 check fails on 401, which reads as a
+catastrophic regression and is pure noise, not a real finding.
 
 ## Suites
 
@@ -108,21 +132,33 @@ backed up before the run and diffed after. Test artefacts are prefixed
 | id | Assertion |
 |----|-----------|
 | S11.buses.delete | Individual bus `DELETE` removes it (create/GET/PUT/undo already covered by S7) |
-| S11.generators.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
-| S11.lines.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
-| S11.storage_units.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
-| S11.stores.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
-| S11.links.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
-| S11.loads.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
-| S11.transformers.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
-| S11.carriers.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+| S11.generators.create/put/delete | Full CRUD lifecycle. PUT is checked twice: once with a full-object payload (spread from a preceding GET), and once as the dedicated `S11.generators.put_partial` check, which omits a field to confirm `_merge_partial_update` (`routers/network.py:173-195`) preserves it rather than wiping it to the schema default |
+| S11.lines.create/put/delete | Full CRUD lifecycle. PUT is checked with a full-object payload only (spread from a preceding GET, so no field is ever absent) — does **not** exercise partial-PUT survival; see the note below the table |
+| S11.storage_units.create/put/delete | Full CRUD lifecycle. PUT is checked with a full-object payload only (spread from a preceding GET, so no field is ever absent) — does **not** exercise partial-PUT survival; see the note below the table |
+| S11.stores.create/put/delete | Full CRUD lifecycle. PUT is checked with a full-object payload only (spread from a preceding GET, so no field is ever absent) — does **not** exercise partial-PUT survival; see the note below the table |
+| S11.links.create/put/delete | Full CRUD lifecycle. PUT is checked with a full-object payload only (spread from a preceding GET, so no field is ever absent) — does **not** exercise partial-PUT survival; see the note below the table |
+| S11.loads.create/put/delete | Full CRUD lifecycle. PUT is checked with a full-object payload only (spread from a preceding GET, so no field is ever absent) — does **not** exercise partial-PUT survival; see the note below the table |
+| S11.transformers.create/put/delete | Full CRUD lifecycle. PUT is checked with a full-object payload only (spread from a preceding GET, so no field is ever absent) — does **not** exercise partial-PUT survival; see the note below the table |
+| S11.carriers.create/put/delete | Full CRUD lifecycle. PUT is checked with a full-object payload only (spread from a preceding GET, so no field is ever absent) — does **not** exercise partial-PUT survival; see the note below the table |
+
+Only `S11.generators.put_partial` tests field-omission survival. The other
+seven classes' `.put` checks always send a complete payload and cannot
+detect a wiped field. This is deliberate, not a coverage gap: every
+component's PUT route shares the single `_merge_partial_update` function
+(`routers/network.py:173-195`), so one check exercises the mechanism for
+all eight classes — the human ruling was that duplicating it per class would
+test the same shared function eight times, not eight different things. If
+you suspect a PUT-wipe regression on `stores`, `lines`, or any class other
+than generators, the check that would catch it is `S11.generators.put_partial`
+— that class's own `.put` check will not, by construction.
 
 ### S12 — Time series load/delete (area 3)
 | id | Assertion |
 |----|-----------|
 | S12.loads/.generators/.links/.storage_units/.stores (.roundtrip/.listed/.delete) | Upload via the real UI/chat-tool path (or the generic upload endpoint for the two classes with no UI affordance), values round-trip, listing shows the pair, delete empties it |
 | S12.lines_asymmetry | `lines` is listed by `GET /timeseries` but rejected by `DELETE ?component=lines` — asserted as a known fact |
-| S12.put_overwrite | Whole-attribute `PUT` sibling-column-survival behaviour, recorded as observed |
+| S12.put_overwrite.behaviour | Whole-attribute `PUT` sibling-column-survival behaviour observed through a normal GET, recorded as observed — this GET is backed by `_user_ts` and can mask real loss (see `.network_loss` below), so its "survived" detail is a view artifact, not proof of preservation |
+| S12.put_overwrite.network_loss | **CHARACTERIZATION TEST — it PASSES today because a bug exists.** Same wholesale-PUT hazard as `.behaviour`, but observed through `POST /api/simulation/preflight`, a read path that does NOT go through `_user_ts` and so sees the network table's real state. `set_timeseries` currently overwrites an attribute table wholesale and destroys sibling columns it doesn't mention; this check confirms that destruction actually happened. **Disposition if this goes FAIL:** if a future fix makes `set_timeseries` merge onto the prior frame instead of replacing it wholesale (mirroring what `_merge_partial_update` already does for every other component's PUT route), the sibling column will survive, preflight will flag it, and this check will correctly go FAIL — that FAIL means the fix worked. Do **not** revert the fix and do **not** edit this assertion back to green to force the suite clean; the correct response is to revisit or remove this check, because the hazard it exists to catch is gone. |
 | S12.snapshot_mismatch | Zero-overlap upload's effect on `ts_start`/`ts_end`, recorded as observed |
 
 ### S13 — Fresh solve + result validation (area 5)
@@ -163,8 +199,36 @@ backend and reads real projects.
 
 ## Outcome
 
-11 rounds. Final state **43 PASS / 0 FAIL / 0 SKIP**, twice consecutively,
-with the write-path battery additionally repeated 4× to prove stability.
+The original S1–S9 hardening pass took 11 rounds and reached **43 PASS / 0
+FAIL / 0 SKIP**, twice consecutively, with the write-path battery
+additionally repeated 4× to prove stability. That baseline predates S10–S14
+(added in a later pass) and predates further drift inside S1–S9's own
+dependencies (frontend dev server availability, backend test count, ruff
+findings) — it is history, not the number to expect from a run today.
+
+**Current baseline**, a full `--suite all` run against the isolated S10–S14
+scratch environment described above:
+
+```
+PASS 86   FAIL 10   SKIP 8
+```
+
+All ten failures are pre-existing and catalogued — none of them are caused
+by S10–S14, and a clean S10–S14 run still shows exactly this set:
+
+| id | Cause |
+|---|---|
+| `S1.2`, `S1.3` | frontend dev server not running |
+| `S2.5` | reintroduced-tool finding (chat-tool registry) |
+| `S6.1`–`S6.4` | frontend build/test tooling — also needs the dev server |
+| `S8.1` | backend pytest — findings outside this work |
+| `S8.3` | ruff — findings outside this work |
+| `S9.1` | `audit_log`/`Depends` `AttributeError` |
+
+A run that reproduces exactly this ten-id set has found no regression. A run
+whose failing set differs from this table — anything added, anything
+missing — has, and is worth investigating before assuming it's "the usual
+ten."
 
 ### Product bug found and fixed
 
