@@ -76,4 +76,17 @@ describe('AssetPicker', () => {
     await userEvent.type(screen.getByRole('searchbox'), 'zzzz')
     expect(screen.getByText(/no assets match/i)).toBeTruthy()
   })
+
+  it('renders only a window of rows, not the whole list', () => {
+    // The small fixtures above all fit inside `overscan`, so they would pass
+    // against a naive full-list render too. Virtualisation only earns its
+    // keep at scale — the spec justifies it on 5 000-asset networks — so
+    // assert the windowing directly.
+    const many = Array.from({ length: 500 }, (_, i) =>
+      A('Generator', `Gen ${i}`, 'gas'))
+    render(<AssetPicker assets={many} selected={null} onSelect={vi.fn()} />)
+    const rendered = screen.getAllByRole('button').length
+    expect(rendered).toBeGreaterThan(0)
+    expect(rendered).toBeLessThan(100)   // 600px viewport / 24px rows + overscan
+  })
 })
