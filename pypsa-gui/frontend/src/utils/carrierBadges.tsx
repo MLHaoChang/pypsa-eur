@@ -15,6 +15,16 @@ import { H2Icon } from '../components/AssetIcons'
 //
 // `solar` was also simply absent, so even the original table would have fallen
 // through to a generic Zap.
+//
+// KEY ORDERING RULE: When one key is a substring of another AND they have
+// different badge labels, the longer key MUST come first. This ensures that
+// variant inputs (e.g. "biogas-chp", "hvdc-link") match the most specific key
+// via the fallback substring scan, not an overly-general one. Example: if "gas"
+// came before "biogas", then input "biogas-chp" would match "gas" first and
+// return 'Gas' instead of the correct 'Biogas' label, contradicting the emissions
+// layer's biogas CO₂ classification and misleading the user about the asset's
+// properties. Always put more-specific (longer, more-constrained) keys before
+// the short keys they contain.
 
 export type BadgeIcon = React.FC<{ size?: number; style?: React.CSSProperties; strokeWidth?: number }>
 export interface BadgeDef { Icon: BadgeIcon; label: string }
@@ -23,10 +33,11 @@ export const CARRIER_BADGES: Record<string, BadgeDef> = {
   H2:              { Icon: H2Icon,          label: 'H₂' },
   hydrogen:        { Icon: H2Icon,          label: 'H₂' },
   electrolysis:    { Icon: Droplets,        label: 'ELY' },
-  heat:            { Icon: Thermometer,     label: 'Heat' },
   heat_pump:       { Icon: Thermometer,     label: 'HP' },
   'heat pump':     { Icon: Thermometer,     label: 'HP' },
+  heat:            { Icon: Thermometer,     label: 'Heat' },
   // Fossil. `gas` covers the fuel-level carrier; CCGT/OCGT are technologies.
+  biogas:          { Icon: Leaf,            label: 'Biogas' },
   gas:             { Icon: Flame,           label: 'Gas' },
   CCGT:            { Icon: Flame,           label: 'Gas' },
   OCGT:            { Icon: Flame,           label: 'Gas' },
@@ -47,15 +58,14 @@ export const CARRIER_BADGES: Record<string, BadgeDef> = {
   ror:             { Icon: Droplets,        label: 'Hydro' },
   PHS:             { Icon: Droplets,        label: 'PHS' },
   biomass:         { Icon: Leaf,            label: 'Biomass' },
-  biogas:          { Icon: Leaf,            label: 'Biogas' },
   geothermal:      { Icon: Mountain,        label: 'Geo' },
   wave:            { Icon: Waves,           label: 'Wave' },
   tidal:           { Icon: Waves,           label: 'Tidal' },
   // Storage and transport.
   battery:         { Icon: BatteryCharging, label: 'Batt.' },
   BEV:             { Icon: BatteryCharging, label: 'BEV' },
-  DC:              { Icon: PlugZap,         label: 'DC' },
   HVDC:            { Icon: PlugZap,         label: 'HVDC' },
+  DC:              { Icon: PlugZap,         label: 'DC' },
   AC:              { Icon: Zap,             label: 'AC' },
   resistive:       { Icon: Zap,             label: 'Res.' },
 }

@@ -21,6 +21,15 @@ describe('getCarrierBadge', () => {
     expect(getCarrierBadge('gas').label).toBe('Gas')
   })
 
+  it('resolves compound biogas carriers to Biogas, not generic Gas', () => {
+    // This test catches the substring-ordering hazard: if "gas" preceded
+    // "biogas" in the table, input "biogas-chp" would match "gas" first and
+    // return the wrong badge. The bug contradicts the emissions layer's
+    // classification (biogas CO₂ is biogenic, not fossil).
+    expect(getCarrierBadge('biogas-chp').label).toBe('Biogas')
+    expect(getCarrierBadge('biogas-boiler').label).toBe('Biogas')
+  })
+
   it('falls back to a truncated label for an unknown carrier', () => {
     expect(getCarrierBadge('unobtainium').label).toBe('unobt')
   })
