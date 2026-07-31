@@ -1,0 +1,99 @@
+"""
+Prices, economics and emissions — including reconciliation with the
+existing /results/asset_economics endpoint.
+"""
+import pytest
+
+from services.asset_results import compute as C
+from tests.conftest import build_network
+
+
+@pytest.fixture
+def ctx():
+    n = build_network(solve=True)
+    return C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+
+
+def test_bus_price_reads_the_generators_own_bus(ctx):
+    got = C.gen_bus_price(ctx)
+    want = ctx.n.buses_t.marginal_price["B1"]
+    assert list(got.values) == pytest.approx(list(want.values))
+
+
+def test_revenue_is_dispatch_times_price_times_weighting(ctx):
+    p = ctx.n.generators_t.p["gas"]
+    lam = ctx.n.buses_t.marginal_price["B1"]
+    assert C.gen_revenue(ctx) == pytest.approx(float((p * lam).sum()))
+
+
+def test_vom_is_absolute_dispatch_times_marginal_cost(ctx):
+    p = ctx.n.generators_t.p["gas"]
+    assert C.gen_vom(ctx) == pytest.approx(float(p.abs().sum()) * 50.0)
+
+
+def test_fixed_cost_is_capital_cost_times_optimised_capacity(ctx):
+    assert C.gen_fixed_cost(ctx) == pytest.approx(
+        100_000.0 * float(ctx.n.generators.at["gas", "p_nom_opt"]))
+
+
+def test_net_profit_is_revenue_minus_fixed_and_variable(ctx):
+    assert C.gen_net_profit(ctx) == pytest.approx(
+        C.gen_revenue(ctx) - (C.gen_fixed_cost(ctx) + C.gen_vom(ctx)))
+
+
+def test_lcoe_is_total_cost_over_energy(ctx):
+    assert C.gen_lcoe(ctx) == pytest.approx(
+        (C.gen_fixed_cost(ctx) + C.gen_vom(ctx)) / C.gen_energy(ctx))
+
+
+def test_lcoe_is_none_when_the_asset_produced_nothing():
+    n = build_network(solve=True)
+    n.generators_t.p["gas"] = 0.0
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    assert C.gen_lcoe(ctx) is None
+
+
+def test_capture_price_is_the_dispatch_weighted_mean_price(ctx):
+    p = ctx.n.generators_t.p["gas"]
+    lam = ctx.n.buses_t.marginal_price["B1"]
+    assert C.gen_capture_price(ctx) == pytest.approx(
+        float((p * lam).sum()) / float(p.sum()))
+
+
+def test_capture_rate_compares_against_the_time_weighted_mean(ctx):
+    lam = ctx.n.buses_t.marginal_price["B1"]
+    assert C.gen_capture_rate(ctx) == pytest.approx(
+        C.gen_capture_price(ctx) / float(lam.mean()))
+
+
+def test_binding_hours_counts_snapshots_with_a_nonzero_dual(ctx):
+    mu = ctx.n.generators_t.mu_upper.get("gas")
+    expected = 0.0 if mu is None else float((mu.abs() > 1e-9).sum())
+    assert C.gen_binding_hours(ctx) == pytest.approx(expected)
+
+
+def test_co2_rate_divides_by_efficiency():
+    n = build_network(solve=False)
+    n.add("Carrier", "gas", co2_emissions=0.2)
+    n.generators.loc["gas", "efficiency"] = 0.5
+    n.optimize(solver_name="highs")
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    rate = C.gen_co2_rate(ctx)
+    want = n.generators_t.p["gas"] / 0.5 * 0.2
+    assert list(rate.values) == pytest.approx(list(want.values))
+    assert C.gen_co2_total(ctx) == pytest.approx(float(want.sum()))
+    assert C.gen_co2_intensity(ctx) == pytest.approx(
+        float(want.sum()) / C.gen_energy(ctx))
+
+
+def test_economics_reconcile_with_the_asset_economics_endpoint(client, install_network):
+    """Two implementations of one number must agree. See CLAUDE.md."""
+    n = build_network(solve=True)
+    install_network(n)
+    rows = client.get("/api/results/asset_economics").json()["generators"]
+    row = next(r for r in rows if r["name"] == "gas")
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    assert C.gen_revenue(ctx) == pytest.approx(row["revenue_eur"], rel=1e-6)
+    assert C.gen_vom(ctx) == pytest.approx(row["vom_cost_eur"], rel=1e-6)
+    assert C.gen_fixed_cost(ctx) == pytest.approx(row["fixed_cost_eur"], rel=1e-6)
+    assert C.gen_net_profit(ctx) == pytest.approx(row["net_profit_eur"], rel=1e-6)

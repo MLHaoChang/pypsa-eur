@@ -434,16 +434,167 @@ def gen_n_starts(ctx: Ctx):
     return None if s is None else int(round(float(s.fillna(0.0).sum())))
 
 
-def _todo(*_a: Any, **_k: Any):  # replaced one-by-one as Task 4 lands
-    raise NotImplementedError
-
-
 def not_yet(*_a: Any, **_k: Any) -> None:
     """Phase 2/3 placeholder metric — never invoked (always resolves `na`)."""
     return None
 
 
-gen_bus_price = gen_mu_upper = gen_mu_lower = _todo
-gen_capture_price = gen_capture_rate = gen_binding_hours = _todo
-gen_revenue = gen_vom = gen_fixed_cost = gen_net_profit = gen_lcoe = _todo
-gen_co2_rate = gen_co2_total = gen_co2_intensity = _todo
+# ── Cost weighting ──────────────────────────────────────────────────────────
+# Energy figures use the `generators` weighting column (ctx.weights); COST
+# figures use `objective`. `/results/asset_economics` draws the same
+# distinction, and the reconciliation test in this task depends on matching it.
+
+def cost_weights(ctx: Ctx):
+    import pandas as pd
+
+    from services.period_utils import snapshot_weights
+
+    # Same rule as build_ctx: snapshot_weights already folds in
+    # investment_period_weightings.years for a MultiIndex `sns`. Multiplying by
+    # the years map again here would inflate every cost total by a factor of
+    # `years` on a multi-period network.
+    try:
+        return snapshot_weights(ctx.n, "objective", ctx.sns)
+    except Exception:
+        return pd.Series(1.0, index=ctx.sns)
+
+
+def _cost_wsum(ctx: Ctx, s) -> float | None:
+    if s is None:
+        return None
+    return float((s.fillna(0.0) * cost_weights(ctx)).sum())
+
+
+# ── prices ──────────────────────────────────────────────────────────────────
+
+def bus_price_series(ctx: Ctx):
+    """
+    Nodal price at the asset's own bus. `bus` for injecting components,
+    `bus0` for branches — Phase 1 only needs the former.
+    """
+    bus = ctx.params.get("bus") or ctx.params.get("bus0")
+    if not bus:
+        return None
+    from routers.results import _result_df
+
+    df = _result_df(ctx.n, "buses_t", "marginal_price", ctx.source)
+    if df is None or getattr(df, "empty", True) or bus not in df.columns:
+        return None
+    return df[bus].reindex(ctx.sns)
+
+
+def gen_bus_price(ctx: Ctx):
+    return bus_price_series(ctx)
+
+
+def gen_mu_upper(ctx: Ctx):
+    return series_for(ctx, "mu_upper")
+
+
+def gen_mu_lower(ctx: Ctx):
+    return series_for(ctx, "mu_lower")
+
+
+def gen_capture_price(ctx: Ctx):
+    p, lam = gen_p(ctx), bus_price_series(ctx)
+    if p is None or lam is None:
+        return None
+    w = cost_weights(ctx)
+    denom = float((p.fillna(0.0) * w).sum())
+    if abs(denom) < 1e-9:
+        return None
+    return float((p.fillna(0.0) * lam.fillna(0.0) * w).sum()) / denom
+
+
+def gen_capture_rate(ctx: Ctx):
+    cap, lam = gen_capture_price(ctx), bus_price_series(ctx)
+    if cap is None or lam is None:
+        return None
+    w = cost_weights(ctx)
+    hours = float(w.sum())
+    if not hours:
+        return None
+    mean_price = float((lam.fillna(0.0) * w).sum()) / hours
+    return None if abs(mean_price) < 1e-9 else cap / mean_price
+
+
+def gen_binding_hours(ctx: Ctx):
+    # No early return on "both series absent": a non-extendable, non-
+    # committable generator legitimately has no mu_upper/mu_lower columns at
+    # all (PyPSA enforces its dispatch bounds as variable bounds, not linear
+    # constraints, so no dual is ever assigned) — that means the bound never
+    # bound, i.e. zero binding hours, not "unknown". See
+    # test_binding_hours_counts_snapshots_with_a_nonzero_dual.
+    up, lo = gen_mu_upper(ctx), gen_mu_lower(ctx)
+    binding = None
+    for s in (up, lo):
+        if s is None:
+            continue
+        b = s.abs() > 1e-9
+        binding = b if binding is None else (binding | b)
+    return float(binding.astype(float).sum()) if binding is not None else 0.0
+
+
+# ── economics ───────────────────────────────────────────────────────────────
+
+def gen_revenue(ctx: Ctx):
+    p, lam = gen_p(ctx), bus_price_series(ctx)
+    return None if p is None or lam is None else _cost_wsum(ctx, p * lam)
+
+
+def gen_vom(ctx: Ctx):
+    p, mc = gen_p(ctx), _static(ctx, "marginal_cost")
+    return None if p is None or mc is None else _cost_wsum(ctx, p.abs() * mc)
+
+
+def gen_fixed_cost(ctx: Ctx):
+    return gen_capex_annual(ctx)
+
+
+def gen_net_profit(ctx: Ctx):
+    rev, fixed, vom = gen_revenue(ctx), gen_fixed_cost(ctx), gen_vom(ctx)
+    if rev is None:
+        return None
+    return rev - ((fixed or 0.0) + (vom or 0.0))
+
+
+def gen_lcoe(ctx: Ctx):
+    e = gen_energy(ctx)
+    if not e:
+        return None
+    return ((gen_fixed_cost(ctx) or 0.0) + (gen_vom(ctx) or 0.0)) / e
+
+
+# ── emissions ───────────────────────────────────────────────────────────────
+
+def _co2_intensity_of_carrier(ctx: Ctx) -> float | None:
+    carrier = ctx.params.get("carrier")
+    carriers = ctx.n.carriers
+    if not carrier or carrier not in carriers.index:
+        return None
+    if "co2_emissions" not in carriers.columns:
+        return None
+    try:
+        return float(carriers.at[carrier, "co2_emissions"] or 0.0)
+    except (TypeError, ValueError):
+        return None
+
+
+def gen_co2_rate(ctx: Ctx):
+    p = gen_p(ctx)
+    factor = _co2_intensity_of_carrier(ctx)
+    eff = _static(ctx, "efficiency") or 1.0
+    if p is None or factor is None or not eff:
+        return None
+    # PyPSA's convention: co2_emissions is per unit of PRIMARY energy, so the
+    # electrical output is divided by efficiency to recover fuel input first.
+    return p / eff * factor
+
+
+def gen_co2_total(ctx: Ctx):
+    return _wsum(ctx, gen_co2_rate(ctx))
+
+
+def gen_co2_intensity(ctx: Ctx):
+    total, e = gen_co2_total(ctx), gen_energy(ctx)
+    return None if total is None or not e else total / e
