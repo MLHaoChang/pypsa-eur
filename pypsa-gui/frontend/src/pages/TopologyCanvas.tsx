@@ -20,6 +20,7 @@ import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { isRenewableCarrier } from '../utils/carriers'
+import { ingestRescale } from '../utils/rescaleActions'
 import { useSimulationStore } from '../store/simulationStore'
 import { getCarrierBadge, type BadgeDef } from '../utils/carrierBadges'
 import CarrierSelect from '../components/CarrierSelect'
@@ -2086,7 +2087,14 @@ export default function TopologyCanvas() {
       const body: Partial<Bus> = { ...current, ...fields }
       return networkApi.updateBus(name, body)
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
+      // See utils/rescaleActions.ts — update_bus previews a per-km-preserving
+      // impedance rescale whenever this edit changed x/y and a connected
+      // line's length moved as a result. BusEditor is one of the four write
+      // paths Finding 1 (2026-07-31 review) found discarding this preview.
+      ingestRescale(queryClient, data.rescale)
+    },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update bus'),
   })
 

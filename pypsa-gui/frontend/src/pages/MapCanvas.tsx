@@ -17,9 +17,9 @@ import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, S
 import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '../components/CanvasResultsContext'
 import { busLatLng, unplacedBusNames } from '../utils/geo'
 import { nextBusToPlace, canSkip } from '../utils/placement'
-import { partitionRescale, type RescalePreview } from '../utils/rescale'
+import { ingestRescale } from '../utils/rescaleActions'
+import { useRescaleStore } from '../store/rescaleStore'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
-import RescaleDialog from '../components/RescaleDialog'
 
 // Draggable bus marker. Mimics the previous CircleMarker visually (12 px,
 // 2 px coloured border, white fill) but uses a Marker + divIcon so leaflet
@@ -627,6 +627,23 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // and by FitToNetwork's `suspended` prop.
   const [placing, setPlacing] = useState(false)
 
+  // Mirror `placing` into the shared rescale store so RescaleDialogHost (at
+  // App.tsx level, see store/rescaleStore.ts) knows to withhold the modal
+  // while click-to-place is running — a Dialog stealing focus mid-click
+  // would break B5. Two effects rather than one: the first keeps the store
+  // in lockstep with every `placing` transition; the second unconditionally
+  // clears it on unmount, covering the case where the user switches the
+  // canvas away from the map (App.tsx swaps MapCanvas out for TopologyCanvas
+  // on `canvasView === 'blank'`) WHILE placement is still active — without
+  // it, `placementActive` would stay stuck `true` and the dialog would never
+  // open again for the rest of the session.
+  useEffect(() => {
+    useRescaleStore.getState().setPlacementActive(placing)
+  }, [placing])
+  useEffect(() => {
+    return () => { useRescaleStore.getState().setPlacementActive(false) }
+  }, [])
+
   // Bus names the user has deferred via "Skip", in no particular order.
   // `placingBus` (below `unplaced` is already declared, so no use-before-
   // declare) is the first still-unplaced bus that hasn't been skipped,
@@ -679,64 +696,17 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [placing])
 
-  // Previewed impedance rescales awaiting a decision. Accumulated rather than
-  // handled per-event: during click-to-place, prompting on every click would
-  // make the mode unusable, so the batch is drained once at the end. RescaleDialog
-  // itself is only rendered while `!placing` (below), so this queue is silent
-  // furniture during placement and surfaces the moment placement ends — via
-  // the completion effect just below, the Escape handler above, or the "Done"
-  // button — whichever sets `placing` back to false first.
-  const [pendingRescale, setPendingRescale] = useState<RescalePreview[]>([])
-
-  // The only write path (B1): explicit, and only for previews the caller
-  // already decided to apply (the auto-applied immaterial ones, or the user's
-  // "Update" choice on the dialog). Toasts and rethrows on failure — one
-  // message either call site can rely on, rather than duplicating it — so
-  // BOTH callers (the silent auto path below, and the dialog's `onAccept`
-  // further down) can still tell the write didn't happen and react.
-  const applyRescale = useCallback(async (previews: RescalePreview[]) => {
-    if (previews.length === 0) return
-    try {
-      await networkApi.rescaleImpedances(previews.map(p => ({
-        name: p.name, r: p.new.r, x: p.new.x, b: p.new.b,
-      })))
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
-    } catch (e) {
-      toast.error(
-        `Could not update line impedance (${previews.length} line${previews.length === 1 ? '' : 's'}) — values unchanged.`
-      )
-      throw e
-    }
-  }, [qc])
-
-  // Immaterial changes are applied straight away; material ones queue for the
-  // dialog. Blocked ones are surfaced by the dialog, never silently dropped.
-  //
-  // A failed AUTO apply must not just vanish: it was never added to
-  // `pendingRescale` (that's the whole point of "immaterial — don't ask"), so
-  // if the write fails there is nothing else that will ever ask about it —
-  // the per-km value stays wrong with only a toast as the trace, and a toast
-  // can be missed or dismissed. Chosen fix: re-queue the failed batch into
-  // `pendingRescale` on rejection, turning a failed silent write into an
-  // explicit ask instead of a silently lost one. `applyRescale` already
-  // toasted the failure; this just recovers the data.
-  const ingestRescale = useCallback((previews: RescalePreview[] | undefined) => {
-    if (!previews || previews.length === 0) return
-    const { auto, ask, blocked } = partitionRescale(previews)
-    if (auto.length) {
-      void applyRescale(auto).catch(() => {
-        setPendingRescale(prev => [...prev, ...auto])
-      })
-    }
-    if (ask.length || blocked.length) setPendingRescale(prev => [...prev, ...ask, ...blocked])
-  }, [applyRescale])
-
+  // Impedance-rescale previews from this component's write paths (drag +
+  // recalc) are queued into the app-wide store via `ingestRescale` — see
+  // store/rescaleStore.ts / utils/rescaleActions.ts for why this is no
+  // longer a local `useState` here. RescaleDialogHost (rendered once at
+  // App.tsx level) owns the actual dialog + apply/decline handling.
   const recalcMut = useMutation({
     mutationFn: () => networkApi.recalculateLineLengths(),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       toast.success(`Line lengths recalculated · ${r.updated} updated, ${r.skipped} skipped`)
-      ingestRescale(r.rescale)
+      ingestRescale(qc, r.rescale)
     },
     onError: () => toast.error('Could not recalculate line lengths'),
   })
@@ -777,7 +747,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       appLog('INFO', `Bus '${vars.name}' moved · connected line lengths recalculated.`)
-      ingestRescale(data.rescale)
+      ingestRescale(qc, data.rescale)
     },
     onError: (e: Error) => toast.error(`Move failed: ${e.message}`),
   })
@@ -1207,33 +1177,12 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         />
       )}
 
-      {/* Rescale prompt for length changes that materially move r/x/b. NOT
-          gated on `placementUiAllowed` — a modal Dialog isn't floating map
-          furniture, it already sits above everything at z-[9999] and traps
-          focus, so it doesn't need to hide behind a slide panel or the
-          command palette. It IS gated on `!placing`: while placement is
-          running, `ingestRescale` still queues into `pendingRescale`, but
-          opening a modal mid-placement would break the click-to-place flow
-          (B5) — the batch surfaces once placement ends, whichever way it
-          ends (last bus placed, Escape, or "Done"). */}
-      {!placing && (
-        <RescaleDialog
-          previews={pendingRescale.filter(p => p.skipped_reason === null)}
-          blocked={pendingRescale.filter(p => p.skipped_reason !== null)}
-          onAccept={async () => {
-            try {
-              await applyRescale(pendingRescale.filter(p => p.skipped_reason === null))
-              setPendingRescale([])
-            } catch {
-              // applyRescale already toasted the failure. Leave pendingRescale
-              // intact — the write didn't happen, nothing was lost, and the
-              // dialog stays open with the same batch so the user can retry
-              // Update or decline.
-            }
-          }}
-          onDecline={() => setPendingRescale([])}
-        />
-      )}
+      {/* The rescale consent dialog used to render here. It's now a single
+          app-wide instance (RescaleDialogHost, mounted once in App.tsx) so
+          previews from PropertiesPanel / TopologyCanvas aren't silently
+          dropped — see store/rescaleStore.ts. The `placing` → `placementActive`
+          sync effect above this component's `placing` state declaration is
+          how that shared instance still knows not to open mid-click. */}
 
       {/* Placement strip. z-[900], not the brief's z-[500]: Leaflet's own
           zoom control sits at z-800 (documented pitfall in this codebase —

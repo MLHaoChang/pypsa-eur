@@ -11,6 +11,7 @@ import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { isRenewableCarrier } from '../utils/carriers'
+import { ingestRescale } from '../utils/rescaleActions'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import type { Bus, Carrier, Generator, Line, Link, LinkProfileMeta, Load, StorageUnit, Store, Transformer, LoadProfileMeta, GeneratorProfileMeta } from '../api/types'
@@ -1566,12 +1567,20 @@ function BusPanel({ name }: { name: string }) {
         y: nf(form, 'y', current.y),
       })
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'Bus', name: newName })
       setEditing(false)
       toast.success('Bus updated')
+      // update_bus previews a per-km-preserving impedance rescale for any
+      // connected line whose length changed as a result of this edit (a
+      // Latitude/Longitude change here recomputes connected line lengths on
+      // the backend). Feed it into the shared queue — see
+      // utils/rescaleActions.ts — instead of discarding it; this is the exact
+      // path Finding 1 (2026-07-31 review) flagged as silently losing the
+      // preview.
+      ingestRescale(qc, data.rescale)
     },
     onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
   })

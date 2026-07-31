@@ -25,6 +25,7 @@ import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
+import RescaleDialogHost from './components/RescaleDialogHost'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -624,6 +625,14 @@ export default function App() {
         <StatusBar />
         <CommandPalette />
         <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+        {/* Single app-wide instance of the impedance-rescale consent dialog
+            (D-B4, Finding 1 of the 2026-07-31 review). Every write path that
+            can change a line's length — MapCanvas drag/recalc, PropertiesPanel's
+            Bus form, TopologyCanvas's BusEditor — feeds its preview into the
+            shared store (utils/rescaleActions.ts); this is the one place that
+            asks about it. See store/rescaleStore.ts for why this moved out of
+            MapCanvasInner. */}
+        <RescaleDialogHost />
       </div>
       </AppErrorBoundary>
     </AuthMismatchGate>
