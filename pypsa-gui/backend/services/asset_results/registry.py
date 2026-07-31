@@ -165,7 +165,7 @@ _GENERATOR_METRICS: tuple[Metric, ...] = (
 
     # ── loadflow (reactive only — hence the ○ in the spec matrix) ─────────
     Metric(id="q", label="Reactive power", unit="MVAr", kind="series",
-           category="loadflow", classes=("Bus", "Line", "Transformer"), origin="output",
+           category="loadflow", classes=("Generator",), origin="output",
            compute=C.gen_q, requires=(REQ_DISPATCH, REQ_AC_PF),
            source_override="ac_pf"),
 
@@ -235,7 +235,7 @@ _GENERATOR_METRICS: tuple[Metric, ...] = (
 # Phase 2/3 placeholders: every non-Generator class gets one always-`na`
 # metric per non-summary category, so the tab strip renders the full eight
 # and says WHY rather than silently showing seven.
-# Also add storage and loadflow placeholders for Generator (structurally n/a).
+# Also add a storage placeholder for Generator (structurally n/a).
 _PLACEHOLDERS: tuple[Metric, ...] = tuple(
     Metric(id=f"__pending__{cls}__{cat}", label=CATEGORY_LABELS[cat], unit="",
            kind="scalar", category=cat, classes=(cls,), origin="derived",
@@ -245,9 +245,6 @@ _PLACEHOLDERS: tuple[Metric, ...] = tuple(
 ) + (
     Metric(id="__pending__Generator__storage", label=CATEGORY_LABELS["storage"],
            unit="", kind="scalar", category="storage", classes=("Generator",),
-           origin="derived", formula="—", compute=C.not_yet, requires=(REQ_NOT_YET,)),
-    Metric(id="__pending__Generator__loadflow", label=CATEGORY_LABELS["loadflow"],
-           unit="", kind="scalar", category="loadflow", classes=("Generator",),
            origin="derived", formula="—", compute=C.not_yet, requires=(REQ_NOT_YET,)),
 )
 

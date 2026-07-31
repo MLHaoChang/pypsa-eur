@@ -35,13 +35,6 @@ class Status:
     reason: str = ""
     remedy: Remedy | None = None
 
-    def as_dict(self) -> dict:
-        out: dict = {"status": self.status}
-        if self.reason:
-            out["reason"] = self.reason
-        if self.remedy is not None:
-            out["remedy"] = {"action": self.remedy.action, "label": self.remedy.label}
-        return out
 
 
 OK = Status("ok")
@@ -77,9 +70,6 @@ def resolve_metric(
     """First unmet precondition wins; unlisted preconditions are treated as ok."""
     if component_class not in metric.classes:
         return _na(f"{metric.label} is not defined for {component_class}")
-    # Phase 2/3 placeholders with REQ_NOT_YET always resolve to na
-    if "not_yet" in metric.requires:
-        return _na(f"{metric.label} is not yet implemented")
     for req in metric.requires:
         st = precond.get(req, OK)
         if st.status != "ok":
@@ -93,7 +83,9 @@ def resolve_category(
     """
     ok      — at least one member metric resolves ok
     blocked — members exist, none is ok, at least one is blocked
-    na      — no members, or every member is na
+    na      — no members, or every member is na; prefer a reason every member
+             shares over the generic category_na_reason (e.g., "not yet available"
+             beats "Dispatch does not apply to Load")
     """
     members = metrics_for(component_class, category)
     if not members:
@@ -104,4 +96,7 @@ def resolve_category(
     for r in resolved:
         if r.status == "blocked":
             return r
+    reasons = {r.reason for r in resolved if r.reason}
+    if len(reasons) == 1:
+        return _na(reasons.pop())
     return _na(category_na_reason(category, component_class))

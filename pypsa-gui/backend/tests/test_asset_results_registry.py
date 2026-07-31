@@ -70,9 +70,35 @@ def test_resolve_metric_is_ok_when_every_precondition_is_ok():
 
 
 def test_resolve_category_is_na_when_the_class_has_no_metrics_there():
-    st = ap.resolve_category("loadflow", "Generator", {})
+    # Storage, not loadflow: a Generator genuinely has NO storage metric.
+    # The placeholder metric needs REQ_NOT_YET in the precond dict to resolve to na.
+    # resolve_category prefers a shared member reason over the generic one.
+    st = ap.resolve_category("storage", "Generator", {
+        reg.REQ_NOT_YET: ap.Status("na", "not yet available — arrives in a later phase of this feature")
+    })
     assert st.status == "na"
-    assert "branch" in st.reason
+    assert "not yet available" in st.reason
+
+
+def test_generator_loadflow_is_blocked_not_na_because_reactive_power_applies():
+    """`q` exists on a Generator but only in the AC PF snapshot, so the
+    category is blocked until that stage runs — never n/a."""
+    blocked = ap.Status("blocked", "AC power flow has not been run",
+                        ap.Remedy("run_ac_pf", "Run AC power flow"))
+    st = ap.resolve_category("loadflow", "Generator", {reg.REQ_AC_PF: blocked})
+    assert st.status == "blocked"
+    assert st.remedy.action == "run_ac_pf"
+
+
+def test_a_reason_every_member_shares_beats_the_generic_one():
+    """A phase-2 placeholder must say 'not yet available', not 'Dispatch does
+    not apply to Load' — Loads DO dispatch, it is simply not wired up yet."""
+    st = ap.resolve_category("dispatch", "Load", {
+        reg.REQ_NOT_YET: ap.Status(
+            "na", "not yet available — arrives in a later phase of this feature"),
+    })
+    assert st.status == "na"
+    assert "not yet available" in st.reason
 
 
 def test_resolve_category_is_ok_when_any_member_metric_is_ok():
@@ -89,7 +115,6 @@ def test_resolve_category_is_blocked_when_no_member_is_ok():
 
 
 @pytest.mark.parametrize("cat,cls,needle", [
-    ("loadflow", "Generator", "branch"),
     ("storage", "Generator", "store energy"),
     ("dispatch", "Bus", "dispatch"),
     ("capacity", "Bus", "capacity"),
