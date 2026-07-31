@@ -90,9 +90,16 @@ def test_apply_reports_an_unknown_line_instead_of_creating_it(client):
 def test_a_zero_length_line_is_reported_not_guessed(client):
     # Per-km is undefined when the old length is 0, so there is nothing to
     # preserve. Reporting beats inventing an impedance.
+    #
+    # The length is set to 0 by a follow-up PUT, not at creation: create_line
+    # treats length <= 0 as "not set" and auto-fills it from the haversine
+    # distance, so a line POSTed with 0.0 never actually has length 0.
     _bus(client, "COLOGNE", 6.960, 50.938)
     _bus(client, "BERLIN", 13.405, 52.520)
-    _line(client, "L1", "COLOGNE", "BERLIN", 0.0, 3.0, 17.5, 0.00015)
+    _line(client, "L1", "COLOGNE", "BERLIN", 1.0, 3.0, 17.5, 0.00015)
+    r = client.put("/api/network/lines/L1", json={"name": "L1", "bus0": "COLOGNE", "bus1": "BERLIN", "length": 0.0})
+    assert r.status_code == 200, r.text
+    assert _lines(client)["L1"]["length"] == 0.0, "setup failed: length is not actually 0"
 
     body = client.post("/api/network/lines/recalculate_lengths").json()
     (prev,) = body["rescale"]
