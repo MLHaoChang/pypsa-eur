@@ -1663,6 +1663,80 @@ def suite_S13():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
 
+def suite_S14():
+    print("\nS14 — Scenario tree & snapshots (area 7)")
+    base = "qa_e2e_scenario"
+    branch = "qa_e2e_scenario_branch"
+    # PRE-MUTATION reset (Hazard 4 -- in-memory network state survives
+    # project deletion). Must run before this suite's first mutation. Issued
+    # here directly (rather than via the shared _fresh_scratch_project
+    # helper, Task 1) because S14 must ALSO delete the `branch` project,
+    # in order, after the reset but before `base` is (re)created below --
+    # _fresh_scratch_project only ever deletes the one project it creates.
+    # Matches S13's S13.2 precedent.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(branch)}?cascade=true", method="DELETE")
+    ok, st_c, body = _fresh_scratch_project(base, do_reset=False)
+    if not ok:
+        skip("S14.*", f"cannot create {base} ({st_c}) {str(body)[:80]}")
+        return
+
+    st_sc, snap = http(f"/api/projects/{q(base)}/snapshots", method="POST",
+                        body={"label": "before-branch"})
+    snap_id = snap.get("id") if isinstance(snap, dict) else None
+    record("S14.2", st_sc == 200 and snap_id is not None, f"create snapshot -> {st_sc}")
+
+    st_sl, snaps = http(f"/api/projects/{q(base)}/snapshots")
+    listed = isinstance(snaps, list) and any(s.get("id") == snap_id for s in snaps)
+    record("S14.3", st_sl == 200 and listed, f"list -> {st_sl}; found={listed}")
+
+    # Diverge the branch from the pre-snapshot state.
+    st_b, _ = http("/api/network/buses", method="POST",
+                    body={"name": "qa_e2e_branch_bus", "v_nom": 400.0, "carrier": "AC"})
+    record("S14.4", st_b in (200, 201), f"diverge bus create -> {st_b}")
+
+    st_br, _ = http(f"/api/projects/{q(base)}/scenarios", method="POST",
+                     body={"name": branch})
+    record("S14.5", st_br == 201, f"create scenario branch -> {st_br}")
+
+    st_p, plist = http("/api/projects/")
+    children = [p.get("name") for p in plist if isinstance(plist, list)
+                and p.get("parent_project") == base]
+    record("S14.6", st_p == 200 and branch in children, f"children of {base}: {children}")
+
+    if snap_id is not None:
+        st_rs, _ = http(f"/api/projects/{q(base)}/snapshots/{q(snap_id)}/restore",
+                         method="POST")
+        st_ab, buses_after = http("/api/network/buses")
+        rolled_back = isinstance(buses_after, list) and not any(
+            b.get("name") == "qa_e2e_branch_bus" for b in buses_after)
+        record("S14.7", st_rs == 200 and rolled_back,
+               f"restore -> {st_rs}; branch bus gone={rolled_back}")
+
+        st_ds, _ = http(f"/api/projects/{q(base)}/snapshots/{q(snap_id)}",
+                         method="DELETE")
+        st_sl2, snaps2 = http(f"/api/projects/{q(base)}/snapshots")
+        gone = isinstance(snaps2, list) and not any(s.get("id") == snap_id for s in snaps2)
+        record("S14.8", st_ds == 204 and gone, f"delete snapshot -> {st_ds}; gone={gone}")
+    else:
+        skip("S14.7", "no snapshot id from S14.2")
+        skip("S14.8", "no snapshot id from S14.2")
+
+    # S14.9 — delete without cascade must be BLOCKED while the branch exists.
+    st_blocked, body_blocked = http(f"/api/projects/{q(base)}", method="DELETE")
+    blocked_ok = st_blocked == 409 and "descendants_exist" in str(body_blocked)
+    record("S14.9", blocked_ok, f"delete w/o cascade -> {st_blocked} {str(body_blocked)[:100]}")
+
+    # S14.10 — cascading delete removes both base and branch.
+    st_casc, _ = http(f"/api/projects/{q(base)}?cascade=true", method="DELETE")
+    st_pf, plist2 = http("/api/projects/")
+    remaining = [p.get("name") for p in plist2] if isinstance(plist2, list) else []
+    both_gone = base not in remaining and branch not in remaining
+    record("S14.10", st_casc == 200 and both_gone,
+           f"cascade delete -> {st_casc}; base_gone={base not in remaining} "
+           f"branch_gone={branch not in remaining}")
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -1712,6 +1786,8 @@ def main() -> int:
         suite_S12()
     if run("S13"):
         suite_S13()
+    if run("S14"):
+        suite_S14()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
