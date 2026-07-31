@@ -1925,6 +1925,53 @@ def test_chronological_columns_carry_no_aggregation(client, install_network):
         {"id": "p", "label": "Active power", "unit": "MW",
          "metric_id": "p", "agg": None}
     ]
+
+
+def _multi_period_network():
+    """2-period MultiIndex network, solved. `mi.name = "snapshot"` is
+    load-bearing: this repo has a documented failure class where a MultiIndex
+    loses its overall `.name` and xarray then reports a `dim_0` error."""
+    import pandas as pd
+    n = build_network(solve=False)
+    base = n.snapshots
+    mi = pd.MultiIndex.from_product([[2026, 2031], base], names=["period", "timestep"])
+    mi.name = "snapshot"
+    n.set_snapshots(mi)
+    n.investment_periods = [2026, 2031]
+    n.investment_period_weightings["years"] = 5.0
+    n.optimize(solver_name="highs")
+    return n
+
+
+def test_multi_period_series_align_and_do_not_come_back_all_null(
+        client, install_network):
+    """`series_for` reindexes a `_t` frame to ctx.sns. On a MultiIndex the
+    reindex aligns by tuple; if it ever silently misaligned, every value would
+    be null and the tab would look empty rather than broken."""
+    install_network(_multi_period_network())
+    body = _get(client, "/Generator/gas", category="dispatch", metrics="p").json()
+    assert len(body["index"]) == 8            # 4 timesteps x 2 periods
+    assert body["periods"] == [2026] * 4 + [2031] * 4
+    assert all(v is not None for v in body["series"]["p"])
+
+
+def test_period_filter_narrows_to_one_investment_period(client, install_network):
+    install_network(_multi_period_network())
+    body = _get(client, "/Generator/gas", category="dispatch", metrics="p",
+                period="2031").json()
+    assert len(body["index"]) == 4
+    assert set(body["periods"]) == {2031}
+
+
+def test_multi_period_energy_applies_years_exactly_once(client, install_network):
+    """Guards the same double-multiplication that shipped in Task 2: with
+    years=5 and 8 snapshots, energy must be 5x the raw dispatch sum, not 25x."""
+    n = _multi_period_network()
+    install_network(n)
+    body = _get(client, "/Generator/gas", category="dispatch",
+                metrics="energy_mwh").json()
+    raw = float(n.generators_t.p["gas"].sum())
+    assert body["scalars"]["energy_mwh"] == pytest.approx(raw * 5.0)
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
