@@ -4325,7 +4325,7 @@ export default function AssetDetail() {
     period: filter.selectedPeriod, mode,
   }
 
-  const { data } = useQuery({
+  const qResult = useQuery({
     queryKey: nk(currentProject, 'assetResults', asset?.class, asset?.name,
                  category, selected.join(','), mode,
                  filter.fromIso, filter.toIso, filter.selectedPeriod),
@@ -4338,6 +4338,12 @@ export default function AssetDetail() {
     // new key resolves.
     placeholderData: keepPreviousData,
   })
+  // `isPlaceholderData` is true while a new query key is in flight and the
+  // PREVIOUS payload is still on screen. The xlsx links are built from live
+  // state, so they must be disabled during that window or they would export a
+  // different selection than the user is looking at.
+  const { data } = qResult
+  const isPlaceholderData = qResult.isPlaceholderData
 
   // Reconcile the remembered tick-set the moment the backend tells us what is
   // actually available for THIS asset. Metrics that became blocked or n/a are
@@ -4456,14 +4462,33 @@ export default function AssetDetail() {
                 className="flex items-center gap-1 text-[11px] text-muted hover:text-accent">
                 <Download size={11} /> CSV
               </button>
+              {/* The xlsx links are built from LIVE `params`, but `data` can be
+                  the previous selection's payload while a new fetch is in
+                  flight (that is what keepPreviousData buys). Serving the links
+                  during that window would point them at a different selection
+                  than the table and the CSV button are showing — three export
+                  affordances in one toolbar, disagreeing. Disable them until
+                  the payload catches up. */}
               {params && (
                 <>
-                  <a href={assetResultsApi.exportXlsxUrl(params, 'view')} download
-                    className="flex items-center gap-1 text-[11px] text-muted hover:text-accent">
+                  <a
+                    href={isPlaceholderData ? undefined : assetResultsApi.exportXlsxUrl(params, 'view')}
+                    download
+                    aria-disabled={isPlaceholderData || undefined}
+                    title={isPlaceholderData ? 'Refreshing — the workbook would not match the view' : undefined}
+                    className={`flex items-center gap-1 text-[11px] ${isPlaceholderData
+                      ? 'text-muted/40 pointer-events-none' : 'text-muted hover:text-accent'}`}
+                  >
                     <Download size={11} /> Export configured view
                   </a>
-                  <a href={assetResultsApi.exportXlsxUrl(params, 'full')} download
-                    className="flex items-center gap-1 text-[11px] text-muted hover:text-accent">
+                  <a
+                    href={isPlaceholderData ? undefined : assetResultsApi.exportXlsxUrl(params, 'full')}
+                    download
+                    aria-disabled={isPlaceholderData || undefined}
+                    title={isPlaceholderData ? 'Refreshing — the workbook would not match the view' : undefined}
+                    className={`flex items-center gap-1 text-[11px] ${isPlaceholderData
+                      ? 'text-muted/40 pointer-events-none' : 'text-muted hover:text-accent'}`}
+                  >
                     <Download size={11} /> Full asset report
                   </a>
                 </>
