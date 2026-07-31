@@ -872,6 +872,48 @@ def suite_S10():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
 
+def _s11_setup() -> str | None:
+    """Create S11's own scratch project. Returns the name, or None on
+    failure. Thin wrapper over the shared _fresh_scratch_project (Task 1) —
+    kept as its own function (rather than inlined into suite_S11) so its
+    call sites (here and Task 10's completed suite_S11) don't have to know
+    the scratch project's literal name."""
+    name = "qa_e2e_assets"
+    ok, _, _ = _fresh_scratch_project(name)
+    return name if ok else None
+
+
+def _s11_teardown(name: str) -> None:
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def _s11_buses() -> None:
+    """
+    Bus DELETE only. Create/GET/PUT/undo are already covered by S7.2/S7.3
+    (qa_e2e.py:417-462) — S7 deletes/recreates the whole PROJECT, never one
+    bus, so individual-bus DELETE has zero coverage anywhere until this check.
+    """
+    st_c, _ = http("/api/network/buses", method="POST",
+                    body={"name": "qa_s11_bus", "v_nom": 110.0, "carrier": "AC"})
+    if st_c not in (200, 201):
+        record("S11.buses.delete", False, f"setup create -> {st_c}")
+        return
+    st_d, _ = http(f"/api/network/buses/{q('qa_s11_bus')}", method="DELETE")
+    st_g, buses = http("/api/network/buses")
+    gone = isinstance(buses, list) and not any(b.get("name") == "qa_s11_bus" for b in buses)
+    record("S11.buses.delete", st_d == 204 and gone, f"DELETE -> {st_d}; gone={gone}")
+
+
+def suite_S11():
+    print("\nS11 — Asset CRUD across component classes (area 2, isolated project)")
+    name = _s11_setup()
+    if not name:
+        skip("S11.*", "cannot create qa_e2e_assets project")
+        return
+    _s11_buses()
+    _s11_teardown(name)
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -915,6 +957,8 @@ def main() -> int:
         suite_S9(target, flat)
     if run("S10"):
         suite_S10()
+    if run("S11"):
+        suite_S11()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
