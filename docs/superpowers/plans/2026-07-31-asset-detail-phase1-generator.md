@@ -276,16 +276,17 @@ class Metric:
     source_override: str | None = None
 
 
-def _summary_for(cls: str) -> tuple[Metric, ...]:
-    """Identity metrics every class shares. Static columns only — no solve."""
-    return (
-        Metric(id=f"__identity__{cls}", label="Identity", unit="", kind="scalar",
-               category="summary", classes=(cls,), origin="input",
-               compute=C.summary_identity),
-        Metric(id=f"__params__{cls}", label="Parameters", unit="", kind="scalar",
-               category="summary", classes=(cls,), origin="input",
-               compute=C.summary_params),
-    )
+# Two metrics every class shares. Declared ONCE with classes=ALL_CLASSES —
+# not per-class — so their ids stay stable, human-readable strings that mean
+# the same thing in the API, the checklist and the exported workbook.
+_SUMMARY_METRICS: tuple[Metric, ...] = (
+    Metric(id="identity", label="Identity", unit="", kind="scalar",
+           category="summary", classes=ALL_CLASSES, origin="input",
+           compute=C.summary_identity),
+    Metric(id="params", label="Parameters", unit="", kind="scalar",
+           category="summary", classes=ALL_CLASSES, origin="input",
+           compute=C.summary_params),
+)
 
 
 _GENERATOR_METRICS: tuple[Metric, ...] = (
@@ -454,9 +455,7 @@ _PLACEHOLDERS: tuple[Metric, ...] = tuple(
 )
 
 METRICS: tuple[Metric, ...] = (
-    tuple(m for cls in ALL_CLASSES for m in _summary_for(cls))
-    + _GENERATOR_METRICS
-    + _PLACEHOLDERS
+    _SUMMARY_METRICS + _GENERATOR_METRICS + _PLACEHOLDERS
 )
 
 _BY_ID: dict[str, Metric] = {m.id: m for m in METRICS}
@@ -1803,7 +1802,7 @@ def test_summary_stays_live_on_an_unsolved_network(client, install_network):
     assert by_id["summary"]["status"] == "ok"
     assert by_id["dispatch"]["status"] == "blocked"
     assert by_id["dispatch"]["remedy"]["action"] == "run_simulation"
-    assert body["scalars"][f"__params__Generator"]["p_nom"] == pytest.approx(200.0)
+    assert body["scalars"]["params"]["p_nom"] == pytest.approx(200.0)
 
 
 def test_stale_dispatch_blocks_every_result_category(client, install_network):
