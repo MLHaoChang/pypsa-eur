@@ -57,6 +57,47 @@ def test_full_scope_writes_every_applicable_category(client, install_network):
     assert "Dispatch" in wb.sheetnames
     assert "Capacity" in wb.sheetnames
     assert "Storage" not in wb.sheetnames, "n/a categories must be omitted"
+    about = {row[0]: row[1] for row in
+             wb["About"].iter_rows(min_col=1, max_col=2, values_only=True)}
+    assert about["Category"] == "(all applicable)", (
+        "a full export spans several categories — naming it after whichever "
+        "one happened to run first (always Summary) is misleading")
+
+
+def test_full_scope_omits_a_category_whose_build_response_raises(
+        client, install_network, monkeypatch):
+    """
+    A single category raising must cost that category, not the workbook.
+
+    Monkeypatches `build_response` so exactly ONE category (prices — normally
+    `ok` for a solved Generator, per the existing full-scope test) raises.
+    Without the try/except in `export.build_workbook`, this request 500s and
+    `_book` fails before any assertion below runs — so this test only passes
+    if the except branch actually caught the exception.
+    """
+    install_network(build_network(solve=True))
+    from services.asset_results import export as xls
+
+    real_build_response = xls.build_response
+
+    def flaky(n, component_class, name, *, category, **kwargs):
+        if category == "prices":
+            raise RuntimeError("boom")
+        return real_build_response(
+            n, component_class, name, category=category, **kwargs)
+
+    monkeypatch.setattr(xls, "build_response", flaky)
+
+    wb = _book(client.get(URL, params={"scope": "full"}))
+    assert "Dispatch" in wb.sheetnames
+    assert "Capacity" in wb.sheetnames
+    assert "Prices & duals" not in wb.sheetnames, (
+        "the category whose build_response raised must not get a sheet")
+    text = "\n".join(
+        str(row[0]) + "|" + str(row[1])
+        for row in wb["About"].iter_rows(min_col=1, max_col=2, values_only=True)
+    )
+    assert "Omitted: Prices & duals|failed to compute: boom" in text
 
 
 def test_full_scope_lists_the_omitted_categories_in_about(client, install_network):
@@ -79,3 +120,10 @@ def test_unsolved_network_still_exports_the_summary(client, install_network):
 def test_bad_scope_is_422(client, install_network):
     install_network(build_network(solve=True))
     assert client.get(URL, params={"scope": "nope"}).status_code == 422
+
+
+def test_bad_mode_is_422(client, install_network):
+    install_network(build_network(solve=True))
+    resp = client.get(URL, params={"scope": "view", "category": "dispatch",
+                                   "metrics": "p", "mode": "nope"})
+    assert resp.status_code == 422

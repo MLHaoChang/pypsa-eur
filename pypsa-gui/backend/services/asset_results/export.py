@@ -8,11 +8,14 @@ shaped the numbers — source, horizon, period, view mode — is written down.
 from __future__ import annotations
 
 import io
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from .registry import CATEGORY_IDS, CATEGORY_LABELS
 from .service import build_response
+
+logger = logging.getLogger("pypsa_gui.asset_results")
 
 SCOPES = ("view", "full")
 
@@ -28,7 +31,11 @@ def _about_rows(resp: dict, *, scope: str, project: str | None,
         ["Bus", resp["asset"].get("bus", "")],
         ["Project", project or "(unsaved)"],
         ["Export scope", scope],
-        ["Category", CATEGORY_LABELS.get(resp["category"], resp["category"])],
+        # For a full export `resp` is whichever category ran first, so naming
+        # it here would always read "Summary" regardless of what the workbook
+        # actually contains.
+        ["Category", "(all applicable)" if scope == "full"
+            else CATEGORY_LABELS.get(resp["category"], resp["category"])],
         ["View mode", resp["mode"]],
         ["Result source", resp["solve"]["source"]],
         ["Solver condition", resp["solve"].get("condition") or "—"],
@@ -97,11 +104,21 @@ def build_workbook(
     for cat in categories:
         ids = metric_ids if scope == "view" else [
             m.id for m in metrics_for(component_class, cat)]
-        resp = build_response(
-            n, component_class, name, category=cat, metric_ids=ids,
-            source=source, from_iso=from_iso, to_iso=to_iso, period=period,
-            mode=mode,
-        )
+        # A full-scope export runs this eight times. One category raising must
+        # cost that category, not the whole workbook — the sibling read
+        # endpoint wraps the identical call for the same reason. Failures
+        # become omissions with a reason, so the user still gets the other
+        # seven sheets and can see what is missing and why.
+        try:
+            resp = build_response(
+                n, component_class, name, category=cat, metric_ids=ids,
+                source=source, from_iso=from_iso, to_iso=to_iso, period=period,
+                mode=mode,
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad category must not
+            logger.exception("asset export: category %s failed", cat)
+            omitted.append((CATEGORY_LABELS[cat], f"failed to compute: {exc}"))
+            continue
         if first_resp is None:
             first_resp = resp
         st = next(c for c in resp["categories"] if c["id"] == cat)

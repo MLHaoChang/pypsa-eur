@@ -44,6 +44,13 @@ def export_asset_results_xlsx(
         raise HTTPException(422, f"Unknown scope '{scope}'")
     if category not in CATEGORY_IDS:
         raise HTTPException(422, f"Unknown category '{category}'")
+    # Same validation the sibling read endpoint applies — a bad `mode` would
+    # otherwise fall through to the chronological branch and silently export a
+    # different shape than the caller asked for.
+    if mode not in svc.VIEW_MODES:
+        raise HTTPException(422, f"Unknown view mode '{mode}'")
+    if source not in ("lopf", "ac_pf"):
+        source = "lopf"  # fail soft, matching every other results endpoint
 
     n = PyPSAService.get_network()
     df = getattr(n, svc.C.attr_for(component_class))
