@@ -2582,7 +2582,11 @@ def _about_rows(resp: dict, *, scope: str, project: str | None,
         ["Bus", resp["asset"].get("bus", "")],
         ["Project", project or "(unsaved)"],
         ["Export scope", scope],
-        ["Category", CATEGORY_LABELS.get(resp["category"], resp["category"])],
+        # For a full export `resp` is whichever category ran first, so naming
+        # it here would always read "Summary" regardless of what the workbook
+        # actually contains.
+        ["Category", "(all applicable)" if scope == "full"
+            else CATEGORY_LABELS.get(resp["category"], resp["category"])],
         ["View mode", resp["mode"]],
         ["Result source", resp["solve"]["source"]],
         ["Solver condition", resp["solve"].get("condition") or "—"],
@@ -2651,11 +2655,21 @@ def build_workbook(
     for cat in categories:
         ids = metric_ids if scope == "view" else [
             m.id for m in metrics_for(component_class, cat)]
-        resp = build_response(
-            n, component_class, name, category=cat, metric_ids=ids,
-            source=source, from_iso=from_iso, to_iso=to_iso, period=period,
-            mode=mode,
-        )
+        # A full-scope export runs this eight times. One category raising must
+        # cost that category, not the whole workbook — the sibling read
+        # endpoint wraps the identical call for the same reason. Failures
+        # become omissions with a reason, so the user still gets the other
+        # seven sheets and can see what is missing and why.
+        try:
+            resp = build_response(
+                n, component_class, name, category=cat, metric_ids=ids,
+                source=source, from_iso=from_iso, to_iso=to_iso, period=period,
+                mode=mode,
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad category must not
+            logger.exception("asset export: category %s failed", cat)
+            omitted.append((CATEGORY_LABELS[cat], f"failed to compute: {exc}"))
+            continue
         if first_resp is None:
             first_resp = resp
         st = next(c for c in resp["categories"] if c["id"] == cat)
@@ -2723,6 +2737,13 @@ def export_asset_results_xlsx(
         raise HTTPException(422, f"Unknown scope '{scope}'")
     if category not in CATEGORY_IDS:
         raise HTTPException(422, f"Unknown category '{category}'")
+    # Same validation the sibling read endpoint applies — a bad `mode` would
+    # otherwise fall through to the chronological branch and silently export a
+    # different shape than the caller asked for.
+    if mode not in svc.VIEW_MODES:
+        raise HTTPException(422, f"Unknown view mode '{mode}'")
+    if source not in ("lopf", "ac_pf"):
+        source = "lopf"  # fail soft, matching every other results endpoint
 
     n = PyPSAService.get_network()
     df = getattr(n, svc.C.attr_for(component_class))
