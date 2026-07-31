@@ -17,12 +17,14 @@ function Row({ m, checked, onToggle, onRemedy }: {
   onToggle: (id: string) => void; onRemedy: (r: Remedy) => void
 }) {
   const disabled = m.status !== 'ok'
+  const reasonId = disabled && m.reason ? `metric-reason-${m.id}` : undefined
   return (
     <li className="flex flex-col gap-0.5 py-0.5">
       <label className={`flex items-center gap-1.5 text-[11px] ${disabled ? 'text-muted' : 'text-text'}`}>
         <input
           type="checkbox"
           aria-label={m.label}
+          aria-describedby={reasonId}
           checked={checked}
           disabled={disabled}
           onChange={() => { if (!disabled) onToggle(m.id) }}
@@ -34,14 +36,14 @@ function Row({ m, checked, onToggle, onRemedy }: {
           <span title="Model input, not a solver result"
             className="text-[9px] uppercase tracking-wide text-muted border border-border rounded px-1">in</span>
         )}
-        {m.origin === 'derived' && m.formula && (
-          <span title={m.formula} className="text-muted"><Sigma size={10} /></span>
+        {m.origin === 'derived' && (
+          <span title={m.formula || 'Derived value'} className="text-muted"><Sigma size={10} /></span>
         )}
         {m.status === 'blocked' && <CircleAlert size={11} className="text-warn" />}
         {m.status === 'na' && <Ban size={11} className="text-muted" />}
       </label>
       {disabled && m.reason && (
-        <span className="pl-5 text-[10px] text-muted flex items-center gap-1.5">
+        <span id={reasonId} className="pl-5 text-[10px] text-muted flex items-center gap-1.5">
           {m.reason}
           {m.status === 'blocked' && m.remedy && (
             <button

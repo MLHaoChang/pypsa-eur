@@ -70,4 +70,32 @@ describe('MetricChecklist', () => {
     setup()
     expect(screen.getByTitle(/Σ p × w/)).toBeTruthy()
   })
+
+  it('links a blocked metric reason to its checkbox for screen readers', () => {
+    setup()
+    const box = screen.getByRole('checkbox', { name: /Committed/ })
+    const describedBy = box.getAttribute('aria-describedby')
+    expect(describedBy).toBeTruthy()
+    expect(document.getElementById(describedBy!)?.textContent)
+      .toMatch(/unit commitment is not enabled/i)
+  })
+
+  it('marks a derived metric even when it has no formula', () => {
+    const derivedNoFormula: MetricRow = {
+      id: 'derived_no_formula', label: 'Derived thing', unit: '', kind: 'scalar',
+      origin: 'derived', status: 'ok',
+    }
+    setup({ metrics: [...METRICS, derivedNoFormula] })
+    expect(screen.getByTitle('Derived value')).toBeTruthy()
+  })
+
+  it('never shows a remedy button for a na metric even if one is supplied', () => {
+    const naWithRemedy: MetricRow = {
+      id: 'na_with_remedy', label: 'Ghost metric', unit: '', kind: 'series', origin: 'output',
+      status: 'na', reason: 'never applies to this class',
+      remedy: { action: 'run_ac_pf', label: 'Run AC power flow' },
+    }
+    setup({ metrics: [...METRICS, naWithRemedy] })
+    expect(screen.queryByRole('button', { name: /Run AC power flow/ })).toBeNull()
+  })
 })
