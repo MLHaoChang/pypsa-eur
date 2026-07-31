@@ -806,6 +806,25 @@ def test_build_ctx_carries_weights_matching_the_snapshot_count():
     ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
     assert len(ctx.weights) == len(n.snapshots)
     assert float(ctx.weights.iloc[0]) == pytest.approx(3.0)
+
+
+def test_multi_period_weights_apply_the_years_multiplier_exactly_once():
+    """`snapshot_weights` already folds in investment_period_weightings.years
+    for a MultiIndex. Applying the years map a second time in build_ctx would
+    give weight x years^2 and inflate every energy and cost total."""
+    n = build_network(solve=False)
+    base = n.snapshots
+    mi = pd.MultiIndex.from_product([[2026, 2031], base], names=["period", "timestep"])
+    mi.name = "snapshot"
+    n.set_snapshots(mi)
+    n.investment_periods = [2026, 2031]
+    n.investment_period_weightings["years"] = 5.0
+    n.snapshot_weightings["generators"] = 3.0
+
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    # 3.0 (snapshot weight) x 5.0 (years) = 15.0 — NOT 75.0.
+    assert float(ctx.weights.iloc[0]) == pytest.approx(15.0)
+    assert ctx.is_multi is True
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -890,18 +909,19 @@ def build_ctx(n, component_class: str, name: str, *, source: str, sns) -> Ctx:
                 params[k] = v
 
     # Energy basis: the `generators` weighting column, matching n.statistics()
-    # and every existing results endpoint. Multiplied by each snapshot's
-    # investment-period year count so multi-period sums are horizon totals.
+    # and every existing results endpoint.
+    #
+    # `snapshot_weights` ALREADY multiplies by investment_period_weightings.years
+    # when `sns` is a MultiIndex — that is the entire purpose of the helper
+    # (period_utils.py:123-135). Do NOT apply the years map again here. Doing so
+    # yields weight × years² and inflates every energy and cost total by a factor
+    # of `years` on any multi-period network — the "~5× wrong" bug class
+    # period_utils exists to prevent, in the over-count direction.
     try:
         w = snapshot_weights(n, "generators", sns)
     except Exception:
         w = pd.Series(1.0, index=sns)
     multi = is_multi_period(n)
-    if multi:
-        years = period_years_map(n)
-        w = w * pd.Series(
-            [float(years.get(p, 1.0)) for p in sns.get_level_values(0)], index=sns
-        )
     return Ctx(n=n, component_class=component_class, name=name, source=source,
                sns=sns, weights=w, is_multi=multi, params=params)
 
@@ -1557,19 +1577,16 @@ covered now has a real implementation.
 def cost_weights(ctx: Ctx):
     import pandas as pd
 
-    from services.period_utils import period_years_map, snapshot_weights
+    from services.period_utils import snapshot_weights
 
+    # Same rule as build_ctx: snapshot_weights already folds in
+    # investment_period_weightings.years for a MultiIndex `sns`. Multiplying by
+    # the years map again here would inflate every cost total by a factor of
+    # `years` on a multi-period network.
     try:
-        w = snapshot_weights(ctx.n, "objective", ctx.sns)
+        return snapshot_weights(ctx.n, "objective", ctx.sns)
     except Exception:
-        w = pd.Series(1.0, index=ctx.sns)
-    if ctx.is_multi:
-        years = period_years_map(ctx.n)
-        w = w * pd.Series(
-            [float(years.get(p, 1.0)) for p in ctx.sns.get_level_values(0)],
-            index=ctx.sns,
-        )
-    return w
+        return pd.Series(1.0, index=ctx.sns)
 
 
 def _cost_wsum(ctx: Ctx, s) -> float | None:
