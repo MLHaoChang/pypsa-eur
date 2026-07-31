@@ -243,7 +243,198 @@ def summary_params(ctx: Ctx) -> dict:
     return {k: ctx.params.get(k) for k in keys if k in ctx.params}
 
 
-def _todo(*_a: Any, **_k: Any):  # replaced one-by-one as Tasks 3-4 land
+# ── Series access ───────────────────────────────────────────────────────────
+
+def series_for(ctx: Ctx, attr: str):
+    """
+    This asset's column from `<component>_t.<attr>`, reindexed to ctx.sns.
+
+    Honours the lopf/ac_pf snapshot the same way every /results/* endpoint
+    does, and returns None (rather than raising) whenever the attribute, the
+    frame or the column is absent — the caller turns that into `null`.
+    """
+    from routers.results import _result_df
+
+    df = _result_df(ctx.n, f"{attr_for(ctx.component_class)}_t", attr, ctx.source)
+    if df is None or getattr(df, "empty", True):
+        return None
+    if ctx.name not in df.columns:
+        return None
+    return df[ctx.name].reindex(ctx.sns)
+
+
+def _static(ctx: Ctx, col: str) -> float | None:
+    v = ctx.params.get(col)
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _wsum(ctx: Ctx, s) -> float | None:
+    """Weighted sum over the context's snapshot slice."""
+    if s is None:
+        return None
+    return float((s.fillna(0.0) * ctx.weights).sum())
+
+
+# ── capacity ────────────────────────────────────────────────────────────────
+
+def gen_p_nom(ctx: Ctx):
+    return _static(ctx, "p_nom")
+
+
+def gen_p_nom_opt(ctx: Ctx):
+    return _static(ctx, "p_nom_opt")
+
+
+def gen_p_nom_delta(ctx: Ctx):
+    opt, nom = gen_p_nom_opt(ctx), gen_p_nom(ctx)
+    return None if opt is None or nom is None else opt - nom
+
+
+def gen_capex_annual(ctx: Ctx):
+    cc, opt = _static(ctx, "capital_cost"), gen_p_nom_opt(ctx)
+    return None if cc is None or opt is None else cc * opt
+
+
+def gen_p_nom_by_vintage(ctx: Ctx):
+    """
+    Per-period capacity recovered from the solver's `<name>@<year>` clone rows.
+
+    Those rows are transient and hidden from every asset list, but they carry
+    the per-vintage p_nom_opt the user actually wants to see under the parent.
+    Returns None on a flat network (no vintages) so the metric renders as
+    "not applicable here" rather than an empty object.
+    """
+    df = getattr(ctx.n, attr_for(ctx.component_class))
+    prefix = f"{ctx.name}@"
+    out: dict[str, float] = {}
+    for row in df.index:
+        rs = str(row)
+        if not rs.startswith(prefix):
+            continue
+        year = rs[len(prefix):]
+        if not year.isdigit():
+            continue
+        try:
+            out[year] = float(df.at[row, "p_nom_opt"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out or None
+
+
+# ── dispatch: series ────────────────────────────────────────────────────────
+
+def gen_p(ctx: Ctx):
+    return series_for(ctx, "p")
+
+
+def gen_p_max_pu(ctx: Ctx):
+    """
+    Availability. Time-varying when the user uploaded a profile, otherwise the
+    static column broadcast across the horizon — a renewable with a flat
+    p_max_pu still has a meaningful availability curve.
+    """
+    import pandas as pd
+
+    s = series_for(ctx, "p_max_pu")
+    if s is not None:
+        return s
+    v = _static(ctx, "p_max_pu")
+    return None if v is None else pd.Series(v, index=ctx.sns)
+
+
+def gen_available(ctx: Ctx):
+    pu, opt = gen_p_max_pu(ctx), gen_p_nom_opt(ctx)
+    return None if pu is None or opt is None else pu * opt
+
+
+def gen_curtailment(ctx: Ctx):
+    avail, p = gen_available(ctx), gen_p(ctx)
+    if avail is None or p is None:
+        return None
+    # Clip at zero: tiny LP tolerances put p a hair above availability, and a
+    # negative curtailment is not a thing anyone wants to explain.
+    return (avail - p).clip(lower=0.0)
+
+
+def gen_capacity_factor(ctx: Ctx):
+    p, opt = gen_p(ctx), gen_p_nom_opt(ctx)
+    if p is None or not opt:
+        return None
+    return p / opt
+
+
+def gen_status(ctx: Ctx):
+    return series_for(ctx, "status")
+
+
+def gen_start_up(ctx: Ctx):
+    return series_for(ctx, "start_up")
+
+
+def gen_shut_down(ctx: Ctx):
+    return series_for(ctx, "shut_down")
+
+
+def gen_q(ctx: Ctx):
+    return series_for(ctx, "q")
+
+
+# ── dispatch: scalars ───────────────────────────────────────────────────────
+
+def gen_energy(ctx: Ctx):
+    return _wsum(ctx, gen_p(ctx))
+
+
+def gen_full_load_hours(ctx: Ctx):
+    e, opt = gen_energy(ctx), gen_p_nom_opt(ctx)
+    return None if e is None or not opt else e / opt
+
+
+def gen_mean_cf(ctx: Ctx):
+    e, opt = gen_energy(ctx), gen_p_nom_opt(ctx)
+    hours = float(ctx.weights.sum())
+    return None if e is None or not opt or not hours else e / (opt * hours)
+
+
+def gen_curtailed_energy(ctx: Ctx):
+    return _wsum(ctx, gen_curtailment(ctx))
+
+
+def gen_peak(ctx: Ctx):
+    p = gen_p(ctx)
+    return None if p is None or p.empty else float(p.max())
+
+
+def gen_zero_hours(ctx: Ctx):
+    p = gen_p(ctx)
+    if p is None:
+        return None
+    return float(((p.abs() < 1e-9).astype(float) * ctx.weights).sum())
+
+
+def gen_max_ramp_up(ctx: Ctx):
+    p = gen_p(ctx)
+    if p is None or len(p) < 2:
+        return None
+    return float(p.diff().dropna().max())
+
+
+def gen_max_ramp_down(ctx: Ctx):
+    p = gen_p(ctx)
+    if p is None or len(p) < 2:
+        return None
+    return float(p.diff().dropna().min())
+
+
+def gen_n_starts(ctx: Ctx):
+    s = gen_start_up(ctx)
+    return None if s is None else int(round(float(s.fillna(0.0).sum())))
+
+
+def _todo(*_a: Any, **_k: Any):  # replaced one-by-one as Task 4 lands
     raise NotImplementedError
 
 
@@ -252,13 +443,6 @@ def not_yet(*_a: Any, **_k: Any) -> None:
     return None
 
 
-gen_p_nom = gen_p_nom_opt = gen_p_nom_delta = gen_capex_annual = _todo
-gen_p_nom_by_vintage = _todo
-gen_p = gen_p_max_pu = gen_available = gen_curtailment = _todo
-gen_capacity_factor = gen_status = gen_start_up = gen_shut_down = _todo
-gen_energy = gen_full_load_hours = gen_mean_cf = gen_curtailed_energy = _todo
-gen_peak = gen_zero_hours = gen_max_ramp_up = gen_max_ramp_down = _todo
-gen_n_starts = gen_q = _todo
 gen_bus_price = gen_mu_upper = gen_mu_lower = _todo
 gen_capture_price = gen_capture_rate = gen_binding_hours = _todo
 gen_revenue = gen_vom = gen_fixed_cost = gen_net_profit = gen_lcoe = _todo
