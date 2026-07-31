@@ -690,21 +690,44 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
 
   // The only write path (B1): explicit, and only for previews the caller
   // already decided to apply (the auto-applied immaterial ones, or the user's
-  // "Update" choice on the dialog).
+  // "Update" choice on the dialog). Toasts and rethrows on failure — one
+  // message either call site can rely on, rather than duplicating it — so
+  // BOTH callers (the silent auto path below, and the dialog's `onAccept`
+  // further down) can still tell the write didn't happen and react.
   const applyRescale = useCallback(async (previews: RescalePreview[]) => {
     if (previews.length === 0) return
-    await networkApi.rescaleImpedances(previews.map(p => ({
-      name: p.name, r: p.new.r, x: p.new.x, b: p.new.b,
-    })))
-    qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
+    try {
+      await networkApi.rescaleImpedances(previews.map(p => ({
+        name: p.name, r: p.new.r, x: p.new.x, b: p.new.b,
+      })))
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
+    } catch (e) {
+      toast.error(
+        `Could not update line impedance (${previews.length} line${previews.length === 1 ? '' : 's'}) — values unchanged.`
+      )
+      throw e
+    }
   }, [qc])
 
   // Immaterial changes are applied straight away; material ones queue for the
   // dialog. Blocked ones are surfaced by the dialog, never silently dropped.
+  //
+  // A failed AUTO apply must not just vanish: it was never added to
+  // `pendingRescale` (that's the whole point of "immaterial — don't ask"), so
+  // if the write fails there is nothing else that will ever ask about it —
+  // the per-km value stays wrong with only a toast as the trace, and a toast
+  // can be missed or dismissed. Chosen fix: re-queue the failed batch into
+  // `pendingRescale` on rejection, turning a failed silent write into an
+  // explicit ask instead of a silently lost one. `applyRescale` already
+  // toasted the failure; this just recovers the data.
   const ingestRescale = useCallback((previews: RescalePreview[] | undefined) => {
     if (!previews || previews.length === 0) return
     const { auto, ask, blocked } = partitionRescale(previews)
-    void applyRescale(auto)
+    if (auto.length) {
+      void applyRescale(auto).catch(() => {
+        setPendingRescale(prev => [...prev, ...auto])
+      })
+    }
     if (ask.length || blocked.length) setPendingRescale(prev => [...prev, ...ask, ...blocked])
   }, [applyRescale])
 
@@ -1198,8 +1221,15 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           previews={pendingRescale.filter(p => p.skipped_reason === null)}
           blocked={pendingRescale.filter(p => p.skipped_reason !== null)}
           onAccept={async () => {
-            await applyRescale(pendingRescale.filter(p => p.skipped_reason === null))
-            setPendingRescale([])
+            try {
+              await applyRescale(pendingRescale.filter(p => p.skipped_reason === null))
+              setPendingRescale([])
+            } catch {
+              // applyRescale already toasted the failure. Leave pendingRescale
+              // intact — the write didn't happen, nothing was lost, and the
+              // dialog stays open with the same batch so the user can retry
+              // Update or decline.
+            }
           }}
           onDecline={() => setPendingRescale([])}
         />
