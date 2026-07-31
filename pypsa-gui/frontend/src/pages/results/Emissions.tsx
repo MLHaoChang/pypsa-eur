@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
+import { networkApi } from '../../api/network'
+import type { Carrier } from '../../api/types'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { KPI } from './shared'
@@ -27,6 +29,13 @@ export default function Emissions() {
   const { data: emissions } = useQuery({
     queryKey: nk(currentProject, 'results', 'emissions'),
     queryFn: resultsApi.getEmissions,
+  })
+  // Carrier intensities — used only to distinguish "genuinely clean" from
+  // "nobody told the model what this fuel emits" when the total is 0.
+  const { data: carriers = [] } = useQuery({
+    queryKey: nk(currentProject, 'carriers'),
+    queryFn: networkApi.getCarriers,
+    staleTime: 60_000,
   })
 
   const filter = useResultsFilter()
@@ -87,6 +96,11 @@ export default function Emissions() {
   const allCaps = emissions.caps
   const hasPerPeriodCaps = allCaps.some(c => c.scope === 'period')
 
+  // A bare "0 tCO2" cannot distinguish "this system is clean" from "nobody
+  // told me what this fuel emits", and those call for opposite actions.
+  const anyIntensity = (carriers as Carrier[]).some(c => (c.co2_emissions ?? 0) > 0)
+  const zeroUnexplained = view.total_tCO2 === 0 && !anyIntensity
+
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
 
@@ -119,7 +133,9 @@ export default function Emissions() {
         <div className={`grid gap-3 ${scopeCaps.length === 1 ? 'grid-cols-3' : 'grid-cols-1'}`}>
           <KPI accent label={`Total emissions (${scopeLabel})`}
                value={`${view.total_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })} tCO₂`}
-               hint="Σ dispatch × snapshot_weight × period.years × co2_emissions / efficiency. Matches PyPSA's primary-energy accounting." />
+               hint={zeroUnexplained
+                 ? 'No carrier in this network has a CO₂ intensity, so every emissions figure is zero. Set one under the Carrier tab, or use the fix offered in Issues.'
+                 : "Σ dispatch × snapshot_weight × period.years × co2_emissions / efficiency. Matches PyPSA's primary-energy accounting."} />
           {scopeCaps.length === 1 && (
             <>
               <KPI label="Shadow price (marginal abatement)"

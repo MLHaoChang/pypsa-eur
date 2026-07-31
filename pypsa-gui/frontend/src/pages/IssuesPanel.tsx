@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, XCircle, X, Lightbulb } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, XCircle, X, Lightbulb, Wrench } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { simulationApi } from '../api/simulation'
+import { networkApi } from '../api/network'
 import { useSimulationStore } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
-import type { ValidationIssue } from '../api/types'
+import { parseSuggestedCo2Value } from '../utils/carrierZeroCo2'
+import type { Carrier, ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
@@ -39,6 +41,15 @@ export default function IssuesPanel() {
     refetchOnMount: 'always',
     refetchInterval: 15_000,
     staleTime: 5_000,
+  })
+
+  // Carriers, for the one-click fix a `carrier_zero_co2` warning offers.
+  // Fetched here (rather than relying on the Carrier tab having been
+  // visited first) so the fix works the first time the user opens Issues.
+  const { data: carriers = [] } = useQuery({
+    queryKey: nk(currentProject, 'carriers'),
+    queryFn: networkApi.getCarriers,
+    staleTime: 60_000,
   })
 
   // Manual revalidate. Useful right after a bulk edit, before clicking Run.
@@ -206,7 +217,7 @@ export default function IssuesPanel() {
                 <>
                   <GroupHeader label="Errors" count={grouped.errors.length} severity="error" />
                   {grouped.errors.map((issue, i) => (
-                    <IssueRow key={`err-${i}-${issue.code}-${issue.name}`} issue={issue} onJumpTo={jumpTo} />
+                    <IssueRow key={`err-${i}-${issue.code}-${issue.name}`} issue={issue} onJumpTo={jumpTo} carriers={carriers} />
                   ))}
                 </>
               )}
@@ -214,7 +225,7 @@ export default function IssuesPanel() {
                 <>
                   <GroupHeader label="Warnings" count={grouped.warnings.length} severity="warning" />
                   {grouped.warnings.map((issue, i) => (
-                    <IssueRow key={`warn-${i}-${issue.code}-${issue.name}`} issue={issue} onJumpTo={jumpTo} />
+                    <IssueRow key={`warn-${i}-${issue.code}-${issue.name}`} issue={issue} onJumpTo={jumpTo} carriers={carriers} />
                   ))}
                 </>
               )}
@@ -251,14 +262,24 @@ const COMPONENT_TYPE_MAP: Record<string, string> = {
   Transformer: 'Transformer',
 }
 
-function IssueRow({ issue, onJumpTo }: {
+function IssueRow({ issue, onJumpTo, carriers }: {
   issue: ValidationIssue
   onJumpTo: (type: string, name: string) => void
+  carriers: Carrier[]
 }) {
   const isError = issue.severity === 'error'
   const Icon = isError ? AlertCircle : AlertTriangle
   const hasTarget = !!issue.component_class && !!issue.name &&
                     !!COMPONENT_TYPE_MAP[issue.component_class]
+  // carrier_zero_co2's `name` IS the carrier (component_class="Carrier").
+  // The message carries a suggested co2_emissions value only when the
+  // catalog has an entry for this carrier; parseSuggestedCo2Value returns
+  // null otherwise, and the button is intentionally not offered then — there
+  // is nothing to pre-fill, and C4 forbids writing anything without a value
+  // the user can see before pressing.
+  const suggestedCo2 = issue.code === 'carrier_zero_co2'
+    ? parseSuggestedCo2Value(issue.message)
+    : null
 
   return (
     <div className="flex items-start gap-3 px-4 py-3 border-t border-border first:border-t-0 hover:bg-bg-2 transition-colors">
@@ -293,6 +314,59 @@ function IssueRow({ issue, onJumpTo }: {
           View <ArrowRight size={11} />
         </button>
       )}
+      {suggestedCo2 != null && (
+        <FixCarrierZeroCo2Button carrierName={issue.name} suggested={suggestedCo2} carriers={carriers} />
+      )}
     </div>
+  )
+}
+
+// One-click fix for a `carrier_zero_co2` warning (C4 — offer, never rewrite:
+// nothing here runs until the user presses this button). Reads the current
+// carrier row from the query cache and spreads it before overriding
+// co2_emissions — the backend's `_update_component` does remove + add, so a
+// partial PUT would reset color/nice_name/unit to their Pydantic defaults.
+// Same trap `updateBusPosMut` documents in MapCanvas.tsx.
+function FixCarrierZeroCo2Button({ carrierName, suggested, carriers }: {
+  carrierName: string
+  suggested: number
+  carriers: Carrier[]
+}) {
+  const qc = useQueryClient()
+  const fixMut = useMutation({
+    mutationFn: async () => {
+      const current = carriers.find(c => c.name === carrierName)
+      if (!current) {
+        throw new Error(`Carrier '${carrierName}' not loaded yet — try again.`)
+      }
+      await networkApi.updateCarrier(carrierName, { ...current, co2_emissions: suggested })
+    },
+    onSuccess: () => {
+      const project = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(project, 'carriers') })
+      qc.invalidateQueries({ queryKey: nk(project, 'undoInfo') })
+      // Every result endpoint that groups by carrier reads this table —
+      // invalidate so Results/Emissions reflects the new intensity without
+      // a manual refresh.
+      qc.invalidateQueries({ queryKey: nk(project, 'results') })
+      // The warning is condition-driven, not dismissed — invalidating
+      // preflight lets the panel confirm the fix actually cleared it
+      // (rather than the user having to wait for the 15 s poll).
+      qc.invalidateQueries({ queryKey: nk(project, 'preflight') })
+      toast.success(`${carrierName} set to ${suggested} tCO₂/MWh`)
+    },
+    onError: (e: Error) => toast.error(e.message || `Could not update '${carrierName}'.`),
+  })
+
+  return (
+    <button
+      onClick={() => fixMut.mutate()}
+      disabled={fixMut.isPending}
+      title={`Set '${carrierName}' co2_emissions to the catalog value`}
+      className="shrink-0 flex items-center gap-1 self-center rounded-md border border-accent/30 bg-accent/5 px-2 py-1 text-[10.5px] font-medium text-accent hover:bg-accent/10 hover:border-accent/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      <Wrench size={11} />
+      Set {carrierName} to {suggested} tCO₂/MWh
+    </button>
   )
 }
