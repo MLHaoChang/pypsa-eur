@@ -7,6 +7,7 @@ import { useUIStore } from '../store/uiStore'
 import { authEnabled } from '../auth/config'
 import { lockStateFromAcquire, WRITABLE, type LockInfo, type LockAcquireOutcome } from './lockState'
 import { nk } from './queryKeys'
+import { flushPendingEdgeDeletes } from './pendingEdgeDeletes'
 
 // Query keys invalidated by any operation that swaps the underlying PyPSA
 // network in memory (load, restore, import). Includes:
@@ -450,6 +451,15 @@ export async function saveProjectQuietly(name: string, clearUndo = false): Promi
     // assume. Omit `expect` when saving under a different name (no caller does
     // today, but keeps the helper honest).
     const expect = name === useUIStore.getState().currentProject ? name : undefined
+    // Commit any line/link delete still inside its 5 s undo window first —
+    // otherwise the backend network still holds an edge the canvas already
+    // removed, and the file we write disagrees with what the user sees.
+    const drainedDeletes = await flushPendingEdgeDeletes()
+    if (drainedDeletes.flushed || drainedDeletes.failed) {
+      appLog(drainedDeletes.failed ? 'WARN' : 'INFO',
+        `Committed ${drainedDeletes.flushed} pending edge delete(s) before saving '${name}'` +
+        (drainedDeletes.failed ? ` · ${drainedDeletes.failed} failed` : ''))
+    }
     const res = await projectsApi.save(name, false, clearUndo, expect)
     appLog('INFO', `Auto-saved '${name}' (${res.ts_columns_saved} ts cols)`)
     // Flush the diagram layout (node positions + edge waypoints) to

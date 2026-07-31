@@ -20,6 +20,10 @@ import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { isRenewableCarrier } from '../utils/carriers'
+import {
+  registerPendingEdgeDelete, cancelPendingEdgeDelete,
+  drainPendingEdgeDeletes, flushPendingEdgeDeletes,
+} from '../utils/pendingEdgeDeletes'
 import { useSimulationStore } from '../store/simulationStore'
 import { H2Icon } from '../components/AssetIcons'
 import CarrierSelect from '../components/CarrierSelect'
@@ -2068,12 +2072,10 @@ export default function TopologyCanvas() {
     }
   }, [canvasMode, connectSource])
 
-  // Pending undo-deletes (line/link removals with 5s undo window).
-  // Track the toast id alongside the timer so the unmount-flush below
-  // can dismiss the stale "deleted" toast — otherwise its Undo button
-  // outlives the component and points at a ref that's no longer wired
-  // up to anything (clicking it after unmount silently noops).
-  const pendingDeletesRef = useRef<Map<string, { timer: ReturnType<typeof setTimeout>; toastId?: string }>>(new Map())
+  // Pending undo-deletes (line/link removals with 5s undo window) live in the
+  // module-level registry in utils/pendingEdgeDeletes — the save flows drain it
+  // before serialising the network, and a pending delete has to outlive this
+  // component being unmounted.
 
   interface CtxMenu {
     x: number; y: number; busName: string
@@ -2120,24 +2122,19 @@ export default function TopologyCanvas() {
       // (by navigating away within the 5s window) would silently survive
       // on the backend. keepalive hands off to the browser's background
       // network slot so the DELETE completes even after the page is gone.
-      const pendingDeletes = pendingDeletesRef.current
-      if (pendingDeletes.size > 0) {
-        pendingDeletes.forEach(({ timer }, edgeId) => {
-          clearTimeout(timer)
-          const isLink = edgeId.startsWith('link-')
-          const name = edgeId.replace(/^(line-|link-)/, '')
-          const url = `/api/network/${isLink ? 'links' : 'lines'}/${encodeURIComponent(name)}`
-          try {
-            fetch(url, {
-              method: 'DELETE',
-              // This site had no headers object at all — raw fetch bypasses the
-              // axios CSRF interceptor, so the pending delete 403s on unload.
-              headers: { ...rawFetchHeaders('DELETE') },
-              keepalive: true,
-            }).catch(() => { /* best effort */ })
-          } catch { /* keepalive unsupported — drop on the floor */ }
-        })
-        pendingDeletes.clear()
+      for (const { edgeId } of drainPendingEdgeDeletes()) {
+        const isLink = edgeId.startsWith('link-')
+        const name = edgeId.replace(/^(line-|link-)/, '')
+        const url = `/api/network/${isLink ? 'links' : 'lines'}/${encodeURIComponent(name)}`
+        try {
+          fetch(url, {
+            method: 'DELETE',
+            // This site had no headers object at all — raw fetch bypasses the
+            // axios CSRF interceptor, so the pending delete 403s on unload.
+            headers: { ...rawFetchHeaders('DELETE') },
+            keepalive: true,
+          }).catch(() => { /* best effort */ })
+        } catch { /* keepalive unsupported — drop on the floor */ }
       }
     }
     window.addEventListener('pagehide', onPageHide)
@@ -2827,8 +2824,14 @@ export default function TopologyCanvas() {
 
     // Keep timer + toast duration in lockstep — the toast IS the undo window.
     const UNDO_MS = 5000
-    const timer = setTimeout(async () => {
-      pendingDeletesRef.current.delete(edgeId)
+    // Assigned just below; `commit` only reads it when it runs, which is never
+    // before the toast exists.
+    let toastId: string | undefined
+    // The one path that actually sends the DELETE — shared by the undo-window
+    // timer, the unmount flush, and the pre-save flush. Rejecting on failure is
+    // part of the contract: flushPendingEdgeDeletes counts the rejections.
+    const commit = async () => {
+      if (toastId) toast.dismiss(toastId)
       try {
         if (isLink) {
           await networkApi.deleteLink(name)
@@ -2840,16 +2843,20 @@ export default function TopologyCanvas() {
       } catch (err) {
         toast.error(`Delete failed: ${(err as Error).message}`)
         setEdges(prev => [...prev, savedEdge as Edge<EdgeData>])
+        throw err
       }
+    }
+    const timer = setTimeout(() => {
+      cancelPendingEdgeDelete(edgeId)
+      commit().catch(() => { /* already surfaced by the toast above */ })
     }, UNDO_MS)
-    const toastId = toast.custom(
+    toastId = toast.custom(
       (t) => (
         <div className={`flex items-center gap-3 bg-bg border border-border rounded-lg px-3 py-2 shadow-lg transition-opacity ${t.visible ? 'opacity-100' : 'opacity-0'}`}>
           <span className="text-sm text-text flex-1">{isLink ? 'Link' : 'Line'} &ldquo;{name}&rdquo; deleted</span>
           <button
             onClick={() => {
-              const pending = pendingDeletesRef.current.get(edgeId)
-              if (pending) { clearTimeout(pending.timer); pendingDeletesRef.current.delete(edgeId) }
+              cancelPendingEdgeDelete(edgeId)
               setEdges(prev => [...prev, savedEdge as Edge<EdgeData>])
               toast.dismiss(t.id)
             }}
@@ -2859,7 +2866,7 @@ export default function TopologyCanvas() {
       ),
       { duration: UNDO_MS }
     )
-    pendingDeletesRef.current.set(edgeId, { timer, toastId })
+    registerPendingEdgeDelete({ edgeId, timer, toastId, commit })
   }, [setEdges, queryClient])
 
   // Flush pending edge-deletes on unmount (tab switch / navigation). The
@@ -2873,19 +2880,8 @@ export default function TopologyCanvas() {
   // dismiss the stale toast. The user navigated away — they've
   // implicitly committed to the delete.
   useEffect(() => () => {
-    const pending = pendingDeletesRef.current
-    if (pending.size === 0) return
-    pending.forEach(({ timer, toastId }, edgeId) => {
-      clearTimeout(timer)
-      if (toastId) toast.dismiss(toastId)
-      const isLink = edgeId.startsWith('link-')
-      const name = edgeId.replace(/^(line-|link-)/, '')
-      const p = isLink ? networkApi.deleteLink(name) : networkApi.deleteLine(name)
-      p.then(() => queryClient.invalidateQueries({ queryKey: [isLink ? 'links' : 'lines'] }))
-       .catch(() => { /* component is gone; nothing to restore */ })
-    })
-    pending.clear()
-  }, [queryClient])
+    void flushPendingEdgeDeletes()
+  }, [])
 
   const linkCarrierLegend = useMemo(() =>
     [...new Set(links.map(l => l.carrier).filter(Boolean))].map((c, i) => ({ carrier: c, color: getLinkColor(c, i) })),

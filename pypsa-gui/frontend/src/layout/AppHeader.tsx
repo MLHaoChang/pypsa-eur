@@ -15,6 +15,7 @@ import { useAuthMode } from '../auth/AuthModeProvider'
 import UserMenu from './UserMenu'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
 import toast from 'react-hot-toast'
+import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -339,6 +340,15 @@ export default function AppHeader() {
       // promotes the saved name to the active project (first-save / Save-As) —
       // the backend must follow so subsequent saves don't 409 on a stale bind.
       const expect = name === currentProject ? name : undefined
+      // Commit any line/link delete still inside its 5 s undo window first —
+      // otherwise the backend network still holds an edge the canvas already
+      // removed, and the file we write disagrees with what the user sees.
+      const drainedDeletes = await flushPendingEdgeDeletes()
+      if (drainedDeletes.flushed || drainedDeletes.failed) {
+        appLog(drainedDeletes.failed ? 'WARN' : 'INFO',
+          `Committed ${drainedDeletes.flushed} pending edge delete(s) before saving '${name}'` +
+          (drainedDeletes.failed ? ` · ${drainedDeletes.failed} failed` : ''))
+      }
       const result = await projectsApi.save(name, false, true, expect, true)
       // Flush the diagram layout (node positions + edge waypoints) to
       // layout.json AFTER the network save. Order matters: the project

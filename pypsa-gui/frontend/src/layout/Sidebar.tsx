@@ -33,6 +33,7 @@ import { H2Icon } from '../components/AssetIcons'
 import { useSolveQueue } from '../hooks/useSolveQueue'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
+import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED_W = 240
@@ -861,6 +862,17 @@ function ProjectSectionContent({
       // Copy, or the first save of a brand-new project where currentProject is
       // still null) omits `expect` so the write is allowed. Read currentProject
       // fresh — a switch may have completed since this callback was created.
+      // Commit any line/link delete still inside its 5 s undo window BEFORE
+      // serialising. Until it fires, the backend network still holds the edge
+      // the canvas already removed — saving first writes a network.nc that
+      // disagrees with what the user is looking at, and reopening the project
+      // brings the deleted line back. Save means "persist what I see".
+      const drained = await flushPendingEdgeDeletes()
+      if (drained.flushed || drained.failed) {
+        appLog(drained.failed ? 'WARN' : 'INFO',
+          `Committed ${drained.flushed} pending edge delete(s) before saving '${name}'` +
+          (drained.failed ? ` · ${drained.failed} failed` : ''))
+      }
       const cur = useUIStore.getState().currentProject
       const expect = name === cur ? name : undefined
       // Rebind when this save makes `name` the active project (setAsCurrent).
