@@ -3855,7 +3855,7 @@ beforeEach(() => {
     cb(new Blob([PNG_BYTES], { type: 'image/png' }))
   } as never
   // jsdom never fires Image.onload; resolve it synchronously.
-  Object.defineProperty(global.Image.prototype, 'src', {
+  Object.defineProperty(globalThis.Image.prototype, 'src', {
     configurable: true,
     set(this: HTMLImageElement) { setTimeout(() => this.onload?.(new Event('load')), 0) },
   })
@@ -3927,9 +3927,16 @@ export async function downloadPNG(
   const svg = container.querySelector('svg')
   if (!svg) return false
 
+  // Fall back through measured box → clientWidth → the SVG's OWN width/height
+  // attributes → a default. The attribute step matters: Recharts sets those on
+  // the element, and in jsdom (and any zero-height container) the first two are
+  // 0, so without it the exporter silently rasterises at the 640×320 default
+  // instead of the chart's real size.
   const rect = svg.getBoundingClientRect()
-  const width = Math.max(1, Math.round(rect.width || svg.clientWidth || 640))
-  const height = Math.max(1, Math.round(rect.height || svg.clientHeight || 320))
+  const attrWidth = parseFloat(svg.getAttribute('width') ?? '')
+  const attrHeight = parseFloat(svg.getAttribute('height') ?? '')
+  const width = Math.max(1, Math.round(rect.width || svg.clientWidth || attrWidth || 640))
+  const height = Math.max(1, Math.round(rect.height || svg.clientHeight || attrHeight || 320))
 
   const clone = svg.cloneNode(true) as SVGSVGElement
   if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
