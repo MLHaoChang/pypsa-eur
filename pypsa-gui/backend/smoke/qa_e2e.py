@@ -904,6 +904,34 @@ def _s11_buses() -> None:
     record("S11.buses.delete", st_d == 204 and gone, f"DELETE -> {st_d}; gone={gone}")
 
 
+def _s11_generators() -> None:
+    body = {"name": "qa_s11_gen", "bus": "Bus 0", "p_nom": 10.0, "marginal_cost": 12.5}
+    st_c, _ = http("/api/network/generators", method="POST", body=body)
+    st_g, rows = http("/api/network/generators")
+    row = next((r for r in rows if r.get("name") == "qa_s11_gen"), None) \
+        if isinstance(rows, list) else None
+    if st_c not in (200, 201) or not row:
+        record("S11.generators.create", False, f"create={st_c} get_found={row is not None}")
+        return
+    record("S11.generators.create", True, f"create -> {st_c}")
+
+    payload = {**row, "p_nom": 55.0}
+    st_p, _ = http(f"/api/network/generators/{q('qa_s11_gen')}", method="PUT", body=payload)
+    st_g2, rows2 = http("/api/network/generators")
+    row2 = next((r for r in rows2 if r.get("name") == "qa_s11_gen"), None) \
+        if isinstance(rows2, list) else None
+    kept = row2 is not None and abs(float(row2.get("p_nom", 0)) - 55.0) < 1e-9 \
+        and abs(float(row2.get("marginal_cost", 0)) - 12.5) < 1e-9
+    record("S11.generators.put", kept,
+           f"PUT {st_p}: p_nom={row2.get('p_nom') if row2 else None} "
+           f"marginal_cost={row2.get('marginal_cost') if row2 else None}")
+
+    st_d, _ = http(f"/api/network/generators/{q('qa_s11_gen')}", method="DELETE")
+    st_g3, rows3 = http("/api/network/generators")
+    gone = isinstance(rows3, list) and not any(r.get("name") == "qa_s11_gen" for r in rows3)
+    record("S11.generators.delete", st_d == 204 and gone, f"DELETE -> {st_d}; gone={gone}")
+
+
 def suite_S11():
     print("\nS11 — Asset CRUD across component classes (area 2, isolated project)")
     name = _s11_setup()
@@ -911,6 +939,7 @@ def suite_S11():
         skip("S11.*", "cannot create qa_e2e_assets project")
         return
     _s11_buses()
+    _s11_generators()
     _s11_teardown(name)
 
 
