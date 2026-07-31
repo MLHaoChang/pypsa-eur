@@ -54,8 +54,18 @@ beforeEach(() => {
   vi.mocked(resultsApi.getCurtailment).mockReset().mockResolvedValue({
     index: [], columns: [], data: [],
   })
+  // Full getLostLoad shape (api/simulation.ts:357-367): `total_mwh` /
+  // `total_cost_eur` / `voll_eur_per_mwh` are required alongside the
+  // index/columns/data TS payload, not optional. With `data: []`,
+  // AggregatedOverview.tsx's `lostLoadTotals` (:128-134) takes the
+  // `ts.data.length === 0` branch and reads `total_mwh`/`total_cost_eur`
+  // straight off this object (defaulting to 0 via `?? 0` either way, so 0
+  // here is a no-op versus the previous under-typed fixture, not a value
+  // change); `voll_eur_per_mwh` only feeds `economicsBars`' VOLL-per-period
+  // calc, which this test never asserts on.
   vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
     index: [], columns: [], data: [],
+    total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 0,
   })
   // Full CostBreakdown shape (api/simulation.ts:62-110). AggregatedOverview.tsx's
   // OPEX section reads `cost.by_component.filter(...)` directly in the JSX
@@ -70,8 +80,31 @@ beforeEach(() => {
     storage_capex_expansion: 0, storage_capex_expansion_lifetime: 0,
     by_component: [], by_carrier: [], by_period: [],
   })
+  // Full Generator shape (api/types.ts:33-55) — 26 fields, not just the 4
+  // this test cares about. AggregatedOverview.tsx and shared.tsx read only
+  // `name`, `carrier` (both preserved from the original fixture) and
+  // `curtailment_cost` (via an `as unknown as` cast, AggregatedOverview.tsx:150,378)
+  // off a Generator row; every other field below is an inert PyPSA-default /
+  // "no constraint" value that nothing in the render path consumes, so
+  // filling them in to satisfy the interface cannot change any value this
+  // test's assertion depends on. `curtailment_cost: 0` also matches the
+  // previous fixture's behaviour exactly: the field was `undefined` before,
+  // and `curtailmentCost`'s guard (`c && Number.isFinite(c) && c > 0`,
+  // AggregatedOverview.tsx:151/379) was already short-circuiting it to
+  // unused regardless.
   vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue([
-    { name: 'ThermalGen', bus: 'Bus 0', carrier: 'gas', p_nom: 100 },
+    {
+      name: 'ThermalGen', bus: 'Bus 0', carrier: 'gas', p_nom: 100,
+      p_nom_extendable: false, p_nom_min: 0, p_nom_max: null,
+      p_min_pu: 0, p_max_pu: 1, control: 'PQ',
+      marginal_cost: 0, capital_cost: 0, fom_cost: 0,
+      overnight_cost: null, discount_rate: null, curtailment_cost: 0,
+      efficiency: 1, committable: false,
+      ramp_limit_up: null, ramp_limit_down: null,
+      start_up_cost: 0, shut_down_cost: 0, min_up_time: 0, min_down_time: 0,
+      e_sum_min: null, e_sum_max: null,
+      build_year: 0, lifetime: null, unit: 'MW',
+    },
   ])
   vi.mocked(networkApi.getStorageUnits).mockReset().mockResolvedValue([])
   vi.mocked(networkApi.getLoads).mockReset().mockResolvedValue([])
