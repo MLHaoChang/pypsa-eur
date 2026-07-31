@@ -4682,6 +4682,16 @@ clearAssetDetailRequest: () => set({ assetDetailRequest: null }),
 Add both to the store's TypeScript interface next to `requestResultsTab` /
 `clearResultsTabRequest`.
 
+**Also clear it in `setCurrentProject`.** That function already nulls
+`selectedComponent` and `highlightedComponent` on a project switch, with a
+comment explaining why: a name carried across projects can resolve to a
+DIFFERENT asset that happens to share it. `assetDetailRequest` carries a name
+too, so it needs the same treatment — otherwise a request raised in project A
+but not yet consumed (the tab was not mounted, or the asset list had not
+resolved) survives the switch and silently applies A's category, mode and
+metric selection to B's same-named asset. Add `assetDetailRequest: null` to
+that same patch object.
+
 - [ ] **Step 4: Add the three UI entry points**
 
 **PropertiesPanel** — in the header of the selected-asset card:
