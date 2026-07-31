@@ -96,6 +96,59 @@ backed up before the run and diffed after. Test artefacts are prefixed
 | S8.2 | 26 PyPSA-Eur unit tests pass |
 | S8.3 | ruff finds only the 7 known-benign findings |
 
+### S10 — Project save/load round trip (area 1)
+| id | Assertion |
+|----|-----------|
+| S10.2 | Full-object `GET`-then-`PUT` on a bus sets a distinctive `v_nom` and preserves the untouched `carrier` field |
+| S10.3 | `POST /api/projects/{name}` (destructive save) succeeds |
+| S10.4 | `GET /api/projects/{name}` (load) followed by `GET /api/network/buses` shows the saved `v_nom` — the literal save/load round-trip content check |
+| S10.5 | After `POST /api/network/reset` + re-activate, the round-tripped `v_nom` is still served (guards resident-state papering over a disk-read bug) |
+
+### S11 — Asset CRUD across component classes (area 2)
+| id | Assertion |
+|----|-----------|
+| S11.buses.delete | Individual bus `DELETE` removes it (create/GET/PUT/undo already covered by S7) |
+| S11.generators.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+| S11.lines.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+| S11.storage_units.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+| S11.stores.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+| S11.links.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+| S11.loads.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+| S11.transformers.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+| S11.carriers.create/put/delete | Full CRUD lifecycle with partial-PUT-survival check |
+
+### S12 — Time series load/delete (area 3)
+| id | Assertion |
+|----|-----------|
+| S12.loads/.generators/.links/.storage_units/.stores (.roundtrip/.listed/.delete) | Upload via the real UI/chat-tool path (or the generic upload endpoint for the two classes with no UI affordance), values round-trip, listing shows the pair, delete empties it |
+| S12.lines_asymmetry | `lines` is listed by `GET /timeseries` but rejected by `DELETE ?component=lines` — asserted as a known fact |
+| S12.put_overwrite | Whole-attribute `PUT` sibling-column-survival behaviour, recorded as observed |
+| S12.snapshot_mismatch | Zero-overlap upload's effect on `ts_start`/`ts_end`, recorded as observed |
+
+### S13 — Fresh solve + result validation (area 5)
+| id | Assertion |
+|----|-----------|
+| S13.1 | Pre-check `GET /api/simulation/status` before touching anything else (Hazard 5) |
+| S13.2 | `POST /api/network/reset`, strictly after S13.1 |
+| S13.3 | Fresh `qa_e2e_solve` project created and activated |
+| S13.4 | `POST /api/simulation/run` accepted |
+| S13.5 | Solve completes within the poll ceiling |
+| S13.6 | `status == "completed"` and `objective` is finite |
+| S13.7 | `RESULT_ENDPOINTS` walk against the fresh solve — no 5xx, no non-finite values |
+| S13.8 | Re-solve reproduces the first objective within `1e-6` relative tolerance |
+
+### S14 — Scenario tree & snapshots (area 7)
+| id | Assertion |
+|----|-----------|
+| S14.2 | Snapshot creation |
+| S14.3 | Snapshot listing shows the new snapshot |
+| S14.5 | Scenario branch creation (`201`) |
+| S14.6 | Scenario tree listing via `parent_project` filtering shows the branch |
+| S14.7 | Snapshot restore rolls back a post-snapshot mutation |
+| S14.8 | Snapshot deletion |
+| S14.9 | Delete without `cascade` is blocked (`409 descendants_exist`) |
+| S14.10 | Cascading delete removes both base and branch |
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the
