@@ -27,6 +27,7 @@ import json
 import math
 import pathlib
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1553,6 +1554,96 @@ def suite_S12():
     _s12_teardown(name)
 
 
+def suite_S13():
+    print("\nS13 — Fresh solve + result validation (area 5)")
+    # S13.1 MUST run before literally anything else, including reset — a
+    # solve holds the PyPSA lock for its whole duration and cannot be
+    # interrupted from Python (Hazard 5). Never touch a solve S13 didn't
+    # start.
+    st_s, status = http("/api/simulation/status")
+    if isinstance(status, dict) and status.get("running"):
+        skip("S13.*", "a solve is already running - not touching reset or state")
+        return
+    record("S13.1", st_s == 200, f"pre-check status -> {st_s}")
+
+    # S13.2 — only now that S13.1 has confirmed no solve is in flight.
+    # Asserted (not a bare call) so this suite's own reset step is checked
+    # like every other numbered step -- matches the QA_E2E_PLAN.md table's
+    # S13.2 row and keeps the record() count at the 8 this task's
+    # verification step already promises. Because this reset is itself an
+    # asserted step that must happen strictly after S13.1, S13 issues it
+    # here directly rather than through the shared _fresh_scratch_project
+    # helper (Task 1) — it then calls that helper below with do_reset=False
+    # so the reset isn't duplicated or reordered.
+    st_r0, _ = http("/api/network/reset", method="POST")
+    record("S13.2", st_r0 == 200, f"reset -> {st_r0}")
+
+    name = "qa_e2e_solve"
+    ok, st_c, body = _fresh_scratch_project(name, do_reset=False)
+    if not ok:
+        skip("S13.*", f"cannot create {name} ({st_c}) {str(body)[:80]}")
+        return
+    record("S13.3", True, f"created+activated {name}")
+
+    st_r, _ = http("/api/simulation/run", method="POST")
+    record("S13.4", st_r == 200, f"run -> {st_r}")
+
+    def poll():
+        for _ in range(90):  # 90 x 2s = 180s ceiling; a 3bus solve is single-digit seconds
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(2)
+        return None
+
+    s1 = poll()
+    if s1 is None:
+        # Hazard 5: no safe way to tell "stuck" from "merely slow" — skip,
+        # never fail, on timeout.
+        skip("S13.5", "solve did not finish within the 180s poll ceiling")
+        skip("S13.6", "solve did not finish")
+        skip("S13.7", "solve did not finish")
+        skip("S13.8", "solve did not finish")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+    record("S13.5", True, f"solve finished: status={s1.get('status')}")
+
+    obj1 = s1.get("objective")
+    completed = s1.get("status") == "completed" and isinstance(obj1, (int, float)) \
+        and math.isfinite(float(obj1))
+    record("S13.6", completed, f"status={s1.get('status')} objective={obj1}")
+
+    bad_status, bad_json, nonfinite = [], [], []
+    for ep in RESULT_ENDPOINTS:
+        st, body = http(f"/api/results/{ep}")
+        if st >= 500 or st == 0:
+            bad_status.append((ep, st, str(body)[:70]))
+            continue
+        if st == 200 and isinstance(body, str):
+            bad_json.append((ep, body[:60]))
+            continue
+        if st == 200:
+            hits = list(finite_scan(body))
+            if hits:
+                nonfinite.append((ep, hits[:2]))
+    record("S13.7", not bad_status and not bad_json and not nonfinite,
+           f"5xx/err={bad_status[:3]} non-JSON={bad_json[:2]} nonfinite={nonfinite[:2]}")
+
+    # S13.8 (adversarial) — re-solve the SAME unchanged project; objective
+    # must reproduce within a tight relative tolerance.
+    http("/api/simulation/run", method="POST")
+    s2 = poll()
+    if s2 is None:
+        skip("S13.8", "second solve did not finish within the 180s poll ceiling")
+    else:
+        obj2 = s2.get("objective")
+        close = isinstance(obj2, (int, float)) and isinstance(obj1, (int, float)) \
+            and abs(float(obj2) - float(obj1)) <= max(1e-6, abs(float(obj1)) * 1e-6)
+        record("S13.8", close, f"re-solve objective={obj2} vs first={obj1}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -1600,6 +1691,8 @@ def main() -> int:
         suite_S11()
     if run("S12"):
         suite_S12()
+    if run("S13"):
+        suite_S13()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
