@@ -815,19 +815,60 @@ def suite_S10():
     # S10.5 (ADVERSARIAL reset — distinct from the pre-mutation reset at the
     # top of this suite). Hazard 4: in-memory network state survives project
     # deletion, so a stale resident network could paper over a real
-    # disk-read bug. Reset first, then re-activate, then re-read. This reset
-    # is a deliberate probe of the round-trip's persistence, not the
-    # isolation-discipline reset every suite must do before its first
-    # mutation (that one already ran above, before S10.2).
+    # disk-read bug — but a plain reset-then-activate does NOT probe that.
+    # `load_project` (S10.4's GET) explicitly re-registers `name` as
+    # RESIDENT (routers/projects.py load_project: "Register the now-bound
+    # active ctx in the resident registry"), and POST /api/network/reset
+    # only swaps the ACTIVE pointer to a fresh context — it does not evict
+    # `name` from that registry (PyPSAService.reset_network). So a bare
+    # reset + /activate hits activate_project's RESIDENT fast path ("a pure
+    # pointer swap... No disk I/O — the whole point") and just re-reads the
+    # same in-memory object S10.4 already validated, regardless of whether
+    # the disk-read path works. CLAUDE.md's test-harness notes name the
+    # fix: "evict the key explicitly." There is no HTTP endpoint that
+    # evicts one resident key directly, so this drives the same B9 LRU-cap
+    # mechanism production traffic uses: create+activate disposable
+    # qa_e2e_*-prefixed projects, one at a time, until `name` appears in
+    # some /activate response's "evicted" list (PyPSAService.
+    # _evict_if_over_cap's return value, surfaced by activate_project).
+    # That confirms `name` actually left `PyPSAService._contexts`, so the
+    # /activate call below is then PROBABLY forced onto the cold
+    # `_hydrate_context_from_disk` path — "probably", not "certainly",
+    # because eviction is LRU over the live registry and nothing stops a
+    # concurrent actor from re-touching `name` between our confirmation and
+    # the probe; nothing in this single-threaded sequential script does.
+    # Bounded well above the documented default RESIDENT_CAP (5); if a
+    # custom-configured cap is high enough that eviction is never
+    # confirmed, S10.5 fails rather than silently probing a still-resident
+    # object.
+    _EVICT_ATTEMPTS = 20
+    evict_seq: list[str] = []
+    forced_cold = False
+    for i in range(_EVICT_ATTEMPTS):
+        evict_name = f"qa_e2e_s10_5_evict_{i}"
+        evict_seq.append(evict_name)
+        http(f"/api/projects/{q(evict_name)}?cascade=true", method="DELETE")
+        st_e, _ = http(f"/api/projects/from_template/3bus?name={q(evict_name)}", method="POST")
+        if st_e not in (200, 201):
+            continue
+        st_a, body_a = http(f"/api/projects/{q(evict_name)}/activate", method="POST")
+        if st_a == 200 and isinstance(body_a, dict) and name in body_a.get("evicted", []):
+            forced_cold = True
+            break
+
     http("/api/network/reset", method="POST")
     http(f"/api/projects/{q(name)}/activate", method="POST")
     st_b2, buses4 = http("/api/network/buses")
     row4 = next((b for b in buses4 if b.get("name") == "Bus 0"), None) \
         if isinstance(buses4, list) else None
-    reset_ok = row4 is not None and abs(float(row4.get("v_nom", 0)) - 987.0) < 1e-9
-    record("S10.5", reset_ok,
-           f"post-reset re-activate -> {st_b2}; Bus 0 v_nom={row4.get('v_nom') if row4 else None}")
+    reload_ok = row4 is not None and abs(float(row4.get("v_nom", 0)) - 987.0) < 1e-9
+    record("S10.5", forced_cold and reload_ok,
+           f"forced-evict={forced_cold} (after {len(evict_seq)} disposable "
+           f"activation(s)); post-eviction re-activate -> {st_b2}; Bus 0 "
+           f"v_nom={row4.get('v_nom') if row4 else None}")
 
+    for evict_name in evict_seq:
+        http(f"/api/projects/{q(evict_name)}?cascade=true", method="DELETE")
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
 
