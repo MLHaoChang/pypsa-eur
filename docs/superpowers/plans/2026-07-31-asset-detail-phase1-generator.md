@@ -1647,9 +1647,14 @@ def gen_capture_rate(ctx: Ctx):
 
 
 def gen_binding_hours(ctx: Ctx):
+    # No early return when BOTH series are absent. A non-extendable,
+    # non-committable generator legitimately has no mu_upper/mu_lower columns
+    # at all — PyPSA enforces its dispatch bounds as variable bounds rather
+    # than linear constraints, so no dual is ever assigned. That means the
+    # bound never bound: zero binding hours, not "unknown". An early
+    # `return None` here would also make the `else 0.0` fallback below dead
+    # code and contradict this task's own test.
     up, lo = gen_mu_upper(ctx), gen_mu_lower(ctx)
-    if up is None and lo is None:
-        return None
     binding = None
     for s in (up, lo):
         if s is None:
