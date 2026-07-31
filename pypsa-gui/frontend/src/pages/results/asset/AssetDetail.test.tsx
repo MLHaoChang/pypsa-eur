@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AssetDetail from './AssetDetail'
 import { assetResultsApi } from './api'
+import { useUIStore } from '../../../store/uiStore'
 import type { AssetResultsResponse } from './types'
 
 vi.mock('./api')
@@ -47,6 +48,9 @@ const renderIt = () => {
 
 beforeEach(() => {
   localStorage.clear()
+  // uiStore is a real singleton shared across tests in this file — reset the
+  // deep-link slot so a request set by one test never leaks into the next.
+  useUIStore.setState({ assetDetailRequest: null })
   vi.mocked(assetResultsApi.listAssets).mockResolvedValue([
     { class: 'Generator', name: 'Gas 1', carrier: 'gas', bus: 'B1' },
     { class: 'Generator', name: 'Wind 1', carrier: 'onwind', bus: 'B1' },
@@ -152,5 +156,43 @@ describe('AssetDetail', () => {
     await waitFor(() => expect(viewLink.getAttribute('href'))
       .toBe('http://x/view/p,energy_mwh.xlsx'))
     expect(fullLink.getAttribute('href')).toBe('http://x/full/p,energy_mwh.xlsx')
+  })
+
+  it('consumes a pending assetDetailRequest deep-link: selects the asset, category and mode, then clears the request', async () => {
+    useUIStore.setState({
+      assetDetailRequest: {
+        componentClass: 'Generator', name: 'Wind 1',
+        category: 'capacity', mode: 'duration', metrics: ['p'],
+      },
+    })
+    renderIt()
+
+    // Resolves {componentClass, name} against the fetched assets list (the
+    // request itself carries no carrier/bus) and lands on the right asset.
+    expect(await screen.findByText(/Wind 1/)).toBeTruthy()
+
+    const capacityTab = await screen.findByRole('tab', { name: /Capacity/ })
+    expect(capacityTab.getAttribute('aria-selected')).toBe('true')
+
+    // Mode carried through to the query — same assertion style as the
+    // existing "switches view mode" test above.
+    await waitFor(() => expect(vi.mocked(assetResultsApi.get)).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'duration', componentClass: 'Generator', name: 'Wind 1' })))
+
+    // Consumed exactly once — a stale request left in the store would keep
+    // re-firing the effect on every render.
+    await waitFor(() => expect(useUIStore.getState().assetDetailRequest).toBeNull())
+  })
+
+  it('ignores a deep-link request for an asset that is not in the network', async () => {
+    useUIStore.setState({
+      assetDetailRequest: { componentClass: 'Generator', name: 'No Such Asset' },
+    })
+    renderIt()
+
+    // Falls back to the auto-selected first asset instead of crashing or
+    // hanging on an unresolved request.
+    expect(await screen.findByText(/Gas 1/)).toBeTruthy()
+    await waitFor(() => expect(useUIStore.getState().assetDetailRequest).toBeNull())
   })
 })

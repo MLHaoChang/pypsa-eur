@@ -10,7 +10,7 @@ import '@xyflow/react/dist/style.css'
 import {
   Plus, Layers, Flame, BatteryCharging,
   Zap, Wind, Trash2, X as XIcon, type LucideIcon,
-  Clock, CheckCircle2, Loader2, XCircle,
+  Clock, CheckCircle2, Loader2, XCircle, ExternalLink,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
@@ -3168,6 +3168,16 @@ export default function TopologyCanvas() {
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="6" cy="6" r="4.5"/><line x1="6" y1="4" x2="6" y2="6.5"/><circle cx="6" cy="8" r="0.5" fill="currentColor" stroke="none"/></svg>
             Properties
+          </button>
+          <button
+            onClick={() => {
+              useUIStore.getState().requestAssetDetail({ componentClass: 'Bus', name: contextMenu.busName })
+              setContextMenu(null)
+            }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-border/30 transition-colors text-text"
+          >
+            <ExternalLink size={12} />
+            View results
           </button>
           {(() => {
             const busName = contextMenu.busName

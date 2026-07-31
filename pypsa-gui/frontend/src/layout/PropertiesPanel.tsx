@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tansta
 import {
   X, Plus, Zap, Battery, Database, GitBranch,
   Pencil, Trash2, Flame, Wind, BatteryCharging, ChevronRight, PlugZap, TrendingUp,
-  HelpCircle,
+  HelpCircle, ExternalLink,
 } from 'lucide-react'
 import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
@@ -2450,6 +2450,9 @@ export default function PropertiesPanel() {
     : selectedComponent.name
 
   const canDelete = selectedComponent.type === 'Bus' || selectedComponent.type === 'Line' || selectedComponent.type === 'Link' || selectedComponent.type === 'Transformer'
+  // AssetGroup is a synthetic bus::category grouping, not a real network
+  // component — it has no entry in Asset Detail's results registry.
+  const canViewResults = selectedComponent.type !== 'AssetGroup'
 
   return (
     <aside className="shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden shadow-lg" style={{ width: 300 }}>
@@ -2476,8 +2479,16 @@ export default function PropertiesPanel() {
           </button>
         </div>
       </div>
-      <div className="px-3 py-2 border-b border-border bg-accent/5 shrink-0">
+      <div className="px-3 py-2 border-b border-border bg-accent/5 shrink-0 flex items-center justify-between gap-2">
         <p className="text-xs font-mono font-semibold text-accent truncate">{displayName}</p>
+        {canViewResults && (
+          <button
+            onClick={() => useUIStore.getState().requestAssetDetail({
+              componentClass: selectedComponent.type, name: selectedComponent.name })}
+            title="Open this asset's results in the Asset Detail tab"
+            className="flex items-center gap-1 text-[11px] text-muted hover:text-accent shrink-0"
+          ><ExternalLink size={11} /> View results</button>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto">
         {/* `key={...}` forces a remount when switching between two assets of the

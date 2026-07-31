@@ -14,22 +14,12 @@ import { assetResultsApi, type AssetQueryParams } from './api'
 import { loadSelection, reconcileSelection, saveSelection } from './selectionMemory'
 import { CATEGORY_ORDER, type AssetRef, type Remedy, type ViewMode } from './types'
 
-// NOTE on deep-linking (Task 13): the brief's original shell also read
-// `assetDetailRequest` / `clearAssetDetailRequest` off `useUIStore` so other
-// panels (PropertiesPanel, BottomPanel, map, chatbot) could jump straight to
-// an asset/category/metric here. Those store fields do not exist yet — they
-// are Task 13's job to add. Referencing them now would either fail typecheck
-// (accessing a non-existent property) or require adding the slot to the
-// shared `uiStore.ts` from within this task, which is out of this task's
-// file scope and risks colliding with a concurrent Task 13 session editing
-// the same file. This shell is fully usable without deep-linking — asset
-// selection, category/metric/view state all work standalone — so the
-// deep-link wiring is deferred to Task 13, which will add the store slot
-// AND the effect that consumes it here.
 export default function AssetDetail() {
   const currentProject = useUIStore(s => s.currentProject)
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const setSelectedComponent = useUIStore(s => s.setSelectedComponent)
+  const assetDetailRequest = useUIStore(s => s.assetDetailRequest)
+  const clearAssetDetailRequest = useUIStore(s => s.clearAssetDetailRequest)
   const filter = useResultsFilter()
 
   const [asset, setAsset] = useState<AssetRef | null>(null)
@@ -47,6 +37,29 @@ export default function AssetDetail() {
   useEffect(() => {
     if (!asset && assets.length > 0) setAsset(assets[0])
   }, [assets, asset])
+
+  // Deep-link consumption (Task 13): Properties, the bottom asset table, the
+  // map and the chatbot all funnel through `requestAssetDetail`, which sets
+  // this request AND opens the Results tab on 'asset' in one atomic store
+  // update (see uiStore.ts). This effect only has to map the request onto
+  // AssetDetail's own local state. The request carries `{componentClass,
+  // name}`, not a full AssetRef (no carrier/bus) — resolve it against the
+  // already-fetched `assets` list so `asset` stays a real AssetRef. Declared
+  // AFTER the auto-select effect above so it always wins the race when both
+  // fire in the same commit (asset arrives at the same time as a request).
+  useEffect(() => {
+    if (!assetDetailRequest || assets.length === 0) return
+    const match = assets.find(a => a.class === assetDetailRequest.componentClass
+      && a.name === assetDetailRequest.name)
+    if (match) {
+      setAsset(match)
+      if (assetDetailRequest.category) setCategory(assetDetailRequest.category)
+      if (assetDetailRequest.mode) setMode(assetDetailRequest.mode)
+      if (assetDetailRequest.metrics) setSelected(assetDetailRequest.metrics)
+      if (assetDetailRequest.chart !== undefined) setView(assetDetailRequest.chart ? 'chart' : 'table')
+    }
+    clearAssetDetailRequest()
+  }, [assetDetailRequest, assets])
 
   const params: AssetQueryParams | null = asset && {
     componentClass: asset.class, name: asset.name, category, metrics: selected,

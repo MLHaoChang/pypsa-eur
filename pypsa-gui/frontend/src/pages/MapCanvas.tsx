@@ -7,7 +7,7 @@ import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { isRenewableCarrier } from '../utils/carriers'
 import { uniformBadge, type BadgeDef } from '../utils/carrierBadges'
-import { Ruler, Flame, Wind, BatteryCharging, Zap } from 'lucide-react'
+import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink } from 'lucide-react'
 import ReactDOMServer from 'react-dom/server'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -1244,6 +1244,16 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-border/30 transition-colors text-text"
             >
               Properties
+            </button>
+            <button
+              onClick={() => {
+                useUIStore.getState().requestAssetDetail({ componentClass: 'Bus', name: ctxMenu.busName })
+                setCtxMenu(null)
+              }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-border/30 transition-colors text-text"
+            >
+              <ExternalLink size={12} />
+              View results
             </button>
             {withAssets.length > 0 && (
               <div className="px-3 py-1 flex gap-1.5 border-b border-border mb-1">
