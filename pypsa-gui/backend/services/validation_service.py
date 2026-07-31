@@ -155,9 +155,18 @@ def _check_carrier_emissions(n) -> list[Issue]:
     neither — which is exactly how a 300 MW gas plant reported 0 tCO2.
     """
     out: list[Issue] = []
-    if n.generators.empty or n.carriers.empty:
+    if n.generators.empty:
         return out
-    if "co2_emissions" not in n.carriers.columns:
+    # NOTE: do NOT also short-circuit on `n.carriers.empty`. A network
+    # imported via n.import_from_netcdf / import_from_csv_folder
+    # (routers/io.py) gets no ensure_carrier pass over its generators, so an
+    # imported fossil-carrier generator with zero Carrier rows is exactly
+    # the least-known-data case this warning exists for. The per-carrier
+    # fallback below (`c in n.carriers.index else 0.0`) already degrades
+    # correctly when a row is missing OR the whole table is empty — an
+    # empty n.carriers has an empty .index, so `c in n.carriers.index` is
+    # simply always False and every used carrier falls back to 0.0.
+    if n.carriers.empty or "co2_emissions" not in n.carriers.columns:
         used = sorted({str(c) for c in n.generators["carrier"].unique() if _looks_fossil(str(c))})
         intensities = {c: 0.0 for c in used}
     else:

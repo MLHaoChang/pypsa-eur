@@ -13,7 +13,7 @@ neither, which is why this warning is ungated.
 from __future__ import annotations
 
 from services.carrier_catalog import CARRIER_CATALOG, ensure_carrier
-from services.validation_service import _looks_fossil
+from services.validation_service import _check_carrier_emissions, _looks_fossil
 
 
 def _codes(client) -> list[str]:
@@ -67,6 +67,28 @@ def test_looks_fossil_excludes_synthetic_methanol_but_not_plain_ccgt_ocgt():
     assert _looks_fossil("OCGT methanol") is False
     assert _looks_fossil("CCGT") is True
     assert _looks_fossil("OCGT") is True
+
+
+def test_warns_when_carriers_table_is_completely_empty():
+    # The API path always populates n.carriers via ensure_carrier, so it
+    # cannot construct this state — build it directly, like
+    # test_ensure_carrier_never_repairs_an_existing_row above.
+    #
+    # A network imported via n.import_from_netcdf / import_from_csv_folder
+    # (routers/io.py) gets no ensure_carrier pass over its generators, so an
+    # imported fossil-carrier generator with a completely empty Carrier
+    # table (n.carriers.empty is True — no rows, though the schema columns
+    # exist) is the LEAST-known-data case this warning exists for. The
+    # per-carrier fallback (`c in n.carriers.index else 0.0`) already
+    # degrades correctly for this; the check must not short-circuit before
+    # reaching it.
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1", v_nom=380.0)
+    n.add("Generator", "G1", bus="B1", carrier="gas", p_nom=300.0)
+    assert n.carriers.empty
+    codes = [issue.code for issue in _check_carrier_emissions(n)]
+    assert "carrier_zero_co2" in codes
 
 
 def test_warns_for_a_fossil_carrier_with_no_intensity(client):
