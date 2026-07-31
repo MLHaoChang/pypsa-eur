@@ -1553,6 +1553,38 @@ def test_economics_reconcile_with_the_asset_economics_endpoint(client, install_n
     assert C.gen_vom(ctx) == pytest.approx(row["vom_cost_eur"], rel=1e-6)
     assert C.gen_fixed_cost(ctx) == pytest.approx(row["fixed_cost_eur"], rel=1e-6)
     assert C.gen_net_profit(ctx) == pytest.approx(row["net_profit_eur"], rel=1e-6)
+
+
+def test_reconciles_when_a_subsidised_renewable_sets_the_price(
+        client, install_network):
+    """curtailment_cost drags the bus dual negative when a subsidised
+    renewable is the price-setting unit — an LP artefact, not a real price.
+    Both implementations must strip it via corrected_marginal_prices, or
+    revenue and capture price diverge from the Results tab."""
+    n = build_network(solve=False)
+    n.generators.loc["solar", "curtailment_cost"] = 30.0
+    n.optimize(solver_name="highs")
+    install_network(n)
+    rows = client.get("/api/results/asset_economics").json()["generators"]
+    row = next(r for r in rows if r["name"] == "solar")
+    ctx = C.build_ctx(n, "Generator", "solar", source="lopf", sns=n.snapshots)
+    assert C.gen_revenue(ctx) == pytest.approx(row["revenue_eur"], rel=1e-6)
+
+
+def test_reconciles_with_a_time_varying_marginal_cost(client, install_network):
+    """/results/asset_economics reads marginal_cost via
+    get_switchable_as_dense. A static-only read here would understate VOM for
+    any generator with a fuel-price profile."""
+    import pandas as pd
+    n = build_network(solve=False)
+    n.generators_t.marginal_cost = pd.DataFrame(
+        {"gas": [40.0, 60.0, 80.0, 100.0]}, index=n.snapshots)
+    n.optimize(solver_name="highs")
+    install_network(n)
+    rows = client.get("/api/results/asset_economics").json()["generators"]
+    row = next(r for r in rows if r["name"] == "gas")
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    assert C.gen_vom(ctx) == pytest.approx(row["vom_cost_eur"], rel=1e-6)
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1598,14 +1630,30 @@ def _cost_wsum(ctx: Ctx, s) -> float | None:
 # ── prices ──────────────────────────────────────────────────────────────────
 
 def bus_price_series(ctx: Ctx):
-    """Nodal price at the asset's own bus. `bus` for injecting components,
-    `bus0` for branches — Phase 1 only needs the former."""
+    """
+    Nodal price at the asset's own bus, with the curtailment-cost subsidy
+    distortion removed. `bus` for injecting components, `bus0` for branches —
+    Phase 1 only needs the former.
+
+    MUST go through `corrected_marginal_prices`, which routers/results.py
+    documents as the single source of truth for the merit-order correction and
+    which `/results/asset_economics` and the Compare tab both price against.
+    The curtailment_cost term adds `-cost × p` to the LP objective for
+    subsidised renewables, dragging the bus dual negative when such a unit sets
+    the price — an LP-accounting artefact, not a real price. Reading raw
+    `buses_t.marginal_price` here would make revenue, capture price and capture
+    rate diverge from the Results tab for any generator with
+    `curtailment_cost > 0`.
+    """
     bus = ctx.params.get("bus") or ctx.params.get("bus0")
     if not bus:
         return None
-    from routers.results import _result_df
+    from routers.results import corrected_marginal_prices
 
-    df = _result_df(ctx.n, "buses_t", "marginal_price", ctx.source)
+    try:
+        df = corrected_marginal_prices(ctx.n)
+    except Exception:
+        return None
     if df is None or getattr(df, "empty", True) or bus not in df.columns:
         return None
     return df[bus].reindex(ctx.sns)
@@ -1672,8 +1720,25 @@ def gen_revenue(ctx: Ctx):
 
 
 def gen_vom(ctx: Ctx):
-    p, mc = gen_p(ctx), _static(ctx, "marginal_cost")
-    return None if p is None or mc is None else _cost_wsum(ctx, p.abs() * mc)
+    # Time-varying marginal_cost first, static column as fallback — the same
+    # idiom gen_p_max_pu uses, and what /results/asset_economics does via
+    # get_switchable_as_dense. A static-only read silently diverges from the
+    # Results tab for any generator carrying a fuel-price profile.
+    p = gen_p(ctx)
+    if p is None:
+        return None
+    mc = None
+    try:
+        mc_df = ctx.n.get_switchable_as_dense(ctx.component_class, "marginal_cost")
+        if mc_df is not None and ctx.name in getattr(mc_df, "columns", []):
+            mc = mc_df[ctx.name].reindex(ctx.sns)
+    except Exception:
+        mc = None
+    if mc is None:
+        mc = _static(ctx, "marginal_cost")
+        if mc is None:
+            return None
+    return _cost_wsum(ctx, p.abs() * mc)
 
 
 def gen_fixed_cost(ctx: Ctx):
