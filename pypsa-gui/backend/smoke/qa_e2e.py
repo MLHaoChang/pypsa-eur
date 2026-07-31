@@ -1340,6 +1340,100 @@ def _s12_component(component: str, ts: list[str]) -> None:
     record(f"S12.{component}.delete", st_d == 200 and empty, f"delete -> {st_d}; empty={empty}")
 
 
+def _s12_lines_asymmetry(ts: list[str]) -> None:
+    """
+    Adversarial: list_timeseries iterates ["generators", "loads",
+    "storage_units", "stores", "lines", "links"] (network.py:2852-2875) but
+    delete_timeseries's allowlist (network.py:3948) has only five, omitting
+    "lines". Populate a real line's s_max_pu via the generic upload endpoint
+    (no dedicated upload_profile route exists for lines), confirm it IS
+    listed, then confirm DELETE ?component=lines is rejected. Uses a real
+    line name discovered via GET rather than a hardcoded guess.
+    """
+    st_l0, lines = http("/api/network/lines")
+    if not isinstance(lines, list) or not lines:
+        skip("S12.lines_asymmetry", "no line in qa_e2e_ts to attach a profile to")
+        return
+    line_name = lines[0]["name"]
+    csv = _s12_csv(line_name, ts, [0.8, 0.9, 0.7])
+    st_u, _ = multipart_post(
+        "/api/network/timeseries/upload?component=lines&attribute=s_max_pu",
+        {}, "file", "qa_s12_line.csv", csv)
+    st_l, listing = http("/api/network/timeseries")
+    listed = isinstance(listing, list) and any(
+        e.get("component") == "lines" and e.get("attribute") == "s_max_pu"
+        for e in listing)
+    record("S12.lines_asymmetry.listed", st_u in (200, 201) and listed,
+           f"upload -> {st_u}; listed={listed}")
+    st_d, body_d = http(
+        f"/api/network/timeseries?component=lines&attribute=s_max_pu&name={q(line_name)}",
+        method="DELETE")
+    rejected = st_d == 400 and "Unsupported component" in str(body_d)
+    record("S12.lines_asymmetry.delete_rejected", rejected,
+           f"DELETE -> {st_d} {str(body_d)[:80]}")
+
+
+def _s12_put_overwrite(ts: list[str]) -> None:
+    """
+    Adversarial: the inline PUT /timeseries/{component}/{attribute} writes
+    ts_store[attribute] = df wholesale (network.py:2981) — the only write
+    path that can silently clobber a sibling column outright (the
+    upload_profile/generic-upload paths write per-column via _user_ts and
+    cannot exhibit this failure mode). Records the OBSERVED behaviour either
+    way, per the ledger's ruling — this is not asserting a required outcome.
+    """
+    http("/api/network/generators", method="POST",
+         body={"name": "qa_s12_putA", "bus": "Bus 0", "p_nom": 1.0})
+    http("/api/network/generators", method="POST",
+         body={"name": "qa_s12_putB", "bus": "Bus 0", "p_nom": 1.0})
+    body_two = {"index": ts, "columns": ["qa_s12_putA", "qa_s12_putB"],
+                "data": [[0.5, 0.6], [0.5, 0.6], [0.5, 0.6]]}
+    st1, _ = http("/api/network/timeseries/generators/p_max_pu",
+                   method="PUT", body=body_two)
+    body_one = {"index": ts, "columns": ["qa_s12_putA"],
+                "data": [[0.9], [0.9], [0.9]]}
+    st2, _ = http("/api/network/timeseries/generators/p_max_pu",
+                   method="PUT", body=body_one)
+    st3, series = http("/api/network/timeseries/generators/p_max_pu")
+    cols = series.get("columns", []) if isinstance(series, dict) else []
+    survived = "qa_s12_putB" in cols
+    record("S12.put_overwrite.behaviour",
+           st1 in (200, 201) and st2 in (200, 201) and st3 == 200,
+           f"after second PUT, columns={cols}; sibling 'qa_s12_putB' survived={survived} "
+           f"(observed fact, not a required outcome)")
+
+
+def _s12_snapshot_mismatch() -> None:
+    """
+    Adversarial: _ensure_snapshots_cover_user_ts (network.py:2371-2465)
+    auto-grows/realigns n.snapshots around whatever range an upload carries,
+    with no validation. Upload a profile whose timestamps have ZERO overlap
+    with the current range (shift +10 years) and record whether ts_start/
+    ts_end moved. Observed fact, not a required outcome.
+    """
+    st0, snap0 = http("/api/network/snapshots")
+    ts_start0 = snap0.get("ts_start") if isinstance(snap0, dict) else None
+    ts_end0 = snap0.get("ts_end") if isinstance(snap0, dict) else None
+    st_g, generators = http("/api/network/generators")
+    if not isinstance(generators, list) or not generators:
+        skip("S12.snapshot_mismatch", "no generator to attach a shifted profile to")
+        return
+    gen_name = generators[0]["name"]
+    base_ts = (snap0.get("snapshots") or [])[:3] if isinstance(snap0, dict) else []
+    shifted = [str(int(iso[:4]) + 10) + iso[4:] for iso in base_ts]
+    csv = _s12_csv(gen_name, shifted, [0.4, 0.5, 0.6])
+    st_u, _ = multipart_post(
+        "/api/network/generators/upload_profile?attribute=p_max_pu",
+        {}, "file", "qa_s12_shift.csv", csv)
+    st1, snap1 = http("/api/network/snapshots")
+    ts_start1 = snap1.get("ts_start") if isinstance(snap1, dict) else None
+    ts_end1 = snap1.get("ts_end") if isinstance(snap1, dict) else None
+    realigned = (ts_start1, ts_end1) != (ts_start0, ts_end0)
+    record("S12.snapshot_mismatch", st_u in (200, 201),
+           f"upload -> {st_u}; before=({ts_start0},{ts_end0}) after=({ts_start1},{ts_end1}) "
+           f"realigned={realigned} (observed fact, not a required outcome)")
+
+
 def suite_S12():
     print("\nS12 — Time series load/delete (area 3, isolated project)")
     setup = _s12_setup()
@@ -1349,6 +1443,9 @@ def suite_S12():
     name, ts = setup
     for component in _S12_CLASSES:
         _s12_component(component, ts)
+    _s12_lines_asymmetry(ts)
+    _s12_put_overwrite(ts)
+    _s12_snapshot_mismatch()
     _s12_teardown(name)
 
 
