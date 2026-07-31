@@ -765,8 +765,9 @@ def suite_S10():
 
     # S10.2 — GET-then-PUT-full-object on "Bus 0" (a real bus from the 3bus
     # template — the exact name set S7.5 already confirmed: "Bus 0", "Bus 1",
-    # "Bus 2", qa_e2e.py:481). Distinctive v_nom=987.0; carrier must survive
-    # unchanged (Hazard 2 guard, same discipline as S7.2, qa_e2e.py:417-443).
+    # "Bus 2", qa_e2e.py:481). Distinctive v_nom=987.0; carrier is resent too,
+    # so this proves PUT applies a changed field without corrupting another
+    # resent field — the omitted-field wipe is S11.generators.put_partial's job.
     st_g, buses = http("/api/network/buses")
     row = next((b for b in buses if b.get("name") == "Bus 0"), None) \
         if isinstance(buses, list) else None
@@ -925,6 +926,24 @@ def _s11_generators() -> None:
     record("S11.generators.put", kept,
            f"PUT {st_p}: p_nom={row2.get('p_nom') if row2 else None} "
            f"marginal_cost={row2.get('marginal_cost') if row2 else None}")
+
+    # Hazard 2 for real: omit marginal_cost entirely. The full-object PUT
+    # above spreads the GET row, so no field is ever absent from it and it
+    # cannot detect a wipe. _merge_partial_update (routers/network.py:173)
+    # must read marginal_cost off the existing row rather than letting the
+    # remove+add cycle reset it to the schema default.
+    partial = {"name": "qa_s11_gen", "bus": "Bus 0", "p_nom": 77.0}
+    st_pp, _ = http(f"/api/network/generators/{q('qa_s11_gen')}",
+                    method="PUT", body=partial)
+    _, rows4 = http("/api/network/generators")
+    row4 = next((r for r in rows4 if r.get("name") == "qa_s11_gen"), None) \
+        if isinstance(rows4, list) else None
+    survived = row4 is not None \
+        and abs(float(row4.get("p_nom", 0)) - 77.0) < 1e-9 \
+        and abs(float(row4.get("marginal_cost", 0)) - 12.5) < 1e-9
+    record("S11.generators.put_partial", survived,
+           f"PUT {st_pp}: p_nom={row4.get('p_nom') if row4 else None} "
+           f"marginal_cost={row4.get('marginal_cost') if row4 else None}")
 
     st_d, _ = http(f"/api/network/generators/{q('qa_s11_gen')}", method="DELETE")
     st_g3, rows3 = http("/api/network/generators")
