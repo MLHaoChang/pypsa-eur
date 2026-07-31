@@ -235,17 +235,12 @@ _GENERATOR_METRICS: tuple[Metric, ...] = (
 # Phase 2/3 placeholders: every non-Generator class gets one always-`na`
 # metric per non-summary category, so the tab strip renders the full eight
 # and says WHY rather than silently showing seven.
-# Also add a storage placeholder for Generator (structurally n/a).
 _PLACEHOLDERS: tuple[Metric, ...] = tuple(
     Metric(id=f"__pending__{cls}__{cat}", label=CATEGORY_LABELS[cat], unit="",
            kind="scalar", category=cat, classes=(cls,), origin="derived",
            formula="—", compute=C.not_yet, requires=(REQ_NOT_YET,))
     for cls in ALL_CLASSES if cls != "Generator"
     for cat in CATEGORY_IDS if cat != "summary"
-) + (
-    Metric(id="__pending__Generator__storage", label=CATEGORY_LABELS["storage"],
-           unit="", kind="scalar", category="storage", classes=("Generator",),
-           origin="derived", formula="—", compute=C.not_yet, requires=(REQ_NOT_YET,)),
 )
 
 METRICS: tuple[Metric, ...] = (

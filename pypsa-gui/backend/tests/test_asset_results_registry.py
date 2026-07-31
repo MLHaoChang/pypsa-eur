@@ -34,11 +34,6 @@ def test_summary_covers_every_component_class():
         assert reg.metrics_for(c, "summary"), f"{c} has no summary metrics"
 
 
-def test_generator_has_all_eight_categories_in_phase_1():
-    for cat in reg.CATEGORY_IDS:
-        assert reg.metrics_for("Generator", cat), f"Generator lacks {cat}"
-
-
 def test_metric_by_id_round_trips_and_misses_cleanly():
     assert reg.metric_by_id("p").id == "p"
     assert reg.metric_by_id("no_such_metric") is None
@@ -71,13 +66,10 @@ def test_resolve_metric_is_ok_when_every_precondition_is_ok():
 
 def test_resolve_category_is_na_when_the_class_has_no_metrics_there():
     # Storage, not loadflow: a Generator genuinely has NO storage metric.
-    # The placeholder metric needs REQ_NOT_YET in the precond dict to resolve to na.
-    # resolve_category prefers a shared member reason over the generic one.
-    st = ap.resolve_category("storage", "Generator", {
-        reg.REQ_NOT_YET: ap.Status("na", "not yet available — arrives in a later phase of this feature")
-    })
+    # Generator/loadflow is the spec's partial case — see the next test.
+    st = ap.resolve_category("storage", "Generator", {})
     assert st.status == "na"
-    assert "not yet available" in st.reason
+    assert "store energy" in st.reason
 
 
 def test_generator_loadflow_is_blocked_not_na_because_reactive_power_applies():

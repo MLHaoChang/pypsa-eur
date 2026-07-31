@@ -36,7 +36,6 @@ class Status:
     remedy: Remedy | None = None
 
 
-
 OK = Status("ok")
 
 _BRANCH_OR_BUS = {"Line", "Transformer", "Link", "Bus"}
