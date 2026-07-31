@@ -20,6 +20,8 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from services.carrier_catalog import CARRIER_CATALOG
+
 # Severity literal kept narrow on purpose — anything beyond error/warning
 # pushes UX complexity onto every callsite for marginal value.
 Severity = Literal["error", "warning"]
@@ -92,6 +94,24 @@ def _warn(code: str, comp: str, name: str, msg: str) -> Issue:
     return Issue("warning", code, comp, name, msg)
 
 
+# Carrier names that imply combustion of fossil carbon. Substring, lower-cased,
+# because carrier naming is free-form.
+#
+# `biogas` is excluded deliberately: it contains `gas`, but its CO2 is biogenic
+# and conventionally counted as zero, so warning on it would be a false
+# positive — and a warning that cries wolf is one users learn to dismiss.
+_FOSSIL_KEYWORDS = ("gas", "coal", "lignite", "oil", "diesel", "peat", "waste",
+                    "ccgt", "ocgt", "methane")
+_FOSSIL_EXCLUDE = ("biogas", "biomethane")
+
+
+def _looks_fossil(carrier: str) -> bool:
+    c = (carrier or "").lower()
+    if any(x in c for x in _FOSSIL_EXCLUDE):
+        return False
+    return any(k in c for k in _FOSSIL_KEYWORDS)
+
+
 # ── network-level checks (run for every mode) ────────────────────────────────
 
 def _check_network_level(n) -> list[Issue]:
@@ -114,6 +134,37 @@ def _check_network_level(n) -> list[Issue]:
                         f"snapshot_weightings['{col}'] has {len(bad)} NaN/inf value(s)."))
     except Exception:
         pass  # weights are optional — not having them is fine
+    return out
+
+
+def _check_carrier_emissions(n) -> list[Issue]:
+    """
+    A fossil-looking carrier with no CO2 intensity makes every emissions figure
+    zero, silently. Ungated on purpose: the two pre-existing guards fire only
+    when co2_price > 0 or a global constraint exists, and a real project had
+    neither — which is exactly how a 300 MW gas plant reported 0 tCO2.
+    """
+    out: list[Issue] = []
+    if n.generators.empty or n.carriers.empty:
+        return out
+    if "co2_emissions" not in n.carriers.columns:
+        used = sorted({str(c) for c in n.generators["carrier"].unique() if _looks_fossil(str(c))})
+        intensities = {c: 0.0 for c in used}
+    else:
+        used = sorted({str(c) for c in n.generators["carrier"].unique() if _looks_fossil(str(c))})
+        intensities = {
+            c: float(n.carriers.at[c, "co2_emissions"]) if c in n.carriers.index else 0.0
+            for c in used
+        }
+    for carrier, value in intensities.items():
+        if value > 0:
+            continue
+        suggested = CARRIER_CATALOG.get(carrier, {}).get("co2_emissions", 0.0)
+        hint = (f" The catalog value for '{carrier}' is {suggested} tCO2/MWh."
+                if suggested else "")
+        out.append(_warn("carrier_zero_co2", "Carrier", carrier,
+            f"Carrier '{carrier}' looks like a fossil fuel but has co2_emissions = 0, "
+            f"so every emissions figure for it is zero.{hint}"))
     return out
 
 
@@ -1222,6 +1273,10 @@ def validate_for_run(n, solver_config) -> list[Issue]:
         return issues
     issues += _check_bus_v_nom(n)
     issues += _check_bus_references(n)
+    # Ungated on purpose — see _check_carrier_emissions docstring. Not
+    # conditioned on co2_price or a global constraint, unlike the
+    # carrier_co2_nan check further down in _check_lopf.
+    issues += _check_carrier_emissions(n)
 
     mode = solver_config.mode
     if mode == "pf":

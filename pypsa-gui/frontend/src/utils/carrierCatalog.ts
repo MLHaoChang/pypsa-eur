@@ -38,6 +38,8 @@ export const CATALOG_THERMAL: CarrierEntry[] = [
   { name: 'lignite', nice_name: 'Lignite',     color: '#826837', co2_emissions: 0.41 },
   { name: 'oil',     nice_name: 'Oil',         color: '#262626', co2_emissions: 0.267 },
   { name: 'nuclear', nice_name: 'Nuclear',     color: '#ff8c00', co2_emissions: 0 },
+  { name: 'gas',    nice_name: 'Natural Gas', color: '#e0986c', co2_emissions: 0.187 },
+  { name: 'diesel', nice_name: 'Diesel',      color: '#3b3b3b', co2_emissions: 0.267 },
 ]
 
 export const CATALOG_HYDROGEN: CarrierEntry[] = [
