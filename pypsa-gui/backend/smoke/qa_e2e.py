@@ -249,7 +249,7 @@ RESULT_ENDPOINTS = [
     "cost_breakdown", "statistics", "generators", "lines", "loads", "prices",
     "storage", "storage_dispatch", "store_dispatch", "links", "emissions",
     "curtailment", "losses", "lost_load", "asset_economics", "lcoh",
-    "unit_commitment", "capacity_expansion", "transformers",
+    "unit_commitment", "transformers",
 ]
 
 
@@ -1604,6 +1604,7 @@ def suite_S13():
         skip("S13.6", "solve did not finish")
         skip("S13.7", "solve did not finish")
         skip("S13.8", "solve did not finish")
+        skip("S13.9", "solve did not finish")
         http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
         return
     record("S13.5", True, f"solve finished: status={s1.get('status')}")
@@ -1640,6 +1641,24 @@ def suite_S13():
         close = isinstance(obj2, (int, float)) and isinstance(obj1, (int, float)) \
             and abs(float(obj2) - float(obj1)) <= max(1e-6, abs(float(obj1)) * 1e-6)
         record("S13.8", close, f"re-solve objective={obj2} vs first={obj1}")
+
+    # S13.9 — every RESULT_ENDPOINTS entry must back a REAL live route.
+    # RESULT_ENDPOINTS is pre-existing data shared with suite_S3; S3.1/S3.2
+    # (and S13.7 above) run the identical read-and-check loop, whose three
+    # tripwires (5xx/0 status, non-JSON body on a 200, non-finite float) do
+    # NOT catch an unmatched /api/results/* path — main.py's SPA catch-all
+    # (`serve_spa`) treats any "/api/"-prefixed path as a static asset
+    # (`static_gate.is_static_asset`) and answers 404 when no file matches,
+    # which is <500, JSON, and float-free. That masks a dead entry as a
+    # silent PASS in any normal frontend-built deployment; mirrors S1.4's
+    # TOOL_ROUTES-vs-schema check to close the gap structurally instead of
+    # relying on this frontend-less environment's 503 to surface it.
+    st_spec, spec = http("/openapi.json")
+    schema_paths = set(spec.get("paths", {})) if isinstance(spec, dict) else set()
+    phantom = [ep for ep in RESULT_ENDPOINTS if f"/api/results/{ep}" not in schema_paths]
+    record("S13.9", st_spec == 200 and not phantom,
+           f"RESULT_ENDPOINTS entries with no live route -- fix the list, "
+           f"or add the missing route: {phantom}")
 
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
