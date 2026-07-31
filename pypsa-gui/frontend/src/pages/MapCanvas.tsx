@@ -17,7 +17,9 @@ import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, S
 import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '../components/CanvasResultsContext'
 import { busLatLng, unplacedBusNames } from '../utils/geo'
 import { nextBusToPlace, canSkip } from '../utils/placement'
+import { partitionRescale, type RescalePreview } from '../utils/rescale'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
+import RescaleDialog from '../components/RescaleDialog'
 
 // Draggable bus marker. Mimics the previous CircleMarker visually (12 px,
 // 2 px coloured border, white fill) but uses a Marker + divIcon so leaflet
@@ -677,11 +679,41 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [placing])
 
+  // Previewed impedance rescales awaiting a decision. Accumulated rather than
+  // handled per-event: during click-to-place, prompting on every click would
+  // make the mode unusable, so the batch is drained once at the end. RescaleDialog
+  // itself is only rendered while `!placing` (below), so this queue is silent
+  // furniture during placement and surfaces the moment placement ends — via
+  // the completion effect just below, the Escape handler above, or the "Done"
+  // button — whichever sets `placing` back to false first.
+  const [pendingRescale, setPendingRescale] = useState<RescalePreview[]>([])
+
+  // The only write path (B1): explicit, and only for previews the caller
+  // already decided to apply (the auto-applied immaterial ones, or the user's
+  // "Update" choice on the dialog).
+  const applyRescale = useCallback(async (previews: RescalePreview[]) => {
+    if (previews.length === 0) return
+    await networkApi.rescaleImpedances(previews.map(p => ({
+      name: p.name, r: p.new.r, x: p.new.x, b: p.new.b,
+    })))
+    qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
+  }, [qc])
+
+  // Immaterial changes are applied straight away; material ones queue for the
+  // dialog. Blocked ones are surfaced by the dialog, never silently dropped.
+  const ingestRescale = useCallback((previews: RescalePreview[] | undefined) => {
+    if (!previews || previews.length === 0) return
+    const { auto, ask, blocked } = partitionRescale(previews)
+    void applyRescale(auto)
+    if (ask.length || blocked.length) setPendingRescale(prev => [...prev, ...ask, ...blocked])
+  }, [applyRescale])
+
   const recalcMut = useMutation({
     mutationFn: () => networkApi.recalculateLineLengths(),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       toast.success(`Line lengths recalculated · ${r.updated} updated, ${r.skipped} skipped`)
+      ingestRescale(r.rescale)
     },
     onError: () => toast.error('Could not recalculate line lengths'),
   })
@@ -711,7 +743,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       const payload: Partial<Bus> = { ...cached, x: lng, y: lat }
       return networkApi.updateBus(name, payload)
     },
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
       // The backend's update_bus already recomputed the lengths of THIS bus's
       // connected lines (_recompute_lengths_for_bus, scoped to the moved bus)
       // and logged a changelog entry. We previously also called the global
@@ -722,6 +754,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       appLog('INFO', `Bus '${vars.name}' moved · connected line lengths recalculated.`)
+      ingestRescale(data.rescale)
     },
     onError: (e: Error) => toast.error(`Move failed: ${e.message}`),
   })
@@ -1148,6 +1181,27 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           totalCount={(buses as Bus[]).length}
           placing={placing}
           onStartPlacing={() => setPlacing(true)}
+        />
+      )}
+
+      {/* Rescale prompt for length changes that materially move r/x/b. NOT
+          gated on `placementUiAllowed` — a modal Dialog isn't floating map
+          furniture, it already sits above everything at z-[9999] and traps
+          focus, so it doesn't need to hide behind a slide panel or the
+          command palette. It IS gated on `!placing`: while placement is
+          running, `ingestRescale` still queues into `pendingRescale`, but
+          opening a modal mid-placement would break the click-to-place flow
+          (B5) — the batch surfaces once placement ends, whichever way it
+          ends (last bus placed, Escape, or "Done"). */}
+      {!placing && (
+        <RescaleDialog
+          previews={pendingRescale.filter(p => p.skipped_reason === null)}
+          blocked={pendingRescale.filter(p => p.skipped_reason !== null)}
+          onAccept={async () => {
+            await applyRescale(pendingRescale.filter(p => p.skipped_reason === null))
+            setPendingRescale([])
+          }}
+          onDecline={() => setPendingRescale([])}
         />
       )}
 

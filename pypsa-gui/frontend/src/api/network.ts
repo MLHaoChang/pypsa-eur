@@ -1,11 +1,20 @@
 import client from './client'
 import type { Bus, Carrier, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
+import type { RescalePreview } from '../utils/rescale'
 
 export const networkApi = {
   // Buses
   getBuses: () => client.get<Bus[]>('/network/buses').then(r => r.data),
   createBus: (b: Partial<Bus>) => client.post<{name:string}>('/network/buses', b).then(r => r.data),
-  updateBus: (name: string, b: Partial<Bus>) => client.put(`/network/buses/${encodeURIComponent(name)}`, b),
+  // update_bus's response is {name, rescale} (not the full bus row — see
+  // _update_component), where `rescale` previews any connected lines' impedance
+  // rescale triggered by a coordinate change (empty when x/y didn't change).
+  // Unwrapped to the body (not the raw AxiosResponse) so callers — MapCanvas's
+  // drag handler in particular — can read `.rescale` straight off the result.
+  updateBus: (name: string, b: Partial<Bus>) =>
+    client.put<{ name: string; rescale: RescalePreview[] }>(
+      `/network/buses/${encodeURIComponent(name)}`, b,
+    ).then(r => r.data),
   deleteBus: (name: string) => client.delete(`/network/buses/${encodeURIComponent(name)}`),
   deleteBusCascade: (name: string) => client.delete(`/network/buses/${encodeURIComponent(name)}/cascade`),
   renameBus: (oldName: string, newName: string) =>
@@ -26,9 +35,18 @@ export const networkApi = {
   deleteLine: (name: string) => client.delete(`/network/lines/${encodeURIComponent(name)}`),
   // Recompute line.length (km) from haversine distance between bus0 / bus1
   // coordinates. Skips lines whose buses don't have a usable (x, y) pair.
+  // `rescale` previews the per-km-preserving impedance rescale each updated
+  // line WOULD get — nothing is written until rescaleImpedances is called
+  // with the caller's chosen subset.
   recalculateLineLengths: () =>
-    client.post<{ updated: number; skipped: number; total: number }>(
+    client.post<{ updated: number; skipped: number; total: number; rescale: RescalePreview[] }>(
       '/network/lines/recalculate_lengths',
+    ).then(r => r.data),
+  // Writes the previewed impedances for an explicit list of lines. The only
+  // write path for a rescale — see RescaleDialog / MapCanvas's applyRescale.
+  rescaleImpedances: (lines: Array<{ name: string; r: number; x: number; b: number }>) =>
+    client.post<{ updated: number; skipped: Array<{ name: string; reason: string }> }>(
+      '/network/lines/rescale_impedances', { lines },
     ).then(r => r.data),
 
   // Links
