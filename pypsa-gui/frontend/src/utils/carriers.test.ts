@@ -37,4 +37,18 @@ describe('isRenewableCarrier', () => {
       expect(isRenewableCarrier(c), c).toBe(false)
     }
   })
+
+  it('does not mistake hydrogen for hydro', () => {
+    // `c.includes('hydro')` also matched inside 'hydrogen' — H2 storage /
+    // generation, not hydropower. 2026-07-31 review, Finding 2 (folded in
+    // alongside the fossil-keyword word-boundary fix).
+    for (const c of ['hydrogen', 'Hydrogen', 'hydrogen storage', 'hydrogen boiler', 'green hydrogen']) {
+      expect(isRenewableCarrier(c), c).toBe(false)
+    }
+    // The legitimate `hydro` matches (including the pump/storage exclusions)
+    // must still all work — this must not regress into "hydro never matches".
+    expect(isRenewableCarrier('hydro')).toBe(true)
+    expect(isRenewableCarrier('Hydro Reservoir')).toBe(true)
+    expect(isRenewableCarrier('pumped hydro')).toBe(false)
+  })
 })

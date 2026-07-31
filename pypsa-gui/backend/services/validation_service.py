@@ -15,6 +15,7 @@ abort the run; warnings only inform.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
@@ -94,8 +95,9 @@ def _warn(code: str, comp: str, name: str, msg: str) -> Issue:
     return Issue("warning", code, comp, name, msg)
 
 
-# Carrier names that imply combustion of fossil carbon. Substring, lower-cased,
-# because carrier naming is free-form.
+# Carrier names that imply combustion of fossil carbon. Word-boundary matched
+# (see `_contains_word` below), lower-cased, because carrier naming is
+# free-form.
 #
 # The exclusions below are NOT "carriers that happen to look clean" — they are
 # carriers whose carbon is biogenic (never fossil to begin with) or already
@@ -110,16 +112,57 @@ def _warn(code: str, comp: str, name: str, msg: str) -> Issue:
 # A warning that cries wolf is one users learn to dismiss — that's the same
 # cost whether the false positive comes from `gas` matching `biogas` or from
 # `ccgt` matching `CCGT methanol`.
+#
+# 2026-07-31 review (Finding 2): bare substring matching (`x in c`) ALSO
+# produced false positives that have nothing to do with biogas/methanol —
+# `oil` inside `boiler`, `gas` inside `gasification`, `coal` inside
+# `charcoal`, `methanol` itself was matched as a bare substring in the
+# exclusion list. Demonstrated false positives (all must be False now):
+# 'biomass boiler', 'electric boiler', 'hydrogen boiler', 'residential rural
+# biomass boiler', 'biomass gasification', 'syngas', 'charcoal', 'waste
+# heat'. Fixed by requiring every keyword/exclusion to match a whole word —
+# see `_contains_word`. Three of the eight needed a deliberate call beyond
+# "just add boundaries":
+#   - `charcoal`: no special-case needed. Word-boundary matching alone stops
+#     `coal` from matching inside it (the `c` before `coal` in `charcoal` has
+#     no boundary), which is also the physically correct answer — charcoal is
+#     biogenic, not fossil.
+#   - `syngas`: NOT added as a keyword, deliberately left unmatched when
+#     bare. Syngas from coal gasification is fossil; syngas from biomass
+#     gasification is not — the bare name alone doesn't say which, and this
+#     module doesn't invent an emission factor (C1). A carrier that DOES
+#     qualify its origin, e.g. `coal syngas` / `lignite syngas`, is still
+#     caught via that qualifying keyword's own word-boundary match. This is
+#     the same reasoning as the biogas/methanol exclusions: an unqualified
+#     guess would either false-negative on real fossil syngas or
+#     false-positive on biomass syngas, and the latter is exactly the
+#     "cry wolf" cost this module exists to avoid.
+#   - `waste heat`: added to `_FOSSIL_PHRASE_EXCLUDE`. Word-boundary matching
+#     does NOT fix this one — `waste` genuinely is its own word here, it's
+#     just describing a byproduct heat stream (e.g. CHP heat recovery /
+#     district-heating offtake), not a fuel. `waste` alone (municipal solid
+#     waste as a combusted fuel) must keep matching.
 _FOSSIL_KEYWORDS = ("gas", "coal", "lignite", "oil", "diesel", "peat", "waste",
                     "ccgt", "ocgt", "methane")
 _FOSSIL_EXCLUDE = ("biogas", "biomethane", "methanol")
+_FOSSIL_PHRASE_EXCLUDE = ("waste heat",)
+
+_FOSSIL_KEYWORD_RE = [re.compile(rf"\b{re.escape(k)}\b") for k in _FOSSIL_KEYWORDS]
+_FOSSIL_EXCLUDE_RE = [re.compile(rf"\b{re.escape(k)}\b") for k in _FOSSIL_EXCLUDE]
+
+
+def _contains_word(carrier_lower: str, patterns: list[re.Pattern[str]]) -> bool:
+    """Whole-word match against any of `patterns` — see the module comment above."""
+    return any(p.search(carrier_lower) for p in patterns)
 
 
 def _looks_fossil(carrier: str) -> bool:
     c = (carrier or "").lower()
-    if any(x in c for x in _FOSSIL_EXCLUDE):
+    if any(phrase in c for phrase in _FOSSIL_PHRASE_EXCLUDE):
         return False
-    return any(k in c for k in _FOSSIL_KEYWORDS)
+    if _contains_word(c, _FOSSIL_EXCLUDE_RE):
+        return False
+    return _contains_word(c, _FOSSIL_KEYWORD_RE)
 
 
 # ── network-level checks (run for every mode) ────────────────────────────────
@@ -636,8 +679,13 @@ def _check_curtailment_cost(n) -> list[Issue]:
     out: list[Issue] = []
     if n.generators.empty or "curtailment_cost" not in n.generators.columns:
         return out
-    # Mirror frontend's renewable detection
-    rkw = ("wind", "solar", "pv", "ror", "hydro", "geothermal",
+    # Mirror frontend's renewable detection (utils/carriers.ts::isRenewableCarrier).
+    # `hydro` is checked separately with a word boundary, not folded into the
+    # bare-substring `rkw` scan below — `"hydro" in "hydrogen"` is also True,
+    # which would exempt hydrogen (H2 storage/generation, not hydropower) from
+    # this warning. Same "hydro ⊂ hydrogen" defect folded in from the
+    # 2026-07-31 review (Finding 2), fixed the same way in isRenewableCarrier.
+    rkw = ("wind", "solar", "pv", "ror", "geothermal",
            "offwind", "onwind", "wave", "tidal", "rooftop")
     active_count = 0
     for name in n.generators.index:
@@ -646,7 +694,7 @@ def _check_curtailment_cost(n) -> list[Issue]:
             continue
         active_count += 1
         carrier = str(n.generators.at[name, "carrier"]).lower()
-        is_renewable = any(k in carrier for k in rkw)
+        is_renewable = re.search(r"\bhydro\b", carrier) is not None or any(k in carrier for k in rkw)
         if not is_renewable:
             out.append(_warn("curtailment_cost_on_thermal", "Generator", str(name),
                 f"curtailment_cost={cost} but carrier='{carrier}' is not a renewable. "

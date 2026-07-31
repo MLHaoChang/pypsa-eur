@@ -69,6 +69,57 @@ def test_looks_fossil_excludes_synthetic_methanol_but_not_plain_ccgt_ocgt():
     assert _looks_fossil("OCGT") is True
 
 
+def test_looks_fossil_matches_whole_words_not_bare_substrings():
+    # 2026-07-31 review, Finding 2: bare substring matching (`x in c`)
+    # produced demonstrated false positives that have nothing to do with the
+    # biogas/methanol exclusions above — same defect class, never swept
+    # against real carrier vocabulary until now.
+    assert _looks_fossil("biomass boiler") is False                        # 'oil' in 'boiler'
+    assert _looks_fossil("electric boiler") is False
+    assert _looks_fossil("hydrogen boiler") is False
+    assert _looks_fossil("residential rural biomass boiler") is False
+    assert _looks_fossil("biomass gasification") is False                  # 'gas' in 'gasification'
+    assert _looks_fossil("syngas") is False                                # ambiguous origin, see below
+    assert _looks_fossil("charcoal") is False                              # 'coal' in 'charcoal'; biogenic
+    assert _looks_fossil("waste heat") is False                            # byproduct stream, not a fuel
+
+    # Word-boundary matching must not degrade into "never matches a real
+    # fossil carrier" — every keyword must still fire on its own.
+    assert _looks_fossil("gas") is True
+    assert _looks_fossil("CCGT") is True
+    assert _looks_fossil("coal") is True
+    assert _looks_fossil("lignite") is True
+    assert _looks_fossil("oil") is True
+    assert _looks_fossil("diesel") is True
+
+    # `syngas` alone is deliberately left unmatched (coal-derived syngas is
+    # fossil, biomass-derived is not — the bare name doesn't say which, and
+    # this module never invents an emission factor). A carrier that DOES
+    # qualify its origin is still caught via that keyword's own match.
+    assert _looks_fossil("coal syngas") is True
+    assert _looks_fossil("biomass syngas") is False
+
+    # `waste` alone (municipal solid waste as a combusted fuel) must keep
+    # matching — only the "waste heat" byproduct-stream phrase is excluded.
+    assert _looks_fossil("waste") is True
+
+
+def test_curtailment_cost_check_does_not_treat_hydrogen_as_hydro():
+    # Same "hydro ⊂ hydrogen" defect as isRenewableCarrier (frontend), folded
+    # in here since this check mirrors that frontend logic.
+    import pypsa
+
+    from services.validation_service import _check_curtailment_cost
+
+    n = pypsa.Network()
+    n.add("Bus", "B1", v_nom=380.0)
+    n.add("Generator", "G1", bus="B1", carrier="hydrogen", p_nom=10.0)
+    n.generators["curtailment_cost"] = 0.0
+    n.generators.at["G1", "curtailment_cost"] = 5.0
+    codes = [issue.code for issue in _check_curtailment_cost(n)]
+    assert "curtailment_cost_on_thermal" in codes
+
+
 def test_warns_when_carriers_table_is_completely_empty():
     # The API path always populates n.carriers via ensure_carrier, so it
     # cannot construct this state — build it directly, like
