@@ -1124,6 +1124,34 @@ def _s11_transformers() -> None:
     record("S11.transformers.delete", st_d == 204 and gone, f"DELETE -> {st_d}; gone={gone}")
 
 
+def _s11_carriers() -> None:
+    body = {"name": "qa_s11_carrier", "co2_emissions": 0.1, "color": "#112233"}
+    st_c, _ = http("/api/network/carriers", method="POST", body=body)
+    st_g, rows = http("/api/network/carriers")
+    row = next((r for r in rows if r.get("name") == "qa_s11_carrier"), None) \
+        if isinstance(rows, list) else None
+    if st_c not in (200, 201) or not row:
+        record("S11.carriers.create", False, f"create={st_c} get_found={row is not None}")
+        return
+    record("S11.carriers.create", True, f"create -> {st_c}")
+
+    payload = {**row, "co2_emissions": 0.5}
+    st_p, _ = http(f"/api/network/carriers/{q('qa_s11_carrier')}", method="PUT", body=payload)
+    st_g2, rows2 = http("/api/network/carriers")
+    row2 = next((r for r in rows2 if r.get("name") == "qa_s11_carrier"), None) \
+        if isinstance(rows2, list) else None
+    kept = row2 is not None and abs(float(row2.get("co2_emissions", 0)) - 0.5) < 1e-9 \
+        and str(row2.get("color")) == "#112233"
+    record("S11.carriers.put", kept,
+           f"PUT {st_p}: co2_emissions={row2.get('co2_emissions') if row2 else None} "
+           f"color={row2.get('color') if row2 else None}")
+
+    st_d, _ = http(f"/api/network/carriers/{q('qa_s11_carrier')}", method="DELETE")
+    st_g3, rows3 = http("/api/network/carriers")
+    gone = isinstance(rows3, list) and not any(r.get("name") == "qa_s11_carrier" for r in rows3)
+    record("S11.carriers.delete", st_d == 204 and gone, f"DELETE -> {st_d}; gone={gone}")
+
+
 def suite_S11():
     print("\nS11 — Asset CRUD across component classes (area 2, isolated project)")
     name = _s11_setup()
@@ -1138,6 +1166,7 @@ def suite_S11():
     _s11_links()
     _s11_loads()
     _s11_transformers()
+    _s11_carriers()
     _s11_teardown(name)
 
 
