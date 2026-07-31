@@ -183,12 +183,35 @@ def test_moving_a_bus_logs_the_true_rewrite_count_even_for_a_zero_impedance_line
     # must log the true rewrite count, not len(rescale) -- otherwise a moved
     # bus connected only to zero-impedance lines would undercount (or skip
     # logging entirely) despite genuinely rewriting a line's length.
+    #
+    # A bus name/target unique to this test matters: the changelog deque is
+    # process-global and is NEVER reset between tests (conftest's
+    # _reset_backend_state resets network/timeseries/solver/undo/queue state,
+    # but not change_log_service), and test_moving_a_bus_previews_its_
+    # connected_lines above also moves a bus called BERLIN to the exact same
+    # (2.35, 48.86). Reusing either would let that earlier test's entry
+    # satisfy this assertion regardless of whether THIS fix is present.
     _bus(client, "COLOGNE", 6.960, 50.938)
-    _bus(client, "BERLIN", 13.405, 52.520)
-    _line(client, "L1", "COLOGNE", "BERLIN", 1.0, 0.0, 0.0, 0.0)
+    _bus(client, "ZURICH", 8.541, 47.377)
+    _line(client, "L1", "COLOGNE", "ZURICH", 1.0, 0.0, 0.0, 0.0)
 
-    r = client.put("/api/network/buses/BERLIN", json={
-        "name": "BERLIN", "v_nom": 380.0, "x": 2.35, "y": 48.86,   # -> Paris
+    # Precondition: the line really is zero-impedance -- that's the whole
+    # point of the scenario. If a future edit gave it non-zero r/x/b, a
+    # rescale WOULD be offered (already covered by
+    # test_moving_a_bus_previews_its_connected_lines) and this test would
+    # quietly start passing for a different reason than the one it exists
+    # to pin.
+    before_line = _lines(client)["L1"]
+    assert (before_line["r"], before_line["x"], before_line["b"]) == (0.0, 0.0, 0.0), \
+        "setup failed: line is not actually zero-impedance"
+
+    # Baseline so the post-move assertion is scoped to entries THIS move
+    # produced, not the whole accumulated (process-global, cross-test)
+    # changelog history.
+    baseline_id = max((e["id"] for e in client.get("/api/changelog/").json()), default=0)
+
+    r = client.put("/api/network/buses/ZURICH", json={
+        "name": "ZURICH", "v_nom": 380.0, "x": 11.576, "y": 48.137,   # -> Munich
     })
     assert r.status_code == 200, r.text
     # No rescale to offer -- the line has zero impedance.
@@ -197,10 +220,11 @@ def test_moving_a_bus_logs_the_true_rewrite_count_even_for_a_zero_impedance_line
     assert _lines(client)["L1"]["length"] != 1.0
 
     # ...and the changelog must say so: an empty rescale list must not mean
-    # "log nothing" or "log 0 lines rewritten".
-    entries = client.get("/api/changelog/").json()
+    # "log nothing" or "log 0 lines rewritten". Scoped to entries with
+    # id > baseline_id, i.e. only what this test's own PUT produced.
+    new_entries = [e for e in client.get("/api/changelog/").json() if e["id"] > baseline_id]
     assert any(
         e["component_type"] == "Lines" and e["name"] == "(auto)"
         and "Auto-rewrote 1 line length(s)" in e["description"]
-        for e in entries
-    ), f"expected a true rewrite-count changelog entry, got: {entries[:3]}"
+        for e in new_entries
+    ), f"expected a true rewrite-count changelog entry, got: {new_entries}"
