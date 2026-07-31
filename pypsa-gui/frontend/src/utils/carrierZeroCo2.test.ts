@@ -48,4 +48,16 @@ describe('parseSuggestedCo2Value', () => {
     // can't parse cleanly, fail closed (no button) rather than surface NaN.
     expect(parseSuggestedCo2Value("The catalog value for 'gas' is NaN tCO2/MWh.")).toBeNull()
   })
+
+  it('parses a carrier name containing an apostrophe', () => {
+    // Not reachable today — every CARRIER_CATALOG key is apostrophe-free —
+    // but the regex must not stop the name-span at an embedded quote. `.+`
+    // backtracks to the LAST `' is `, which is the sentence's own closing
+    // quote regardless of quotes embedded earlier in the name.
+    const message =
+      "Carrier \"Bob's gas\" looks like a fossil fuel but has co2_emissions " +
+      "= 0, so every emissions figure for it is zero. The catalog value " +
+      "for 'Bob's gas' is 0.187 tCO2/MWh."
+    expect(parseSuggestedCo2Value(message)).toBe(0.187)
+  })
 })

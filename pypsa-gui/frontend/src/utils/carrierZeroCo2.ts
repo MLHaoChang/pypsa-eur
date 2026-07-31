@@ -12,7 +12,13 @@
 // the signal that no one-click fix exists, and this helper returns null so
 // callers know not to render a button.
 
-const SUGGESTED_CO2_RE = /The catalog value for '[^']*' is ([0-9.]+) tCO2\/MWh\./
+// `.+`, not `[^']*` — a carrier name containing an apostrophe (not reachable
+// today: every CARRIER_CATALOG key is apostrophe-free) would otherwise stop
+// the span at the embedded quote and fail to find the closing `' is `. `.+`
+// is greedy, so it backtracks to the LAST `' is `, which is always the one
+// this sentence's own closing quote produces — there is only one such span
+// in the message.
+const SUGGESTED_CO2_RE = /The catalog value for '.+' is ([0-9.]+) tCO2\/MWh\./
 
 export function parseSuggestedCo2Value(message: string): number | null {
   const match = SUGGESTED_CO2_RE.exec(message)
