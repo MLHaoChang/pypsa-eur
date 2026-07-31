@@ -39,6 +39,20 @@ def test_metric_by_id_round_trips_and_misses_cleanly():
     assert reg.metric_by_id("no_such_metric") is None
 
 
+def test_generator_has_every_category_except_structurally_absent_storage():
+    """Generator's Phase-1 promise: real metrics in every category except
+    `storage`, which is structurally n/a — a generator has no state of
+    charge. `storage` is asserted separately by the resolve_category test."""
+    for cat in reg.CATEGORY_IDS:
+        members = reg.metrics_for("Generator", cat)
+        if cat == "storage":
+            assert members == (), "Generator must have NO storage metrics"
+            continue
+        assert members, f"Generator lacks {cat}"
+        assert any(reg.REQ_NOT_YET not in m.requires for m in members), \
+            f"Generator's {cat} is placeholders only — phase 1 needs real metrics"
+
+
 def test_resolve_metric_returns_na_for_a_class_the_metric_excludes():
     curtailment = reg.metric_by_id("curtailment")
     st = ap.resolve_metric(curtailment, "Line", {})
