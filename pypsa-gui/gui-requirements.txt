@@ -55,3 +55,64 @@ pwdlib==0.3.0
 ujson==5.12.1
 validators==0.35.0
 pywebview==6.2.1
+
+# ── imported INSIDE a function body, so nothing above notices they are gone ──
+#
+# Added 2026-07-31 after a shipped build returned 500 on every "download
+# template" click:
+#
+#   File "routers/network.py", line 441, in _xlsx_response
+#   File "pandas/io/excel/_openpyxl.py", line 57, in __init__
+#   ModuleNotFoundError: No module named 'openpyxl'
+#
+# Every one of these was present in the pixi environment — so the suite passed,
+# dev runs worked, and only the frozen app failed. The build venv was the one
+# place their absence was observable and nothing was looking there.
+#
+# What makes this class of omission ship: each is imported inside the function
+# that needs it, never at module scope. A missing top-level import crashes the
+# app at launch and cannot be missed. A missing function-local one launches
+# clean and 500s when the user reaches the feature.
+#
+# `tests/test_packaging_requirements.py` fails the suite if shipped code
+# imports an UNGUARDED third-party module this file does not pin, so the next
+# one is caught before it is built rather than after it is installed.
+#
+# Versions generated from the `desktop` environment, per the header rule.
+openpyxl==3.1.5      # xlsx templates, asset-results export, template upload.
+                     # `network.py:441` reaches it through pandas' engine
+                     # registry, which is a string lookup — not an import
+                     # statement, so no static analysis can see it at all.
+Jinja2==3.1.6        # matpower export (`io.py:125`), unguarded. Was reaching
+                     # the bundle only as an undeclared transitive — it worked
+                     # by luck, and a resolver change would have made it the
+                     # next 500.
+anthropic==0.117.0   # chat agent. Guarded (`sdk_not_installed`), so its
+                     # absence disables the panel rather than crashing it —
+                     # but the panel is meant to work. NOTE: this alone does
+                     # not fix chat. `check_bundle.py` deliberately keeps
+                     # `.env` out of the bundle, so the packaged app has no
+                     # ANTHROPIC_API_KEY and the key gate fails BEFORE this
+                     # import is reached. That is workstream K.
+pypdf==6.14.2        # PDF page-count probe. Guarded, but the fallback returns
+                     # "unknown", which lets a >100-page PDF through to the
+                     # Anthropic 100-page cap as a 415 instead of a clean
+                     # local truncation banner.
+#
+# DELIBERATELY NOT PINNED — both are guarded AND their fallback is correct:
+#
+#   tsam          `time_aggregation_service.py:170` catches ImportError and
+#                 falls back to the full period. Pinning it would pull pyomo
+#                 and scikit-learn into the bundle to service a code path that
+#                 already works. The real defect there is that the fallback is
+#                 SILENT — a log line only — so a user who asked for
+#                 representative periods gets a full-period solve and is never
+#                 told. Fix the silence, not the dependency.
+#
+#   python-magic  `uploads.py:92` catches (ImportError, OSError). The wheel is
+#                 only ctypes bindings over a system `libmagic`, which this
+#                 bundle does not ship — so pinning it would change nothing on
+#                 a clean Mac. Consequence of its absence is narrower than a
+#                 crash but is NOT nothing: MIME sniffing is skipped and the
+#                 client's DECLARED content-type is trusted, which is the
+#                 check the Office-zip upgrade exists to backstop.
