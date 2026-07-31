@@ -1446,6 +1446,19 @@ def _s12_put_overwrite_network_loss(ts: list[str]) -> None:
     applied to S12.put_overwrite because that check had no way to verify
     which outcome occurred at all — this one does, so it pins the outcome
     the investigation confirmed against source.
+
+    DISPOSITION FOR A FUTURE READER, if this goes FAIL: this check pins
+    TODAY's set_timeseries behaviour (wholesale overwrite, destroys
+    unlisted siblings), not the behaviour it OUGHT to have. If someone
+    later fixes set_timeseries to merge onto the prior frame instead of
+    replacing it wholesale (e.g. mirroring what _merge_partial_update
+    already does for every other component's PUT route), 'qa_s12_lossB'
+    will then survive, preflight will flag it, and this check will go
+    FAIL — correctly and on purpose. That FAIL means the fix worked, not
+    that it broke something. Do NOT revert the set_timeseries fix and do
+    NOT edit this assertion back to green to make the suite pass; the
+    correct response is to revisit or delete this check, because the
+    hazard it exists to catch is gone.
     """
     http("/api/network/generators", method="POST",
          body={"name": "qa_s12_lossA", "bus": "Bus 0", "p_nom": 1.0})
@@ -1465,9 +1478,9 @@ def _s12_put_overwrite_network_loss(ts: list[str]) -> None:
         i.get("code") == "p_max_pu_above_one" and i.get("name") == "qa_s12_lossB"
         for i in issues)
     record("S12.put_overwrite.network_loss", st_p == 200 and not flagged,
-           f"preflight -> {st_p}; qa_s12_lossB flagged in n.generators_t.p_max_pu="
-           f"{flagged} (flagged=True would mean the column survived the wholesale "
-           f"PUT in the network table itself)")
+           f"preflight -> {st_p}; qa_s12_lossB flagged={flagged}. "
+           f"FAIL after a set_timeseries merge-fix is CORRECT (see docstring) -- "
+           f"do not revert the fix.")
 
 
 def _s12_snapshot_mismatch() -> None:
@@ -1487,13 +1500,14 @@ def _s12_snapshot_mismatch() -> None:
     Confirmed with a temporary debug probe on `longest`/`new_idx` and by
     breaking `if realign:` directly: both showed the branch is genuinely
     unreached for this check, in a clean run. The gate this check actually
-    exercises is _reapply_user_ts_to_network's zero-overlap column skip
-    (network.py:2611-2620): "if aligned.isna().all() and not
-    series.isna().all(): ... continue" — this check's shifted (+10 year)
-    profile is the ONLY upload anywhere in S12 whose series has zero
-    overlap with n.snapshots (every other S12 upload reuses the real `ts`
-    _s12_setup reads from the live snapshot index), so it is the only
-    upload in this suite that can reach that skip at all. A future reader
+    exercises is _reapply_user_ts_to_network's zero-overlap column skip —
+    the `if` at network.py:2606, the `continue` at network.py:2615:
+    "if aligned.isna().all() and not series.isna().all(): ... continue"
+    — this check's shifted (+10 year) profile is the ONLY upload anywhere
+    in S12 whose series has zero overlap with n.snapshots (every other
+    S12 upload reuses the real `ts` _s12_setup reads from the live
+    snapshot index), so it is the only upload in this suite that can
+    reach that skip at all. A future reader
     should not "fix" this check by chasing the realign branch — that
     branch is dead code for this specific scenario, by construction of
     which profiles happen to already be in _user_ts before this check
