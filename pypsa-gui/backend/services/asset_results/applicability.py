@@ -35,6 +35,20 @@ class Status:
     reason: str = ""
     remedy: Remedy | None = None
 
+    def as_dict(self) -> dict:
+        """
+        JSON shape for a category/metric row: `status` always present,
+        `reason` only when non-empty, `remedy` only when set (and itself
+        shaped as a plain dict so FastAPI doesn't need to know about the
+        dataclass).
+        """
+        out: dict = {"status": self.status}
+        if self.reason:
+            out["reason"] = self.reason
+        if self.remedy is not None:
+            out["remedy"] = {"action": self.remedy.action, "label": self.remedy.label}
+        return out
+
 
 OK = Status("ok")
 
@@ -80,7 +94,7 @@ def resolve_category(
     category: str, component_class: str, precond: dict[str, Status]
 ) -> Status:
     """
-    ok      — at least one member metric resolves ok
+    Ok      — at least one member metric resolves ok
     blocked — members exist, none is ok, at least one is blocked
     na      — no members, or every member is na; prefer a reason every member
              shares over the generic category_na_reason (e.g., "not yet available"

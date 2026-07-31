@@ -39,6 +39,7 @@ from services import active_project
 from services import shutdown as shutdown_service
 from routers import (
     admin,
+    asset_results,
     auth,
     changelog,
     chat,
@@ -732,6 +733,11 @@ app.include_router(vintage.router, prefix="/api/network", tags=["vintage"])
 app.include_router(changelog.router, prefix="/api/changelog", tags=["changelog"])
 app.include_router(simulation.router, prefix="/api/simulation", tags=["simulation"])
 app.include_router(results.results_router, prefix="/api/results", tags=["results"])
+# Per-asset "Asset Detail" results (Phase 1). Mounted AFTER results_router so
+# the more specific /api/results/asset/... prefix registers without being
+# shadowed; the two routers don't share any literal path segments in practice
+# but this keeps the ordering convention consistent with the rest of the file.
+app.include_router(asset_results.router, prefix="/api/results/asset", tags=["asset-results"])
 # Sequential multi-project solve queue (Phase A / C1). Sits under /api/simulation
 # so it's adjacent to the foreground solve lifecycle it shares (_state, log_stream).
 app.include_router(solve_queue.router, prefix="/api/simulation/queue", tags=["solve-queue"])
