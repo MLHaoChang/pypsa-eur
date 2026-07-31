@@ -692,7 +692,9 @@ five real causes of "blocked" are detected.
 **Interfaces:**
 - Consumes: `registry.REQ_*`, `applicability.Status`, `applicability.Remedy`.
 - Produces:
-  - `compute.Ctx` frozen dataclass: `n, component_class, name, source, sns, weights, years, is_multi, params`
+  - `compute.Ctx` frozen dataclass: `n, component_class, name, source, sns, weights, is_multi, params`
+    (no separate `years` field — the per-period year multiplier is already folded
+    into `weights`, and Task 4's `cost_weights` recomputes its own)
   - `compute.build_ctx(n, component_class, name, *, source, sns) -> Ctx`
   - `compute.preconditions(n, component_class, name) -> dict[str, Status]`
   - `compute.attr_for(component_class) -> str` (e.g. `"Generator" → "generators"`)
@@ -839,15 +841,12 @@ from services.period_utils import (
     snapshot_weights,
 )
 
-from .applicability import OK, Remedy, Status
-from .registry import (
-    REQ_AC_PF,
-    REQ_CO2,
-    REQ_COMMITTABLE,
-    REQ_DISPATCH,
-    REQ_DUALS,
-    REQ_NOT_YET,
-)
+# NOTE: `.applicability` and `.registry` are imported INSIDE the functions that
+# need them, never at module level. `registry.py` does `from . import compute as C`
+# at module scope to bind each Metric's compute function, so a module-level import
+# back into registry (or into applicability, which imports registry) is a genuine
+# cycle and raises ImportError the moment the package is first imported. Same
+# reason `routers.simulation._state_snapshot` is imported function-locally below.
 
 _ATTR: dict[str, str] = {
     "Bus": "buses", "Generator": "generators", "Load": "loads",
