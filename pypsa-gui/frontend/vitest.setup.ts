@@ -14,6 +14,7 @@ import { cleanup } from '@testing-library/react'
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
 })
 
 // jsdom does not implement ResizeObserver. recharts' `ResponsiveContainer`
@@ -64,3 +65,105 @@ Element.prototype.getBoundingClientRect = () => ({
   y: 0,
   toJSON() {},
 })
+
+// jsdom does not implement window.matchMedia. `useIsCoarsePointer`
+// (src/hooks/useIsCoarsePointer.ts) calls `window.matchMedia('(pointer:
+// coarse)')` unconditionally — with no `typeof window.matchMedia ===
+// 'function'` guard, unlike ProjectsHomePage.tsx's prefers-reduced-motion
+// check — from a useState initializer AND a mount effect. ChatPanel.tsx
+// calls that hook unconditionally near the top of its render (used to pick
+// the touch-device send affordance), so every test that mounts ChatPanel
+// throws `TypeError: window.matchMedia is not a function` before a single
+// assertion runs, the same fatal-passive-effect/unmount pattern the
+// ResizeObserver stub above documents. `matches: false` is a deliberate
+// choice, not a placeholder: it selects the mouse/trackpad (non-coarse)
+// pointer path, which is the correct default for a jsdom test environment
+// that has no real pointer at all. `addEventListener`/`removeEventListener`
+// are stubbed as no-ops because nothing in jsdom ever fires a `change`
+// event on a media query, mirroring the ResizeObserver callback never
+// firing either. First needed by ChatPanel.test.tsx (Task 26).
+class MediaQueryListStub implements Partial<MediaQueryList> {
+  matches = false
+  media: string
+  onchange = null
+  constructor(media: string) {
+    this.media = media
+  }
+  addEventListener() {}
+  removeEventListener() {}
+  addListener() {}
+  removeListener() {}
+  dispatchEvent() {
+    return false
+  }
+}
+window.matchMedia = ((media: string) =>
+  new MediaQueryListStub(media) as unknown as MediaQueryList) as typeof window.matchMedia
+
+// window.localStorage is broken in this environment — NOT a plain jsdom gap
+// (jsdom does implement Storage), but the practical effect is identical, so
+// it gets the same fix-in-setup treatment. This Node runtime (v25) ships an
+// experimental native `globalThis.localStorage` gated behind
+// `--localstorage-file`; without a valid file path it still installs an
+// object (hence `typeof localStorage === 'object'`, not 'undefined') but
+// that object has no working methods (`typeof localStorage.getItem ===
+// 'undefined'`), which is exactly the "provided without a valid path"
+// warning vitest prints once per run. Confirmed by probe:
+// `sameRef: localStorage === window.localStorage` is `true`, so this one
+// broken object is shadowing jsdom's own Storage before jsdom ever gets to
+// install it, on both bindings at once — so overriding `window.localStorage`
+// via `Object.defineProperty` (a plain `=` assignment risks failing silently
+// against a getter-only descriptor) fixes bare `localStorage` references
+// too. ChatPanel.tsx reads three keys unconditionally on mount
+// (`chat:promptHeight`, `chat:autoUncheckAfterSend`) and on first send
+// (`chat:firstSendAck`) with no try/catch, so `TypeError: localStorage
+// .getItem is not a function` was fatal before a single assertion ran — same
+// pattern as the ResizeObserver / matchMedia stubs above.
+// topologyLayoutStore.ts wraps every localStorage call in try/catch and its
+// own test (topologyLayoutStore.test.tsx) deliberately asserts against the
+// server write instead of localStorage for this exact reason (see that
+// file's comment) — this stub makes those try/catch paths succeed instead
+// of silently no-op, which is a strict improvement (closer to real browser
+// behavior) and does not change what that test asserts. `afterEach` clears
+// the store (alongside `cleanup()` above) so no key set by one test's
+// mount effects (e.g. `chat:firstSendAck`) leaks into a later test in the
+// same file. First needed by ChatPanel.test.tsx (Task 26).
+class LocalStorageStub implements Storage {
+  private store = new Map<string, string>()
+  getItem(key: string): string | null {
+    return this.store.has(key) ? this.store.get(key)! : null
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, String(value))
+  }
+  removeItem(key: string): void {
+    this.store.delete(key)
+  }
+  clear(): void {
+    this.store.clear()
+  }
+  key(index: number): string | null {
+    return Array.from(this.store.keys())[index] ?? null
+  }
+  get length(): number {
+    return this.store.size
+  }
+}
+Object.defineProperty(window, 'localStorage', {
+  value: new LocalStorageStub(),
+  writable: true,
+  configurable: true,
+})
+
+// jsdom does not implement Element.scrollIntoView (it does no layout at
+// all, so "scroll to this element" has nothing to compute). ChatPanel.tsx's
+// auto-scroll-to-latest-message effect calls
+// `messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block:
+// 'end' })` unconditionally whenever `stickToBottom` is true (the default),
+// which fires on first mount — so every test that mounts ChatPanel throws
+// `TypeError: messagesEndRef.current?.scrollIntoView is not a function` in
+// a passive effect, fatal to the tree exactly like the ResizeObserver /
+// matchMedia / localStorage gaps above. A no-op is sufficient: the test
+// only needs the call not to throw, not to actually move a viewport that
+// jsdom doesn't render.
+Element.prototype.scrollIntoView = () => {}
