@@ -22,10 +22,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
+from db.models import Session as SessionRow
+from deps import current_session
 from services import chat_service
 
 
@@ -238,7 +240,11 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
 
 
 @router.post("/stream")
-async def chat_stream(body: StreamRequest, request: Request) -> StreamingResponse:
+async def chat_stream(
+    body: StreamRequest,
+    request: Request,
+    acting_session: SessionRow | None = Depends(current_session),
+) -> StreamingResponse:
     """
     Open an SSE stream for one chat turn. The Phase 2 stub drives the
     script-provided frame sequence; Phase 3 will replace the inner loop
@@ -272,6 +278,15 @@ async def chat_stream(body: StreamRequest, request: Request) -> StreamingRespons
     # still sync and still runs off-loop in the threadpool.
     from services import chat_tools as _chat_tools
     _chat_tools.set_acting_user(getattr(getattr(request.state, "auth_user", None), "id", None))
+    # STEP 0b: the SESSION too, so a chat-driven save or activate moves the
+    # active-project pointer exactly as the UI path does. Bound as an ID only —
+    # `_route` re-fetches the row inside its own short-lived DB session, since
+    # the row `current_session` returns belongs to the DB session this handler
+    # closes on return. `current_session` is a SYNC dependency, so FastAPI has
+    # already resolved it in the threadpool: no I/O is added to this body, which
+    # the note above requires. None (local mode issues no cookie) is legal and
+    # is what the HTTP path passes there too.
+    _chat_tools.set_acting_session(getattr(acting_session, "id", None))
 
     session = chat_service.get_or_create_session(
         body.session_id, model=body.model or chat_service.DEFAULT_MODEL,

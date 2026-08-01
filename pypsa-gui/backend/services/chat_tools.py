@@ -39,6 +39,7 @@ lists which Phase 2 turns into Messages-API content blocks.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import logging
 import math
 import uuid
@@ -1026,6 +1027,14 @@ def solve_queue_clear_finished() -> dict:
 # the identity comes from the session row rather than a contextvar.
 
 _ACTING_USER_ID: ContextVar[str | None] = ContextVar("chat_acting_user_id", default=None)
+# The acting SESSION travels as an ID for the same reason the user does, and one
+# more: a `SessionRow` captured at request time belongs to the request's DB
+# session, which is closed before the first tool runs, so touching it would
+# raise DetachedInstanceError. `deps.current_session` re-resolves per request
+# for exactly that reason; `_acting_session` re-fetches per tool call.
+_ACTING_SESSION_ID: ContextVar[str | None] = ContextVar(
+    "chat_acting_session_id", default=None
+)
 
 
 def set_acting_user(user_id: str | None) -> None:
@@ -1035,6 +1044,11 @@ def set_acting_user(user_id: str | None) -> None:
 
 def acting_user_id() -> str | None:
     return _ACTING_USER_ID.get()
+
+
+def set_acting_session(session_id) -> None:
+    """Bind the session whose active-project pointer this turn's tools may move."""
+    _ACTING_SESSION_ID.set(str(session_id) if session_id is not None else None)
 
 
 @contextlib.contextmanager
@@ -1065,9 +1079,37 @@ def _acting():
         db.close()
 
 
+def _acting_session(db):
+    """
+    Re-fetch the acting session row inside `db`, or None when none is bound.
+
+    Deliberately re-read rather than carried as an ORM object: the row would
+    otherwise belong to the request's DB session, which `chat_stream` closes
+    long before the SSE generator dispatches a tool, and every attribute read
+    would raise DetachedInstanceError. None is a legal answer — local mode
+    issues no session cookie at all, and there the HTTP path passes None too.
+    """
+    session_id = _ACTING_SESSION_ID.get()
+    if session_id is None:
+        return None
+    from db.models import Session as SessionRow
+
+    return db.get(SessionRow, uuid.UUID(session_id))
+
+
 def _route(handler, *args, **kwargs):
     """Call a project-router handler with the acting identity injected."""
     with _acting() as (db, user):
+        # `save_project` and `activate_project` declare a THIRD dependency,
+        # `session: SessionRow | None = Depends(current_session)`, and use it to
+        # move the session's active-project pointer. Unsupplied, they receive the
+        # raw `Depends` and die on `.active_project_id`; supplied as a constant
+        # None they stop crashing but a chat-driven Save-As silently leaves the
+        # browser pointing at the old project. Keyed off the signature because
+        # most handlers reached here declare no `session` and would raise
+        # TypeError on an unexpected keyword.
+        if "session" not in kwargs and "session" in inspect.signature(handler).parameters:
+            kwargs["session"] = _acting_session(db)
         return handler(*args, db=db, user=user, **kwargs)
 
 
