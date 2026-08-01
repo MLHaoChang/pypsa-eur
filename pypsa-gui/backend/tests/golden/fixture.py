@@ -50,16 +50,22 @@ def build_golden_network() -> pypsa.Network:
     n.add("Carrier", "solar")
 
     # --- the shape that broke: cost via overnight_cost, capital_cost unset ---
-    # discount_rate is required here by PyPSA 1.1.2's consistency_check
-    # whenever overnight_cost is set (a per-component annuitization input that
-    # postdates the brief this fixture was originally written against).
+    # discount_rate is deliberately left unset here (stays NaN). PyPSA 1.1.2's
+    # consistency_check requires SOME discount_rate on any asset carrying
+    # overnight_cost, but the app never writes it onto the asset permanently
+    # — solver_service.with_periodized_cost_defaults() fills it from
+    # SolverConfig.discount_rate transiently around n.optimize() and reverts
+    # afterwards (see solve_golden_network below). Baking a value in here
+    # would defeat the exact shape this fixture exists to carry: the 22-100%
+    # Asset Detail gap came from resolvers that read the per-asset column
+    # directly and got NaN where they expected the config fallback to have
+    # already run.
     n.add(
         "Generator", "gas",
         bus="elec_a", carrier="gas",
         p_nom=100.0, p_nom_extendable=True, p_nom_max=1000.0,
         marginal_cost=50.0,
         overnight_cost=900_000.0, lifetime=25.0,
-        discount_rate=GOLDEN_DISCOUNT_RATE,
         build_year=GOLDEN_PERIODS[0],
     )
     # --- the shape that works: capital_cost supplied directly, NOT extendable
@@ -85,7 +91,6 @@ def build_golden_network() -> pypsa.Network:
         p_nom=50.0, p_nom_extendable=True, p_nom_max=500.0,
         marginal_cost=10.0,
         overnight_cost=1_500_000.0, lifetime=20.0,
-        discount_rate=GOLDEN_DISCOUNT_RATE,
         build_year=GOLDEN_PERIODS[0],
     )
     # --- a genuinely zero-cost asset: zero must stay zero, not become "unset"
@@ -101,11 +106,29 @@ def build_golden_network() -> pypsa.Network:
 
 
 def solve_golden_network() -> pypsa.Network:
-    """Build + solve once per process. HiGHS on 48 snapshots is sub-second."""
+    """
+    Build + solve once per process. HiGHS on 48 snapshots is sub-second.
+
+    Wraps the solve in `with_periodized_cost_defaults` — the SAME mechanism
+    `run_simulation` uses in production (services/solver_service.py) to fill
+    per-asset `discount_rate` from the config for the duration of the solve
+    only, then revert. PyPSA's consistency_check requires the fill to exist
+    at solve time; the app never persists it. Using anything else here (e.g.
+    baking the rate onto the asset row) would make the fixture stop covering
+    the config-fallback code path every downstream resolver has to get right.
+    """
+    from services.solver_service import SolverConfig, with_periodized_cost_defaults
+
     global _SOLVED
     if _SOLVED is None:
         n = build_golden_network()
-        n.optimize(solver_name="highs", multi_investment_periods=True)
+        cfg = SolverConfig(
+            discount_rate=GOLDEN_DISCOUNT_RATE,
+            multi_investment_periods=True,
+            investment_periods=list(GOLDEN_PERIODS),
+        )
+        with with_periodized_cost_defaults(n, cfg):
+            n.optimize(solver_name="highs", multi_investment_periods=True)
         _SOLVED = n
     return _SOLVED
 

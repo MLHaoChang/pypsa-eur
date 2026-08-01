@@ -36,6 +36,15 @@ def test_the_overnight_shape_is_present_and_has_no_raw_capital_cost(solved):
     assert solved.generators.at["gas", "overnight_cost"] == 900_000.0
     assert solved.generators.at["gas", "capital_cost"] == 0.0
     assert solved.generators.at["gas", "p_nom_extendable"]
+    # discount_rate is supplied ONLY via solver config, never baked onto the
+    # asset row — the app fills it transiently at solve time and reverts.
+    assert pd.isna(solved.generators.at["gas", "discount_rate"])
+
+
+def test_the_config_supplied_discount_rate_does_not_persist_on_the_asset(solved):
+    # The app fills discount_rate transiently at solve time and reverts. If it
+    # persisted, every resolver's config-fallback branch would go untested.
+    assert pd.isna(solved.generators.at["gas", "discount_rate"])
 
 
 def test_the_direct_capital_cost_shape_is_present(solved):
