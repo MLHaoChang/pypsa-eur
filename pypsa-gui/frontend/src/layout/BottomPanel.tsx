@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp, Terminal, Trash2, History, Columns3, X, Search } from 'lucide-react'
+import { ChevronDown, ChevronUp, Terminal, Trash2, History, Columns3, X, Search, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { networkApi } from '../api/network'
@@ -492,6 +492,7 @@ function AssetTable({
                   )}
                 </th>
               ))}
+              <th className="w-7 px-1 py-1.5" />
             </tr>
           </thead>
           <tbody>
@@ -529,6 +530,16 @@ function AssetTable({
                       {fmt(row[col])}
                     </td>
                   ))}
+                  <td className="w-7 px-1 whitespace-nowrap" style={{ paddingBlock: 'var(--row-padding-y)' }}>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation()
+                        useUIStore.getState().requestAssetDetail({ componentClass, name })
+                      }}
+                      title="View this asset's results"
+                      className="text-muted hover:text-accent"
+                    ><ExternalLink size={11} /></button>
+                  </td>
                 </tr>
               )
             })}

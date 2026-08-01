@@ -216,6 +216,19 @@ function persistRecents(list: string[]) {
 
 export interface HighlightedComponent { type: string; name: string; busName?: string }
 
+// Deep-link request into the Asset Detail results tab (Task 13). Four entry
+// points funnel through the single `requestAssetDetail` action below so the
+// panel, the tab and the selection always move together — see the action's
+// own comment for why that matters.
+export interface AssetDetailRequest {
+  componentClass: string
+  name: string
+  category?: string
+  metrics?: string[]
+  mode?: 'chronological' | 'duration' | 'monthly'
+  chart?: boolean
+}
+
 interface UIStore {
   sidebarExpanded: boolean
   sidebarMode: SidebarMode
@@ -267,6 +280,9 @@ interface UIStore {
   bottomTabRequest: string | null
   // Chat / agent navigation: Results sub-tab id (capex, dispatch, …).
   resultsTabRequest: string | null
+  // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
+  // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
+  assetDetailRequest: AssetDetailRequest | null
   // Chat / agent: seed CompareView A/B + tab (consumed then cleared).
   compareNavRequest: { a?: string; b?: string; tab?: string } | null
   // Chat / agent: open Import/Export modal ('import' | 'export').
@@ -332,6 +348,11 @@ interface UIStore {
   clearBottomTabRequest: () => void
   requestResultsTab: (tab: string) => void
   clearResultsTabRequest: () => void
+  // ONE path for all four entry points (Properties, bottom table, map,
+  // chatbot). Each of them only has to call this — the panel, the tab and
+  // the selection all move together, so none of them can drift out of step.
+  requestAssetDetail: (req: AssetDetailRequest) => void
+  clearAssetDetailRequest: () => void
   requestCompareNav: (nav: { a?: string; b?: string; tab?: string }) => void
   clearCompareNavRequest: () => void
   requestIoModal: (tab: 'import' | 'export') => void
@@ -382,6 +403,7 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   resultsTabRequest: null,
+  assetDetailRequest: null,
   compareNavRequest: null,
   ioModalRequest: null,
   readOnly: false,
@@ -488,6 +510,13 @@ export const useUIStore = create<UIStore>((set) => ({
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
   requestResultsTab: (tab) => set({ resultsTabRequest: tab }),
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
+  requestAssetDetail: (req) => set({
+    assetDetailRequest: req,
+    selectedComponent: { type: req.componentClass, name: req.name },
+    activeSlidePanel: 'results',
+    resultsTabRequest: 'asset',
+  }),
+  clearAssetDetailRequest: () => set({ assetDetailRequest: null }),
   requestCompareNav: (nav) => set({ compareNavRequest: nav }),
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab) => set({ ioModalRequest: tab }),
@@ -509,10 +538,17 @@ export const useUIStore = create<UIStore>((set) => ({
       // that happens to share the name). The PropertiesPanel auto-opens
       // when `selectedComponent` is set; surviving across switches would
       // surface a stale slide-out for an asset the user didn't pick.
+      // assetDetailRequest is structurally the same hazard (componentClass +
+      // name, resolved against whichever project's asset list happens to be
+      // loaded when AssetDetail's effect consumes it) — clear it alongside
+      // the other two so a request left pending across a project switch
+      // can't silently apply project A's category/mode/metrics to a
+      // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
         selectedComponent: null,
         highlightedComponent: null,
+        assetDetailRequest: null,
         // Per-project result-source (B8): restore the new project's choice so
         // an instant switch lands on the source the user last picked there.
         // Defaults to 'lopf' for a never-visited / fresh project.

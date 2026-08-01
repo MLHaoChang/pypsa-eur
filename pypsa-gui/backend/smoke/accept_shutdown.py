@@ -38,19 +38,14 @@ ACTION = sys.argv[1] if len(sys.argv) > 1 else "solve-cancel-quit"
 PROJECT = "SolveCancelProject"
 out = {"action": ACTION}
 
-# BOTH are required. `PYPSAGUI_APP_DATA_DIR` moves the database, the log, the
-# lock and the FLAT store; project storage is governed by the separate
-# `PYPSAGUI_PROJECTS_ROOT`, default ~/Documents/PyPSA GUI/Projects. Setting
-# only the first wrote this harness's throwaway projects into the developer's
-# real Documents folder while reporting that app-data had been redirected.
-_appdata = os.environ.get("PYPSAGUI_APP_DATA_DIR", "")
-_projects = os.environ.get("PYPSAGUI_PROJECTS_ROOT", "")
-assert _appdata, "refusing to run: set PYPSAGUI_APP_DATA_DIR to a throwaway directory"
-assert _projects, "refusing to run: set PYPSAGUI_PROJECTS_ROOT to a throwaway directory"
-for _label, _v in (("PYPSAGUI_APP_DATA_DIR", _appdata), ("PYPSAGUI_PROJECTS_ROOT", _projects)):
-    _p = Path(_v).expanduser().resolve()
-    assert _p != (BACKEND / "projects").resolve(), f"refusing to run: {_label} IS the real projects tree"
-    assert Path.home() / "Documents" not in _p.parents, f"refusing to run: {_label} is inside Documents"
+# Isolation is one shared guard now — see smoke/isolation.py. It requires
+# DATABASE_URL as well as the two path variables, which this copy did not:
+# `backend/.env` pins a cwd-relative DATABASE_URL and pydantic ranks the env
+# file above the app-data default, so app-data could be redirected while the
+# auth database was still written next to wherever the harness was launched.
+from smoke.isolation import require_isolated_environment  # noqa: E402
+
+require_isolated_environment()
 
 # NOTE: do NOT import pypsa (or anything that pulls it) at module scope here.
 # `launcher.apply_environment` refuses to run once the backend is imported --

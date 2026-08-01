@@ -21,12 +21,27 @@ only ever driven through `evaluate_js`, never with a mouse.
 
 These are not style preferences. Each one is here because it was violated once.
 
-1. **Never point either storage variable at `~/Documents`.** An earlier harness
-   set only `PYPSAGUI_APP_DATA_DIR` and wrote seven throwaway projects into the
-   developer's real `~/Documents/PyPSA GUI/Projects`. `PYPSAGUI_APP_DATA_DIR`
-   moves the database, the log, the lock and the *flat* store.
-   `PYPSAGUI_PROJECTS_ROOT` is what governs projects. **Set both, always.** The
-   harnesses now refuse to start otherwise.
+1. **Set all THREE isolation variables, always** — and never point any of them
+   at `~/Documents`.
+
+   - `PYPSAGUI_APP_DATA_DIR` moves the database *default*, the log, the lock
+     and the *flat* store.
+   - `PYPSAGUI_PROJECTS_ROOT` governs projects. An earlier harness set only the
+     first and wrote seven throwaway projects into the developer's real
+     `~/Documents/PyPSA GUI/Projects`.
+   - `DATABASE_URL` — **the one this run-book used to omit.** `settings.py`
+     declares `env_file=backend/.env`, and pydantic-settings ranks the env file
+     **above** the `default_factory` that reads `PYPSAGUI_APP_DATA_DIR`. So the
+     cwd-relative `DATABASE_URL` in `backend/.env` wins, and an otherwise
+     isolated harness writes its auth database next to wherever it was
+     launched. That produced a stray `auth_dev.db` at the repo root — a file on
+     the credential gate's own forbidden list, because it carries a password
+     hash.
+
+   `backend/smoke/isolation.py` is the single guard; all three harnesses call
+   it and refuse to start unless every variable is set and disposable. It also
+   refuses bare `PROJECTS_ROOT` / `FLAT_PROJECTS_ROOT` / `LEGACY_ROOT`, which
+   pydantic binds *above* the `PYPSAGUI_*` override.
 2. **Never write to or delete under `pypsa-gui/backend/projects/`.** 113 MB of
    irreplaceable projects, inside a gitignored directory inside a git checkout —
    `git clean -xdf` would take it silently.
@@ -100,9 +115,11 @@ write. It is what found the launch-blocking `DATABASE_URL` defect.
 
 ```bash
 PYPSAGUI_APP_DATA_DIR="$ACC/appdata" PYPSAGUI_PROJECTS_ROOT="$ACC/projects" \
+  DATABASE_URL="sqlite+pysqlite:///$ACC/appdata/acceptance.db" \
   pixi run -e desktop bash -c 'cd / && python "$COLD" first'
 
 PYPSAGUI_APP_DATA_DIR="$ACC/appdata" PYPSAGUI_PROJECTS_ROOT="$ACC/projects" \
+  DATABASE_URL="sqlite+pysqlite:///$ACC/appdata/acceptance.db" \
   pixi run -e desktop bash -c 'cd / && python "$COLD" relaunch'
 ```
 
@@ -168,8 +185,10 @@ absent, and the absence is itself the diagnosis.
 ```bash
 rm -rf "$ACC" && mkdir -p "$ACC/appdata" "$ACC/projects"
 PYPSAGUI_APP_DATA_DIR="$ACC/appdata" PYPSAGUI_PROJECTS_ROOT="$ACC/projects" \
+  DATABASE_URL="sqlite+pysqlite:///$ACC/appdata/acceptance.db" \
   pixi run -e desktop bash -c 'cd / && python "$SHUT" solve-cancel-quit'
 PYPSAGUI_APP_DATA_DIR="$ACC/appdata" PYPSAGUI_PROJECTS_ROOT="$ACC/projects" \
+  DATABASE_URL="sqlite+pysqlite:///$ACC/appdata/acceptance.db" \
   pixi run -e desktop bash -c 'cd / && python "$SHUT" relaunch'
 ```
 
@@ -187,6 +206,7 @@ Launch the real app and drive it by hand:
 
 ```bash
 PYPSAGUI_APP_DATA_DIR="$ACC/appdata" PYPSAGUI_PROJECTS_ROOT="$ACC/projects" \
+  DATABASE_URL="sqlite+pysqlite:///$ACC/appdata/acceptance.db" \
   pixi run -e desktop desktop-gui
 ```
 

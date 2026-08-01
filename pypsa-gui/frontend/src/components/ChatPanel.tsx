@@ -99,11 +99,26 @@ function applyUiNavigate(d: {
   name?: string
   snapshot_iso?: string
   period?: number | null
+  category?: string
+  metrics?: string[]
+  mode?: 'chronological' | 'duration' | 'monthly'
+  chart?: boolean
 }) {
   const ui = useUIStore.getState()
   if (d.kind === 'select_component' && d.component_class && d.name) {
     ui.setSelectedComponent({ type: d.component_class, name: d.name })
     ui.openRightPanel()
+    return
+  }
+  if (d.kind === 'open_asset_detail' && d.component_class && d.name) {
+    ui.requestAssetDetail({
+      componentClass: d.component_class,
+      name: d.name,
+      category: d.category,
+      metrics: d.metrics,
+      mode: d.mode,
+      chart: d.chart,
+    })
     return
   }
   if (d.kind === 'set_snapshot' && d.snapshot_iso) {
@@ -1350,6 +1365,10 @@ export default function ChatPanel() {
           name?: string
           snapshot_iso?: string
           period?: number | null
+          category?: string
+          metrics?: string[]
+          mode?: 'chronological' | 'duration' | 'monthly'
+          chart?: boolean
         }>(frame)
         try {
           applyUiNavigate(d)

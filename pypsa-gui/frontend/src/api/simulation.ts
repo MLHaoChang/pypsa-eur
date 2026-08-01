@@ -485,6 +485,44 @@ export interface StoreEconomicsRow {
   avg_charge_price_eur_per_mwh: number | null
   by_period: StorageUnitEconomicsRow['by_period']
 }
+// Converters — electrolysers, heat pumps, P2X. A Link BUYS at bus0 and SELLS
+// at bus1, so it carries both a gross revenue and the cost of the energy it
+// consumed. `revenue_eur` is already NET of that input; `gross_revenue_eur`
+// and `input_cost_eur` are the halves, so the table can show the same
+// two-sided layout it uses for storage.
+export interface LinkEconomicsRow {
+  name: string
+  bus: string                  // bus0 — where the Link buys
+  bus1: string                 // where it delivers
+  carrier: string
+  efficiency: number | null
+  p_nom_opt_mw: number
+  energy_mwh: number           // OUTPUT at bus1, not input
+  input_energy_mwh: number
+  capacity_factor: number | null   // measured on the input, which p_nom bounds
+  revenue_eur: number          // gross_revenue − input_cost
+  gross_revenue_eur: number
+  input_cost_eur: number
+  vom_cost_eur: number
+  fixed_cost_eur: number
+  fom_cost_eur: number
+  net_profit_eur: number       // revenue − fixed − vom
+  lcoe_eur_per_mwh: number | null  // ALL-IN per MWh of output; matches /results/lcoh
+  avg_price_eur_per_mwh: number | null
+  by_period: Array<{
+    period: number | string
+    energy_mwh: number
+    revenue_eur: number
+    gross_revenue_eur: number
+    input_cost_eur: number
+    fixed_cost_eur: number
+    fom_cost_eur: number
+    vom_cost_eur: number
+    net_profit_eur: number
+    lcoe_eur_per_mwh: number | null
+    avg_price_eur_per_mwh: number | null
+  }>
+}
 export interface AssetEconomicsPayload {
   currency: string
   is_multi_period: boolean
@@ -492,6 +530,7 @@ export interface AssetEconomicsPayload {
   generators: GeneratorEconomicsRow[]
   storage_units: StorageUnitEconomicsRow[]
   stores: StoreEconomicsRow[]
+  links: LinkEconomicsRow[]
 }
 
 export function createLogStream(

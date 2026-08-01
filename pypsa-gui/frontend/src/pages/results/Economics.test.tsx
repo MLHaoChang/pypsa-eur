@@ -25,7 +25,8 @@ beforeEach(() => {
   // return a flat array of `AggregatedAssetRow`-shaped objects. Its real
   // contract (api/simulation.ts:403-405, `AssetEconomicsPayload` :488-495)
   // is `{ currency, is_multi_period, periods, generators: GeneratorEconomicsRow[],
-  // storage_units: StorageUnitEconomicsRow[], stores: StoreEconomicsRow[] }`.
+  // storage_units: StorageUnitEconomicsRow[], stores: StoreEconomicsRow[],
+  // links: LinkEconomicsRow[] }`.
   // Economics.tsx's `everyRow` (:294-301) reads `payload.generators.map(...)`
   // — with an array-shaped payload (the original fixture), `payload.generators`
   // is `undefined` and `.map` throws `TypeError` during render. The mocked
@@ -46,6 +47,7 @@ beforeEach(() => {
     ],
     storage_units: [],
     stores: [],
+    links: [],
   })
   // Real shape is `{ rows: [...], total: null | {...}, currency }`
   // (api/simulation.ts:173-197). Economics.tsx's `LcohSection` (:995) reads

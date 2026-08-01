@@ -4,17 +4,19 @@ import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tansta
 import {
   X, Plus, Zap, Battery, Database, GitBranch,
   Pencil, Trash2, Flame, Wind, BatteryCharging, ChevronRight, PlugZap, TrendingUp,
-  HelpCircle,
+  HelpCircle, ExternalLink,
 } from 'lucide-react'
 import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { isRenewableCarrier } from '../utils/carriers'
+import { ingestRescale } from '../utils/rescaleActions'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import type { Bus, Carrier, Generator, Line, Link, LinkProfileMeta, Load, StorageUnit, Store, Transformer, LoadProfileMeta, GeneratorProfileMeta } from '../api/types'
 import { safeMax } from '../utils/numeric'
+import { isPlaced } from '../utils/geo'
 import toast from 'react-hot-toast'
 import CreationForm from './CreationForm'
 import { tip as docTip } from '../utils/propertyDocs'
@@ -1565,12 +1567,20 @@ function BusPanel({ name }: { name: string }) {
         y: nf(form, 'y', current.y),
       })
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'Bus', name: newName })
       setEditing(false)
       toast.success('Bus updated')
+      // update_bus previews a per-km-preserving impedance rescale for any
+      // connected line whose length changed as a result of this edit (a
+      // Latitude/Longitude change here recomputes connected line lengths on
+      // the backend). Feed it into the shared queue — see
+      // utils/rescaleActions.ts — instead of discarding it; this is the exact
+      // path Finding 1 (2026-07-31 review) flagged as silently losing the
+      // preview.
+      ingestRescale(qc, data.rescale)
     },
     onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
   })
@@ -1605,7 +1615,14 @@ function BusPanel({ name }: { name: string }) {
           <Row label="Control"     value={bus.control}  tip={docTip('bus.control')} />
           <Row label="Country"     value={bus.country}  tip={docTip('bus.country')} />
           <Row label="Sub-network" value={bus.sub_network || '—'} tip="Manual region label for the 'region' clustering mode. Buses sharing this value collapse to one node. Empty = auto-determine from electrical topology." />
-          <Row label="Coordinates" value={bus.x != null ? `${bus.x?.toFixed(3)}, ${bus.y?.toFixed(3)}` : null} tip={docTip('bus.coordinates')} />
+          {/* isPlaced (utils/geo, D4-compliant single import) — not a bare
+              `bus.x != null` check. PyPSA's Bus.x/y default to 0.0, so an
+              unplaced bus always has non-null x/y and the old check rendered
+              "0.000, 0.000" as if it were a real position: this is exactly
+              the surface the empty-state panel sends the user to ("paste a
+              lat, lng pair into its properties"), so showing Null Island
+              here undermines that guidance. */}
+          <Row label="Coordinates" value={isPlaced(bus) ? `${bus.x?.toFixed(3)}, ${bus.y?.toFixed(3)}` : 'not set'} tip={docTip('bus.coordinates')} />
           <button onClick={startEdit}
             className="w-full mt-2 py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors flex items-center justify-center gap-1.5">
             <Pencil size={11} /> Edit Bus
@@ -2433,6 +2450,9 @@ export default function PropertiesPanel() {
     : selectedComponent.name
 
   const canDelete = selectedComponent.type === 'Bus' || selectedComponent.type === 'Line' || selectedComponent.type === 'Link' || selectedComponent.type === 'Transformer'
+  // AssetGroup is a synthetic bus::category grouping, not a real network
+  // component — it has no entry in Asset Detail's results registry.
+  const canViewResults = selectedComponent.type !== 'AssetGroup'
 
   return (
     <aside className="shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden shadow-lg" style={{ width: 300 }}>
@@ -2459,8 +2479,16 @@ export default function PropertiesPanel() {
           </button>
         </div>
       </div>
-      <div className="px-3 py-2 border-b border-border bg-accent/5 shrink-0">
+      <div className="px-3 py-2 border-b border-border bg-accent/5 shrink-0 flex items-center justify-between gap-2">
         <p className="text-xs font-mono font-semibold text-accent truncate">{displayName}</p>
+        {canViewResults && (
+          <button
+            onClick={() => useUIStore.getState().requestAssetDetail({
+              componentClass: selectedComponent.type, name: selectedComponent.name })}
+            title="Open this asset's results in the Asset Detail tab"
+            className="flex items-center gap-1 text-[11px] text-muted hover:text-accent shrink-0"
+          ><ExternalLink size={11} /> View results</button>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto">
         {/* `key={...}` forces a remount when switching between two assets of the

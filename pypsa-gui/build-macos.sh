@@ -44,10 +44,26 @@ MSG
   step "Creating the build venv with $BUILD_PYTHON"
   "$BUILD_PYTHON" -m venv "$VENV"
   "$VENV/bin/python" -m pip install --quiet --upgrade pip
-  # `proxy_tools` (via pywebview) publishes no wheel — pure Python, no
-  # dependencies, no compiler. So this cannot be --only-binary=:all:.
-  "$VENV/bin/pip" install --quiet -r "$HERE/gui-requirements.txt" pyinstaller
 fi
+
+# ── sync the venv to gui-requirements.txt, EVERY build ──────────────────────
+#
+# This used to live inside the `if` above, so it ran once — at venv creation —
+# and never again. The venv is cached by design, which meant that after the
+# first build, editing `gui-requirements.txt` had NO EFFECT on the artifact.
+#
+# That is how `openpyxl` stayed missing on 2026-07-31: adding the pin fixes
+# nothing on its own, and the build reports success either way. A packaging
+# manifest the build ignores is worse than no manifest, because it reads as
+# authoritative in review.
+#
+# pip is a no-op when everything is already satisfied, so the cost of getting
+# this right is a second or two per build.
+#
+# `proxy_tools` (via pywebview) publishes no wheel — pure Python, no
+# dependencies, no compiler. So this cannot be --only-binary=:all:.
+step "Syncing the build venv to gui-requirements.txt"
+"$VENV/bin/pip" install --quiet -r "$HERE/gui-requirements.txt" pyinstaller
 
 # ── the SPA ─────────────────────────────────────────────────────────────────
 # `dist/` is gitignored, so a checkout never has one, and a STALE one is worse

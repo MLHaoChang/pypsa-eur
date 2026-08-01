@@ -3733,6 +3733,208 @@ def get_asset_economics():
                 "by_period": by_period_rows,
             })
 
+    # ── Link block (converters: electrolysers, heat pumps, P2X) ──────────
+    # Missing entirely until 2026-07-31. The user asked why their electrolyser
+    # showed no economics; the endpoint returned generators / storage_units /
+    # stores and no `links` key at all, so a Link could not appear in the
+    # Economics table however its costs were configured.
+    #
+    # A Link is two-sided in a way the other three are not: it BUYS at bus0 and
+    # SELLS at bus1. `revenue_eur` is therefore the NET of the two — value
+    # delivered at bus1 minus energy bought at bus0 — so `net_profit_eur`
+    # (revenue − fixed − vom) means the same thing it does for a generator and
+    # the columns stay comparable down the table. The gross halves ride along
+    # as their own fields so the netting is auditable rather than implied, and
+    # so the Compare view can reconstruct either convention.
+    link_rows: list[dict] = []
+    try:
+        links_p0 = _result_df(n, "links_t", "p0", "lopf")
+        links_p1 = _result_df(n, "links_t", "p1", "lopf")
+    except Exception:
+        links_p0 = links_p1 = None
+    if links_p0 is not None and not links_p0.empty and not n.links.empty:
+        links_df = n.links
+        if "p_nom_opt" in links_df.columns:
+            l_p_nom = links_df["p_nom_opt"].fillna(links_df.get("p_nom", 0.0))
+        else:
+            l_p_nom = links_df["p_nom"]
+        l_mc_static = (
+            links_df["marginal_cost"].fillna(0.0) if "marginal_cost" in links_df.columns
+            else _pd.Series(0.0, index=links_df.index)
+        )
+        l_fom_static = (
+            links_df["fom_cost"].fillna(0.0) if "fom_cost" in links_df.columns
+            else _pd.Series(0.0, index=links_df.index)
+        )
+        try:
+            l_mc_t_df = n.get_switchable_as_dense("Link", "marginal_cost")
+        except Exception:
+            l_mc_t_df = None
+
+        for ln in links_p0.columns:
+            if ln not in links_df.index:
+                continue
+            bus0 = str(links_df.at[ln, "bus0"]) if "bus0" in links_df.columns else ""
+            bus1 = str(links_df.at[ln, "bus1"]) if "bus1" in links_df.columns else ""
+            try:
+                p0_series = links_p0[ln].fillna(0.0)
+            except Exception:
+                continue
+
+            # `p1` is NEGATIVE when the Link delivers into bus1, so flip it to
+            # get a positive quantity of energy sold. Fall back to
+            # p0 × efficiency only when the dispatch table lacks p1.
+            if links_p1 is not None and ln in links_p1.columns:
+                out_series = -links_p1[ln].reindex(p0_series.index).fillna(0.0)
+            else:
+                try:
+                    eff = float(links_df.at[ln, "efficiency"])
+                except (KeyError, TypeError, ValueError):
+                    eff = 1.0
+                out_series = p0_series * eff
+            gross_revenue_series = out_series * (
+                prices[bus1].reindex(p0_series.index).fillna(0.0)
+                if bus1 in prices.columns else 0.0
+            )
+
+            # Multi-output Links (CHP: bus0 gas → bus1 electricity + bus2 heat;
+            # heat pumps with a second sink) deliver at bus2/bus3/bus4 as well.
+            # Counting only bus1 would silently drop half a CHP's product and
+            # inflate its unit cost accordingly. Each extra port is valued at
+            # ITS OWN bus price, which is unambiguous; the energy total is the
+            # combined output across ports, so for a multi-output Link the
+            # unit cost is per MWh of everything it delivers.
+            for port in ("2", "3", "4"):
+                bus_col = f"bus{port}"
+                if bus_col not in links_df.columns:
+                    continue
+                bus_n = str(links_df.at[ln, bus_col] or "").strip()
+                if not bus_n:
+                    continue
+                try:
+                    p_n_df = _result_df(n, "links_t", f"p{port}", "lopf")
+                except Exception:
+                    p_n_df = None
+                if p_n_df is None or ln not in getattr(p_n_df, "columns", []):
+                    continue
+                out_n = -p_n_df[ln].reindex(p0_series.index).fillna(0.0)
+                out_series = out_series + out_n
+                if bus_n in prices.columns:
+                    gross_revenue_series = gross_revenue_series + (
+                        out_n * prices[bus_n].reindex(p0_series.index).fillna(0.0)
+                    )
+
+            # Unlike the generator block, a missing bus price is NOT a reason
+            # to drop the row. An H₂ or heat bus often carries no meaningful
+            # dual, and skipping would reproduce the very bug this block
+            # fixes — the asset silently vanishing from the table. Treat an
+            # absent price as zero and still report capacity, energy and cost.
+            if bus0 in prices.columns:
+                price0 = prices[bus0].reindex(p0_series.index).fillna(0.0)
+            else:
+                price0 = _pd.Series(0.0, index=p0_series.index)
+            if l_mc_t_df is not None and ln in l_mc_t_df.columns:
+                l_mc_series = l_mc_t_df[ln].reindex(p0_series.index).fillna(float(l_mc_static.get(ln, 0.0)))
+            else:
+                l_mc_series = _pd.Series(float(l_mc_static.get(ln, 0.0)), index=p0_series.index)
+
+            gross_revenue_total, gross_rev_per_p = _accumulate_per_period(gross_revenue_series, w_vals)
+            input_cost_total, input_cost_per_p = _accumulate_per_period(p0_series * price0, w_vals)
+            # PyPSA charges a Link's marginal_cost against p0 (the input), not
+            # the output — matching how the LP builds the objective.
+            vom_total, vom_per_p = _accumulate_per_period(p0_series.abs() * l_mc_series, w_vals)
+            # ENERGY = what leaves bus1. Using p0 here would overstate a
+            # 70%-efficient electrolyser's product by 1/0.7 and understate its
+            # unit cost by the same factor.
+            energy_total, energy_per_p = _accumulate_per_period(out_series, w_vals_energy)
+            input_energy_total, _ = _accumulate_per_period(p0_series, w_vals_energy)
+
+            try:
+                cc_eff = float(asset_costs.get("links", {}).get(ln, {}).get("capital_cost", 0.0))
+            except (TypeError, ValueError):
+                cc_eff = 0.0
+            p_nom_l = float(l_p_nom.get(ln, 0.0) or 0.0)
+            fixed_cost = cc_eff * p_nom_l * total_years_factor
+            fom_cost = float(l_fom_static.get(ln, 0.0) or 0.0) * p_nom_l
+
+            revenue_total = gross_revenue_total - input_cost_total
+
+            # All-in levelised cost of the Link's OUTPUT: capital + VOM + the
+            # energy it had to buy. The bought energy belongs in the numerator
+            # — for a 70%-efficient electrolyser it is the dominant term, and
+            # omitting it produced €43.74/MWh against the LCOH panel's €246.02
+            # for the identical asset. Two views of one converter disagreeing
+            # by 5.6x is worse than either number alone, so this matches
+            # `/results/lcoh` exactly, term for term.
+            denom = energy_total
+            if denom > 1e-6:
+                lcoe = (fixed_cost + vom_total + input_cost_total) / denom
+                avg_price = gross_revenue_total / denom
+            else:
+                lcoe = None
+                avg_price = None
+
+            # p_nom bounds the INPUT (p0), so utilisation is measured there.
+            if p_nom_l > 1e-6:
+                total_hours_modelled = float(w_vals_energy.sum())
+                cap_factor = (
+                    input_energy_total / (p_nom_l * total_hours_modelled)
+                    if total_hours_modelled > 0 else None
+                )
+            else:
+                cap_factor = None
+
+            by_period_rows = []
+            if is_multi and energy_per_p:
+                total_years = sum(period_years_lookup.values()) or 1.0
+                keys = set(energy_per_p) | set(gross_rev_per_p) | set(input_cost_per_p)
+                for p_key in sorted(keys):
+                    y = _years_for_period(p_key)
+                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
+                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
+                    vom_p = vom_per_p.get(p_key, 0.0)
+                    gross_p = gross_rev_per_p.get(p_key, 0.0)
+                    in_p = input_cost_per_p.get(p_key, 0.0)
+                    rev_p = gross_p - in_p
+                    e_p = energy_per_p.get(p_key, 0.0)
+                    # Same all-in basis as the horizon figure above.
+                    lcoe_p = ((fixed_p + vom_p + in_p) / e_p) if e_p > 1e-6 else None
+                    by_period_rows.append({
+                        "period": p_key,
+                        "energy_mwh": _safe_finite(e_p),
+                        "revenue_eur": _safe_finite(rev_p),
+                        "gross_revenue_eur": _safe_finite(gross_p),
+                        "input_cost_eur": _safe_finite(in_p),
+                        "fixed_cost_eur": _safe_finite(fixed_p),
+                        "fom_cost_eur": _safe_finite(fom_p),
+                        "vom_cost_eur": _safe_finite(vom_p),
+                        "net_profit_eur": _safe_finite(rev_p - fixed_p - vom_p),
+                        "lcoe_eur_per_mwh": _safe_finite(lcoe_p) if lcoe_p is not None else None,
+                        "avg_price_eur_per_mwh": _safe_finite((gross_p / e_p) if e_p > 1e-6 else 0.0) if e_p > 1e-6 else None,
+                    })
+
+            link_rows.append({
+                "name": str(ln),
+                "bus": bus0,
+                "bus1": bus1,
+                "carrier": str(links_df.at[ln, "carrier"]) if "carrier" in links_df.columns else "",
+                "efficiency": _safe_finite(float(links_df.at[ln, "efficiency"])) if "efficiency" in links_df.columns else None,
+                "p_nom_opt_mw": _safe_finite(p_nom_l),
+                "energy_mwh": _safe_finite(energy_total),
+                "input_energy_mwh": _safe_finite(input_energy_total),
+                "capacity_factor": _safe_finite(cap_factor) if cap_factor is not None else None,
+                "revenue_eur": _safe_finite(revenue_total),
+                "gross_revenue_eur": _safe_finite(gross_revenue_total),
+                "input_cost_eur": _safe_finite(input_cost_total),
+                "vom_cost_eur": _safe_finite(vom_total),
+                "fixed_cost_eur": _safe_finite(fixed_cost),
+                "fom_cost_eur": _safe_finite(fom_cost),
+                "net_profit_eur": _safe_finite(revenue_total - fixed_cost - vom_total),
+                "lcoe_eur_per_mwh": _safe_finite(lcoe) if lcoe is not None else None,
+                "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
+                "by_period": by_period_rows,
+            })
+
     # Periods list (sorted) for the frontend's period selector.
     periods_list: list = []
     if is_multi:
@@ -3753,4 +3955,5 @@ def get_asset_economics():
         "generators": gen_rows,
         "storage_units": su_rows,
         "stores": store_rows,
+        "links": link_rows,
     }

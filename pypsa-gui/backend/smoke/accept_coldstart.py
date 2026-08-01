@@ -57,28 +57,14 @@ ACTION = sys.argv[1] if len(sys.argv) > 1 else "first"
 PROJECT = "ColdStart"
 out = {"action": ACTION, "cwd": os.getcwd()}
 
-# BOTH are required. `PYPSAGUI_APP_DATA_DIR` moves the database, the log, the
-# lock and the FLAT store; project storage is governed by the separate
-# `PYPSAGUI_PROJECTS_ROOT`, default ~/Documents/PyPSA GUI/Projects. Setting only
-# the first wrote an earlier harness's throwaway projects into the developer's
-# real Documents folder while reporting that app-data had been redirected.
-_appdata = os.environ.get("PYPSAGUI_APP_DATA_DIR", "")
-_projects = os.environ.get("PYPSAGUI_PROJECTS_ROOT", "")
-assert _appdata, "refusing to run: set PYPSAGUI_APP_DATA_DIR to a throwaway directory"
-assert _projects, "refusing to run: set PYPSAGUI_PROJECTS_ROOT to a throwaway directory"
-# `settings` declares NO `env_prefix`, so `projects_root` binds the BARE name
-# `PROJECTS_ROOT` through pydantic — and a bound env value outranks the
-# `default_factory`, which is the only place `PYPSAGUI_PROJECTS_ROOT` is ever
-# read. Same for the other two. So a developer with `PROJECTS_ROOT` exported or
-# sitting in `backend/.env` gets full isolation theatre from the two variables
-# below while the app writes somewhere else entirely. Measured, not reasoned:
-# `PROJECTS_ROOT=/tmp/decoy PYPSAGUI_PROJECTS_ROOT=/tmp/throwaway` resolves
-# `settings.projects_root` to `/tmp/decoy`.
-for _bare in ("PROJECTS_ROOT", "FLAT_PROJECTS_ROOT", "LEGACY_ROOT"):
-    assert not os.environ.get(_bare), (
-        f"refusing to run: {_bare} is set, and pydantic binds that bare name "
-        f"ABOVE the PYPSAGUI_* variable this harness isolates with — unset it"
-    )
+# One shared guard now — see smoke/isolation.py. The bare-name check this file
+# pioneered (`PROJECTS_ROOT` and friends bind ABOVE the PYPSAGUI_* variable,
+# because `settings` declares no `env_prefix`) moved there, so the other two
+# harnesses get it too; they never had it. In exchange this file gains the
+# DATABASE_URL requirement, which none of the three had.
+from smoke.isolation import require_isolated_environment  # noqa: E402
+
+require_isolated_environment()
 
 
 def _is_inside(child: Path, parent: Path) -> bool:

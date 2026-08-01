@@ -8,9 +8,9 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
-  Plus, Layers, Flame, Thermometer, BatteryCharging, PlugZap,
-  Zap, Droplets, Wind, Trash2, X as XIcon, type LucideIcon,
-  Clock, CheckCircle2, Loader2, XCircle,
+  Plus, Layers, Flame, BatteryCharging,
+  Zap, Wind, Trash2, X as XIcon, type LucideIcon,
+  Clock, CheckCircle2, Loader2, XCircle, ExternalLink,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
@@ -24,8 +24,9 @@ import {
   registerPendingEdgeDelete, cancelPendingEdgeDelete,
   drainPendingEdgeDeletes, flushPendingEdgeDeletes,
 } from '../utils/pendingEdgeDeletes'
+import { ingestRescale } from '../utils/rescaleActions'
 import { useSimulationStore } from '../store/simulationStore'
-import { H2Icon } from '../components/AssetIcons'
+import { getCarrierBadge, type BadgeDef } from '../utils/carrierBadges'
 import CarrierSelect from '../components/CarrierSelect'
 import { Dialog } from '../components/Dialog'
 import {
@@ -272,38 +273,8 @@ const CAT_DISPLAY_LABELS: Record<AssetCategory, string> = {
 // Icon may be a lucide icon OR a custom component (e.g. shared H2Icon). Both
 // accept `size` and `style`; `strokeWidth` is optional — lucide icons honour it,
 // custom SVG glyphs (H2Icon) just ignore the extra prop.
-type BadgeIcon = React.FC<{ size?: number; style?: React.CSSProperties; strokeWidth?: number }>
-interface BadgeDef { Icon: BadgeIcon; label: string }
-
-const CARRIER_BADGES: Record<string, BadgeDef> = {
-  H2:              { Icon: H2Icon,         label: 'H₂' },
-  hydrogen:        { Icon: H2Icon,         label: 'H₂' },
-  electrolysis:    { Icon: Droplets,       label: 'ELY' },
-  // Heat-carrier links are visually distinct from gas/thermal generators —
-  // use Thermometer to match the left-sidebar Heating-Demand glyph.
-  heat:            { Icon: Thermometer,    label: 'Heat' },
-  heat_pump:       { Icon: Thermometer,    label: 'HP' },
-  'heat pump':     { Icon: Thermometer,    label: 'HP' },
-  gas:             { Icon: Flame,          label: 'Gas' },
-  CCGT:            { Icon: Zap,            label: 'CCGT' },
-  OCGT:            { Icon: Zap,            label: 'OCGT' },
-  SMR:             { Icon: H2Icon,         label: 'SMR' },
-  battery:         { Icon: BatteryCharging,label: 'Batt.' },
-  BEV:             { Icon: BatteryCharging,label: 'BEV' },
-  DC:              { Icon: PlugZap,        label: 'DC' },
-  HVDC:            { Icon: PlugZap,        label: 'HVDC' },
-  AC:              { Icon: Zap,            label: 'AC' },
-  resistive:       { Icon: Zap,            label: 'Res.' },
-  wind:            { Icon: Wind,           label: 'Wind' },
-}
-
-function getCarrierBadge(carrier: string): BadgeDef {
-  if (CARRIER_BADGES[carrier]) return CARRIER_BADGES[carrier]
-  const key = Object.keys(CARRIER_BADGES).find(k =>
-    carrier.toLowerCase().includes(k.toLowerCase())
-  )
-  return key ? CARRIER_BADGES[key] : { Icon: Zap, label: carrier.slice(0, 5) }
-}
+// Table and getCarrierBadge moved to utils/carrierBadges.tsx for sharing with
+// the map component.
 
 function CarrierBadge({ carrier, color }: { carrier: string; color: string }) {
   const { Icon, label } = getCarrierBadge(carrier)
@@ -1935,7 +1906,14 @@ export default function TopologyCanvas() {
       const body: Partial<Bus> = { ...current, ...fields }
       return networkApi.updateBus(name, body)
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
+      // See utils/rescaleActions.ts — update_bus previews a per-km-preserving
+      // impedance rescale whenever this edit changed x/y and a connected
+      // line's length moved as a result. BusEditor is one of the four write
+      // paths Finding 1 (2026-07-31 review) found discarding this preview.
+      ingestRescale(queryClient, data.rescale)
+    },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update bus'),
   })
 
@@ -3190,6 +3168,16 @@ export default function TopologyCanvas() {
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="6" cy="6" r="4.5"/><line x1="6" y1="4" x2="6" y2="6.5"/><circle cx="6" cy="8" r="0.5" fill="currentColor" stroke="none"/></svg>
             Properties
+          </button>
+          <button
+            onClick={() => {
+              useUIStore.getState().requestAssetDetail({ componentClass: 'Bus', name: contextMenu.busName })
+              setContextMenu(null)
+            }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-border/30 transition-colors text-text"
+          >
+            <ExternalLink size={12} />
+            View results
           </button>
           {(() => {
             const busName = contextMenu.busName

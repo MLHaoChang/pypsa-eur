@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { isRenewableCarrier } from '../utils/carriers'
-import { Ruler, Flame, Wind, BatteryCharging, Zap } from 'lucide-react'
+import { uniformBadge, type BadgeDef } from '../utils/carrierBadges'
+import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink } from 'lucide-react'
 import ReactDOMServer from 'react-dom/server'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -14,6 +15,11 @@ import { networkApi } from '../api/network'
 import { appLog } from '../store/simulationStore'
 import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '../components/CanvasResultsContext'
+import { busLatLng, unplacedBusNames } from '../utils/geo'
+import { nextBusToPlace, canSkip } from '../utils/placement'
+import { ingestRescale } from '../utils/rescaleActions'
+import { useRescaleStore } from '../store/rescaleStore'
+import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
 
 // Draggable bus marker. Mimics the previous CircleMarker visually (12 px,
 // 2 px coloured border, white fill) but uses a Marker + divIcon so leaflet
@@ -70,6 +76,11 @@ const CATEGORY_LABELS: Record<AssetCategory, string> = {
   Thermal: 'Thermal Generation', Renewables: 'Renewables',
   Storage: 'Storage', Load: 'Load',
 }
+
+// Per bus × category: how many assets, and which single carrier badge (if
+// any) they all share. `badge` is null for a mixed or empty group, in which
+// case the bubble falls back to the category's generic icon.
+interface CategoryEntry { count: number; badge: BadgeDef | null }
 
 // localStorage keys for the map's user layout — asset-group bubble offsets and
 // line waypoints. Keyed PER PROJECT (the `default` slot is the unsaved /
@@ -146,10 +157,20 @@ function addHandleDivIcon(color: string): L.DivIcon {
 // summed dispatch at the current snapshot — ▲ for injection, ▼ for draw.
 function assetGroupDivIcon(
   cat: AssetCategory, count: number, dx: number, dy: number, dispatchMw?: number | null,
+  badge?: BadgeDef | null,
 ): L.DivIcon {
-  const { Icon, color } = CATEGORY_STYLE[cat]
+  const { Icon: CategoryIcon, color } = CATEGORY_STYLE[cat]
+  // A group whose carriers all share one badge gets that badge's pictogram —
+  // a solar-only group is a sun, not the generic renewables turbine. A mixed
+  // group keeps the category icon, because no single icon is honest for it.
+  const Icon = badge?.Icon ?? CategoryIcon
+  // `color` via style, not the `color` prop: BadgeIcon (unlike CategoryIcon)
+  // may be H2Icon, a custom SVG that doesn't accept a `color` prop. Both
+  // lucide icons and H2Icon paint via `currentColor`, so setting the CSS
+  // `color` on the root <svg> — even through renderToStaticMarkup's static
+  // markup — resolves correctly once Leaflet inlines it into the live DOM.
   const iconSvg = ReactDOMServer.renderToStaticMarkup(
-    <Icon size={14} color={color} strokeWidth={2} />
+    <Icon size={14} style={{ color }} strokeWidth={2} />
   )
   const showDispatch = dispatchMw != null && Number.isFinite(dispatchMw)
   const dispatchHtml = showDispatch
@@ -204,24 +225,18 @@ interface MapCanvasProps {
   mode: Exclude<CanvasView, 'blank'>
 }
 
-// PyPSA convention: bus.x = longitude, bus.y = latitude. Leaflet expects
-// [lat, lng] tuples — convertCoord centralises the swap.
-function busLatLng(b: Bus): [number, number] | null {
-  const lat = Number(b.y)
-  const lng = Number(b.x)
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null
-  return [lat, lng]
-}
-
 // One-shot helper that fits the map view to the network bounds the first
 // time data lands. Subsequent renders don't re-fit so the user's pan/zoom
 // is preserved.
-function FitToNetwork({ buses }: { buses: Bus[] }) {
+//
+// `suspended` is true while click-to-place is running. Without it, placing the
+// first bus makes `points.length === 1` and this calls setView(..., 11) —
+// snapping the map to that bus while the user is lining up the next click.
+function FitToNetwork({ buses, suspended }: { buses: Bus[]; suspended: boolean }) {
   const map = useMap()
   const fittedRef = useRef(false)
   useEffect(() => {
-    if (fittedRef.current) return
+    if (fittedRef.current || suspended) return
     const points = buses.map(busLatLng).filter((p): p is [number, number] => p !== null)
     if (points.length === 0) return
     if (points.length === 1) {
@@ -230,7 +245,26 @@ function FitToNetwork({ buses }: { buses: Bus[] }) {
       map.fitBounds(L.latLngBounds(points), { padding: [40, 40] })
     }
     fittedRef.current = true
-  }, [buses, map])
+  }, [buses, map, suspended])
+  return null
+}
+
+// Click-to-place. Mounted inside <MapContainer> only while placement is
+// running, so the map has no click handler at all the rest of the time.
+//
+// Leaflet does not fire `click` at the end of a drag — the same guarantee the
+// bus markers already rely on (see the comment above the bus Marker layer) —
+// so panning to find a location cannot drop a bus by accident.
+function ClickToPlace({ onPick }: { onPick: (lat: number, lng: number) => void }) {
+  const map = useMapEvents({
+    click: (e) => onPick(e.latlng.lat, e.latlng.lng),
+  })
+  useEffect(() => {
+    const el = map.getContainer()
+    const previous = el.style.cursor
+    el.style.cursor = 'crosshair'
+    return () => { el.style.cursor = previous }
+  }, [map])
   return null
 }
 
@@ -247,7 +281,7 @@ function FitToNetwork({ buses }: { buses: Bus[] }) {
 interface AssetGroupLayerProps {
   busByName: Map<string, Bus>
   visibleGroups: Set<string>
-  categoryCountsByBus: Map<string, Record<AssetCategory, number>>
+  categoryCountsByBus: Map<string, Record<AssetCategory, CategoryEntry>>
   onSelect: (busName: string, cat: AssetCategory) => void
   offsets: AssetOffsets
   setOffsets: (o: AssetOffsets) => void
@@ -269,7 +303,8 @@ function AssetGroupLayer({
         if (!bus) return null
         const c = busLatLng(bus)
         if (!c) return null
-        const count = categoryCountsByBus.get(busName)?.[cat] ?? 0
+        const entry = categoryCountsByBus.get(busName)?.[cat]
+        const count = entry?.count ?? 0
         if (count === 0) return null
 
         const offset = offsets[id] ?? CATEGORY_STYLE[cat]
@@ -282,7 +317,7 @@ function AssetGroupLayer({
             key={id}
             position={c}
             draggable
-            icon={assetGroupDivIcon(cat, count, offset.dx, offset.dy, dispatchMw)}
+            icon={assetGroupDivIcon(cat, count, offset.dx, offset.dy, dispatchMw, entry?.badge)}
             eventHandlers={{
               click: () => onSelect(busName, cat),
               dragend: (e) => {
@@ -553,8 +588,15 @@ function PolylineCtxMenu({
 // marker / line / asset bubble below) can read the per-snapshot results
 // overlay via useCanvasResults().
 function MapCanvasInner({ mode }: MapCanvasProps) {
-  const { setSelectedComponent, currentProject } = useUIStore()
+  const { setSelectedComponent, currentProject, activeSlidePanel, paletteMode } = useUIStore()
   const qc = useQueryClient()
+  // True unless a higher-priority overlay (a slide panel or the command
+  // palette) is open. Gates every piece of placement UI — the empty-state /
+  // chip panel, the placement strip, AND the ClickToPlace map-click handler
+  // — so a click landing on map exposed behind an open modal can't silently
+  // place a bus with no visible indicator, and so the strip can't float on
+  // top of the command palette.
+  const placementUiAllowed = !activeSlidePanel && paletteMode === null
   // Per-snapshot results overlay (LOPF / AC PF dispatch + line loading).
   // `enabled` is false unless the user turns the overlay on in SnapshotPicker.
   const results = useCanvasResults()
@@ -576,25 +618,95 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     return m
   }, [buses])
 
-  // Warn once if many buses are missing usable coordinates — otherwise the
-  // user just sees an empty map and wonders why nothing rendered.
-  const missingWarnedRef = useRef(false)
-  useEffect(() => {
-    if (missingWarnedRef.current) return
-    if ((buses as Bus[]).length === 0) return
-    const missing = (buses as Bus[]).filter(b => busLatLng(b) === null).length
-    if (missing > 0 && missing >= (buses as Bus[]).length / 2) {
-      toast(`Map view: ${missing} of ${(buses as Bus[]).length} buses have no coordinates — they're hidden.`,
-        { icon: '🌍', duration: 4500 })
-    }
-    missingWarnedRef.current = true
-  }, [buses])
+  // Buses still at PyPSA's (0, 0) default. Derived on every render (D2) — the
+  // previous code toasted this once per mount and then forgot it, which is
+  // most of why a network of unplaced buses read as a broken basemap.
+  const unplaced = useMemo(() => unplacedBusNames(buses as Bus[]), [buses])
 
+  // Set by UnplacedBusesPanel / the placement strip; consumed by ClickToPlace
+  // and by FitToNetwork's `suspended` prop.
+  const [placing, setPlacing] = useState(false)
+
+  // Mirror `placing` into the shared rescale store so RescaleDialogHost (at
+  // App.tsx level, see store/rescaleStore.ts) knows to withhold the modal
+  // while click-to-place is running — a Dialog stealing focus mid-click
+  // would break B5. Two effects rather than one: the first keeps the store
+  // in lockstep with every `placing` transition; the second unconditionally
+  // clears it on unmount, covering the case where the user switches the
+  // canvas away from the map (App.tsx swaps MapCanvas out for TopologyCanvas
+  // on `canvasView === 'blank'`) WHILE placement is still active — without
+  // it, `placementActive` would stay stuck `true` and the dialog would never
+  // open again for the rest of the session.
+  useEffect(() => {
+    useRescaleStore.getState().setPlacementActive(placing)
+  }, [placing])
+  useEffect(() => {
+    return () => { useRescaleStore.getState().setPlacementActive(false) }
+  }, [])
+
+  // Bus names the user has deferred via "Skip", in no particular order.
+  // `placingBus` (below `unplaced` is already declared, so no use-before-
+  // declare) is the first still-unplaced bus that hasn't been skipped,
+  // falling back to the very first unplaced bus once every remaining one has
+  // been skipped over — so skipping only ever REORDERS the queue, it never
+  // drops a bus. Recomputed from `unplaced` on every render rather than a
+  // stale local queue: placing a bus removes it from `unplaced` when the
+  // buses query invalidates, which advances the picker on its own.
+  //
+  // This diverges from the task brief's `unplaced[skipped] ?? unplaced[0]`
+  // numeric-index scheme. That index is a position into an array that
+  // shrinks by one on every successful placement, so "skip" followed by a
+  // "place" silently re-points the same index at whichever bus shifted into
+  // that slot — not the bus the user actually meant to defer. It still
+  // terminates and never resolves to nothing while buses remain (the
+  // `?? unplaced[0]` fallback catches every out-of-bounds case), so no bus
+  // is ever permanently unreachable — but the Skip button ends up disabled
+  // for the rest of the session as soon as the numeric pointer runs off the
+  // shrinking tail, even with several buses still left to place, which reads
+  // as broken. Tracking skipped bus NAMES instead of an index makes "has
+  // this specific bus been skipped" well-defined regardless of how the
+  // array reshuffles, and keeps Skip enabled as long as more than one
+  // unplaced bus remains.
+  //
+  // The derivation itself lives in utils/placement.ts (nextBusToPlace /
+  // canSkip) — a separate pure module with its own test coverage, imported
+  // here rather than re-inlined.
+  const [skippedNames, setSkippedNames] = useState<Set<string>>(new Set())
+  const placingBus = placing ? nextBusToPlace(unplaced, skippedNames) : undefined
+
+  // Escape exits placement mode without waiting for the last bus. Clears the
+  // skip set too, so a later "Place buses on the map" starts from a clean
+  // queue rather than resuming an order the user may not remember setting.
+  //
+  // Ignore Escape events that originate from an editable element (a focused
+  // input/textarea/select, or anything contenteditable). Without this check,
+  // a bare `window` keydown listener catches EVERY Escape press — including
+  // one meant to close the command palette's search box or blur a form
+  // field — and silently ends the placement session underneath it.
+  useEffect(() => {
+    if (!placing) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return
+      setPlacing(false); setSkippedNames(new Set())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [placing])
+
+  // Impedance-rescale previews from this component's write paths (drag +
+  // recalc) are queued into the app-wide store via `ingestRescale` — see
+  // store/rescaleStore.ts / utils/rescaleActions.ts for why this is no
+  // longer a local `useState` here. RescaleDialogHost (rendered once at
+  // App.tsx level) owns the actual dialog + apply/decline handling.
   const recalcMut = useMutation({
     mutationFn: () => networkApi.recalculateLineLengths(),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       toast.success(`Line lengths recalculated · ${r.updated} updated, ${r.skipped} skipped`)
+      ingestRescale(qc, r.rescale)
     },
     onError: () => toast.error('Could not recalculate line lengths'),
   })
@@ -624,7 +736,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       const payload: Partial<Bus> = { ...cached, x: lng, y: lat }
       return networkApi.updateBus(name, payload)
     },
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
       // The backend's update_bus already recomputed the lengths of THIS bus's
       // connected lines (_recompute_lengths_for_bus, scoped to the moved bus)
       // and logged a changelog entry. We previously also called the global
@@ -635,6 +747,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       appLog('INFO', `Bus '${vars.name}' moved · connected line lengths recalculated.`)
+      ingestRescale(qc, data.rescale)
     },
     onError: (e: Error) => toast.error(`Move failed: ${e.message}`),
   })
@@ -647,21 +760,66 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     )
   }
 
-  // ── Per-bus asset-category counts (for the right-click menu + group markers).
-  // Mirrors the blank canvas: Thermal / Renewables / Storage / Load. Stores
-  // the live counts so the menu stays accurate after add / delete operations.
+  // Leave placement mode when there is nothing left to place. The toast
+  // OFFERS the line-length recalculation (D6) rather than running it —
+  // `handleRecalc` still confirms before it writes, so accepting the offer
+  // stays two deliberate clicks away from the model edit. Declared here
+  // (below `handleRecalc`) rather than beside the rest of the placement
+  // state above it, so the reference below isn't a use-before-define.
+  useEffect(() => {
+    // `(buses as Bus[]).length > 0` matters: switching project mid-placement
+    // changes the query key, `data` falls back to `[]` for an instant, and
+    // `unplaced.length === 0` is ALSO true for a genuinely empty bus list —
+    // without this guard the user gets a false "Every bus now has a
+    // location" toast offering a line-length rewrite against the NEW
+    // project's (empty) network.
+    if (placing && unplaced.length === 0 && (buses as Bus[]).length > 0) {
+      setPlacing(false)
+      setSkippedNames(new Set())
+      toast.success(
+        (t) => (
+          <span className="flex items-center gap-2">
+            Every bus now has a location.
+            <button
+              type="button"
+              onClick={() => { toast.dismiss(t.id); handleRecalc() }}
+              className="px-2 py-0.5 rounded border border-border text-[11px] hover:bg-border/30"
+            >Recalculate line lengths</button>
+          </span>
+        ),
+        { duration: 8000 },
+      )
+    }
+  }, [placing, unplaced.length, buses])
+
+  // ── Per-bus asset-category counts + resolved icon (for the right-click menu
+  // + group markers). Mirrors the blank canvas: Thermal / Renewables /
+  // Storage / Load. Count AND icon per bus × category. The badge is resolved
+  // here, once, so the decision lives in one place and consumers just render
+  // it. A parallel map keyed the same way would be the same drift risk one
+  // level down.
   const categoryCountsByBus = useMemo(() => {
-    const out = new Map<string, Record<AssetCategory, number>>()
+    const carriers = new Map<string, Record<AssetCategory, string[]>>()
+    const out = new Map<string, Record<AssetCategory, CategoryEntry>>()
     for (const b of buses as Bus[]) {
-      out.set(b.name, { Thermal: 0, Renewables: 0, Storage: 0, Load: 0 })
+      carriers.set(b.name, { Thermal: [], Renewables: [], Storage: [], Load: [] })
     }
     for (const g of generators as Generator[]) {
-      const r = out.get(g.bus); if (!r) continue
-      if (isRenewableCarrier(g.carrier)) r.Renewables += 1; else r.Thermal += 1
+      const r = carriers.get(g.bus); if (!r) continue
+      if (isRenewableCarrier(g.carrier)) r.Renewables.push(g.carrier)
+      else r.Thermal.push(g.carrier)
     }
-    for (const l of loads as Load[]) { const r = out.get(l.bus); if (r) r.Load += 1 }
-    for (const s of sus as StorageUnit[]) { const r = out.get(s.bus); if (r) r.Storage += 1 }
-    for (const s of stores as Store[]) { const r = out.get(s.bus); if (r) r.Storage += 1 }
+    for (const l of loads as Load[]) { const r = carriers.get(l.bus); if (r) r.Load.push(l.carrier ?? '') }
+    for (const s of sus as StorageUnit[]) { const r = carriers.get(s.bus); if (r) r.Storage.push(s.carrier) }
+    for (const s of stores as Store[]) { const r = carriers.get(s.bus); if (r) r.Storage.push(s.carrier) }
+    for (const [busName, byCat] of carriers) {
+      out.set(busName, {
+        Thermal:    { count: byCat.Thermal.length,    badge: uniformBadge(byCat.Thermal) },
+        Renewables: { count: byCat.Renewables.length, badge: uniformBadge(byCat.Renewables) },
+        Storage:    { count: byCat.Storage.length,    badge: uniformBadge(byCat.Storage) },
+        Load:       { count: byCat.Load.length,       badge: uniformBadge(byCat.Load) },
+      })
+    }
     return out
   }, [buses, generators, loads, sus, stores])
 
@@ -766,7 +924,20 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           </>
         )}
 
-        <FitToNetwork buses={buses as Bus[]} />
+        <FitToNetwork buses={buses as Bus[]} suspended={placing} />
+
+        {placing && placingBus && placementUiAllowed && (
+          <ClickToPlace onPick={(lat, lng) => {
+            // `unplaced` only shrinks after the PUT round-trips and the buses
+            // query refetches, so without this guard two quick clicks both
+            // target the current `placingBus` — the second overwrites the
+            // first instead of advancing to the next bus. Ignoring the click
+            // while a placement PUT is already in flight makes each click
+            // advance the queue by exactly one bus.
+            if (updateBusPosMut.isPending) return
+            updateBusPosMut.mutate({ name: placingBus, lat, lng })
+          }} />
+        )}
 
         {/* Lines — colour by the lower of the two bus voltages. Routable. */}
         {(lines as LineT[]).map(line => {
@@ -993,13 +1164,66 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         </button>
       </div>
 
+      {/* Hidden while a slide panel or the command palette is open — both are
+          higher-priority z-[500]/z-[300] overlays and the panel's z-[900]
+          would otherwise float on top of them (same guard MapModeSwitcher
+          applies for the same reason). */}
+      {placementUiAllowed && (
+        <UnplacedBusesPanel
+          unplacedCount={unplaced.length}
+          totalCount={(buses as Bus[]).length}
+          placing={placing}
+          onStartPlacing={() => setPlacing(true)}
+        />
+      )}
+
+      {/* The rescale consent dialog used to render here. It's now a single
+          app-wide instance (RescaleDialogHost, mounted once in App.tsx) so
+          previews from PropertiesPanel / TopologyCanvas aren't silently
+          dropped — see store/rescaleStore.ts. The `placing` → `placementActive`
+          sync effect above this component's `placing` state declaration is
+          how that shared instance still knows not to open mid-click. */}
+
+      {/* Placement strip. z-[900], not the brief's z-[500]: Leaflet's own
+          zoom control sits at z-800 (documented pitfall in this codebase —
+          "Floating UI z-index < 800 over Leaflet map"), and z-500 would
+          render the strip UNDER it. Also gated on `placementUiAllowed` — the
+          UnplacedBusesPanel guard just above applies to this strip too, so a
+          Cmd+K command-palette open (z-500) can't be covered by this strip's
+          higher z-[900], and ClickToPlace (gated the same way) can't leave a
+          bus-placing click live on the map with no visible indicator. */}
+      {placing && placingBus && placementUiAllowed && (
+        <div
+          className="absolute z-[900] left-1/2 -translate-x-1/2 flex items-center gap-3 px-3 py-2
+                     bg-bg border border-border rounded-lg shadow-lg text-xs"
+          style={{ bottom: 24 }}
+        >
+          <span className="text-text">
+            Placing <span className="font-mono font-medium">{placingBus}</span> — click the map
+            <span className="text-muted"> ({unplaced.length} left)</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setSkippedNames(prev => new Set(prev).add(placingBus))}
+            disabled={!canSkip(unplaced, skippedNames)}
+            className="px-2 py-1 rounded border border-border text-text hover:bg-border/30
+                       transition-colors disabled:opacity-35"
+          >Skip</button>
+          <button
+            type="button"
+            onClick={() => { setPlacing(false); setSkippedNames(new Set()) }}
+            className="px-2 py-1 rounded bg-accent text-white hover:opacity-90 transition-opacity"
+          >Done</button>
+        </div>
+      )}
+
       {/* Bus right-click context menu — same layout & options as the blank
           canvas equivalent. Local visibleGroups state means the two views
           stay decoupled (mirrors the layout decoupling). */}
       {ctxMenu && (() => {
         const counts = categoryCountsByBus.get(ctxMenu.busName)
         const cats: AssetCategory[] = ['Thermal', 'Renewables', 'Storage', 'Load']
-        const withAssets = cats.filter(c => (counts?.[c] ?? 0) > 0)
+        const withAssets = cats.filter(c => (counts?.[c]?.count ?? 0) > 0)
         const expandedIds = withAssets.map(c => `${ctxMenu.busName}::${c}`)
         const allVisible = expandedIds.length > 0 && expandedIds.every(id => visibleGroups.has(id))
         const anyVisible = expandedIds.some(id => visibleGroups.has(id))
@@ -1020,6 +1244,16 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-border/30 transition-colors text-text"
             >
               Properties
+            </button>
+            <button
+              onClick={() => {
+                useUIStore.getState().requestAssetDetail({ componentClass: 'Bus', name: ctxMenu.busName })
+                setCtxMenu(null)
+              }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-border/30 transition-colors text-text"
+            >
+              <ExternalLink size={12} />
+              View results
             </button>
             {withAssets.length > 0 && (
               <div className="px-3 py-1 flex gap-1.5 border-b border-border mb-1">
@@ -1046,7 +1280,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               </div>
             )}
             {cats.map(cat => {
-              const count = counts?.[cat] ?? 0
+              const count = counts?.[cat]?.count ?? 0
               const id = `${ctxMenu.busName}::${cat}`
               const isVisible = visibleGroups.has(id)
               const cfg = CATEGORY_STYLE[cat]

@@ -32,6 +32,14 @@ CARRIER_CATALOG: dict[str, dict] = {
     "lignite":        {"nice_name": "Lignite",     "color": "#826837", "co2_emissions": 0.41},
     "oil":            {"nice_name": "Oil",         "color": "#262626", "co2_emissions": 0.267},
     "nuclear":        {"nice_name": "Nuclear",     "color": "#ff8c00", "co2_emissions": 0.0},
+    # Fuel-level carriers. `gas` is an ordinary PyPSA-Eur carrier name, and its
+    # absence is what made a real project report 0 tCO2 for a 300 MW gas plant:
+    # ensure_carrier fell back to co2_emissions=0.0 and nothing warned. The
+    # factors match this file's own CCGT/OCGT (natural gas) and oil, rather
+    # than being invented — a wrong factor is worse than a missing one because
+    # it looks authoritative.
+    "gas":            {"nice_name": "Natural Gas", "color": "#e0986c", "co2_emissions": 0.187},
+    "diesel":         {"nice_name": "Diesel",      "color": "#3b3b3b", "co2_emissions": 0.267},
     # Hydrogen & fuels
     "H2":             {"nice_name": "Hydrogen",         "color": "#dd2727", "co2_emissions": 0.0},
     "H2 electrolysis": {"nice_name": "H2 Electrolysis", "color": "#ff6361", "co2_emissions": 0.0},

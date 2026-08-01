@@ -19,11 +19,23 @@ ambiguous and you debug two things at once.
 
 ## 0. Hard rules
 
-1. **Never point either storage variable at `Documents`.** Set **both**
-   `PYPSAGUI_APP_DATA_DIR` *and* `PYPSAGUI_PROJECTS_ROOT`. The first moves the
-   database, log, lock and *flat* store; only the second governs projects.
-   Setting one and assuming isolation put seven throwaway projects into a real
-   Documents folder once. The harnesses refuse to start unless both are set.
+1. **Set all THREE isolation variables**, and never point any at `Documents`.
+   `PYPSAGUI_APP_DATA_DIR` moves the database *default*, log, lock and *flat*
+   store; `PYPSAGUI_PROJECTS_ROOT` governs projects — setting one and assuming
+   isolation put seven throwaway projects into a real Documents folder once.
+
+   `DATABASE_URL` is the third, and this run-book used to omit it.
+   `settings.py` declares `env_file=backend\.env`, and pydantic-settings ranks
+   the env file **above** the `default_factory` that reads
+   `PYPSAGUI_APP_DATA_DIR` — so the cwd-relative `DATABASE_URL` in `.env` wins
+   and the auth database lands next to wherever the harness was launched. On
+   macOS that produced a stray `auth_dev.db` at the repo root, a file on the
+   credential gate's own forbidden list because it carries a password hash.
+
+   `backend\smoke\isolation.py` is the single guard all three harnesses call;
+   it refuses to start unless every variable is set and disposable, and also
+   refuses bare `PROJECTS_ROOT` / `FLAT_PROJECTS_ROOT` / `LEGACY_ROOT`, which
+   pydantic binds *above* the `PYPSAGUI_*` override.
 2. **Never write to or delete under `pypsa-gui\backend\projects\`.**
 3. **`POST /api/projects/{name}` is a destructive save**, not a load.
 4. **`npm run build` before any frontend check** — the app serves the built SPA
@@ -107,6 +119,8 @@ $env:COLD = "$PWD\pypsa-gui\backend\smoke\accept_coldstart.py"
 $env:SHUT = "$PWD\pypsa-gui\backend\smoke\accept_shutdown.py"
 $env:PYPSAGUI_APP_DATA_DIR = "$env:ACC\appdata"
 $env:PYPSAGUI_PROJECTS_ROOT = "$env:ACC\projects"
+# Forward slashes on purpose: this is a SQLAlchemy URL, not a Windows path.
+$env:DATABASE_URL = "sqlite+pysqlite:///$($env:ACC -replace '\\','/')/appdata/acceptance.db"
 ```
 
 Verify `$env:ACC` is **not** inside a OneDrive-redirected folder. Check where

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import math
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,7 @@ from models.schemas import (
     BusCreate,
     CarrierCreate,
     GeneratorCreate,
+    ImpedanceRescaleRequest,
     InvestmentPeriods,
     LineCreate,
     LinkCreate,
@@ -214,12 +215,31 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         merged = _merge_partial_update(n, attr, name, kwargs)
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
-        n.remove(component_class, name)
         new_name = merged.pop("name", name)
-        n.add(component_class, new_name, **merged)
+        # Refuse to rename onto an occupied name. Without this the remove+add
+        # below silently destroyed the source component and (once the rename
+        # goes through PyPSA) would drag its dependents onto the target — a
+        # merge the user never asked for, reported as a 200.
+        if new_name != name and new_name in df.index:
+            raise HTTPException(409, f"{component_class} '{new_name}' already exists")
+        n.remove(component_class, name)
+        # Re-add under the OLD name and rename separately. A rename by
+        # remove+add does NOT re-point the components that REFER to this one:
+        # `loads.bus`, `generators.bus`, `lines.bus0/bus1` (and `carrier` on
+        # everything, for a Carrier rename) keep the old string, so renaming a
+        # bus orphaned everything attached to it. The orphans are invisible
+        # until the preflight reports `bus_ref_unknown`, and contribute nothing
+        # to the solve in the meantime. PyPSA's `rename_component_names` is the
+        # primitive that re-points dependents — and it also invalidates the
+        # cached `n.components` accessors and sub-network membership that a
+        # manual column rewrite would leave stale. `POST /buses/{name}/rename`
+        # already used it; this path is the one the Properties panel's edit
+        # cards take, and it did not.
+        n.add(component_class, name, **merged)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.
         if new_name != name:
+            n.rename_component_names(component_class, **{name: new_name})
             vintage_service.rename_asset(n, component_class, name, new_name)
             # Same fix for the time-series store — _user_ts keys carry the
             # column name, and without this the profile would be silently
@@ -295,6 +315,27 @@ def _bus_coord(n, bus_name: str) -> tuple[float, float] | None:
         return None
     if not (math.isfinite(x) and math.isfinite(y)):
         return None
+    # PyPSA's Bus.x / Bus.y default to 0.0, so the exact pair means "never
+    # set", not "the Gulf of Guinea". Without this, every line touching an
+    # unplaced bus is rewritten to the great-circle distance to Null Island
+    # and stored as fact — see tests/test_line_lengths.py and
+    # docs/superpowers/specs/2026-07-30-unplaced-buses-map-design.md.
+    #
+    # BOTH exactly zero: a bus at (0, 51.478) is Greenwich and stays valid.
+    if x == 0.0 and y == 0.0:
+        return None
+    # Mirrors the range check in frontend/src/utils/geo.ts's busLatLng. The
+    # frontend hides a bus outside these bounds and counts it as "unplaced"
+    # in UnplacedBusesPanel, but until this check _bus_coord had no range
+    # check at all — a bus at y == 91 was hidden by the map and reported as
+    # unplaced while recalculate_lengths still measured a haversine distance
+    # to it and wrote that into n.lines.length. Reachable in practice:
+    # PropertiesPanel's Longitude/Latitude fields are unbounded NumInputs and
+    # BusCreate.x / BusCreate.y (models/schemas.py) are plain unbounded
+    # floats. Do not remove the frontend's check when reading this — both
+    # layers must reject out-of-range coordinates.
+    if not (-90.0 <= y <= 90.0 and -180.0 <= x <= 180.0):
+        return None
     return x, y
 
 
@@ -306,24 +347,106 @@ def _line_haversine_km(n, bus0: str, bus1: str) -> float | None:
     return _haversine_km(c0[0], c0[1], c1[0], c1[1])
 
 
-def _recompute_lengths_for_bus(n, bus_name: str) -> int:
+_IMPEDANCE_FIELDS = ("r", "x", "b")
+
+
+def _impedance_preview(
+    line_name: str, old_length: float, new_length: float, old: dict[str, float]
+) -> dict | None:
     """
-    Rewrite line.length for every line whose bus0 or bus1 == bus_name. The
-    caller must hold PyPSAService.get_lock(). Returns the count updated.
+    What a per-km-preserving rescale WOULD do. Never mutates.
+
+    Returns None when there is no choice to offer — an all-zero impedance
+    scales to zero whatever the length does.
+
+    The relative change is identical for r, x and b (each is multiplied by the
+    same length ratio), so one number describes all three.
+
+    `rel_change` is a MAGNITUDE (`abs(ratio - 1.0)`), not a signed delta — a
+    shrinking line reports the same positive number as a growing one at the
+    same ratio. This is deliberate, not an oversight: downstream, previews
+    get partitioned by `rel_change <= <threshold>` to decide what to apply
+    WITHOUT asking the user. If this were signed, a line whose length HALVED
+    (ratio 0.5, signed change -0.5) would read as -0.5, which is <= any
+    positive threshold, and its impedance would be silently halved with no
+    prompt — the exact silent rewrite this feature exists to prevent. Keep
+    the `abs()`; a shrink must clear the same bar a growth does.
+    """
+    if all(float(old.get(k, 0.0) or 0.0) == 0.0 for k in _IMPEDANCE_FIELDS):
+        return None
+
+    reason: str | None = None
+    if not (old_length > 0):
+        reason = "old_length<=0"      # per-km undefined — nothing to preserve
+    elif not (new_length > 0):
+        reason = "new_length<=0"      # would zero the impedance
+
+    if reason is not None:
+        new = dict(old)
+        rel = 0.0
+    else:
+        ratio = new_length / old_length
+        new = {k: float(old.get(k, 0.0) or 0.0) * ratio for k in _IMPEDANCE_FIELDS}
+        # Magnitude, on purpose — see the docstring above. Do NOT drop the
+        # abs(): a shrinking line (ratio < 1) must report the same positive
+        # rel_change a growing line at the same ratio would, or a threshold
+        # comparison downstream lets shrinks slip through unprompted.
+        rel = abs(ratio - 1.0)
+
+    return {
+        "name": line_name,
+        "old_length": float(old_length),
+        "new_length": float(new_length),
+        "old": {k: float(old.get(k, 0.0) or 0.0) for k in _IMPEDANCE_FIELDS},
+        "new": new,
+        "rel_change": rel,
+        "skipped_reason": reason,
+    }
+
+
+class _RecomputeResult(NamedTuple):
+    """
+    `_recompute_lengths_for_bus` counts two different things and they are NOT
+    interchangeable: `updated` is how many lines actually had `length`
+    rewritten (every line that resolved a haversine distance); `previews` is
+    the (possibly shorter) list of impedance-rescale offers, which
+    `_impedance_preview` omits for an all-zero-impedance line even though its
+    length WAS rewritten. A changelog that reports `len(previews)` undercounts
+    whenever a zero-impedance line is among the ones touched.
+    """
+    updated: int
+    previews: list[dict]
+
+
+def _recompute_lengths_for_bus(n, bus_name: str) -> _RecomputeResult:
+    """
+    Rewrite line.length for every line touching `bus_name`, and return both
+    the rewrite count and one preview per line whose impedance a
+    per-km-preserving rescale would change.
+
+    Length is rewritten here because it follows from geometry. Impedance is a
+    modelling choice and is only PREVIEWED — see _impedance_preview and
+    POST /lines/rescale_impedances. The caller must hold PyPSAService.get_lock().
     """
     if n.lines.empty:
-        return 0
+        return _RecomputeResult(0, [])
     mask = (n.lines["bus0"] == bus_name) | (n.lines["bus1"] == bus_name)
     updated = 0
+    previews: list[dict] = []
     for line_name in n.lines.index[mask]:
         b0 = str(n.lines.at[line_name, "bus0"])
         b1 = str(n.lines.at[line_name, "bus1"])
         d = _line_haversine_km(n, b0, b1)
         if d is None:
             continue
+        old_length = float(n.lines.at[line_name, "length"])
+        old = {k: float(n.lines.at[line_name, k]) for k in _IMPEDANCE_FIELDS}
         n.lines.at[line_name, "length"] = float(d)
         updated += 1
-    return updated
+        p = _impedance_preview(str(line_name), old_length, float(d), old)
+        if p is not None:
+            previews.append(p)
+    return _RecomputeResult(updated, previews)
 
 
 def _xlsx_response(df: pd.DataFrame, fname: str) -> StreamingResponse:
@@ -415,15 +538,23 @@ def update_bus(name: str, bus: BusCreate):
     # Auto-rewrite line lengths for any line touching the moved bus. The user
     # can still override later via PUT /lines/{name}. Use the post-update name
     # (rename-aware) so we hit the renamed bus, not its ghost.
+    rescale: list[dict] = []
     if coord_changed:
         new_name = result.get("name", name)
         with PyPSAService.get_lock():
-            updated = _recompute_lengths_for_bus(n, new_name)
-        if updated:
+            recompute = _recompute_lengths_for_bus(n, new_name)
+        rescale = recompute.previews
+        # Log the true rewrite count, not len(rescale): a zero-impedance line
+        # still has its length rewritten but _impedance_preview omits it (no
+        # rescale to offer), so len(rescale) alone would undercount whenever
+        # such a line is among the ones touched.
+        if recompute.updated:
             change_log_service.log(
                 "update", "Lines", "(auto)",
-                f"Auto-rewrote {updated} line length(s) after bus '{new_name}' moved",
+                f"Auto-rewrote {recompute.updated} line length(s) after bus '{new_name}' moved",
             )
+    if isinstance(result, dict):
+        result = {**result, "rescale": rescale}
     return result
 
 
@@ -559,10 +690,11 @@ def recalculate_line_lengths():
     """
     n = PyPSAService.get_network()
     if n.lines.empty:
-        return {"updated": 0, "skipped": 0, "total": 0}
+        return {"updated": 0, "skipped": 0, "total": 0, "rescale": []}
 
     updated = 0
     skipped = 0
+    previews: list[dict] = []
     with PyPSAService.get_lock():
         for line_name in n.lines.index:
             b0 = str(n.lines.at[line_name, "bus0"]) if "bus0" in n.lines.columns else ""
@@ -571,14 +703,49 @@ def recalculate_line_lengths():
             if d_km is None:
                 skipped += 1
                 continue
+            old_length = float(n.lines.at[line_name, "length"])
+            old = {k: float(n.lines.at[line_name, k]) for k in _IMPEDANCE_FIELDS}
             n.lines.at[line_name, "length"] = float(d_km)
             updated += 1
+            p = _impedance_preview(str(line_name), old_length, float(d_km), old)
+            if p is not None:
+                previews.append(p)
 
     change_log_service.log(
         "update", "Lines", "(haversine)",
         f"Recalculated line lengths from bus coordinates: {updated} updated, {skipped} skipped",
     )
-    return {"updated": updated, "skipped": skipped, "total": int(len(n.lines))}
+    return {"updated": updated, "skipped": skipped, "total": int(len(n.lines)), "rescale": previews}
+
+
+@router.post("/lines/rescale_impedances")
+def rescale_impedances(req: ImpedanceRescaleRequest):
+    """
+    Write the previewed impedances for an explicit list of lines.
+
+    Deliberately takes the VALUES rather than recomputing them: by the time the
+    user consents, the length has already been rewritten, so the old per-km is
+    no longer derivable from the network. Recomputing here would silently use
+    the new length as the old one and scale by 1.
+    """
+    n = PyPSAService.get_network()
+    updated = 0
+    skipped: list[dict] = []
+    with PyPSAService.get_lock():
+        for entry in req.lines:
+            if entry.name not in n.lines.index:
+                skipped.append({"name": entry.name, "reason": "unknown-line"})
+                continue
+            n.lines.at[entry.name, "r"] = float(entry.r)
+            n.lines.at[entry.name, "x"] = float(entry.x)
+            n.lines.at[entry.name, "b"] = float(entry.b)
+            updated += 1
+    if updated:
+        change_log_service.log(
+            "update", "Lines", "(rescale)",
+            f"Rescaled impedance on {updated} line(s) to preserve per-km values after a length change",
+        )
+    return {"updated": updated, "skipped": skipped}
 
 
 # ── Links ────────────────────────────────────────────────────────────────────

@@ -1,0 +1,230 @@
+"""
+Changing a line's length must not silently change its per-km impedance.
+
+r/x/b are stored absolute; the properties form presents them per-km (it
+divides by length to display and multiplies back to save). Both backend paths
+that change length — a bus move and the Ruler button — rewrote ONLY length, so
+the physical per-km value silently changed by the length ratio. Click-to-place
+makes that easy to hit: LineCreate.length defaults to 1.0 km, so real geography
+rescales a hand-built network by orders of magnitude.
+
+Length stays automatic — it follows from coordinates. Impedance is a modelling
+choice and is never written without consent, so these endpoints PREVIEW and a
+separate one applies.
+"""
+from __future__ import annotations
+
+
+def _bus(client, name, x, y):
+    r = client.post("/api/network/buses", json={"name": name, "v_nom": 380.0, "x": x, "y": y})
+    assert r.status_code == 201, r.text
+
+
+def _line(client, name, bus0, bus1, length, r_ohm, x_ohm, b_s):
+    resp = client.post("/api/network/lines", json={
+        "name": name, "bus0": bus0, "bus1": bus1, "length": length,
+        "r": r_ohm, "x": x_ohm, "b": b_s, "s_nom": 500.0,
+    })
+    assert resp.status_code == 201, resp.text
+
+
+def _lines(client):
+    return {ln["name"]: ln for ln in client.get("/api/network/lines").json()}
+
+
+def test_recalculate_previews_the_rescale_without_writing_it(client):
+    _bus(client, "COLOGNE", 6.960, 50.938)
+    _bus(client, "BERLIN", 13.405, 52.520)
+    _line(client, "L1", "COLOGNE", "BERLIN", 1.0, 3.0, 17.5, 0.00015)
+
+    r = client.post("/api/network/lines/recalculate_lengths")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["updated"] == 1
+
+    (prev,) = body["rescale"]
+    assert prev["name"] == "L1"
+    assert prev["old_length"] == 1.0
+    assert 460.0 < prev["new_length"] < 490.0
+    assert prev["skipped_reason"] is None
+    # Per-km preserved: new/old == length ratio, identically for r, x and b.
+    ratio = prev["new_length"] / prev["old_length"]
+    assert abs(prev["new"]["r"] - 3.0 * ratio) < 1e-6
+    assert abs(prev["new"]["x"] - 17.5 * ratio) < 1e-6
+    assert abs(prev["new"]["b"] - 0.00015 * ratio) < 1e-9
+    assert abs(prev["rel_change"] - (ratio - 1.0)) < 1e-6
+
+    # PREVIEW ONLY. The length is rewritten (geometry); the impedance is not.
+    after = _lines(client)["L1"]
+    assert after["r"] == 3.0 and after["x"] == 17.5 and after["b"] == 0.00015
+    assert 460.0 < after["length"] < 490.0
+
+
+def test_apply_writes_only_the_named_lines(client):
+    _bus(client, "COLOGNE", 6.960, 50.938)
+    _bus(client, "BERLIN", 13.405, 52.520)
+    _line(client, "L1", "COLOGNE", "BERLIN", 1.0, 3.0, 17.5, 0.00015)
+    _line(client, "L2", "COLOGNE", "BERLIN", 1.0, 9.0, 21.0, 0.00030)
+
+    r = client.post("/api/network/lines/rescale_impedances", json={
+        "lines": [{"name": "L1", "r": 100.0, "x": 200.0, "b": 0.5}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json() == {"updated": 1, "skipped": []}
+
+    after = _lines(client)
+    assert (after["L1"]["r"], after["L1"]["x"], after["L1"]["b"]) == (100.0, 200.0, 0.5)
+    assert (after["L2"]["r"], after["L2"]["x"], after["L2"]["b"]) == (9.0, 21.0, 0.00030)
+
+
+def test_apply_reports_an_unknown_line_instead_of_creating_it(client):
+    _bus(client, "COLOGNE", 6.960, 50.938)
+    r = client.post("/api/network/lines/rescale_impedances", json={
+        "lines": [{"name": "GHOST", "r": 1.0, "x": 2.0, "b": 3.0}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json() == {"updated": 0, "skipped": [{"name": "GHOST", "reason": "unknown-line"}]}
+    assert "GHOST" not in _lines(client)
+
+
+def test_a_zero_length_line_is_reported_not_guessed(client):
+    # Per-km is undefined when the old length is 0, so there is nothing to
+    # preserve. Reporting beats inventing an impedance.
+    #
+    # The length is set to 0 by a follow-up PUT, not at creation: create_line
+    # treats length <= 0 as "not set" and auto-fills it from the haversine
+    # distance, so a line POSTed with 0.0 never actually has length 0.
+    _bus(client, "COLOGNE", 6.960, 50.938)
+    _bus(client, "BERLIN", 13.405, 52.520)
+    _line(client, "L1", "COLOGNE", "BERLIN", 1.0, 3.0, 17.5, 0.00015)
+    r = client.put("/api/network/lines/L1", json={"name": "L1", "bus0": "COLOGNE", "bus1": "BERLIN", "length": 0.0})
+    assert r.status_code == 200, r.text
+    assert _lines(client)["L1"]["length"] == 0.0, "setup failed: length is not actually 0"
+
+    body = client.post("/api/network/lines/recalculate_lengths").json()
+    (prev,) = body["rescale"]
+    assert prev["skipped_reason"] == "old_length<=0"
+    assert prev["new"] == prev["old"]
+
+
+def test_an_all_zero_impedance_line_produces_no_preview(client):
+    # Scaling zero by anything is zero — there is no choice to offer.
+    _bus(client, "COLOGNE", 6.960, 50.938)
+    _bus(client, "BERLIN", 13.405, 52.520)
+    _line(client, "L1", "COLOGNE", "BERLIN", 1.0, 0.0, 0.0, 0.0)
+
+    body = client.post("/api/network/lines/recalculate_lengths").json()
+    assert body["rescale"] == []
+
+
+def test_moving_a_bus_previews_its_connected_lines(client):
+    _bus(client, "COLOGNE", 6.960, 50.938)
+    _bus(client, "BERLIN", 13.405, 52.520)
+    _line(client, "L1", "COLOGNE", "BERLIN", 1.0, 3.0, 17.5, 0.00015)
+
+    r = client.put("/api/network/buses/BERLIN", json={
+        "name": "BERLIN", "v_nom": 380.0, "x": 2.35, "y": 48.86,   # -> Paris
+    })
+    assert r.status_code == 200, r.text
+    (prev,) = r.json()["rescale"]
+    assert prev["name"] == "L1"
+    assert prev["skipped_reason"] is None
+    assert prev["new"]["r"] > 3.0
+    # Still preview-only.
+    assert _lines(client)["L1"]["r"] == 3.0
+
+
+def test_shrinking_a_line_reports_the_positive_magnitude(client):
+    # rel_change is abs(ratio - 1.0) -- a magnitude, not a signed delta. A
+    # shrinking line must report the same positive number a growing line at
+    # the same ratio would. Every other test in this file GROWS a line (they
+    # all start at an artificial 1.0 km and move to a real haversine
+    # distance), so the shrink path was previously entirely unexercised.
+    #
+    # This matters beyond coverage: downstream, previews get partitioned by
+    # `rel_change <= <a small threshold>` to decide what applies WITHOUT
+    # asking the user. A SIGNED rel_change would let a line that shrank a
+    # lot (ratio << 1, so a large NEGATIVE number) slip under a small
+    # positive threshold and get its impedance silently rescaled with no
+    # prompt -- exactly the silent rewrite this feature exists to prevent.
+    _bus(client, "COLOGNE", 6.960, 50.938)
+    _bus(client, "ROME", 12.496, 41.903)
+    _line(client, "L1", "COLOGNE", "ROME", 1.0, 3.0, 17.5, 0.00015)
+
+    # Establish a large, real "old" length (Cologne -> Rome, ~1090 km)
+    # before shrinking it.
+    client.post("/api/network/lines/recalculate_lengths")
+    old_length = _lines(client)["L1"]["length"]
+    assert old_length > 900.0
+
+    # Move ROME to Berlin's position -- much closer to Cologne (~477 km).
+    r = client.put("/api/network/buses/ROME", json={
+        "name": "ROME", "v_nom": 380.0, "x": 13.405, "y": 52.520,
+    })
+    assert r.status_code == 200, r.text
+    (prev,) = r.json()["rescale"]
+    assert prev["name"] == "L1"
+    assert prev["old_length"] == old_length
+    assert prev["new_length"] < old_length            # genuinely shrank
+    ratio = prev["new_length"] / prev["old_length"]
+    assert ratio < 1.0
+
+    # The magnitude is reported, not the signed change.
+    assert prev["rel_change"] > 0
+    assert abs(prev["rel_change"] - abs(ratio - 1.0)) < 1e-6
+    # Materially shorter -- well above any reasonable auto-apply threshold.
+    assert prev["rel_change"] > 0.05
+
+
+def test_moving_a_bus_logs_the_true_rewrite_count_even_for_a_zero_impedance_line(client):
+    # _recompute_lengths_for_bus rewrites `length` for every line it touches,
+    # but _impedance_preview only returns an entry when the line's impedance
+    # is non-zero (an all-zero line has nothing to rescale). The changelog
+    # must log the true rewrite count, not len(rescale) -- otherwise a moved
+    # bus connected only to zero-impedance lines would undercount (or skip
+    # logging entirely) despite genuinely rewriting a line's length.
+    #
+    # A bus name/target unique to this test matters: the changelog deque is
+    # process-global and is NEVER reset between tests (conftest's
+    # _reset_backend_state resets network/timeseries/solver/undo/queue state,
+    # but not change_log_service), and test_moving_a_bus_previews_its_
+    # connected_lines above also moves a bus called BERLIN to the exact same
+    # (2.35, 48.86). Reusing either would let that earlier test's entry
+    # satisfy this assertion regardless of whether THIS fix is present.
+    _bus(client, "COLOGNE", 6.960, 50.938)
+    _bus(client, "ZURICH", 8.541, 47.377)
+    _line(client, "L1", "COLOGNE", "ZURICH", 1.0, 0.0, 0.0, 0.0)
+
+    # Precondition: the line really is zero-impedance -- that's the whole
+    # point of the scenario. If a future edit gave it non-zero r/x/b, a
+    # rescale WOULD be offered (already covered by
+    # test_moving_a_bus_previews_its_connected_lines) and this test would
+    # quietly start passing for a different reason than the one it exists
+    # to pin.
+    before_line = _lines(client)["L1"]
+    assert (before_line["r"], before_line["x"], before_line["b"]) == (0.0, 0.0, 0.0), \
+        "setup failed: line is not actually zero-impedance"
+
+    # Baseline so the post-move assertion is scoped to entries THIS move
+    # produced, not the whole accumulated (process-global, cross-test)
+    # changelog history.
+    baseline_id = max((e["id"] for e in client.get("/api/changelog/").json()), default=0)
+
+    r = client.put("/api/network/buses/ZURICH", json={
+        "name": "ZURICH", "v_nom": 380.0, "x": 11.576, "y": 48.137,   # -> Munich
+    })
+    assert r.status_code == 200, r.text
+    # No rescale to offer -- the line has zero impedance.
+    assert r.json()["rescale"] == []
+    # The length WAS rewritten...
+    assert _lines(client)["L1"]["length"] != 1.0
+
+    # ...and the changelog must say so: an empty rescale list must not mean
+    # "log nothing" or "log 0 lines rewritten". Scoped to entries with
+    # id > baseline_id, i.e. only what this test's own PUT produced.
+    new_entries = [e for e in client.get("/api/changelog/").json() if e["id"] > baseline_id]
+    assert any(
+        e["component_type"] == "Lines" and e["name"] == "(auto)"
+        and "Auto-rewrote 1 line length(s)" in e["description"]
+        for e in new_entries
+    ), f"expected a true rewrite-count changelog entry, got: {new_entries}"

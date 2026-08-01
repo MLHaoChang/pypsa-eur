@@ -947,11 +947,27 @@ class PyPSAService:
         The thread-local SOLVING ctx if a solve bound it on this thread, else the
         active ctx. `ensure=True` (mark path) materialises a fresh active ctx if
         none; `ensure=False` (read/clear path) returns None when there's no ctx.
+
+        This method predates Step 0b's session-scoped `_request_ctx` (written
+        before `adopt_process_foreground` existed): the `ensure=False` branch
+        used to read `cls._active` directly because that WAS "the active ctx"
+        at the time. Once a session's first request adopts the process
+        foreground, `adopt_process_foreground()` MOVES that same ProjectContext
+        into `_request_ctx` and clears `cls._active` to `None` — so a plain
+        `cls._active` read inside that (or any later) request always sees
+        `None` and silently reports "no transient rows", even though the
+        request-scoped ctx still carries them. Same `_request_ctx.get() or
+        cls._active` precedence `reset_network()` already uses a few lines up
+        in this file — falls back to `_active` for genuinely session-less
+        callers (solve dispatcher, eviction, direct in-process use), matches
+        the request's own ctx otherwise.
         """
         ctx = getattr(cls._solving_ctx, "ctx", None)
         if ctx is not None:
             return ctx
-        return cls._ensure_active() if ensure else cls._active
+        if ensure:
+            return cls._ensure_active()
+        return cls._request_ctx.get() or cls._active
 
     @classmethod
     def mark_transient(cls, component_class: str, name: str) -> None:
