@@ -65,6 +65,27 @@ def test_a_genuinely_zero_cost_asset_is_present(solved):
     assert pd.isna(solved.storage_units.at["bess", "overnight_cost"])
 
 
+def test_electricity_price_is_not_flat_zero_and_the_link_actually_pays_for_input(solved):
+    # The composition tests above all passed while the fixture was
+    # economically degenerate: solar's original p_nom (200) alone covered
+    # every MW of electrical demand at zero marginal cost, so `gas` never
+    # entered merit and BOTH electricity buses priced at exactly 0.00. That
+    # made `gas` a vacuous anchor (0 x anything is 0) and, worse, made
+    # `electrolyzer`'s `input_cost_eur` (which prices its bus0 draw at
+    # elec_a's marginal price) silently 0 too — collapsing
+    # `revenue_eur == gross_revenue_eur` and making the Link's netting rule
+    # (revenue = gross_revenue - input_cost) untestable. A future change
+    # that re-flattens the price must fail here, loudly, instead of quietly
+    # hollowing out every test that reads from `solved`.
+    prices = solved.buses_t.marginal_price
+    assert prices["elec_a"].mean() > 1.0
+    assert prices["elec_b"].mean() > 1.0
+
+    p0 = solved.links_t.p0["electrolyzer"]
+    input_cost = (p0 * prices["elec_a"]).sum()
+    assert input_cost > 1.0
+
+
 def test_both_extendable_and_non_extendable_are_present(solved):
     ext = solved.generators["p_nom_extendable"]
     assert ext.any() and not ext.all()

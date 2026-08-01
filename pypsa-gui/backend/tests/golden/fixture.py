@@ -69,10 +69,19 @@ def build_golden_network() -> pypsa.Network:
         build_year=GOLDEN_PERIODS[0],
     )
     # --- the shape that works: capital_cost supplied directly, NOT extendable
+    # p_nom is deliberately BELOW total electrical demand (150 + ~28.6 MW the
+    # electrolyzer draws through the line) — a p_nom of 200 covered the whole
+    # load at zero marginal cost, so `gas` never entered merit, priced both
+    # electricity buses at exactly 0.00, and made every downstream check on
+    # `gas` (and on `electrolyzer.input_cost_eur`, which reads elec_a's price)
+    # vacuous: 0 x anything is 0 whether the code under test is right or
+    # wrong. Cost parameterisation (capital_cost=27_500.0, non-extendable) is
+    # unchanged — only the size, so solar still can't be built/shrunk by the
+    # LP and still exercises the direct-capital_cost shape.
     n.add(
         "Generator", "solar",
         bus="elec_b", carrier="solar",
-        p_nom=200.0, p_nom_extendable=False,
+        p_nom=60.0, p_nom_extendable=False,
         marginal_cost=0.0, capital_cost=27_500.0,
         build_year=GOLDEN_PERIODS[0],
     )
@@ -100,7 +109,13 @@ def build_golden_network() -> pypsa.Network:
         max_hours=4.0, capital_cost=0.0, marginal_cost=0.0,
     )
 
-    n.add("Load", "demand_e", bus="elec_b", p_set=120.0)
+    # Raised from 120 alongside solar's p_nom cut — together they force `gas`
+    # to cover ~118.6 MW of residual demand (comfortably above its own
+    # p_nom=100, so the extendable-CAPEX sizing decision is genuinely
+    # exercised, not merely non-zero) and keep both electricity buses'
+    # marginal price at ~58.8 EUR/MWh instead of 0. Verified against the
+    # solved network, not derived on paper — see solve_golden_network.
+    n.add("Load", "demand_e", bus="elec_b", p_set=150.0)
     n.add("Load", "demand_h2", bus="h2", p_set=20.0)
     return n
 
