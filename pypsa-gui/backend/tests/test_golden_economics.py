@@ -133,13 +133,23 @@ def test_a_genuinely_zero_cost_asset_reports_zero_not_unresolvable(golden):
     assert row["fixed_cost_eur"] == 0.0
 
 
-def test_cost_breakdown_agrees_with_asset_economics_on_gas(golden):
+def test_cost_breakdown_agrees_with_asset_economics_on_solar(golden):
+    """
+    `solar`, not `gas`: `gas`'s LP-optimal capacity is 0 (see module
+    docstring), so a gas-vs-cost_breakdown check would only ever compare
+    0.0 to 0.0 — passing against a cost_breakdown that reported zero for
+    EVERYTHING, not just gas. `solar` carries a real, non-zero capital_cost
+    (EUR 82,500,000 horizon total) and, like `gas`, is the only Generator on
+    its carrier (`carrier="solar"`, fixture.py:72-78) — so the
+    carrier-coincidence `_find_component_capex` relies on still holds.
+    """
     ae = R.get_asset_economics()
-    gas = next(r for r in ae["generators"] if r["name"] == "gas")
+    solar = next(r for r in ae["generators"] if r["name"] == "solar")
     cb = R.get_cost_breakdown()
 
-    gas_capex = _find_component_capex(cb, "Generator", "gas")
-    assert gas_capex == pytest.approx(gas["fixed_cost_eur"], rel=1e-6)
+    solar_capex = _find_component_capex(cb, "Generator", "solar")
+    assert solar_capex == pytest.approx(solar["fixed_cost_eur"], rel=1e-6)
+    assert solar_capex != 0.0  # guards against a silently-all-zero payload
 
 
 def test_line_capex_agrees_with_the_oracle_across_cost_breakdown_and_asset_costs(golden):
@@ -212,21 +222,32 @@ def test_statistics_h2_capex_matches_asset_economics(golden):
         "routers/results.py:791/798 and routers/compare.py:2652), which "
         "prices an overnight_cost-parameterised asset via "
         "_safe_capital_cost() = overnight_cost * annuity(rate, lifetime) "
-        "(routers/compare.py:341-374). That OMITS the "
-        "`snapshots_per_period / 8760` scaling PyPSA's own capital_cost "
-        "accessor applies (see tests/golden/oracle.py's "
-        "annualised_capital_cost, and periodized_capital_costs which "
-        "correctly includes it) -- for this fixture's 24-snapshot periods "
-        "that is a factor of 8760/24 = 365x too HIGH. Measured: "
+        "(routers/compare.py:341-374). That OMITS the scaling PyPSA's own "
+        "capital_cost accessor applies via periodized_cost(..., "
+        "nyears=n.nyears) -- and the trigger is NOT snapshot count, it is "
+        "n.nyears = (8760 / Sum(snapshot_weightings['objective'] per "
+        "period)) (pypsa/network/index.py:648-654). On THIS fixture's 24 "
+        "unit-weighted snapshots per period, nyears = 24/8760 and the "
+        "missing factor is 8760/24 = 365x too HIGH. Measured: "
         "economics_by_carrier's 'h2' carrier reports capex_meur.total = "
         "60.681166... M EUR against the correct EUR 166,249.77 "
         "(asset_economics fixed_cost_eur for 'electrolyzer') -- a 36,400% "
-        "overstatement. Assets priced via a direct `capital_cost` (solar "
-        "in this fixture) are unaffected: _safe_capital_cost only "
-        "mis-scales the overnight_cost branch. Not previously tracked; "
-        "found by this task, not by the originating brief. strict=True "
-        "fails this marker once the bug is gone so it cannot outlive the "
-        "defect."
+        "overstatement. The factor is NOT fixed at 365x: it is 52.14x on a "
+        "unit-weighted 168-hour representative week, and 1x -- INVISIBLE "
+        "-- on a full 8760-snapshot year AND on a correctly weighted "
+        "representative-week set, whose snapshot_weightings are set so "
+        "the weighted total reconstructs the full year (Sum ~= 8760h, "
+        "routers/network.py:1467-1469, sample_representative_weeks). The "
+        "bug reappears at 52.14x if a rep-week project is later promoted "
+        "to multi-period, because set_snapshots(MultiIndex) resets "
+        "snapshot_weightings to 1.0 (documented in CLAUDE.md). So the "
+        "common unit-weighted small-snapshot-set case (24h, 48h, 168h) is "
+        "affected, not a representative-week corner case. Assets priced "
+        "via a direct `capital_cost` (solar in this fixture) are "
+        "unaffected: _safe_capital_cost only mis-scales the overnight_cost "
+        "branch. Not previously tracked; found by this task, not by the "
+        "originating brief. strict=True fails this marker once the bug is "
+        "gone so it cannot outlive the defect."
     ),
 )
 def test_economics_by_carrier_h2_capex_agrees_with_asset_economics(golden):
@@ -253,11 +274,12 @@ def _find_component_capex(cost_breakdown: dict, component_class: str, name: str)
 
     This function matches on CARRIER via `by_carrier`, using `name` as the
     carrier to look up. That is only correct because the golden fixture
-    happens to give `gas` a carrier of the same name, and `gas` is the ONLY
-    Generator on that carrier. It is a coincidence of the fixture, not a
-    general capability of cost_breakdown — do not reuse this helper for an
-    asset whose carrier differs from its name, or where two assets share a
-    carrier: it would silently return a SUMMED number instead of raising.
+    happens to give both `gas` and `solar` a carrier equal to their own
+    name, and each is the ONLY Generator on that carrier. It is a
+    coincidence of the fixture, not a general capability of cost_breakdown
+    — do not reuse this helper for an asset whose carrier differs from its
+    name, or where two assets share a carrier: it would silently return a
+    SUMMED number instead of raising.
     """
     for row in cost_breakdown.get("by_carrier", []):
         if row.get("component") == component_class and row.get("carrier") == name:
@@ -427,42 +449,72 @@ ADAPTERS: dict[str, Adapter] = {
     "asset_economics": _from_asset_economics,
     "lcoh": _from_lcoh,
     "asset_costs": _from_asset_costs,
-    # ── The other five SURFACES, deliberately with NO adapter ──────────────
-    #
-    # cost_breakdown, statistics, economics_by_carrier: each aggregates to
-    # (component_class[, carrier]) — none has a per-asset field at all
-    # (verified 2026-08-01; see `_find_component_capex`'s docstring and the
-    # findings doc). Forcing them into `{(class, name): value}` would mean
-    # inventing a mapping the endpoint doesn't provide, exactly what the
-    # task-4 brief warns against. Each is spot-checked instead by a
-    # dedicated test above: `test_cost_breakdown_agrees_with_asset_economics_on_gas`,
-    # `test_statistics_h2_capex_matches_asset_economics`, and
-    # `test_economics_by_carrier_h2_capex_agrees_with_asset_economics` (xfail
-    # — a NEW, previously-untracked ~365x CAPEX overstatement, see its
-    # reason string).
-    #
-    # asset_results, asset_results_xlsx: genuinely per-asset, but both run
-    # through the exact `services/asset_results/compute.py::capex_annual`
-    # that `test_asset_detail_capex_agrees_with_asset_economics` already
-    # tracks as a known, xfail'd defect (asset_results_xlsx shares the path
-    # via `services/asset_results/export.py`'s `from .service import
-    # build_response` — verified by reading the import, not re-probed at
-    # runtime). Including either here would re-trip the SAME already-tracked
-    # bug as a hard failure inside this loop, instead of the dedicated xfail
-    # above — discovering nothing new, only duplicating it in a form that
-    # can't be marked xfail without hiding whatever ELSE this loop might
-    # catch on a future run.
-    #
-    # compare_economics: its `by_carrier` field is carrier-aggregated by the
-    # exact same `_compute_economics_summary` function economics_by_carrier
-    # calls (routers/compare.py:2652 vs routers/results.py:791,798), so it
-    # carries the identical 365x bug. Its `per_asset_lcoh` field IS
-    # genuinely per-asset, but Link-only — narrower than the
-    # Generator/StorageUnit/Link set `coverage.COVERAGE["compare_economics"]`
-    # lists, so it can't stand in as a general per-class adapter either. See
-    # the findings doc for the measured per_asset_lcoh numbers (checked by
-    # calling `_compute_economics_summary` directly, since the real endpoint
-    # needs a project saved to disk).
+}
+
+# Every SURFACE not in ADAPTERS must have an entry here instead — see the
+# `test_every_surface_agrees_on_every_covered_asset` assertion that
+# `set(ADAPTERS) | set(NO_ADAPTER_REASONS) == set(cov.SURFACES)`. Without that
+# assertion, a TENTH surface added to `coverage.SURFACES` in the future would
+# silently be skipped by `if sid in ADAPTERS` below and never compared — the
+# exact same silence-reads-as-agreement failure mode this whole task exists
+# to eliminate, one level up the stack. Keeping the reasons as DATA (not
+# comments) is what makes that assertion possible.
+NO_ADAPTER_REASONS: dict[str, str] = {
+    "cost_breakdown": (
+        "Aggregates to (component_class[, carrier]) — no per-asset field at "
+        "all (verified 2026-08-01; see `_find_component_capex`'s docstring "
+        "and the findings doc). Forcing it into `{(class, name): value}` "
+        "would mean inventing a mapping the endpoint doesn't provide, "
+        "exactly what the task-4 brief warns against. Spot-checked instead "
+        "by `test_cost_breakdown_agrees_with_asset_economics_on_solar` and "
+        "`test_line_capex_agrees_with_the_oracle_across_cost_breakdown_and_asset_costs`."
+    ),
+    "statistics": (
+        "Same structural limitation as cost_breakdown: raw "
+        "`df_to_json(n.statistics())`, indexed by (component_class, "
+        "carrier), no per-asset field. Spot-checked instead by "
+        "`test_statistics_h2_capex_matches_asset_economics`."
+    ),
+    "economics_by_carrier": (
+        "Aggregates to carrier only (`{'by_carrier': {carrier: {...}}}`), "
+        "no per-asset field — the brief's own example of a surface that "
+        "must not be forced into this shape. ALSO carries a newly-found "
+        "wrong-number bug (~365x CAPEX overstatement on this fixture for "
+        "overnight_cost-parameterised assets; the true factor is "
+        "8760/n.nyears, not a fixed 365 — see the xfail reason on "
+        "`test_economics_by_carrier_h2_capex_agrees_with_asset_economics`, "
+        "which spot-checks this surface directly)."
+    ),
+    "asset_results": (
+        "Genuinely per-asset, but runs through the exact "
+        "`services/asset_results/compute.py::capex_annual` that "
+        "`test_asset_detail_capex_agrees_with_asset_economics` already "
+        "tracks as a known, xfail'd defect. Including it here would re-trip "
+        "the SAME already-tracked bug as a hard failure inside this loop "
+        "instead of the dedicated xfail — discovering nothing new, only "
+        "duplicating it in a form that can't be marked xfail without hiding "
+        "whatever ELSE this loop might catch on a future run."
+    ),
+    "asset_results_xlsx": (
+        "Shares the identical compute path as asset_results — "
+        "`services/asset_results/export.py` imports `build_response` from "
+        "the same `services/asset_results/service.py` — verified by reading "
+        "the import, not re-probed at runtime. Same reasoning as "
+        "asset_results applies: excluded from this loop, tracked via the "
+        "same dedicated xfail."
+    ),
+    "compare_economics": (
+        "Its `by_carrier` field is carrier-aggregated by the exact same "
+        "`_compute_economics_summary` function economics_by_carrier calls "
+        "(routers/compare.py:2652 vs routers/results.py:791,798), so it "
+        "carries the identical CAPEX-overstatement bug. Its `per_asset_lcoh` "
+        "field IS genuinely per-asset, but Link-only — narrower than the "
+        "Generator/StorageUnit/Link set `coverage.COVERAGE['compare_economics']` "
+        "lists, so it can't stand in as a general per-class adapter either. "
+        "See the findings doc for the measured per_asset_lcoh numbers "
+        "(checked by calling `_compute_economics_summary` directly, since "
+        "the real endpoint needs a project saved to disk)."
+    ),
 }
 
 
@@ -473,6 +525,18 @@ def test_every_surface_agrees_on_every_covered_asset(golden):
     structurally rather than by someone remembering to look.
     """
     from tests.golden import coverage as cov
+
+    # A surface this suite has neither an adapter NOR a documented reason
+    # for skipping is a silent gap — the same failure mode this whole task
+    # exists to eliminate, just one level up (at "which surfaces did we even
+    # look at" instead of "does this asset's number agree").
+    accounted_for = set(ADAPTERS) | set(NO_ADAPTER_REASONS)
+    assert accounted_for == set(cov.SURFACES), (
+        "every surface in coverage.SURFACES must have either an ADAPTERS "
+        "entry or a NO_ADAPTER_REASONS entry -- unaccounted: "
+        f"{set(cov.SURFACES) - accounted_for}, "
+        f"stale (no longer a real surface): {accounted_for - set(cov.SURFACES)}"
+    )
 
     reported = {sid: ADAPTERS[sid](golden) for sid in cov.SURFACES if sid in ADAPTERS}
 
