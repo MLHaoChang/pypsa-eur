@@ -88,7 +88,10 @@ def _stamps_and_periods(n, sns) -> tuple[list[str], list | None]:
     return ([pd.Timestamp(s).isoformat() for s in sns], None)
 
 
-def apply_view_mode(stamps, periods, series_map: dict, metrics: dict, mode: str) -> dict:
+def apply_view_mode(
+    stamps, periods, series_map: dict, metrics: dict, mode: str,
+    weights: list[float] | None = None,
+) -> dict:
     """
     Reshape the chronological series into the requested view.
 
@@ -96,16 +99,30 @@ def apply_view_mode(stamps, periods, series_map: dict, metrics: dict, mode: str)
     describes every emitted column (id, label, unit, metric_id, agg) so the
     frontend never has to infer a naming convention — the registry stays the
     only place that knows what a metric is called.
+
+    `weights` is the snapshot-weighting vector aligned to `stamps` (same basis
+    as `Ctx.weights`, i.e. the `generators` column — matching every series
+    metric this shapes, none of which are cost-weighted). Only the monthly
+    view's "energy" aggregate uses it; the other modes ignore it.
     """
     import math
+
+    # Power units only — appending "h" to `pu`, `EUR/MWh`, `t/h` etc. produces
+    # nonsense units like "puh" / "EUR/MWhh". MW·h = MWh is the one case where
+    # the concatenation is actually correct.
+    _POWER_UNITS = {"MW", "MVAr"}
 
     def col(mid: str, agg: str | None) -> dict:
         m = metrics[mid]
         suffix = {"mean": " (mean)", "max": " (max)", "energy": " (energy)"}
+        if agg == "energy" and m.unit in _POWER_UNITS:
+            unit = f"{m.unit}h"
+        else:
+            unit = m.unit
         return {
             "id": mid if agg is None else f"{mid}__{agg}",
             "label": m.label + ("" if agg is None else suffix[agg]),
-            "unit": m.unit if agg != "energy" else f"{m.unit}h",
+            "unit": unit,
             "metric_id": mid,
             "agg": agg,
         }
@@ -132,13 +149,28 @@ def apply_view_mode(stamps, periods, series_map: dict, metrics: dict, mode: str)
         }
 
     if mode == "monthly":
+        # PyPSA replicates ONE operational year under every investment period,
+        # so a bare `st[:7]` bucket key (e.g. "2025-01") collects rows from
+        # EVERY period into one bucket on a multi-period network — January
+        # 2026 and January 2031 both carry the timestep-year prefix "2025".
+        # Qualify the bucket key with the period (when there is one) so
+        # periods never merge; `bucket_periods` carries the period each
+        # bucket actually belongs to through to the response instead of
+        # nulling it out. Flat-network behaviour (no periods) is unchanged:
+        # bucket on `st[:7]` alone, `periods: None`.
+        keys: list[str] = []
         months: list[str] = []
+        bucket_periods: list | None = [] if periods is not None else None
         buckets: dict[str, list[int]] = {}
         for i, st in enumerate(stamps):
-            key = st[:7]
+            mth = st[:7]
+            key = f"{periods[i]}|{mth}" if periods is not None else mth
             if key not in buckets:
                 buckets[key] = []
-                months.append(key)
+                keys.append(key)
+                months.append(mth)
+                if periods is not None:
+                    bucket_periods.append(periods[i])
             buckets[key].append(i)
         columns: list[dict] = []
         out_series = {}
@@ -147,8 +179,9 @@ def apply_view_mode(stamps, periods, series_map: dict, metrics: dict, mode: str)
                 c = col(mid, agg)
                 columns.append(c)
                 acc = []
-                for mth in months:
-                    picked = [vals[i] for i in buckets[mth]
+                for key in keys:
+                    idxs = buckets[key]
+                    picked = [vals[i] for i in idxs
                               if vals[i] is not None and math.isfinite(vals[i])]
                     if not picked:
                         acc.append(None)
@@ -157,9 +190,22 @@ def apply_view_mode(stamps, periods, series_map: dict, metrics: dict, mode: str)
                     elif agg == "max":
                         acc.append(max(picked))
                     else:
-                        acc.append(sum(picked))
+                        # "energy" must be the snapshot-weighted sum, not a
+                        # raw sum of raw series values, to match the "MWh"
+                        # unit the column is labelled with. `weights` is
+                        # None only when the caller has no context to supply
+                        # one (defensive default) — fall back to an
+                        # unweighted sum rather than raising, since a raw
+                        # sum was the pre-existing (if wrong) behaviour.
+                        if weights is None:
+                            acc.append(sum(picked))
+                        else:
+                            acc.append(sum(
+                                vals[i] * weights[i] for i in idxs
+                                if vals[i] is not None and math.isfinite(vals[i])
+                            ))
                 out_series[c["id"]] = acc
-        return {"index": months, "periods": None, "pct_of_hours": None,
+        return {"index": months, "periods": bucket_periods, "pct_of_hours": None,
                 "columns": columns, "series": out_series}
 
     return {
@@ -191,6 +237,7 @@ def build_response(
 
     members = metrics_for(component_class, category)
     metric_rows, resolved = [], {}
+    rows_by_id: dict[str, dict] = {}
     for m in members:
         st = resolve_metric(m, component_class, precond)
         resolved[m.id] = st
@@ -199,6 +246,7 @@ def build_response(
         if m.formula:
             row["formula"] = m.formula
         metric_rows.append(row)
+        rows_by_id[m.id] = row
 
     # An explicit `metrics=` list narrows to that subset (e.g. a chart that
     # only wants "p"). With no explicit list, the feature's own contract —
@@ -227,6 +275,20 @@ def build_response(
         except Exception:
             value = None
         if value is None:
+            # A metric can resolve `ok` (every PRECONDITION is met) and still
+            # compute to nothing — e.g. mu_upper/mu_lower on a non-extendable,
+            # non-committable generator: PyPSA enforces that bound as a
+            # variable bound rather than a linear constraint, so no dual
+            # column exists at all, and `_duals_status` only checks
+            # `buses_t.marginal_price`. Without this, the row stays `ok`,
+            # never appears in series/scalars, and the frontend shows a
+            # ticked checkbox with an empty chart and no explanation — a
+            # fourth, unnamed state on top of ok/blocked/na. Downgrade the
+            # row in place so the checklist tells the truth.
+            row = rows_by_id[mid]
+            row["status"] = "blocked"
+            row["reason"] = "not produced by this solve"
+            row.pop("remedy", None)
             continue
         if m.kind == "series":
             series_map[mid] = [clean_scalar(v) for v in list(value.values)]
@@ -234,9 +296,16 @@ def build_response(
             scalars[mid] = clean_scalar(value) if not isinstance(value, dict) \
                 else {k: clean_scalar(v) for k, v in value.items()}
 
-    shaped = apply_view_mode(stamps, periods, series_map, by_id, mode)
-    state = _state_snapshot()
+    # Monthly "energy" needs a weighting vector — the same `generators` basis
+    # every series metric here already uses via `Ctx.weights` (cost-weighted
+    # scalars like revenue/VOM are never `kind="series"` for Generator, so a
+    # single weights vector is correct for every series this shapes). Build
+    # one `Ctx` for the un-overridden `source` to get it; cheap (no compute
+    # call), and reused below for the response's `asset` field too.
     ctx0 = C.build_ctx(n, component_class, name, source=source, sns=sns)
+    weights = [float(w) for w in ctx0.weights.values]
+    shaped = apply_view_mode(stamps, periods, series_map, by_id, mode, weights)
+    state = _state_snapshot()
 
     return {
         "asset": {**C.summary_identity(ctx0), "params": C.summary_params(ctx0)},

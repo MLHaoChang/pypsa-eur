@@ -535,7 +535,14 @@ def gen_binding_hours(ctx: Ctx):
     # all (PyPSA enforces its dispatch bounds as variable bounds, not linear
     # constraints, so no dual is ever assigned) — that means the bound never
     # bound, i.e. zero binding hours, not "unknown". See
-    # test_binding_hours_counts_snapshots_with_a_nonzero_dual.
+    # test_binding_hours_counts_weighted_snapshots_with_a_nonzero_dual.
+    #
+    # Weighted by ctx.weights, matching gen_zero_hours / gen_full_load_hours /
+    # gen_mean_cf — all four carry unit="h" and sit side by side as KPI cards.
+    # A bare `.sum()` of the boolean mask reports SNAPSHOT count, which reads
+    # as real hours on any representative-week network (e.g.
+    # snapshot_weightings.generators = 52.14): ~84 snapshots would show as
+    # "84 h" next to a zero-output-hours KPI correctly reading ~4400 h.
     up, lo = gen_mu_upper(ctx), gen_mu_lower(ctx)
     binding = None
     for s in (up, lo):
@@ -543,7 +550,9 @@ def gen_binding_hours(ctx: Ctx):
             continue
         b = s.abs() > 1e-9
         binding = b if binding is None else (binding | b)
-    return float(binding.astype(float).sum()) if binding is not None else 0.0
+    if binding is None:
+        return 0.0
+    return float((binding.astype(float) * ctx.weights).sum())
 
 
 # ── economics ───────────────────────────────────────────────────────────────

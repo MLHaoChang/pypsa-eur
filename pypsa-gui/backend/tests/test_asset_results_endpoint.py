@@ -143,6 +143,58 @@ def test_monthly_mode_emits_one_column_triple_per_metric(client, install_network
     assert body["index"] == ["2025-01"]
 
 
+def test_monthly_energy_aggregate_is_weighted_not_a_raw_sum(client, install_network):
+    """
+    The monthly "energy" column is labelled with an energy unit (MWh here) —
+    it must be the snapshot-WEIGHTED sum (matching `energy_mwh`/`gen_energy`),
+    not a bare `sum(picked)` of raw dispatch values. `gens_weight=3.0` makes
+    the two readings differ so the test actually discriminates.
+    """
+    n = build_network(solve=True, gens_weight=3.0)
+    install_network(n)
+    body = _get(client, "/Generator/gas", category="dispatch", metrics="p",
+                mode="monthly").json()
+    raw = float(n.generators_t.p["gas"].sum())
+    assert body["series"]["p__energy"][0] == pytest.approx(raw * 3.0)
+    assert body["series"]["p__energy"][0] != pytest.approx(raw), (
+        "fixture does not discriminate weighted from unweighted")
+
+
+def test_monthly_energy_unit_only_appends_h_to_a_power_unit(client, install_network):
+    """
+    `unit = f"{m.unit}h"` is correct for MW -> MWh but produces nonsense for
+    any other base unit — "puh" for capacity_factor (pu). Only append "h"
+    when the base unit is actually a power unit.
+    """
+    install_network(build_network(solve=True))
+    body = _get(client, "/Generator/gas", category="dispatch",
+                metrics="p,capacity_factor", mode="monthly").json()
+    by_id = {c["id"]: c for c in body["columns"]}
+    assert by_id["p__energy"]["unit"] == "MWh"
+    assert by_id["capacity_factor__energy"]["unit"] == "pu"
+
+
+def test_a_metric_that_resolves_ok_but_computes_none_is_downgraded_to_blocked(
+        client, install_network):
+    """
+    mu_upper/mu_lower on `gas` (non-extendable, non-committable by default in
+    this fixture): PyPSA enforces that bound as a variable bound rather than
+    a linear constraint, so no dual column is ever assigned, and
+    `_duals_status` only checks `buses_t.marginal_price` — so the metric
+    resolves `ok` on preconditions alone. Without the downgrade, the row
+    stays `ok`, the checklist ticks it, and neither `series` nor `scalars`
+    explains why the chart is empty — a fourth, unnamed state.
+    """
+    install_network(build_network(solve=True))
+    body = _get(client, "/Generator/gas", category="prices").json()
+    by_id = {m["id"]: m for m in body["metrics"]}
+    assert by_id["mu_upper"]["status"] == "blocked"
+    assert by_id["mu_upper"]["reason"] == "not produced by this solve"
+    assert "remedy" not in by_id["mu_upper"]
+    assert "mu_upper" not in body["series"]
+    assert "mu_upper" not in body["scalars"]
+
+
 def test_chronological_columns_carry_no_aggregation(client, install_network):
     install_network(build_network(solve=True))
     body = _get(client, "/Generator/gas", category="dispatch", metrics="p").json()
@@ -226,3 +278,19 @@ def test_an_unmatched_period_yields_no_rows_not_every_row(client, install_networ
     from services.asset_results import service as svc
     n = _multi_period_network()
     assert len(svc.slice_snapshots(n, None, None, 9999)) == 0
+
+
+def test_monthly_mode_does_not_merge_investment_periods(client, install_network):
+    """
+    PyPSA replicates ONE operational year under every investment period, so
+    every period's January carries the same "2025-01" timestep prefix. A bare
+    `key = st[:7]` bucket collected rows from BOTH periods into one row and
+    the response's `periods` was nulled out — nothing on screen revealed the
+    merge. Must be 2 rows (one per period), each tagged with its own period.
+    """
+    install_network(_multi_period_network())
+    body = _get(client, "/Generator/gas", category="dispatch", metrics="p",
+                mode="monthly").json()
+    assert len(body["index"]) == 2, "2 periods must not collapse into 1 row"
+    assert body["index"] == ["2025-01", "2025-01"]
+    assert body["periods"] == [2026, 2031]

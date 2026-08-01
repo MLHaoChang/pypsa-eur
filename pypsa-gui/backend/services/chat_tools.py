@@ -2382,13 +2382,20 @@ def _series_stats(index: list[str], values: list, *, points: int = 48) -> dict:
     agent can answer almost every real question — peak, mean, total, when it
     peaks, how often it sits at zero — from these ~12 fields plus a coarse
     sparkline, and it is told to reach for the export tool when it cannot.
+
+    `zero_count` is an unweighted count of SNAPSHOTS, deliberately not named
+    `zero_hours` — the response's own `scalars["zero_hours"]` (from the
+    `zero_hours` metric in the registry) is the snapshot-WEIGHTED hour count.
+    Two identically-named fields with different values in the same payload
+    would be indistinguishable to the agent; different names make the
+    difference legible instead of silent.
     """
     finite = [(i, float(v)) for i, v in enumerate(values)
               if v is not None and math.isfinite(float(v))]
     if not finite:
         return {"min": None, "max": None, "mean": None, "sum": None,
                 "p50": None, "p95": None, "peak_at": None,
-                "zero_hours": 0, "sparkline": []}
+                "zero_count": 0, "sparkline": []}
     vals = [v for _, v in finite]
     ordered = sorted(vals)
     peak_i = max(finite, key=lambda t: t[1])[0]
@@ -2406,7 +2413,7 @@ def _series_stats(index: list[str], values: list, *, points: int = 48) -> dict:
         "p50": pct(0.5),
         "p95": pct(0.95),
         "peak_at": index[peak_i] if peak_i < len(index) else None,
-        "zero_hours": sum(1 for v in vals if abs(v) < 1e-9),
+        "zero_count": sum(1 for v in vals if abs(v) < 1e-9),
         "sparkline": [round(v, 4) for v in vals[::step]][:points],
     }
 

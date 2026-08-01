@@ -20,6 +20,11 @@ export default function AssetDetail() {
   const setSelectedComponent = useUIStore(s => s.setSelectedComponent)
   const assetDetailRequest = useUIStore(s => s.assetDetailRequest)
   const clearAssetDetailRequest = useUIStore(s => s.clearAssetDetailRequest)
+  // The shared per-project lopf/ac_pf toggle — Dispatch.tsx, LoadFlow.tsx,
+  // CanvasResultsContext and SnapshotPicker all read the same field. Part of
+  // the query key too, so flipping it refetches instead of silently leaving
+  // the panel showing whichever source was active when it last fetched.
+  const resultSource = useUIStore(s => s.resultSource)
   const filter = useResultsFilter()
 
   const [asset, setAsset] = useState<AssetRef | null>(null)
@@ -29,7 +34,13 @@ export default function AssetDetail() {
   const [view, setView] = useState<'table' | 'chart'>('table')
 
   const { data: assets = [] } = useQuery({
-    queryKey: nk(currentProject, 'assetResults', 'assets'),
+    // Re-rooted under 'results' (was 'assetResults') so the SSE solve-done
+    // handler's `qc.invalidateQueries({ queryKey: nk(proj, 'results') })`
+    // (App.tsx) reaches this by prefix match, and so project load/import/
+    // restore's `ALL_NETWORK_KEYS` sweep (which already lists 'results')
+    // covers it too — a separate 'assetResults' entry there would have been
+    // a second place to keep in sync.
+    queryKey: nk(currentProject, 'results', 'asset', 'assets'),
     queryFn: assetResultsApi.listAssets,
   })
 
@@ -63,14 +74,16 @@ export default function AssetDetail() {
 
   const params: AssetQueryParams | null = asset && {
     componentClass: asset.class, name: asset.name, category, metrics: selected,
-    source: 'lopf', fromIso: filter.fromIso, toIso: filter.toIso,
+    source: resultSource, fromIso: filter.fromIso, toIso: filter.toIso,
     period: filter.selectedPeriod, mode,
   }
 
   const qResult = useQuery({
-    queryKey: nk(currentProject, 'assetResults', asset?.class, asset?.name,
+    // Re-rooted under 'results' — see the comment on the assets query above.
+    // `resultSource` is part of the key so flipping lopf/ac_pf refetches.
+    queryKey: nk(currentProject, 'results', 'asset', asset?.class, asset?.name,
                  category, selected.join(','), mode,
-                 filter.fromIso, filter.toIso, filter.selectedPeriod),
+                 filter.fromIso, filter.toIso, filter.selectedPeriod, resultSource),
     queryFn: () => assetResultsApi.get(params!),
     enabled: !!params,
     // The reconcile effect below changes `selected` (part of this key) the

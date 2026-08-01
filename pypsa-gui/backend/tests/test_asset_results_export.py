@@ -117,6 +117,29 @@ def test_unsolved_network_still_exports_the_summary(client, install_network):
     assert "Dispatch" not in wb.sheetnames
 
 
+def test_view_scope_returns_a_clean_500_when_its_only_category_raises(
+        client, install_network, monkeypatch):
+    """
+    `scope=view` runs exactly ONE category. If that raises, `first_resp`
+    never gets set — before this fix the only guard was a bare `assert`,
+    which is an unhandled AssertionError (opaque 500, no detail) and is
+    compiled out entirely under `python -O`. The export route has no
+    try/except of its own (unlike the sibling read endpoint), so this must
+    be an explicit, clean error instead.
+    """
+    install_network(build_network(solve=True))
+    from services.asset_results import export as xls
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(xls, "build_response", boom)
+    resp = client.get(URL, params={"scope": "view", "category": "dispatch",
+                                   "metrics": "p"})
+    assert resp.status_code == 500
+    assert "detail" in resp.json()
+
+
 def test_bad_scope_is_422(client, install_network):
     install_network(build_network(solve=True))
     assert client.get(URL, params={"scope": "nope"}).status_code == 422

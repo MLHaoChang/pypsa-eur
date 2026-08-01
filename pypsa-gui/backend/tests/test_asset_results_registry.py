@@ -40,9 +40,11 @@ def test_metric_by_id_round_trips_and_misses_cleanly():
 
 
 def test_generator_has_every_category_except_structurally_absent_storage():
-    """Generator's Phase-1 promise: real metrics in every category except
+    """
+    Generator's Phase-1 promise: real metrics in every category except
     `storage`, which is structurally n/a — a generator has no state of
-    charge. `storage` is asserted separately by the resolve_category test."""
+    charge. `storage` is asserted separately by the resolve_category test.
+    """
     for cat in reg.CATEGORY_IDS:
         members = reg.metrics_for("Generator", cat)
         if cat == "storage":
@@ -87,8 +89,10 @@ def test_resolve_category_is_na_when_the_class_has_no_metrics_there():
 
 
 def test_generator_loadflow_is_blocked_not_na_because_reactive_power_applies():
-    """`q` exists on a Generator but only in the AC PF snapshot, so the
-    category is blocked until that stage runs — never n/a."""
+    """
+    `q` exists on a Generator but only in the AC PF snapshot, so the
+    category is blocked until that stage runs — never n/a.
+    """
     blocked = ap.Status("blocked", "AC power flow has not been run",
                         ap.Remedy("run_ac_pf", "Run AC power flow"))
     st = ap.resolve_category("loadflow", "Generator", {reg.REQ_AC_PF: blocked})
@@ -97,8 +101,10 @@ def test_generator_loadflow_is_blocked_not_na_because_reactive_power_applies():
 
 
 def test_a_reason_every_member_shares_beats_the_generic_one():
-    """A phase-2 placeholder must say 'not yet available', not 'Dispatch does
-    not apply to Load' — Loads DO dispatch, it is simply not wired up yet."""
+    """
+    A phase-2 placeholder must say 'not yet available', not 'Dispatch does
+    not apply to Load' — Loads DO dispatch, it is simply not wired up yet.
+    """
     st = ap.resolve_category("dispatch", "Load", {
         reg.REQ_NOT_YET: ap.Status(
             "na", "not yet available — arrives in a later phase of this feature"),

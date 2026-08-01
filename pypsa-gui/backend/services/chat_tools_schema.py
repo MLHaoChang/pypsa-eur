@@ -1284,7 +1284,7 @@ TOOLS: list[dict[str, Any]] = [
         "Returns {asset, category, categories[{id,status,reason}], scalars, "
         "unavailable[{id,label,status,reason}], n_snapshots} plus, by default "
         "(resolution='stats'), series_stats[metric] = {min,max,mean,sum,p50,"
-        "p95,peak_at,zero_hours,sparkline} — a <=48-point downsample, NOT the "
+        "p95,peak_at,zero_count,sparkline} — a <=48-point downsample, NOT the "
         "full series. Use this default for questions about totals, peaks, "
         "timing and shape. resolution='raw' returns real arrays truncated to "
         "max_rows (default 2000) with truncated + n_total set; an hourly year "

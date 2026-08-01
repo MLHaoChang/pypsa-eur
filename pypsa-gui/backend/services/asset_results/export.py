@@ -12,6 +12,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from fastapi import HTTPException
+
 from .registry import CATEGORY_IDS, CATEGORY_LABELS
 from .service import build_response
 
@@ -155,7 +157,20 @@ def build_workbook(
             sheets[CATEGORY_LABELS[cat]] = (
                 ["Metric", "Value", "Unit", "Formula"], cat_scalar_rows)
 
-    assert first_resp is not None
+    if first_resp is None:
+        # Every attempted category raised (for `scope=view` that is the ONE
+        # requested category). Unlike the sibling read endpoint
+        # (routers/asset_results.py::get_asset_results), this route has no
+        # try/except of its own, so a bare `assert` here was the only guard —
+        # it raises an unhandled AssertionError (an opaque 500 with no
+        # detail) and vanishes entirely under `python -O`, where asserts are
+        # compiled out and the function would instead crash further down on
+        # `first_resp["asset"]` against `None`. Fail explicitly instead.
+        raise HTTPException(
+            500,
+            f"Failed to export asset results for {component_class}/{name}: "
+            "every requested category raised an exception (see server log).",
+        )
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xl:
         about = _about_rows(first_resp, scope=scope, project=project,

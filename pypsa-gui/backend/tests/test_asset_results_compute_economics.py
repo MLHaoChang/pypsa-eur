@@ -2,6 +2,7 @@
 Prices, economics and emissions — including reconciliation with the
 existing /results/asset_economics endpoint.
 """
+import pandas as pd
 import pytest
 
 from services.asset_results import compute as C
@@ -66,10 +67,40 @@ def test_capture_rate_compares_against_the_time_weighted_mean(ctx):
         C.gen_capture_price(ctx) / float(lam.mean()))
 
 
-def test_binding_hours_counts_snapshots_with_a_nonzero_dual(ctx):
-    mu = ctx.n.generators_t.mu_upper.get("gas")
-    expected = 0.0 if mu is None else float((mu.abs() > 1e-9).sum())
-    assert C.gen_binding_hours(ctx) == pytest.approx(expected)
+def test_binding_hours_counts_weighted_snapshots_with_a_nonzero_dual():
+    """
+    Changed from a bare `.sum()` of the boolean mask (snapshot COUNT) to a
+    weighted sum via `ctx.weights`, matching gen_zero_hours / full_load_hours
+    / mean_capacity_factor — all four carry unit="h" and sit side by side as
+    KPI cards, so they must measure hours the same way.
+
+    The shared `ctx` fixture (weight=1.0, and mu_upper/mu_lower columns
+    empty on the un-extended base network — PyPSA never assigns duals for a
+    non-extendable, non-committable generator's simple bound by default)
+    cannot discriminate weighted from unweighted, so this builds its own
+    network: `snapshot_weightings.generators = 2.0` plus `assign_all_duals`
+    and a varying load so gas (p_nom=100) actually binds on 2 of 4
+    snapshots. 2 binding snapshots -> 2.0 unweighted vs 4.0 weighted.
+    """
+    n = build_network(solve=False, gens_weight=2.0)
+    n.generators.loc["solar", "p_nom_extendable"] = True
+    n.generators.loc["solar", "capital_cost"] = 1000.0
+    n.generators.loc["gas", "p_nom"] = 100.0
+    n.loads_t.p_set = pd.DataFrame(
+        {"L1": [100.0, 150.0, 90.0, 40.0]}, index=n.snapshots)
+    n.optimize(solver_name="highs", assign_all_duals=True)
+
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    up = ctx.n.generators_t.mu_upper.get("gas")
+    lo = ctx.n.generators_t.mu_lower.get("gas")
+    binding = (up.abs() > 1e-9) | (lo.abs() > 1e-9)
+    assert binding.any(), "fixture must actually produce a nonzero dual"
+
+    unweighted = float(binding.sum())
+    weighted = float((binding.astype(float) * ctx.weights).sum())
+    assert weighted != pytest.approx(unweighted), (
+        "fixture does not discriminate weighted from unweighted hours")
+    assert C.gen_binding_hours(ctx) == pytest.approx(weighted)
 
 
 def test_co2_rate_divides_by_efficiency():

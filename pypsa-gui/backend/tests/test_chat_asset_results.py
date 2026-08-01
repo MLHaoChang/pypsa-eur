@@ -4,6 +4,7 @@ default, and the raw-mode cap.
 """
 import json
 
+import pandas as pd
 import pytest
 
 from services import chat_tools as T
@@ -52,9 +53,36 @@ def test_default_resolution_is_statistics_not_raw_arrays(install_network):
     assert "series" not in out
     st = out["series_stats"]["p"]
     for key in ("min", "max", "mean", "sum", "p50", "p95", "peak_at",
-                "zero_hours", "sparkline"):
+                "zero_count", "sparkline"):
         assert key in st, f"missing statistic {key}"
     assert len(st["sparkline"]) <= 48
+
+
+def test_zero_count_is_the_unweighted_twin_of_the_weighted_zero_hours_scalar(
+        install_network):
+    """
+    `_series_stats`'s `zero_count` is a bare snapshot count; the SAME
+    response's `scalars["zero_hours"]` (the registry metric, computed via
+    `ctx.weights`) is the weighted hour count. Before the rename both fields
+    were called `zero_hours` — identical names, different values, in the
+    same payload. A non-default weighting makes the two numbers diverge, so
+    this network carries `snapshot_weightings.generators = 3.0` and forces
+    exactly one zero-output snapshot for `solar` via a `p_max_pu` dip.
+    """
+    n = build_network(solve=False, gens_weight=3.0)
+    n.generators_t.p_max_pu = pd.DataFrame(
+        {"solar": [0.6, 0.0, 0.6, 0.6]}, index=n.snapshots)
+    n.optimize(solver_name="highs")
+    install_network(n)
+
+    out = T.get_asset_results("Generator", "solar", category="dispatch")
+    zero_snapshots = sum(
+        1 for v in n.generators_t.p["solar"] if abs(float(v)) < 1e-9)
+    assert zero_snapshots == 1, "fixture must produce exactly one zero snapshot"
+
+    assert out["series_stats"]["p"]["zero_count"] == zero_snapshots
+    assert out["scalars"]["zero_hours"] == pytest.approx(zero_snapshots * 3.0)
+    assert out["series_stats"]["p"]["zero_count"] != out["scalars"]["zero_hours"]
 
 
 def test_the_default_response_stays_small_enough_to_be_worth_sending(install_network):

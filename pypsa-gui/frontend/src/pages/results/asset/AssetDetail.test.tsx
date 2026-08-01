@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AssetDetail from './AssetDetail'
 import { assetResultsApi } from './api'
 import { useUIStore } from '../../../store/uiStore'
+import { nk } from '../../../utils/queryKeys'
 import type { AssetResultsResponse } from './types'
 
 vi.mock('./api')
@@ -43,14 +44,16 @@ const RESPONSE: AssetResultsResponse = {
 
 const renderIt = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={qc}><AssetDetail /></QueryClientProvider>)
+  const view = render(<QueryClientProvider client={qc}><AssetDetail /></QueryClientProvider>)
+  return { ...view, qc }
 }
 
 beforeEach(() => {
   localStorage.clear()
   // uiStore is a real singleton shared across tests in this file — reset the
-  // deep-link slot so a request set by one test never leaks into the next.
-  useUIStore.setState({ assetDetailRequest: null })
+  // deep-link slot and the result-source toggle so state set by one test
+  // never leaks into the next.
+  useUIStore.setState({ assetDetailRequest: null, resultSource: 'lopf' })
   vi.mocked(assetResultsApi.listAssets).mockResolvedValue([
     { class: 'Generator', name: 'Gas 1', carrier: 'gas', bus: 'B1' },
     { class: 'Generator', name: 'Wind 1', carrier: 'onwind', bus: 'B1' },
@@ -194,5 +197,50 @@ describe('AssetDetail', () => {
     // hanging on an unresolved request.
     expect(await screen.findByText(/Gas 1/)).toBeTruthy()
     await waitFor(() => expect(useUIStore.getState().assetDetailRequest).toBeNull())
+  })
+
+  it('refetches when something invalidates the results root — the same key the SSE solve-done handler uses', async () => {
+    // App.tsx's done handler does `qc.invalidateQueries({ queryKey: nk(proj,
+    // 'results') })` (and project load/import/restore's ALL_NETWORK_KEYS
+    // sweep already lists 'results'). Both queries here must be re-rooted
+    // under 'results' for that prefix match to reach them — before the fix
+    // they lived under a standalone 'assetResults' root that neither path
+    // ever touched, so a solve-done event never refreshed this panel.
+    // `assetResultsApi.get` is a shared mock across every test in this file
+    // (no per-test reset), so its call count accumulates — measure a DELTA
+    // from this test's own starting point, never an absolute count.
+    const before = vi.mocked(assetResultsApi.get).mock.calls.length
+    const { qc } = renderIt()
+
+    // Two fetches happen on mount regardless of any invalidation: the
+    // initial query (selected=[]) and the one the reconcile-selection
+    // effect triggers the instant it resolves (see "disables the xlsx
+    // export links" above for the same two-fetch dance with this RESPONSE
+    // fixture). Wait for both to settle so the assertion below can only be
+    // explained by the invalidation, not by that unrelated steady-state
+    // churn — an earlier version of this test captured `callsBefore` right
+    // after the first fetch and passed even against the un-fixed component,
+    // because the second (unrelated) fetch alone satisfied it.
+    await waitFor(() => expect(
+      vi.mocked(assetResultsApi.get).mock.calls.length - before).toBe(2))
+    const callsBefore = vi.mocked(assetResultsApi.get).mock.calls.length
+
+    const currentProject = useUIStore.getState().currentProject
+    await qc.invalidateQueries({ queryKey: nk(currentProject, 'results') })
+
+    await waitFor(() => expect(vi.mocked(assetResultsApi.get).mock.calls.length)
+      .toBeGreaterThan(callsBefore))
+  })
+
+  it('reads the shared lopf/ac_pf toggle instead of hardcoding "lopf"', async () => {
+    // uiStore.resultSource is the same field Dispatch.tsx / LoadFlow.tsx /
+    // CanvasResultsContext / SnapshotPicker all read. The export's "About"
+    // sheet stamps whatever `source` the request carried, so a hardcoded
+    // 'lopf' would silently mislabel the provenance the moment the user has
+    // switched the app-wide toggle to AC PF.
+    useUIStore.setState({ resultSource: 'ac_pf' })
+    renderIt()
+    await waitFor(() => expect(vi.mocked(assetResultsApi.get)).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'ac_pf' })))
   })
 })
