@@ -19,12 +19,20 @@ is the operator's responsibility before launching uvicorn, e.g.:
       PYPSAGUI_PROJECTS_ROOT=/tmp/qa_e2e_scratch/projects \
       PYPSAGUI_LOCAL_MODE=1 \
       pixi run uvicorn main:app --host 127.0.0.1 --port 8000
+
+If the backend is not on port 8000 (e.g. another session already holds it),
+pass --backend or set QA_E2E_BACKEND to the actual origin. Doing so covers
+only THIS script's own HTTP calls — a non-8000 backend additionally requires
+setting PYPSA_GUI_API_ORIGIN for any vite dev server under test, since
+vite.auth-gate.ts's health probe and vite.config.ts's dev-server proxy both
+hardcode http://127.0.0.1:8000 otherwise.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import os
 import pathlib
 import sys
 import time
@@ -64,8 +72,14 @@ def q(name: str) -> str:
     return urllib.parse.quote(name, safe="")
 
 
-def http(path: str, base: str = BACKEND, method: str = "GET", body=None, timeout: int = 120):
+def http(path: str, base: str | None = None, method: str = "GET", body=None, timeout: int = 120):
     """Return (status, parsed_or_text). Never raises on HTTP error codes."""
+    if base is None:
+        # Read the module global at call time, not def time — BACKEND may be
+        # reassigned by main() from --backend/QA_E2E_BACKEND after this
+        # function was defined, and a default-argument value binds once, at
+        # def time, so it would never see that reassignment.
+        base = BACKEND
     url = path if path.startswith("http") else base + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -89,7 +103,7 @@ def http(path: str, base: str = BACKEND, method: str = "GET", body=None, timeout
 
 
 def multipart_post(path: str, fields: dict[str, str], file_field: str, filename: str,
-                    content: bytes, base: str = BACKEND, timeout: int = 60):
+                    content: bytes, base: str | None = None, timeout: int = 60):
     """
     POST multipart/form-data with stdlib only (no `requests` — qa_e2e.py has
     zero third-party HTTP dependencies by design; `requests` is only an
@@ -100,6 +114,10 @@ def multipart_post(path: str, fields: dict[str, str], file_field: str, filename:
     `file_field` is the form field name the endpoint's UploadFile parameter
     expects (always "file" in this codebase).
     """
+    if base is None:
+        # See http()'s identical comment: read the module global at call
+        # time so a --backend/QA_E2E_BACKEND reassignment in main() is seen.
+        base = BACKEND
     boundary = "----qa_e2e_boundary_7f3c9a"
     parts: list[bytes] = []
     for key, value in fields.items():
@@ -1726,8 +1744,13 @@ def suite_S14():
     record("S14.5", st_br == 201, f"create scenario branch -> {st_br}")
 
     st_p, plist = http("/api/projects/")
-    children = [p.get("name") for p in plist if isinstance(plist, list)
-                and p.get("parent_project") == base]
+    # isinstance guard must run BEFORE `for p in plist` iterates, not inside
+    # the comprehension — otherwise a non-list `plist` (e.g. `None`, when
+    # GET /api/projects/ returns an empty body) raises TypeError from the
+    # `for` clause itself before the guard is ever reached. Matches S14.10's
+    # form (below) in this same function.
+    children = [p.get("name") for p in plist if p.get("parent_project") == base] \
+        if isinstance(plist, list) else []
     record("S14.6", st_p == 200 and branch in children, f"children of {base}: {children}")
 
     if snap_id is not None:
@@ -1765,9 +1788,17 @@ def suite_S14():
 
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
+    global BACKEND
     ap = argparse.ArgumentParser()
     ap.add_argument("--suite", default="all")
+    ap.add_argument(
+        "--backend",
+        default=os.environ.get("QA_E2E_BACKEND", "http://127.0.0.1:8000"),
+        help="Backend origin to test against (default: $QA_E2E_BACKEND, "
+             "falling back to http://127.0.0.1:8000).",
+    )
     args = ap.parse_args()
+    BACKEND = args.backend
     want = args.suite.upper()
 
     def run(tag: str) -> bool:
