@@ -1058,7 +1058,13 @@ def test_the_frontend_payload_fixture_is_current(golden):
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
 
-    assert dest.exists()
+    # Assert the payload is USABLE, not merely that a file appeared. A test
+    # whose only assertion is `exists()` passes just as happily on an empty
+    # dict, and the frontend test downstream would then assert against nothing.
+    written = json.loads(dest.read_text(encoding="utf-8"))
+    assert set(written) >= {"generators", "storage_units", "links"}
+    assert written["links"], "no link rows — the frontend mapping test needs one"
+    assert written["generators"], "no generator rows"
 ```
 
 - [ ] **Step 2: Run it to generate the file**
@@ -1207,12 +1213,20 @@ def test_an_unresolvable_capex_says_why_instead_of_reporting_zero(golden):
     from services.asset_results import compute as C
     from services.solver_service import SolverConfig
 
-    # Strip the discount rate: `gas` is priced via overnight_cost, so its
-    # annuity can no longer be resolved.
-    sim_router._state["solver_config"] = SolverConfig(discount_rate=float("nan"))
-    golden.generators.loc["gas", "discount_rate"] = float("nan")
+    # DEEP-COPY FIRST. `solve_golden_network()` caches at module level and hands
+    # every test THE SAME OBJECT, so mutating `golden` here would leak a NaN
+    # discount_rate into every test that runs after this one — including
+    # `test_a_resolvable_capex_has_no_reason` immediately below, which would
+    # then fail for a reason that has nothing to do with the code under test.
+    import copy
 
-    ctx = C.build_ctx(golden, "Generator", "gas", source="lopf", sns=golden.snapshots)
+    n = copy.deepcopy(golden)
+    n.generators.loc["gas", "discount_rate"] = float("nan")
+    # The solver_config mutation is safe unmocked: conftest's autouse
+    # `reset_backend` restores it after every test.
+    sim_router._state["solver_config"] = SolverConfig(discount_rate=float("nan"))
+
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
     reason = C.gen_capex_unresolved_reason(ctx)
 
     assert reason is not None
