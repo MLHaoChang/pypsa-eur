@@ -914,10 +914,11 @@ _STORE_METRICS: tuple[Metric, ...] = (
            unit="pu", kind="scalar", category="storage", classes=("Store",),
            origin="derived", formula="energy discharged ÷ energy charged",
            compute=C.store_round_trip_efficiency, requires=(REQ_DISPATCH,)),
-    Metric(id="standing_loss_mwh", label="Standing loss", unit="MWh",
+    Metric(id="net_absorbed_mwh", label="Net energy absorbed", unit="MWh",
            kind="scalar", category="storage", classes=("Store",), origin="derived",
-           formula="energy charged − energy discharged − Δe over the horizon",
-           compute=C.store_standing_loss_mwh, requires=(REQ_DISPATCH,)),
+           formula="energy charged − energy discharged (= Δlevel + standing "
+                   "loss; on a cyclic store over the full horizon, the loss)",
+           compute=C.store_net_absorbed_mwh, requires=(REQ_DISPATCH,)),
 
     # ── loadflow ─────────────────────────────────────────────────────────
     Metric(id="q", label="Reactive power", unit="MVAr", kind="series",

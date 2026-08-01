@@ -372,6 +372,20 @@ def test_store_reports_energy_level_and_balance(client, multiclass):
     assert d["energy_in_mwh"] > 0 and d["energy_out_mwh"] > 0
 
 
+def test_a_lossless_cyclic_store_absorbs_nothing_net(client, multiclass):
+    """
+    h2_store is `e_cyclic=True` with no standing_loss, so over the full
+    horizon it must give back exactly what it took in. This pins the sign:
+    an earlier version subtracted `e[last] − e[first]` to report a "standing
+    loss" and got −8 MWh — a NEGATIVE loss on a lossless store — because
+    `e[first]` already carries one timestep of flow and the cyclic wrap puts
+    the pre-horizon level at `e[last]`.
+    """
+    s = _get(client, "Store", "h2_store", category="storage")["scalars"]
+    assert s["net_absorbed_mwh"] == pytest.approx(0.0, abs=1e-6)
+    assert s["round_trip_efficiency"] == pytest.approx(1.0, rel=1e-6)
+
+
 def test_load_shows_demand_and_cost(client, multiclass):
     n = multiclass
     body = _get(client, "Load", "load_b2", category="dispatch")

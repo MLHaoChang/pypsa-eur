@@ -1418,20 +1418,26 @@ def store_round_trip_efficiency(ctx: Ctx):
     return None if out is None or not in_ else out / in_
 
 
-def store_standing_loss_mwh(ctx: Ctx):
+def store_net_absorbed_mwh(ctx: Ctx):
     """
-    Energy that entered but never came back out. On a cyclic store this is
-    standing loss; on a non-cyclic one it also contains whatever is left in
-    the reservoir at the end of the horizon.
+    Energy charged minus energy discharged over the horizon.
+
+    By the store's energy balance this equals the change in stored level plus
+    any standing loss, so on a CYCLIC store over the full horizon — where the
+    level change is zero by construction — it is exactly the standing loss.
+    On a non-cyclic store, or a sliced horizon, it also carries whatever the
+    reservoir gained or gave up across the window.
+
+    Deliberately NOT reported as "standing loss" with the level change
+    subtracted out. Doing that needs the level at the snapshot BEFORE the
+    first one in the slice: `e[first]` already has one timestep of flow baked
+    into it (and under PyPSA's cyclic wrap the pre-horizon level IS
+    `e[last]`), so `e[last] − e[first]` undercounts by exactly one timestep
+    and produced a NEGATIVE standing loss on a lossless cyclic store. A
+    quantity that is always correct beats a more specific one that is not.
     """
     out, in_ = store_energy_out(ctx), store_energy_in(ctx)
-    if out is None or in_ is None:
-        return None
-    e = series_for(ctx, "e")
-    residual = 0.0
-    if e is not None and len(e) >= 2:
-        residual = float(e.iloc[-1]) - float(e.iloc[0])
-    return in_ - out - residual
+    return None if out is None or in_ is None else in_ - out
 
 
 def store_peak_discharge(ctx: Ctx):
