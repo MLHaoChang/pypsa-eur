@@ -208,9 +208,23 @@ def suite_S2():
     st, body = http("/api/chat/health")
     record("S2.4", st == 200 and isinstance(body, dict) and body.get("ok") is True,
            f"health -> {st}")
+    # These names were once listed in DISPATCHERS without being defined
+    # anywhere in chat_tools, so importing the module raised NameError at
+    # module scope and took the entire tool surface down — see the block
+    # comment above chat_tools.py's synthesis/analysis registrations. The
+    # invariant that block protects is "no name is registered without an
+    # implementation", NOT "these names may never exist again"; that same
+    # comment spells out how to bring one back for real. `compare_scenarios`
+    # was subsequently implemented on master exactly that way (a real
+    # `def compare_scenarios`, matching entries in chat_tools_schema.TOOLS and
+    # TOOL_ROUTES, and its own test_chat_compare_navigate.py), so it is a
+    # shipped feature rather than a reintroduced stub and is no longer listed
+    # here. The real invariant stays enforced for EVERY name, this one
+    # included, by S2.1 (TOOLS == DISPATCHERS), S2.2 (all callable), S2.3
+    # (all routed) and S2.6 (schema matches signature).
     removed = {"diagnose_results", "solve_overview", "sanity_check_results",
-               "compare_scenarios", "generate_run_report", "submit_plan",
-               "plan_what_if", "undo_my_last_chat_action"}
+               "generate_run_report", "submit_plan", "plan_what_if",
+               "undo_my_last_chat_action"}
     leak = sorted((removed & set(DISPATCHERS)) | (removed & names))
     record("S2.5", not leak, f"reintroduced: {leak}")
 
@@ -578,16 +592,35 @@ def suite_S6():
     out = (r.stdout or "") + (r.stderr or "")
     record("S6.3", r.returncode == 0 and "built in" in out, f"build rc={r.returncode}")
 
-    # S6.4 — the served HTML must reference a bundle that actually loads.
-    st, html = http("/", base=FRONTEND)
-    assets = re.findall(r'src="([^"]+\.tsx?)"|src="(/[^"]+\.js)"', html or "")
-    ref = next((a or b for a, b in assets), None)
-    if ref:
+    # S6.4 — the SPA's entry module must actually load off the dev server.
+    #
+    # This previously fetched "/" and hunted the response for a script `src`,
+    # falling back to asserting the SPA's root mount point was in that HTML.
+    # Both halves rest on a single-page premise this frontend does not meet,
+    # and the check could NOT pass even with the dev server up — verified:
+    # with vite running and S1.2 green on the same "/" fetch, S6.4 still
+    # failed. vite.config.ts declares a MULTI-PAGE build (`index.html` AND
+    # `spa.html`); "/" is the LOGIN page, which is inline-scripted and by
+    # design carries neither a script `src` nor a <div id="root">, so the
+    # regex found nothing and the fallback compared against the wrong
+    # document. Nor can the check simply switch to "/spa.html": the dev
+    # server's own auth gate (vite.auth-gate.ts) 302s an unauthenticated
+    # request for it straight back to "/", so the SPA HTML is unreachable
+    # over HTTP without a session, which is not something to simulate here.
+    #
+    # Assert the contract that is actually testable: spa.html declares a root
+    # mount point and an entry module, and the dev server really serves that
+    # module. Vite serves source modules without the HTML auth gate, so the
+    # HTTP half stays meaningful — a broken or missing entry still fails.
+    spa = (fe / "spa.html").read_text(encoding="utf-8")
+    m_spa = re.search(r'<script[^>]+src="([^"]+)"', spa)
+    if m_spa:
+        ref = m_spa.group(1)
         st2, _ = http(ref, base=FRONTEND)
-        record("S6.4", st2 == 200, f"entry {ref} -> {st2}")
+        record("S6.4", st2 == 200 and "<div id=\"root\"" in spa,
+               f"spa.html entry {ref} -> {st2}; root mount point present")
     else:
-        record("S6.4", st == 200 and "<div id=\"root\"" in (html or ""),
-               "served HTML has a root mount point")
+        record("S6.4", False, "spa.html declares no entry module")
 
     # S6.5 — the coerceForColumn extraction must leave BottomPanel importable.
     bp = (fe / "src" / "layout" / "BottomPanel.tsx").read_text(encoding="utf-8")
@@ -614,7 +647,19 @@ def suite_S8():
                 returncode, stdout, stderr = 1, "", f"{type(e).__name__}: {e}"
             return R()
 
-    r = sh(["pixi", "run", "python", "-m", "pytest",
+    # `-e test` is load-bearing here, for the same reason it is on S8.2 below.
+    # Seven tests in the backend suite import `webview`, and pixi.toml carries
+    # pywebview in exactly ONE environment — `test`, via the `desktop` feature
+    # (pixi.toml's `[environments]` comment explains that this is deliberate:
+    # without it the desktop-download guards silently SKIP and a hole reads as
+    # green). A bare `pixi run python …` resolves to `default`, which has no
+    # pywebview, so those seven fail with "pywebview is missing from this
+    # environment" and S8.1 reports a red suite that is actually green. pixi
+    # names `gui-tests` (defined under `[feature.test.tasks]`) the canonical
+    # gate; backend/pytest.ini documents `-m pytest pypsa-gui/backend/tests` as
+    # the equivalent explicit-path form, used here so `-p no:cacheprovider`
+    # still applies and the battery leaves no .pytest_cache behind.
+    r = sh(["pixi", "run", "-e", "test", "python", "-m", "pytest",
             "pypsa-gui/backend/tests", "-p", "no:cacheprovider"])
     out = (r.stdout or "") + (r.stderr or "")
     m = re.search(r"(\d+) passed", out)
