@@ -26,6 +26,17 @@ only THIS script's own HTTP calls — a non-8000 backend additionally requires
 setting PYPSA_GUI_API_ORIGIN for any vite dev server under test, since
 vite.auth-gate.ts's health probe and vite.config.ts's dev-server proxy both
 hardcode http://127.0.0.1:8000 otherwise.
+
+S8.2 runs `pytest test` with cwd at the worktree root. Its
+download_natural_earth fixture (test/conftest.py:122-133) urlretrieve()s a
+~10 MB zip to a relative filename, ne_10m_admin_0_countries_deu.zip, so it
+lands in the worktree root. Cleanup is a post-yield teardown, so if the
+fixture raises before the yield (corrupt download, an HTML error page
+tripping zipfile.BadZipFile) or the subprocess is killed on its timeout, the
+file is left behind — and it is not gitignored. After any --suite all or
+--suite S8 run, check `git status` for this file in the worktree root and
+delete it if present. S8.2 also performs a live network download, so it is
+flaky offline.
 """
 from __future__ import annotations
 

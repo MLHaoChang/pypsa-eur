@@ -63,7 +63,7 @@ it('renders the distinctive total emissions KPI sourced from the mocked results 
   //   - caps: [] keeps scopeCaps/allCaps empty, so the caps table and the
   //     two extra KPIs (shadow price / cap slack) stay hidden.
   //   - is_multi_period: false keeps the per-period section
-  //     (Emissions.tsx:200) hidden.
+  //     (Emissions.tsx:216) hidden.
   //   - by_period: [] is never reached: is_multi_period === false
   //     short-circuits the `&&` chain that would read it.
   vi.mocked(resultsApi.getEmissions).mockResolvedValue({
@@ -83,7 +83,7 @@ it('renders the distinctive total emissions KPI sourced from the mocked results 
 
   renderPage()
   // total_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 }) rounds
-  // 424.24 to "424.2" (Emissions.tsx:120-122).
+  // 424.24 to "424.2" (Emissions.tsx:135).
   const match = await screen.findByText((text) => text.includes('424.2') && text.includes('tCO'))
   expect(match).toBeTruthy()
 })
