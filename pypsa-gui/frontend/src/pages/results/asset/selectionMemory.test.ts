@@ -55,10 +55,20 @@ describe('selectionMemory', () => {
   })
 
   it('falls back to the full default when nothing remembered survives', () => {
-    // Every remembered id is blocked for THIS asset. Returning [] would
-    // leave the panel blank with no explanation of why.
+    // Every remembered id is blocked for THIS asset — a tick-set carried
+    // over from a sibling. Returning [] would leave the panel blank with no
+    // explanation of why.
     const metrics = [m('p', 'ok'), m('status', 'blocked')]
     expect(reconcileSelection(['status'], metrics)).toEqual(['p'])
+  })
+
+  it('respects a deliberately emptied tick-set', () => {
+    // Unticking the last metric changes the query key, which refetches,
+    // which re-runs the reconcile. If an explicit [] fell through to the
+    // full default the selection would snap straight back and the last
+    // checkbox could never be cleared.
+    const metrics = [m('p', 'ok'), m('curtailment', 'ok')]
+    expect(reconcileSelection([], metrics)).toEqual([])
   })
 })
 

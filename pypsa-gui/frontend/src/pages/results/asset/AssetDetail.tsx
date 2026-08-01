@@ -244,10 +244,15 @@ export default function AssetDetail() {
         {filter.controls && <HorizonFilter controls={filter.controls} />}
 
         <div className="flex-1 min-h-0 flex">
-          <div className="w-60 shrink-0 overflow-y-auto border-r border-border">
-            {data && <MetricChecklist metrics={data.metrics} selected={selected}
-              onToggle={toggle} onRemedy={onRemedy} />}
-          </div>
+          {/* Summary renders a fixed set of tables and ignores the tick-set
+              entirely, so a checklist beside it would be a control with no
+              effect. Every other category is driven by it. */}
+          {category !== 'summary' && (
+            <div className="w-60 shrink-0 overflow-y-auto border-r border-border">
+              {data && <MetricChecklist metrics={data.metrics} selected={selected}
+                onToggle={toggle} onRemedy={onRemedy} />}
+            </div>
+          )}
 
           <div className="flex-1 min-w-0 flex flex-col">
             {/* Controls + exports */}

@@ -41,10 +41,17 @@ export function reconcileSelection(
   if (remembered) {
     const okIds = new Set(ok.map(m => m.id))
     const kept = remembered.filter(id => okIds.has(id))
-    // A remembered set that survives as nothing (every id is now blocked or
-    // n/a for this asset) would leave the panel blank with no explanation.
-    // Treat it as "never configured" and fall through to the full default.
-    if (kept.length > 0) return kept
+    // Two ways to arrive at an empty result, and they need opposite answers:
+    //
+    //   remembered = []      the user unticked everything on purpose. Respect
+    //                        it — otherwise the tick-set bounces straight back
+    //                        to "all" on the refetch that unticking triggers,
+    //                        and the last checkbox becomes impossible to clear.
+    //   remembered = [ids]   but every id is now blocked or n/a for THIS asset
+    //                        (a tick-set carried over from a sibling with
+    //                        different results). Falling through to the default
+    //                        beats a blank panel with nothing to explain it.
+    if (kept.length > 0 || remembered.length === 0) return kept
   }
   return ok.map(m => m.id)
 }
