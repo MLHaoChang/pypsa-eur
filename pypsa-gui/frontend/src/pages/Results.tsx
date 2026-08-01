@@ -244,17 +244,40 @@ export default function Results() {
     iso && baseYear && displayYear !== baseYear && iso.startsWith(displayYear)
       ? baseYear + iso.slice(4) : iso
 
-  const filterValue = {
-    fromIso: normIso(fromIso),
-    toIso: normIso(toIso),
-    selectedPeriod: selectedPeriod === 'all' ? null : selectedPeriod,
-  }
   // Active filter = the user moved at least one bound off the full horizon.
   // When fromIso === firstSnap16 AND toIso === lastSnap16 we treat it as
   // unfiltered, so the seeded defaults don't trigger the warn banner.
   const isFiltered =
     (!!fromIso && fromIso !== firstSnap16) ||
     (!!toIso   && toIso   !== lastSnap16)
+
+  const resetHorizon = () => {
+    if (firstSnap16) setFromIso(firstSnap16)
+    if (lastSnap16)  setToIso(lastSnap16)
+  }
+
+  // Tabs that want the horizon filter inline (Asset Detail) drive THIS state
+  // through `controls` rather than keeping a second copy — one filter for the
+  // whole panel, so the strip above and the in-tab control can never diverge.
+  // Values are pre-translated into the display year; see toDisplay/toStore.
+  const filterValue = {
+    fromIso: normIso(fromIso),
+    toIso: normIso(toIso),
+    selectedPeriod: selectedPeriod === 'all' ? null : selectedPeriod,
+    controls: {
+      fromInput: toDisplay(fromIso),
+      toInput: toDisplay(toIso),
+      setFromInput: (v: string) => setFromIso(toStore(v)),
+      setToInput: (v: string) => setToIso(toStore(v)),
+      firstSnap: firstSnap16 ? toDisplay(firstSnap16) : '',
+      lastSnap: lastSnap16 ? toDisplay(lastSnap16) : '',
+      periods: uniquePeriods,
+      selectedPeriod,
+      setSelectedPeriod,
+      isFiltered,
+      reset: resetHorizon,
+    },
+  }
 
   return (
     <div className="flex flex-col h-full text-sm">
@@ -328,8 +351,7 @@ export default function Results() {
                 // "Clear" restores to the full simulation horizon, not to
                 // empty fields — empty re-introduces the localised
                 // placeholder glyph soup.
-                if (firstSnap16) setFromIso(firstSnap16)
-                if (lastSnap16)  setToIso(lastSnap16)
+                resetHorizon()
               }}
               className="text-[10px] text-muted hover:text-danger cursor-pointer px-1"
             >clear</span>
@@ -365,10 +387,7 @@ export default function Results() {
             <span className="flex-1" />
             {isFiltered && (
               <button
-                onClick={() => {
-                  if (firstSnap16) setFromIso(firstSnap16)
-                  if (lastSnap16)  setToIso(lastSnap16)
-                }}
+                onClick={resetHorizon}
                 className="px-2 py-1 text-[11px] text-muted hover:text-danger"
               >Reset</button>
             )}

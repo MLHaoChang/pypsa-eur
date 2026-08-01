@@ -47,6 +47,26 @@ export interface AssetRef {
   bus: string
 }
 
+/**
+ * A headline KPI on the Summary tab, lifted from one of the other
+ * categories. `value` is present only when `status === 'ok'`; a blocked or
+ * n/a headline carries its `reason` instead so the row still renders and
+ * explains itself. Mirrors registry.HEADLINE + service.build_headline.
+ */
+export interface HeadlineRow {
+  id: string
+  label: string
+  unit: string
+  category: string
+  category_label: string
+  origin: 'output' | 'input' | 'derived'
+  status: MetricStatus
+  value?: number | string | null | Record<string, number | null>
+  reason?: string
+  remedy?: Remedy
+  formula?: string
+}
+
 export interface AssetResultsResponse {
   asset: AssetRef & { params: Record<string, unknown> }
   solve: {
@@ -60,6 +80,8 @@ export interface AssetResultsResponse {
   categories: CategoryStatus[]
   metrics: MetricRow[]
   scalars: Record<string, number | string | null | Record<string, number | null>>
+  /** Populated only when `category === 'summary'`; `[]` on every other tab. */
+  headline: HeadlineRow[]
   index: string[]
   periods: Array<number | string> | null
   pct_of_hours: number[] | null

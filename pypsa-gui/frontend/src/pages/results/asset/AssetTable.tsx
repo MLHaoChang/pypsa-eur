@@ -1,8 +1,7 @@
 import { useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { fmtNum, withUnit as head } from './format'
 import type { AssetResultsResponse } from './types'
-
-const head = (label: string, unit: string) => unit ? `${label} (${unit})` : label
 
 /**
  * The exact rows the table renders — also the rows the CSV export writes.
@@ -34,19 +33,13 @@ export function tableRows(data: AssetResultsResponse): {
   }
 }
 
-const fmt = (v: unknown) => {
-  if (v === null || v === undefined) return ''
-  if (typeof v === 'number') {
-    // Non-finite must never reach the DOM as the text "NaN"/"Infinity". The
-    // backend already nulls these, but the guard costs nothing and this is the
-    // component users read actual numbers from.
-    if (!Number.isFinite(v)) return ''
-    return Number.isInteger(v) ? String(v) : v.toFixed(3)
-  }
-  return String(v)
-}
-
-export default function AssetTable({ data }: { data: AssetResultsResponse }) {
+export default function AssetTable(
+  { data, onShowAll }: {
+    data: AssetResultsResponse
+    /** Restores every applicable metric — see the empty state below. */
+    onShowAll?: () => void
+  },
+) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const { header, rows } = tableRows(data)
   const virt = useVirtualizer({
@@ -64,7 +57,12 @@ export default function AssetTable({ data }: { data: AssetResultsResponse }) {
   if (data.columns.length === 0) {
     return (
       <p className="p-4 text-[11px] text-muted">
-        Tick a time series on the left to populate the table.
+        No time series selected.{' '}
+        {onShowAll && (
+          <button onClick={onShowAll} className="text-accent hover:underline">
+            Show all
+          </button>
+        )}
       </p>
     )
   }
@@ -110,7 +108,7 @@ export default function AssetTable({ data }: { data: AssetResultsResponse }) {
               {rows[v.index].map((cell, ci) => (
                 <div key={ci} role="cell"
                   className="px-2 py-0.5 tabular-nums whitespace-nowrap overflow-hidden text-ellipsis">
-                  {fmt(cell)}
+                  {fmtNum(cell)}
                 </div>
               ))}
             </div>

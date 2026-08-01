@@ -5,13 +5,17 @@ import toast from 'react-hot-toast'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { useResultsFilter } from '../filterContext'
-import { downloadCSV, KPI, Seg } from '../shared'
+import { downloadCSV, Seg } from '../shared'
 import AssetCharts from './AssetCharts'
 import AssetPicker from './AssetPicker'
+import AssetSummary from './AssetSummary'
 import AssetTable, { tableRows } from './AssetTable'
+import HorizonFilter from './HorizonFilter'
 import MetricChecklist from './MetricChecklist'
+import ScalarTable, { type ScalarRow } from './ScalarTable'
 import { assetResultsApi, type AssetQueryParams } from './api'
-import { loadSelection, reconcileSelection, saveSelection } from './selectionMemory'
+import { allApplicable, loadSelection, reconcileSelection, saveSelection }
+  from './selectionMemory'
 import { CATEGORY_ORDER, type AssetRef, type Remedy, type ViewMode } from './types'
 
 export default function AssetDetail() {
@@ -160,11 +164,25 @@ export default function AssetDetail() {
     }
   }
 
-  const scalarCards = useMemo(() => {
+  const showAll = () => {
+    if (!data || !asset) return
+    const next = allApplicable(data.metrics)
+    setSelected(next)
+    saveSelection(asset.class, category, next)
+  }
+
+  // Every ticked scalar, as rows for the shared ScalarTable. Blocked and n/a
+  // entries are deliberately NOT included here — they already have a row in
+  // the checklist on the left carrying the same reason, and repeating them
+  // in the results table would double every unavailable metric on screen.
+  const scalarRows: ScalarRow[] = useMemo(() => {
     if (!data) return []
     return data.metrics
       .filter(m => m.kind === 'scalar' && selected.includes(m.id) && m.id in data.scalars)
-      .map(m => ({ metric: m, value: data.scalars[m.id] }))
+      .map(m => ({
+        id: m.id, label: m.label, unit: m.unit, formula: m.formula,
+        value: data.scalars[m.id], status: 'ok' as const,
+      }))
   }, [data, selected])
 
   const exportCsv = () => {
@@ -216,6 +234,15 @@ export default function AssetDetail() {
           })}
         </div>
 
+        {/* The shell's own horizon filter is collapsed behind a disclosure at
+            the top of the Results panel, which left a user reading an hourly
+            series with no visible way to narrow it. This is the SAME filter
+            (see filterContext.ResultsFilterControls), surfaced inline.
+            Rendered on EVERY category including Summary: the headline KPIs
+            are horizon-scoped sums, so a narrowed horizon that the user
+            cannot see would silently change every number on that tab. */}
+        {filter.controls && <HorizonFilter controls={filter.controls} />}
+
         <div className="flex-1 min-h-0 flex">
           <div className="w-60 shrink-0 overflow-y-auto border-r border-border">
             {data && <MetricChecklist metrics={data.metrics} selected={selected}
@@ -226,18 +253,27 @@ export default function AssetDetail() {
             {/* Controls + exports */}
             <div className="shrink-0 flex items-center gap-2 px-2 py-1.5
               border-b border-border">
-              <Seg value={view} onChange={setView}
-                options={[{ value: 'table', label: 'Table' },
-                          { value: 'chart', label: 'Chart' }]} />
-              <Seg value={mode} onChange={setMode}
-                options={[{ value: 'chronological', label: 'Chronological' },
-                          { value: 'duration', label: 'Duration' },
-                          { value: 'monthly', label: 'Monthly' }]} />
+              {/* Table/Chart and the view mode only mean anything where
+                  there is a series to shape. Summary is scalars-only, so
+                  showing them there would be three dead controls. */}
+              {category !== 'summary' && (
+                <>
+                  <Seg value={view} onChange={setView}
+                    options={[{ value: 'table', label: 'Table' },
+                              { value: 'chart', label: 'Chart' }]} />
+                  <Seg value={mode} onChange={setMode}
+                    options={[{ value: 'chronological', label: 'Chronological' },
+                              { value: 'duration', label: 'Duration' },
+                              { value: 'monthly', label: 'Monthly' }]} />
+                </>
+              )}
               <span className="flex-1" />
-              <button onClick={exportCsv}
-                className="flex items-center gap-1 text-[11px] text-muted hover:text-accent">
-                <Download size={11} /> CSV
-              </button>
+              {category !== 'summary' && (
+                <button onClick={exportCsv}
+                  className="flex items-center gap-1 text-[11px] text-muted hover:text-accent">
+                  <Download size={11} /> CSV
+                </button>
+              )}
               {params && (
                 <>
                   {/* The xlsx links are built from LIVE `params`, but `data` can be
@@ -271,23 +307,25 @@ export default function AssetDetail() {
               )}
             </div>
 
-            {scalarCards.length > 0 && (
-              <div className="shrink-0 flex flex-wrap gap-2 px-2 py-2 border-b border-border">
-                {scalarCards.map(({ metric, value }) => (
-                  <KPI key={metric.id} label={metric.label} unit={metric.unit}
-                    hint={metric.formula}
-                    value={typeof value === 'object' && value !== null
-                      ? Object.entries(value).map(([k, v]) => `${k}: ${v}`).join('  ')
-                      : String(value ?? '—')} />
-                ))}
-              </div>
+            {/* Summary is entirely tabular — headline KPIs plus identity and
+                parameters — so it replaces the whole body rather than sitting
+                above an empty time-series table it has no series for. */}
+            {data && category === 'summary' ? (
+              <AssetSummary data={data} />
+            ) : (
+              <>
+                {scalarRows.length > 0 && (
+                  <div className="shrink-0 max-h-[40%] overflow-auto border-b border-border">
+                    <ScalarTable rows={scalarRows} caption="Summary values" />
+                  </div>
+                )}
+                <div className="flex-1 min-h-0 flex flex-col">
+                  {data && (view === 'table'
+                    ? <AssetTable data={data} onShowAll={showAll} />
+                    : <AssetCharts data={data} onShowAll={showAll} />)}
+                </div>
+              </>
             )}
-
-            <div className="flex-1 min-h-0 flex flex-col">
-              {data && (view === 'table'
-                ? <AssetTable data={data} />
-                : <AssetCharts data={data} />)}
-            </div>
           </div>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { loadSelection, reconcileSelection, saveSelection } from './selectionMemory'
+import { allApplicable, loadSelection, reconcileSelection, saveSelection }
+  from './selectionMemory'
 import type { MetricRow } from './types'
 
 const m = (id: string, status: MetricRow['status'], kind: MetricRow['kind'] = 'series'): MetricRow =>
@@ -38,9 +39,33 @@ describe('selectionMemory', () => {
     expect(reconcileSelection(['p', 'gone'], [m('p', 'ok')])).toEqual(['p'])
   })
 
-  it('falls back to the first two ok series when nothing is remembered', () => {
+  it('ticks every applicable metric when nothing is remembered', () => {
+    // Deliberately not a subset. Arriving on a tab that has four results and
+    // seeing three, with no signal the fourth exists, reads as the tab being
+    // half-empty — which is exactly the complaint this default answers.
     const metrics = [m('p', 'ok'), m('curtailment', 'ok'), m('mu_upper', 'ok'),
                      m('energy_mwh', 'ok', 'scalar')]
-    expect(reconcileSelection(null, metrics)).toEqual(['p', 'curtailment', 'energy_mwh'])
+    expect(reconcileSelection(null, metrics)).toEqual(
+      ['p', 'curtailment', 'mu_upper', 'energy_mwh'])
+  })
+
+  it('skips metrics that are not ok when defaulting', () => {
+    const metrics = [m('p', 'ok'), m('status', 'blocked'), m('losses', 'na')]
+    expect(reconcileSelection(null, metrics)).toEqual(['p'])
+  })
+
+  it('falls back to the full default when nothing remembered survives', () => {
+    // Every remembered id is blocked for THIS asset. Returning [] would
+    // leave the panel blank with no explanation of why.
+    const metrics = [m('p', 'ok'), m('status', 'blocked')]
+    expect(reconcileSelection(['status'], metrics)).toEqual(['p'])
+  })
+})
+
+describe('allApplicable', () => {
+  it('returns every ok metric, in registry order', () => {
+    const metrics = [m('p', 'ok'), m('status', 'blocked'),
+                     m('energy_mwh', 'ok', 'scalar'), m('losses', 'na')]
+    expect(allApplicable(metrics)).toEqual(['p', 'energy_mwh'])
   })
 })

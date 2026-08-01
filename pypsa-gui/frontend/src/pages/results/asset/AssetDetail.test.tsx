@@ -36,7 +36,7 @@ const RESPONSE: AssetResultsResponse = {
     { id: 'energy_mwh', label: 'Energy', unit: 'MWh', kind: 'scalar',
       origin: 'derived', status: 'ok', formula: 'Σ p × w' },
   ],
-  scalars: { energy_mwh: 512000 },
+  scalars: { energy_mwh: 512000 }, headline: [],
   index: ['2026-01-01T00:00:00'], periods: null, pct_of_hours: null,
   columns: [{ id: 'p', label: 'Active power', unit: 'MW', metric_id: 'p', agg: null }],
   series: { p: [120] },
@@ -83,10 +83,38 @@ describe('AssetDetail', () => {
     expect(emissions.getAttribute('title')).toMatch(/co2_emissions/)
   })
 
-  it('shows selected scalars as KPI cards', async () => {
+  it('shows selected scalars in the shared scalar table, two decimals', async () => {
     renderIt()
     expect(await screen.findByText(/Energy/)).toBeTruthy()
-    expect(await screen.findByText(/512000|512,000/)).toBeTruthy()
+    // Same formatter as the time-series table and the chart tooltip, so the
+    // same number cannot read three ways in one panel.
+    expect(await screen.findByText('512,000.00')).toBeTruthy()
+  })
+
+  it('renders the Summary tab as tables, not a series view', async () => {
+    vi.mocked(assetResultsApi.get).mockResolvedValue({
+      ...RESPONSE,
+      category: 'summary',
+      metrics: [],
+      columns: [],
+      series: {},
+      headline: [
+        { id: 'energy_mwh', label: 'Energy', unit: 'MWh', category: 'dispatch',
+          category_label: 'Dispatch', origin: 'derived', status: 'ok',
+          value: 512000 },
+      ],
+    })
+    renderIt()
+    await userEvent.click(await screen.findByRole('tab', { name: /Summary/ }))
+    // Headline KPI, lifted out of the Dispatch tab.
+    expect(await screen.findByText('512,000.00')).toBeTruthy()
+    expect(screen.getByText('Key results')).toBeTruthy()
+    expect(screen.getByText('Identity')).toBeTruthy()
+    // Table/Chart and the view modes shape a series; Summary has none, so
+    // those controls must not be sitting there doing nothing.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /^Duration$/ })).toBeNull())
+    expect(screen.queryByRole('button', { name: /^Chart$/ })).toBeNull()
   })
 
   it('switches view mode and refetches with the new mode', async () => {

@@ -8,6 +8,7 @@ import { Download } from 'lucide-react'
 import { CHART_AXIS, CHART_GRID, CHART_TOOLTIP, colourForCarrier, downloadSVG }
   from '../shared'
 import { downloadPNG } from './exportPng'
+import { fmtNum } from './format'
 import type { AssetResultsResponse, ColumnSpec } from './types'
 
 /**
@@ -69,7 +70,13 @@ function UnitChart(
             <CartesianGrid {...CHART_GRID} />
             <XAxis dataKey={xKey} {...CHART_AXIS} minTickGap={40} />
             <YAxis {...CHART_AXIS} />
-            <Tooltip {...CHART_TOOLTIP} />
+            {/* Two decimals here too, so hovering a point and reading the
+                same point in the table cannot disagree. */}
+            <Tooltip
+              {...CHART_TOOLTIP}
+              formatter={(value: unknown, name: unknown) =>
+                [fmtNum(value), name as string] as [string, string]}
+            />
             <Legend wrapperStyle={{ fontSize: 10 }} />
             {columns.map((c, i) => (
               <Line key={c.id} type="monotone" dataKey={c.id} name={c.label}
@@ -83,7 +90,13 @@ function UnitChart(
   )
 }
 
-export default function AssetCharts({ data }: { data: AssetResultsResponse }) {
+export default function AssetCharts(
+  { data, onShowAll }: {
+    data: AssetResultsResponse
+    /** Restores every applicable metric — see the empty state below. */
+    onShowAll?: () => void
+  },
+) {
   const groups = useMemo(() => groupColumnsByUnit(data.columns), [data.columns])
   const xKey = data.mode === 'duration' ? 'rank'
     : data.mode === 'monthly' ? 'month' : 'snapshot'
@@ -97,7 +110,12 @@ export default function AssetCharts({ data }: { data: AssetResultsResponse }) {
   if (groups.length === 0) {
     return (
       <p className="p-4 text-[11px] text-muted">
-        Tick a time series on the left to draw it over the horizon.
+        No time series selected.{' '}
+        {onShowAll && (
+          <button onClick={onShowAll} className="text-accent hover:underline">
+            Show all
+          </button>
+        )}
       </p>
     )
   }

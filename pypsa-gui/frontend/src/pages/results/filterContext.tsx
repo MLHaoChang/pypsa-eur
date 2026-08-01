@@ -9,6 +9,38 @@ import { createContext, useContext, type ReactNode } from 'react'
 // Tab components convert to concrete indices using their fetched TSPayload.
 // Helpers below shave the time-series and string-index aggregations.
 
+/**
+ * Write access to the horizon filter, for tabs that need to expose it inline
+ * rather than send the user back up to the collapsed strip at the top of the
+ * Results shell.
+ *
+ * Results.tsx owns the state; this is the only way to drive it, so there is
+ * still exactly one filter for the whole panel and a tab-local control and
+ * the shell control can never disagree. Every field is already translated
+ * into the display year the shell shows (multi-period networks replicate one
+ * operational year under every investment period), so a consumer binds
+ * `fromInput` straight to a `datetime-local` input and calls `setFromInput`
+ * with whatever the user typed.
+ */
+export interface ResultsFilterControls {
+  /** "YYYY-MM-DDTHH:mm", ready for a datetime-local input. */
+  fromInput: string
+  toInput: string
+  setFromInput: (value: string) => void
+  setToInput: (value: string) => void
+  /** The network's own span, same format — input min/max and Reset target. */
+  firstSnap: string
+  lastSnap: string
+  /** Empty on a flat (single-period) network. */
+  periods: Array<number | string>
+  selectedPeriod: number | string | 'all'
+  setSelectedPeriod: (period: number | string | 'all') => void
+  /** True once the user has narrowed off the full horizon. */
+  isFiltered: boolean
+  /** Restore both bounds to the full simulation horizon. */
+  reset: () => void
+}
+
 export interface ResultsFilter {
   fromIso: string | null
   toIso:   string | null
@@ -17,6 +49,9 @@ export interface ResultsFilter {
    *  Ignored on single-period (flat) snapshots — TS payloads don't have a
    *  `periods` array there. */
   selectedPeriod: number | string | null
+  /** Absent when a tab is rendered outside the Results shell (tests, and any
+   *  future embedding) — consumers must treat the inline control as optional. */
+  controls?: ResultsFilterControls
 }
 
 const Ctx = createContext<ResultsFilter>({ fromIso: null, toIso: null, selectedPeriod: null })

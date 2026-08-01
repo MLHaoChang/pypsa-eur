@@ -20,7 +20,8 @@ const base = (over: Partial<AssetResultsResponse>): AssetResultsResponse => ({
   asset: { class: 'Generator', name: 'Gas 1', carrier: 'gas', bus: 'B1', params: {} },
   solve: { source: 'lopf', objective: 1, solve_time: 1, condition: 'optimal' },
   category: 'dispatch', mode: 'chronological', categories: [], metrics: [],
-  scalars: {}, index: [], periods: null, pct_of_hours: null, columns: [], series: {},
+  scalars: {}, headline: [], index: [], periods: null, pct_of_hours: null,
+  columns: [], series: {},
   ...over,
 })
 
@@ -86,7 +87,7 @@ describe('AssetTable (rendering)', () => {
     render(<AssetTable data={base({
       index: ['a'], periods: [2026], columns: [], series: {},
     })} />)
-    expect(screen.getByText(/tick a time series/i)).toBeTruthy()
+    expect(screen.getByText(/no time series selected/i)).toBeTruthy()
   })
 
   it('shows the empty-state prompt in duration mode with nothing ticked', () => {
@@ -97,27 +98,47 @@ describe('AssetTable (rendering)', () => {
       mode: 'duration', index: ['1', '2'], pct_of_hours: [0.5, 1],
       columns: [], series: {},
     })} />)
-    expect(screen.getByText(/tick a time series/i)).toBeTruthy()
+    expect(screen.getByText(/no time series selected/i)).toBeTruthy()
   })
 
   it('shows the empty-state prompt in monthly mode with nothing ticked', () => {
     render(<AssetTable data={base({
       mode: 'monthly', index: ['2026-01'], columns: [], series: {},
     })} />)
-    expect(screen.getByText(/tick a time series/i)).toBeTruthy()
+    expect(screen.getByText(/no time series selected/i)).toBeTruthy()
   })
 
-  it('formats numbers: integers bare, floats to 3dp, null and non-finite as empty cells', () => {
+  it('formats every number to two decimals, with null and non-finite blank', () => {
     render(<AssetTable data={base({
-      index: ['a', 'b', 'c', 'd'],
+      index: ['a', 'b', 'c', 'd', 'e'],
       columns: [{ id: 'p', label: 'p', unit: 'MW', metric_id: 'p', agg: null }],
-      series: { p: [120, 58.4321, null, NaN] },
+      series: { p: [120, 58.4321, null, NaN, 12345.6] },
     })} />)
     const cells = screen.getAllByRole('cell')
-    // Cells alternate [snapshot, p] per row: [a,120, b,58.432, c,'', d,''].
-    expect(cells.map(c => c.textContent)).toEqual(
-      ['a', '120', 'b', '58.432', 'c', '', 'd', ''],
-    )
+    // Cells alternate [snapshot, p] per row. Integers get their decimals too
+    // — a column where some rows read "120" and others "58.43" does not line
+    // up on the decimal point, which is the whole point of tabular-nums.
+    expect(cells.map(c => c.textContent)).toEqual([
+      'a', '120.00',
+      'b', '58.43',
+      'c', '',
+      'd', '',
+      'e', '12,345.60',
+    ])
+  })
+
+  it('renders a real but tiny value in exponential rather than as 0.00', () => {
+    // A capacity factor of 0.0008 pu and a genuine zero are different
+    // results; rounding both to "0.00" would hide a barely-running asset
+    // behind an idle one.
+    render(<AssetTable data={base({
+      index: ['a', 'b'],
+      columns: [{ id: 'cf', label: 'cf', unit: 'pu', metric_id: 'cf', agg: null }],
+      series: { cf: [0.0008, 0] },
+    })} />)
+    const cells = screen.getAllByRole('cell')
+    expect(cells[1].textContent).toBe('8.00e-4')
+    expect(cells[3].textContent).toBe('0.00')
   })
 
   it('renders the same number of cells per row as there are header columns', () => {
