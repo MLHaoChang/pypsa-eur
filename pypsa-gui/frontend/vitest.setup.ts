@@ -82,7 +82,7 @@ Element.prototype.getBoundingClientRect = () => ({
 // are stubbed as no-ops because nothing in jsdom ever fires a `change`
 // event on a media query, mirroring the ResizeObserver callback never
 // firing either. First needed by ChatPanel.test.tsx (Task 26).
-class MediaQueryListStub implements Partial<MediaQueryList> {
+class MediaQueryListStub implements MediaQueryList {
   matches = false
   media: string
   onchange = null
@@ -97,8 +97,7 @@ class MediaQueryListStub implements Partial<MediaQueryList> {
     return false
   }
 }
-window.matchMedia = ((media: string) =>
-  new MediaQueryListStub(media) as unknown as MediaQueryList) as typeof window.matchMedia
+window.matchMedia = (media: string) => new MediaQueryListStub(media)
 
 // window.localStorage is broken in this environment — NOT a plain jsdom gap
 // (jsdom does implement Storage), but the practical effect is identical, so
