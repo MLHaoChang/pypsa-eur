@@ -405,6 +405,47 @@ def capex_annual(ctx: Ctx):
     return cc * opt
 
 
+def gen_capex_unresolved_reason(ctx: Ctx) -> str | None:
+    """
+    Why this asset's CAPEX could not be annualised, or None if it could.
+
+    Only the NaN-defaulted inputs are detectable. `capital_cost`,
+    `marginal_cost` and `fom_cost` default to 0.0 and PyPSA materialises that
+    on load — MEASURED: `links_marginal_cost` was absent from a real netCDF
+    entirely and still read 0.0 in memory — so for those fields "unset" and
+    "deliberately zero" are indistinguishable and this function stays silent.
+    """
+    import math
+
+    import routers.simulation as sim_router
+
+    overnight = _static(ctx, "overnight_cost")
+    if overnight is None or (isinstance(overnight, float) and math.isnan(overnight)):
+        # Priced directly via capital_cost (or genuinely free). Nothing to annualise.
+        return None
+
+    rate = _static(ctx, "discount_rate")
+    if rate is None or (isinstance(rate, float) and math.isnan(rate)):
+        cfg = sim_router._state.get("solver_config")
+        cfg_rate = getattr(cfg, "discount_rate", None)
+        if cfg_rate is None or (isinstance(cfg_rate, float) and math.isnan(cfg_rate)):
+            return (
+                "CAPEX cannot be annualised: this asset is priced via "
+                "overnight_cost, but discount_rate is unset on the asset and "
+                "no solver-config default applies."
+            )
+
+    lifetime = _static(ctx, "lifetime")
+    if lifetime is None or (isinstance(lifetime, float) and not math.isfinite(lifetime)):
+        return (
+            "CAPEX cannot be annualised: this asset is priced via "
+            "overnight_cost, but lifetime is unset (infinite), so there is no "
+            "period to spread the investment over."
+        )
+
+    return None
+
+
 # Generator-flavoured names kept as aliases: for `Generator` the generic
 # functions resolve `p_nom`/`p_nom_opt`, so these are the same callable under
 # the name the Generator registry entries and their tests already use.

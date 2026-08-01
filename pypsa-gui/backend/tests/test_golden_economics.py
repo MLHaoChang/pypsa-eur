@@ -564,3 +564,48 @@ def test_the_frontend_payload_fixture_is_current(golden):
     assert set(written) >= {"generators", "storage_units", "links"}
     assert written["links"], "no link rows — the frontend mapping test needs one"
     assert written["generators"], "no generator rows"
+
+
+def test_an_unresolvable_capex_says_why_instead_of_reporting_zero(golden):
+    """
+    discount_rate = NaN is what turned every annuity into NaN and made
+    n.statistics() report EUR 0 CAPEX for assets the LP had costed correctly.
+    A zero here is indistinguishable from a free asset; a reason is not.
+    """
+    import routers.simulation as sim_router
+    from services.asset_results import compute as C
+    from services.solver_service import SolverConfig
+
+    # DEEP-COPY FIRST. `solve_golden_network()` caches at module level and hands
+    # every test THE SAME OBJECT, so mutating `golden` here would leak a NaN
+    # discount_rate into every test that runs after this one — including
+    # `test_a_resolvable_capex_has_no_reason` immediately below, which would
+    # then fail for a reason that has nothing to do with the code under test.
+    import copy
+
+    n = copy.deepcopy(golden)
+    n.generators.loc["gas", "discount_rate"] = float("nan")
+    # The solver_config mutation is safe unmocked: conftest's autouse
+    # `reset_backend` restores it after every test.
+    sim_router._state["solver_config"] = SolverConfig(discount_rate=float("nan"))
+
+    ctx = C.build_ctx(n, "Generator", "gas", source="lopf", sns=n.snapshots)
+    reason = C.gen_capex_unresolved_reason(ctx)
+
+    assert reason is not None
+    assert "discount_rate" in reason
+
+
+def test_a_resolvable_capex_has_no_reason(golden):
+    from services.asset_results import compute as C
+
+    ctx = C.build_ctx(golden, "Generator", "gas", source="lopf", sns=golden.snapshots)
+    assert C.gen_capex_unresolved_reason(ctx) is None
+
+
+def test_a_genuine_zero_is_not_reported_as_unresolvable(golden):
+    # `bess` has capital_cost = 0.0 deliberately. Zero is an answer.
+    from services.asset_results import compute as C
+
+    ctx = C.build_ctx(golden, "StorageUnit", "bess", source="lopf", sns=golden.snapshots)
+    assert C.gen_capex_unresolved_reason(ctx) is None
