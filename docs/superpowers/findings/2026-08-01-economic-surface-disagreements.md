@@ -42,7 +42,7 @@ DOES build.
 | 1 | `asset_economics` (`/results/asset_economics`) | Yes — the baseline | independent oracle (`gas`, `electrolyzer`) | **AGREE** (exact match, see below) |
 | 2 | `cost_breakdown` (`/results/cost_breakdown`) | No — by (class[, carrier]) only | oracle (Line `L_ab`), `asset_economics` (`solar`, via carrier coincidence) | **AGREE** where checked; shape mismatch elsewhere |
 | 3 | `statistics` (`/results/statistics`) | No — by (class, carrier) only | `asset_economics` (`electrolyzer`, via carrier `H2`) | **AGREE** |
-| 4 | `economics_by_carrier` (`/results/economics_by_carrier`) | No — by carrier only | `asset_economics` (`electrolyzer`, via carrier `h2`) | **DISAGREE — wrong number, 365× too high on this fixture (NEW; general factor is `8760/n.nyears`, see §4)** |
+| 4 | `economics_by_carrier` (`/results/economics_by_carrier`) | No — by carrier only | `asset_economics` (`electrolyzer`, via carrier `h2`) | **DISAGREE — wrong number, 365× too high on this fixture (NEW; general factor is `1/n.nyears`, see §4)** |
 | 5 | `lcoh` (`/results/lcoh`) | Yes, for electrolyser-like Links | `asset_economics` (`electrolyzer`) | **AGREE** |
 | 6 | `asset_costs` (`/api/simulation/asset_costs`) | Yes, for every class | `asset_economics` (`gas`, `solar`, `bess`, `electrolyzer`), oracle (`L_ab`) | **AGREE**, all 5 assets |
 | 7 | `asset_results` (Asset Detail, `capex_annual`/`fixed_cost_eur`) | Yes | `asset_economics` (`electrolyzer`) | **DISAGREE — wrong number, 100% low (KNOWN, tracked)** |
@@ -172,7 +172,7 @@ all. **The trigger is the snapshot WEIGHTS, not the snapshot COUNT** — an
 earlier draft of this finding conflated the two, which matters because it
 flips which networks are affected:
 
-| Network shape | `Σweights` per period | `n.nyears` | Missing factor `8760/n.nyears` |
+| Network shape | `Σweights` per period | `n.nyears` (= `Σweights/8760`) | Missing factor `1/n.nyears` |
 |---|---|---|---|
 | This golden fixture: 24 unit-weighted snapshots | 24 | 24/8760 | **365×** |
 | A unit-weighted 168-hour representative week | 168 | 168/8760 | **52.14×** |
@@ -222,7 +222,7 @@ path in `_safe_capital_cost`, not the function as a whole.
 Recorded as `pytest.mark.xfail(strict=True)` in
 `test_economics_by_carrier_h2_capex_agrees_with_asset_economics`. This is a
 **wrong number** (fix), not a shape mismatch — the value returned is too
-large by a factor of `8760 / n.nyears` for any overnight_cost-parameterised
+large by a factor of `1 / n.nyears` for any overnight_cost-parameterised
 asset, on any network whose snapshot weights don't happen to sum to ≈8760
 per period.
 
@@ -339,7 +339,7 @@ Recorded as `pytest.mark.xfail(strict=True)` in
 `capex_meur` is built through the same `_safe_capital_cost` /
 `_capex_commitment` path, so it inherits the identical missing-`nyears`
 overstatement (365× on THIS fixture's unit-weighted 24-snapshot periods —
-see §4 for why the factor is `8760/n.nyears`, not a fixed 365, and why a
+see §4 for why the factor is `1/n.nyears`, not a fixed 365, and why a
 correctly weighted representative-week network would not show this):
 
 ```
@@ -420,7 +420,7 @@ checks `L_ab` against the oracle directly through `cost_breakdown` and
 | Finding | Kind | Status |
 |---|---|---|
 | Asset Detail (`asset_results`/`asset_results_xlsx`) `capex_annual`/`fixed_cost_eur` reads raw `capital_cost`, ignoring `overnight_cost` annuitisation — 100% low for the electrolyzer | Wrong number | Known (measured on user's project pre-task); tracked here as `xfail(strict=True)`, fix scheduled for Task 5 |
-| `economics_by_carrier` / `compare_economics` (`_safe_capital_cost` in `routers/compare.py`) omit the `n.nyears` scaling PyPSA's own `capital_cost` accessor applies for `overnight_cost`-parameterised assets — 365× too high for the electrolyzer on this fixture's unit-weighted 24-snapshot periods. General factor is `8760/n.nyears` = `8760 / (Σ snapshot_weightings["objective"] per period)`: 52.14× on a unit-weighted 168-h week, **invisible (≈1×)** on a full year or a correctly weighted representative-week sample — and returns at 52.14× if a rep-week project is later promoted to multi-period (weights reset to 1.0). Affects the common unit-weighted small-snapshot case, not just this fixture | Wrong number | **New** — not previously tracked; recorded here as `xfail(strict=True)` |
+| `economics_by_carrier` / `compare_economics` (`_safe_capital_cost` in `routers/compare.py`) omit the `1/n.nyears` scaling PyPSA's own `capital_cost` accessor applies for `overnight_cost`-parameterised assets (`n.nyears` = `Σ snapshot_weightings["objective"] per period / 8760`) — 365× too high for the electrolyzer on this fixture's unit-weighted 24-snapshot periods. General factor is `1/n.nyears` = `8760 / (Σ snapshot_weightings["objective"] per period)`: 52.14× on a unit-weighted 168-h week, **invisible (≈1×)** on a full year or a correctly weighted representative-week sample — and returns at 52.14× if a rep-week project is later promoted to multi-period (weights reset to 1.0). Affects the common unit-weighted small-snapshot case, not just this fixture | Wrong number | **New** — not previously tracked; recorded here as `xfail(strict=True)` |
 | `compare_economics.per_asset_lcoh` is Link-only, but `coverage.COVERAGE` lists it as covering Generator/StorageUnit/Link too | Shape / coverage-claim mismatch | Documented; no per-asset Generator/StorageUnit data exists on this surface to assert against |
 | `cost_breakdown`, `statistics`, `economics_by_carrier.by_carrier`, `compare_economics.by_carrier` have no per-asset field at all (aggregate by class and/or carrier only) | Shape mismatch | Documented; spot-checked via carrier-coincidence or class-total-equals-single-asset where the fixture allows it — all such spot checks **agree** |
 | Everything else checked (`asset_economics` vs oracle ×2, `cost_breakdown`/`statistics`/`asset_costs`/`lcoh` vs `asset_economics` or oracle) | — | **Agree** |
