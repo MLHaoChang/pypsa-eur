@@ -33,7 +33,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getStorageDispatchResults).mockReset().mockResolvedValue({
     index: ['2026-01-01T00:00:00'], columns: ['Battery1'], data: [[10]],
   })
-  // Full StorageUnit shape (api/types.ts:56-70) — 20 fields, not just the 4
+  // Full StorageUnit shape (api/types.ts:56-70) — 21 fields, not just the 4
   // the brief supplied. StorageCycling.tsx's `meta` builder (:114-121) only
   // ever reads `name`, `carrier`, `p_nom_opt` (absent here, so it falls back
   // to `p_nom`) and `max_hours` off each row. Every other field below is an

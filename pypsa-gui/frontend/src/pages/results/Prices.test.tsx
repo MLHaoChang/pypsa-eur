@@ -76,6 +76,12 @@ it('renders a distinctive per-bus price sourced from a single mocked bus/snapsho
   // above predicts. Using findAllByText (the same fix Task 18's Dispatch
   // brief applied for the identical coincidence) keeps the assertion tied
   // to the fixture's 424.24 without depending on how many cells repeat it.
+  // findAllByText already throws if zero elements match, so a bare
+  // toBeGreaterThan(0) is vacuous — it can never fail and leaves the count
+  // unpinned. Empirically confirmed (by probing cell position within the
+  // matched `<tr>`) that the 3 matches are the row's Mean/Peak/Trough `<td>`
+  // cells (`Prices.tsx:258-260`) at cellIndex 3/4/5 respectively — three
+  // genuinely distinct render sites, not one node counted three times.
   const matches = await screen.findAllByText('424.24')
-  expect(matches.length).toBeGreaterThan(0)
+  expect(matches.length).toBe(3)
 })

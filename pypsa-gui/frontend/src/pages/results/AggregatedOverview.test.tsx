@@ -5,7 +5,7 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import AggregatedOverview from './AggregatedOverview'
-import type { WeightCtx } from './shared'
+import type { WeightCtx, SnapshotWeightRow } from './shared'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -80,7 +80,7 @@ beforeEach(() => {
     storage_capex_expansion: 0, storage_capex_expansion_lifetime: 0,
     by_component: [], by_carrier: [], by_period: [],
   })
-  // Full Generator shape (api/types.ts:33-55) — 26 fields, not just the 4
+  // Full Generator shape (api/types.ts:33-55) — 29 fields, not just the 4
   // this test cares about. AggregatedOverview.tsx and shared.tsx read only
   // `name`, `carrier` (both preserved from the original fixture) and
   // `curtailment_cost` (via an `as unknown as` cast, AggregatedOverview.tsx:150,378)
@@ -117,10 +117,21 @@ function renderOverview() {
   // this fixture matches the exact shape that wrapper builds, with a single
   // snapshot at weight 1 so the KPI's weighted sum equals the raw mocked
   // dispatch value.
+  // `name` is not a `SnapshotWeightRow` field. `_snapshotWeightRow`
+  // (shared.tsx:181-195) treats a row with neither `snapshot` nor `timestep`
+  // set as a positional match, so `name` is inert regardless — it's kept
+  // here only because a real weightings row would carry the snapshot's ISO
+  // under some key. Typed via intersection (the sanctioned form used at
+  // CapacityExpansion.test.tsx:84 for `lineWithOptimalSize`) so the extra
+  // field narrows this local fixture rather than widening `SnapshotWeightRow`
+  // or being silenced with a forbidden `as never`.
+  const snapshotWeightRow: SnapshotWeightRow & { name: string } = {
+    name: '2026-01-01T00:00:00', objective: 1, generators: 1, stores: 1,
+  }
   const weightCtx: WeightCtx = {
     snapshots: ['2026-01-01T00:00:00'],
     snapshotPeriods: undefined,
-    snapshotWeights: [{ name: '2026-01-01T00:00:00', objective: 1, generators: 1, stores: 1 } as never],
+    snapshotWeights: [snapshotWeightRow],
     periodWeights: undefined,
   }
   return render(

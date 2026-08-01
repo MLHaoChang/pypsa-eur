@@ -94,7 +94,7 @@ beforeEach(() => {
       country: '', unit: '', control: 'PQ', sub_network: '',
     },
   ])
-  // Full Generator shape (api/types.ts:33-55) — 26 fields, not just the 4
+  // Full Generator shape (api/types.ts:33-55) — 29 fields, not just the 4
   // this test cares about. `groupCols` (Dispatch.tsx:299-307), which feeds
   // `kpis.thermal`/`kpis.totalGen` via `weightedSum`, reads only `name` and
   // `carrier`; `curtailmentCost` (:703-719) reads `curtailment_cost` but
@@ -178,6 +178,12 @@ it('renders a distinctive thermal dispatch value sourced from the mocked results
   // assert the literal computed string is present at least once, rather
   // than trying to disambiguate a duplicate produced by an already-hidden,
   // marked-for-removal legacy section.
+  // findAllByText already throws if zero elements match, so a bare
+  // toBeGreaterThan(0) is vacuous — it can never fail and leaves the count
+  // unpinned. Empirically confirmed (by walking each match up to its KPI
+  // card container) that the 2 matches are the "Thermal" and "Total
+  // generation" cards (:1258/:1260) — two genuinely distinct render sites,
+  // not one node counted twice.
   const matches = await screen.findAllByText('424.24 MWh')
-  expect(matches.length).toBeGreaterThan(0)
+  expect(matches.length).toBe(2)
 })

@@ -49,15 +49,15 @@ it('renders the distinctive total emissions KPI sourced from the mocked results 
   // context default `selectedPeriod: null` (filterContext.tsx:23), so
   // Emissions.tsx's `view` memo takes the horizon branch, and the very next
   // memo unconditionally calls `emissions.caps.filter(...)`
-  // (Emissions.tsx:70) — a missing `caps` throws
+  // (Emissions.tsx:77) — a missing `caps` throws
   // "Cannot read properties of undefined (reading 'filter')". The
   // unconditionally-rendered "By generator" section similarly calls
-  // `view.by_generator.filter(...)` (Emissions.tsx:295), i.e.
+  // `view.by_generator.filter(...)` (Emissions.tsx:297), i.e.
   // `emissions.by_generator.filter(...)` on the horizon branch.
   // total_tCO2/by_carrier are the values under test (kept exactly as the
   // brief specified); the rest are inert defaults:
   //   - by_generator: [] keeps the "By generator" section hidden
-  //     (Emissions.tsx:295 guard: `.filter(r => r.tCO2 > 0).length > 0`).
+  //     (Emissions.tsx:297 guard: `.filter(r => r.tCO2 > 0).length > 0`).
   //   - cap: { active: false } is never read by Emissions.tsx at all (only
   //     the plural `caps[]` is; grepped to confirm).
   //   - caps: [] keeps scopeCaps/allCaps empty, so the caps table and the

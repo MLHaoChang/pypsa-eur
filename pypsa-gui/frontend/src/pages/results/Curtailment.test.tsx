@@ -44,7 +44,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getGeneratorResults).mockReset().mockResolvedValue({
     index: ['2026-01-01T00:00:00'], columns: ['SolarGen'], data: [[0]],
   })
-  // Full Generator shape (api/types.ts:33-55) — 26 fields, not just the 4
+  // Full Generator shape (api/types.ts:33-55) — 29 fields, not just the 4
   // the brief supplied. Curtailment.tsx reads only `name` and `carrier` off
   // each row: `carrierByName` (:46) and `renewableNames` (:62-64). Every
   // other field below is an inert PyPSA-default / "no constraint" value
