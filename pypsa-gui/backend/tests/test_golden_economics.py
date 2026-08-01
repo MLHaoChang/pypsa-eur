@@ -537,3 +537,30 @@ def test_every_surface_agrees_on_every_covered_asset(golden):
                     )
 
     assert not problems, "Economic surfaces disagree:\n  " + "\n  ".join(problems)
+
+
+def test_the_frontend_payload_fixture_is_current(golden):
+    """
+    The frontend mapping test reads a committed copy of this payload. If the
+    copy drifts from what the backend actually returns, that test passes
+    against a fiction — so regenerate it here and let CI fail on a dirty tree.
+    """
+    import json
+    import pathlib
+
+    payload = R.get_asset_economics()
+    dest = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "frontend" / "src" / "pages" / "results" / "__fixtures__"
+        / "asset-economics.golden.json"
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+
+    # Assert the payload is USABLE, not merely that a file appeared. A test
+    # whose only assertion is `exists()` passes just as happily on an empty
+    # dict, and the frontend test downstream would then assert against nothing.
+    written = json.loads(dest.read_text(encoding="utf-8"))
+    assert set(written) >= {"generators", "storage_units", "links"}
+    assert written["links"], "no link rows — the frontend mapping test needs one"
+    assert written["generators"], "no generator rows"

@@ -1,0 +1,190 @@
+{
+  "currency": "EUR",
+  "is_multi_period": true,
+  "periods": [
+    2030,
+    2035
+  ],
+  "generators": [
+    {
+      "name": "gas",
+      "bus": "elec_a",
+      "carrier": "gas",
+      "p_nom_opt_mw": 0.0,
+      "energy_mwh": 0.0,
+      "capacity_factor": null,
+      "revenue_eur": 0.0,
+      "vom_cost_eur": 0.0,
+      "fixed_cost_eur": 0.0,
+      "fom_cost_eur": 0.0,
+      "net_profit_eur": 0.0,
+      "lcoe_eur_per_mwh": null,
+      "avg_price_eur_per_mwh": null,
+      "by_period": [
+        {
+          "period": 2030,
+          "energy_mwh": 0.0,
+          "revenue_eur": 0.0,
+          "fixed_cost_eur": 0.0,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 0.0,
+          "net_profit_eur": 0.0,
+          "lcoe_eur_per_mwh": null,
+          "avg_price_eur_per_mwh": null
+        },
+        {
+          "period": 2035,
+          "energy_mwh": 0.0,
+          "revenue_eur": 0.0,
+          "fixed_cost_eur": 0.0,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 0.0,
+          "net_profit_eur": 0.0,
+          "lcoe_eur_per_mwh": null,
+          "avg_price_eur_per_mwh": null
+        }
+      ]
+    },
+    {
+      "name": "solar",
+      "bus": "elec_b",
+      "carrier": "solar",
+      "p_nom_opt_mw": 200.0,
+      "energy_mwh": 55485.71428571429,
+      "capacity_factor": 0.7706349206349207,
+      "revenue_eur": 0.0,
+      "vom_cost_eur": 0.0,
+      "fixed_cost_eur": 82500000.0,
+      "fom_cost_eur": 0.0,
+      "net_profit_eur": -82500000.0,
+      "lcoe_eur_per_mwh": 1486.8692070030895,
+      "avg_price_eur_per_mwh": 0.0,
+      "by_period": [
+        {
+          "period": 2030,
+          "energy_mwh": 17828.57142857143,
+          "revenue_eur": 0.0,
+          "fixed_cost_eur": 27500000.0,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 0.0,
+          "net_profit_eur": -27500000.0,
+          "lcoe_eur_per_mwh": 1542.4679487179485,
+          "avg_price_eur_per_mwh": 0.0
+        },
+        {
+          "period": 2035,
+          "energy_mwh": 37657.142857142855,
+          "revenue_eur": 0.0,
+          "fixed_cost_eur": 55000000.0,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 0.0,
+          "net_profit_eur": -55000000.0,
+          "lcoe_eur_per_mwh": 1460.5462822458271,
+          "avg_price_eur_per_mwh": 0.0
+        }
+      ]
+    }
+  ],
+  "storage_units": [
+    {
+      "name": "bess",
+      "bus": "elec_b",
+      "carrier": "",
+      "p_nom_opt_mw": 50.0,
+      "max_hours": 4.0,
+      "energy_capacity_mwh": 200.0,
+      "round_trip_efficiency": 1.0,
+      "discharge_mwh": 0.0,
+      "charge_mwh": 2000.0,
+      "discharge_revenue_eur": 0.0,
+      "charge_cost_eur": 0.0,
+      "vom_cost_eur": 0.0,
+      "fixed_cost_eur": 0.0,
+      "fom_cost_eur": 0.0,
+      "net_profit_eur": 0.0,
+      "lcos_eur_per_mwh": null,
+      "spread_eur_per_mwh": null,
+      "avg_discharge_price_eur_per_mwh": null,
+      "avg_charge_price_eur_per_mwh": 0.0,
+      "by_period": [
+        {
+          "period": 2030,
+          "discharge_mwh": 0.0,
+          "charge_mwh": 0.0,
+          "discharge_revenue_eur": 0.0,
+          "charge_cost_eur": 0.0,
+          "fixed_cost_eur": 0.0,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 0.0,
+          "net_profit_eur": 0.0,
+          "lcos_eur_per_mwh": null,
+          "spread_eur_per_mwh": null
+        },
+        {
+          "period": 2035,
+          "discharge_mwh": 0.0,
+          "charge_mwh": 2000.0,
+          "discharge_revenue_eur": 0.0,
+          "charge_cost_eur": 0.0,
+          "fixed_cost_eur": 0.0,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 0.0,
+          "net_profit_eur": 0.0,
+          "lcos_eur_per_mwh": null,
+          "spread_eur_per_mwh": null
+        }
+      ]
+    }
+  ],
+  "stores": [],
+  "links": [
+    {
+      "name": "electrolyzer",
+      "bus": "elec_a",
+      "bus1": "h2",
+      "carrier": "H2",
+      "efficiency": 0.7,
+      "p_nom_opt_mw": 28.571428571428573,
+      "energy_mwh": 7200.0,
+      "input_energy_mwh": 10285.714285714286,
+      "capacity_factor": 1.0,
+      "revenue_eur": 213690.32376898904,
+      "gross_revenue_eur": 213690.32376898904,
+      "input_cost_eur": 0.0,
+      "vom_cost_eur": 102857.14285714286,
+      "fixed_cost_eur": 166249.77136776928,
+      "fom_cost_eur": 0.0,
+      "net_profit_eur": -55416.5904559231,
+      "lcoe_eur_per_mwh": 37.375960309015575,
+      "avg_price_eur_per_mwh": 29.67921163458181,
+      "by_period": [
+        {
+          "period": 2030,
+          "energy_mwh": 2400.0,
+          "revenue_eur": 145118.8951975605,
+          "gross_revenue_eur": 145118.8951975605,
+          "input_cost_eur": 0.0,
+          "fixed_cost_eur": 55416.59045592309,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 34285.71428571428,
+          "net_profit_eur": 55416.59045592312,
+          "lcoe_eur_per_mwh": 37.375960309015575,
+          "avg_price_eur_per_mwh": 60.46620633231687
+        },
+        {
+          "period": 2035,
+          "energy_mwh": 4800.0,
+          "revenue_eur": 68571.42857142857,
+          "gross_revenue_eur": 68571.42857142857,
+          "input_cost_eur": 0.0,
+          "fixed_cost_eur": 110833.18091184618,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 68571.42857142857,
+          "net_profit_eur": -110833.18091184618,
+          "lcoe_eur_per_mwh": 37.375960309015575,
+          "avg_price_eur_per_mwh": 14.285714285714285
+        }
+      ]
+    }
+  ]
+}
