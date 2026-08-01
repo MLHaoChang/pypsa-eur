@@ -45,6 +45,8 @@ REQ_AC_PF = "ac_pf"                # AC PF stage results present in _state
 REQ_DUALS = "duals"                # LP duals captured on this component class
 REQ_COMMITTABLE = "committable"    # this asset has committable=True
 REQ_CO2 = "co2"                    # this asset's carrier declares co2_emissions
+REQ_ANNUITY = "annuity"            # overnight_cost-priced asset resolves a
+                                    # discount_rate and a finite lifetime
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,7 @@ _GENERATOR_METRICS: tuple[Metric, ...] = (
     Metric(id="capex_annual", label="Annualised CAPEX", unit="EUR/a", kind="scalar",
            category="capacity", classes=("Generator",), origin="derived",
            formula="overnight_cost × annuity(discount_rate, lifetime) × p_nom_opt", compute=C.gen_capex_annual,
-           requires=(REQ_DISPATCH,)),
+           requires=(REQ_DISPATCH, REQ_ANNUITY)),
     Metric(id="p_nom_opt_by_vintage", label="Capacity by vintage", unit="MW",
            kind="scalar", category="capacity", classes=("Generator",),
            origin="derived", formula="Σ p_nom_opt over `<name>@<year>` rows",
@@ -204,7 +206,7 @@ _GENERATOR_METRICS: tuple[Metric, ...] = (
     Metric(id="fixed_cost_eur", label="Fixed cost", unit="EUR/a", kind="scalar",
            category="economics", classes=("Generator",), origin="derived",
            formula="overnight_cost × annuity(discount_rate, lifetime) × p_nom_opt", compute=C.gen_fixed_cost,
-           requires=(REQ_DISPATCH,)),
+           requires=(REQ_DISPATCH, REQ_ANNUITY)),
     Metric(id="net_profit_eur", label="Net profit", unit="EUR", kind="scalar",
            category="economics", classes=("Generator",), origin="derived",
            formula="revenue − (fixed cost + VOM)", compute=C.gen_net_profit,
@@ -392,7 +394,7 @@ def _branch_metrics(cls: str, rating_unit: str) -> tuple[Metric, ...]:
         Metric(id="capex_annual", label="Annualised CAPEX", unit="EUR/a",
                kind="scalar", category="capacity", classes=(cls,), origin="derived",
                formula="overnight_cost × annuity(discount_rate, lifetime) × s_nom_opt", compute=C.capex_annual,
-               requires=(REQ_DISPATCH,)),
+               requires=(REQ_DISPATCH, REQ_ANNUITY)),
 
         # ── loadflow ─────────────────────────────────────────────────────
         Metric(id="p0", label="Active power at bus0", unit="MW", kind="series",
@@ -494,7 +496,7 @@ def _branch_metrics(cls: str, rating_unit: str) -> tuple[Metric, ...]:
         Metric(id="fixed_cost_eur", label="Fixed cost", unit="EUR/a",
                kind="scalar", category="economics", classes=(cls,),
                origin="derived", formula="overnight_cost × annuity(discount_rate, lifetime) × s_nom_opt",
-               compute=C.br_fixed_cost, requires=(REQ_DISPATCH,)),
+               compute=C.br_fixed_cost, requires=(REQ_DISPATCH, REQ_ANNUITY)),
     )
 
 
@@ -513,7 +515,7 @@ _LINK_METRICS: tuple[Metric, ...] = (
     Metric(id="capex_annual", label="Annualised CAPEX", unit="EUR/a",
            kind="scalar", category="capacity", classes=("Link",), origin="derived",
            formula="overnight_cost × annuity(discount_rate, lifetime) × p_nom_opt", compute=C.capex_annual,
-           requires=(REQ_DISPATCH,)),
+           requires=(REQ_DISPATCH, REQ_ANNUITY)),
 
     # ── dispatch ─────────────────────────────────────────────────────────
     Metric(id="p0", label="Withdrawal at bus0", unit="MW", kind="series",
@@ -646,7 +648,7 @@ _LINK_METRICS: tuple[Metric, ...] = (
     Metric(id="fixed_cost_eur", label="Fixed cost", unit="EUR/a", kind="scalar",
            category="economics", classes=("Link",), origin="derived",
            formula="overnight_cost × annuity(discount_rate, lifetime) × p_nom_opt", compute=C.capex_annual,
-           requires=(REQ_DISPATCH,)),
+           requires=(REQ_DISPATCH, REQ_ANNUITY)),
     Metric(id="net_profit_eur", label="Net profit", unit="EUR", kind="scalar",
            category="economics", classes=("Link",), origin="derived",
            formula="output revenue − (input cost + VOM + fixed cost)",
@@ -687,7 +689,7 @@ _STORAGE_UNIT_METRICS: tuple[Metric, ...] = (
     Metric(id="capex_annual", label="Annualised CAPEX", unit="EUR/a",
            kind="scalar", category="capacity", classes=("StorageUnit",),
            origin="derived", formula="overnight_cost × annuity(discount_rate, lifetime) × p_nom_opt",
-           compute=C.capex_annual, requires=(REQ_DISPATCH,)),
+           compute=C.capex_annual, requires=(REQ_DISPATCH, REQ_ANNUITY)),
 
     # ── dispatch ─────────────────────────────────────────────────────────
     Metric(id="p", label="Net power", unit="MW", kind="series",
@@ -832,7 +834,7 @@ _STORAGE_UNIT_METRICS: tuple[Metric, ...] = (
     Metric(id="fixed_cost_eur", label="Fixed cost", unit="EUR/a", kind="scalar",
            category="economics", classes=("StorageUnit",), origin="derived",
            formula="overnight_cost × annuity(discount_rate, lifetime) × p_nom_opt", compute=C.capex_annual,
-           requires=(REQ_DISPATCH,)),
+           requires=(REQ_DISPATCH, REQ_ANNUITY)),
     Metric(id="net_profit_eur", label="Net profit", unit="EUR", kind="scalar",
            category="economics", classes=("StorageUnit",), origin="derived",
            formula="revenue − (charging cost + VOM + fixed cost)",
@@ -859,7 +861,7 @@ _STORE_METRICS: tuple[Metric, ...] = (
     Metric(id="capex_annual", label="Annualised CAPEX", unit="EUR/a",
            kind="scalar", category="capacity", classes=("Store",), origin="derived",
            formula="overnight_cost × annuity(discount_rate, lifetime) × e_nom_opt", compute=C.capex_annual,
-           requires=(REQ_DISPATCH,)),
+           requires=(REQ_DISPATCH, REQ_ANNUITY)),
 
     # ── dispatch ─────────────────────────────────────────────────────────
     Metric(id="p", label="Power", unit="MW", kind="series", category="dispatch",
@@ -968,7 +970,7 @@ _STORE_METRICS: tuple[Metric, ...] = (
     Metric(id="fixed_cost_eur", label="Fixed cost", unit="EUR/a", kind="scalar",
            category="economics", classes=("Store",), origin="derived",
            formula="overnight_cost × annuity(discount_rate, lifetime) × e_nom_opt", compute=C.capex_annual,
-           requires=(REQ_DISPATCH,)),
+           requires=(REQ_DISPATCH, REQ_ANNUITY)),
     Metric(id="net_profit_eur", label="Net profit", unit="EUR", kind="scalar",
            category="economics", classes=("Store",), origin="derived",
            formula="revenue − (charging cost + VOM + fixed cost)",

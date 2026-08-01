@@ -604,8 +604,86 @@ def test_a_resolvable_capex_has_no_reason(golden):
 
 
 def test_a_genuine_zero_is_not_reported_as_unresolvable(golden):
-    # `bess` has capital_cost = 0.0 deliberately. Zero is an answer.
+    """
+    `bess` has capital_cost = 0.0 deliberately, and no overnight_cost. Zero
+    is an answer, not a symptom of a bug.
+
+    REVIEW FINDING (2026-08-01): asserting only `bess -> None` passes for an
+    accidental reason. `gen_capex_unresolved_reason` returns None the moment
+    `overnight_cost` is unset, REGARDLESS of what `capital_cost` holds — the
+    check would pass byte-identically if `bess.capital_cost` were 500.0. It
+    proves "no overnight_cost -> None", not that a genuine zero specifically
+    survives. `solar` (fixture.py: `capital_cost=27_500.0`, no
+    `overnight_cost`) is the control: same resolution path, a real non-zero
+    value. Both must report None for the claim in this test's name to be
+    more than a coincidence of which asset happened to get picked.
+    """
     from services.asset_results import compute as C
 
-    ctx = C.build_ctx(golden, "StorageUnit", "bess", source="lopf", sns=golden.snapshots)
-    assert C.gen_capex_unresolved_reason(ctx) is None
+    assert float(golden.storage_units.at["bess", "capital_cost"]) == 0.0
+    assert float(golden.generators.at["solar", "capital_cost"]) != 0.0
+
+    bess_ctx = C.build_ctx(golden, "StorageUnit", "bess", source="lopf", sns=golden.snapshots)
+    solar_ctx = C.build_ctx(golden, "Generator", "solar", source="lopf", sns=golden.snapshots)
+
+    assert C.gen_capex_unresolved_reason(bess_ctx) is None
+    assert C.gen_capex_unresolved_reason(solar_ctx) is None
+
+
+def test_an_unresolved_capex_reaches_the_asset_results_endpoint_as_a_reason(golden):
+    """
+    REVIEW FINDING (2026-08-01): `gen_capex_unresolved_reason` was correct
+    but unreachable — declared in compute.py, called only by its own test,
+    wired into no `Metric.requires`. From a user's perspective that is dead
+    code: the spec requires the surface to STATE the reason, and a helper
+    nobody calls does not do that.
+
+    Wiring: `registry.REQ_ANNUITY` is a new precondition key, set by
+    `compute._annuity_status` (via `compute.preconditions()`) on every
+    `capex_annual` / `fixed_cost_eur` metric's `requires` tuple. This test
+    proves the reason actually reaches an API response — GET
+    /asset_results/{class}/{name} (routers.asset_results.get_asset_results
+    -> services.asset_results.service.build_response) — not just the
+    compute-layer function in isolation.
+
+    `capex_annual` lives in category="capacity"; `fixed_cost_eur` in
+    category="economics" — the endpoint resolves one category per call, so
+    both need their own request.
+    """
+    import copy
+
+    import routers.asset_results as AR
+    import routers.simulation as sim_router
+    from services.solver_service import SolverConfig
+    from tests.golden import fixture as gf
+
+    n = copy.deepcopy(golden)
+    n.generators.loc["gas", "discount_rate"] = float("nan")
+    gf.install_golden(n)
+    # Override AFTER install_golden (which pins GOLDEN_DISCOUNT_RATE) so the
+    # solver-config fallback is unavailable too — same shape as
+    # `test_an_unresolvable_capex_says_why_instead_of_reporting_zero`, but
+    # driven all the way through the real endpoint instead of the compute
+    # function directly. conftest's autouse `reset_backend` restores both
+    # the network and the solver config after this test.
+    sim_router._state["solver_config"] = SolverConfig(
+        discount_rate=float("nan"),
+        multi_investment_periods=True,
+        investment_periods=list(gf.GOLDEN_PERIODS),
+    )
+
+    for category, metric_id in (("capacity", "capex_annual"),
+                                 ("economics", "fixed_cost_eur")):
+        detail = AR.get_asset_results(
+            component_class="Generator", name="gas", category=category,
+            source="lopf", from_=None, to=None, period=None,
+            mode="chronological", metrics="",
+        )
+        row = next(m for m in detail["metrics"] if m["id"] == metric_id)
+
+        assert row["status"] == "blocked"
+        assert "discount_rate" in row["reason"]
+        assert row.get("remedy", {}).get("action") == "open_properties"
+        # Blocked means NOT computed — no confident number sits next to the
+        # reason for the frontend to render by mistake.
+        assert metric_id not in detail.get("scalars", {})

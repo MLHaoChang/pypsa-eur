@@ -101,6 +101,7 @@ def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
     from .applicability import OK, Remedy, Status
     from .registry import (
         REQ_AC_PF,
+        REQ_ANNUITY,
         REQ_CO2,
         REQ_COMMITTABLE,
         REQ_DISPATCH,
@@ -144,6 +145,10 @@ def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
 
     # 5. A carbon-bearing carrier on THIS asset.
     out[REQ_CO2] = _co2_status(n, component_class, name)
+
+    # 6. An overnight_cost-priced asset must resolve a discount_rate and a
+    #    finite lifetime to annualise — see `capex_unresolved_reason`.
+    out[REQ_ANNUITY] = _annuity_status(n, component_class, name)
     return out
 
 
@@ -200,6 +205,24 @@ def _co2_status(n, component_class: str, name: str) -> Status:
         f"by assumption rather than by result",
         Remedy("open_properties", f"Set co2_emissions on '{carrier}'"),
     )
+
+
+def _annuity_status(n, component_class: str, name: str) -> Status:
+    """
+    `capex_unresolved_reason` promoted to a `Status` for the precondition map.
+
+    Silent (OK) for every asset priced via `capital_cost` directly, or
+    genuinely free — the reason function itself stays silent there, see its
+    docstring. Only trips for an asset priced via `overnight_cost` whose
+    `discount_rate` and/or `lifetime` did not resolve.
+    """
+    from .applicability import OK, Remedy, Status
+
+    reason = capex_unresolved_reason(n, component_class, name)
+    if reason is None:
+        return OK
+    label = "Set discount rate" if "discount_rate" in reason else "Set lifetime"
+    return Status("blocked", reason, Remedy("open_properties", label))
 
 
 # ── summary (every class) ───────────────────────────────────────────────────
@@ -405,9 +428,15 @@ def capex_annual(ctx: Ctx):
     return cc * opt
 
 
-def gen_capex_unresolved_reason(ctx: Ctx) -> str | None:
+def capex_unresolved_reason(n, component_class: str, name: str) -> str | None:
     """
-    Why this asset's CAPEX could not be annualised, or None if it could.
+    Why an asset's CAPEX could not be annualised, or None if it could.
+
+    Reads directly off the network's static row rather than requiring a full
+    `Ctx`. `preconditions()` below calls this once per (class, name) on
+    EVERY request — building a `Ctx` (weights, is_multi, a NaN-scrubbed copy
+    of the whole row) just to answer this one question would be wasted work
+    on every asset, including ones with no `overnight_cost` at all.
 
     Only the NaN-defaulted inputs are detectable. `capital_cost`,
     `marginal_cost` and `fom_cost` default to 0.0 and PyPSA materialises that
@@ -419,13 +448,25 @@ def gen_capex_unresolved_reason(ctx: Ctx) -> str | None:
 
     import routers.simulation as sim_router
 
-    overnight = _static(ctx, "overnight_cost")
-    if overnight is None or (isinstance(overnight, float) and math.isnan(overnight)):
+    df = getattr(n, attr_for(component_class), None)
+    if df is None or name not in df.index:
+        return None
+
+    def _col(col: str) -> float | None:
+        if col not in df.columns:
+            return None
+        try:
+            return float(df.at[name, col])
+        except (TypeError, ValueError):
+            return None
+
+    overnight = _col("overnight_cost")
+    if overnight is None or math.isnan(overnight):
         # Priced directly via capital_cost (or genuinely free). Nothing to annualise.
         return None
 
-    rate = _static(ctx, "discount_rate")
-    if rate is None or (isinstance(rate, float) and math.isnan(rate)):
+    rate = _col("discount_rate")
+    if rate is None or math.isnan(rate):
         cfg = sim_router._state.get("solver_config")
         cfg_rate = getattr(cfg, "discount_rate", None)
         if cfg_rate is None or (isinstance(cfg_rate, float) and math.isnan(cfg_rate)):
@@ -435,8 +476,8 @@ def gen_capex_unresolved_reason(ctx: Ctx) -> str | None:
                 "no solver-config default applies."
             )
 
-    lifetime = _static(ctx, "lifetime")
-    if lifetime is None or (isinstance(lifetime, float) and not math.isfinite(lifetime)):
+    lifetime = _col("lifetime")
+    if lifetime is None or not math.isfinite(lifetime):
         return (
             "CAPEX cannot be annualised: this asset is priced via "
             "overnight_cost, but lifetime is unset (infinite), so there is no "
@@ -444,6 +485,13 @@ def gen_capex_unresolved_reason(ctx: Ctx) -> str | None:
         )
 
     return None
+
+
+def gen_capex_unresolved_reason(ctx: Ctx) -> str | None:
+    """`Ctx`-flavoured wrapper around `capex_unresolved_reason` — kept for
+    direct compute-layer tests; `preconditions()` calls the network-level
+    form directly instead of building a `Ctx` for it."""
+    return capex_unresolved_reason(ctx.n, ctx.component_class, ctx.name)
 
 
 # Generator-flavoured names kept as aliases: for `Generator` the generic
