@@ -27,6 +27,18 @@ onto the `Depends` parameter). Checks 4-10 call each one against a project that
 does not exist: a resolved dependency answers `HTTPException(404)`, an
 unresolved one dies with `AttributeError`.
 
+S9.1 pins the RESOLUTION half only, and cannot pin the mis-binding half.
+`_authorized_project(MISSING_PROJECT)` raises 404 while the argument list is
+still being EVALUATED, so the handler is never entered and a call with its
+arguments swapped is indistinguishable from a correct one — all three
+two-parameter checks were observed PASSing against deliberately swapped tools.
+S9.2 is the half that does pin it: every check there aims at a project that
+EXISTS, which moves the 404 (or the success) inside the handler body, where the
+result is reachable only if each resolved value landed on the parameter that
+was meant to receive it. `list_snapshots(project)` takes a single parameter, so
+no argument-order defect is expressible for it; S9.2.2 pins that the handler is
+entered and answers for the right project, which is all that shape admits.
+
 F3 — `_route` injected only `db=` and `user=`, but `save_project` and
 `activate_project` declare a THIRD dependency, `session: SessionRow | None =
 Depends(current_session)`, and move the session's active-project pointer with
@@ -95,6 +107,12 @@ MISSING_PROJECT = "qa_e2e_f1_regress_no_such_project"
 # `qa_e2e_` prefix, inside the scratch PYPSAGUI_PROJECTS_ROOT pinned above.
 F3_PROJECT_A = "qa_e2e_f3_regress_alpha"
 F3_PROJECT_B = "qa_e2e_f3_regress_beta"
+# S9.2 needs a project that EXISTS, so its 404s come from inside the handler.
+S9_PROJECT = "qa_e2e_s9_regress_binding"
+S9_LABEL = "qa-e2e-binding-probe"
+# Matches `_SNAPSHOT_ID_RE` (snapshots.py:67), so the handler answers 404 for a
+# missing snapshot rather than 400 for a malformed id.
+S9_MISSING_SNAPSHOT = "qa-e2e-no-such-snapshot"
 
 _results: list[tuple[str, bool, str]] = []
 _observed: dict[str, object] = {}
@@ -163,6 +181,32 @@ def _expect_404(name: str, call) -> None:
         record(name, False, f"{type(exc).__name__}: {exc}"[:110])
     else:
         record(name, False, "returned without raising — expected 404")
+
+
+def _expect_inner_404(name: str, call) -> None:
+    """
+    FAIL unless `call` 404s from INSIDE the handler, naming the bogus snapshot.
+
+    The project exists, so `_authorized_project` returns rather than raising and
+    the handler really runs. Reaching the snapshot-missing 404 requires BOTH
+    arguments to have landed correctly: `project` must be the AuthorizedProject
+    (a swapped call dies on `project.name` before any 404) and `snapshot_id`
+    must be the string, since the detail text interpolates it. A project-level
+    404 would carry the project name instead and still FAIL here.
+    """
+    try:
+        call()
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        record(
+            name,
+            exc.status_code == 404 and S9_MISSING_SNAPSHOT in detail,
+            f"HTTPException({exc.status_code}): {detail}"[:110],
+        )
+    except Exception as exc:  # noqa: BLE001 — the mis-binding crash
+        record(name, False, f"{type(exc).__name__}: {exc}"[:110])
+    else:
+        record(name, False, "returned without raising — expected an inner 404")
 
 
 def run_f1() -> None:
@@ -235,6 +279,69 @@ def run_s9() -> None:
                    f"{type(exc).__name__}: {exc}"[:110])
         else:
             record("S9.1.7 clear_audit_log", True, "returned")
+    finally:
+        chat_tools.set_acting_user(None)
+
+
+def run_s9_binding() -> None:
+    """
+    Pin the ARGUMENT-ORDER half of S9.1, which `run_s9` structurally cannot.
+
+    Runs LAST, and unbinds the acting session first, because it must not leak
+    state into another group. Both directions were observed: saving this
+    group's project binds `PyPSAService.get_active_context().loaded_project`,
+    and `save_project` only moves a session pointer when the context was
+    unbound (`projects.py:1226`) — so running this group any earlier turned
+    F3.3 red, and leaving F3's session bound would let this group move a
+    pointer F3 asserts on. Destructive-call hazard 1: `S9_PROJECT` carries the
+    `qa_e2e_` prefix and lives under the scratch PYPSAGUI_PROJECTS_ROOT pinned
+    at import time.
+    """
+    print("S9.2 — the snapshot tools bind their arguments to the right parameters")
+    chat_tools.set_acting_user(EXPECTED_USER)
+    chat_tools.set_acting_session(None)
+    try:
+        # An existing project on disk is the whole point of this group: it is
+        # what lets a 404 originate in the handler instead of in the argument
+        # list. `save_project` writes network.nc, which every check below needs.
+        chat_tools.save_project(S9_PROJECT)
+        info = None
+        try:
+            info = chat_tools.create_project_snapshot(S9_PROJECT, S9_LABEL)
+        except Exception as exc:  # noqa: BLE001 — the mis-binding crash
+            record("S9.2.1 create_project_snapshot binds (req, project)", False,
+                   f"{type(exc).__name__}: {exc}"[:110])
+        else:
+            # The label only round-trips if `req` got the CreateSnapshotRequest;
+            # swapped, the handler reads `.name` off that model and dies.
+            seen_label = getattr(info, "label", None)
+            record("S9.2.1 create_project_snapshot binds (req, project)",
+                   seen_label == S9_LABEL, f"label={seen_label!r}")
+        snapshot_id = getattr(info, "id", None)
+        try:
+            rows = chat_tools.list_project_snapshots(S9_PROJECT)
+        except Exception as exc:  # noqa: BLE001
+            record("S9.2.2 list_project_snapshots answers for that project", False,
+                   f"{type(exc).__name__}: {exc}"[:110])
+        else:
+            ids = [getattr(r, "id", None) for r in rows] if isinstance(rows, list) else []
+            # Finding the id here also proves S9.2.1's snapshot landed under the
+            # right project's directory, not merely that the call returned.
+            record("S9.2.2 list_project_snapshots answers for that project",
+                   snapshot_id is not None and snapshot_id in ids,
+                   f"{len(ids)} snapshot(s), created id present={snapshot_id in ids}")
+        _expect_inner_404(
+            "S9.2.3 restore_project_snapshot binds (snapshot_id, project)",
+            lambda: chat_tools.restore_project_snapshot(
+                S9_PROJECT, S9_MISSING_SNAPSHOT
+            ),
+        )
+        _expect_inner_404(
+            "S9.2.4 delete_project_snapshot binds (snapshot_id, project)",
+            lambda: chat_tools.delete_project_snapshot(
+                S9_PROJECT, S9_MISSING_SNAPSHOT
+            ),
+        )
     finally:
         chat_tools.set_acting_user(None)
 
@@ -399,6 +506,7 @@ def main_() -> int:
     run_f1()
     run_s9()
     run_f3()
+    run_s9_binding()
     passed = sum(1 for _, ok, _ in _results if ok)
     failed = len(_results) - passed
     print(f"\nSUMMARY  PASS {passed}  FAIL {failed}")
