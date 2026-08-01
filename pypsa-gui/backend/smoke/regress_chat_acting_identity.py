@@ -48,6 +48,14 @@ constant `None` would stop the crash but silently leave the browser pointing at
 the old project after a chat-driven Save-As), and that handlers declaring no
 `session` are still called without the keyword.
 
+M1 — F3 left `_route`'s contract as "resolve whatever the target declares",
+enforced by nothing. A FOURTH dependency on any routed handler would silently
+receive the raw `Depends` sentinel again. `_route` now raises RuntimeError
+naming the handler and the unsatisfied parameter, and supplies `db`/`user`
+conditionally like `session`, so `reset_network`'s `(db, session)` shape routes
+too. The M1 checks pin the guard firing, the no-`user` shape working, and the
+guard NOT firing on an ordinary default.
+
 The F3 group runs with LOCAL MODE OFF. Local mode injects the seeded user and
 issues no session cookie at all, so `current_session` is None there for the UI
 and the chat path alike — a session pointer only exists when auth is on, and
@@ -346,6 +354,56 @@ def run_s9_binding() -> None:
         chat_tools.set_acting_user(None)
 
 
+def _probe_dependency():
+    """A fourth dependency `_route` supplies nothing for."""
+    return "never-resolved-by-_route"
+
+
+def _probe_handler_extra_dependency(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+    extra: str = Depends(_probe_dependency),
+):
+    """
+    Stand in for a routed handler that grows a FOURTH dependency.
+
+    Returning a marker rather than touching `extra` is deliberate: without the
+    guard this body is reached and answers normally, and the raw `Depends`
+    sentinel only detonates wherever the real handler happens to dereference it
+    — which is the silent-failure mode M1.1 exists to convert into a loud one.
+    """
+    return "reached the body"
+
+
+def _probe_handler_reset_network_shape(
+    db: DBSession = Depends(get_db),
+    session: SessionRow | None = Depends(current_session),
+):
+    """
+    Stand in for `reset_network` (`routers/network.py:1898`) — `db`, no `user`.
+
+    It declares `session` but NOT `user`, so a `_route` that supplies `user=`
+    unconditionally raises TypeError before the body runs. No chat tool routes
+    to it today; this pins that adding one would work.
+    """
+    return "ok"
+
+
+def _probe_handler_plain_default(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+    cascade: bool = False,
+):
+    """
+    Negative control: an unsupplied parameter whose default is NOT a `Depends`.
+
+    `delete_project` and `save_project` both have several. The guard must key on
+    `isinstance(default, fastapi.params.Depends)`, not on "unsupplied", or it
+    would reject most of the live call sites.
+    """
+    return f"cascade={cascade}"
+
+
 def _probe_handler_with_session(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
@@ -501,12 +559,46 @@ def run_f3() -> None:
         record(name, seen == f"ok:True pointer={expected!r}", f"saw {seen!r}"[:150])
 
 
+def run_m1() -> None:
+    """Prove `_route` refuses a dependency it cannot supply, loudly."""
+    print("M1 — _route fails loudly on a dependency it does not supply")
+    chat_tools.set_acting_user(EXPECTED_USER)
+    chat_tools.set_acting_session(None)
+    try:
+        seen = _describe(lambda: chat_tools._route(_probe_handler_extra_dependency))
+        # Both names must appear: a RuntimeError that does not say WHICH
+        # parameter of WHICH handler is unsatisfied would leave the next
+        # implementer exactly where F3 left this one.
+        record(
+            "M1.1 an unsatisfied Depends raises RuntimeError",
+            seen.startswith("RuntimeError:")
+            and "'extra'" in seen
+            and "_probe_handler_extra_dependency" in seen,
+            f"saw {seen!r}"[:150],
+        )
+        seen = _describe(lambda: chat_tools._route(_probe_handler_reset_network_shape))
+        record(
+            "M1.2 a handler declaring no `user` still routes",
+            seen == "ok:ok",
+            f"saw {seen!r}"[:150],
+        )
+        seen = _describe(lambda: chat_tools._route(_probe_handler_plain_default))
+        record(
+            "M1.3 a non-Depends default does not trip the guard",
+            seen == "ok:cascade=False",
+            f"saw {seen!r}"[:150],
+        )
+    finally:
+        chat_tools.set_acting_user(None)
+
+
 def main_() -> int:
     """Run all three groups and return a process exit code."""
     run_f1()
     run_s9()
     run_f3()
     run_s9_binding()
+    run_m1()
     passed = sum(1 for _, ok, _ in _results if ok)
     failed = len(_results) - passed
     print(f"\nSUMMARY  PASS {passed}  FAIL {failed}")

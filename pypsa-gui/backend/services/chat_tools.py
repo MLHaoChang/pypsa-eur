@@ -46,7 +46,7 @@ import uuid
 from contextvars import ContextVar
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, params as fastapi_params
 
 from services.pypsa_service import PyPSAService
 
@@ -1100,17 +1100,36 @@ def _acting_session(db):
 def _route(handler, *args, **kwargs):
     """Call a project-router handler with the acting identity injected."""
     with _acting() as (db, user):
+        params = inspect.signature(handler).parameters
         # `save_project` and `activate_project` declare a THIRD dependency,
         # `session: SessionRow | None = Depends(current_session)`, and use it to
         # move the session's active-project pointer. Unsupplied, they receive the
         # raw `Depends` and die on `.active_project_id`; supplied as a constant
         # None they stop crashing but a chat-driven Save-As silently leaves the
-        # browser pointing at the old project. Keyed off the signature because
-        # most handlers reached here declare no `session` and would raise
-        # TypeError on an unexpected keyword.
-        if "session" not in kwargs and "session" in inspect.signature(handler).parameters:
-            kwargs["session"] = _acting_session(db)
-        return handler(*args, db=db, user=user, **kwargs)
+        # browser pointing at the old project. Every injection is keyed off the
+        # signature because handlers reached here declare different subsets and
+        # would raise TypeError on an unexpected keyword — `reset_network`
+        # (`routers/network.py:1898`) declares `db` and `session` but no `user`.
+        injected = {n: v for n, v in (("db", db), ("user", user)) if n in params}
+        if "session" in params and "session" not in kwargs:
+            injected["session"] = _acting_session(db)
+        # `_route`'s contract is "resolve whatever the target declares", and
+        # nothing but this loop enforces it. A FOURTH dependency added to any
+        # routed handler would otherwise arrive as a raw `Depends` sentinel and
+        # die with an AttributeError deep inside the body — which is exactly how
+        # F3 hid behind F1's 401 for a full cycle. A static scan is no
+        # substitute: the DISPATCHERS-to-handler mapping is established by ~40
+        # function-local imports, which is why earlier AST scans missed F3.
+        consumed = set(list(params)[: len(args)]) | injected.keys() | kwargs.keys()
+        for name, param in params.items():
+            if name not in consumed and isinstance(param.default, fastapi_params.Depends):
+                raise RuntimeError(
+                    f"_route() cannot satisfy dependency {name!r} of "
+                    f"{getattr(handler, '__module__', '?')}."
+                    f"{getattr(handler, '__qualname__', handler)}: it supplies only "
+                    f"db/user/session. Resolve it at the call site or extend _route()."
+                )
+        return handler(*args, **{**injected, **kwargs})
 
 
 def _authorized_project(name: str):
