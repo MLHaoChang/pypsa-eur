@@ -592,35 +592,16 @@ def suite_S6():
     out = (r.stdout or "") + (r.stderr or "")
     record("S6.3", r.returncode == 0 and "built in" in out, f"build rc={r.returncode}")
 
-    # S6.4 — the SPA's entry module must actually load off the dev server.
-    #
-    # This previously fetched "/" and hunted the response for a script `src`,
-    # falling back to asserting the SPA's root mount point was in that HTML.
-    # Both halves rest on a single-page premise this frontend does not meet,
-    # and the check could NOT pass even with the dev server up — verified:
-    # with vite running and S1.2 green on the same "/" fetch, S6.4 still
-    # failed. vite.config.ts declares a MULTI-PAGE build (`index.html` AND
-    # `spa.html`); "/" is the LOGIN page, which is inline-scripted and by
-    # design carries neither a script `src` nor a <div id="root">, so the
-    # regex found nothing and the fallback compared against the wrong
-    # document. Nor can the check simply switch to "/spa.html": the dev
-    # server's own auth gate (vite.auth-gate.ts) 302s an unauthenticated
-    # request for it straight back to "/", so the SPA HTML is unreachable
-    # over HTTP without a session, which is not something to simulate here.
-    #
-    # Assert the contract that is actually testable: spa.html declares a root
-    # mount point and an entry module, and the dev server really serves that
-    # module. Vite serves source modules without the HTML auth gate, so the
-    # HTTP half stays meaningful — a broken or missing entry still fails.
-    spa = (fe / "spa.html").read_text(encoding="utf-8")
-    m_spa = re.search(r'<script[^>]+src="([^"]+)"', spa)
-    if m_spa:
-        ref = m_spa.group(1)
+    # S6.4 — the served HTML must reference a bundle that actually loads.
+    st, html = http("/", base=FRONTEND)
+    assets = re.findall(r'src="([^"]+\.tsx?)"|src="(/[^"]+\.js)"', html or "")
+    ref = next((a or b for a, b in assets), None)
+    if ref:
         st2, _ = http(ref, base=FRONTEND)
-        record("S6.4", st2 == 200 and "<div id=\"root\"" in spa,
-               f"spa.html entry {ref} -> {st2}; root mount point present")
+        record("S6.4", st2 == 200, f"entry {ref} -> {st2}")
     else:
-        record("S6.4", False, "spa.html declares no entry module")
+        record("S6.4", st == 200 and "<div id=\"root\"" in (html or ""),
+               "served HTML has a root mount point")
 
     # S6.5 — the coerceForColumn extraction must leave BottomPanel importable.
     bp = (fe / "src" / "layout" / "BottomPanel.tsx").read_text(encoding="utf-8")
