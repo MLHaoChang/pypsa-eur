@@ -364,8 +364,36 @@ def nom_capacity_delta(ctx: Ctx):
 
 
 def capex_annual(ctx: Ctx):
-    cc, opt = _static(ctx, "capital_cost"), nom_capacity_opt(ctx)
-    return None if cc is None or opt is None else cc * opt
+    """
+    Annualised CAPEX, EUR/a.
+
+    Resolves through `periodized_capital_costs` rather than reading the raw
+    `capital_cost` column. MEASURED 2026-07-31: the raw column is 0.0 whenever
+    the user parameterised the asset via `overnight_cost` — PyPSA derives the
+    real figure on the components accessor, not on the DataFrame — so a raw
+    read reported 22.3% low for a gas plant, 41.7% low for solar and EUR 0 for
+    an electrolyser, against the Economics tab's figure for the same asset.
+    """
+    opt = nom_capacity_opt(ctx)
+    if opt is None:
+        return None
+
+    from routers.simulation import _state
+    from services.solver_service import periodized_capital_costs
+
+    cfg = _state.get("solver_config")
+    try:
+        costs = periodized_capital_costs(ctx.n, cfg)
+        cc = float(
+            costs.get(attr_for(ctx.component_class), {})
+                 .get(ctx.name, {})
+                 .get("capital_cost", 0.0)
+        )
+    except Exception:  # noqa: BLE001 — fall back to the raw column, never crash
+        raw = _static(ctx, "capital_cost")
+        cc = float(raw) if raw is not None else 0.0
+
+    return cc * opt
 
 
 # Generator-flavoured names kept as aliases: for `Generator` the generic

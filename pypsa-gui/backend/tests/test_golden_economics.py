@@ -326,36 +326,6 @@ def _find_metric(asset_detail: dict, metric_id: str) -> float:
     raise AssertionError(f"Asset Detail has no metric {metric_id!r}")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "MEASURED on the golden fixture, 2026-08-01: Asset Detail's "
-        "capex_annual (services/asset_results/compute.py::capex_annual, "
-        "shared by the 'capex_annual' AND 'fixed_cost_eur' metric ids for "
-        "Link) reads the RAW `capital_cost` column via "
-        "`_static(ctx, 'capital_cost')` instead of resolving it through "
-        "periodized_capital_costs / with_periodized_cost_defaults the way "
-        "asset_economics does. For the electrolyzer (overnight_cost = "
-        "1,500,000, no direct capital_cost typed) that raw column is "
-        "PyPSA's untouched default of 0.0, so Asset Detail reports EUR "
-        "0/yr against the correct EUR 11,083.32/yr (asset_economics "
-        "fixed_cost_eur 166,249.77 / 15 horizon-years) -- 100% low. Same "
-        "shape as the user's real project (Gas 22.3% low, Solar PV 41.7% "
-        "low, electrolyser EUR 0 against EUR 27,143,399). NOTE: the "
-        "originating brief's example targeted Generator 'gas', but this "
-        "golden fixture's LP sets gas's p_nom_opt to 0 (solar alone "
-        "clears demand) -- both the buggy and the correct formula "
-        "evaluate to zero there, so 'gas' would have made this marker "
-        "XPASS. Retargeted to Link 'electrolyzer', whose LP-optimal "
-        "capacity is strictly positive and actually reproduces the "
-        "defect. asset_results_xlsx shares this exact defect too "
-        "(services/asset_results/export.py imports `build_response` from "
-        "the same services/asset_results/service.py used here) but is not "
-        "separately probed at runtime. Fixed in Task 5; strict=True fails "
-        "this marker once the bug is gone so it cannot outlive the "
-        "defect."
-    ),
-)
 def test_asset_detail_capex_agrees_with_asset_economics(golden):
     import routers.asset_results as AR
 
