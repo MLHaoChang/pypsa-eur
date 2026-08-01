@@ -7,11 +7,14 @@ HTTP, no serialisation, no NaN scrubbing — the router owns all three.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.period_utils import is_multi_period, snapshot_weights
+
+logger = logging.getLogger(__name__)
 
 # `.applicability` and `.registry` are imported LOCALLY inside the functions
 # below, never at module level. `registry.py` does `from . import compute as
@@ -389,7 +392,13 @@ def capex_annual(ctx: Ctx):
                  .get(ctx.name, {})
                  .get("capital_cost", 0.0)
         )
-    except Exception:  # noqa: BLE001 — fall back to the raw column, never crash
+    except Exception as exc:  # noqa: BLE001 — fall back to the raw column, never crash
+        logger.warning(
+            "capex_annual: periodized_capital_costs failed for %s %r, falling "
+            "back to raw capital_cost column (reports 0.0 for an "
+            "overnight_cost-priced asset): %s",
+            ctx.component_class, ctx.name, exc,
+        )
         raw = _static(ctx, "capital_cost")
         cc = float(raw) if raw is not None else 0.0
 
