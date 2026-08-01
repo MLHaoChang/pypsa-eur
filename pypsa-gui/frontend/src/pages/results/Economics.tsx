@@ -79,7 +79,7 @@ interface AggregatedAssetRow {
 // Map an asset row from the API into the row shape used by the table — the
 // generator/storage/store flavours have slightly different field names, but
 // the UI columns are common.
-function makeGenRow(g: GeneratorEconomicsRow): AggregatedAssetRow {
+export function makeGenRow(g: GeneratorEconomicsRow): AggregatedAssetRow {
   return {
     group: isRenewableCarrier(g.carrier) ? 'Renewables' : 'Thermal',
     name: g.name,
@@ -113,7 +113,7 @@ function makeGenRow(g: GeneratorEconomicsRow): AggregatedAssetRow {
     })),
   }
 }
-function makeSURow(s: StorageUnitEconomicsRow): AggregatedAssetRow {
+export function makeSURow(s: StorageUnitEconomicsRow): AggregatedAssetRow {
   return {
     group: 'Storage',
     name: s.name,
@@ -151,7 +151,7 @@ function makeSURow(s: StorageUnitEconomicsRow): AggregatedAssetRow {
 // energy bought. `sumGroup` already builds its unit cost as
 // (fixed + vom + charge_cost) / energy, which is the all-in basis the backend
 // and the LCOH panel use, so group totals come out right without special-casing.
-function makeLinkRow(l: LinkEconomicsRow): AggregatedAssetRow {
+export function makeLinkRow(l: LinkEconomicsRow): AggregatedAssetRow {
   return {
     group: 'Converters',
     name: l.name,
@@ -183,7 +183,7 @@ function makeLinkRow(l: LinkEconomicsRow): AggregatedAssetRow {
     })),
   }
 }
-function makeStoreRow(s: StoreEconomicsRow): AggregatedAssetRow {
+export function makeStoreRow(s: StoreEconomicsRow): AggregatedAssetRow {
   return {
     group: 'Storage',
     name: s.name,
