@@ -238,7 +238,7 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
 
 
 @router.post("/stream")
-def chat_stream(body: StreamRequest, request: Request) -> StreamingResponse:
+async def chat_stream(body: StreamRequest, request: Request) -> StreamingResponse:
     """
     Open an SSE stream for one chat turn. The Phase 2 stub drives the
     script-provided frame sequence; Phase 3 will replace the inner loop
@@ -259,6 +259,17 @@ def chat_stream(body: StreamRequest, request: Request) -> StreamingResponse:
     # and opens its own short-lived DB session per call, because this request's
     # session is closed the moment the handler returns and the SSE generator
     # outlives it. STEP 0b: this becomes the session row's own identity.
+    #
+    # THIS HANDLER MUST STAY `async def`. As a sync `def` FastAPI runs it via
+    # `run_in_threadpool`, which copies the context per submit, so the bind
+    # below lands on a worker-thread copy discarded when the handler returns —
+    # and `_gen()` (driven by `iterate_in_threadpool`, which copies the task
+    # context afresh for EVERY yielded item) then reads the default `None`, so
+    # every project-scoped tool answers 401 `no_acting_user`. Binding from the
+    # event-loop task instead mutates the context those per-item copies descend
+    # from, so it survives all of them. Corollary: nothing blocking may be added
+    # to this handler body — it runs on the event loop now. `_gen()` itself is
+    # still sync and still runs off-loop in the threadpool.
     from services import chat_tools as _chat_tools
     _chat_tools.set_acting_user(getattr(getattr(request.state, "auth_user", None), "id", None))
 

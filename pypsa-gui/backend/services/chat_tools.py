@@ -982,7 +982,7 @@ def force_reset_simulation() -> dict:
 def solve_queue_enqueue(project_id: str) -> dict:
     # Handler is enqueue_solve(req: EnqueueRequest) — wrap the id in the model.
     from routers.solve_queue import enqueue_solve as _h, EnqueueRequest
-    return _h(EnqueueRequest(project_id=project_id))
+    return _route(_h, EnqueueRequest(project_id=project_id))
 
 
 def solve_queue_list() -> dict:
@@ -1479,26 +1479,33 @@ def compare_scenarios(
 
 
 def create_project_snapshot(name: str, label: str, message: str | None = None) -> dict:
-    # Handler is create_snapshot(name, req: CreateSnapshotRequest) and reads
-    # req.label / req.message — pass the model, not a dict (a direct call doesn't
-    # get FastAPI's body parsing, so a dict would AttributeError on req.label).
+    # Handler is create_snapshot(req: CreateSnapshotRequest, project:
+    # AuthorizedProject = ProjectAccessDep) and reads req.label / req.message —
+    # pass the model, not a dict (a direct call doesn't get FastAPI's body
+    # parsing, so a dict would AttributeError on req.label). The `project`
+    # default is an unresolved `Depends`, so it has to be supplied too; these
+    # four take a resolved AuthorizedProject rather than db=/user=, so
+    # `_authorized_project` is the right helper and `_route` is NOT.
     from routers.snapshots import create_snapshot, CreateSnapshotRequest
-    return create_snapshot(name, CreateSnapshotRequest(label=label, message=message or ""))
+    return create_snapshot(
+        CreateSnapshotRequest(label=label, message=message or ""),
+        _authorized_project(name),
+    )
 
 
 def list_project_snapshots(name: str) -> list[dict]:
     from routers.snapshots import list_snapshots as _h
-    return _h(name)
+    return _h(_authorized_project(name))
 
 
 def restore_project_snapshot(name: str, snapshot_id: str) -> dict:
     from routers.snapshots import restore_snapshot as _h
-    return _h(name, snapshot_id)
+    return _h(snapshot_id, _authorized_project(name))
 
 
 def delete_project_snapshot(name: str, snapshot_id: str) -> None:
     from routers.snapshots import delete_snapshot as _h
-    _h(name, snapshot_id)
+    _h(snapshot_id, _authorized_project(name))
 
 
 # ── Import / Export (8) ─────────────────────────────────────────────────────
@@ -1608,8 +1615,10 @@ def export_matpower() -> dict:
 
 
 def audit_log(limit: int | None = None) -> list[dict]:
+    # Both changelog handlers take `user`/`db` as unresolved `Depends` defaults
+    # and org-scope the trail off `user`, so they must be routed, not called.
     from routers.changelog import get_changelog as _h
-    entries = _h()
+    entries = _route(_h)
     if limit is not None and isinstance(entries, list):
         return entries[-limit:]
     return entries
@@ -1617,7 +1626,7 @@ def audit_log(limit: int | None = None) -> list[dict]:
 
 def clear_audit_log() -> None:
     from routers.changelog import clear_changelog as _h
-    _h()
+    _route(_h)
 
 
 def undo_last() -> dict:
