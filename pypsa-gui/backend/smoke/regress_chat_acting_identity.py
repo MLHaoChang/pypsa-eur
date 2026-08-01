@@ -1,5 +1,5 @@
 """
-Regression harness for the chat acting-identity defects (F1 + S9.1).
+Regression harness for the chat acting-identity defects (F1 + S9.1 + F3).
 
 Standalone PASS/FAIL script — NOT a pytest module. It lives in `smoke/` because
 `tests/` is shared with a concurrently-running pytest session whose database it
@@ -27,6 +27,20 @@ onto the `Depends` parameter). Checks 4-10 call each one against a project that
 does not exist: a resolved dependency answers `HTTPException(404)`, an
 unresolved one dies with `AttributeError`.
 
+F3 — `_route` injected only `db=` and `user=`, but `save_project` and
+`activate_project` declare a THIRD dependency, `session: SessionRow | None =
+Depends(current_session)`, and move the session's active-project pointer with
+it. They received the raw `Depends` sentinel and died on `.active_project_id`.
+Checks 12-16 pin BOTH halves of the fix: that a real `SessionRow` arrives (a
+constant `None` would stop the crash but silently leave the browser pointing at
+the old project after a chat-driven Save-As), and that handlers declaring no
+`session` are still called without the keyword.
+
+The F3 group runs with LOCAL MODE OFF. Local mode injects the seeded user and
+issues no session cookie at all, so `current_session` is None there for the UI
+and the chat path alike — a session pointer only exists when auth is on, and
+"not crashing" is all that could be observed under it.
+
 The `script` stub path is deliberately NOT used as the probe — `_dispatch_stub_
 call` replays canned results and never reaches a real handler. The probe
 replaces `chat_service.run_turn` instead, so the router, Starlette's streaming
@@ -39,6 +53,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import uuid
 
 _BACKEND = pathlib.Path(__file__).resolve().parent.parent
 if str(_BACKEND) not in sys.path:
@@ -63,13 +78,23 @@ require_isolated_environment()
 
 import local_mode  # noqa: E402
 import main  # noqa: E402
-from fastapi import HTTPException  # noqa: E402
+import security  # noqa: E402
+from fastapi import Depends, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy.orm import Session as DBSession  # noqa: E402
 
+from db.models import Project, Session as SessionRow, User  # noqa: E402
+from db.session import SessionLocal, get_db  # noqa: E402
+from deps import current_session, optional_user  # noqa: E402
 from services import chat_service, chat_tools  # noqa: E402
+from settings import get_settings  # noqa: E402
 
 EXPECTED_USER = str(local_mode.LOCAL_USER_ID)
 MISSING_PROJECT = "qa_e2e_f1_regress_no_such_project"
+# Destructive-call hazard 1: every project this harness writes carries the
+# `qa_e2e_` prefix, inside the scratch PYPSAGUI_PROJECTS_ROOT pinned above.
+F3_PROJECT_A = "qa_e2e_f3_regress_alpha"
+F3_PROJECT_B = "qa_e2e_f3_regress_beta"
 
 _results: list[tuple[str, bool, str]] = []
 _observed: dict[str, object] = {}
@@ -214,10 +239,166 @@ def run_s9() -> None:
         chat_tools.set_acting_user(None)
 
 
+def _probe_handler_with_session(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
+):
+    """
+    Stand in for `save_project`'s THREE-dependency shape.
+
+    Reports the injected session's id, so the check can tell a resolved
+    `SessionRow` from `None` and from an unresolved `Depends` sentinel. Read
+    HERE, inside `_acting()`'s DB session, rather than by the caller — that is
+    the discipline the fix itself follows.
+    """
+    return str(session.id) if session is not None else repr(session)
+
+
+def _probe_handler_without_session(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Stand in for the majority of handlers `_route` serves.
+
+    They declare no `session`, so passing the keyword unconditionally would
+    TypeError every one of them. This is the check that keeps the fix keyed on
+    the target's signature.
+    """
+    return "ok"
+
+
+def _pointer_project_name(session_id: str) -> str | None:
+    """The display name of the project `session_id` currently points at."""
+    with SessionLocal() as db:
+        row = db.get(SessionRow, uuid.UUID(session_id))
+        if row is None or row.active_project_id is None:
+            return None
+        project = db.get(Project, row.active_project_id)
+        return None if project is None else project.name
+
+
+def _describe(call) -> str:
+    """Run `call` and render its outcome as one short string."""
+    try:
+        return f"ok:{call()}"
+    except HTTPException as exc:
+        return f"HTTPException({exc.status_code}): {exc.detail}"
+    except Exception as exc:  # noqa: BLE001 — the unresolved-Depends crash
+        return f"{type(exc).__name__}: {exc}"
+
+
+def _probe_turn_f3(session, message, attachment_file_ids=None):
+    """
+    Stand in for `run_turn` and exercise the session-bound tools from a tool thread.
+
+    Everything after the first `yield` runs under a fresh `iterate_in_threadpool`
+    context copy, and each probe is submitted into `chat_service._TOOL_EXECUTOR`
+    through the same `copy_context()` snapshot the real dispatcher uses — so the
+    acting SESSION is observed under exactly the conditions a real tool call
+    sees, not merely in the handler that bound it.
+    """
+    yield "token", {"text": "probe"}
+    snapshot = contextvars.copy_context()
+    sid = str(_observed["f3_session_id"])
+
+    def _run(fn):
+        return chat_service._TOOL_EXECUTOR.submit(lambda: snapshot.run(fn)).result(
+            timeout=120
+        )
+
+    def _tool(call):
+        """One tool's outcome, plus where it left the session's pointer."""
+        outcome = _describe(call)
+        return f"{outcome} pointer={_pointer_project_name(sid)!r}"
+
+    _observed["f3_session_row"] = _run(
+        lambda: _describe(lambda: chat_tools._route(_probe_handler_with_session))
+    )
+    _observed["f3_no_session_kwarg"] = _run(
+        lambda: _describe(lambda: chat_tools._route(_probe_handler_without_session))
+    )
+    _observed["f3_save"] = _run(
+        lambda: _tool(lambda: bool(chat_tools.save_project(F3_PROJECT_A)))
+    )
+    _observed["f3_save_as"] = _run(
+        lambda: _tool(lambda: bool(chat_tools.save_project_as(F3_PROJECT_B)))
+    )
+    _observed["f3_activate"] = _run(
+        lambda: _tool(lambda: bool(chat_tools.activate_project(F3_PROJECT_A)))
+    )
+    yield "done", {"ok": True}
+
+
+def run_f3() -> None:
+    """Drive one cookie-authenticated turn and prove the session really resolves."""
+    print("F3 — _route resolves the acting SESSION, not just the user")
+    settings = get_settings()
+    # Auth ON for this group: local mode issues no session cookie, so
+    # `current_session` is None there by design and neither the fix nor the
+    # rejected `session=None` shortcut would be distinguishable under it.
+    os.environ["PYPSAGUI_LOCAL_MODE"] = "0"
+    original = chat_service.run_turn
+    chat_service.run_turn = _probe_turn_f3
+    try:
+        # The identity itself is the one `lifespan` seeded during run_f1 — it
+        # already has an org, a membership and status="active". All this adds is
+        # a real session row to carry a cookie, which local mode never mints.
+        from services.auth_service import create_session
+        with SessionLocal() as db:
+            raw_token, row = create_session(db, local_mode.LOCAL_USER_ID)
+            session_id = str(row.id)
+        _observed["f3_session_id"] = session_id
+        csrf_token = security.new_csrf_token()
+        # Unbind in THIS thread first, exactly as run_f1 does: a value left
+        # bound here is the root context every downstream copy descends from.
+        # Nothing here binds the SESSION — the router must do that, or the
+        # check would be testing the harness rather than the fix.
+        chat_tools.set_acting_user(None)
+        with TestClient(main.app) as client:
+            client.cookies.set(settings.session_cookie_name, raw_token)
+            client.cookies.set(settings.csrf_cookie_name, csrf_token)
+            client.headers[settings.csrf_header_name] = csrf_token
+            response = client.post(
+                "/api/chat/stream",
+                json={"session_id": "f3-regress", "message": "probe"},
+            )
+        record("F3.0 authenticated stream opened", response.status_code == 200,
+               f"HTTP {response.status_code}")
+    finally:
+        chat_service.run_turn = original
+        os.environ["PYPSAGUI_LOCAL_MODE"] = "1"
+        chat_tools.set_acting_user(None)
+
+    seen_row = _observed.get("f3_session_row")
+    record(
+        "F3.1 _route injects the resolved SessionRow",
+        seen_row == f"ok:{session_id}",
+        f"saw {seen_row!r}"[:150],
+    )
+    seen_plain = _observed.get("f3_no_session_kwarg")
+    record(
+        "F3.2 handlers without `session` keep their signature",
+        seen_plain == "ok:ok",
+        f"saw {seen_plain!r}"[:150],
+    )
+    # The three checks the human's ruling turns on. A `session=None` shortcut
+    # stops the AttributeError and leaves every one of these pointers None.
+    for name, key, expected in (
+        ("F3.3 save_project moves the session pointer", "f3_save", F3_PROJECT_A),
+        ("F3.4 save_project_as rebinds the session pointer", "f3_save_as", F3_PROJECT_B),
+        ("F3.5 activate_project moves the session pointer", "f3_activate", F3_PROJECT_A),
+    ):
+        seen = _observed.get(key)
+        record(name, seen == f"ok:True pointer={expected!r}", f"saw {seen!r}"[:150])
+
+
 def main_() -> int:
-    """Run both groups and return a process exit code."""
+    """Run all three groups and return a process exit code."""
     run_f1()
     run_s9()
+    run_f3()
     passed = sum(1 for _, ok, _ in _results if ok)
     failed = len(_results) - passed
     print(f"\nSUMMARY  PASS {passed}  FAIL {failed}")
