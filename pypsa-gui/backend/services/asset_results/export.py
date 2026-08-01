@@ -100,8 +100,11 @@ def build_workbook(
 
     sheets: dict[str, tuple[list, list[list]]] = {}
     scalar_rows: list[list] = [["Category", "Metric", "Value", "Unit", "Formula"]]
+    headline_rows: list[list] = [
+        ["Metric", "Value", "Unit", "Source tab", "Status", "Formula"]]
     omitted: list[tuple[str, str]] = []
     first_resp: dict | None = None
+    headline: list[dict] = []
 
     for cat in categories:
         ids = metric_ids if scope == "view" else [
@@ -123,6 +126,8 @@ def build_workbook(
             continue
         if first_resp is None:
             first_resp = resp
+        if resp.get("headline"):
+            headline = resp["headline"]
         st = next(c for c in resp["categories"] if c["id"] == cat)
         if st["status"] != "ok":
             omitted.append((CATEGORY_LABELS[cat], st.get("reason", "")))
@@ -171,6 +176,32 @@ def build_workbook(
             f"Failed to export asset results for {component_class}/{name}: "
             "every requested category raised an exception (see server log).",
         )
+    # The headline KPIs ride along on the `summary` response, which a full
+    # export always runs. A `view` export of some other category has to ask
+    # for them — the "Key results" sheet is the page a reader opens first,
+    # and it should not depend on which tab happened to be on screen.
+    if not headline:
+        try:
+            headline = build_response(
+                n, component_class, name, category="summary", metric_ids=[],
+                source=source, from_iso=from_iso, to_iso=to_iso, period=period,
+                mode=mode,
+            ).get("headline", [])
+        except Exception:  # noqa: BLE001 — a missing summary must not cost
+            logger.exception("asset export: headline KPIs failed")           # the workbook
+            headline = []
+
+    for h in headline:
+        headline_rows.append([
+            h["label"],
+            h.get("value") if h.get("status") == "ok" else None,
+            h.get("unit", ""),
+            h.get("category_label", ""),
+            "ok" if h.get("status") == "ok" else
+            f"{h.get('status')}: {h.get('reason', '')}".strip(": "),
+            h.get("formula", ""),
+        ])
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xl:
         about = _about_rows(first_resp, scope=scope, project=project,
@@ -178,9 +209,46 @@ def build_workbook(
                             omitted=omitted)
         pd.DataFrame(about, columns=["Field", "Value"]).to_excel(
             xl, sheet_name="About", index=False, header=False)
+        pd.DataFrame(headline_rows[1:], columns=headline_rows[0]).to_excel(
+            xl, sheet_name="Key results", index=False)
         pd.DataFrame(scalar_rows[1:], columns=scalar_rows[0]).to_excel(
             xl, sheet_name="Summary", index=False)
         for sheet, (header, rows) in sheets.items():
             pd.DataFrame(rows, columns=header).to_excel(
                 xl, sheet_name=sheet[:31], index=False)
+        _style(xl.book)
     return buf.getvalue()
+
+
+# Two decimals everywhere, matching the on-screen table. The UNDERLYING value
+# stays full precision — this is a display format, so a user who widens the
+# column or re-reads the file in pandas still gets every digit.
+_NUM_FORMAT = "#,##0.00"
+
+
+def _style(book) -> None:
+    """Number format + readable column widths on every sheet."""
+    for ws in book.worksheets:
+        widths: dict[int, int] = {}
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, bool):
+                    # bools are ints in Python; a numeric format would render
+                    # True as "1.00", which is not what the model said.
+                    text = str(cell.value)
+                elif isinstance(cell.value, (int, float)):
+                    cell.number_format = _NUM_FORMAT
+                    text = f"{cell.value:,.2f}"
+                elif cell.value is None:
+                    text = ""
+                else:
+                    text = str(cell.value)
+                widths[cell.column] = min(
+                    48, max(widths.get(cell.column, 9), len(text) + 2))
+        for col, width in widths.items():
+            ws.column_dimensions[
+                ws.cell(row=1, column=col).column_letter].width = width
+        # About is written header=False, so its first row is data, not a
+        # header to pin.
+        if ws.title != "About":
+            ws.freeze_panes = "A2"

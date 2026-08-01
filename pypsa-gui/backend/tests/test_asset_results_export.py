@@ -18,7 +18,10 @@ def test_configured_scope_writes_about_summary_and_the_category(
     install_network(build_network(solve=True))
     wb = _book(client.get(URL, params={
         "scope": "view", "category": "dispatch", "metrics": "p,energy_mwh"}))
-    assert wb.sheetnames == ["About", "Summary", "Dispatch"]
+    # "Key results" carries the headline KPIs lifted from every category. A
+    # view-scope export builds it too — it is the page a reader opens first,
+    # and it must not depend on which tab happened to be on screen.
+    assert wb.sheetnames == ["About", "Key results", "Summary", "Dispatch"]
 
 
 def test_about_sheet_carries_every_provenance_field(client, install_network):

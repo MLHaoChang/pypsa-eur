@@ -2466,6 +2466,18 @@ def get_asset_results(
         "unavailable": unavailable,
         "n_snapshots": len(resp["index"]),
     }
+    # The default category is `summary`, whose own metrics are just identity
+    # and parameters. The headline KPIs are what makes "summarise Gas 1"
+    # answerable in one call instead of seven — carry them through, each
+    # tagged with the tab it came from so the agent can cite a source.
+    if resp.get("headline"):
+        out["headline"] = [
+            {"id": h["id"], "label": h["label"], "unit": h.get("unit", ""),
+             "category": h["category"], "status": h["status"],
+             **({"value": h["value"]} if "value" in h else {}),
+             **({"reason": h["reason"]} if h.get("reason") else {})}
+            for h in resp["headline"]
+        ]
     if resolution == "raw":
         out["resolution"] = "raw"
         out["index"] = resp["index"][:max_rows]

@@ -13,7 +13,10 @@ from . import compute as C
 from .applicability import resolve_category, resolve_metric
 from .registry import (
     CATEGORIES,
+    CATEGORY_LABELS,
     ALL_CLASSES,
+    headline_ids,
+    metric_for,
     metrics_for,
 )
 
@@ -217,6 +220,82 @@ def apply_view_mode(
     }
 
 
+def _compute_one(n, component_class: str, name: str, metric, *, source: str, sns):
+    """
+    Run a single metric and return a JSON-ready value, or None.
+
+    Shares `build_response`'s contract: the metric's own `source_override`
+    beats the panel's lopf/ac_pf toggle, a raising compute is a None rather
+    than a 500, and a Series comes back as a plain list.
+    """
+    from services.serialization import clean_scalar
+
+    ctx = C.build_ctx(
+        n, component_class, name,
+        source=(metric.source_override or source), sns=sns,
+    )
+    try:
+        value = metric.compute(ctx)
+    except Exception:
+        return None
+    if value is None:
+        return None
+    if metric.kind == "series":
+        return [clean_scalar(v) for v in list(value.values)]
+    if isinstance(value, dict):
+        return {k: clean_scalar(v) for k, v in value.items()}
+    return clean_scalar(value)
+
+
+def build_headline(n, component_class: str, name: str, *, precond: dict,
+                   source: str, sns) -> list[dict]:
+    """
+    The Summary tab's aggregated KPIs, lifted from the OTHER categories.
+
+    Ids come from `registry.HEADLINE`; everything else — label, unit,
+    formula, preconditions — is read back off the same registry entry the
+    owning category uses, so a headline can never drift from the metric it
+    mirrors. Blocked and n/a headlines are returned WITH their reason rather
+    than dropped: "Capture price — needs a solve" is information, and a
+    summary that silently omits half its rows on an unsolved network reads as
+    if those results do not exist.
+
+    Scalar-only. A headline is a single number a user reads at a glance; the
+    series live one click away in their own category.
+    """
+    out: list[dict] = []
+    for mid in headline_ids(component_class):
+        m = metric_for(component_class, mid)
+        if m is None or m.kind != "scalar":
+            continue
+        st = resolve_metric(m, component_class, precond)
+        row = {
+            "id": m.id,
+            "label": m.label,
+            "unit": m.unit,
+            "category": m.category,
+            "category_label": CATEGORY_LABELS.get(m.category, m.category),
+            "origin": m.origin,
+            **st.as_dict(),
+        }
+        if m.formula:
+            row["formula"] = m.formula
+        if st.status == "ok":
+            value = _compute_one(n, component_class, name, m,
+                                 source=source, sns=sns)
+            if value is None:
+                # Same downgrade the per-category path applies: `ok` means
+                # every precondition passed, which does not guarantee the
+                # solver actually wrote the column.
+                row["status"] = "blocked"
+                row["reason"] = "not produced by this solve"
+                row.pop("remedy", None)
+            else:
+                row["value"] = value
+        out.append(row)
+    return out
+
+
 def build_response(
     n, component_class: str, name: str, *, category: str,
     metric_ids: list[str], source: str, from_iso: str | None,
@@ -307,6 +386,15 @@ def build_response(
     shaped = apply_view_mode(stamps, periods, series_map, by_id, mode, weights)
     state = _state_snapshot()
 
+    # Headline KPIs are computed only for the Summary tab. They reach across
+    # every other category, so building them on all eight requests would run
+    # the same ~8 metrics seven extra times for a payload nobody reads.
+    headline = (
+        build_headline(n, component_class, name, precond=precond,
+                       source=source, sns=sns)
+        if category == "summary" else []
+    )
+
     return {
         "asset": {**C.summary_identity(ctx0), "params": C.summary_params(ctx0)},
         "solve": {
@@ -320,5 +408,6 @@ def build_response(
         "categories": categories,
         "metrics": metric_rows,
         "scalars": scalars,
+        "headline": headline,
         **shaped,
     }

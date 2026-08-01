@@ -57,11 +57,20 @@ def test_carrier_with_co2_clears_the_emissions_precondition():
     assert C.preconditions(n, "Generator", "gas")[reg.REQ_CO2].status == "ok"
 
 
-def test_not_yet_is_always_na_and_carries_no_remedy():
+def test_preconditions_returns_exactly_the_declared_set():
+    """
+    Every id a metric can list in `requires` must be evaluated here, and
+    nothing else should be. A metric requiring an id this map omits would
+    silently resolve `ok` (unlisted preconditions are treated as ok in
+    `resolve_metric`), turning a genuinely unavailable result into a ticked
+    checkbox with an empty chart.
+    """
     n = build_network(solve=True)
-    st = C.preconditions(n, "Generator", "gas")[reg.REQ_NOT_YET]
-    assert st.status == "na"
-    assert st.remedy is None
+    got = set(C.preconditions(n, "Generator", "gas"))
+    assert got == {reg.REQ_DISPATCH, reg.REQ_AC_PF, reg.REQ_DUALS,
+                   reg.REQ_COMMITTABLE, reg.REQ_CO2}
+    declared = {r for m in reg.METRICS for r in m.requires}
+    assert declared <= got, f"metrics require unevaluated preconditions: {declared - got}"
 
 
 def test_attr_for_maps_every_class():
