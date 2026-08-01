@@ -1,7 +1,13 @@
-/// <reference types="vitest" />
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vite'
+// vitest 4.x's `declare module 'vite'` augmentation (adding the `test` key
+// to `UserConfig`) lives in `vitest/config`'s own type module, not in the
+// `vitest` package root — the `/// <reference types="vitest" />` this
+// replaced was the vitest 0.x/1.x way of pulling that augmentation in and
+// no longer types `test` under 4.x. Importing `defineConfig` from
+// `vitest/config` instead (it re-exports vite's own `defineConfig`
+// overloads, plus the module augmentation) is vitest's documented fix.
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { authHtmlGatePlugin } from './vite.auth-gate'
