@@ -817,22 +817,68 @@ def test_probe_maps_an_unexpected_exception_to_unreachable(monkeypatch):
 
 # ── secret hygiene ────────────────────────────────────────────────────────
 
-def test_the_key_literal_never_reaches_the_log(local_client, monkeypatch, caplog):
+def test_the_key_literal_never_reaches_a_log_or_a_response(
+    local_client, monkeypatch, caplog,
+):
+    """
+    Drives the REAL probe code path — only the SDK client is faked, so the
+    route's own exception handling is what runs. No network: a test that dials
+    Anthropic is slow, flaky, and fails offline.
+
+    Nothing may carry the key literal out — not the response, not a log record.
+    """
     import logging
 
+    import anthropic
+
     secret = "sk-ant-donotlogme1234567890"
-    monkeypatch.setattr(
-        "routers.local_settings.probe_api_key",
-        lambda: ("rejected", "invalid x-api-key: sk-ant-donotlogme1234567890"),
-    )
+
+    class _Models:
+        def list(self, **kwargs):
+            raise anthropic.AuthenticationError.__new__(anthropic.AuthenticationError)
+
+    class _Client:
+        models = _Models()
+
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _Client())
 
     with caplog.at_level(logging.DEBUG):
-        r = local_client.put(
+        put = local_client.put(
             "/api/local-settings/anthropic-key", json={"api_key": secret},
         )
+        get = local_client.get("/api/local-settings")
 
     assert secret not in caplog.text
-    assert secret not in r.text
+    assert secret not in put.text
+    assert secret not in get.text
+
+
+def test_probe_detail_never_carries_sdk_exception_text(monkeypatch, caplog):
+    """
+    The detail strings are fixed. An SDK message that happened to embed the key
+    could not survive into the response, because it is never formatted in.
+    """
+    import logging
+
+    import anthropic
+
+    from routers import local_settings as routes
+
+    class _Models:
+        def list(self, **kwargs):
+            raise RuntimeError("x-api-key sk-ant-leakedthroughtheexception")
+
+    class _Client:
+        models = _Models()
+
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _Client())
+
+    with caplog.at_level(logging.DEBUG):
+        status, detail = routes.probe_api_key()
+
+    assert status == "unreachable"
+    assert "sk-ant-leakedthroughtheexception" not in detail
+    assert "sk-ant-leakedthroughtheexception" not in caplog.text
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -874,24 +920,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(local_mode.reject_unless_local_mode)])
 
-# Kept in step with `desktop.bootstrap._LOG_FILENAME`, which is private to that
-# module. Duplicated deliberately rather than reaching into it: importing
-# `desktop.bootstrap` here would pull the launcher into every web request path.
+# Duplicates `desktop.bootstrap._LOG_FILENAME` deliberately. `desktop/__init__.py`
+# states the rule: "Nothing here may be imported by `main` — the hosted
+# deployment must not acquire a dependency on the desktop shell." One shared
+# string is the cheaper price.
 LOG_FILENAME = "pypsa-gui.log"
 
 
 class ApiKeyBody(BaseModel):
     api_key: str
-
-
-def _redact(value: object) -> str:
-    """
-    Reuse chat's redactor rather than growing a second one that drifts.
-    Imported lazily: `chat_service` is heavy and this router must stay cheap.
-    """
-    from services.chat_service import _redact_for_log
-
-    return _redact_for_log(value)
 
 
 def _state() -> dict:
@@ -913,6 +950,11 @@ def probe_api_key() -> tuple[str, str]:
     NEVER raises, and the three failure modes stay DISTINCT. A key we could not
     check is not a key that works and must not render as one — the same rule
     the economics surfaces follow for an unresolvable cost.
+
+    **SDK exception text never reaches the response or the log.** The detail
+    strings below are fixed, and only the exception CLASS NAME is logged — a
+    class name cannot contain an API key. This is stronger than scrubbing:
+    there is no formatting step for a key to survive.
     """
     try:
         import anthropic
@@ -922,9 +964,11 @@ def probe_api_key() -> tuple[str, str]:
     try:
         anthropic.Anthropic().models.list(limit=1)
     except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
-        return "rejected", _redact(exc)
+        logger.warning("local settings: key probe rejected (%s)", type(exc).__name__)
+        return "rejected", "Anthropic rejected this key."
     except Exception as exc:  # noqa: BLE001 — every other failure is "unknown"
-        return "unreachable", _redact(exc)
+        logger.warning("local settings: key probe failed (%s)", type(exc).__name__)
+        return "unreachable", "Could not reach Anthropic to verify the key."
     return "valid", "Key accepted."
 
 
@@ -1788,9 +1832,9 @@ Expected: `BUILD_EXIT=0`, a clean secret-scan line, and a DMG timestamp **later 
   `_chatbot_startup_check`.** The whole design is that setting the environment
   variable is sufficient. If it turns out not to be, stop and report rather
   than editing chat.
-- **`_redact_for_log` is private to `chat_service`.** Task 3 imports it anyway,
-  deliberately: a second redactor would drift from the first, and drift in a
-  redactor is a leaked key. If a reviewer objects, the answer is to promote it
-  to a public name in a follow-up, not to duplicate it.
+- **Do not import `chat_service._redact_for_log`.** An earlier draft did. The
+  probe's detail strings are fixed and only exception CLASS NAMES are logged,
+  so there is no formatting step for a key to survive — which is stronger than
+  scrubbing, and needs nothing private from another module.
 - **`explorer` exits non-zero on success.** `check=False` in the reveal call is
   load-bearing; do not "tidy" it to `check=True`.
