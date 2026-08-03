@@ -557,8 +557,11 @@ NO_ADAPTER_REASONS: dict[str, str] = {
         "compare_economics: the real endpoint needs a project saved to "
         "disk) and checks both CAPEX fields against the oracle for `solar` "
         "(non-extendable, exercises `capex_meur_by_carrier`'s total-only "
-        "basis) and `electrolyzer` (extendable, exercises "
-        "`new_capex_meur_by_carrier`'s built-increment basis)."
+        "basis) and `gas` (extendable, LP expands it from p_nom=100 to "
+        "p_nom_opt~118.57, exercising `new_capex_meur_by_carrier`'s "
+        "built-increment basis for real — `electrolyzer` can't stand in "
+        "here because the LP SHRINKS it below its initial p_nom on this "
+        "fixture, and `_walk_plain` clamps negative deltas to zero)."
     ),
 }
 

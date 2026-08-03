@@ -581,3 +581,56 @@ Explicit record so this list isn't confused with "not yet checked":
 Nine surfaces went in; nine surfaces came out agreeing on every number they
 report. Two needed a fix to get there (Task 5, Task 9); the rest agreed from
 the first measurement.
+
+## Final review (2026-08-03) — three more Importants fixed, one follow-up logged
+
+A closing review of the whole plan found three more Important issues (a
+blank-`lifetime` cross-surface disagreement in Asset Detail, a tenth surface
+— `compare_capacity` — outside the coverage matrix, and `coverage.SURFACES`
+having no mechanical link back to the actual routes) plus five Minors. All
+were fixed directly; see the commit that added this section for the diff.
+One item from that review is logged here rather than fixed, per the
+reviewer's explicit instruction to record it as a follow-up instead of
+implementing it in the same pass:
+
+### Follow-up: the route-allowlist guard only watches 4 of ~20 router modules
+
+`tests/test_golden_coverage.py::test_every_route_handler_is_declared_in_the_surfaces_allowlist`
+(added in the 2026-08-03 review fix) AST-scans exactly four files —
+`routers/results.py`, `routers/simulation.py`, `routers/compare.py`,
+`routers/asset_results.py` — for every `@router.get/post/put(...)`-decorated
+handler, and fails if that set drifts from a hand-maintained
+`ROUTE_SURFACES` allowlist. That closes IMPORTANT-3 (`coverage.SURFACES`
+silently missing a tenth surface added to one of those four files).
+
+It does NOT close the same failure mode one level up: this repo's own
+documented pattern for adding a feature is "new service =
+`services/foo_service.py` + `routers/foo.py` + one `app.include_router(...)`
+line in `main.py`" (see CLAUDE.md, "New backend service = 3 files"). A tenth
+economics surface shipped in a brand-new `routers/foo.py` — rather than
+added to one of the four already-watched files — is invisible to
+`ROUTE_FILES` (and therefore to the whole allowlist test) until someone
+remembers to add the new module to `ROUTE_FILES` by hand. This is the exact
+class of silent gap the whole trustworthy-numbers plan exists to eliminate,
+recurring at the level of "which router files does the guard even scan."
+
+Two closes were suggested during review, neither implemented here (out of
+scope for a closing correction; each needs its own verification pass):
+
+1. **Glob `routers/*.py`** instead of a hand-maintained `ROUTE_FILES` list —
+   removes the need to remember to add a new module, but widens the AST scan
+   to every router in the app (currently ~20), most of which have nothing to
+   do with economics; `ROUTE_SURFACES` would need an entry (even if an empty
+   `frozenset()`) for every route handler in every one of them, which is a
+   much larger allowlist to keep current and may reintroduce the same
+   "hand-maintained, silently stale" risk this test was built to avoid.
+2. **Cross-check `ROUTE_FILES` against `main.py`'s `app.include_router(...)`
+   calls** — AST-scan `main.py` for every registered router module, and
+   assert that set is a subset of (or equal to) `ROUTE_FILES`'s keys. Fails
+   the moment a new router is registered without the coverage guard being
+   told about it, without widening the scan to modules that were never
+   economics-relevant. Likely the better fit, since it targets exactly the
+   "new service, new router" path CLAUDE.md documents as the norm — but
+   needs its own check against how `main.py` actually spells router
+   registration (`include_router(foo.router, prefix=...)` — module vs.
+   attribute access) before it can be written as a reliable AST match.
