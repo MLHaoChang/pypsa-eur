@@ -58,6 +58,17 @@ def test_put_is_404_in_web_mode(client):
     assert r.status_code == 404
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "POST /api/local-settings/reveal-log does not exist until Task 4. "
+        "main.py:866's SPA catch-all is GET/HEAD-only, so a POST to an "
+        "undefined path returns 405, not the 404 this asserts. Task 4 adds "
+        "the route with reject_unless_local_mode and MUST delete this marker "
+        "— strict=True turns the resulting XPASS into a failure, so the "
+        "marker cannot outlive the gap it documents."
+    ),
+)
 def test_reveal_is_404_in_web_mode(client):
     assert client.post("/api/local-settings/reveal-log").status_code == 404
 
