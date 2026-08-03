@@ -987,8 +987,11 @@ def solve_queue_enqueue(project_id: str) -> dict:
 
 
 def solve_queue_list() -> dict:
+    # P-1: `_route`, not a bare `_h()`. All four handlers take `db`/`user` now,
+    # so a direct call would hand `user` the raw `Depends` sentinel — and before
+    # they did, this tool read every org's queued project names.
     from routers.solve_queue import list_queue as _h
-    return _h()
+    return _route(_h)
 
 
 def solve_queue_abort(job_id: str) -> dict:
@@ -997,13 +1000,16 @@ def solve_queue_abort(job_id: str) -> dict:
     # thinks the abort worked. Coerce to int. A non-numeric id raises a clear
     # ValueError that the dispatcher surfaces as a tool_error.
     from routers.solve_queue import abort_job as _h
-    return _h(int(job_id))
+    return _route(_h, int(job_id))
 
 
 def solve_queue_clear_finished() -> dict:
     """N1: read-tier — drops listing entries only, idempotent."""
+    # P-1: super-admin only, so this 403s for an ordinary chat caller. That is
+    # the intended outcome — the queue is process-global and the clear crosses
+    # every org.
     from routers.solve_queue import clear_finished as _h
-    return _h()
+    return _route(_h)
 
 
 # ── Project management (21) ─────────────────────────────────────────────────
