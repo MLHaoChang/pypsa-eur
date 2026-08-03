@@ -29,6 +29,7 @@ solved here — `test_solve_queue.py` covers the dispatcher itself.
 """
 from __future__ import annotations
 
+import queue
 import threading
 import time
 import uuid
@@ -43,15 +44,33 @@ from services.solve_queue import solve_queue
 from tests.conftest import attach_session, build_network
 
 
+class _NullQueue:
+    """A `queue.Queue` stand-in that swallows work instead of dispatching it."""
+
+    def put(self, item) -> None:
+        pass
+
+    def get_nowait(self):
+        raise queue.Empty
+
+    def task_done(self) -> None:
+        pass
+
+
 @pytest.fixture(autouse=True)
 def _parked_dispatcher(monkeypatch):
     """
-    Stop the dispatcher from ever starting, so enqueued jobs stay `queued`.
+    Keep every enqueued job parked in `queued`, so positions are deterministic.
 
-    Shadows the bound method on the singleton; `enqueue()` calls it under the
-    queue lock and does not care what it returns.
+    BOTH patches are load-bearing. Neutering `_ensure_dispatcher_locked` stops a
+    dispatcher from being started, but `test_solve_queue.py` leaves a live one
+    parked on the singleton's real `queue.Queue` — a daemon thread that cannot
+    be killed — and it drains anything `enqueue()` puts there. Swapping `_q` is
+    what actually keeps the jobs from being solved; without it this module
+    passes alone and fails in a full-suite run.
     """
     monkeypatch.setattr(solve_queue, "_ensure_dispatcher_locked", lambda: None)
+    monkeypatch.setattr(solve_queue, "_q", _NullQueue())
 
 
 @pytest.fixture

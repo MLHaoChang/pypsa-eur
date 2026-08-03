@@ -140,9 +140,13 @@ def test_abort_queued_job_is_skipped(client, install_network, tmp_projects_dir, 
     assert da["status"] == "completed", da
     assert solve_queue.get_job(b["id"])["status"] == "aborted"
 
-    # clear_finished drops both terminal jobs.
-    removed = client.post("/api/simulation/queue/clear_finished").json()["removed"]
-    assert removed == 2
+    # clear_finished drops both terminal jobs — but the ROUTE is super-admin
+    # only since P-1 (the queue is process-global, so a clear crosses every
+    # org), and the seeded user is an ORG admin. The service call is what this
+    # test is really about: both jobs reached a terminal state and are
+    # droppable. `test_solve_queue_authz.py` owns the HTTP gate itself.
+    assert client.post("/api/simulation/queue/clear_finished").status_code == 403
+    assert solve_queue.clear_finished() == 2
     assert solve_queue.list_jobs() == []
 
 
