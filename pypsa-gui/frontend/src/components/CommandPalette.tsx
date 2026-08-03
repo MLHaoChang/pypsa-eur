@@ -5,6 +5,7 @@ import {
   Search, X, FolderOpen, Camera, Save as SaveIcon, FilePlus, Settings2,
   TrendingUp, Clock, Zap, RotateCcw, LayoutDashboard,
   Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks, LayoutGrid, Users,
+  SlidersHorizontal,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Dialog } from './Dialog'
@@ -344,6 +345,13 @@ function useCommands(mode: PaletteMode): Command[] {
           title: 'Open solver settings',
           icon: <Settings2 size={14} />,
           run: () => setSlidePanel('simparams'),
+        },
+        {
+          id: 'act-settings',
+          kind: 'action',
+          title: 'Open settings',
+          icon: <SlidersHorizontal size={14} />,
+          run: () => setSlidePanel('settings'),
         },
         {
           id: 'act-horizon',

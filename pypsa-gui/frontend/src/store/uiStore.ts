@@ -27,7 +27,7 @@ export type CanvasMode = 'select' | 'connect'
 // `chat` is the chatbot integration v6 panel (Phase 3). It opens a
 // half-width slide-panel on the right with the conversation, confirmation
 // cards, and live tool-progress streams. Reset via chatStore on project switch.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'chat' | 'workspace'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'chat' | 'workspace' | 'settings'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null

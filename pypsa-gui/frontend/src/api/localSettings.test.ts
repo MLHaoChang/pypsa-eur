@@ -29,11 +29,18 @@ describe('probeMessage', () => {
 
   it('gives every status its own message', () => {
     // The whole point of five statuses is that a user can tell them apart.
-    // Asserting pairwise would need 10 cases; asserting distinctness needs one,
-    // and it cannot rot as statuses are added.
-    const statuses: ProbeStatus[] = [
-      'valid', 'rejected', 'unreachable', 'sdk_not_installed', 'cleared',
-    ]
+    // Asserting pairwise would need 10 cases; asserting distinctness needs one.
+    //
+    // A Record over the union, so adding a sixth ProbeStatus is a COMPILE error
+    // here — not a silently-still-passing test that checks only the first five.
+    const ALL_STATUSES: Record<ProbeStatus, true> = {
+      valid: true,
+      rejected: true,
+      unreachable: true,
+      sdk_not_installed: true,
+      cleared: true,
+    }
+    const statuses = Object.keys(ALL_STATUSES) as ProbeStatus[]
     const texts = statuses.map(s => probeMessage(s).text)
 
     expect(new Set(texts).size).toBe(statuses.length)

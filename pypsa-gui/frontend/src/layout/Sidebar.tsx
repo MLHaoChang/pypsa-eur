@@ -9,7 +9,7 @@ import {
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   GitBranch as GitBranchIcon, ListChecks,
-  MessageSquare, LayoutGrid, Users,
+  MessageSquare, LayoutGrid, Users, SlidersHorizontal,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -32,6 +32,7 @@ import NewProjectWizard from './NewProjectWizard'
 import { H2Icon } from '../components/AssetIcons'
 import ProjectPicker from '../components/ProjectPicker'
 import { useSolveQueue } from '../hooks/useSolveQueue'
+import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
@@ -1277,6 +1278,10 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // are active (see useSolveQueue), so this idle-mounted consumer is cheap.
   const { data: solveQueue } = useSolveQueue()
   const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
+  // The Settings pane is desktop-only; its routes 404 on a web deployment.
+  // The row hides with it — a nav entry that opens an empty panel is worse
+  // than no nav entry. Shares one react-query fetch with the pane.
+  const settingsAvailable = useLocalSettingsAvailable()
   return (
     <div>
       <SItem icon={<Settings2 size={15} />} label="Solver Settings"
@@ -1284,6 +1289,13 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         active={activeSlidePanel === 'simparams'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'simparams' ? null : 'simparams'); onCloseModal?.() }}
       />
+      {settingsAvailable && (
+        <SItem icon={<SlidersHorizontal size={15} />} label="Settings"
+          title="Store your Anthropic API key and find the application log."
+          active={activeSlidePanel === 'settings'}
+          onClick={() => { setSlidePanel(activeSlidePanel === 'settings' ? null : 'settings'); onCloseModal?.() }}
+        />
+      )}
       <SItem icon={<Clock size={15} />} label="Model Horizon"
         title="Define the snapshots (time steps) and investment periods/years the optimisation plans over."
         active={activeSlidePanel === 'horizon'}

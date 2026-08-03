@@ -23,6 +23,7 @@ import ScenariosPanel from './pages/ScenariosPanel'
 import WorkspacePanel from './pages/WorkspacePanel'
 import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
+import LocalSettings from './pages/LocalSettings'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
@@ -110,6 +111,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   // body handles its own layout (message list + composer + cost meter).
   chat:       { eyebrow: 'ASSISTANT',  title: 'Chat assistant' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
+  settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
 }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
@@ -135,6 +137,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'capacityBounds': return <CapacityBoundsEditor />
     case 'solveQueue': return <SolveQueuePanel />
     case 'chat':       return <ChatPanel />
+    case 'settings':   return <LocalSettings />
     default:           return null
   }
 }
