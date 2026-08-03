@@ -11,7 +11,15 @@ frontend/dist/
 # a repo rule, and doesn't cover a BUILD_VENV pointed elsewhere. dist-app/
 # (the frozen .app + .dmg) and .build-work/ (PyInstaller's workpath) had no
 # rule at all and showed up as untracked after every build.
+#
+# .build-python/ is the standalone CPython the venv is built FROM. It lives
+# here rather than in /tmp because the venv caches an absolute path to its
+# base interpreter in `pyvenv.cfg`: when that path is transient, the venv
+# survives the interpreter and every later build dies inside pip with
+# "No module named 'encodings'" — a failure that names neither the venv nor
+# the missing Python. Both are re-provisionable; they rot together.
 .build-venv/
+.build-python/
 .build-work/
 dist-app/
 

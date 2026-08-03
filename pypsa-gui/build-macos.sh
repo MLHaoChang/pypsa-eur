@@ -34,10 +34,26 @@ No build venv yet, and BUILD_PYTHON is not set.
 Point it at a python3.13 that is NOT the conda/pixi interpreter (D14). A
 standalone build works and needs no system install:
 
+  cd pypsa-gui
   curl -sL -o /tmp/cpython.tar.gz \
     https://github.com/astral-sh/python-build-standalone/releases/download/20260728/cpython-3.13.14%2B20260728-aarch64-apple-darwin-install_only.tar.gz
-  tar xzf /tmp/cpython.tar.gz -C /tmp
-  BUILD_PYTHON=/tmp/python/bin/python3 bash pypsa-gui/build-macos.sh
+  mkdir -p .build-python
+  tar xzf /tmp/cpython.tar.gz -C .build-python --strip-components=1
+  cd .. && BUILD_PYTHON="$PWD/pypsa-gui/.build-python/bin/python3" bash pypsa-gui/build-macos.sh
+
+Unpack it INTO the repo (.build-python/, gitignored), not /tmp. `python -m
+venv` records an absolute path to its base interpreter in the venv's
+`pyvenv.cfg` and resolves the stdlib through it on every run — so a base
+that is cleaned up outlives nothing, but the CACHED venv outlives IT. The
+next build then dies inside pip with
+
+  Could not find platform independent libraries <prefix>
+  ModuleNotFoundError: No module named 'encodings'
+
+which names neither the venv nor the vanished Python, and `python -V` still
+answers correctly because -V exits before the stdlib is imported. That cost
+a build on 2026-08-04, from a base unpacked under /tmp. If you hit it: the
+venv is not repairable, delete .build-venv and re-provision.
 MSG
     exit 2
   fi
