@@ -72,6 +72,58 @@ def test_rewrite_keeps_mode_600(appdata):
     assert mode == 0o600, f"expected 0o600 after rewrite, got {oct(mode)}"
 
 
+def test_a_failed_replace_leaves_the_original_file_intact(appdata, monkeypatch):
+    """
+    Pins write-to-temp-then-`os.replace`, not write-in-place.
+
+    Catches: a regression that opens `settings_path()` directly (in place of
+    the temp file) instead of swapping it in via `os.replace`. Under such a
+    regression the OLD value would already be destroyed by the time this test
+    could observe a failure — and if the regression also drops the call to
+    `os.replace` entirely, this monkeypatch never fires and the write silently
+    "succeeds", which is caught below by the missing `pytest.raises`. Also
+    catches a swap done via something other than `os.replace` (e.g.
+    `shutil.move`), which this patch would likewise not intercept.
+    """
+    local_settings.write_api_key("sk-ant-original-value")
+
+    def boom(*_args, **_kwargs):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(os, "replace", boom)
+
+    with pytest.raises(OSError):
+        local_settings.write_api_key("sk-ant-new-value")
+
+    assert local_settings.stored_api_key() == "sk-ant-original-value"
+
+
+def test_a_failed_write_leaves_no_tmp_file_and_original_untouched(appdata, monkeypatch):
+    """
+    Covers the `except Exception: tmp.unlink(missing_ok=True); raise` cleanup
+    branch in `write_api_key`, which nothing else in the suite exercises.
+
+    Catches: removing that cleanup (or swallowing the exception instead of
+    re-raising it) would leave a stray `<file>.tmp` on disk after a failed
+    write — this test fails on that stray file's presence even though
+    `stored_api_key()` alone couldn't tell the difference.
+    """
+    local_settings.write_api_key("sk-ant-original-value")
+
+    def boom(*_args, **_kwargs):
+        raise ValueError("simulated dump failure")
+
+    monkeypatch.setattr(json, "dump", boom)
+
+    with pytest.raises(ValueError):
+        local_settings.write_api_key("sk-ant-new-value")
+
+    assert local_settings.stored_api_key() == "sk-ant-original-value"
+    path = local_settings.settings_path()
+    tmp = path.with_name(path.name + ".tmp")
+    assert not tmp.exists()
+
+
 def test_malformed_json_is_ignored_rather_than_raised(appdata, caplog):
     path = local_settings.settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +133,25 @@ def test_malformed_json_is_ignored_rather_than_raised(appdata, caplog):
         assert local_settings.stored_api_key() is None
 
     assert "not valid JSON" in caplog.text
+
+
+def test_invalid_utf8_is_ignored_rather_than_raised(appdata, caplog):
+    """
+    `UnicodeDecodeError` is a `ValueError` subclass, not an `OSError` subclass,
+    so it slips past `except OSError` in `read_settings` unless caught
+    explicitly. Left unhandled, a corrupted/tampered settings file would raise
+    out of a function documented as "NEVER raises" — and since Task 2 calls
+    `apply_to_environ()` at `main.py` import time, that would stop the whole
+    app from launching.
+    """
+    path = local_settings.settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xff\xfe\x00 not utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        assert local_settings.read_settings() == {}
+
+    assert "not valid UTF-8" in caplog.text
 
 
 def test_a_json_array_is_ignored_rather_than_raised(appdata):

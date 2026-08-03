@@ -50,6 +50,13 @@ def read_settings() -> dict[str, str]:
     except OSError:
         logger.warning("local settings: %s could not be read; ignoring it", path)
         return {}
+    except UnicodeDecodeError:
+        # UnicodeDecodeError is a ValueError subclass, not an OSError subclass,
+        # so it is NOT caught by the `except OSError` above — a corrupted or
+        # tampered file would otherwise raise out of a function documented as
+        # "NEVER raises", crashing `apply_to_environ()` at main.py import time.
+        logger.warning("local settings: %s is not valid UTF-8; ignoring it", path)
+        return {}
 
     try:
         data = json.loads(raw)
