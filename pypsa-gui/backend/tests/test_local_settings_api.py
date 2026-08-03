@@ -58,17 +58,6 @@ def test_put_is_404_in_web_mode(client):
     assert r.status_code == 404
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "POST /api/local-settings/reveal-log does not exist until Task 4. "
-        "main.py:866's SPA catch-all is GET/HEAD-only, so a POST to an "
-        "undefined path returns 405, not the 404 this asserts. Task 4 adds "
-        "the route with reject_unless_local_mode and MUST delete this marker "
-        "— strict=True turns the resulting XPASS into a failure, so the "
-        "marker cannot outlive the gap it documents."
-    ),
-)
 def test_reveal_is_404_in_web_mode(client):
     assert client.post("/api/local-settings/reveal-log").status_code == 404
 
@@ -238,6 +227,23 @@ def test_probe_maps_an_unexpected_exception_to_unreachable(monkeypatch):
     assert routes.probe_api_key()[0] == "unreachable"
 
 
+def test_probe_reports_sdk_not_installed_when_anthropic_import_fails(monkeypatch):
+    """
+    The one probe status with no other coverage. Setting the sys.modules entry
+    to None makes the next `import anthropic` raise ImportError, same as the
+    package genuinely being absent from a build.
+    """
+    import sys
+
+    from routers import local_settings as routes
+
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+
+    status, _detail = routes.probe_api_key()
+
+    assert status == "sdk_not_installed"
+
+
 # ── secret hygiene ────────────────────────────────────────────────────────
 
 def test_the_key_literal_never_reaches_a_log_or_a_response(
@@ -271,6 +277,10 @@ def test_the_key_literal_never_reaches_a_log_or_a_response(
         )
         get = local_client.get("/api/local-settings")
 
+    # Positive control: prove caplog actually captured something, so the
+    # `secret not in caplog.text` assertions above can't pass vacuously
+    # against an empty capture.
+    assert "AuthenticationError" in caplog.text
     assert secret not in caplog.text
     assert secret not in put.text
     assert secret not in get.text
@@ -300,5 +310,90 @@ def test_probe_detail_never_carries_sdk_exception_text(monkeypatch, caplog):
         status, detail = routes.probe_api_key()
 
     assert status == "unreachable"
+    # Positive control: prove caplog actually captured something, so the
+    # "not in caplog.text" assertion below can't pass vacuously against an
+    # empty capture.
+    assert "RuntimeError" in caplog.text
     assert "sk-ant-leakedthroughtheexception" not in detail
     assert "sk-ant-leakedthroughtheexception" not in caplog.text
+
+
+# ── reveal ────────────────────────────────────────────────────────────────
+
+def test_reveal_runs_a_fixed_command_with_no_request_input(local_client, monkeypatch):
+    """
+    The whole safety argument for the only subprocess call in the app: every
+    element of argv is either a literal or derived from app_paths. If a future
+    change lets a request parameter reach argv, this test is what catches it.
+    """
+    seen = {}
+
+    def _fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return None
+
+    monkeypatch.setattr("routers.local_settings.subprocess.run", _fake_run)
+
+    r = local_client.post("/api/local-settings/reveal-log")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["revealed"] is True
+    assert isinstance(seen["argv"], list), "argv must be a list — never a shell string"
+    assert seen["kwargs"]["shell"] is False
+    assert seen["kwargs"]["check"] is False
+
+    # Every element is either a hardcoded literal or the server-computed path.
+    # Nothing else may ever appear here.
+    from pathlib import Path
+
+    log_path = r.json()["log_path"]
+    literals = {"open", "-R", "explorer", "xdg-open"}
+    permitted_paths = {log_path, str(Path(log_path).parent), f"/select,{log_path}"}
+    for part in seen["argv"]:
+        assert part in literals or part in permitted_paths, (
+            f"argv element {part!r} is neither a hardcoded literal nor the "
+            f"server-computed log path — a request parameter may have reached argv"
+        )
+
+
+def test_reveal_creates_the_log_file_if_it_is_missing(local_client, monkeypatch):
+    """A reveal that selects nothing reads as a broken button."""
+    monkeypatch.setattr("routers.local_settings.subprocess.run", lambda *a, **k: None)
+
+    r = local_client.post("/api/local-settings/reveal-log")
+
+    from pathlib import Path
+    assert Path(r.json()["log_path"]).exists()
+
+
+def test_reveal_failure_is_reported_not_raised(local_client, monkeypatch):
+    """
+    200 with revealed=false, not a 500. The pane still shows the path and a
+    Copy button, so the feature degrades instead of dead-ending.
+    """
+    def _boom(*args, **kwargs):
+        raise OSError("no file manager on this box")
+
+    monkeypatch.setattr("routers.local_settings.subprocess.run", _boom)
+
+    r = local_client.post("/api/local-settings/reveal-log")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["revealed"] is False
+    assert "no file manager" in r.json()["detail"]
+    assert r.json()["log_path"].endswith("pypsa-gui.log")
+
+
+@pytest.mark.parametrize(
+    "platform, expected_head",
+    [("darwin", ["open", "-R"]), ("win32", ["explorer"]), ("linux", ["xdg-open"])],
+)
+def test_reveal_argv_per_platform(monkeypatch, tmp_path, platform, expected_head):
+    from routers import local_settings as routes
+
+    monkeypatch.setattr(routes.sys, "platform", platform)
+
+    argv = routes._reveal_argv(tmp_path / "pypsa-gui.log")
+
+    assert argv[: len(expected_head)] == expected_head

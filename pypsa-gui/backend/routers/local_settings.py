@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -101,3 +104,43 @@ def put_anthropic_key(body: ApiKeyBody) -> dict:
 
     logger.info("local settings: anthropic key updated, probe=%s", status)
     return {"status": status, "detail": detail, **_state()}
+
+
+def _reveal_argv(path: Path) -> list[str]:
+    """
+    The platform's "show this file" command.
+
+    Linux has no portable reveal-and-select, so it opens the containing
+    directory instead — the honest degradation, rather than pretending.
+    """
+    if sys.platform == "darwin":
+        return ["open", "-R", str(path)]
+    if sys.platform == "win32":
+        # No space after the comma: explorer parses `/select,<path>` as ONE
+        # token. It also exits non-zero on success, which is why check=False
+        # below is load-bearing rather than lazy.
+        return ["explorer", f"/select,{path}"]
+    return ["xdg-open", str(path.parent)]
+
+
+@router.post("/reveal-log")
+def reveal_log() -> dict:
+    """
+    Show the log file in the platform file manager.
+
+    This is the only `subprocess` invocation in the application. It is
+    acceptable for one specific reason: NOTHING from the request reaches the
+    command. This route takes no parameters and the path is computed here from
+    `app_paths`. There is no argument to inject into because there is no
+    argument — and `test_reveal_runs_a_fixed_command_with_no_request_input`
+    exists to keep it that way.
+    """
+    path = app_paths.app_data_dir() / LOG_FILENAME
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+        subprocess.run(_reveal_argv(path), shell=False, check=False, timeout=10)
+    except Exception as exc:  # noqa: BLE001 — reported, never fatal
+        logger.warning("local settings: reveal-log failed: %s", exc)
+        return {"revealed": False, "detail": str(exc), "log_path": str(path)}
+    return {"revealed": True, "log_path": str(path)}
