@@ -4,10 +4,12 @@ import toast from 'react-hot-toast'
 import { GitBranch, Plus, Trash2, ArrowRight, Layers, ChevronRight } from 'lucide-react'
 import { projectsApi } from '../api/projects'
 import { networkApi } from '../api/network'
+import { formatApiDetail } from '../api/client'
 import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, saveProjectQuietly, switchToProject } from '../utils/projectActions'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { confirmToast } from '../utils/toasts'
+import { parseScenType, tagScenType, type ScenType } from '../utils/scenarioType'
 import { appLog } from '../store/simulationStore'
 import type { ProjectInfo } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn, Tag } from '../components/PageKit'
@@ -80,20 +82,43 @@ export function buildScenarioForest(projects: ProjectInfo[]): ScenarioNode[] {
 }
 
 // ── Scenario "type" tag ─────────────────────────────────────────────────────
-// ProjectInfo has no `type` field — the category (baseline / scenario /
-// stress) is encoded as a `[type]` prefix on the scenario_description string,
-// so `parseScenType` pulls it back out for the badge and strips it from the
-// displayed description.
-const SCEN_TYPES = ['baseline', 'scenario', 'stress'] as const
-type ScenType = typeof SCEN_TYPES[number]
+// The encoding (a `[type]` prefix on scenario_description) now lives in
+// `utils/scenarioType` because this panel was not the only surface rendering
+// a description — it was just the only one that knew to strip the marker.
+// Only the tone mapping is panel-local: it names PageKit tags.
 const SCEN_TYPE_TONE: Record<ScenType, 'accent' | 'purple' | 'warn'> = {
   baseline: 'accent', scenario: 'purple', stress: 'warn',
 }
-function parseScenType(desc?: string | null): { type: ScenType | null; text: string } {
-  if (!desc) return { type: null, text: '' }
-  const m = desc.match(/^\[(baseline|scenario|stress)\]\s*([\s\S]*)$/)
-  if (m) return { type: m[1] as ScenType, text: m[2] }
-  return { type: null, text: desc }
+
+// ── Cascade-delete prompt ───────────────────────────────────────────────────
+
+/**
+ * The confirm-prompt text for "this project still has children".
+ *
+ * The backend refuses a non-cascade delete with a STRUCTURED 409 detail —
+ * `{error_kind, message, descendants}` — and the panel used to interpolate
+ * that object straight into a template literal, so the user was asked
+ * "[object Object] — delete it and all its child scenarios?".
+ *
+ * Its `message` field is not the fallback either: it ends with "Pass
+ * ?cascade=true to delete recursively", which is a note to an API client, not
+ * something to show someone who is looking at the button that does it. So the
+ * `descendants` array — which is why the detail is structured in the first
+ * place — is what we render, and `message` is never surfaced.
+ */
+export function describeDescendants(detail: unknown, name: string): string {
+  const kids = (detail && typeof detail === 'object' && Array.isArray((detail as { descendants?: unknown }).descendants))
+    ? (detail as { descendants: unknown[] }).descendants.filter((d): d is string => typeof d === 'string')
+    : []
+  if (kids.length === 0) {
+    // Shape we don't recognise. Still a real 409, so still ask — just without
+    // the names we couldn't read.
+    return `'${name}' still has child scenarios. Delete it and all of them?`
+  }
+  const shown = kids.slice(0, 5).join(', ')
+  const rest = kids.length > 5 ? `, +${kids.length - 5} more` : ''
+  const noun = kids.length === 1 ? 'child scenario' : 'child scenarios'
+  return `'${name}' has ${kids.length} ${noun} (${shown}${rest}). Delete it and all of them?`
 }
 
 // ── Main panel ──────────────────────────────────────────────────────────────
@@ -155,7 +180,16 @@ export default function ScenariosPanel() {
 
   // Shared read-only guard for the panel's mutating actions. Returns true when
   // the action may proceed; otherwise toasts and returns false.
-  const guardMutation = (): boolean => {
+  //
+  // The edit lock is held on ONE project — the active one — and protects its
+  // in-memory state. It says nothing about a row the lock-holder never loaded:
+  // deleting a different project touches only that project's own bundle, and
+  // the backend gates it on the ACL (`can_delete_project`), not on any lock.
+  // Gating every row on the active project's flag meant holding the lock on A
+  // offered to delete B (which the backend then refused), while being
+  // read-only on A blocked deleting a B nobody was editing at all.
+  const guardMutation = (target: string): boolean => {
+    if (target !== currentProject) return true
     const verdict = evaluateMutation(readOnly)
     if (!verdict.allowed) toast.error(verdict.blockedMessage!)
     return verdict.allowed
@@ -273,19 +307,21 @@ export default function ScenariosPanel() {
       }
     },
     onError: (err, params) => {
-      const e = err as { response?: { status?: number; data?: { detail?: string } } }
+      const e = err as { response?: { status?: number; data?: { detail?: unknown } } }
       // Only re-prompt for cascade when this was a non-cascade attempt — a
       // 409 on a cascade=true call would otherwise loop the prompt.
       if (e.response?.status === 409 && !params.cascade) {
-        const detail = e.response.data?.detail ?? 'has child scenarios'
         confirmToast(
-          `${detail} — delete it and all its child scenarios?`,
+          describeDescendants(e.response.data?.detail, params.name),
           () => deleteMut.mutate({ id: params.id, name: params.name, cascade: true }),
           { confirmLabel: 'Delete all', danger: true },
         )
         return
       }
-      toast.error(`Delete failed: ${e.response?.data?.detail ?? (err as Error).message}`)
+      // `formatApiDetail`, not a bare interpolation: FastAPI details are
+      // string | validation-array | object, and this endpoint sends an object.
+      // `${detail}` on it rendered the literal text "[object Object]".
+      toast.error(`Delete failed: ${formatApiDetail(e.response?.data?.detail, (err as Error).message)}`)
     },
   })
 
@@ -361,8 +397,8 @@ export default function ScenariosPanel() {
                   currentProject={currentProject}
                   readOnly={readOnly}
                   onSwitch={switchTo}
-                  onCreateChild={(base) => { if (guardMutation()) setCreating({ base, baseId: apiIdFor(base) }) }}
-                  onDelete={(name) => { if (guardMutation()) deleteMut.mutate({ id: apiIdFor(name), name, cascade: false }) }}
+                  onCreateChild={(base) => { if (guardMutation(base)) setCreating({ base, baseId: apiIdFor(base) }) }}
+                  onDelete={(name) => { if (guardMutation(name)) deleteMut.mutate({ id: apiIdFor(name), name, cascade: false }) }}
                 />
               ))}
             </div>
@@ -374,6 +410,7 @@ export default function ScenariosPanel() {
         <CreateScenarioDialog
           base={creating.base}
           baseId={creating.baseId}
+          baseIsActive={creating.base === currentProject}
           onClose={() => setCreating(null)}
           onCreated={(info) => {
             setCreating(null)
@@ -410,6 +447,13 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
   const isCurrent = node.project.name === currentProject
   const indent = node.depth * 16
   const { type: scenType, text: scenText } = parseScenType(node.project.scenario_description)
+  // The registry row outlives a folder deleted in Finder. Switching to one
+  // 404s and branching one has nothing to copy, so both are refused here —
+  // matching the "+" tab's project picker, which already greys these out.
+  const missing = node.project.missing === true
+  // The lock is held on the ACTIVE project only; it has no bearing on a row
+  // the holder never loaded. See `guardMutation` for the full reasoning.
+  const lockedRow = readOnly && isCurrent
   return (
     <>
       <div
@@ -425,6 +469,7 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
           <div className="flex items-center gap-2">
             <span className="text-[13px] font-semibold text-text truncate">{node.project.name}</span>
             {isCurrent && <Tag tone="accent">active</Tag>}
+            {missing && <Tag tone="err">files missing</Tag>}
             {scenType && <Tag tone={SCEN_TYPE_TONE[scenType]}>{scenType}</Tag>}
           </div>
           {scenText && (
@@ -441,39 +486,52 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
           {!isCurrent && (
             <button
               onClick={() => onSwitch(node.project.name)}
-              className="p-1.5 text-muted hover:text-accent transition-colors rounded"
-              title="Switch to this scenario (auto-saves outgoing)"
+              disabled={missing}
+              className={`p-1.5 transition-colors rounded ${
+                missing ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-accent'
+              }`}
+              title={missing
+                ? "This project's folder is no longer on disk — it cannot be opened"
+                : 'Switch to this scenario (auto-saves outgoing)'}
             >
               <ArrowRight size={13} />
             </button>
           )}
-          {/* "Branch a child" is only valid from the ACTIVE project — the
-              backend serialises the live in-memory network, so branching
-              from a non-active row would carry the wrong topology (and the
-              backend now 409s that). Disable on non-active rows with a hint. */}
+          {/* Branching used to be offered on the ACTIVE row only, because the
+              backend once serialised the live in-memory network and a
+              non-active base would have carried the wrong topology. It no
+              longer does: `_create_scenario_db` copies the BASE's own on-disk
+              bundle, precisely so a project can be branched WITHOUT first
+              loading it into the process-global network. The restriction
+              outlived its reason, and cost a full project switch — reloading
+              a 26k-snapshot network — for every branch. */}
           <button
-            onClick={() => isCurrent && onCreateChild(node.project.name)}
-            disabled={!isCurrent || readOnly}
+            onClick={() => onCreateChild(node.project.name)}
+            disabled={lockedRow || missing}
             className={`p-1.5 transition-colors rounded ${
-              isCurrent && !readOnly
-                ? 'text-muted hover:text-accent'
-                : 'text-ink-300 cursor-not-allowed'
+              lockedRow || missing
+                ? 'text-ink-300 cursor-not-allowed'
+                : 'text-muted hover:text-accent'
             }`}
-            title={readOnly
+            title={missing
+              ? "This project's folder is no longer on disk — there is nothing to branch"
+              : lockedRow
               ? 'Read-only — another user is editing this project'
               : isCurrent
-              ? 'Branch a child scenario from this project'
-              : 'Switch to this scenario first to branch a child from it'}
+              ? 'Branch a child scenario from this project (saves it first)'
+              : 'Branch a child scenario from this project'}
           >
             <Plus size={13} />
           </button>
+          {/* Deletable even when its files are gone: the registry row is
+              exactly what wants clearing in that case. */}
           <button
             onClick={() => onDelete(node.project.name)}
-            disabled={readOnly}
+            disabled={lockedRow}
             className={`p-1.5 transition-colors rounded ${
-              readOnly ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-danger'
+              lockedRow ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-danger'
             }`}
-            title={readOnly
+            title={lockedRow
               ? 'Read-only — another user is editing this project'
               : 'Delete this scenario'}
           >
@@ -503,11 +561,14 @@ interface DialogProps {
   base: string
   // UUID-backed route key (id||name) used for the createScenario API call.
   baseId: string
+  // True when `base` is the project currently loaded in the backend, i.e. the
+  // one whose in-memory state can be ahead of its files. Drives the flush.
+  baseIsActive: boolean
   onClose: () => void
   onCreated: (info: ProjectInfo) => void
 }
 
-function CreateScenarioDialog({ base, baseId, onClose, onCreated }: DialogProps) {
+function CreateScenarioDialog({ base, baseId, baseIsActive, onClose, onCreated }: DialogProps) {
   const titleId = useId()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -516,15 +577,39 @@ function CreateScenarioDialog({ base, baseId, onClose, onCreated }: DialogProps)
   // ProjectInfo carries no dedicated field.
   const [scenType, setScenType] = useState<ScenType>('scenario')
   const createMut = useMutation({
-    mutationFn: () => {
-      const desc = description.trim()
-      const tagged = `[${scenType}] ${desc}`.trim()
-      return projectsApi.createScenario(baseId, name.trim(), tagged)
+    mutationFn: async () => {
+      // Flush the base to disk FIRST when it is the loaded project.
+      //
+      // `POST /{base}/scenarios` copies the base's on-disk BUNDLE — it never
+      // touches the in-memory network (that is what lets a non-active project
+      // be branched at all). So without this the child forks from the last
+      // AUTOSAVE, up to five minutes behind the network on screen, and the
+      // divergence is invisible until the user opens the branch much later
+      // and finds their edits missing. The dialog claimed the opposite
+      // ("saves the current in-memory network") for as long as the copy has
+      // read from disk.
+      //
+      // Only for the active base: for any other row the on-disk bundle IS the
+      // project, and there is nothing resident to flush.
+      if (baseIsActive) {
+        const saved = await saveProjectQuietly(base)
+        if (!saved) {
+          // Refuse rather than silently branch from stale files — the whole
+          // point of the flush. `saveProjectQuietly` also declines while a
+          // solve is running, which is the common way to land here.
+          throw new Error(
+            `Couldn't save '${base}' first, so the scenario would branch from its `
+            + `last saved state instead of what's on screen. `
+            + `Finish or abort a running solve, then retry.`,
+          )
+        }
+      }
+      return projectsApi.createScenario(baseId, name.trim(), tagScenType(scenType, description))
     },
     onSuccess: onCreated,
     onError: (err) => {
-      const e = err as { response?: { status?: number; data?: { detail?: string } } }
-      toast.error(`Create failed: ${e.response?.data?.detail ?? (err as Error).message}`)
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      toast.error(`Create failed: ${formatApiDetail(e.response?.data?.detail, (err as Error).message)}`)
     },
   })
 
@@ -554,7 +639,9 @@ function CreateScenarioDialog({ base, baseId, onClose, onCreated }: DialogProps)
       <div className="px-3 py-2 border-b border-border">
         <div id={titleId} className="text-xs font-semibold text-text">New scenario from <span className="text-accent">{base}</span></div>
         <div className="text-[10px] text-muted mt-0.5">
-          Saves the current in-memory network as a new project linked to its base. Won't auto-switch.
+          {baseIsActive
+            ? <>Saves <span className="text-ink-700">{base}</span> first, then copies it into a new project linked to it. Won't auto-switch.</>
+            : <>Copies <span className="text-ink-700">{base}</span> as it is on disk into a new project linked to it. Won't auto-switch.</>}
         </div>
       </div>
       <div className="p-3 space-y-2">

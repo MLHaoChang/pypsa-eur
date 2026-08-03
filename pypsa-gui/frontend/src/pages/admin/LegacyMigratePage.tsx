@@ -14,6 +14,7 @@ import {
   Tag,
 } from '../../components/PageKit'
 import { usersForOrganization } from './helpers'
+import { scenDescriptionText } from '../../utils/scenarioType'
 
 const LEGACY_QUERY_KEY = ['admin', 'legacy-projects']
 const USERS_QUERY_KEY = ['admin', 'users']
@@ -173,7 +174,11 @@ export default function LegacyMigratePage() {
                       </div>
                       <div className="mt-2 space-y-1 text-sm text-[var(--brand-ink-dim)]">
                         <p>Parent: {project.parent_project ?? 'Root project'}</p>
-                        {project.scenario_description && <p>{project.scenario_description}</p>}
+                        {/* Stripped, not raw: the `[type]` marker the scenario
+                            dialog prefixes is an encoding, not prose. */}
+                        {scenDescriptionText(project.scenario_description) && (
+                          <p>{scenDescriptionText(project.scenario_description)}</p>
+                        )}
                       </div>
                     </button>
                   )

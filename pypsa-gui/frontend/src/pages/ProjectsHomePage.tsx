@@ -14,6 +14,7 @@ import NewProjectWizard, { type NewProjectTab } from '../layout/NewProjectWizard
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { formatRelativeTime, invalidateNetworkQueries } from '../utils/projectActions'
+import { scenDescriptionText } from '../utils/scenarioType'
 import { hasAdminConsoleAccess } from './admin/helpers'
 import {
   countScenarios,
@@ -636,6 +637,11 @@ export default function ProjectsHomePage() {
                 const isPending = importing.includes(row.name)
                 const failure = feedback[row.name]?.tone === 'error' ? feedback[row.name] : null
                 const scenarioLabel = scenarioCountLabel(row.descendant_names.length)
+                // Strip the `[baseline|scenario|stress]` marker the scenario
+                // dialog prefixes onto the description. Rendered raw, a
+                // scenario saved with no description of its own showed the
+                // literal text "[scenario]" here.
+                const scenarioText = scenDescriptionText(row.scenario_description)
                 return (
                   <li
                     className="rounded-[18px] border border-white/10 bg-[rgba(29,24,25,0.66)] p-4"
@@ -660,8 +666,8 @@ export default function ProjectsHomePage() {
                             </Badge>
                           )}
                         </div>
-                        {row.scenario_description && (
-                          <p className="text-sm leading-6 text-[var(--brand-ink-dim)]">{row.scenario_description}</p>
+                        {scenarioText && (
+                          <p className="text-sm leading-6 text-[var(--brand-ink-dim)]">{scenarioText}</p>
                         )}
                         {!row.has_network && (
                           <p className="text-xs leading-5 text-[var(--brand-warn)]">

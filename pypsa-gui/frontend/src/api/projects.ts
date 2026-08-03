@@ -181,10 +181,15 @@ export const projectsApi = {
   // `parent_project=<base>`. `createScenario` saves the current in-memory
   // network to a new project keyed by `name`, branched off `base`. Caller
   // decides whether to switch — the new scenario does NOT auto-activate.
+  //
+  // `skipErrorToast`: the only caller renders every failure itself, inside the
+  // dialog the user is looking at. Without this the interceptor ALSO toasts,
+  // so a name collision popped two messages saying the same thing.
   createScenario: (base: string, name: string, description?: string) =>
     client.post<ProjectInfo>(
       `/projects/${encodeURIComponent(base)}/scenarios`,
       { name, description: description ?? null },
+      { skipErrorToast: true },
     ).then(r => r.data),
   // Read-only summary of a non-active project; safe to call from anywhere
   // (doesn't touch the in-memory PyPSAService singleton).
@@ -270,10 +275,16 @@ export const projectsApi = {
   // rmtree raised — e.g. a Windows file lock]}` so the caller can clear
   // `currentProject` when the active project was actually removed, and warn
   // about anything that couldn't be deleted.
+  // `skipErrorToast`: a non-cascade delete of a project WITH children 409s by
+  // design — that is the signal to ask "delete the children too?", not an
+  // error. The interceptor rendered the backend's raw detail at the user,
+  // instructing them to "Pass ?cascade=true", a query parameter they have no
+  // way to type. The sole caller turns that 409 into the confirm prompt and
+  // toasts every other failure itself.
   delete: (name: string, cascade = false) =>
     client.delete<{ deleted: string[]; failed: string[] }>(
       `/projects/${encodeURIComponent(name)}`,
-      { params: cascade ? { cascade: true } : undefined },
+      { params: cascade ? { cascade: true } : undefined, skipErrorToast: true },
     ).then(r => r.data),
   statistics: (name: string) => client.get(`/projects/${encodeURIComponent(name)}/statistics`).then(r => r.data),
   // Stream the project's full state as a .pypsaproj.zip bundle (network.nc +
