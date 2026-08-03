@@ -30,6 +30,7 @@ import {
 import { nk } from '../utils/queryKeys'
 import NewProjectWizard from './NewProjectWizard'
 import { H2Icon } from '../components/AssetIcons'
+import ProjectPicker from '../components/ProjectPicker'
 import { useSolveQueue } from '../hooks/useSolveQueue'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
@@ -531,19 +532,7 @@ function OpenProjectModal({
   onPickFile: (file: File) => void
   onClose: () => void
 }) {
-  const { data: projects = [], isLoading } = useQuery({
-    queryKey: ['projects'],
-    queryFn: projectsApi.list,
-    refetchOnMount: 'always',
-  })
-  const [filter, setFilter] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const filtered = (projects as ProjectInfo[])
-    .filter(p => p.name.toLowerCase().includes(filter.trim().toLowerCase()))
-  const fmtDate = (iso: string) => {
-    try { return new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) }
-    catch { return iso }
-  }
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.45)' }}
@@ -579,60 +568,12 @@ function OpenProjectModal({
             }}
           />
         </div>
-        <div className="px-4 py-2 border-b border-border shrink-0">
-          <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Saved on backend</p>
-          <input
-            type="text"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            placeholder="Filter projects…"
-            className="w-full px-2.5 py-1.5 text-xs border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
-          />
+        <div className="px-4 pt-2 shrink-0">
+          <p className="text-[10px] font-bold text-muted uppercase tracking-wider">Saved on backend</p>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {isLoading ? (
-            <p className="p-6 text-xs text-muted text-center animate-pulse">Loading projects…</p>
-          ) : filtered.length === 0 ? (
-            <p className="p-6 text-xs text-muted text-center">
-              {projects.length === 0
-                ? 'No projects saved on the backend yet. Save a project first or import one.'
-                : 'No projects match this filter.'}
-            </p>
-          ) : (
-            <ul className="divide-y divide-border/40">
-              {filtered.map(p => {
-                const isCurrent = p.name === currentProject
-                return (
-                  <li key={p.name}>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        // Stop the click from bubbling to the backdrop's
-                        // onClick (which closes the modal). The synthetic
-                        // event check there should already prevent a close
-                        // since target≠currentTarget, but be explicit.
-                        e.stopPropagation()
-                        onPick(p.name)
-                      }}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors
-                        ${isCurrent ? 'bg-accent/5' : 'hover:bg-accent/5'}`}
-                    >
-                      <FolderOpen size={14} className={isCurrent ? 'text-accent' : 'text-muted'} />
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-semibold truncate ${isCurrent ? 'text-accent' : 'text-text'}`}>
-                          {p.name}{isCurrent && <span className="ml-1.5 text-[9px] font-normal opacity-70">(current)</span>}
-                        </p>
-                        <p className="text-[10px] text-muted truncate">
-                          {p.bus_count} buses · {p.snapshot_count} snapshots · {fmtDate(p.created_at)}
-                        </p>
-                      </div>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
+        {/* Shared with the project-tab strip's "+" dialog, so both lists carry
+            the same filter, badges and empty states. */}
+        <ProjectPicker currentProject={currentProject} onPick={onPick} />
       </div>
     </div>
   )

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, X, FolderOpen, Loader } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
 import { projectsApi } from '../api/projects'
 import { appLog } from '../store/simulationStore'
+import ProjectPicker from '../components/ProjectPicker'
 import {
   invalidateNetworkQueries, saveProjectQuietly, nextUntitledName,
   resetBackendNetwork, slugify, abortRunningSim, uniqueProjectName,
@@ -14,62 +15,124 @@ import { useSolveQueue, activeJobForProject } from '../hooks/useSolveQueue'
 import { isActive } from '../api/solveQueue'
 import { Dialog } from '../components/Dialog'
 
-// Small name-input modal for the "+ new tab" flow. Lives here rather than in
-// a shared module because it's only used by ProjectTabs; the Sidebar has its
-// own (heavier) NewProjectModal with folder picker support.
-function NewTabNameModal({
-  initial, taken, onCreate, onClose,
+// The "+" dialog. Two ways to add a tab, because a workspace that can only
+// CREATE forces you to the sidebar to open a project you already have —
+// which is the whole point of a tab strip.
+//
+//   Open existing  — pick from the projects saved on the backend. Opening one
+//                    ADDS a tab beside the current project rather than
+//                    replacing it (setCurrentProject auto-adds; see uiStore).
+//   New project    — the original name-input flow, unchanged.
+//
+// Defaults to "Open existing" whenever there is something to open, and falls
+// back to "New project" on an empty backend so a first-run user is not
+// staring at an empty list.
+function AddProjectModal({
+  initial, taken, currentProject, onCreate, onOpen, onClose,
 }: {
   initial: string
   taken: readonly string[]
+  currentProject: string | null
   onCreate: (name: string) => void
+  onOpen: (name: string) => void
   onClose: () => void
 }) {
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: projectsApi.list,
+    refetchOnMount: 'always',
+  })
+  // Resolve the default mode from the list, but only once — re-deriving it on
+  // every render would yank the user out of a mode they picked as soon as the
+  // query settled or refetched.
+  const [mode, setMode] = useState<'open' | 'new' | null>(null)
+  const resolvedMode = mode ?? (projects.length > 0 ? 'open' : 'new')
+
   const [name, setName] = useState(initial)
   const inputRef = useRef<HTMLInputElement>(null)
   const titleId = useId()
-  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select() }, [])
+  useEffect(() => {
+    if (resolvedMode === 'new') { inputRef.current?.focus(); inputRef.current?.select() }
+  }, [resolvedMode])
   const trimmed = name.trim()
   const conflict = trimmed && taken.includes(trimmed)
   const commit = () => {
     if (!trimmed || conflict) return
     onCreate(trimmed)
   }
+
+  const tab = (id: 'open' | 'new', label: string) => (
+    <button
+      key={id}
+      type="button"
+      role="tab"
+      aria-selected={resolvedMode === id}
+      onClick={() => setMode(id)}
+      className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
+        resolvedMode === id
+          ? 'border-accent text-accent'
+          : 'border-transparent text-muted hover:text-text'
+      }`}
+    >{label}</button>
+  )
+
   return (
-    <Dialog open onClose={onClose} aria-labelledby={titleId} panelClassName="bg-bg rounded-xl shadow-2xl w-80 overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <span id={titleId} className="text-sm font-semibold text-text">New project</span>
-        <button onClick={onClose} aria-label="Close new project dialog" className="p-1 text-muted hover:text-text"><X size={15} /></button>
+    <Dialog
+      open
+      onClose={onClose}
+      aria-labelledby={titleId}
+      panelClassName="bg-bg rounded-xl shadow-2xl w-[460px] max-w-[95vw] max-h-[80vh] flex flex-col overflow-hidden"
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+        <span id={titleId} className="text-sm font-semibold text-text">Add a project tab</span>
+        <button onClick={onClose} aria-label="Close add project dialog"
+          className="p-1 text-muted hover:text-text"><X size={15} /></button>
       </div>
-      <div className="p-4 space-y-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-text">Project name</span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') commit() }}
-            className={`px-2.5 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 ${
-              conflict
-                ? 'border-danger focus:border-danger focus:ring-danger/20'
-                : 'border-border focus:border-accent focus:ring-accent/20'
-            }`}
-            placeholder="my_project"
-          />
-          {conflict
-            ? <span className="text-[10px] text-danger">A tab named '{trimmed}' is already open</span>
-            : <span className="text-[10px] text-muted">A new empty project will be created on the backend</span>}
-        </label>
-        <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text transition-colors">Cancel</button>
-          <button
-            onClick={commit}
-            disabled={!trimmed || !!conflict}
-            className="px-4 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 disabled:opacity-40 transition-colors"
-          >Create</button>
+
+      <div role="tablist" className="flex items-center gap-1 px-3 border-b border-border shrink-0">
+        {tab('open', 'Open existing')}
+        {tab('new', 'New project')}
+      </div>
+
+      {resolvedMode === 'open' ? (
+        <ProjectPicker
+          currentProject={currentProject}
+          alreadyOpen={taken}
+          onPick={onOpen}
+          autoFocusFilter
+          emptyHint={<>No projects saved yet — use <b>New project</b> to make one.</>}
+        />
+      ) : (
+        <div className="p-4 space-y-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-text">Project name</span>
+            <input
+              ref={inputRef}
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') commit() }}
+              className={`px-2.5 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 ${
+                conflict
+                  ? 'border-danger focus:border-danger focus:ring-danger/20'
+                  : 'border-border focus:border-accent focus:ring-accent/20'
+              }`}
+              placeholder="my_project"
+            />
+            {conflict
+              ? <span className="text-[10px] text-danger">A tab named '{trimmed}' is already open</span>
+              : <span className="text-[10px] text-muted">A new empty project will be created on the backend</span>}
+          </label>
+          <div className="flex gap-2 justify-end">
+            <button onClick={onClose} className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text transition-colors">Cancel</button>
+            <button
+              onClick={commit}
+              disabled={!trimmed || !!conflict}
+              className="px-4 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 disabled:opacity-40 transition-colors"
+            >Create</button>
+          </div>
         </div>
-      </div>
+      )}
     </Dialog>
   )
 }
@@ -205,9 +268,52 @@ export default function ProjectTabs() {
     }
   }, [busy, currentProject, qc, addTab, setCurrentProject, setProjectName])
 
-  // The "+" tab now opens a name-input modal first; creation happens on Enter
-  // / Create. nextUntitledName is the suggested default so the user can hit
-  // Enter for the legacy auto-named flow.
+  // Open an EXISTING project as an additional tab. `switchToProject` does the
+  // whole dance — abort any foreground solve, save the outgoing project,
+  // activate the target backend-side, re-key the reactive queries — and its
+  // `setCurrentProject` call auto-adds the tab when the project is not already
+  // open (uiStore). So the current project stays open beside the new one;
+  // this is an ADD, not a replace.
+  const openExisting = useCallback(async (target: string) => {
+    if (busy) return
+    setShowNameModal(false)
+    if (target === currentProject) return
+    setBusy(target)
+    setProjectSwitchInProgress(true)
+    try {
+      const r = await switchToProject(target, qc)
+      switch (r.status) {
+        case 'switched':
+          appLog('INFO', `Opened project '${target}' in a tab`)
+          toast.success(`Opened '${target}'`)
+          break
+        case 'noop':
+          break
+        case 'abort-failed':
+          toast.error('Could not abort the running simulation. Try again in a moment.')
+          break
+        case 'busy-solve':
+          toast.error(`Finish or abort the running solve on '${currentProject}' before opening another project.`)
+          break
+        case 'not-found':
+          toast.error(`'${target}' no longer exists`)
+          // The list we picked from is stale — refresh it so the row goes away.
+          qc.invalidateQueries({ queryKey: ['projects'] })
+          break
+        case 'error':
+          appLog('ERROR', `Opening '${target}' failed: ${r.message}`)
+          toast.error(`Could not open '${target}'`)
+          break
+      }
+    } finally {
+      setProjectSwitchInProgress(false)
+      setBusy(null)
+    }
+  }, [busy, currentProject, qc, setProjectSwitchInProgress])
+
+  // The "+" tab opens the add-a-tab dialog: open an existing project, or
+  // create a new one. nextUntitledName is the suggested default on the create
+  // side so the user can still hit Enter for the legacy auto-named flow.
   const handleNewClick = useCallback(() => {
     if (busy) return
     setShowNameModal(true)
@@ -252,14 +358,16 @@ export default function ProjectTabs() {
             disabled={!!busy}
             className="ml-2 flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
           >
-            <Plus size={12} /> New project
+            <Plus size={12} /> Open or create a project
           </button>
         </div>
         {showNameModal && (
-          <NewTabNameModal
+          <AddProjectModal
             initial={nextUntitledName(tabNames)}
             taken={tabNames}
+            currentProject={currentProject}
             onCreate={handleNameConfirm}
+            onOpen={openExisting}
             onClose={() => setShowNameModal(false)}
           />
         )}
@@ -270,10 +378,12 @@ export default function ProjectTabs() {
   return (
     <div data-no-panel-close className="flex items-center gap-0.5 px-2 h-9 bg-bg border-b border-border shrink-0 overflow-x-auto">
       {showNameModal && (
-        <NewTabNameModal
+        <AddProjectModal
           initial={nextUntitledName(tabNames)}
           taken={tabNames}
+          currentProject={currentProject}
           onCreate={handleNameConfirm}
+          onOpen={openExisting}
           onClose={() => setShowNameModal(false)}
         />
       )}
@@ -329,7 +439,8 @@ export default function ProjectTabs() {
         onClick={handleNewClick}
         disabled={!!busy}
         className="ml-1 flex items-center justify-center w-6 h-6 rounded text-muted hover:text-accent hover:bg-accent/5 transition-colors disabled:opacity-50"
-        title="New project (auto-saves current first)"
+        title="Open an existing project or create a new one (auto-saves current first)"
+        aria-label="Add a project tab"
       >
         {busy === '__new__' ? <Loader size={12} className="animate-spin" /> : <Plus size={14} />}
       </button>
