@@ -803,8 +803,21 @@ def test_a_blank_lifetime_reaches_the_asset_results_endpoint_as_ok(golden):
     """
     import routers.asset_results as AR
 
-    for category, metric_id in (("capacity", "capex_annual"),
-                                 ("economics", "fixed_cost_eur")):
+    # The two metrics are on DIFFERENT time bases and this test used to assert
+    # one number for both, which is the conflation that made Asset Detail
+    # disagree with the Economics tab:
+    #
+    #   capex_annual    EUR/a — the annual rate
+    #   fixed_cost_eur  EUR   — that rate over the horizon (5 + 10 = 15 years)
+    #
+    # 28211.676894465407 is not a number this test chose; it is what
+    # /results/asset_economics reports for `diesel_backup`, asserted directly
+    # in test_asset_detail_horizon_scaling.py.
+    annual = 1880.778459631027
+    for category, metric_id, expected in (
+        ("capacity", "capex_annual", annual),
+        ("economics", "fixed_cost_eur", annual * 15.0),
+    ):
         detail = AR.get_asset_results(
             component_class="Generator", name="diesel_backup", category=category,
             source="lopf", from_=None, to=None, period=None,
@@ -816,4 +829,4 @@ def test_a_blank_lifetime_reaches_the_asset_results_endpoint_as_ok(golden):
         # ok means it actually reached `scalars` with a real, non-zero
         # number — not a silent 0.0 masquerading as "computed".
         assert metric_id in detail.get("scalars", {})
-        assert detail["scalars"][metric_id] == pytest.approx(1880.778459631027, rel=1e-6)
+        assert detail["scalars"][metric_id] == pytest.approx(expected, rel=1e-6)

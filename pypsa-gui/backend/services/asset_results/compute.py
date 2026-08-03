@@ -428,6 +428,58 @@ def capex_annual(ctx: Ctx):
     return cc * opt
 
 
+def horizon_years(ctx: Ctx) -> float:
+    """
+    Years of ownership the SELECTED WINDOW represents — the factor that turns
+    the annual CAPEX rate into a cost comparable with horizon-summed revenue.
+
+    Every cost and energy total in this module is a weighted sum over
+    `ctx.sns`, while `capex_annual` is a RATE (EUR/a). Subtracting one from the
+    other is a units error: MEASURED on the user's 3_nodes_system (three
+    periods, years=1 each), Asset Detail reported PV_B3 net profit as
+    98,324,594 against the Economics tab's 27,956,088 — high by exactly
+    2 × the annual CAPEX — and a one-day window reported a 34.9 MEUR loss,
+    one day of revenue minus a full year of CAPEX.
+
+    `/results/asset_economics` already carries this correction as
+    `total_years_factor` (= Σ investment_period_weightings.years, or 1.0 on a
+    flat network). This MUST reduce to exactly that when the whole horizon is
+    selected or the two surfaces disagree again — hence horizon-years scaled by
+    the window's SHARE of the horizon, rather than a bare `Σweights / 8760`.
+    That shortcut agrees on any full year but reads 24/8760 instead of 1.0 for
+    a flat unit-weighted 24-snapshot project, which would trade this bug for a
+    quieter one on exactly the small-snapshot networks this GUI is full of.
+
+    The share is taken on the cost basis (`objective`), matching `_cost_wsum` —
+    the same weights the revenue it is subtracted from was summed with.
+    """
+    from services.period_utils import period_years_map, snapshot_weights
+
+    years_map = period_years_map(ctx.n)
+    total = float(sum(years_map.values())) if years_map else 1.0
+
+    try:
+        whole = float(snapshot_weights(ctx.n, "objective", None).sum())
+    except Exception:
+        whole = 0.0
+    if whole <= 0.0:
+        # No usable weighting basis — the full-horizon factor is still the
+        # better answer than silently dropping CAPEX to zero.
+        return total
+    return total * (float(cost_weights(ctx).sum()) / whole)
+
+
+def capex_over_horizon(ctx: Ctx):
+    """
+    `capex_annual` scaled to the selected window — EUR, not EUR/a.
+
+    This is the quantity `/results/asset_economics` reports as `fixed_cost_eur`,
+    and the only one that belongs in a net profit or a levelised cost.
+    """
+    annual = capex_annual(ctx)
+    return None if annual is None else annual * horizon_years(ctx)
+
+
 def capex_unresolved_reason(n, component_class: str, name: str) -> str | None:
     """
     Why an asset's CAPEX could not be annualised, or None if it could.
@@ -812,7 +864,9 @@ def gen_vom(ctx: Ctx):
 
 
 def gen_fixed_cost(ctx: Ctx):
-    return gen_capex_annual(ctx)
+    # Horizon cost, not the annual rate — `gen_net_profit` subtracts it from a
+    # horizon-summed revenue and `gen_lcoe` divides it by horizon energy.
+    return capex_over_horizon(ctx)
 
 
 def gen_net_profit(ctx: Ctx):
@@ -1238,7 +1292,7 @@ def br_congestion_rent(ctx: Ctx):
 
 
 def br_fixed_cost(ctx: Ctx):
-    return capex_annual(ctx)
+    return capex_over_horizon(ctx)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1324,7 +1378,7 @@ def link_net_profit(ctx: Ctx):
     if rev is None:
         return None
     return rev - ((link_input_cost(ctx) or 0.0) + (link_vom(ctx) or 0.0)
-                  + (capex_annual(ctx) or 0.0))
+                  + (capex_over_horizon(ctx) or 0.0))
 
 
 def link_co2_rate(ctx: Ctx):
@@ -1489,7 +1543,7 @@ def su_net_profit(ctx: Ctx):
     if rev is None:
         return None
     return rev - ((su_charging_cost(ctx) or 0.0) + (su_vom(ctx) or 0.0)
-                  + (capex_annual(ctx) or 0.0))
+                  + (capex_over_horizon(ctx) or 0.0))
 
 
 def su_lcos(ctx: Ctx):
@@ -1497,7 +1551,7 @@ def su_lcos(ctx: Ctx):
     out = su_energy_discharged(ctx)
     if not out:
         return None
-    return ((capex_annual(ctx) or 0.0) + (su_vom(ctx) or 0.0)
+    return ((capex_over_horizon(ctx) or 0.0) + (su_vom(ctx) or 0.0)
             + (su_charging_cost(ctx) or 0.0)) / out
 
 
@@ -1609,7 +1663,7 @@ def store_net_profit(ctx: Ctx):
     if rev is None:
         return None
     return rev - ((store_charging_cost(ctx) or 0.0) + (store_vom(ctx) or 0.0)
-                  + (capex_annual(ctx) or 0.0))
+                  + (capex_over_horizon(ctx) or 0.0))
 
 
 # ════════════════════════════════════════════════════════════════════════════
