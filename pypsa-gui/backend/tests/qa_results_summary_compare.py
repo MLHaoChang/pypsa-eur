@@ -227,12 +227,23 @@ def test_solved_network_capacity_per_period() -> None:
     _step("solar capacity total ≥ 100 MW", solar_total >= 100.0,
           f"got {solar_total:.1f}")
     # CAPEX: with overnight_cost=1M and annuity(7%, 25y) ≈ 0.0858, per-MW
-    # annuity ≈ €85.8k/MW/yr. Built capacity = solar_total - 100. The CAPEX
-    # in M€ should be (solar_total - 100) × 85.8k / 1e6.
+    # annuity ≈ €85.8k/MW/yr. That's the LP-effective rate PyPSA's own
+    # `capital_cost` accessor reports, i.e. `overnight × annuity × n.nyears`
+    # (n.nyears = Σ snapshot_weightings.objective per period / 8760 — this
+    # fixture's 12 unit-weighted snapshots/period give n.nyears = 12/8760).
+    # Built capacity = solar_total - 100. Fixed 2026-08-01 (Task 9): this
+    # formula used to omit the `n.nyears` factor, which happened to match
+    # `_safe_capital_cost`'s pre-fix bug of the same omission — two wrongs
+    # cancelling out. Both are now correct, so the `n.nyears` factor is
+    # required here for the comparison to mean anything.
     capex_solar = (capex.get("solar") or {}).get("total", 0.0)
-    expected_capex = (solar_total - 100.0) * 1_000_000 * _annuity(0.07, 25.0) / 1e6
+    # n.nyears is per-period on a multi-period network; every period in this
+    # fixture carries the same unit weighting (12 hourly snapshots each), so
+    # any one period's value is representative.
+    nyears = float(n.nyears.iloc[0]) if hasattr(n.nyears, "iloc") else float(n.nyears)
+    expected_capex = (solar_total - 100.0) * 1_000_000 * _annuity(0.07, 25.0) * nyears / 1e6
     if expected_capex > 0:
-        _step("solar new_capex ≈ Δp_nom × annuity (within 5 %)",
+        _step("solar new_capex ≈ Δp_nom × annuity × n.nyears (within 5 %)",
               abs(capex_solar - expected_capex) / expected_capex < 0.05,
               f"got {capex_solar:.2f}M€, expected ≈ {expected_capex:.2f}M€")
     else:

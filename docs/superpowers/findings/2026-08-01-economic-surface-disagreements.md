@@ -1,16 +1,55 @@
 # Nine economic surfaces, cross-checked against a solved golden network
 
-**Date:** 2026-08-01
+**Date:** 2026-08-01 (opened) — **2026-08-03 (closed out, Task 9)**
 **Method:** `pypsa-gui/backend/tests/golden/fixture.py`'s golden network
 (Generator `gas` [overnight_cost], Generator `solar` [direct capital_cost],
 Line `L_ab` [direct capital_cost], Link `electrolyzer` [overnight_cost],
 StorageUnit `bess` [zero cost]), solved for real with HiGHS, multi-period
 (2030 with 5 years, 2035 with 10 years, discount rate 7%). Every number below
 was read directly off the running endpoints in
-`pypsa-gui/backend/tests/test_golden_economics.py`, not inferred from code.
-**Status:** 2 wrong-number defects found (1 already tracked, 1 new), 2
-shape/coverage-claim mismatches documented, everything else measured to
-agree.
+`pypsa-gui/backend/tests/test_golden_economics.py`, not inferred from code
+— except where a paragraph is explicitly marked "inferred from a code read"
+(no live measurement taken).
+
+**FINAL STATUS (Task 9, 2026-08-03):** Both wrong-number defects found by
+this investigation are now FIXED and MEASURED-clean:
+
+- Asset Detail CAPEX (`asset_results` / `asset_results_xlsx`, §7–§8) — fixed
+  in Task 5.
+- `economics_by_carrier` / `compare_economics` 365× CAPEX overstatement
+  (§4, §9) — fixed in Task 9, by making `routers/compare.py::_safe_capital_cost`
+  delegate entirely to `services.solver_service.periodized_capital_costs`
+  (the resolution `asset_economics` / `cost_breakdown` / `asset_costs` / Asset
+  Detail all already used) instead of hand-rolling
+  `overnight_cost * annuity(rate, lifetime)` with no `nyears` scaling.
+  `test_economics_by_carrier_h2_capex_agrees_with_asset_economics`'s
+  `xfail(strict=True)` marker has been REMOVED (not widened, not skipped) and
+  the test now passes for real — MEASURED: `economics_by_carrier`'s `h2`
+  carrier and `compare_economics`'s `per_asset_lcoh[electrolyzer]` both now
+  report `166249.77136776928` EUR, identical to the last printed digit to
+  `asset_economics`'s `fixed_cost_eur` and to the independent oracle. Ratio
+  1.00× (was 365.00×). Full backend suite: **1957 passed, 1 skipped, 0
+  failed** (`pixi run gui-tests`, 2026-08-03) — no other `test_*.py` file in
+  the pytest-collected suite had encoded the pre-fix (365×-wrong) value as an
+  expectation. Two standalone `qa_*.py` scripts (NOT pytest-collected —
+  `pytest.ini`'s `python_files = test_*.py` excludes them, and they are not
+  part of any required verification gate) did encode the old formula and were
+  updated for consistency: `qa_safe_capital_cost.py` (probed
+  `_safe_capital_cost`'s old hand-rolled-annuity signature directly, now
+  rewritten to test the new lookup-into-`periodized_capital_costs` contract)
+  and `qa_results_summary_compare.py` (one hand-derived `expected_capex`
+  assertion omitted the `n.nyears` factor, coincidentally matching the old
+  bug's omission — "two wrongs cancelling out" — now corrected to multiply by
+  `n.nyears` explicitly).
+
+Remaining open items are coverage/shape mismatches, not wrong numbers — see
+"Deferred" in the Summary table at the bottom. Two surfaces (`asset_costs`,
+`lcoh`) agreed cleanly from the start and needed no fix; that is recorded
+explicitly below, not left to be inferred from the absence of a complaint.
+
+**Original 2026-08-01 status (superseded by the above):** 2 wrong-number
+defects found (1 already tracked, 1 new), 2 shape/coverage-claim mismatches
+documented, everything else measured to agree.
 
 ## Headline numbers
 
@@ -42,15 +81,17 @@ DOES build.
 | 1 | `asset_economics` (`/results/asset_economics`) | Yes — the baseline | independent oracle (`gas`, `electrolyzer`) | **AGREE** (exact match, see below) |
 | 2 | `cost_breakdown` (`/results/cost_breakdown`) | No — by (class[, carrier]) only | oracle (Line `L_ab`), `asset_economics` (`solar`, via carrier coincidence) | **AGREE** where checked; shape mismatch elsewhere |
 | 3 | `statistics` (`/results/statistics`) | No — by (class, carrier) only | `asset_economics` (`electrolyzer`, via carrier `H2`) | **AGREE** |
-| 4 | `economics_by_carrier` (`/results/economics_by_carrier`) | No — by carrier only | `asset_economics` (`electrolyzer`, via carrier `h2`) | **DISAGREE — wrong number, 365× too high on this fixture (NEW; general factor is `1/n.nyears`, see §4)** |
+| 4 | `economics_by_carrier` (`/results/economics_by_carrier`) | No — by carrier only | `asset_economics` (`electrolyzer`, via carrier `h2`) | **FIXED (Task 9) — was wrong number, 365× too high on this fixture; general factor was `1/n.nyears`, see §4. Now AGREE, exact match** |
 | 5 | `lcoh` (`/results/lcoh`) | Yes, for electrolyser-like Links | `asset_economics` (`electrolyzer`) | **AGREE** |
 | 6 | `asset_costs` (`/api/simulation/asset_costs`) | Yes, for every class | `asset_economics` (`gas`, `solar`, `bess`, `electrolyzer`), oracle (`L_ab`) | **AGREE**, all 5 assets |
-| 7 | `asset_results` (Asset Detail, `capex_annual`/`fixed_cost_eur`) | Yes | `asset_economics` (`electrolyzer`) | **DISAGREE — wrong number, 100% low (KNOWN, tracked)** |
-| 8 | `asset_results_xlsx` | Yes (same compute path as #7) | code-verified only, not re-measured | inherits #7's defect |
-| 9 | `compare_economics` (`_compute_economics_summary`, feeds Compare tab) | Partial — `by_carrier` no, `per_asset_lcoh` Link-only | `asset_economics` (`electrolyzer`, via `per_asset_lcoh`) | **DISAGREE — same wrong number as #4** + **shape/coverage-claim mismatch** |
+| 7 | `asset_results` (Asset Detail, `capex_annual`/`fixed_cost_eur`) | Yes | `asset_economics` (`electrolyzer`) | **FIXED (Task 5) — was wrong number, 100% low. Now AGREE** |
+| 8 | `asset_results_xlsx` | Yes (same compute path as #7) | code-verified only, not re-measured | inherits #7's fix (same compute path) |
+| 9 | `compare_economics` (`_compute_economics_summary`, feeds Compare tab) | Partial — `by_carrier` no, `per_asset_lcoh` Link-only | `asset_economics` (`electrolyzer`, via `per_asset_lcoh`) | **CAPEX number FIXED (Task 9, same root cause as #4) — now AGREE, exact match.** Coverage-claim mismatch (`per_asset_lcoh` is Link-only) remains DEFERRED — documentation-only, no field to fix it against |
 
-Nine surfaces, nine rows. Two carry a genuine wrong number; the rest that
-were directly comparable agree; three of the nine (`cost_breakdown`,
+Nine surfaces, nine rows. Zero now carry a wrong number — both defects this
+investigation found are fixed (§4/§9 here, plus the Asset-Detail defect from
+Task 5). The rest that were directly comparable agreed from the start; three
+of the nine (`cost_breakdown`,
 `statistics`, `economics_by_carrier`) and part of a fourth
 (`compare_economics.by_carrier`) simply don't have a per-asset field to
 compare in the first place.
@@ -141,9 +182,16 @@ asset_economics electrolyzer fixed_cost_eur / 15 = 11083.318091184619
 
 **AGREE** for both periods (`test_statistics_h2_capex_matches_asset_economics`).
 
-## 4. `economics_by_carrier` — wrong number, 365× too high ON THIS FIXTURE (NEW, not previously tracked)
+## 4. `economics_by_carrier` — FIXED (Task 9). Was: wrong number, 365× too high ON THIS FIXTURE
 
-This is the significant new finding from this task. `economics_by_carrier`
+**Status as of 2026-08-03: FIXED.** The bug described below (found 2026-08-01)
+was corrected in Task 9 by making `_safe_capital_cost` delegate to
+`services.solver_service.periodized_capital_costs` instead of hand-rolling
+the annuity — see the "FIXED" postscript at the end of this section for the
+fix and its verification. The rest of this section is kept as the historical
+record of what was found and how, unedited from the original investigation.
+
+This was the significant new finding from the original task. `economics_by_carrier`
 (`routers/results.py:771`) delegates to
 `routers/compare.py::_compute_economics_summary`, which prices an
 `overnight_cost`-parameterised asset via a **second, independent**
@@ -219,12 +267,67 @@ asset_economics solar fixed_cost_eur = 82,500,000.00   EUR
 **AGREE** for `solar`. So the bug is specific to the `overnight_cost` code
 path in `_safe_capital_cost`, not the function as a whole.
 
-Recorded as `pytest.mark.xfail(strict=True)` in
-`test_economics_by_carrier_h2_capex_agrees_with_asset_economics`. This is a
-**wrong number** (fix), not a shape mismatch — the value returned is too
+Was recorded as `pytest.mark.xfail(strict=True)` in
+`test_economics_by_carrier_h2_capex_agrees_with_asset_economics`. This was a
+**wrong number** (fix), not a shape mismatch — the value returned was too
 large by a factor of `1 / n.nyears` for any overnight_cost-parameterised
-asset, on any network whose snapshot weights don't happen to sum to ≈8760
+asset, on any network whose snapshot weights didn't happen to sum to ≈8760
 per period.
+
+**FIXED (Task 9, 2026-08-03).** `_safe_capital_cost` (`routers/compare.py`)
+no longer hand-rolls `overnight_cost * annuity(rate, lifetime)`. It now
+delegates entirely to `services.solver_service.periodized_capital_costs(n,
+cfg)` — the SAME resolution `asset_economics`, `cost_breakdown`,
+`asset_costs` and (since Task 5) Asset Detail all already used — via a new
+`_periodized_lookup(n)` helper that builds that function's per-asset dict
+ONCE per network (not once per row: `periodized_capital_costs` walks every
+cost-bearing component class in a single pass, so a per-row call would be
+O(rows) times more expensive for the identical answer). `_safe_capital_cost`
+is now a pure lookup: given a pandas Series `row` (its `.name` is the asset
+name), the precomputed `pcc` dict, and which top-level bucket (`"generators"`,
+`"links"`, …) the row belongs to, it returns `pcc[comp_attr][name]
+["capital_cost"]` or `0.0` if absent. This removes the second, independent
+annuity implementation entirely rather than patching a `× 1/n.nyears`
+correction factor on top of it — the brief's explicit instruction, because a
+correction factor bolted onto a duplicate implementation is exactly the kind
+of drift that produced this bug in the first place (`_safe_capital_cost` was
+originally written to match `periodized_capital_costs`'s behaviour by
+re-deriving it, and drifted the moment PyPSA's `nyears` scaling was added
+upstream without a matching update here).
+
+**The overnight-preferred-over-stale-capital_cost behaviour survives
+unchanged.** `_safe_capital_cost`'s docstring used to say it deliberately
+prefers `overnight_cost` over a non-zero `capital_cost` column "because
+networks often carry a stale straight-line figure alongside overnight_cost".
+Checked (code read, `services/solver_service.py::periodized_capital_costs`
+and PyPSA's own `capital_cost` accessor, `n.c[comp_class].capital_cost`):
+`periodized_capital_costs` reads `capital_cost` through that same PyPSA
+accessor, which for an asset with `overnight_cost` set returns the
+annuitised-and-`nyears`-scaled overnight figure, NOT the raw `capital_cost`
+column — i.e. PyPSA's own accessor already makes the identical
+overnight-over-stale-column choice `_safe_capital_cost` used to hand-implement.
+So there is **no behavioural difference** on that front; delegating changed
+only the missing `nyears` factor, not the overnight-vs-capital_cost
+preference. This was a finding worth checking and reporting (per the brief),
+not one that turned up an actual discrepancy to paper over.
+
+**MEASURED on the golden fixture (2026-08-03, post-fix):**
+
+```
+economics_by_carrier["by_carrier"]["h2"]["capex_meur"]["total"] * 1e6
+    = 166249.77136776928   EUR
+
+asset_economics electrolyzer fixed_cost_eur
+    = 166249.77136776928   EUR
+
+ratio: 1.00 (exact, was 365.00)
+```
+
+`test_economics_by_carrier_h2_capex_agrees_with_asset_economics`'s
+`xfail(strict=True)` marker has been REMOVED — the test now asserts the
+agreement directly and passes for real; leaving the marker in place would
+have made the (now-passing) test FAIL, since `strict=True` turns an
+unexpected pass into a hard failure.
 
 ## 5. `lcoh` — per-Link, agrees
 
@@ -329,32 +432,50 @@ Recorded as `pytest.mark.xfail(strict=True)` in
 `test_asset_detail_capex_agrees_with_asset_economics`. **Wrong number** (fix)
 — tracked for Task 5.
 
-## 9. `compare_economics` — same wrong number as #4, plus a shape/coverage-claim mismatch
+## 9. `compare_economics` — CAPEX FIXED (Task 9, same root cause as #4); coverage-claim mismatch remains DEFERRED
+
+**Status as of 2026-08-03: the wrong-number part is FIXED; the
+shape/coverage-claim mismatch below is unchanged and DEFERRED** (it was
+never a wrong number — see the "Deferred" discussion at the end of this
+section for why it stays open).
 
 `compare_economics` is the `economics` field of `GET
 /compare/{name}/results-summary`, computed by
 `_compute_economics_summary(temp_n, ...)` at `routers/compare.py:2652` — the
 **exact same function** `economics_by_carrier` calls (§4). Its
 `per_asset_lcoh` list is genuinely per-asset (unlike `by_carrier`) and its
-`capex_meur` is built through the same `_safe_capital_cost` /
-`_capex_commitment` path, so it inherits the identical missing-`nyears`
-overstatement (365× on THIS fixture's unit-weighted 24-snapshot periods —
-see §4 for why the factor is `1/n.nyears`, not a fixed 365, and why a
-correctly weighted representative-week network would not show this):
+`capex_meur` was built through the same `_safe_capital_cost` /
+`_capex_commitment` path, so before the Task 9 fix it inherited the identical
+missing-`nyears` overstatement (365× on THIS fixture's unit-weighted
+24-snapshot periods — see §4 for why the factor was `1/n.nyears`, not a
+fixed 365, and why a correctly weighted representative-week network would
+not have shown this). MEASURED, pre-fix (2026-08-01):
 
 ```
 per_asset_lcoh[electrolyzer].capex_meur.total * 1e6 = 60,681,166.549...  EUR
 asset_economics electrolyzer fixed_cost_eur         =    166,249.77     EUR
 ```
 
-**DISAGREE**, same root cause and same ratio as §4 on this fixture. Verified by calling
-`_compute_economics_summary` directly on the golden network (the real HTTP
-endpoint needs a project saved to disk via `ProjectAccessDep`, which this
-task did not spin up — the golden-network call site is identical code, not a
-different implementation, so this is a direct measurement of the same
-function, just not routed through the disk-backed endpoint).
+That was a **DISAGREE**, same root cause and same ratio as §4 on this
+fixture at the time. **FIXED (Task 9, 2026-08-03)** — same
+`_safe_capital_cost` delegation fix described in §4 (this surface calls the
+identical function, so one fix closed both). MEASURED, post-fix:
 
-**Separately, a shape/coverage-claim mismatch.**
+```
+per_asset_lcoh[electrolyzer].capex_meur.total * 1e6 = 166249.77136776928  EUR
+asset_economics electrolyzer fixed_cost_eur         = 166249.77136776928  EUR
+
+ratio: 1.00 (exact, was 365.00)
+```
+
+**AGREE**, exact match. Verified by calling `_compute_economics_summary`
+directly on the golden network (the real HTTP endpoint needs a project saved
+to disk via `ProjectAccessDep`, which this task did not spin up — the
+golden-network call site is identical code, not a different implementation,
+so this is a direct measurement of the same function, just not routed
+through the disk-backed endpoint).
+
+**Separately, a shape/coverage-claim mismatch — DEFERRED, not a wrong number.**
 `coverage.COVERAGE["compare_economics"] = {"Generator", "StorageUnit",
 "Link"}` — correct in the sense that `_compute_economics_summary`'s CAPEX
 walk touches all three classes (into the carrier-aggregated `by_carrier`).
@@ -376,17 +497,18 @@ surfaces are deliberately absent:
 - **`cost_breakdown`, `statistics`, `economics_by_carrier`** — no per-asset
   field exists in any of the three payloads (§2, §3, §4). Spot-checked by
   dedicated tests instead.
-- **`asset_results`, `asset_results_xlsx`** — genuinely per-asset, but both
-  run through the exact `capex_annual` compute path already tracked by the
-  dedicated `test_asset_detail_capex_agrees_with_asset_economics` xfail (§7,
-  §8). Including them in the loop would re-trip the SAME known bug as a hard,
-  non-xfail failure for `electrolyzer`, without discovering anything new —
-  and it would make `test_every_surface_agrees_on_every_covered_asset` itself
-  need an xfail marker, which would hide any OTHER, unrelated regression the
-  loop might catch on a future run.
+- **`asset_results`, `asset_results_xlsx`** — genuinely per-asset, both run
+  through the exact `capex_annual` compute path the dedicated
+  `test_asset_detail_capex_agrees_with_asset_economics` test already covers
+  directly (§7, §8). That test's defect was fixed in Task 5 (its `xfail`
+  marker is gone; it now passes for real) — the loop-exclusion reason today
+  is "already covered by a dedicated test", not "hiding a known bug behind an
+  xfail". Not added to `ADAPTERS` because doing so would duplicate that
+  dedicated coverage rather than add anything new.
 - **`compare_economics`** — no general per-class adapter is possible
   (§9): `by_carrier` is carrier-aggregated, `per_asset_lcoh` is
-  genuinely per-asset but Link-only.
+  genuinely per-asset but Link-only. (This is the one remaining item in this
+  whole investigation that is still open — see the Summary table below.)
 
 These six reasons are recorded as DATA, not comments — `test_golden_economics.py`'s
 `NO_ADAPTER_REASONS: dict[str, str]` holds one entry per surface, and
@@ -415,12 +537,47 @@ separate test: `test_line_capex_agrees_with_the_oracle_across_cost_breakdown_and
 checks `L_ab` against the oracle directly through `cost_breakdown` and
 `asset_costs`, both of which **agree** (§2, §6).
 
-## Summary
+## Summary — final state (Task 9, 2026-08-03)
+
+This is the authoritative close-out record for the whole investigation
+(originally opened 2026-08-01, all nine surfaces now accounted for). Every
+row below states whether it was directly MEASURED against a running endpoint
+or the oracle, or INFERRED from a code read (used only where re-measuring
+would duplicate an existing test without learning anything new — e.g. the
+xlsx export sharing its parent's compute path by construction).
+
+### Fixed in this plan
 
 | Finding | Kind | Status |
 |---|---|---|
-| Asset Detail (`asset_results`/`asset_results_xlsx`) `capex_annual`/`fixed_cost_eur` reads raw `capital_cost`, ignoring `overnight_cost` annuitisation — 100% low for the electrolyzer | Wrong number | Known (measured on user's project pre-task); tracked here as `xfail(strict=True)`, fix scheduled for Task 5 |
-| `economics_by_carrier` / `compare_economics` (`_safe_capital_cost` in `routers/compare.py`) omit the `1/n.nyears` scaling PyPSA's own `capital_cost` accessor applies for `overnight_cost`-parameterised assets (`n.nyears` = `Σ snapshot_weightings["objective"] per period / 8760`) — 365× too high for the electrolyzer on this fixture's unit-weighted 24-snapshot periods. General factor is `1/n.nyears` = `8760 / (Σ snapshot_weightings["objective"] per period)`: 52.14× on a unit-weighted 168-h week, **invisible (≈1×)** on a full year or a correctly weighted representative-week sample — and returns at 52.14× if a rep-week project is later promoted to multi-period (weights reset to 1.0). Affects the common unit-weighted small-snapshot case, not just this fixture | Wrong number | **New** — not previously tracked; recorded here as `xfail(strict=True)` |
-| `compare_economics.per_asset_lcoh` is Link-only, but `coverage.COVERAGE` lists it as covering Generator/StorageUnit/Link too | Shape / coverage-claim mismatch | Documented; no per-asset Generator/StorageUnit data exists on this surface to assert against |
-| `cost_breakdown`, `statistics`, `economics_by_carrier.by_carrier`, `compare_economics.by_carrier` have no per-asset field at all (aggregate by class and/or carrier only) | Shape mismatch | Documented; spot-checked via carrier-coincidence or class-total-equals-single-asset where the fixture allows it — all such spot checks **agree** |
-| Everything else checked (`asset_economics` vs oracle ×2, `cost_breakdown`/`statistics`/`asset_costs`/`lcoh` vs `asset_economics` or oracle) | — | **Agree** |
+| Asset Detail (`asset_results`/`asset_results_xlsx`) `capex_annual`/`fixed_cost_eur` read raw `capital_cost`, ignoring `overnight_cost` annuitisation — 100% low for the electrolyzer | Wrong number | **FIXED — Task 5.** MEASURED: `test_asset_detail_capex_agrees_with_asset_economics` passes with no `xfail` marker. |
+| `economics_by_carrier` / `compare_economics` (`_safe_capital_cost` in `routers/compare.py`) omitted the `1/n.nyears` scaling PyPSA's own `capital_cost` accessor applies for `overnight_cost`-parameterised assets (`n.nyears` = `Σ snapshot_weightings["objective"] per period / 8760`) — 365× too high for the electrolyzer on this fixture's unit-weighted 24-snapshot periods. General factor was `1/n.nyears` = `8760 / (Σ snapshot_weightings["objective"] per period)`: 52.14× on a unit-weighted 168-h week, invisible (≈1×) on a full year or a correctly weighted representative-week sample — and would have returned at 52.14× if a rep-week project were later promoted to multi-period (weights reset to 1.0). Affected the common unit-weighted small-snapshot case, not just this fixture | Wrong number | **FIXED — Task 9.** `_safe_capital_cost` now delegates to `services.solver_service.periodized_capital_costs` instead of hand-rolling the annuity — no `× 1/n.nyears` patch, the duplicate implementation was removed. MEASURED: both surfaces now report `166249.77136776928` EUR, exact match to `asset_economics` and the oracle (ratio 1.00×, was 365.00×). `xfail(strict=True)` marker REMOVED from `test_economics_by_carrier_h2_capex_agrees_with_asset_economics`; it passes for real. |
+
+### Deferred — with reason
+
+| Finding | Kind | Status |
+|---|---|---|
+| `compare_economics.per_asset_lcoh` is Link-only, but `coverage.COVERAGE["compare_economics"]` lists it as covering Generator/StorageUnit/Link too | Shape / coverage-claim mismatch | **DEFERRED.** MEASURED (code read of `routers/compare.py:1938`, `if n.links is not None and not n.links.empty:` — Generators and StorageUnits never enter the `per_asset_lcoh` list). No per-asset Generator/StorageUnit CAPEX field exists on this surface under any name to assert against — there is nothing to fix without inventing a field the endpoint doesn't have. Reason to leave open: this is a coverage CLAIM inaccuracy (`coverage.COVERAGE` overclaims), not a wrong number reaching a user; correcting it is either (a) narrow `coverage.COVERAGE["compare_economics"]` to `{"Link"}` to match reality, or (b) add genuine Generator/StorageUnit per-asset LCOE/cost fields to `compare_economics` — the second is a feature addition, not a bug fix, and out of this plan's scope (fixing wrong numbers). |
+| `cost_breakdown`, `statistics`, `economics_by_carrier.by_carrier`, `compare_economics.by_carrier` have no per-asset field at all (aggregate by class and/or carrier only) | Shape mismatch | **DEFERRED — by design, not a defect.** MEASURED: spot-checked via carrier-coincidence (`cost_breakdown` vs `solar`) or class-total-equals-single-asset (`cost_breakdown`/`asset_costs` vs `L_ab`, the fixture's only Line) where the fixture allows it — all such spot checks **AGREE**. These four aggregate-only payload shapes are the brief's own explicit example of "a surface that must not be forced into a per-asset shape it doesn't have" (see task-4 brief); reason to leave open: turning them per-asset would be a new feature (an API shape change), not a fix to a wrong number, and every number these surfaces DO report has been checked and agrees. |
+
+**Total deferred residuals: 2** (both shape/coverage-claim mismatches, zero
+wrong numbers).
+
+### Agreed — measured, no fix needed
+
+Explicit record so this list isn't confused with "not yet checked":
+
+| Surface | Checked against | Result |
+|---|---|---|
+| `asset_economics` (`/results/asset_economics`) | independent oracle, `gas` + `electrolyzer` | **AGREE**, exact match — the baseline every other row is measured against |
+| `asset_costs` (`/api/simulation/asset_costs`) | `asset_economics` (`gas`, `solar`, `bess`, `electrolyzer`) + oracle (`L_ab`) | **AGREE**, all 5 fixture assets, exact match — the only surface genuinely per-asset for every class it returns |
+| `lcoh` (`/results/lcoh`) | `asset_economics` (`electrolyzer`) | **AGREE**, exact match |
+| `cost_breakdown` (spot-checked, not per-asset) | `asset_economics` (`solar`), oracle (`L_ab`) | **AGREE** on every value checked |
+| `statistics` (spot-checked, not per-asset) | `asset_economics` (`electrolyzer`, via carrier `H2`) | **AGREE** for both investment periods |
+| `economics_by_carrier` (fixed in Task 9) | `asset_economics` (`electrolyzer`, via carrier `h2`) | **AGREE**, exact match, post-fix |
+| `compare_economics.per_asset_lcoh` (fixed in Task 9) | `asset_economics` (`electrolyzer`) | **AGREE**, exact match, post-fix |
+| `asset_results` / `asset_results_xlsx` (fixed in Task 5) | `asset_economics` (`electrolyzer`, `solar`, `bess`) | **AGREE** |
+
+Nine surfaces went in; nine surfaces came out agreeing on every number they
+report. Two needed a fix to get there (Task 5, Task 9); the rest agreed from
+the first measurement.

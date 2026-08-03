@@ -213,48 +213,19 @@ def test_statistics_h2_capex_matches_asset_economics(golden):
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "MEASURED on the golden fixture, 2026-08-01: economics_by_carrier "
-        "and compare_economics share one computation "
-        "(routers/compare.py:_compute_economics_summary, called from "
-        "routers/results.py:791/798 and routers/compare.py:2652), which "
-        "prices an overnight_cost-parameterised asset via "
-        "_safe_capital_cost() = overnight_cost * annuity(rate, lifetime) "
-        "(routers/compare.py:341-374). That OMITS the scaling PyPSA's own "
-        "capital_cost accessor applies via periodized_cost(..., "
-        "nyears=n.nyears) -- and the trigger is NOT snapshot count, it is "
-        "the snapshot WEIGHTS: n.nyears = (Sum(snapshot_weightings["
-        "'objective'] per period) / 8760) (pypsa/network/index.py:648-654; "
-        "n.nyears itself is the fraction of a year the model represents, "
-        "so the MISSING factor -- what _safe_capital_cost should have "
-        "multiplied by and didn't -- is 1/n.nyears, not n.nyears). On "
-        "THIS fixture's 24 unit-weighted snapshots per period, n.nyears = "
-        "24/8760 and the missing factor 1/n.nyears = 8760/24 = 365x too "
-        "HIGH. Measured: economics_by_carrier's 'h2' carrier reports "
-        "capex_meur.total = 60.681166... M EUR against the correct EUR "
-        "166,249.77 (asset_economics fixed_cost_eur for 'electrolyzer') "
-        "-- a 36,400% overstatement. The factor is NOT fixed at 365x: "
-        "1/n.nyears is 52.14x on a unit-weighted 168-hour representative "
-        "week, and 1x -- INVISIBLE -- on a full 8760-snapshot year AND on "
-        "a correctly weighted representative-week set, whose "
-        "snapshot_weightings are set so the weighted total reconstructs "
-        "the full year (Sum ~= 8760h, n.nyears ~= 1, "
-        "routers/network.py:1467-1469, sample_representative_weeks). The "
-        "bug reappears at 52.14x if a rep-week project is later promoted "
-        "to multi-period, because set_snapshots(MultiIndex) resets "
-        "snapshot_weightings to 1.0 (documented in CLAUDE.md). So the "
-        "common unit-weighted small-snapshot-set case (24h, 48h, 168h) is "
-        "affected, not a representative-week corner case. Assets priced "
-        "via a direct `capital_cost` (solar in this fixture) are "
-        "unaffected: _safe_capital_cost only mis-scales the overnight_cost "
-        "branch. Not previously tracked; found by this task, not by the "
-        "originating brief. strict=True fails this marker once the bug is "
-        "gone so it cannot outlive the defect."
-    ),
-)
 def test_economics_by_carrier_h2_capex_agrees_with_asset_economics(golden):
+    """
+    Was xfail(strict=True) until Task 9: `_safe_capital_cost` in
+    `routers/compare.py` used to hand-roll
+    `overnight_cost * annuity(rate, lifetime)`, omitting the `1/n.nyears`
+    scaling PyPSA's own `capital_cost` accessor applies (365x too high on
+    this fixture's unit-weighted 24-snapshot periods; see
+    docs/superpowers/findings/2026-08-01-economic-surface-disagreements.md
+    Sections 4 and 9). Fixed by making `_safe_capital_cost` delegate to
+    `services.solver_service.periodized_capital_costs` — the same resolution
+    `asset_economics` / `cost_breakdown` / `asset_costs` / Asset Detail all
+    use — instead of carrying a second, independent annuity implementation.
+    """
     ae = R.get_asset_economics()
     electrolyzer = next(r for r in ae["links"] if r["name"] == "electrolyzer")
 
@@ -452,43 +423,54 @@ NO_ADAPTER_REASONS: dict[str, str] = {
     "economics_by_carrier": (
         "Aggregates to carrier only (`{'by_carrier': {carrier: {...}}}`), "
         "no per-asset field — the brief's own example of a surface that "
-        "must not be forced into this shape. ALSO carries a newly-found "
-        "wrong-number bug (~365x CAPEX overstatement on this fixture for "
-        "overnight_cost-parameterised assets; the true factor is "
-        "1/n.nyears (n.nyears = Sum(weights)/8760), not a fixed 365 — see "
-        "the xfail reason on "
-        "`test_economics_by_carrier_h2_capex_agrees_with_asset_economics`, "
-        "which spot-checks this surface directly)."
+        "must not be forced into this shape. Until Task 9 (2026-08-01) it "
+        "ALSO carried a wrong-number bug (~365x CAPEX overstatement on this "
+        "fixture for overnight_cost-parameterised assets, missing factor "
+        "1/n.nyears where n.nyears = Sum(weights)/8760) — fixed by making "
+        "`compare._safe_capital_cost` delegate to "
+        "`services.solver_service.periodized_capital_costs` instead of "
+        "hand-rolling the annuity. "
+        "`test_economics_by_carrier_h2_capex_agrees_with_asset_economics` "
+        "spot-checks this surface directly and now passes for real (the "
+        "xfail marker was removed, not just widened)."
     ),
     "asset_results": (
         "Genuinely per-asset, but runs through the exact "
-        "`services/asset_results/compute.py::capex_annual` that "
+        "`services/asset_results/compute.py::capex_annual` compute path "
         "`test_asset_detail_capex_agrees_with_asset_economics` already "
-        "tracks as a known, xfail'd defect. Including it here would re-trip "
-        "the SAME already-tracked bug as a hard failure inside this loop "
-        "instead of the dedicated xfail — discovering nothing new, only "
-        "duplicating it in a form that can't be marked xfail without hiding "
-        "whatever ELSE this loop might catch on a future run."
+        "covers directly. That test was a known, xfail'd defect (100% low "
+        "for overnight_cost-parameterised assets) until Task 5 fixed it; "
+        "the marker is gone and the test now passes for real. Still "
+        "excluded from this generic loop rather than added to ADAPTERS — "
+        "doing so would duplicate an already-dedicated test without "
+        "discovering anything new, and this loop is meant to catch "
+        "UNTRACKED disagreements, not restate a tracked, fixed one."
     ),
     "asset_results_xlsx": (
         "Shares the identical compute path as asset_results — "
         "`services/asset_results/export.py` imports `build_response` from "
         "the same `services/asset_results/service.py` — verified by reading "
         "the import, not re-probed at runtime. Same reasoning as "
-        "asset_results applies: excluded from this loop, tracked via the "
-        "same dedicated xfail."
+        "asset_results applies: excluded from this loop, covered by the "
+        "same dedicated test."
     ),
     "compare_economics": (
         "Its `by_carrier` field is carrier-aggregated by the exact same "
         "`_compute_economics_summary` function economics_by_carrier calls "
-        "(routers/compare.py:2652 vs routers/results.py:791,798), so it "
-        "carries the identical CAPEX-overstatement bug. Its `per_asset_lcoh` "
-        "field IS genuinely per-asset, but Link-only — narrower than the "
-        "Generator/StorageUnit/Link set `coverage.COVERAGE['compare_economics']` "
-        "lists, so it can't stand in as a general per-class adapter either. "
-        "See the findings doc for the measured per_asset_lcoh numbers "
-        "(checked by calling `_compute_economics_summary` directly, since "
-        "the real endpoint needs a project saved to disk)."
+        "(routers/compare.py:2652 vs routers/results.py:791,798) — until "
+        "Task 9 it carried the identical CAPEX-overstatement bug, now fixed "
+        "alongside economics_by_carrier's (same underlying "
+        "`_safe_capital_cost` delegation fix; MEASURED on the golden "
+        "fixture: per_asset_lcoh[electrolyzer].capex_meur.total * 1e6 == "
+        "166249.77136776928 == asset_economics's fixed_cost_eur, exactly). "
+        "Its `per_asset_lcoh` field IS genuinely per-asset, but Link-only — "
+        "narrower than the Generator/StorageUnit/Link set "
+        "`coverage.COVERAGE['compare_economics']` lists, so it can't stand "
+        "in as a general per-class adapter either; this coverage-claim "
+        "mismatch is the one thing about this surface still deferred, "
+        "documented in the findings doc rather than force-fit into "
+        "ADAPTERS. (Checked by calling `_compute_economics_summary` "
+        "directly, since the real endpoint needs a project saved to disk.)"
     ),
 }
 

@@ -338,40 +338,79 @@ def _to_pv(d: dict) -> CarrierPeriodValue:
     return _CPV(total=d["total"], by_period=d["by_period"])
 
 
-def _safe_capital_cost(row, default_dr: float, default_lt: float) -> float:
+def _periodized_lookup(n) -> dict:
     """
-    LP-effective annuitised €/MW/yr for one asset row, matching
-    ``periodized_capital_costs`` / ``asset_economics`` / ``cost_breakdown``:
-
-      * Prefer ``overnight_cost × annuity(discount_rate, lifetime)`` when
-        overnight_cost > 0 — the GUI's investment parameter and what PyPSA
-        annualises into the LP ``capital_cost``.
-      * Otherwise use ``capital_cost`` when set (>0 and finite).
-      * Per-asset discount_rate / lifetime fall back to the config defaults.
-
-    Preferring overnight over a non-zero ``capital_cost`` column is
-    intentional: networks often keep a stale straight-line figure
-    (overnight ÷ lifetime) alongside overnight_cost. Using the column first
-    under-counted CAPEX vs Economics Fixed / cost_breakdown (e.g. gas
-    60 000 vs annuity ≈ 77 229 €/MW/yr).
-
-    Returns 0.0 when no usable cost is found — caller skips the contribution.
+    Build ``services.solver_service.periodized_capital_costs``'s per-asset
+    dict ONCE for this network, using the same live ``SolverConfig`` every
+    other economics surface reads (``routers.simulation._state["solver_config"]``
+    -- the same object ``asset_economics`` / ``cost_breakdown`` / ``asset_costs``
+    resolve their ``cfg`` from). Callers that walk many asset rows (the
+    ``_walk_*`` closures below) must call this ONCE per network and pass the
+    result to ``_safe_capital_cost`` -- ``periodized_capital_costs`` walks
+    every cost-bearing component class in one pass, so calling it per-row
+    would be O(rows) times more expensive for the exact same answer.
     """
+    from services.solver_service import SolverConfig, periodized_capital_costs
 
-    from services.solver_service import _annuity
-    # `_safe_float` (NaN/Inf/parse-failure → default) is the module-level alias
-    # of `services.serialization.safe_float`; every call below passes an
-    # explicit default, so the shared default (0.0) is never relied upon here.
+    try:
+        from routers.simulation import _state as _sim_state
+        cfg = _sim_state.get("solver_config") or SolverConfig()
+    except Exception:
+        cfg = SolverConfig()
+    return periodized_capital_costs(n, cfg)
 
-    oc = _safe_float(row.get("overnight_cost") if hasattr(row, "get") else None, 0.0)
-    dr = _safe_float(row.get("discount_rate") if hasattr(row, "get") else None, default_dr) or default_dr
-    lt = _safe_float(row.get("lifetime") if hasattr(row, "get") else None, default_lt) or default_lt
-    if oc and oc > 0 and lt > 0:
-        return oc * _annuity(dr, lt)
-    cc = _safe_float(row.get("capital_cost") if hasattr(row, "get") else None, 0.0)
-    if cc and cc > 0:
-        return cc
-    return 0.0
+
+def _safe_capital_cost(row, pcc: dict, comp_attr: str) -> float:
+    """
+    LP-effective annuitised EUR/MW/yr for one asset row.
+
+    Delegates entirely to ``services.solver_service.periodized_capital_costs``
+    -- the SAME resolution ``asset_economics``, ``cost_breakdown``,
+    ``asset_costs`` and (since Task 5) Asset Detail all use. ``pcc`` is that
+    function's per-network output (build it once via ``_periodized_lookup(n)``
+    and reuse it across every row -- see that helper's docstring for why).
+    ``comp_attr`` selects which top-level bucket (``"generators"``,
+    ``"storage_units"``, ``"stores"``, ``"links"``, ``"lines"``,
+    ``"transformers"``) this row belongs to.
+
+    This function used to hand-roll
+    ``overnight_cost * annuity(discount_rate, lifetime)`` for the
+    overnight_cost path, which omitted the ``nyears`` (horizon-fraction)
+    scaling PyPSA's own ``capital_cost`` accessor applies via
+    ``periodized_cost(..., nyears=n.nyears)`` -- 365x too high on the golden
+    fixture's unit-weighted 24-snapshot periods, 52.14x on a unit-weighted
+    168-hour week. See
+    docs/superpowers/findings/2026-08-01-economic-surface-disagreements.md
+    Sections 4 and 9 for the measured defect this replaced. Reimplementing a
+    resolution that already exists elsewhere (``periodized_capital_costs``)
+    is what caused that bug; this function now defers to it instead of
+    carrying a second, independent annuity implementation that can drift out
+    of sync.
+
+    ``periodized_capital_costs`` itself PREFERS ``overnight_cost`` over a
+    non-zero ``capital_cost`` column (see that function's docstring) -- the
+    same preference this function used to hand-implement -- so there is no
+    behavioural difference there; only the missing ``nyears`` factor is
+    fixed.
+
+    Returns 0.0 when the asset has no entry in ``pcc`` (e.g. not a
+    cost-bearing class, or the row's name isn't in the network) -- caller
+    skips the contribution, matching the old function's contract.
+
+    CONTRACT: ``row`` must be a pandas Series obtained via ``df.loc[name]``
+    (its ``.name`` is how this function knows which asset to look up in
+    ``pcc``). A plain dict -- or anything else without a ``.name`` -- has no
+    identity to look up and silently resolves to 0.0 rather than raising.
+    Every call site in this module binds ``row`` this way today, but a
+    future caller passing a dict would hit this silently, not loudly.
+    """
+    name = getattr(row, "name", None)
+    if name is None:
+        return 0.0
+    entry = (pcc.get(comp_attr) or {}).get(name)
+    if not entry:
+        return 0.0
+    return _safe_float(entry.get("capital_cost"), 0.0)
 
 
 def _classify_build_year(value) -> int | None:
@@ -393,6 +432,21 @@ def _classify_build_year(value) -> int | None:
     if not (1900 <= y <= 2200):
         return None
     return y
+
+
+# PyPSA component class name -> the `n.<attr>` DataFrame / `periodized_capital_costs`
+# top-level bucket it corresponds to. Every `_safe_capital_cost` call site in this
+# module already knows the component class it's walking (it's either an explicit
+# `cls_name` parameter or the DataFrame being iterated is unambiguous); this maps
+# that to the key `periodized_capital_costs` uses.
+_CLS_TO_ATTR: dict[str, str] = {
+    "Generator": "generators",
+    "StorageUnit": "storage_units",
+    "Store": "stores",
+    "Link": "links",
+    "Line": "lines",
+    "Transformer": "transformers",
+}
 
 
 def _build_snapshot_weights(n, column: str = "objective") -> pd.Series:
@@ -461,12 +515,13 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
         commit?" but can be misleading when the existing fleet dominates.
     """
     import math as _math
-    # Pull cfg defaults so overnight_cost fallback works even when the asset
-    # row leaves discount_rate / lifetime blank. Prefer the project-local
-    # solver_config.json over `_state["solver_config"]` (which belongs to the
-    # currently-active singleton, not necessarily the project we're
-    # summarising). Falls back to engine defaults if neither is available.
-    default_dr, default_lt = _resolve_project_cost_defaults(n)
+    # Per-asset annuitised capital_cost, resolved once via the SAME
+    # `periodized_capital_costs` path `asset_economics` / `cost_breakdown` /
+    # `asset_costs` use — see `_periodized_lookup`'s docstring. This reads
+    # `_state["solver_config"]` (the currently-active singleton's config, not
+    # necessarily the project this network came from — a pre-existing
+    # limitation, not addressed here).
+    pcc = _periodized_lookup(n)
 
     # ipw.years per period — multiplier for annuitised €/yr → period total.
     # Empty on a flat network; `years_for_period` then answers 1.0 for every
@@ -554,7 +609,7 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
                 continue
             # Per-period capacity = vintage p_nom_opt under that build_year.
             # CAPEX = vintage p_nom_opt × annuitised capital_cost from parent.
-            cc_per_mw = _safe_capital_cost(row, default_dr, default_lt)
+            cc_per_mw = _safe_capital_cost(row, pcc, _CLS_TO_ATTR[cls_name])
             for entry in periods_list:
                 if not isinstance(entry, dict):
                     continue
@@ -642,7 +697,7 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
                 # fleet (fixes the "heat-dump 500/500/Δ=0 reads as built" UX bug).
                 if target_new_cap is not None:
                     _bucket_add(target_new_cap, carrier, delta, by_int)
-                cc = _safe_capital_cost(row, default_dr, default_lt)
+                cc = _safe_capital_cost(row, pcc, _CLS_TO_ATTR[cls_name])
                 if cc > 0:
                     _bucket_add(target_capex, carrier, cc * delta / 1e6, by_int)
             if also_mwh is not None:
@@ -701,7 +756,7 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
     # The single-period case collapses to one total entry with no by_period
     # split.
     total_capex_by_carrier: dict = _compute_total_annuitised_capex(
-        n, periods, is_multi, years_map, default_dr, default_lt,
+        n, periods, is_multi, years_map, pcc,
     )
 
     return CapacityComparison(
@@ -718,42 +773,23 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
     )
 
 
-def _resolve_project_cost_defaults(n) -> tuple[float, float]:
-    """
-    Return ``(discount_rate, default_lifetime)`` for fall-back annuity
-    computation. Prefers the active solver config (best guess when the
-    compare view is summarising the active project); falls back to engine
-    defaults otherwise. We avoid reading the project's own solver_config.json
-    here because the compare endpoint already discards the path mapping after
-    netcdf import — keeping this self-contained means no extra arg threading
-    through the compute helpers, and the defaults are LP-realistic for the
-    overwhelming majority of projects (PyPSA's own default_lifetime is 25).
-    """
-    try:
-        from routers.simulation import _state as _sim_state
-        cfg = _sim_state.get("solver_config")
-        dr = float(getattr(cfg, "discount_rate", 0.07) or 0.07)
-        lt = float(getattr(cfg, "default_lifetime", 25.0) or 25.0)
-        return dr, lt
-    except Exception:
-        return 0.07, 25.0
-
-
 def _compute_total_annuitised_capex(
-    n, periods, is_multi, years_map, default_dr, default_lt,
+    n, periods, is_multi, years_map, pcc,
 ) -> dict:
     """
     Walk every cost-bearing component, accumulate ``p_nom_opt × cc_per_MW``
     per carrier as M€/yr, then expand into per-period values via
     ``ipw.years[P]``. Mirrors the per-period aggregation in
     ``cost_breakdown`` so the two views show the same gas / solar / battery
-    CAPEX numbers.
+    CAPEX numbers. ``pcc`` is ``_periodized_lookup(n)``'s output, built once
+    by the caller (``_compute_capacity_summary``) and passed through here
+    rather than recomputed.
     """
     import math as _math
 
     out: dict = {}
 
-    def _walk(df, nom_col: str) -> None:
+    def _walk(df, nom_col: str, comp_attr: str) -> None:
         if df is None or df.empty:
             return
         opt_col = f"{nom_col}_opt"
@@ -768,7 +804,7 @@ def _compute_total_annuitised_capex(
                 continue
             if not _math.isfinite(opt) or opt <= 1e-9:
                 continue
-            cc_per_mw = _safe_capital_cost(row, default_dr, default_lt)
+            cc_per_mw = _safe_capital_cost(row, pcc, comp_attr)
             if cc_per_mw <= 0:
                 continue
             per_year_meur = (opt * cc_per_mw) / 1e6  # M€/yr annuitised
@@ -795,9 +831,9 @@ def _compute_total_annuitised_capex(
     # so including them here would produce a "line CAPEX" carrier value that
     # the user can't reconcile with the live Results panel. Branch expansion
     # is visible in the Line loading tab; that's where it belongs.
-    _walk(n.generators,    "p_nom")
-    _walk(n.storage_units, "p_nom")
-    _walk(n.stores,        "e_nom")
+    _walk(n.generators,    "p_nom", "generators")
+    _walk(n.storage_units, "p_nom", "storage_units")
+    _walk(n.stores,        "e_nom", "stores")
     return out
 
 
@@ -1532,13 +1568,10 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     except Exception:
         bus_prices = getattr(n.buses_t, "marginal_price", None) if hasattr(n, "buses_t") else None
 
-    try:
-        from routers.simulation import _state as _sim_state
-        cfg = _sim_state.get("solver_config")
-        default_dr = float(getattr(cfg, "discount_rate", 0.07) or 0.07)
-        default_lt = float(getattr(cfg, "default_lifetime", 25.0) or 25.0)
-    except Exception:
-        default_dr, default_lt = 0.07, 25.0
+    # Per-asset annuitised capital_cost, resolved once via the SAME
+    # `periodized_capital_costs` path `asset_economics` / `cost_breakdown` /
+    # `asset_costs` use — see `_periodized_lookup`'s docstring.
+    pcc = _periodized_lookup(n)
 
     # Investment-period weightings — years × period. Default 1.0 each. Used
     # to scale annuitised CAPEX commitment from a single-year cost to the
@@ -1639,7 +1672,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 continue
             row = df.loc[parent_name]
             carrier = str(row.get("carrier", "unknown") or "unknown").lower()
-            cc = _safe_capital_cost(row, default_dr, default_lt)
+            cc = _safe_capital_cost(row, pcc, _CLS_TO_ATTR[cls_name])
             if cc <= 0:
                 continue
             lt = row.get("lifetime") if "lifetime" in df.columns else None
@@ -1680,7 +1713,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 continue
             row = df.loc[asset_name]
             carrier = str(row.get("carrier", "unknown") or "unknown").lower()
-            cc = _safe_capital_cost(row, default_dr, default_lt)
+            cc = _safe_capital_cost(row, pcc, _CLS_TO_ATTR[cls_name])
             if cc <= 0:
                 continue
             try:
@@ -1995,7 +2028,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                         pass
 
                 # CAPEX: prefer vintage breakdown when present, else plain.
-                cc = _safe_capital_cost(row, default_dr, default_lt)
+                cc = _safe_capital_cost(row, pcc, "links")
                 lt_val = row.get("lifetime") if "lifetime" in n.links.columns else None
                 capex_eur_total = 0.0
                 capex_eur_pp: dict[str, float] = {}
