@@ -478,11 +478,19 @@ def capex_unresolved_reason(n, component_class: str, name: str) -> str | None:
 
     lifetime = _col("lifetime")
     if lifetime is None or not math.isfinite(lifetime):
-        return (
-            "CAPEX cannot be annualised: this asset is priced via "
-            "overnight_cost, but lifetime is unset (infinite), so there is no "
-            "period to spread the investment over."
-        )
+        cfg = sim_router._state.get("solver_config")
+        cfg_lifetime = getattr(cfg, "default_lifetime", None)
+        if (
+            cfg_lifetime is None
+            or (isinstance(cfg_lifetime, float) and math.isnan(cfg_lifetime))
+            or not math.isfinite(cfg_lifetime)
+        ):
+            return (
+                "CAPEX cannot be annualised: this asset is priced via "
+                "overnight_cost, but lifetime is unset (infinite) on the "
+                "asset and no solver-config default applies, so there is no "
+                "period to spread the investment over."
+            )
 
     return None
 

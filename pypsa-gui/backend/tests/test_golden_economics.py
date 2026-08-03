@@ -19,12 +19,13 @@ assumptions turned out to be wrong once run:
     `Query(...)` sentinel object rather than its resolved default, and the
     endpoint's own `mode not in VIEW_MODES` / similar guards then 422. Every
     direct call below passes all of them explicitly.
-  * The golden fixture's LP declines to build any `gas` capacity at all
-    (`solar` alone clears the electricity load), so `gas`'s `p_nom_opt` is
-    0. That makes `gas` a WEAK check for anything multiplied by capacity —
-    a broken annuity formula and a correct one both evaluate to zero once
-    multiplied by zero. Tests that need to exercise the annuity arithmetic
-    for real use the Link `electrolyzer` instead, which the LP DOES build.
+  * The golden fixture's LP builds a real, non-zero `gas` capacity
+    (`p_nom_opt` ~118.57 MW — `solar` is capped at p_nom=60, non-extendable,
+    and can't clear the ~150 MW electricity load on its own), so `gas`'s
+    CAPEX check exercises the annuity arithmetic for real, not just a
+    zero-times-anything identity. `electrolyzer` (a Link) remains the other
+    real check — kept for class coverage (Generator vs Link), not because
+    `gas` is weak.
 """
 from __future__ import annotations
 
@@ -58,12 +59,12 @@ def _gas_expected_capex(n) -> float:
     """
     Independent expectation for the `gas` generator's horizon CAPEX.
 
-    WEAK BY CONSTRUCTION: the golden fixture's LP builds zero `gas` capacity
-    (see module docstring), so this only confirms asset_economics reports a
-    clean 0.0 — not NaN, not an exception — for an extendable asset sized to
-    nothing. It does NOT exercise the CRF/annuity magnitude, because
-    anything times zero is zero regardless of whether the annuity itself is
-    right. See `_electrolyzer_expected_capex` for the check that does.
+    The golden fixture's LP builds a real, non-zero `gas` capacity
+    (`p_nom_opt` ~118.57 MW — see module docstring), so this exercises the
+    CRF/annuity magnitude for real: a broken annuity formula and a correct
+    one produce different numbers here, unlike a check against an asset
+    sized to zero. See `_electrolyzer_expected_capex` for the Link-class
+    equivalent.
     """
     rate = oracle.annualised_capital_cost(
         overnight_cost=float(n.generators.at["gas", "overnight_cost"]),
@@ -135,13 +136,15 @@ def test_a_genuinely_zero_cost_asset_reports_zero_not_unresolvable(golden):
 
 def test_cost_breakdown_agrees_with_asset_economics_on_solar(golden):
     """
-    `solar`, not `gas`: `gas`'s LP-optimal capacity is 0 (see module
-    docstring), so a gas-vs-cost_breakdown check would only ever compare
-    0.0 to 0.0 — passing against a cost_breakdown that reported zero for
-    EVERYTHING, not just gas. `solar` carries a real, non-zero capital_cost
-    (EUR 82,500,000 horizon total) and, like `gas`, is the only Generator on
-    its carrier (`carrier="solar"`, fixture.py:72-78) — so the
-    carrier-coincidence `_find_component_capex` relies on still holds.
+    `solar`, not `gas`: `solar` is priced directly via `capital_cost`
+    (non-extendable, fixed at p_nom=60), the other pricing path this fixture
+    carries alongside `gas`/`electrolyzer`'s overnight_cost path — those are
+    already checked for real by `test_asset_economics_gas_capex_matches_the_
+    oracle` and `test_asset_economics_electrolyzer_capex_matches_the_oracle`.
+    `solar` carries a real, non-zero capital_cost (EUR 82,500,000 horizon
+    total) and is the only Generator on its carrier (`carrier="solar"`,
+    fixture.py) — so the carrier-coincidence `_find_component_capex` relies
+    on still holds.
     """
     ae = R.get_asset_economics()
     solar = next(r for r in ae["generators"] if r["name"] == "solar")
@@ -233,6 +236,70 @@ def test_economics_by_carrier_h2_capex_agrees_with_asset_economics(golden):
     h2_capex_eur = ebc["by_carrier"]["h2"]["capex_meur"]["total"] * 1e6
 
     assert h2_capex_eur == pytest.approx(electrolyzer["fixed_cost_eur"], rel=1e-6)
+
+
+def test_compare_capacity_agrees_with_asset_economics(golden):
+    """
+    IMPORTANT-2 (final review, 2026-08-03): `capex_meur_by_carrier` and
+    `new_capex_meur_by_carrier` (routers/compare.py::get_results_summary's
+    `capacity` field) feed the Compare-Scenarios "Capacity" tab and were
+    changed 365x by Task 9 (the same `_safe_capital_cost` delegation fix
+    `test_economics_by_carrier_h2_capex_agrees_with_asset_economics` checks
+    above) — yet had no golden coverage at all until this test; see
+    `coverage.NO_ADAPTER_REASONS["compare_capacity"]` for why this is a spot
+    check rather than a generic ADAPTERS entry (carrier-aggregated only, no
+    per-asset field).
+
+    Calls `_compute_capacity_summary` directly rather than the real
+    `/{name}/results-summary` endpoint — same reason `compare_economics`'s
+    spot check does: the endpoint needs a project saved to disk, and this
+    function is where the numbers are actually computed.
+
+    Two different fields, two different assets, because they are NOT the
+    same quantity:
+      * `capex_meur_by_carrier` is a HORIZON total (existing + new,
+        scaled by investment-period years) — checked via `solar`
+        (non-extendable, p_nom_opt == p_nom, so total IS the whole fleet,
+        the same direct-capital_cost pricing path
+        `test_cost_breakdown_agrees_with_asset_economics_on_solar` checks).
+      * `new_capex_meur_by_carrier` is an ANNUAL rate (NOT scaled by years)
+        for the build-year-attributed delta only — checked via `gas`
+        (extendable, LP expands it from p_nom=100 to p_nom_opt~118.57, a
+        real positive delta that exercises the overnight_cost -> CRF
+        pipeline; `electrolyzer` doesn't work for this check because the
+        LP SHRINKS it below its initial p_nom here, and `_walk_plain` clamps
+        negative deltas to zero, so it never appears in this field at all).
+    """
+    from routers.compare import _compute_capacity_summary
+
+    n = golden
+    summary = _compute_capacity_summary(
+        n, periods=list(gf.GOLDEN_PERIODS), is_multi=True, has_solve=True,
+    )
+
+    expected_solar_total_eur = oracle.horizon_capex(
+        rate_per_mw=float(n.generators.at["solar", "capital_cost"]),
+        p_nom_opt=float(n.generators.at["solar", "p_nom_opt"]),
+        years=gf.GOLDEN_YEARS,
+    )
+    solar_capex_meur = summary.capex_meur_by_carrier["solar"].total
+    assert solar_capex_meur != 0.0
+    assert solar_capex_meur * 1e6 == pytest.approx(expected_solar_total_eur, rel=1e-6)
+
+    annual_rate = oracle.annualised_capital_cost(
+        overnight_cost=float(n.generators.at["gas", "overnight_cost"]),
+        rate=gf.GOLDEN_DISCOUNT_RATE,
+        lifetime=float(n.generators.at["gas", "lifetime"]),
+        snapshots_per_period=gf.SNAPSHOTS_PER_PERIOD,
+    )
+    delta = (
+        float(n.generators.at["gas", "p_nom_opt"])
+        - float(n.generators.at["gas", "p_nom"])
+    )
+    assert delta > 0.0  # guards against a silently-zero comparison
+    expected_new_gas_eur = annual_rate * delta
+    new_gas_meur = summary.new_capex_meur_by_carrier["gas"].total
+    assert new_gas_meur * 1e6 == pytest.approx(expected_new_gas_eur, rel=1e-6)
 
 
 def _find_component_capex(cost_breakdown: dict, component_class: str, name: str) -> float:
@@ -336,10 +403,10 @@ def _from_lcoh(_n) -> dict[tuple[str, str], float]:
     """
     Per-Link horizon CAPEX from /results/lcoh.
 
-    `coverage.COVERAGE["lcoh"]` is `{"Link"}`, but the endpoint only ever
-    walks Links whose carrier matches an electrolyser-like token
-    (routers/results.py:939-949) — narrower than "every Link", though the
-    golden fixture's single Link (carrier "H2") happens to qualify.
+    `coverage.COVERAGE["lcoh"]` is `{"Link"}`, but the endpoint (routers/
+    results.py::get_lcoh) only ever walks Links whose carrier matches an
+    electrolyser-like token — narrower than "every Link", though the golden
+    fixture's single Link (carrier "H2") happens to qualify.
     `capex_eur_per_year` is PyPSA's annual rate; multiply by the horizon
     years to land on asset_economics's basis.
     """
@@ -456,21 +523,42 @@ NO_ADAPTER_REASONS: dict[str, str] = {
     ),
     "compare_economics": (
         "Its `by_carrier` field is carrier-aggregated by the exact same "
-        "`_compute_economics_summary` function economics_by_carrier calls "
-        "(routers/compare.py:2652 vs routers/results.py:791,798) — until "
-        "Task 9 it carried the identical CAPEX-overstatement bug, now fixed "
-        "alongside economics_by_carrier's (same underlying "
-        "`_safe_capital_cost` delegation fix; MEASURED on the golden "
-        "fixture: per_asset_lcoh[electrolyzer].capex_meur.total * 1e6 == "
-        "166249.77136776928 == asset_economics's fixed_cost_eur, exactly). "
-        "Its `per_asset_lcoh` field IS genuinely per-asset, but Link-only — "
-        "narrower than the Generator/StorageUnit/Link set "
+        "`_compute_economics_summary` function (routers/compare.py) that "
+        "economics_by_carrier calls (routers/results.py::"
+        "get_economics_by_carrier) — until Task 9 it carried the identical "
+        "CAPEX-overstatement bug, now fixed alongside economics_by_carrier's "
+        "(same underlying `_safe_capital_cost` delegation fix; MEASURED on "
+        "the golden fixture: per_asset_lcoh[electrolyzer].capex_meur.total "
+        "* 1e6 == 166249.77136776928 == asset_economics's fixed_cost_eur, "
+        "exactly). Its `per_asset_lcoh` field IS genuinely per-asset, but "
+        "Link-only — narrower than the Generator/StorageUnit/Link set "
         "`coverage.COVERAGE['compare_economics']` lists, so it can't stand "
         "in as a general per-class adapter either; this coverage-claim "
         "mismatch is the one thing about this surface still deferred, "
         "documented in the findings doc rather than force-fit into "
         "ADAPTERS. (Checked by calling `_compute_economics_summary` "
         "directly, since the real endpoint needs a project saved to disk.)"
+    ),
+    "compare_capacity": (
+        "IMPORTANT-2 (final review, 2026-08-03): `capex_meur_by_carrier` and "
+        "`new_capex_meur_by_carrier` (routers/compare.py::"
+        "get_results_summary -> _compute_capacity_summary -> "
+        "_compute_total_annuitised_capex) are carrier-aggregated only — no "
+        "per-asset field, same structural limitation as cost_breakdown / "
+        "economics_by_carrier / compare_economics above. These are the "
+        "fields Task 9 changed by 365x for overnight_cost-priced assets "
+        "(the same `_safe_capital_cost` delegation fix), yet no golden test "
+        "asserted them before this entry existed — `coverage.py` had no "
+        "`compare_capacity` surface at all, and the only prior check "
+        "(tests/qa_results_summary_compare.py) is not pytest-collected "
+        "(see pytest.ini). Spot-checked instead by "
+        "`test_compare_capacity_agrees_with_asset_economics`, which calls "
+        "`_compute_capacity_summary` directly (same reason as "
+        "compare_economics: the real endpoint needs a project saved to "
+        "disk) and checks both CAPEX fields against the oracle for `solar` "
+        "(non-extendable, exercises `capex_meur_by_carrier`'s total-only "
+        "basis) and `electrolyzer` (extendable, exercises "
+        "`new_capex_meur_by_carrier`'s built-increment basis)."
     ),
 }
 
@@ -669,3 +757,60 @@ def test_an_unresolved_capex_reaches_the_asset_results_endpoint_as_a_reason(gold
         # Blocked means NOT computed — no confident number sits next to the
         # reason for the frontend to render by mistake.
         assert metric_id not in detail.get("scalars", {})
+
+
+def test_a_blank_lifetime_falls_back_to_the_config_default_like_discount_rate_does(golden):
+    """
+    IMPORTANT-1 (final review, 2026-08-03): `capex_unresolved_reason` mirrored
+    `discount_rate`'s solver-config fallback but never had one for `lifetime`
+    — it blocked ANY overnight_cost-priced asset whose `lifetime` was unset
+    (PyPSA's own default of +inf), even though the compute path it gates
+    (`capex_annual` -> `periodized_capital_costs` ->
+    `fill_periodized_cost_defaults`, services/solver_service.py) already
+    fills `lifetime` from `cfg.default_lifetime` and returns a real number.
+    Every component schema defaults `lifetime` to +inf (`models/schemas.py`),
+    so this was reachable from the GUI on any overnight_cost-priced asset
+    with a blank Lifetime field — every surface but Asset Detail showed a
+    confident euro figure, and Asset Detail's reason was also factually
+    wrong ("no period to spread the investment over" when config supplies
+    one). `diesel_backup` (fixture.py) carries exactly this shape: real
+    overnight_cost, `lifetime` left at PyPSA's default, on its own bus/load
+    so it can't perturb any other anchor in this file.
+    """
+    from services.asset_results import compute as C
+
+    assert golden.generators.at["diesel_backup", "lifetime"] == float("inf")
+
+    ctx = C.build_ctx(golden, "Generator", "diesel_backup", source="lopf",
+                       sns=golden.snapshots)
+    assert C.gen_capex_unresolved_reason(ctx) is None
+
+
+def test_a_blank_lifetime_reaches_the_asset_results_endpoint_as_ok(golden):
+    """
+    Endpoint-level companion to the test above — same relationship
+    `test_an_unresolved_capex_reaches_the_asset_results_endpoint_as_a_reason``
+    has to `test_an_unresolvable_capex_says_why_instead_of_reporting_zero`:
+    proves the fix reaches GET /asset_results/{class}/{name}
+    (routers.asset_results.get_asset_results ->
+    services.asset_results.service.build_response), not just the
+    compute-layer function in isolation. `capex_annual` lives in
+    category="capacity"; `fixed_cost_eur` in category="economics" — the
+    endpoint resolves one category per call, so both need their own request.
+    """
+    import routers.asset_results as AR
+
+    for category, metric_id in (("capacity", "capex_annual"),
+                                 ("economics", "fixed_cost_eur")):
+        detail = AR.get_asset_results(
+            component_class="Generator", name="diesel_backup", category=category,
+            source="lopf", from_=None, to=None, period=None,
+            mode="chronological", metrics="",
+        )
+        row = next(m for m in detail["metrics"] if m["id"] == metric_id)
+
+        assert row["status"] == "ok"
+        # ok means it actually reached `scalars` with a real, non-zero
+        # number — not a silent 0.0 masquerading as "computed".
+        assert metric_id in detail.get("scalars", {})
+        assert detail["scalars"][metric_id] == pytest.approx(1880.778459631027, rel=1e-6)

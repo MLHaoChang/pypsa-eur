@@ -83,6 +83,45 @@
           "avg_price_eur_per_mwh": 50.0
         }
       ]
+    },
+    {
+      "name": "diesel_backup",
+      "bus": "iso_bus",
+      "carrier": "diesel",
+      "p_nom_opt_mw": 10.0,
+      "energy_mwh": 3600.0,
+      "capacity_factor": 1.0,
+      "revenue_eur": 360000.0,
+      "vom_cost_eur": 360000.0,
+      "fixed_cost_eur": 28211.676894465407,
+      "fom_cost_eur": 0.0,
+      "net_profit_eur": -28211.676894465403,
+      "lcoe_eur_per_mwh": 107.83657691512929,
+      "avg_price_eur_per_mwh": 100.0,
+      "by_period": [
+        {
+          "period": 2030,
+          "energy_mwh": 1200.0,
+          "revenue_eur": 120000.0,
+          "fixed_cost_eur": 9403.892298155135,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 120000.0,
+          "net_profit_eur": -9403.89229815513,
+          "lcoe_eur_per_mwh": 107.83657691512927,
+          "avg_price_eur_per_mwh": 100.0
+        },
+        {
+          "period": 2035,
+          "energy_mwh": 2400.0,
+          "revenue_eur": 240000.0,
+          "fixed_cost_eur": 18807.78459631027,
+          "fom_cost_eur": 0.0,
+          "vom_cost_eur": 240000.0,
+          "net_profit_eur": -18807.78459631026,
+          "lcoe_eur_per_mwh": 107.83657691512927,
+          "avg_price_eur_per_mwh": 100.0
+        }
+      ]
     }
   ],
   "storage_units": [

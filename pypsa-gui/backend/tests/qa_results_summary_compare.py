@@ -17,8 +17,15 @@ Covers capacity + dispatch payloads:
       of generators_t.p and storage_units_t.p_dispatch (charging
       excluded — only the dispatch half feeds the energy mix).
   [5] OPEX (M€) = Σ marginal_cost × p × weights, scaled by 1e6.
-  [6] overnight_cost annuitisation is preferred when overnight_cost > 0;
-      otherwise capital_cost is used (matches compare._safe_capital_cost).
+  [6] `compare._safe_capital_cost` is a pure lookup into
+      `services.solver_service.periodized_capital_costs`'s per-asset output
+      — it no longer decides between overnight_cost and capital_cost
+      itself; that preference (overnight_cost wins when set) is resolved
+      inside `periodized_capital_costs`, the same resolution
+      `asset_economics` / `cost_breakdown` / `asset_costs` / Asset Detail
+      all use (fixed in Task 9 — see `test_golden_economics.py::
+      test_economics_by_carrier_h2_capex_agrees_with_asset_economics` for
+      the regression this replaced).
 """
 from __future__ import annotations
 

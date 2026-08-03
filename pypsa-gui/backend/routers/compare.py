@@ -349,6 +349,18 @@ def _periodized_lookup(n) -> dict:
     result to ``_safe_capital_cost`` -- ``periodized_capital_costs`` walks
     every cost-bearing component class in one pass, so calling it per-row
     would be O(rows) times more expensive for the exact same answer.
+
+    Returns ``{}`` if ``periodized_capital_costs`` itself raises. Every
+    ``_safe_capital_cost`` lookup against an empty dict already resolves to
+    0.0 (see that function's docstring), so this degrades to "no CAPEX
+    contribution from any asset" rather than a 500 -- matching
+    ``get_economics_by_carrier`` (routers/results.py), which wraps its
+    whole ``_compute_economics_summary`` call in a try/except for the same
+    reason. Before this fix, a ``periodized_capital_costs`` raise propagated
+    uncaught through ``_compute_capacity_summary`` / ``_compute_economics_
+    summary`` into ``get_results_summary`` (routers/compare.py), which has
+    no such guard -- turning what ``get_economics_by_carrier`` treats as
+    graceful degradation into a plain 500 for the Compare-Scenarios view.
     """
     from services.solver_service import SolverConfig, periodized_capital_costs
 
@@ -357,7 +369,10 @@ def _periodized_lookup(n) -> dict:
         cfg = _sim_state.get("solver_config") or SolverConfig()
     except Exception:
         cfg = SolverConfig()
-    return periodized_capital_costs(n, cfg)
+    try:
+        return periodized_capital_costs(n, cfg)
+    except Exception:
+        return {}
 
 
 def _safe_capital_cost(row, pcc: dict, comp_attr: str) -> float:

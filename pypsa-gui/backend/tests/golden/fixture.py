@@ -48,6 +48,7 @@ def build_golden_network() -> pypsa.Network:
     n.add("Carrier", "H2")
     n.add("Carrier", "gas", co2_emissions=0.2)
     n.add("Carrier", "solar")
+    n.add("Carrier", "diesel")
 
     # --- the shape that broke: cost via overnight_cost, capital_cost unset ---
     # discount_rate is deliberately left unset here (stays NaN). PyPSA 1.1.2's
@@ -108,6 +109,37 @@ def build_golden_network() -> pypsa.Network:
         bus="elec_b", p_nom=50.0, p_nom_extendable=False,
         max_hours=4.0, capital_cost=0.0, marginal_cost=0.0,
     )
+    # --- the shape IMPORTANT-1 found: overnight_cost-priced, but `lifetime`
+    # left at PyPSA's own default of +inf instead of a real number (this is
+    # what a GUI-created asset looks like whenever the user leaves the
+    # Lifetime field blank). `capex_unresolved_reason`
+    # (services/asset_results/compute.py) used to block this unconditionally
+    # — "no period to spread the investment over" — without ever consulting
+    # `cfg.default_lifetime`, even though the compute path it gates
+    # (`capex_annual` -> `periodized_capital_costs` ->
+    # `fill_periodized_cost_defaults`) already falls back to that same
+    # config value and returns a real number. Every surface except Asset
+    # Detail showed a confident euro figure; Asset Detail alone reported
+    # "blocked" with a reason that was also factually wrong (there IS a
+    # period — 25 years from config). On its own bus/load, matched exactly,
+    # so it cannot change `gas`/`solar`/`electrolyzer`'s dispatch or any
+    # existing anchor value; non-extendable so it cannot perturb the LP's
+    # sizing decisions either — see fixture module docstring on why the
+    # composition stays MODERATE.
+    n.add("Bus", "iso_bus")
+    n.add(
+        "Generator", "diesel_backup",
+        bus="iso_bus", carrier="diesel", p_nom=10.0, p_nom_extendable=False,
+        marginal_cost=100.0,
+        overnight_cost=800_000.0,
+        # discount_rate and lifetime deliberately NOT passed: both stay at
+        # PyPSA's own defaults (NaN, +inf) — the exact "unset" shape this
+        # asset exists to carry. discount_rate resolves via the SAME
+        # cfg.discount_rate fallback `gas`/`electrolyzer` already exercise;
+        # lifetime is the new fallback this fixture addition covers.
+        build_year=GOLDEN_PERIODS[0],
+    )
+    n.add("Load", "iso_load", bus="iso_bus", p_set=10.0)
 
     # Raised from 120 alongside solar's p_nom cut — together they force `gas`
     # to cover ~118.6 MW of residual demand (comfortably above its own
