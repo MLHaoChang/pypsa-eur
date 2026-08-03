@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { keyFieldPlaceholder, probeMessage } from './localSettings'
+import { keyFieldPlaceholder, probeMessage, type ProbeStatus } from './localSettings'
 
 describe('keyFieldPlaceholder', () => {
   it('prompts for a key when none is stored', () => {
@@ -24,6 +24,19 @@ describe('keyFieldPlaceholder', () => {
 describe('probeMessage', () => {
   it('reports a verified key as verified', () => {
     expect(probeMessage('valid').tone).toBe('ok')
+    expect(probeMessage('valid').text).toMatch(/accepted/i)
+  })
+
+  it('gives every status its own message', () => {
+    // The whole point of five statuses is that a user can tell them apart.
+    // Asserting pairwise would need 10 cases; asserting distinctness needs one,
+    // and it cannot rot as statuses are added.
+    const statuses: ProbeStatus[] = [
+      'valid', 'rejected', 'unreachable', 'sdk_not_installed', 'cleared',
+    ]
+    const texts = statuses.map(s => probeMessage(s).text)
+
+    expect(new Set(texts).size).toBe(statuses.length)
   })
 
   it('distinguishes rejected from unreachable', () => {
