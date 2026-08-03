@@ -188,7 +188,16 @@ class SolveQueue:
         return pub
 
     def clear_finished(self) -> int:
-        """Drop terminal jobs from the listing. Returns the count removed."""
+        """
+        Drop terminal jobs from the listing. Returns the count removed.
+
+        UNCONDITIONALLY GLOBAL, and there is no per-caller variant on purpose.
+        One queue serves the whole process, so this empties EVERY org's finished
+        jobs; any route reaching it must therefore be gated on an instance-wide
+        role, not an org-scoped one (`routers/solve_queue.py:clear_finished`
+        gates on `User.is_super_admin`). A `predicate=` parameter here would
+        read like a second, weaker authorization path that no caller uses.
+        """
         with self._lock:
             removed = [jid for jid in self._order
                        if self._jobs.get(jid) and self._jobs[jid].status in _TERMINAL]
