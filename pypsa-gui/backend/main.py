@@ -24,6 +24,20 @@ try:
 except ImportError:
     pass
 
+# Publish a key stored by the desktop Settings pane, but only when the
+# environment does not already carry one — same precedence as the
+# `override=False` above, and for the same reason. The packaged app has no
+# other channel: `.env` is excluded from the bundle and a `.app` launched
+# from Finder sources no shell profile.
+#
+# Module level, not a startup event, so it lands before ANY module reads the
+# variable. `app_paths` reads PYPSAGUI_APP_DATA_DIR per call and the desktop
+# launcher applies its environment before `import main`, so the path is
+# already correct here.
+import local_settings as local_settings_store  # noqa: E402
+
+local_settings_store.apply_to_environ()
+
 import pypsa
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
