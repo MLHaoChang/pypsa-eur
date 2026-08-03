@@ -73,6 +73,59 @@ def _parked_dispatcher(monkeypatch):
     monkeypatch.setattr(solve_queue, "_q", _NullQueue())
 
 
+def _drop_user(session_local, user_id) -> None:
+    """
+    Remove a per-test user and everything that FK-references it.
+
+    `projects.created_by` and `project_memberships.assigned_by` carry no
+    ON DELETE, and `_reset_tenant_tables` truncates the project tables only
+    AFTER this fixture unwinds — so deleting the user first fails on a foreign
+    key, the user survives, and every later test using the fixture dies on the
+    unique email instead. Sessions and org memberships DO cascade.
+    """
+    from sqlalchemy import delete, or_
+
+    from db.models import Project, ProjectMembership
+
+    with session_local() as db:
+        db.execute(
+            delete(ProjectMembership).where(
+                or_(
+                    ProjectMembership.user_id == user_id,
+                    ProjectMembership.assigned_by == user_id,
+                )
+            )
+        )
+        db.execute(delete(Project).where(Project.created_by == user_id))
+        db.commit()
+        row = db.get(User, user_id)
+        if row is not None:
+            db.delete(row)
+            db.commit()
+
+
+def _seed_user(session_local, org_id, *, email: str, role: str, super_admin: bool):
+    """Create an active user in `org_id` and return their id."""
+    with session_local() as db:
+        user = User(
+            id=uuid.uuid4(),
+            email=email,
+            password_hash=None,
+            status="active",
+            is_super_admin=super_admin,
+            created_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            OrgMembership(
+                id=uuid.uuid4(), user_id=user.id, org_id=org_id, role=role
+            )
+        )
+        db.commit()
+        return user.id
+
+
 @pytest.fixture
 def super_admin_client(_auth_db, seeded_identity):
     """
@@ -84,39 +137,44 @@ def super_admin_client(_auth_db, seeded_identity):
     super-admin would follow every later test in the session.
     """
     _engine, session_local = _auth_db
-    email = "queue-super-admin@example.com"
-    with session_local() as db:
-        user = User(
-            id=uuid.uuid4(),
-            email=email,
-            password_hash=None,
-            status="active",
-            is_super_admin=True,
-            created_at=datetime.now(tz=timezone.utc),
-        )
-        db.add(user)
-        db.flush()
-        db.add(
-            OrgMembership(
-                id=uuid.uuid4(),
-                user_id=user.id,
-                org_id=seeded_identity["org_id"],
-                role="admin",
-            )
-        )
-        db.commit()
-        user_id = user.id
+    user_id = _seed_user(
+        session_local,
+        seeded_identity["org_id"],
+        email="queue-super-admin@example.com",
+        role="admin",
+        super_admin=True,
+    )
     try:
         with TestClient(main.app) as c:
             yield attach_session(c, session_local, user_id)
     finally:
-        with session_local() as db:
-            # sessions.user_id / org_memberships.user_id are ON DELETE CASCADE
-            # and the SQLite FK pragma is on, so the user row is enough.
-            row = db.get(User, user_id)
-            if row is not None:
-                db.delete(row)
-                db.commit()
+        _drop_user(session_local, user_id)
+
+
+@pytest.fixture
+def org_member_client(_auth_db, seeded_identity):
+    """
+    Authenticated client for a PLAIN member of the primary org.
+
+    Both conftest identities carry `role="admin"`, which short-circuits
+    `can_access_project` — so neither can express "same org, no access to this
+    project", the case that separates an org-boundary check from a project-ACL
+    one. This user creates nothing and is assigned to nothing, so every project
+    they did not make is invisible to them.
+    """
+    _engine, session_local = _auth_db
+    user_id = _seed_user(
+        session_local,
+        seeded_identity["org_id"],
+        email="queue-org-member@example.com",
+        role="member",
+        super_admin=False,
+    )
+    try:
+        with TestClient(main.app) as c:
+            yield attach_session(c, session_local, user_id)
+    finally:
+        _drop_user(session_local, user_id)
 
 
 def _enqueue(test_client, install_network, name: str) -> dict:
@@ -139,6 +197,48 @@ def _force_status(job_id: int, status: str) -> None:
             job.error = "boom" if status == "failed" else None
         elif status == "running":
             job.started_at = time.time()
+
+
+def _clone_job(job_id: int, times: int) -> None:
+    """Append `times` more parked jobs carrying the same job's project key."""
+    from services.solve_queue import SolveJob
+
+    with solve_queue._lock:
+        template = solve_queue._jobs[job_id]
+        for _ in range(times):
+            new_id = next(solve_queue._counter)
+            solve_queue._jobs[new_id] = SolveJob(
+                id=new_id,
+                project_id=template.project_id,
+                project_key=template.project_key,
+                enqueued_at=time.time(),
+            )
+            solve_queue._order.append(new_id)
+
+
+@pytest.fixture
+def count_queries(_auth_db):
+    """Factory: a context manager counting SQL statements on the test engine."""
+    import contextlib
+
+    from sqlalchemy import event
+
+    engine, _session_local = _auth_db
+
+    @contextlib.contextmanager
+    def _count():
+        seen = {"n": 0}
+
+        def _on_execute(conn, cursor, statement, params, context, executemany):
+            seen["n"] += 1
+
+        event.listen(engine, "before_cursor_execute", _on_execute)
+        try:
+            yield seen
+        finally:
+            event.remove(engine, "before_cursor_execute", _on_execute)
+
+    return _count
 
 
 def _by_id(payload: dict, job_id: int) -> dict:
@@ -216,6 +316,123 @@ def test_current_is_null_when_the_running_job_belongs_to_another_org(
     theirs_view = other_org_client.get("/api/simulation/queue").json()
     assert theirs_view["current"] == theirs["id"]
     assert _by_id(theirs_view, theirs["id"])["project_id"] == "Bravo"
+
+
+def test_list_redacts_a_same_org_project_the_caller_cannot_access(
+    client, org_member_client, install_network, tmp_projects_dir
+):
+    """
+    The redaction boundary is the PROJECT ACL, not the org.
+
+    `GET /api/projects/` already filters this member's own listing through
+    `can_access_project`, so a queue that answered on org membership alone
+    would hand back names the projects endpoint refuses them.
+    """
+    theirs = _enqueue(client, install_network, "Alpha")
+    mine = _enqueue(org_member_client, install_network, "Mine")
+
+    payload = org_member_client.get("/api/simulation/queue").json()
+    assert _by_id(payload, mine["id"])["project_id"] == "Mine"
+    assert _by_id(payload, theirs["id"])["project_id"] is None, (
+        "a same-org project the caller cannot access leaked its name"
+    )
+    assert _by_id(payload, theirs["id"])["project_key"] is None
+    # Still globally truthful: the invisible job in front keeps its slot.
+    assert [j["position"] for j in payload["jobs"]] == [1, 2]
+
+
+def test_list_and_abort_agree_for_a_same_org_project(
+    client, org_member_client, install_network, tmp_projects_dir
+):
+    """
+    Listing and abort answer the same question, so a member never sees a job
+    in full that they then cannot stop, nor a redacted job they secretly can.
+    """
+    theirs = _enqueue(client, install_network, "Alpha")
+
+    payload = org_member_client.get("/api/simulation/queue").json()
+    assert _by_id(payload, theirs["id"])["project_id"] is None
+
+    denied = org_member_client.post(f"/api/simulation/queue/{theirs['id']}/abort")
+    assert denied.status_code == 404, denied.text
+    assert solve_queue.get_job(theirs["id"])["status"] == "queued"
+
+
+def test_list_shows_a_project_shared_by_root_membership(
+    client, org_member_client, install_network, tmp_projects_dir, project_row, _auth_db
+):
+    """
+    Assigning the member to the project's tree root makes it visible again —
+    the batch resolver must honour `ProjectMembership`, not just authorship.
+    """
+    from db.models import ProjectMembership
+
+    theirs = _enqueue(client, install_network, "Alpha")
+    assert _by_id(
+        org_member_client.get("/api/simulation/queue").json(), theirs["id"]
+    )["project_id"] is None
+
+    _engine, session_local = _auth_db
+    row = project_row("Alpha")
+    with session_local() as db:
+        from services.auth_service import resolve_session_row
+        from settings import get_settings
+
+        raw = org_member_client.cookies.get(get_settings().session_cookie_name)
+        member_id = resolve_session_row(db, raw).user_id
+        db.add(
+            ProjectMembership(
+                project_id=row.id,
+                user_id=member_id,
+                assigned_by=member_id,
+                assigned_at=datetime.now(tz=timezone.utc),
+            )
+        )
+        db.commit()
+
+    payload = org_member_client.get("/api/simulation/queue").json()
+    assert _by_id(payload, theirs["id"])["project_id"] == "Alpha"
+    allowed = org_member_client.post(f"/api/simulation/queue/{theirs['id']}/abort")
+    assert allowed.status_code == 200, allowed.text
+
+
+def test_list_queue_query_count_does_not_grow_with_the_job_count(
+    client, other_org_client, org_member_client, install_network, tmp_projects_dir,
+    count_queries,
+):
+    """
+    The listing is polled every 1.5s while a job is active, so authorization
+    must be resolved in a batch. A `can_access_project` call per job would make
+    this endpoint's cost track queue depth.
+
+    Measured as a DELTA between a short and a long queue: the absolute count
+    includes the auth middleware's own lookups, which are not this route's to
+    control, but any per-job work shows up as growth.
+    """
+    mine = _enqueue(client, install_network, "Alpha")
+    theirs = _enqueue(other_org_client, install_network, "Bravo")
+
+    # Warm up first: the very first request on a client also binds its session's
+    # active project, which costs a lookup the polling requests never repeat.
+    # Measuring against that one-off would compare two different things.
+    assert org_member_client.get("/api/simulation/queue").status_code == 200
+
+    with count_queries() as short:
+        assert org_member_client.get("/api/simulation/queue").status_code == 200
+    baseline = short["n"]
+
+    # 30 more jobs, both accessible and not, so neither branch is skipped.
+    _clone_job(mine["id"], 15)
+    _clone_job(theirs["id"], 15)
+
+    with count_queries() as long:
+        payload = org_member_client.get("/api/simulation/queue").json()
+    assert len(payload["jobs"]) == 32
+
+    assert long["n"] == baseline, (
+        f"{baseline} queries for 2 jobs, {long['n']} for 32 — authorization is "
+        "being resolved per job"
+    )
 
 
 # ── abort_job ───────────────────────────────────────────────────────────────
@@ -351,14 +568,23 @@ def test_chat_solve_queue_tools_carry_the_acting_identity(
 # ── local mode (Task 6: the packaged desktop app must not regress) ───────────
 
 
-def test_local_mode_can_list_abort_and_clear(_auth_db, monkeypatch, tmp_path):
+def test_local_mode_can_list_abort_and_clear(
+    _auth_db, monkeypatch, tmp_path, install_network, tmp_projects_dir
+):
     """
     Non-regression, not a security assertion: this one passes before and after.
 
-    The desktop build seeds ONE user with `is_super_admin=True` (local_mode.py),
-    which is what keeps `clear_finished` reachable there after the gate lands.
-    If that seed ever stops setting the flag, the packaged app loses its
-    "Clear finished" button — this test is the tripwire.
+    Drives the REAL desktop path — save a project, enqueue it through the
+    route, then list/abort/clear — rather than hand-building a job. An earlier
+    version fabricated a `project_key` pointing at no row, which the
+    project-ACL tightening then redacted; that said nothing about the packaged
+    app, where every job names a project that exists.
+
+    Two things it pins: the desktop user is seeded `is_super_admin=True`
+    (`local_mode.py`), which is what keeps `clear_finished` reachable there;
+    and `role="admin"` in the local org, which is what
+    `accessible_project_ids` short-circuits on so the single tenant sees their
+    own queue in full.
     """
     import local_mode
 
@@ -373,14 +599,13 @@ def test_local_mode_can_list_abort_and_clear(_auth_db, monkeypatch, tmp_path):
     try:
         with TestClient(main.app) as local_client:
             local_client.cookies.clear()
-            job = solve_queue.enqueue(
-                "Desktop", project_key=f"{local_mode.LOCAL_ORG_ID}:{uuid.uuid4()}"
-            )
+            job = _enqueue(local_client, install_network, "Desktop")
 
             payload = local_client.get("/api/simulation/queue").json()
-            assert _by_id(payload, job.id)["project_id"] == "Desktop"
+            assert _by_id(payload, job["id"])["project_id"] == "Desktop"
+            assert _by_id(payload, job["id"])["project_key"] is not None
 
-            r = local_client.post(f"/api/simulation/queue/{job.id}/abort")
+            r = local_client.post(f"/api/simulation/queue/{job['id']}/abort")
             assert r.status_code == 200, r.text
             assert r.json()["status"] == "aborted"
 
@@ -418,6 +643,29 @@ def test_local_mode_shows_an_unkeyed_legacy_job(_auth_db, monkeypatch, tmp_path)
     finally:
         with session_local() as db:
             local_mode.remove_local_identity(db)
+
+
+def test_a_deleted_projects_job_is_redacted_but_still_abortable(
+    client, install_network, tmp_projects_dir
+):
+    """
+    The one place `_may_see` and `_may_abort` deliberately disagree.
+
+    `_delete_project_db` drops the row and the directory without touching the
+    queue, so a queued or running solve outlives its project. There is no ACL
+    left to consult, so the IDENTITY fails closed — but refusing the abort too
+    would strand the job and block the shared solver with no way to free it.
+    """
+    job = _enqueue(client, install_network, "Doomed")
+    assert client.delete("/api/projects/Doomed").status_code == 200
+
+    payload = client.get("/api/simulation/queue").json()
+    assert _by_id(payload, job["id"])["project_id"] is None
+    assert _by_id(payload, job["id"])["status"] == "queued"
+
+    r = client.post(f"/api/simulation/queue/{job['id']}/abort")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "aborted"
 
 
 def test_unkeyed_job_is_redacted_under_auth(client, install_network, tmp_projects_dir):

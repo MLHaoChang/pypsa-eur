@@ -18,6 +18,8 @@ they use and why they differ.
 """
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
@@ -99,20 +101,47 @@ def _org_prefix(db: DBSession, user: User) -> str | None:
     return None if membership is None else f"{membership.org_id}:"
 
 
-def _may_see(job: dict, prefix: str | None) -> bool:
+def _project_uuid(job: dict, prefix: str | None) -> uuid.UUID | None:
     """
-    Whether the caller may see WHOSE job this is.
+    The project a job names, but only when the key belongs to the caller's org.
+
+    Returns None for another org's job, an unkeyed one, and a key whose uuid
+    half does not parse — all three are "no project you could be entitled to",
+    which is the only distinction the callers below need.
+    """
+    key = job.get("project_key")
+    if key is None or prefix is None or not key.startswith(prefix):
+        return None
+    try:
+        return uuid.UUID(key[len(prefix):])
+    except ValueError:
+        return None
+
+
+def _may_see(job: dict, prefix: str | None, allowed: set[uuid.UUID]) -> bool:
+    """
+    Whether the caller may see WHOSE job this is — the PROJECT ACL, not the org.
+
+    `allowed` is resolved once per request by `project_acl.accessible_project_ids`,
+    so this stays a set membership test however long the queue is. Org
+    membership alone would be the wrong boundary: `GET /api/projects/` already
+    filters a caller's own project list through `can_access_project`, so an
+    org-wide answer here would hand back names that endpoint refuses them.
 
     A job with no `project_key` is a legacy or hand-made artefact —
     `enqueue_solve` has stamped a key on every job since Step 0a. Under auth it
     cannot be attributed to an org, therefore it cannot be authorized, so it
     fails closed. In local mode there is exactly one tenant (`local_mode`, one
     seeded org + user), so the only possible owner IS the caller.
+
+    A job whose project row has been DELETED is redacted for the same reason:
+    there is no ACL left to consult. `_may_abort` deliberately answers
+    differently — see there.
     """
-    key = job.get("project_key")
-    if key is None:
+    if job.get("project_key") is None:
         return local_mode.is_local_mode()
-    return prefix is not None and key.startswith(prefix)
+    project_id = _project_uuid(job, prefix)
+    return project_id is not None and project_id in allowed
 
 
 def _redact(job: dict) -> dict:
@@ -122,32 +151,37 @@ def _redact(job: dict) -> dict:
 
 def _may_abort(db: DBSession, user: User, job: dict) -> bool:
     """
-    Whether the caller may STOP this job — the full project ACL, not just the
-    org, because aborting destroys work in progress.
+    Whether the caller may STOP this job.
 
-    Stricter than `_may_see` on purpose. The listing's boundary is the org: it
-    is polled, so it must cost one query, and it hands back no more than "your
-    org has N jobs queued". Abort touches exactly one job, so it can afford the
-    project lookup that `enqueue_solve` already performs, and least privilege
-    says a caller who may not open a project may not kill its solve either.
+    Same predicate as `_may_see` — `can_access_project` — reached directly
+    rather than through the batch, because abort concerns exactly one job and
+    the single-project path is the authoritative one `enqueue_solve` uses.
+    `tests/test_project_acl.py` pins that the batch agrees with it.
 
-    A job whose project row has since been DELETED stays abortable by its own
-    org: the resource it guards is gone, the queue slot is not, and refusing
-    would strand a running solve with no way to stop it.
+    ONE deliberate difference. A job whose project row has since been DELETED
+    is invisible in the listing (no ACL to consult, so identity fails closed)
+    but stays abortable by its own org. `_delete_project_db` removes the row and
+    the directory without touching the queue, so a running solve outlives its
+    project; refusing here would strand it with no way to stop it and no way to
+    free the shared solver. The listing still shows the job's id and status, so
+    an operator can find it — they just cannot learn whose it was.
     """
     key = job.get("project_key")
     if key is None:
         return local_mode.is_local_mode()
-    org_part, _, uuid_part = key.partition(":")
     prefix = _org_prefix(db, user)
-    if prefix is None or f"{org_part}:" != prefix:
+    project_id = _project_uuid(job, prefix)
+    if project_id is None:
         return False
 
-    from services import project_acl, project_registry
+    from db.models import Project
+    from services import project_acl
 
-    project = project_registry.find_project(db, user, uuid_part)
+    project = db.get(Project, project_id)
     if project is None:
-        return True
+        return True  # orphaned by a delete; see above
+    if f"{project.org_id}:" != prefix:
+        return False  # the key's org half lied about the row's real owner
     return project_acl.can_access_project(db, user, project)
 
 
@@ -171,13 +205,22 @@ def list_queue(
     caller cannot access. `current` is the true running job id only when the
     caller may see it — otherwise null, since the id alone was enough to abort
     it before this change.
+
+    "Cannot access" is the PROJECT ACL, resolved for the whole listing in one
+    batch (`accessible_project_ids`). This endpoint is polled every 1.5s while
+    a job is active, so a `can_access_project` call per job would be an N+1 on
+    a hot path — and answering on org membership instead would leak names that
+    `GET /api/projects/` already hides from the same caller.
     """
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     prefix = _org_prefix(db, user)
     jobs = solve_queue.list_jobs()
-    seen = [_may_see(job, prefix) for job in jobs]
+    allowed = project_acl.accessible_project_ids(
+        db, user, (_project_uuid(job, prefix) for job in jobs)
+    )
+    seen = [_may_see(job, prefix, allowed) for job in jobs]
     current = next(
         (job["id"] for job, ok in zip(jobs, seen) if ok and job["status"] == "running"),
         None,
