@@ -55,9 +55,10 @@ class MembersRequest(BaseModel):
 
 # The FLAT legacy store: <root>/<display-name>/network.nc. Distinct from
 # `settings.projects_root`, which is org-scoped (<root>/<org>/<project>/) —
-# pointing this at that one makes `_find_direct_children`'s <dir>/network.nc
-# filter iterate org-UUID directories and never match, so scenario-tree delete
-# and reparent silently return [].
+# pointing this at that one makes every `PROJECTS_DIR / <display-name>` lookup
+# address an org-UUID directory instead: `_safe_project_dir`, the legacy-mode
+# fallback in `_resolve_project_src`, and the free-name search in
+# `_unique_project_name` all silently resolve against the wrong tree.
 #
 # Deliberately a module ATTRIBUTE rather than a function: tests/conftest.py's
 # `tmp_projects_dir` fixture monkeypatches this name, and nine test files
@@ -440,82 +441,22 @@ def _write_meta(project_dir: pathlib.Path, data: dict) -> None:
 
 
 # ── Scenario-tree helpers ────────────────────────────────────────────────────
-# Scenarios are projects whose `metadata.json` carries a non-null
-# `parent_project`. The tree is reconstructed by walking those pointers.
-# A linear scan of `PROJECTS_DIR` is acceptable because the active project
-# list is short (capped to whatever the user has on disk, typically tens),
-# and these helpers run only on delete/reparent operations — not in hot
-# paths.
-
-def _find_direct_children(parent_name: str) -> list[str]:
-    """
-    Return names of projects whose metadata.parent_project == parent_name.
-
-    Only direct children. Use `_find_descendants` for the transitive closure.
-    """
-    if not PROJECTS_DIR.exists():
-        return []
-    out: list[str] = []
-    for d in PROJECTS_DIR.iterdir():
-        if not d.is_dir() or not (d / "network.nc").exists():
-            continue
-        if _read_meta(d).get("parent_project") == parent_name:
-            out.append(d.name)
-    return out
-
-
-def _find_descendants(root_name: str) -> list[str]:
-    """
-    All transitive children of `root_name`, BFS-ordered.
-
-    Caller deletes in reverse so leaves go first, keeping the on-disk tree
-    consistent at every step. Cycles in the parent graph (shouldn't happen
-    given POST /scenarios validation but defended for paranoia) would loop
-    forever — guard with a seen-set.
-    """
-    seen: set[str] = set()
-    out: list[str] = []
-    frontier = [root_name]
-    while frontier:
-        next_frontier: list[str] = []
-        for parent in frontier:
-            for child in _find_direct_children(parent):
-                if child in seen:
-                    continue  # cycle defense
-                seen.add(child)
-                out.append(child)
-                next_frontier.append(child)
-        frontier = next_frontier
-    return out
-
-
-def _walk_ancestors(name: str) -> list[str]:
-    """
-    Walk up the parent chain from `name` (exclusive), root-most last.
-
-    Used by cycle detection: a candidate parent that already lists `name`
-    in its own ancestry would form a cycle if set as `name`'s parent.
-    """
-    seen: set[str] = {name}
-    chain: list[str] = []
-    cursor: str | None = _read_meta(PROJECTS_DIR / name).get("parent_project") if (PROJECTS_DIR / name).is_dir() else None
-    while cursor and cursor not in seen:
-        seen.add(cursor)
-        chain.append(cursor)
-        parent_dir = PROJECTS_DIR / cursor
-        if not parent_dir.is_dir():
-            break  # dangling reference; treat as root
-        cursor = _read_meta(parent_dir).get("parent_project")
-    return chain
-
-
-def _would_cycle(child_name: str, candidate_parent: str) -> bool:
-    """True iff assigning `candidate_parent` to `child_name` would loop back."""
-    if candidate_parent == child_name:
-        return True
-    # If child_name appears in candidate_parent's ancestry, setting that as
-    # the new parent creates the loop: child → candidate → … → child.
-    return child_name in _walk_ancestors(candidate_parent)
+# There are none here any more, and that is the point.
+#
+# The tree used to be reconstructed by scanning `PROJECTS_DIR` and walking the
+# `metadata.parent_project` NAME pointers — `_find_direct_children`,
+# `_find_descendants`, `_walk_ancestors`, `_would_cycle`. Since the projects
+# router became ACL-gated and DB-backed, the parent graph is
+# `Project.parent_project_id` and the authoritative walks are
+# `project_registry.direct_children` / `.descendants`, which is what delete,
+# rename and the ACL all call.
+#
+# The filesystem versions were left behind, unreferenced, for long enough that
+# they read as live logic to anyone tracing how the scenario tree works — the
+# most expensive kind of dead code, because it answers a question wrongly
+# rather than not at all. `metadata.json` still carries `parent_project`, but
+# only so a bundle export/import round-trips the tree; nothing reads it back
+# to decide anything.
 
 
 def _project_info(project_dir: pathlib.Path) -> ProjectInfo:

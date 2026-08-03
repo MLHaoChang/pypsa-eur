@@ -75,9 +75,10 @@ def default_flat_projects_root() -> Path:
     FLAT legacy store, ``<root>/<display-name>/network.nc``.
 
     NOT the same as `default_projects_root()`: that one is org-scoped and its
-    entries are UUID directories, so pointing the flat store at it makes
-    `_find_direct_children`'s ``<dir>/network.nc`` filter never match. Kept in
-    app-data because it is an implementation detail the user should not browse.
+    entries are UUID directories, so pointing the flat store at it makes every
+    ``<flat root>/<display-name>`` lookup in `routers.projects` address an
+    org-UUID directory instead. Kept in app-data because it is an
+    implementation detail the user should not browse.
     """
     return app_data_dir() / "flat_projects"
 

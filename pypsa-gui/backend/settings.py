@@ -53,8 +53,8 @@ class Settings(BaseSettings):
     # FLAT legacy store, `<root>/<display-name>/network.nc`. Deliberately NOT
     # the same as `projects_root`, which is org-scoped
     # (`<root>/<org_uuid>/<project_uuid>/`). Pointing the flat store at it makes
-    # `_find_direct_children`'s `<dir>/network.nc` filter never match, so
-    # scenario-tree delete and reparent silently return [].
+    # every `<flat root>/<display-name>` lookup in `routers.projects` address an
+    # org-UUID directory instead — see the note beside `PROJECTS_DIR` there.
     flat_projects_root: Path = Field(
         default_factory=app_paths.default_flat_projects_root
     )

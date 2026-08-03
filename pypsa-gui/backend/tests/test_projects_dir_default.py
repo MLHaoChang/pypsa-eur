@@ -8,9 +8,10 @@ TWO ROOTS, DELIBERATELY. Do not merge them:
 
 `conftest.py` pins PROJECTS_ROOT to one tmpdir and separately monkeypatches
 PROJECTS_DIR to a different one — they are not interchangeable. Pointing
-PROJECTS_DIR at projects_root makes `_find_direct_children`'s
-`<dir>/network.nc` filter iterate org-UUID directories and never match, so
-scenario-tree delete and reparent silently return [].
+PROJECTS_DIR at projects_root makes every `PROJECTS_DIR / <display-name>`
+lookup address an org-UUID directory instead: `_safe_project_dir`, the
+legacy-mode fallback in `_resolve_project_src`, and `_unique_project_name`
+all resolve against the wrong tree.
 
 PROJECTS_DIR must also stay a settable module ATTRIBUTE: `conftest.py`'s
 `tmp_projects_dir` fixture does `monkeypatch.setattr(projects_router,
@@ -66,7 +67,7 @@ def test_projects_dir_default_is_outside_the_source_tree():
 
 
 def test_flat_root_is_not_the_org_scoped_root(monkeypatch, tmp_path):
-    """Different stores, different layouts. Merging them breaks _find_direct_children."""
+    """Different stores, different layouts. Merging them misdirects every flat lookup."""
     monkeypatch.setenv("PROJECTS_ROOT", str(tmp_path / "org"))
     monkeypatch.setenv("FLAT_PROJECTS_ROOT", str(tmp_path / "flat"))
     settings_module.get_settings.cache_clear()
