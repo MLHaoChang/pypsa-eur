@@ -10,12 +10,15 @@ The child stubs out `dotenv` before importing `main`. A developer checkout's
 `load_dotenv(_ENV_PATH, override=False)` runs BEFORE the code under test — so
 without the stub, two of the three cases below observe the real key coming
 back from `.env` instead of the stored-settings value they're supposed to be
-measuring. The PACKAGED app never has this problem: `smoke/check_bundle.py`
-enforces `FORBIDDEN_PREFIXES = (".env",)` so no `.env` ships, and
-`from dotenv import load_dotenv` would in fact bind nothing there either
-(the module isn't bundled). Stubbing `dotenv` to a no-op makes the child
-model that environment — the one this whole feature exists for — instead of
-this machine's developer checkout.
+measuring. The PACKAGED app never has this problem, but not because `dotenv`
+is absent there: `python-dotenv` IS bundled (pinned in `gui-requirements.txt`,
+and a hard dependency of `pydantic-settings` regardless of what this app
+imports directly). What's absent is the `.env` FILE — `smoke/check_bundle.py`
+enforces `FORBIDDEN_PREFIXES = (".env",)` so none ships — which makes
+`_ENV_PATH.exists()` False and means `load_dotenv` is never even called. A
+child interpreter can't make this machine's real `backend/.env` disappear
+from disk, so the stub reproduces that same end state — no `.env` values
+ever reach `os.environ` — by neutering the function instead.
 
 The stub carries `dotenv_values` as well as `load_dotenv`, not because
 `main.py` calls it, but because `security` -> `settings` -> `pydantic_settings`
@@ -38,12 +41,15 @@ BACKEND = Path(__file__).resolve().parents[1]
 
 PROBE = (
     "import sys, types, os; sys.path.insert(0, %r); "
-    # A developer checkout has backend/.env carrying a real key; the PACKAGED
-    # app has none, because check_bundle.py forbids shipping it. Stub dotenv so
-    # this child models the packaged app - the environment this whole feature
-    # exists for - instead of the developer's machine. `dotenv_values` is also
-    # stubbed: pydantic_settings imports it independently of main.py's own
-    # load_dotenv call, at pydantic_settings import time.
+    # A developer checkout has backend/.env carrying a real key. The PACKAGED
+    # app still bundles python-dotenv (gui-requirements.txt pins it, and
+    # pydantic-settings hard-depends on it anyway) - what it lacks is the
+    # .env FILE, forbidden by check_bundle.py, so _ENV_PATH.exists() is False
+    # and load_dotenv is never called there at all. A child interpreter can't
+    # delete this machine's real backend/.env from disk, so stub dotenv to
+    # reproduce that same "nothing loaded" end state instead. `dotenv_values`
+    # is also stubbed: pydantic_settings imports it independently of main.py's
+    # own load_dotenv call, at pydantic_settings import time.
     "_d = types.ModuleType('dotenv'); _d.load_dotenv = lambda *a, **k: False; "
     "_d.dotenv_values = lambda *a, **k: {}; "
     "sys.modules['dotenv'] = _d; "
