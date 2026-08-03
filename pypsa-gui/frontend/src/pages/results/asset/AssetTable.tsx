@@ -21,7 +21,13 @@ export function tableRows(data: AssetResultsResponse): {
     }
   }
   const first = data.mode === 'monthly' ? 'month' : 'snapshot'
-  const withPeriod = data.mode === 'chronological' && !!data.periods
+  // Monthly buckets repeat their `YYYY-MM` label once per investment period
+  // (the backend keys buckets by `period|month` precisely so they don't merge,
+  // and carries the period in the parallel array). Excluding monthly here left
+  // those rows indistinguishable — 12 labels for 36 rows. `duration` returns
+  // `periods: null` and has already returned above, so this covers exactly the
+  // two modes that are indexed by time.
+  const withPeriod = !!data.periods
   return {
     header: [first, ...(withPeriod ? ['period'] : []),
              ...cols.map(c => head(c.label, c.unit))],
@@ -51,7 +57,8 @@ export default function AssetTable(
 
   // Key the empty state off the METRIC columns, not the header length. The
   // number of fixed leading columns varies by mode — duration always has two
-  // (`rank`, `pct_of_hours`) and chronological-with-periods has two — so a
+  // (`rank`, `pct_of_hours`) and either time-indexed mode has two when the
+  // network is multi-period (`snapshot`/`month`, `period`) — so a
   // `header.length <= 1` test would never fire in either, and a user with
   // nothing ticked would get thousands of bare rank rows instead of a prompt.
   if (data.columns.length === 0) {

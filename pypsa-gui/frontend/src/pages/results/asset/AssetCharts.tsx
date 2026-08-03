@@ -5,8 +5,8 @@ import {
 } from 'recharts'
 import toast from 'react-hot-toast'
 import { Download } from 'lucide-react'
-import { CHART_AXIS, CHART_GRID, CHART_TOOLTIP, colourForCarrier, downloadSVG }
-  from '../shared'
+import { CHART_AXIS, CHART_GRID, CHART_TOOLTIP, colourForCarrier, downloadSVG,
+  stampWithPeriod } from '../shared'
 import { downloadPNG } from './exportPng'
 import { fmtNum } from './format'
 import type { AssetResultsResponse, ColumnSpec } from './types'
@@ -90,6 +90,46 @@ function UnitChart(
   )
 }
 
+/**
+ * The exact rows the chart plots, and the key they are plotted against.
+ * Pure, so a test can assert the X values without rendering recharts — the
+ * same reason `tableRows` is pure.
+ *
+ * PyPSA replays ONE operational year under every investment period, so on a
+ * multi-period network `index` repeats: a one-day request returns 24 stamps
+ * three times over, identical strings, distinguishable only by the parallel
+ * `periods` array. Plotting against the bare stamp drew the same calendar day
+ * once per period with nothing to tell them apart — the axis read as a chart
+ * that had been pasted end-to-end three times. The table has consumed
+ * `periods` since it was added; the chart never did.
+ *
+ * The prefix goes on only when more than one distinct period is present. With
+ * a single period selected the axis is already unambiguous, and prefixing
+ * every tick with the same year is noise.
+ */
+export function chartRows(data: AssetResultsResponse):
+  { xKey: string; rows: Array<Record<string, unknown>> } {
+  const xKey = data.mode === 'duration' ? 'rank'
+    : data.mode === 'monthly' ? 'month' : 'snapshot'
+  // `duration` sorts every series independently and reports `periods: null` —
+  // rank 1 is not a moment in time, so there is nothing to qualify.
+  const periods = data.periods
+  const multi = !!periods && new Set(periods).size > 1
+
+  const rows = data.index.map((stamp, i) => {
+    const period = periods?.[i]
+    // Monthly buckets are already `YYYY-MM`; `stampWithPeriod` would slice
+    // that down to the bare month. Prefix those directly instead.
+    const x = !multi || period == null ? stamp
+      : data.mode === 'monthly' ? `${period} · ${stamp}`
+      : stampWithPeriod(stamp, Number(period))
+    const row: Record<string, unknown> = { [xKey]: x }
+    for (const c of data.columns) row[c.id] = data.series[c.id]?.[i] ?? null
+    return row
+  })
+  return { xKey, rows }
+}
+
 export default function AssetCharts(
   { data, onShowAll }: {
     data: AssetResultsResponse
@@ -98,14 +138,7 @@ export default function AssetCharts(
   },
 ) {
   const groups = useMemo(() => groupColumnsByUnit(data.columns), [data.columns])
-  const xKey = data.mode === 'duration' ? 'rank'
-    : data.mode === 'monthly' ? 'month' : 'snapshot'
-
-  const rows = useMemo(() => data.index.map((stamp, i) => {
-    const row: Record<string, unknown> = { [xKey]: stamp }
-    for (const c of data.columns) row[c.id] = data.series[c.id]?.[i] ?? null
-    return row
-  }), [data, xKey])
+  const { xKey, rows } = useMemo(() => chartRows(data), [data])
 
   if (groups.length === 0) {
     return (

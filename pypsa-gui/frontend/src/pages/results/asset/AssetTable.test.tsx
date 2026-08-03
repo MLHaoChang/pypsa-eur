@@ -69,6 +69,19 @@ describe('tableRows', () => {
     expect(header).toEqual(['month', 'Active power (mean) (MW)', 'Active power (energy) (MWh)'])
   })
 
+  // Monthly buckets are keyed `period|month` server-side, so a three-period
+  // network yields 36 rows carrying only 12 distinct month labels. Without the
+  // period column those rows are indistinguishable.
+  it('adds the period column to monthly buckets too, not just chronological', () => {
+    const { header, rows } = tableRows(base({
+      mode: 'monthly', index: ['2026-01', '2026-01'], periods: [2027, 2028],
+      columns: [{ id: 'p__mean', label: 'p', unit: 'MW', metric_id: 'p', agg: 'mean' }],
+      series: { p__mean: [58, 61] },
+    }))
+    expect(header).toEqual(['month', 'period', 'p (MW)'])
+    expect(rows).toEqual([['2026-01', 2027, 58], ['2026-01', 2028, 61]])
+  })
+
   it('renders a missing value as an empty cell rather than NaN', () => {
     const { rows } = tableRows(base({
       index: ['a'],
