@@ -245,3 +245,104 @@ def test_load_project_registers_bound_ctx(
     assert ctx.loaded_project == "X"
     # The registered ctx IS the active one (load binds the active ctx to X).
     assert ctx is session_ctx(client)
+
+
+# ── OS-level access denials must be legible, not a 500 ───────────────────────
+# The default projects root lives under `~/Documents`, which macOS privacy
+# (TCC) gates. A denial arrives as `PermissionError: [Errno 1] Operation not
+# permitted` on a file whose mode, owner and ACL are ordinary and which the
+# same user reads fine from a shell — so the raw error looks like a corrupt
+# install, and it reached the user as a bare "request failed with error code
+# 500". It is also partial: a file that carries a `com.apple.macl` grant (one
+# the user once picked in an open dialog) still reads, so `network.nc` loads
+# and the sidecars beside it do not.
+
+def _deny_reads_of(monkeypatch, filename: str):
+    """Make `Path.read_text` raise EPERM for one filename, as TCC does."""
+    import errno
+    import pathlib as _pl
+
+    real = _pl.Path.read_text
+
+    def guarded(self, *a, **kw):
+        if self.name == filename:
+            raise PermissionError(errno.EPERM, "Operation not permitted", str(self))
+        return real(self, *a, **kw)
+
+    monkeypatch.setattr(_pl.Path, "read_text", guarded)
+
+
+def test_activate_reports_a_blocked_solver_config_instead_of_500(
+    client, install_network, tmp_projects_dir, registry_key_for, session_ctx, monkeypatch,
+):
+    _put_A_and_B_on_disk(client, install_network)
+    _deny_reads_of(monkeypatch, "solver_config.json")
+
+    r = client.post("/api/projects/B/activate")
+
+    assert r.status_code == 503, r.text
+    detail = r.json()["detail"]
+    # The message has to name the file and tell the user what to change —
+    # the whole failure is invisible from inside the app.
+    assert "solver_config.json" in detail
+    assert "Privacy" in detail or "permission" in detail.lower()
+
+
+def test_a_blocked_solver_config_never_silently_defaults(
+    client, install_network, tmp_projects_dir, session_ctx, monkeypatch,
+):
+    """Defaulting on a denial is worse than failing.
+
+    `exists()` answering True is not permission to read. Falling back to a
+    default SolverConfig would open the project with a DIFFERENT configuration
+    than the one on disk, and the next save would write that over the user's
+    real settings — silent, and destructive.
+    """
+    _put_A_and_B_on_disk(client, install_network)
+    _deny_reads_of(monkeypatch, "solver_config.json")
+
+    r = client.post("/api/projects/B/activate")
+    assert r.status_code != 200, "a project must not open with a guessed solver config"
+
+
+def test_an_unreadable_layout_is_not_reported_as_no_layout(
+    client, install_network, tmp_projects_dir, session_ctx, monkeypatch,
+):
+    """`{}` means "nothing saved", and the canvas acts on that.
+
+    It runs its layout algorithm and the next scheduleSave writes those
+    generated positions over a layout.json that was perfectly good and merely
+    unreadable. The user's schematic, silently replaced.
+    """
+    install_network(_bus_network("A_BUS"), name="A")
+    _save_project(client, "A")
+    r = client.put("/api/projects/A/layout", json={"version": 1, "savedAt": 1, "nodes": [], "edges": []})
+    assert r.status_code in (200, 201), r.text
+    assert client.get("/api/projects/A/layout").json().get("version") == 1
+
+    _deny_reads_of(monkeypatch, "layout.json")
+
+    r = client.get("/api/projects/A/layout")
+    assert r.status_code == 503, f"a denial must not read as 'no layout': {r.text}"
+    assert "layout.json" in r.json()["detail"]
+
+
+def test_a_corrupt_layout_still_degrades_to_the_algorithm(
+    client, install_network, tmp_projects_dir, session_ctx, monkeypatch,
+):
+    """Corruption is the case the graceful path exists for — keep it."""
+    install_network(_bus_network("A_BUS"), name="A")
+    _save_project(client, "A")
+    r = client.put("/api/projects/A/layout", json={"version": 1, "savedAt": 1, "nodes": [], "edges": []})
+    assert r.status_code in (200, 201), r.text
+
+    import pathlib as _pl
+    real = _pl.Path.read_text
+    monkeypatch.setattr(
+        _pl.Path, "read_text",
+        lambda self, *a, **kw: "{not json at all" if self.name == "layout.json" else real(self, *a, **kw),
+    )
+
+    r = client.get("/api/projects/A/layout")
+    assert r.status_code == 200, r.text
+    assert r.json() == {}

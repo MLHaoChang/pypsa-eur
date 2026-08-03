@@ -1707,6 +1707,45 @@ def _save_context(
     }
 
 
+def _access_denied(path: pathlib.Path) -> HTTPException:
+    """
+    Turn an OS-level refusal to read a project file into something actionable.
+
+    macOS privacy (TCC) gates `~/Documents`, `~/Desktop` and `~/Downloads`, and
+    the default projects root lives under `~/Documents`. A denial arrives as
+    `PermissionError: [Errno 1] Operation not permitted` — EPERM, not the
+    EACCES you would get from real filesystem permissions — on a file whose
+    mode, owner and ACL are all perfectly normal and which the same user can
+    read from a shell. Nothing about it looks like a permissions problem, so
+    the raw error reads as a corrupt install.
+
+    It is also PARTIAL, which is what makes it confusing: a file the user once
+    picked in an open dialog carries a `com.apple.macl` grant and keeps
+    working, so `network.nc` loads and its sidecars next to it do not. And the
+    grant is keyed to the app binary, so every rebuild of an ad-hoc-signed
+    build can drop it.
+
+    Reported as 503: the request is not malformed and the caller is not
+    unauthorised — the server cannot reach the bytes until the user changes a
+    setting outside the app.
+    """
+    if sys.platform == "darwin":
+        detail = (
+            f"macOS is blocking access to '{path.name}' in {path.parent}. "
+            "Grant access in System Settings → Privacy & Security → Files and "
+            "Folders → PyPSA Studio (enable 'Documents Folder'), or give it "
+            "Full Disk Access, then reopen the project. Note that rebuilding "
+            "or replacing the app resets this permission."
+        )
+    else:
+        detail = (
+            f"The operating system denied access to '{path.name}' in "
+            f"{path.parent}. Check the folder's permissions, then reopen the "
+            "project."
+        )
+    return HTTPException(503, detail)
+
+
 def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
     """
     Populate a (typically OFF-TO-THE-SIDE, background) ProjectContext from the
@@ -1745,10 +1784,20 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
         ctx.loaded_project = name
 
     # Solver config (legacy-tolerant; default when absent).
+    #
+    # `exists()` answering True is NOT permission to read: a macOS privacy
+    # denial lets the stat through and refuses the open. Defaulting on a
+    # denial would be worse than failing — the project would open with a
+    # DIFFERENT solver configuration than the one on disk, and the next save
+    # would write that over the user's real settings.
     cfg_path = src / "solver_config.json"
     if cfg_path.exists():
+        try:
+            raw_cfg = cfg_path.read_text()
+        except PermissionError as exc:
+            raise _access_denied(cfg_path) from exc
         ctx.solver_state["solver_config"] = _solver_config_from_dict(
-            json.loads(cfg_path.read_text())
+            json.loads(raw_cfg)
         )
     else:
         ctx.solver_state["solver_config"] = SolverConfig()
@@ -2542,9 +2591,22 @@ def get_layout(
     layout_path = src / "layout.json"
     if not layout_path.exists():
         return {}
+    # A denial is NOT corruption, and the difference is destructive. `{}` means
+    # "no layout saved", so the canvas runs its layout algorithm and the next
+    # scheduleSave writes those generated positions over a layout.json that was
+    # perfectly good and merely unreadable — the user's schematic, silently
+    # replaced. Corruption still degrades (the file really is unusable and the
+    # algorithm is the best answer); a permission denial is surfaced so the
+    # canvas keeps whatever it already has and the user is told what to fix.
     try:
-        data = json.loads(layout_path.read_text())
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        raw = layout_path.read_text()
+    except PermissionError as exc:
+        raise _access_denied(layout_path) from exc
+    except (OSError, UnicodeDecodeError):
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
         # Corrupted layout — degrade to "no layout" so the canvas falls back
         # to its layout algorithm rather than 500-ing the whole project open.
         return {}
