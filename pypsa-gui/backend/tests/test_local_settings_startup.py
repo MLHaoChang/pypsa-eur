@@ -4,6 +4,29 @@ The import-time chain: a key on disk becomes ANTHROPIC_API_KEY in the process.
 Runs in a SUBPROCESS on purpose. conftest imports `main` once per session, so
 an in-process test can never re-trigger a module-level call — and "the chain
 does not run in the real process" is exactly the defect this guards.
+
+The child stubs out `dotenv` before importing `main`. A developer checkout's
+`backend/.env` carries a real ANTHROPIC_API_KEY, and `main.py`'s existing
+`load_dotenv(_ENV_PATH, override=False)` runs BEFORE the code under test — so
+without the stub, two of the three cases below observe the real key coming
+back from `.env` instead of the stored-settings value they're supposed to be
+measuring. The PACKAGED app never has this problem: `smoke/check_bundle.py`
+enforces `FORBIDDEN_PREFIXES = (".env",)` so no `.env` ships, and
+`from dotenv import load_dotenv` would in fact bind nothing there either
+(the module isn't bundled). Stubbing `dotenv` to a no-op makes the child
+model that environment — the one this whole feature exists for — instead of
+this machine's developer checkout.
+
+The stub carries `dotenv_values` as well as `load_dotenv`, not because
+`main.py` calls it, but because `security` -> `settings` -> `pydantic_settings`
+imports `dotenv_values` from the same module at IMPORT time
+(`pydantic_settings/sources/providers/dotenv.py`), unconditionally, as soon as
+`pydantic_settings` itself is imported — independent of whether any
+`Settings` subclass is ever instantiated. A `load_dotenv`-only stub replaces
+`sys.modules['dotenv']` wholesale and breaks that unrelated import with
+`ImportError: cannot import name 'dotenv_values' from 'dotenv'`. Both no-ops
+return "nothing to load", which is the correct model for a `.env`-less
+packaged app either way.
 """
 import json
 import os
@@ -14,7 +37,16 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 
 PROBE = (
-    "import os, sys; sys.path.insert(0, %r); "
+    "import sys, types, os; sys.path.insert(0, %r); "
+    # A developer checkout has backend/.env carrying a real key; the PACKAGED
+    # app has none, because check_bundle.py forbids shipping it. Stub dotenv so
+    # this child models the packaged app - the environment this whole feature
+    # exists for - instead of the developer's machine. `dotenv_values` is also
+    # stubbed: pydantic_settings imports it independently of main.py's own
+    # load_dotenv call, at pydantic_settings import time.
+    "_d = types.ModuleType('dotenv'); _d.load_dotenv = lambda *a, **k: False; "
+    "_d.dotenv_values = lambda *a, **k: {}; "
+    "sys.modules['dotenv'] = _d; "
     "import main; "
     "print('KEY=' + os.environ.get('ANTHROPIC_API_KEY', ''))"
 )
