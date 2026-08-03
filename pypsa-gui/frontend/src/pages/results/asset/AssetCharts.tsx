@@ -5,8 +5,8 @@ import {
 } from 'recharts'
 import toast from 'react-hot-toast'
 import { Download } from 'lucide-react'
-import { CHART_AXIS, CHART_GRID, CHART_TOOLTIP, colourForCarrier, downloadSVG,
-  stampWithPeriod } from '../shared'
+import { CHART_AXIS, CHART_GRID, CHART_TOOLTIP, colourForCarrier, downloadSVG }
+  from '../shared'
 import { downloadPNG } from './exportPng'
 import { fmtNum } from './format'
 import type { AssetResultsResponse, ColumnSpec } from './types'
@@ -90,39 +90,62 @@ function UnitChart(
   )
 }
 
+const ISO_YEAR = /^(\d{4})(-.*)$/
+
+/**
+ * The X value one row is plotted against.
+ *
+ * PyPSA replays ONE operational year under every investment period, so every
+ * timestep of a multi-period network arrives stamped with the same base year
+ * (2026, say) no matter which period it belongs to — the period lives only in
+ * the parallel `periods` array. Plotting those raw ran the calendar
+ * January→December once per period along a single axis: on a three-period
+ * network the same date appeared three times, and the chart read as itself
+ * pasted end-to-end three times.
+ *
+ * Rebasing each timestep onto ITS period's year turns the axis into a genuine
+ * monotonic timeline (2027-01-01 → 2029-12-31): every date appears exactly
+ * once, and there is still one line per series rather than one per
+ * series × period. Results.tsx already applies this correction to the
+ * horizon-filter inputs (`toDisplay` there); the chart was the last surface
+ * still showing the raw replication year.
+ *
+ * An earlier attempt prefixed instead — `2027 · 06-15 00:00`. That made the X
+ * values unique, so the lines stopped overdrawing, but it left the calendar
+ * repeating along the axis (the reported symptom) and produced a
+ * self-contradicting `2027 · 2026-01` on monthly buckets, where the prefix
+ * says one year and the label says another.
+ */
+function plotStamp(
+  stamp: string, period: number | string | null | undefined, monthly: boolean,
+): string {
+  const m = ISO_YEAR.exec(stamp)
+  if (!m) return stamp                       // not a shape we recognise
+  const year = period == null ? m[1] : String(period)
+  // Monthly buckets are `YYYY-MM` and stop there.
+  if (monthly) return `${year}${m[2]}`
+  // `YYYY-MM-DDThh:mm:ss` → `YYYY-MM-DD hh:mm`. Snapshot seconds are always
+  // :00 and cost a fifth of the tick's width.
+  return `${year}${m[2].slice(0, 12).replace('T', ' ')}`
+}
+
 /**
  * The exact rows the chart plots, and the key they are plotted against.
  * Pure, so a test can assert the X values without rendering recharts — the
  * same reason `tableRows` is pure.
- *
- * PyPSA replays ONE operational year under every investment period, so on a
- * multi-period network `index` repeats: a one-day request returns 24 stamps
- * three times over, identical strings, distinguishable only by the parallel
- * `periods` array. Plotting against the bare stamp drew the same calendar day
- * once per period with nothing to tell them apart — the axis read as a chart
- * that had been pasted end-to-end three times. The table has consumed
- * `periods` since it was added; the chart never did.
- *
- * The prefix goes on only when more than one distinct period is present. With
- * a single period selected the axis is already unambiguous, and prefixing
- * every tick with the same year is noise.
  */
 export function chartRows(data: AssetResultsResponse):
   { xKey: string; rows: Array<Record<string, unknown>> } {
   const xKey = data.mode === 'duration' ? 'rank'
     : data.mode === 'monthly' ? 'month' : 'snapshot'
   // `duration` sorts every series independently and reports `periods: null` —
-  // rank 1 is not a moment in time, so there is nothing to qualify.
+  // rank 1 is not a moment in time, so there is nothing to rebase.
+  const timeIndexed = data.mode !== 'duration'
+  const monthly = data.mode === 'monthly'
   const periods = data.periods
-  const multi = !!periods && new Set(periods).size > 1
 
   const rows = data.index.map((stamp, i) => {
-    const period = periods?.[i]
-    // Monthly buckets are already `YYYY-MM`; `stampWithPeriod` would slice
-    // that down to the bare month. Prefix those directly instead.
-    const x = !multi || period == null ? stamp
-      : data.mode === 'monthly' ? `${period} · ${stamp}`
-      : stampWithPeriod(stamp, Number(period))
+    const x = timeIndexed ? plotStamp(stamp, periods?.[i], monthly) : stamp
     const row: Record<string, unknown> = { [xKey]: x }
     for (const c of data.columns) row[c.id] = data.series[c.id]?.[i] ?? null
     return row

@@ -54,47 +54,70 @@ describe('groupColumnsByUnit', () => {
 })
 
 describe('chartRows', () => {
-  it('plots the bare stamp when the network has no investment periods', () => {
+  it('keeps the stamp year when the network has no investment periods', () => {
     const { xKey, rows } = chartRows(base({
       index: ['2026-01-01T00:00:00', '2026-01-01T01:00:00'],
       columns: [c('p', 'MW')], series: { p: [120, 135] },
     }))
     expect(xKey).toBe('snapshot')
+    // Seconds dropped and the T replaced: a tick label, not a raw ISO string.
     expect(rows).toEqual([
-      { snapshot: '2026-01-01T00:00:00', p: 120 },
-      { snapshot: '2026-01-01T01:00:00', p: 135 },
+      { snapshot: '2026-01-01 00:00', p: 120 },
+      { snapshot: '2026-01-01 01:00', p: 135 },
     ])
   })
 
-  // The reported bug: one day of a three-period network drew the same day
-  // three times, because every period contributed the identical stamp.
-  it('gives each period its own X value instead of three identical days', () => {
+  // The reported bug. PyPSA replays one operational year under every period,
+  // so all three periods carry the SAME base-year stamp. Plotting that raw
+  // ran the calendar Jan→Dec once per period along one axis — the same date
+  // three times over.
+  it('rebases each period onto its own year so a date appears once', () => {
     const { rows } = chartRows(threePeriodDay([0, 1, 2]))
     expect(rows).toHaveLength(9)
     const xs = rows.map(r => r.snapshot)
     expect(new Set(xs).size).toBe(9)
-    expect(xs[0]).toBe('2027 · 06-15 00:00')
-    expect(xs[3]).toBe('2028 · 06-15 00:00')
-    expect(xs[6]).toBe('2029 · 06-15 00:00')
+    expect(xs[0]).toBe('2027-06-15 00:00')
+    expect(xs[3]).toBe('2028-06-15 00:00')
+    expect(xs[6]).toBe('2029-06-15 00:00')
+    // The base year the backend actually sent must appear nowhere on the axis.
+    expect(xs.some(x => String(x).startsWith('2026'))).toBe(false)
   })
 
-  it('leaves the axis unprefixed when a single period is selected', () => {
+  it('produces a monotonic axis, not the same year three times over', () => {
+    // The symptom stated as a property: sort order must match plot order.
+    const xs = chartRows(threePeriodDay([0, 1, 2])).rows.map(r => String(r.snapshot))
+    expect(xs).toEqual([...xs].sort())
+  })
+
+  it('shows the selected period year, not the replication year', () => {
+    // Single period selected: the axis should say 2027, not the 2026 the
+    // backend stamps every timestep with.
     const { rows } = chartRows(base({
       index: ['2026-06-15T00:00:00', '2026-06-15T01:00:00'],
       periods: [2027, 2027],
       columns: [c('p', 'MW')], series: { p: [1, 2] },
     }))
     expect(rows.map(r => r.snapshot))
-      .toEqual(['2026-06-15T00:00:00', '2026-06-15T01:00:00'])
+      .toEqual(['2027-06-15 00:00', '2027-06-15 01:00'])
   })
 
-  it('qualifies monthly buckets without slicing the month away', () => {
+  it('rebases monthly buckets instead of contradicting itself', () => {
+    // The prefix approach produced '2027 · 2026-01' — a label naming two
+    // different years for one bucket.
     const { xKey, rows } = chartRows(base({
       mode: 'monthly', index: ['2026-01', '2026-01'], periods: [2027, 2028],
       columns: [c('p__mean', 'MW')], series: { p__mean: [58, 61] },
     }))
     expect(xKey).toBe('month')
-    expect(rows.map(r => r.month)).toEqual(['2027 · 2026-01', '2028 · 2026-01'])
+    expect(rows.map(r => r.month)).toEqual(['2027-01', '2028-01'])
+  })
+
+  it('passes an unrecognised index value through untouched', () => {
+    const { rows } = chartRows(base({
+      index: ['not-a-stamp'], periods: [2027],
+      columns: [c('p', 'MW')], series: { p: [1] },
+    }))
+    expect(rows[0].snapshot).toBe('not-a-stamp')
   })
 
   it('leaves duration ranks alone — a rank is not a moment in time', () => {
