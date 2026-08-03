@@ -40,6 +40,10 @@ FORBIDDEN_FILES = {
     "auth_dev.db-wal",
     "auth_dev.db-shm",
     "pypsa-gui.db",      # a real user's database, if a build ran from app-data
+    # Written by `local_settings.py` into app-data and holds a live Anthropic
+    # key. On the forbidden list for the same reason `.env` is: a build that
+    # ever ran from an app-data directory would otherwise bundle it.
+    "local-settings.json",
 }
 
 # Anything starting `.env`, not an enumeration of the two that exist today.
