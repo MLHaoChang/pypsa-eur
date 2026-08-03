@@ -60,6 +60,7 @@ from routers import (
     clustering,
     compare,
     io,
+    local_settings,
     network,
     project_network,
     projects,
@@ -779,6 +780,10 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+# Desktop-only. Every route 404s in web mode; see routers/local_settings.py.
+app.include_router(
+    local_settings.router, prefix="/api/local-settings", tags=["local-settings"],
+)
 
 
 @app.on_event("startup")
