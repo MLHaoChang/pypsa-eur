@@ -10,8 +10,14 @@
 //
 // Task 17 (A/A identity): feed the same payload to both sides on every
 // drivable tab; no delta cell may carry a sign.
+// Task 18 (delta arithmetic): (1) sign convention — B bigger reads '+',
+// B smaller reads '-', consistently across tabs; (2) a `null` field must
+// read as "not reported", never as a literal zero that produces a bogus
+// reduction; (3) with a specific period selected, both sides must read
+// `by_period[period]`, never fall back to `total`.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 vi.mock('../api/projects')
@@ -269,5 +275,114 @@ describe('Task 17 — A/A identity', () => {
     //    only when |v| < 1e-9, so this is a real zero-arithmetic check, not
     //    a "the component happened not to render" false pass.
     expect(signedTexts()).toEqual([])
+  })
+})
+
+// ── Task 18 — Step 1: sign convention ────────────────────────────────────
+// bValue - aValue is the sign convention everywhere the source reads (vb -
+// va, bValue - aValue, cb - ca, ...). `invert` on <Delta> only recolours a
+// bad-direction change (e.g. cost going up) — it must NOT flip the sign
+// text. Scaling every (non-negative) fixture leaf uniformly by a constant
+// factor makes every non-zero delta in a tab share one sign: if the code
+// ever computed A - B instead of B - A on some tab, or if `invert` leaked
+// into the sign, this test catches it directly as a wrong-sign string.
+
+describe('Task 18 — sign convention', () => {
+  it.each(ALL_TABS)('%s: B bigger than A -> every rendered delta is positive', async (tab) => {
+    seedPicker(tab)
+    mockBothSides(1, 2)  // B = 2x A
+    renderCompare()
+    await waitFor(() => expect(signedTexts().length).toBeGreaterThan(0))
+    const wrongSign = signedTexts().filter(t => !t!.startsWith('+'))
+    expect(wrongSign).toEqual([])
+  })
+
+  it.each(ALL_TABS)('%s: B smaller than A -> every rendered delta is negative', async (tab) => {
+    seedPicker(tab)
+    mockBothSides(2, 1)  // B = 0.5x A
+    renderCompare()
+    await waitFor(() => expect(signedTexts().length).toBeGreaterThan(0))
+    const wrongSign = signedTexts().filter(t => t!.startsWith('+'))
+    expect(wrongSign).toEqual([])
+  })
+})
+
+// ── Task 18 — Step 2: zero vs absent baseline ────────────────────────────
+// A `null` category on one side means "not reported by this project" — it
+// must never be silently read as "reported, value zero", because that
+// manufactures a fake 100%-scale swing that isn't in the data at all.
+
+describe('Task 18 — zero vs absent baseline', () => {
+  it('emissions: a null side correctly bails to a message, not a fabricated -100%', async () => {
+    seedPicker('emissions')
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(async (name: string) => {
+      const s = summary(name, 1)
+      if (name === 'B') s.emissions = null
+      return s as never
+    })
+    renderCompare()
+    await waitFor(() => expect(screen.getByText(/No emissions data/)).toBeTruthy())
+    expect(screen.queryByText(/-100/)).toBeNull()
+    // The whole tab bails to a text banner instead of computing per-carrier
+    // deltas against a phantom zero — confirmed by there being NO delta
+    // cells at all, not just none matching "-100".
+    expect(signedTexts()).toEqual([])
+  })
+
+  // FINDING (do not fix CompareView.tsx — this documents the defect).
+  // EmissionsTab guards with `if (!emA || !emB) return <banner>` (OR — trips
+  // on EITHER side missing). CurtailmentTab guards with
+  // `if (!hasAnyA && !hasAnyB) return <banner>` (AND — only trips when BOTH
+  // sides are empty). So when only B's curtailment is null, the AND guard
+  // does not fire, and every read of `cB?.<field>` falls through readPV's
+  // `if (!pv) return 0` to a literal 0 — a project that never reported
+  // curtailment renders identically to a project that curtails exactly
+  // nothing. With A's system_rate_pct pinned to 100% the resulting Δ is
+  // literally -100.00%, i.e. "B eliminated all curtailment", which is not
+  // information the payload contains. This assertion encodes the CORRECT
+  // behaviour (no rate rendered as a literal 0, no fabricated -100 delta)
+  // and is expected to fail against the current implementation.
+  it.fails(
+    'FINDING: curtailment renders a null side as literal zero, not "not reported" (see comment above)',
+    async () => {
+      seedPicker('curtailment')
+      vi.mocked(projectsApi.resultsSummary).mockImplementation(async (name: string) => {
+        const s = summary(name, 1)
+        if (name === 'A') s.curtailment = { ...s.curtailment!, system_rate_pct: pv(100, 100, 100) }
+        if (name === 'B') s.curtailment = null
+        return s as never
+      })
+      renderCompare()
+      await waitFor(() => expect(screen.queryAllByText(/20\.0 GWh/).length).toBeGreaterThan(0))
+      expect(screen.queryByText(/-100/)).toBeNull()
+    },
+  )
+})
+
+// ── Task 18 — Step 3: period selection ───────────────────────────────────
+// With the period selector on a specific period, both sides must read
+// by_period[period] — never fall back to `total`. The fixture's asymmetric
+// split (total 82.5 / 27.5 / 55, no two equal) makes a total-fallback
+// visible: if either side leaked through as `total`, "82.50" would still be
+// on screen after selecting period 2030, and "27.50" would be missing or
+// wrong.
+
+describe('Task 18 — period selection', () => {
+  it('capacity CAPEX: selecting period 2030 reads by_period, not total', async () => {
+    seedPicker('capacity')
+    renderCompare()
+    await waitFor(() => expect(screen.queryAllByText(/82\.50 M€/).length).toBeGreaterThan(0))
+    await userEvent.click(screen.getByRole('button', { name: '2030' }))
+    await waitFor(() => expect(screen.queryAllByText(/27\.50 M€/).length).toBeGreaterThan(0))
+    expect(screen.queryAllByText(/82\.50 M€/).length).toBe(0)
+  })
+
+  it('dispatch OPEX: selecting period 2030 reads by_period, not total', async () => {
+    seedPicker('dispatch')
+    renderCompare()
+    await waitFor(() => expect(screen.queryAllByText(/12\.00 M€/).length).toBeGreaterThan(0))
+    await userEvent.click(screen.getByRole('button', { name: '2030' }))
+    await waitFor(() => expect(screen.queryAllByText(/4\.00 M€/).length).toBeGreaterThan(0))
+    expect(screen.queryAllByText(/12\.00 M€/).length).toBe(0)
   })
 })
