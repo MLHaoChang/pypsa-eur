@@ -143,6 +143,20 @@ def install_id() -> str:
         return fresh
 
 
+def _scenario_fields(metadata: dict) -> dict[str, str | None]:
+    """
+    `scenario_type` + `scenario_description` out of a legacy metadata.json.
+
+    Thin re-export of the router's decoder so both importers and the project
+    endpoints agree on what an old bundle means. Imported lazily: this module
+    is reachable from `routers.projects`, and a module-level import back the
+    other way is a cycle.
+    """
+    from routers.projects import _scenario_fields_from_meta
+
+    return _scenario_fields_from_meta(metadata)
+
+
 # ── Inventory ────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -153,6 +167,13 @@ class LegacyProject:
     has_network: bool
     parent_name: str | None
     scenario_description: str | None
+    # Split out of `scenario_description` when the on-disk project predates
+    # migration 0004 and still carries the retired `[type]` prefix inline.
+    # Passing the description through raw — which this importer did, while its
+    # sibling `legacy_migrate` was updated — recreated exactly the state 0004
+    # exists to delete: an uncategorised row whose description renders the
+    # marker as prose. This is the ONLY import path the desktop app offers.
+    scenario_type: str | None
     skip_reason: str | None
 
     @property
@@ -253,7 +274,8 @@ def inventory(root) -> list[LegacyProject]:
                 LegacyProject(
                     path=entry, dir_name=entry.name, name=entry.name,
                     has_network=False, parent_name=None,
-                    scenario_description=None, skip_reason=skip_reason,
+                    scenario_description=None, scenario_type=None,
+                    skip_reason=skip_reason,
                 )
             )
             for child in _org_tree_children(entry):
@@ -266,7 +288,7 @@ def inventory(root) -> list[LegacyProject]:
                         name=_org_tree_display_name(child, child_meta),
                         has_network=True,
                         parent_name=parent if isinstance(parent, str) else None,
-                        scenario_description=child_meta.get("scenario_description"),
+                        **_scenario_fields(child_meta),
                         skip_reason=None,
                     )
                 )
@@ -284,7 +306,7 @@ def inventory(root) -> list[LegacyProject]:
                 name=display[:_NAME_CAP],
                 has_network=entry.is_dir() and (entry / "network.nc").exists(),
                 parent_name=parent if isinstance(parent, str) else None,
-                scenario_description=metadata.get("scenario_description"),
+                **_scenario_fields(metadata),
                 skip_reason=skip_reason,
             )
         )
@@ -921,6 +943,7 @@ def _insert_row(db, candidate, destination, org_id, user_id, segment, name=None)
         storage_path=storage_value(relative),
         parent_project_id=None,
         scenario_description=candidate.scenario_description,
+        scenario_type=candidate.scenario_type,
         created_at=datetime.now(tz=timezone.utc),
         updated_at=datetime.now(tz=timezone.utc),
     )

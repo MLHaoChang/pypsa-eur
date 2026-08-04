@@ -54,6 +54,7 @@ from routers.projects import (
     PROJECTS_DIR,
     _read_meta,
     _safe_unpickle_results,
+    _scenario_fields_from_meta,
     _unwrap_results_state,
 )
 # Shared with the single-network Results endpoints. These were previously
@@ -277,7 +278,10 @@ def get_compare_state(
         solve_time=meta.get("solve_time"),
         dispatch_status=status_str,
         parent_project=meta.get("parent_project"),
-        scenario_description=meta.get("scenario_description"),
+        # Decoded, not raw: a bundle written before migration 0004 carries the
+        # category as a `[type]` prefix inside the description, and the
+        # compare payload would otherwise ship the marker as prose.
+        **_scenario_fields_from_meta(meta),
         created_at=meta.get("created_at"),
         last_saved=meta.get("last_saved"),
     )

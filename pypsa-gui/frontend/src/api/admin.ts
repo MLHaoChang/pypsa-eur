@@ -26,6 +26,9 @@ export interface LegacyProjectRow {
   name: string
   parent_project: string | null
   scenario_description: string | null
+  // Split out of the description for a pre-0004 bundle. Present on
+  // /api/projects/unclaimed too — the two routes serve the same data.
+  scenario_type: string | null
   has_network: boolean
   descendant_names: string[]
 }

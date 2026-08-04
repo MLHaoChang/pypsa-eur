@@ -884,12 +884,21 @@ async def import_bundle(
     if "network.nc" not in members:
         raise HTTPException(400, "Bundle is missing network.nc")
 
-    target_name = (name or "").strip()
-    if not target_name and "metadata.json" in members:
+    # Read the bundle's metadata ONCE — the name is not the only thing in it
+    # worth keeping. Corrupt/absent metadata degrades to {}, exactly as
+    # `_read_meta` does for an on-disk bundle.
+    bundle_meta: dict = {}
+    if "metadata.json" in members:
         try:
-            target_name = json.loads(zf.read("metadata.json").decode("utf-8")).get("name", "").strip()
+            loaded = json.loads(zf.read("metadata.json").decode("utf-8"))
+            if isinstance(loaded, dict):
+                bundle_meta = loaded
         except Exception:
-            target_name = ""
+            bundle_meta = {}
+
+    target_name = (name or "").strip()
+    if not target_name:
+        target_name = str(bundle_meta.get("name", "") or "").strip()
     if not target_name:
         base = (file.filename or "imported_project")
         for ext in (".pypsaproj.zip", ".zip"):
@@ -903,7 +912,19 @@ async def import_bundle(
     from services import project_registry
 
     project_registry.require_user(user)
-    _imported_project = project_registry.create_root(db, user, target_name)
+    # Carry the bundle's scenario labels onto the ROW, not just onto the files.
+    # `_project_info_db` serves the DB row and overrides whatever the storage
+    # dir says, so a row created without these makes the restored
+    # metadata.json's correct values unreachable — the export round-tripped
+    # them and the import threw them away. `_scenario_fields_from_meta` also
+    # splits a pre-0004 bundle's inline `[type]` prefix on the way in.
+    #
+    # The parent link is deliberately NOT restored: a bundle is a single
+    # project, and its `parent_project` names a project that may not exist
+    # here. Imports land as roots, which is the pre-existing behaviour.
+    _imported_project = project_registry.create_root(
+        db, user, target_name, **_scenario_fields_from_meta(bundle_meta),
+    )
     target_name = _imported_project.name
     dest = project_registry.ensure_project_dir(_imported_project)
     for fname in _BUNDLE_FILES:
@@ -2366,9 +2387,30 @@ def update_scenario_metadata(
     # would be a worse trade than a bundle whose sidecar lags one field.
     try:
         project_dir = project_registry.project_dir(project)
-        if project_dir.is_dir():
+        if not project_dir.is_dir():
+            logger.info(
+                "scenario metadata for '%s' not mirrored: no storage directory "
+                "(the project has never been saved)", project.name,
+            )
+        else:
             meta = _read_meta(project_dir)
-            if meta:
+            if not meta:
+                # `_read_meta` flattens missing, corrupt AND unreadable to {} —
+                # and on macOS "unreadable" includes the ~/Documents TCC
+                # PermissionError this app hits after a rebuild. Skipping
+                # silently made a bundle export quietly disagree with the DB
+                # with nothing anywhere to explain it. We do not WRITE a fresh
+                # metadata.json here: this route owns two label fields, and
+                # inventing the other dozen keys (bus_count, objective,
+                # parent_project…) from nothing would replace a readable
+                # sidecar's worth of lost data with a wrong one.
+                logger.warning(
+                    "scenario metadata for '%s' not mirrored: metadata.json is "
+                    "missing or unreadable, so a bundle export of this project "
+                    "will not carry the edit until it is next saved",
+                    project.name,
+                )
+            else:
                 meta["scenario_description"] = project.scenario_description
                 meta["scenario_type"] = project.scenario_type
                 _write_meta(project_dir, meta)

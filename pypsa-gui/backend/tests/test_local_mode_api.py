@@ -220,6 +220,67 @@ def test_import_folder_actually_copies_when_applied(local_client, monkeypatch, t
     assert "OldProject" in {p["name"] for p in local_client.get("/api/projects/").json()}
 
 
+def test_folder_import_splits_a_legacy_type_prefix(local_client, monkeypatch, tmp_path):
+    """
+    This is the ONLY import door the desktop app offers, and pre-desktop
+    projects on disk carry their category as a `[type]` prefix inside
+    `scenario_description` — the encoding migration 0004 exists to retire.
+
+    Importing the description verbatim recreates the exact state 0004 deletes:
+    a row with no category whose description renders the marker as prose. The
+    sibling importer (`legacy_migrate`, behind the auth-mode claim flow) was
+    updated for this and this one was missed, so the two doors disagreed about
+    what the same folder meant.
+    """
+    import json
+
+    monkeypatch.setenv("PYPSAGUI_PROJECTS_ROOT", str(tmp_path / "dest"))
+    source = tmp_path / "legacy"
+    (source / "Tagged").mkdir(parents=True)
+    (source / "Tagged" / "network.nc").write_bytes(b"not really a network")
+    (source / "Tagged" / "metadata.json").write_text(json.dumps({
+        "name": "Tagged",
+        "scenario_description": "[stress] cold winter, no imports",
+    }), encoding="utf-8")
+
+    r = local_client.post(
+        "/api/projects/import-folder", json={"path": str(source), "apply": True}
+    )
+    assert r.status_code == 200, r.text
+    assert "Tagged" in r.json()["imported"], r.text
+
+    row = next(
+        p for p in local_client.get("/api/projects/").json() if p["name"] == "Tagged"
+    )
+    assert row["scenario_type"] == "stress"
+    assert row["scenario_description"] == "cold winter, no imports"
+    assert "[stress]" not in (row["scenario_description"] or "")
+
+
+def test_folder_import_leaves_a_merely_bracketed_description_alone(local_client, monkeypatch, tmp_path):
+    # "[draft]" is prose, not an encoding. Eating the user's first word here
+    # would be unrecoverable.
+    import json
+
+    monkeypatch.setenv("PYPSAGUI_PROJECTS_ROOT", str(tmp_path / "dest"))
+    source = tmp_path / "legacy"
+    (source / "Prose").mkdir(parents=True)
+    (source / "Prose" / "network.nc").write_bytes(b"not really a network")
+    (source / "Prose" / "metadata.json").write_text(json.dumps({
+        "name": "Prose",
+        "scenario_description": "[draft] cut the gas fleet",
+    }), encoding="utf-8")
+
+    local_client.post(
+        "/api/projects/import-folder", json={"path": str(source), "apply": True}
+    )
+    row = next(
+        p for p in local_client.get("/api/projects/").json() if p["name"] == "Prose"
+    )
+    assert row["scenario_type"] is None
+    assert row["scenario_description"] == "[draft] cut the gas fleet"
+
+
 def test_importing_the_same_folder_twice_does_not_duplicate(local_client, monkeypatch, tmp_path):
     """
     A user who clicks Import twice, or points at the same folder next week,

@@ -648,6 +648,7 @@ class CompareState(BaseModel):
     # Scenario-tree fields piped through unmodified for the compare view.
     parent_project: str | None = None
     scenario_description: str | None = None
+    scenario_type: str | None = None
     created_at: str | None = None
     last_saved: str | None = None
 

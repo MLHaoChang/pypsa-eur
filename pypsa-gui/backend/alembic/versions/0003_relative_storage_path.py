@@ -64,9 +64,14 @@ _LOG = logging.getLogger("alembic.runtime.migration")
 INDEX_NAME = "uq_projects_org_id_storage_path"
 
 # Untyped columns on purpose. Declaring `id` as `sa.Uuid` makes SQLAlchemy
-# re-encode the value on the way back into the WHERE clause — on SQLite that is
-# 32 hex characters with no dashes, while 0001 stored the dashed form, so every
-# UPDATE matches zero rows and the migration silently does nothing.
+# decode the stored value into a `uuid.UUID` on the way OUT, and `str()` of that
+# is the DASHED form — while 0001's `CHAR(32)` column holds 32 hex characters
+# with no dashes. Compared as text the two never match, so every UPDATE affects
+# zero rows and the migration silently does nothing.
+#
+# (This comment previously stated the opposite — that 0001 stored the dashed
+# form. The conclusion was right and the mechanism was backwards; corrected
+# against the live database while writing 0004, which repeats the pattern.)
 _PROJECTS = sa.table("projects", sa.column("id"), sa.column("storage_path"))
 
 

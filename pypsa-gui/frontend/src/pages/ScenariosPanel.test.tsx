@@ -304,8 +304,10 @@ describe('editing a scenario after it was created', () => {
     const dlg = await screen.findByRole('dialog')
     await userEvent.clear(within(dlg).getByRole('textbox'))
     await userEvent.click(within(dlg).getByRole('button', { name: 'Save' }))
+    // Only the cleared field — the category was not touched, so its key is
+    // absent and the route leaves it alone.
     await waitFor(() => expect(vi.mocked(projectsApi.updateScenario))
-      .toHaveBeenCalledWith('id-typed', { description: null, scenario_type: 'stress' }))
+      .toHaveBeenCalledWith('id-typed', { description: null }))
   })
 
   it('opens uncategorised as uncategorised, not pre-set to a guess', async () => {
@@ -337,9 +339,48 @@ describe('editing a scenario after it was created', () => {
     await userEvent.selectOptions(within(dlg).getByRole('combobox'), '')
     await userEvent.click(within(dlg).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(vi.mocked(projectsApi.updateScenario))
-      .toHaveBeenCalledWith('id-typed', {
-        description: 'cold winter', scenario_type: null,
-      }))
+      .toHaveBeenCalledWith('id-typed', { scenario_type: null }))
+  })
+
+  it('sends only the field that changed, not both', async () => {
+    // The route is partial: an absent key means "leave alone". Sending both
+    // unconditionally is what made the next test's bug possible.
+    vi.mocked(projectsApi.updateScenario).mockResolvedValue({ name: 'base' } as never)
+    renderPanel()
+    const row = await rowFor('base')
+    await userEvent.click(within(row).getByTitle(/^Edit this scenario/))
+    const dlg = await screen.findByRole('dialog')
+    await userEvent.type(within(dlg).getByRole('textbox'), 'only the text')
+    await userEvent.click(within(dlg).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(vi.mocked(projectsApi.updateScenario))
+      .toHaveBeenCalledWith('id-base', { description: 'only the text' }))
+  })
+
+  it('does not wipe a category it cannot display', async () => {
+    // A category this build does not recognise — added server-side, or
+    // written by an importer — resolves to `type: null`, so the select opens
+    // on "— none —". Sending the select's value regardless would clear a
+    // category the user never touched and could not see.
+    vi.mocked(projectsApi.updateScenario).mockResolvedValue({ name: 'exotic' } as never)
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({
+        name: 'exotic', id: 'id-exotic',
+        scenario_type: 'sensitivity', scenario_description: 'keep my category',
+      }),
+    ] as never)
+    renderPanel()
+    const row = await rowFor('exotic')
+    await userEvent.click(within(row).getByTitle(/^Edit this scenario/))
+    const dlg = await screen.findByRole('dialog')
+    expect((within(dlg).getByRole('combobox') as HTMLSelectElement).value).toBe('')
+    await userEvent.clear(within(dlg).getByRole('textbox'))
+    await userEvent.type(within(dlg).getByRole('textbox'), 'edited text')
+    await userEvent.click(within(dlg).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(vi.mocked(projectsApi.updateScenario)).toHaveBeenCalled())
+    const [, patch] = vi.mocked(projectsApi.updateScenario).mock.calls[0]
+    expect(patch).toEqual({ description: 'edited text' })
+    expect(patch).not.toHaveProperty('scenario_type')
   })
 
   it('is offered even when the project’s files are gone', async () => {

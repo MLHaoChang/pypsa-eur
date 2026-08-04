@@ -10,6 +10,7 @@ only takes the DB path when auth is enabled AND a user is resolved.
 from __future__ import annotations
 
 import contextlib
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -399,6 +400,88 @@ def test_an_empty_patch_body_is_a_no_op(session_local):
     assert resp.status_code == 200
     assert resp.json()["scenario_type"] == "stress"
     assert resp.json()["scenario_description"] == "keep"
+
+
+# ── The seams: a category must survive leaving and re-entering the app ───────
+# QA found the feature exported the field correctly and then threw it away on
+# the way back in. `_project_info_db` serves the DB ROW and overrides the
+# storage dir, so a row created without the category makes the correct value
+# in the restored metadata.json unreachable rather than merely redundant.
+
+def test_a_bundle_round_trip_keeps_the_category(session_local):
+    import io
+    import zipfile
+
+    _org, _admin, root = _seed_admin_root(session_local, name="Exported")
+    with _client_for("admin@example.com") as client:
+        # Branch a child rather than patching the fixture root: the scenario
+        # path writes a real metadata.json, which is what a bundle carries.
+        # (A project that has never been saved has no sidecar, so PATCH has
+        # nowhere to mirror to — see the warning it logs for that case.)
+        child_id = client.post(
+            f"/api/projects/{root.id}/scenarios",
+            json={"name": "Branch", "description": "cold winter", "scenario_type": "stress"},
+        ).json()["id"]
+
+        bundle = client.get(f"/api/projects/{child_id}/bundle")
+        assert bundle.status_code == 200, bundle.text
+
+        # The bundle must carry it…
+        meta = json.loads(
+            zipfile.ZipFile(io.BytesIO(bundle.content)).read("metadata.json")
+        )
+        assert meta["scenario_type"] == "stress"
+        assert meta["scenario_description"] == "cold winter"
+
+        # …and the import must put it on the ROW, not only back on disk.
+        # `_project_info_db` serves the row and overrides the storage dir, so
+        # a row created without the category makes the restored value
+        # unreachable rather than merely redundant.
+        restored = client.post(
+            "/api/projects/import_bundle",
+            files={"file": ("Branch.pypsaproj.zip", bundle.content, "application/zip")},
+            params={"name": "Reimported"},
+        )
+        assert restored.status_code in (200, 201), restored.text
+
+        row = next(
+            r for r in client.get("/api/projects/").json() if r["name"] == "Reimported"
+        )
+        assert row["scenario_type"] == "stress"
+        assert row["scenario_description"] == "cold winter"
+
+
+def test_an_old_bundle_is_split_on_import_not_stored_tagged(session_local, tmp_path):
+    # A bundle exported before migration 0004 carries the category as a
+    # `[type]` prefix inline. Importing it verbatim recreates exactly the
+    # state 0004 exists to delete: an uncategorised row whose description
+    # renders the marker as prose.
+    import io
+    import zipfile
+
+    _org, _admin, _root = _seed_admin_root(session_local, name="Host")
+    seed = tmp_path / "oldbundle"
+    _seed_network(seed)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("network.nc", (seed / "network.nc").read_bytes())
+        zf.writestr("metadata.json", json.dumps({
+            "name": "OldBundle",
+            "scenario_description": "[stress] cold winter",
+        }))
+
+    with _client_for("admin@example.com") as client:
+        resp = client.post(
+            "/api/projects/import_bundle",
+            files={"file": ("OldBundle.pypsaproj.zip", buf.getvalue(), "application/zip")},
+        )
+        assert resp.status_code in (200, 201), resp.text
+        rows = {r["name"]: r for r in client.get("/api/projects/").json()}
+
+    assert "OldBundle" in rows
+    assert rows["OldBundle"]["scenario_type"] == "stress"
+    assert rows["OldBundle"]["scenario_description"] == "cold winter"
 
 
 def test_scenario_child_metadata_parent_name_in_sync(session_local):

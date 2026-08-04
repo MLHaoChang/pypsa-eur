@@ -238,6 +238,11 @@ def list_legacy_projects_endpoint(
             "name": project.name,
             "parent_project": project.parent_project,
             "scenario_description": project.scenario_description,
+            # Same payload as /api/projects/unclaimed — this route is the same
+            # `legacy_migrate` data behind an admin door, and a field present
+            # on one and absent on the other is a trap for whoever consumes
+            # both.
+            "scenario_type": project.scenario_type,
             "has_network": project.has_network,
             "descendant_names": project.descendant_names,
         }

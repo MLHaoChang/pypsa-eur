@@ -647,15 +647,22 @@ function EditScenarioDialog({ project, onClose, onSaved }: EditDialogProps) {
   const [description, setDescription] = useState(initial.text)
 
   const saveMut = useMutation({
-    // Both keys always sent: this dialog owns both fields and shows their
-    // current values, so an empty box means "clear it" — which is `null`, not
-    // an omitted key. Omission is for callers that are not editing a field at
-    // all, and sending `undefined` here would silently leave a cleared
-    // description in place.
-    mutationFn: () => projectsApi.updateScenario(project.id ?? project.name, {
-      description: description.trim() || null,
-      scenario_type: scenType || null,
-    }),
+    // Only the fields the user actually CHANGED, using the route's partial
+    // semantics — an absent key means "leave alone", `null` means "clear".
+    //
+    // Sending both unconditionally looked simpler and silently destroyed
+    // data: a category this build does not recognise (one added server-side,
+    // or written by an older importer) resolves to `type: null`, so the select
+    // opens on "— none —", and saving a DESCRIPTION-only edit would have
+    // cleared the category the user never touched and could not see.
+    mutationFn: () => {
+      const patch: { description?: string | null; scenario_type?: string | null } = {}
+      if (description.trim() !== initial.text.trim()) {
+        patch.description = description.trim() || null
+      }
+      if ((scenType || null) !== initial.type) patch.scenario_type = scenType || null
+      return projectsApi.updateScenario(project.id ?? project.name, patch)
+    },
     onSuccess: onSaved,
     onError: (err) => {
       const e = err as { response?: { data?: { detail?: unknown } } }

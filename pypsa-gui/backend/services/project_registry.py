@@ -215,8 +215,17 @@ def create_root(
     name: str,
     *,
     scenario_description: str | None = None,
+    scenario_type: str | None = None,
 ) -> Project:
-    """Insert a root (parent-less) project row for the caller's org."""
+    """
+    Insert a root (parent-less) project row for the caller's org.
+
+    `scenario_type` mirrors `create_scenario`'s parameter. It exists because
+    the BUNDLE IMPORTER creates roots: a `.pypsaproj` carries the category in
+    its metadata.json, and without somewhere to put it the import silently
+    dropped the field — `_project_info_db` serves the DB row, so the correct
+    value sitting in the restored storage dir was unreachable.
+    """
     org_id = _org_id_for(db, user)
     project_id = uuid.uuid4()
     segment = use_org_segment()
@@ -230,6 +239,7 @@ def create_root(
         ),
         parent_project_id=None,
         scenario_description=scenario_description,
+        scenario_type=scenario_type,
         created_at=_now(),
         updated_at=_now(),
     )

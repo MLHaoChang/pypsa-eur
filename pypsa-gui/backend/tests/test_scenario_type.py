@@ -223,6 +223,32 @@ def test_downgrade_restores_the_prefix_before_dropping_the_column(migration_modu
     assert rows["e"] is None
 
 
+def test_downgrade_refuses_to_overflow_the_declared_column_width(migration_module):
+    # `scenario_description` is String(500) and 500 is also the API's own cap,
+    # so re-prefixing a description written at the limit pushes it to 511.
+    # SQLite would take it silently; Postgres aborts the whole downgrade with
+    # "value too long", stranding the database between two revisions during a
+    # rollback. The category is dropped for those rows instead — it is
+    # recoverable by re-labelling, and the description is the user's text.
+    engine = sa.create_engine("sqlite://")
+    at_limit = "x" * 500
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE projects (id TEXT PRIMARY KEY, scenario_description TEXT,"
+            " scenario_type TEXT)"
+        )
+        conn.exec_driver_sql("INSERT INTO projects VALUES ('long', ?, 'stress')", (at_limit,))
+        conn.exec_driver_sql("INSERT INTO projects VALUES ('short', 'ok', 'stress')")
+        _run(migration_module, "downgrade", conn)
+        rows = dict(
+            conn.exec_driver_sql("SELECT id, scenario_description FROM projects").all()
+        )
+
+    assert len(rows["long"]) <= 500
+    assert rows["long"] == at_limit          # the prose is untouched
+    assert rows["short"] == "[stress] ok"    # the ordinary row still round-trips
+
+
 def test_a_category_the_old_format_cannot_hold_is_dropped_not_mangled(migration_module):
     # A value added after this migration has nowhere to go in the prefix
     # encoding. Losing it on rollback is honest; smuggling it into the
