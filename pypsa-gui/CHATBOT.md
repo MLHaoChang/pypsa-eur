@@ -12,16 +12,57 @@ The assistant is **off** until two prerequisites are met:
 1. The `anthropic` Python package is installed (pulled in by
    [backend/requirements.txt](backend/requirements.txt) — runs
    `pip install -r requirements.txt` from a fresh checkout).
-2. The `ANTHROPIC_API_KEY` environment variable is set in the backend
-   process. Either export it in your shell before launching uvicorn, or
-   drop it into a gitignored `.env` file the backend reads at startup.
+2. An `ANTHROPIC_API_KEY` reaches the backend process. There are three ways,
+   and they are tried in this order of authority:
 
-If either is missing the panel renders disabled and surfaces
-`error_kind='missing_api_key'` or `error_kind='sdk_not_installed'`
-explaining the gap. Setting the key requires no restart of the frontend.
+   | Source | Set it by | Best for |
+   |---|---|---|
+   | The launching shell | `export ANTHROPIC_API_KEY=…` before starting uvicorn | CI, one-off runs |
+   | `<app-data>/user.env` | **In the app** — see below | The packaged app |
+   | `pypsa-gui/backend/.env` | Editing the gitignored file | A developer checkout |
+
+   A value exported in the shell always wins; `user.env` beats `backend/.env`,
+   so a key saved from the UI is not silently reverted by a stale `.env` on the
+   next restart.
+
+If either prerequisite is missing the panel surfaces
+`error_kind='missing_api_key'` or `error_kind='sdk_not_installed'` explaining
+the gap. Setting the key requires no restart of the frontend.
+
+### Supplying the key in the packaged app
+
+The distributed `.app` / `.exe` deliberately ships **no** `backend/.env` — that
+file carries a real `ANTHROPIC_API_KEY` *and* the `SECRET_KEY` that signs
+session cookies, and bundling it would publish both
+(`backend/smoke/check_bundle.py` fails the build if it is ever present). So the
+packaged app has to be told the key from inside itself:
+
+1. Open the chat panel and send anything. The assistant answers with an
+   **API key missing** banner.
+2. The banner carries the key field. Paste an Anthropic key and press **Save**.
+3. The assistant is usable immediately — no restart. The key is written to
+   `user.env` in the app-data directory (`~/Library/Application Support/PyPSA
+   Studio/user.env` on macOS, `%LOCALAPPDATA%\PyPSA Studio\user.env` on
+   Windows), mode `0600`, and reloaded on every launch.
+
+The same field also appears in a server deployment, but only for
+**super-admins**: one `ANTHROPIC_API_KEY` is shared by every organisation on
+the instance, so an org admin has no authority over it and is shown who to ask
+instead. The desktop app's single seeded user is a super-admin, so this never
+gets in the way there.
+
+`user.env` is plaintext, like the `.env` it replaces. It is not the OS
+keychain: that would mean bundling `keyring` plus a platform backend for each
+of macOS and Windows, and it defends against a threat — another process reading
+your files as you — that `backend/.env` already accepts. Only
+`ANTHROPIC_API_KEY` is ever read from or written to it; anything else in the
+file is ignored, so it cannot be used to set `SECRET_KEY` or repoint the
+database.
 
 The `/api/chat/health` endpoint reports `anthropic_api_key_present` without
 ever echoing the key value, so you can probe the backend's view safely.
+`GET /api/chat/settings/api-key` (super-admin only) additionally reports where
+the live key came from and its last four characters — never more.
 
 ## Voice input
 
@@ -115,7 +156,12 @@ The error banner above the message list recognises:
 - `confirmation_expired` — TTL elapsed before Approve / Deny.
 - `rate_limited` — Anthropic 429 or `RateLimitError`. The agent backs off.
 - `unauthorized` — Anthropic rejected the API key. Update and retry.
-- `missing_api_key` — `ANTHROPIC_API_KEY` not set in the backend env.
+- `missing_api_key` — `ANTHROPIC_API_KEY` not set in the backend env. The
+  banner carries the key field itself; see **Supplying the key in the packaged
+  app** above.
+- `inactive_acting_user` — the signed-in account stopped being active partway
+  through a turn (disabled by an administrator, say). The stream's tools refuse
+  from that point on; sign in again.
 
 The `cold_path` activate is **not** an error — the banner self-dismisses
 to keep the conversation clean (v6-F2).

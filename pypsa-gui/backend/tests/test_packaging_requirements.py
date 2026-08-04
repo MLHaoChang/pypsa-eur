@@ -66,9 +66,11 @@ OPTIONAL_AT_RUNTIME = {
     ),
     "anthropic": (
         "chat_service returns the typed error `sdk_not_installed` and the "
-        "panel renders disabled. Pinned anyway — the panel is meant to work — "
-        "but note the packaged app has no ANTHROPIC_API_KEY (check_bundle.py "
-        "keeps .env out of the bundle), so the key gate fails first."
+        "panel renders disabled. Pinned anyway — the panel is meant to work. "
+        "The packaged app still ships no .env (check_bundle.py keeps it out), "
+        "but since U-1 the key gate is no longer a dead end: the "
+        "missing_api_key banner carries a field that writes "
+        "<app-data>/user.env (services/app_secrets.py)."
     ),
     "pypdf": (
         "upload_service returns (None, False) — page count unknown. A "
