@@ -7,22 +7,19 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Load `pypsa-gui/backend/.env` (gitignored) before any module reads
-# `os.environ` — this is what keeps `ANTHROPIC_API_KEY` (and any other
-# operator-supplied env vars) alive across backend restarts initiated
-# outside the original launching shell. `python-dotenv` ships in the pixi
-# env; the import is soft so a missing package degrades to "env-only" mode
-# rather than crashing startup.
-try:
-    from dotenv import load_dotenv
-    _ENV_PATH = Path(__file__).parent / ".env"
-    if _ENV_PATH.exists():
-        # override=False so an env var set in the launching shell wins over
-        # the .env file value (matches python-dotenv's documented contract
-        # and avoids surprising the operator who set a key inline).
-        load_dotenv(dotenv_path=_ENV_PATH, override=False)
-except ImportError:
-    pass
+# Populate `os.environ` before ANY module reads it — `settings.get_settings()`
+# caches on first call, so a load that happens later has already missed.
+#
+# Two files feed it, in this order of authority: the launching shell, then
+# `<app-data>/user.env` (written from Settings — this is how the PACKAGED app
+# receives an `ANTHROPIC_API_KEY`, since the bundle deliberately ships no
+# `.env`), then the gitignored `pypsa-gui/backend/.env` a developer checkout
+# has. `services/app_secrets` owns the precedence and the reasoning behind it;
+# it is imported here, above the third-party imports, so nothing can read
+# configuration ahead of it.
+from services import app_secrets
+
+app_secrets.bootstrap_environment(backend_env=Path(__file__).parent / ".env")
 
 import pypsa
 from fastapi import Depends, FastAPI, HTTPException, Request

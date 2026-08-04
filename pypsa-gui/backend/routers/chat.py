@@ -27,8 +27,9 @@ from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
 from db.models import Session as SessionRow
-from deps import current_session
-from services import chat_service
+from db.models import User
+from deps import current_session, optional_user
+from services import app_secrets, chat_service
 
 
 router = APIRouter()
@@ -65,6 +66,18 @@ class ConfirmRequest(BaseModel):
     decision: str  # "approve" | "deny"
 
 
+class ApiKeyRequest(BaseModel):
+    """
+    Body for PUT /api/chat/settings/api-key.
+
+    No `Field(max_length=…)` here on purpose: `app_secrets.validate_value`
+    owns every rule about what is storable, and duplicating one of them in the
+    schema splits the error copy across two layers that would then drift.
+    """
+
+    value: str
+
+
 class ImportRequest(BaseModel):
     """
     Body for POST /api/chat/import (#27).
@@ -95,6 +108,73 @@ def chat_health() -> dict[str, Any]:
         "default_model": chat_service.DEFAULT_MODEL,
         "confirmation_ttl_seconds": chat_service.CONFIRMATION_TTL_SECONDS,
     }
+
+
+# ── U-1 — supplying the API key from inside the app ─────────────────────────
+#
+# These live on the CHAT router, not the admin one, and that is the whole point.
+# `main.py` mounts `admin.router` behind `Depends(local_mode.reject_in_local_mode)`,
+# so every `/api/admin/*` route 404s in the desktop app — which is precisely the
+# deployment that has no `backend/.env` and therefore no key. Putting the
+# setting there would have made it unreachable in the only place it is needed.
+#
+# The gate is `is_super_admin`, matching `solve_queue.clear_finished`: this key
+# is one process-global environment variable shared by every organisation, so an
+# ORG admin has no authority over it. Local mode seeds its single user with
+# `is_super_admin=True` (`local_mode.py:132`), so the desktop app passes.
+
+
+def _require_super_admin(user: User | None) -> User:
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not user.is_super_admin:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "The Anthropic API key is shared by every organization on this "
+                "instance, so only super-admins can change it."
+            ),
+        )
+    return user
+
+
+@router.get("/settings/api-key")
+def get_api_key_settings(
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Whether a key is configured, where it came from, and a 4-char hint."""
+    _require_super_admin(user)
+    return app_secrets.status("ANTHROPIC_API_KEY")
+
+
+@router.put("/settings/api-key")
+def put_api_key_settings(
+    payload: ApiKeyRequest,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """
+    Store an Anthropic API key and apply it to this process immediately.
+
+    Applying it in-process is not a convenience: a packaged `.app` gives the
+    user no way to restart the backend, so a key that only took effect on the
+    next launch would read as "saving did nothing".
+    """
+    _require_super_admin(user)
+    try:
+        return app_secrets.set_secret("ANTHROPIC_API_KEY", payload.value)
+    except app_secrets.SecretValueError as exc:
+        # 422, not 400: this is a body-validation failure in the same class as
+        # the pydantic ones, and the message is written to be shown verbatim.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/settings/api-key")
+def delete_api_key_settings(
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Forget the stored key — from the file and from this process."""
+    _require_super_admin(user)
+    return app_secrets.clear_secret("ANTHROPIC_API_KEY")
 
 
 @router.get("/history")

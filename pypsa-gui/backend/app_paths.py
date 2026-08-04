@@ -85,3 +85,21 @@ def default_flat_projects_root() -> Path:
 def default_database_url() -> str:
     """Absolute on purpose: a relative SQLite URL resolves against cwd."""
     return f"sqlite+pysqlite:///{(app_data_dir() / 'pypsa-gui.db').as_posix()}"
+
+
+def user_env_file() -> Path:
+    """
+    Operator-supplied environment, editable from inside the running app.
+
+    U-1. `backend/.env` is deliberately excluded from the frozen bundle
+    (`pypsa-gui.spec`, `smoke/check_bundle.py`) because it carries a real
+    `ANTHROPIC_API_KEY` *and* the `SECRET_KEY` that signs sessions — shipping it
+    would hand every install the developer's secrets. Nothing replaced it, so
+    the packaged app had no supported way to receive an API key at all and the
+    chat panel was permanently disabled in the shipped artifact.
+
+    This file is that replacement. It lives in app-data rather than the bundle,
+    so it survives app updates and belongs to the person who typed the key
+    rather than to whoever built the `.app`.
+    """
+    return app_data_dir() / "user.env"
