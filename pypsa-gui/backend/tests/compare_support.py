@@ -87,3 +87,63 @@ STOCK_FIELDS = frozenset(k for k, v in KIND.items() if v == STOCK)
 def classify(model_name: str, field: str) -> str:
     """Kind for `<model>.<field>`; KeyError if unclassified (deliberate)."""
     return KIND[f"{model_name}.{field}"]
+
+
+def summarise(n) -> dict:
+    """
+    Every tab's payload for one network, by calling the compute functions the
+    endpoint calls. Mirrors `get_results_summary`'s own argument derivation
+    (routers/compare.py:2649-2703) so the two cannot drift apart silently.
+    """
+    import pathlib
+    import tempfile
+
+    import routers.compare as CMP
+    from services import period_utils
+    from services.dispatch_status import dispatch_status as _classify_dispatch
+
+    # Same derivation the endpoint uses (routers/compare.py:2686-2693):
+    # `is_multi = isinstance(n.snapshots, pd.MultiIndex)` — `is_multi_period`
+    # is that exact check, factored into services/period_utils.py.
+    is_multi = period_utils.is_multi_period(n)
+    periods = sorted({int(p) for p in n.snapshots.get_level_values(0)}) if is_multi else []
+    # `has_solve` is NOT "generators_t.p is not None" (that's always a
+    # DataFrame, never None, so the naive check is always True). The endpoint
+    # asks the same dispatch-freshness classifier `/results/*` uses elsewhere
+    # in this app: "fresh" means dispatch tables exist AND match the current
+    # topology (services/dispatch_status.py).
+    has_solve = _classify_dispatch(n) == "fresh"
+
+    # The endpoint passes `project.directory` here so `_compute_lost_load_summary`
+    # can read that project's `results_state.pkl` (the VOLL-slack capture that
+    # doesn't survive a netcdf round-trip — see that function's docstring). The
+    # golden network is installed purely in-memory via `install_golden`, with no
+    # project directory and therefore no such pickle. A guaranteed-nonexistent
+    # path reproduces the same "no capture available" branch the endpoint takes
+    # for any solved project that was never run through solver_service, rather
+    # than fabricating a directory that might coincidentally exist.
+    no_project_dir = pathlib.Path(tempfile.gettempdir()) / "compare-support-no-project"
+
+    return {
+        "periods": periods,
+        "is_multi": is_multi,
+        "capacity":        CMP._compute_capacity_summary(n, periods, is_multi, has_solve),
+        "dispatch":        CMP._compute_dispatch_summary(n, periods, is_multi, has_solve),
+        "loading":         CMP._compute_loading_summary(n, periods, is_multi, has_solve),
+        "prices":          CMP._compute_prices_summary(n, periods, is_multi, has_solve),
+        "emissions":       CMP._compute_emissions_summary(n, periods, is_multi, has_solve),
+        # prices_from_state=False is what the endpoint passes for a loaded
+        # bundle (routers/compare.py:2700) — read the network's own duals,
+        # never the live singleton's cached snapshot.
+        "economics":       CMP._compute_economics_summary(n, periods, is_multi, has_solve,
+                                                          prices_from_state=False),
+        "curtailment":     CMP._compute_curtailment_summary(n, periods, is_multi, has_solve),
+        # NOTE: signature is (project_dir, n, periods, is_multi, has_solve) —
+        # the only compute function with a leading path argument.
+        "lost_load":       CMP._compute_lost_load_summary(no_project_dir, n, periods, is_multi, has_solve),
+        "storage_cycling": CMP._compute_storage_cycling_summary(n, periods, is_multi, has_solve),
+    }
+
+
+TAB_FIELDS = ("capacity", "dispatch", "loading", "prices", "emissions",
+              "economics", "curtailment", "lost_load", "storage_cycling")

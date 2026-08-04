@@ -5,6 +5,7 @@ import pytest
 
 from models import schemas
 from tests import compare_support as cs
+from tests.golden import fixture as gf
 
 MODELS_WITH_PERIOD_VALUES = (
     "CapacityComparison", "DispatchComparison", "LineLoadingEntry",
@@ -48,3 +49,17 @@ def test_the_registry_names_no_field_that_has_been_removed():
         if model is None or field not in model.model_fields:
             stale.append(key)
     assert not stale, f"registry entries with no matching field: {stale}"
+
+
+@pytest.fixture()
+def golden(reset_backend):
+    """Solved golden network, installed after conftest's autouse reset."""
+    n = gf.solve_golden_network()
+    gf.install_golden(n)
+    return n
+
+
+def test_the_harness_derives_the_same_periods_the_fixture_declares(golden):
+    s = cs.summarise(golden)
+    assert s["is_multi"] is True
+    assert s["periods"] == list(gf.GOLDEN_PERIODS)
