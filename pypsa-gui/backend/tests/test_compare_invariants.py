@@ -296,3 +296,20 @@ def test_binding_hours_never_exceed_the_horizon(golden):
 def test_mean_loading_never_exceeds_peak_loading(golden):
     for entry in cs.summarise(golden)["loading"].lines:
         assert entry.mean_loading.total <= entry.peak_loading.total + 1e-9, entry.name
+
+
+# ── Task 8: Prices tab — internal identity ──────────────────────────────────
+
+def test_the_duration_curve_is_monotonically_non_increasing(golden):
+    curve = cs.summarise(golden)["prices"].duration_curve
+    assert curve, "empty duration curve on a solved network"
+    assert all(curve[i] >= curve[i + 1] - 1e-9 for i in range(len(curve) - 1)), \
+        "duration curve is not sorted descending"
+
+
+def test_price_statistics_lie_inside_the_observed_range(golden):
+    pr = cs.summarise(golden)["prices"]
+    assert pr.min_price - 1e-9 <= pr.median_price.total <= pr.max_price + 1e-9
+    assert pr.min_price - 1e-9 <= pr.mean_price.total <= pr.max_price + 1e-9
+    for carrier, stats in pr.by_carrier_stats.items():
+        assert pr.min_price - 1e-9 <= stats.mean_price.total <= pr.max_price + 1e-9, carrier

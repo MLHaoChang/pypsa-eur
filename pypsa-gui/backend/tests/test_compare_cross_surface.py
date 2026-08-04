@@ -94,3 +94,54 @@ def test_dispatch_agrees_with_carrier_kpis(golden):
         assert disp.dispatch_gwh_by_carrier[carrier].total == pytest.approx(want_gwh, rel=1e-6)
         compared += 1
     assert compared >= 1, "no carrier compared — key names have drifted"
+
+
+# ── Task 8: Prices tab vs. /results/prices ──────────────────────────────────
+
+def test_prices_mean_agrees_with_results_prices(golden):
+    """
+    `GET /results/prices` returns `{"index", "columns", "data", "data_adjusted",
+    "periods", "source", "negative_hours", "fallback_per_snapshot", "note"}`
+    (verified by calling `get_prices()` directly against the solved golden
+    network). On the golden fixture: `index` is 48 ISO timestamps, `columns`
+    is the 4 bus names (`elec_a`, `elec_b`, `h2`, `iso_bus`), `data` and
+    `data_adjusted` are both 48x4 matrices of EUR/MWh (in this fixture they
+    happen to be numerically identical cell-for-cell — no subsidised
+    renewable ever sets the dual — but `data_adjusted` is the semantically
+    correct one to compare against: it's the merit-order-corrected series,
+    matching what `_compute_prices_summary` reads via
+    `corrected_marginal_prices`, per that function's own docstring). There is
+    no top-level "mean"/"prices" key, so the tab's `mean_price.total` is
+    recomputed here directly from the raw matrix as the snapshot-weighted
+    mean, using the SAME weighting basis `_compute_prices_summary` uses:
+    `_build_snapshot_weights(n)` with no explicit column defaults to
+    `period_utils.snapshot_weights(n, "objective")`.
+
+    Verified numerically before this assertion was written: weighted mean of
+    `data_adjusted` == `prices.mean_price.total` exactly (ratio 1.0, 0
+    differing cells) on the golden fixture — see task-5b-7-8-report.md.
+    """
+    import numpy as np
+
+    import routers.results as R
+    from services import period_utils
+
+    prices = cs.summarise(golden)["prices"]
+    resp = R.get_prices()
+    # Shape check first — a silently-renamed/-reshaped payload would otherwise
+    # make the weighted-mean computation below silently compare against an
+    # empty or malformed matrix and pass vacuously.
+    assert "data_adjusted" in resp and resp["data_adjusted"], (
+        "get_prices returned nothing for a solved network")
+    data_adj = np.asarray(resp["data_adjusted"], dtype=float)
+    assert data_adj.shape == (len(golden.snapshots), len(golden.buses)), (
+        f"unexpected /results/prices shape {data_adj.shape} for "
+        f"{len(golden.snapshots)} snapshots x {len(golden.buses)} buses — "
+        "key names or payload shape have drifted")
+
+    w = period_utils.snapshot_weights(golden, "objective")
+    w_full = np.broadcast_to(np.asarray(w.values).reshape(-1, 1), data_adj.shape)
+    compared = int(data_adj.size)
+    assert compared >= 1, "no price cells returned — shape has drifted"
+    want = float((data_adj * w_full).sum() / w_full.sum())
+    assert prices.mean_price.total == pytest.approx(want, rel=1e-6)
