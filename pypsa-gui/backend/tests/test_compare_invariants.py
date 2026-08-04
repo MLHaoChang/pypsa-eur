@@ -261,3 +261,38 @@ def test_dispatch_energy_uses_the_generators_weighting_basis(golden):
         got = disp.dispatch_gwh_by_carrier.get(carrier)
         assert got is not None, f"carrier {carrier} missing from dispatch tab"
         assert got.total == pytest.approx(want, rel=1e-6)
+
+
+# ── Task 7: Line loading tab — internal identity ────────────────────────────
+#
+# NOTE on suspect S2 (Task 15): `_compute_loading_summary` (routers/compare.py)
+# builds its weights via `_build_snapshot_weights(n)` with NO explicit column
+# argument, which defaults to the "objective" (COST) basis — not "generators"
+# (ENERGY/HOURS), the basis `test_dispatch_energy_uses_the_generators_
+# weighting_basis` above insists dispatch GWh use. `binding_hours` and
+# `mean_loading` are hours/loading quantities, not cost, so this reads like
+# the same class of bug. BUT on the golden fixture `snapshot_weightings
+# ["objective"]` and `["generators"]` are identical (both flat 1.0 — no
+# custom weighting is ever set in build_golden_network), so the two invariants
+# below hold under EITHER basis here and cannot distinguish which one
+# `_compute_loading_summary` is actually using. A green run of these two tests
+# is NOT evidence the weighting-basis choice is correct — it is only evidence
+# that peak/mean/binding-hours arithmetic is internally consistent. The basis
+# question stays OPEN pending the fixture Task 15 builds with `objective` !=
+# `generators`.
+
+def test_binding_hours_never_exceed_the_horizon(golden):
+    from services import period_utils
+
+    loading = cs.summarise(golden)["loading"]
+    horizon_hours = float(period_utils.snapshot_weights(
+        golden, "generators", golden.snapshots).sum())
+    for entry in loading.lines:
+        assert entry.binding_hours.total <= horizon_hours * (1 + 1e-9), (
+            f"{entry.name}: {entry.binding_hours.total} h binding of "
+            f"{horizon_hours} h horizon")
+
+
+def test_mean_loading_never_exceeds_peak_loading(golden):
+    for entry in cs.summarise(golden)["loading"].lines:
+        assert entry.mean_loading.total <= entry.peak_loading.total + 1e-9, entry.name
