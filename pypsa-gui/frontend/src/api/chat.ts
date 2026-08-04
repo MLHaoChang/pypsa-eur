@@ -144,6 +144,42 @@ export async function getChatHealth(): Promise<ChatHealth> {
   return r.data
 }
 
+// ── U-1 — supplying the Anthropic API key from inside the app ──────────────
+//
+// The packaged app ships no `backend/.env` (it would carry a real key and the
+// session-signing SECRET_KEY), so these routes are the only supported way it
+// can be given one. They live under `/chat`, not `/admin`, because the whole
+// admin router 404s in local mode — which is the desktop app.
+export interface ApiKeySettings {
+  configured: boolean
+  /** 'settings' when it came from this UI, 'environment' when the shell set it. */
+  source: 'settings' | 'environment' | null
+  /** Last four characters, e.g. `…wxyz`. Never the key. */
+  hint: string | null
+  /** A shell-set value is masking the stored one, so saving looks like a no-op. */
+  overridden_by_environment: boolean
+  storage_path: string
+}
+
+export async function getApiKeySettings(): Promise<ApiKeySettings> {
+  // `skipErrorToast` because a 403 here is an expected STATE, not a failure:
+  // the route is super-admin only, and an ordinary member reaching a chat panel
+  // with no key configured would otherwise get a red toast telling them off for
+  // something the UI asked on their behalf.
+  const r = await client.get('/chat/settings/api-key', { skipErrorToast: true })
+  return r.data
+}
+
+export async function putApiKeySettings(value: string): Promise<ApiKeySettings> {
+  const r = await client.put('/chat/settings/api-key', { value })
+  return r.data
+}
+
+export async function deleteApiKeySettings(): Promise<ApiKeySettings> {
+  const r = await client.delete('/chat/settings/api-key')
+  return r.data
+}
+
 export interface ChatTurn {
   ts: number
   session_id: string

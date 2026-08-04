@@ -15,6 +15,15 @@ vi.mock('../api/chat', async (importOriginal) => {
     getChatHistory: vi.fn().mockResolvedValue({ turns: [], last_session_id: null, bound_project: null }),
     postChatAbort: vi.fn(),
     postChatConfirm: vi.fn().mockResolvedValue({ ok: true }),
+    getApiKeySettings: vi.fn().mockResolvedValue({
+      configured: false,
+      source: null,
+      hint: null,
+      overridden_by_environment: false,
+      storage_path: '/tmp/user.env',
+    }),
+    putApiKeySettings: vi.fn(),
+    deleteApiKeySettings: vi.fn(),
   }
 })
 
@@ -32,6 +41,11 @@ beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
   useChatStore.setState({ sessionId: null, pending: null, messages: [] })
   vi.mocked(postChatConfirm).mockClear()
+  // `createChatStream` accumulates across every `it()` in this file — each one
+  // sends at least once — so an assertion on its call COUNT is otherwise
+  // order-dependent. `mockClear` resets calls only; the per-test
+  // `mockImplementation` in `sendAndScript` is unaffected.
+  vi.mocked(createChatStream).mockClear()
 })
 
 function renderPanel() {
@@ -52,6 +66,39 @@ async function sendAndScript(scriptedFrames: ChatFrame[]) {
   await user.type(screen.getByTestId('chat-input'), 'hello')
   await user.click(screen.getByTestId('chat-send'))
 }
+
+// U-1 — "API key missing" must not be a dead end.
+//
+// This is the state the PACKAGED app was permanently in: the bundle ships no
+// `backend/.env` by design, so this banner was the user's entire experience of
+// the assistant, with nothing anywhere to act on. The banner now carries the
+// setup form itself. Asserting it here rather than only in ApiKeySetup.test.tsx
+// is the point — the component passing its own tests while never being rendered
+// would leave U-1 exactly as broken as before.
+it('offers the API key setup form when the backend reports missing_api_key', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-nokey' } },
+    {
+      event: 'error',
+      data: { error_kind: 'missing_api_key', message: 'ANTHROPIC_API_KEY is not set' },
+    },
+  ])
+  expect(await screen.findByText('API key missing')).toBeTruthy()
+  expect(await screen.findByTestId('chat-api-key-input')).toBeTruthy()
+})
+
+it('does not offer the setup form for an unrelated error', async () => {
+  // The negative control: a form that rendered under every error kind would
+  // pass the test above while being wrong everywhere else.
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-rate' } },
+    { event: 'error', data: { error_kind: 'rate_limited', message: 'slow down' } },
+  ])
+  expect(await screen.findByText('Rate limited')).toBeTruthy()
+  expect(screen.queryByTestId('chat-api-key-input')).toBeNull()
+})
 
 // ── F2 — a hostile localStorage must not take the panel down ────────────────
 //

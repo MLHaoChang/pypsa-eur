@@ -38,6 +38,7 @@ import {
   type UploadMeta,
 } from '../api/uploads'
 import { deriveCostEur, useChatStore, type UploadMetaUI } from '../store/chatStore'
+import ApiKeySetup from './ApiKeySetup'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
@@ -448,6 +449,8 @@ function ErrorBanner() {
         {error.error_kind === 'rate_limited' && 'Rate limited'}
         {error.error_kind === 'unauthorized' && 'API key rejected'}
         {error.error_kind === 'missing_api_key' && 'API key missing'}
+        {/* P-2 — the acting account stopped being active mid-turn. */}
+        {error.error_kind === 'inactive_acting_user' && 'Account is no longer active'}
         {error.error_kind === 'solver_in_flight' && 'Solver in flight'}
         {error.error_kind === 'parallel_destructive_not_allowed' && 'Multiple destructive actions in one turn'}
         {error.error_kind === 'tool_call_cap_exceeded' && 'Tool call limit reached this turn'}
@@ -472,6 +475,7 @@ function ErrorBanner() {
         {error.error_kind === 'vision_call_failed' && 'Vision call failed'}
         {!['project_exists', 'descendants_exist', 'confirmation_expired',
             'rate_limited', 'unauthorized', 'missing_api_key',
+            'inactive_acting_user',
             'solver_in_flight', 'parallel_destructive_not_allowed',
             'file_too_large', 'empty_file', 'invalid_filename',
             'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
@@ -484,6 +488,15 @@ function ErrorBanner() {
           && error.error_kind}
       </div>
       <div className="text-muted whitespace-pre-wrap">{error.message}</div>
+      {/*
+        U-1 — "API key missing" used to be a dead end. In the packaged app it
+        was THE state: the bundle ships no `backend/.env` on purpose, so this
+        banner was every user's entire experience of the assistant, with
+        nothing anywhere to act on. The setup form renders inline here rather
+        than on a settings page, because this is where the user is when they
+        find out.
+      */}
+      {error.error_kind === 'missing_api_key' && <ApiKeySetup />}
       <button
         className="mt-2 text-[10px] underline text-muted hover:text-text"
         onClick={() => setError(null)}
