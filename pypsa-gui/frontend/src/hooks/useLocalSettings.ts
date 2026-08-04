@@ -7,6 +7,19 @@
  *
  * `staleTime: Infinity`: neither the key hint nor the log path changes except
  * through this pane, which invalidates the key explicitly after a write.
+ *
+ * `retry: 2`, deliberately not `false`. With `staleTime: Infinity` and the
+ * app's global `refetchOnWindowFocus: false` (main.tsx), this query fetches
+ * ONCE per session and then never again on its own — so a single transient
+ * GET failure (not a 404, an actual network blip) would otherwise hide the
+ * Sidebar row AND the ⌘K entry for the rest of the session, silently, for
+ * the one feature whose entire point is that there is no other door to it.
+ * A real 404 (web mode) still resolves to `null` on the first try —
+ * `fetchLocalSettings` maps that before it ever reaches the query's error
+ * path — so retrying costs nothing there. Do NOT change the error branch to
+ * show the pane on failure instead: a web-mode 401 arriving before the
+ * router's auth gate also lands in the error branch, and hiding is correct
+ * in that case.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
@@ -18,7 +31,7 @@ export function useLocalSettings() {
     queryKey: LOCAL_SETTINGS_KEY,
     queryFn: fetchLocalSettings,
     staleTime: Infinity,
-    retry: false,
+    retry: 2,
   })
 }
 

@@ -38,13 +38,31 @@
 // `document.activeElement`) is kept anyway since it exercises the actually
 // load-bearing user behaviour — being able to type immediately — not just
 // the DOM's internal focus pointer.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import CommandPalette from './CommandPalette'
 import { useUIStore } from '../store/uiStore'
+import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
+
+// Partial mock, same shape as pages/LocalSettings.test.tsx: keep everything
+// else real, stub only the network call `useLocalSettingsAvailable` wraps.
+// Default (below) resolves null — matching what the REAL fetchLocalSettings
+// settles to in this jsdom env with no backend (a rejected axios call with
+// no `.response`, so `fetchLocalSettings` rethrows, `retry: false` fails the
+// query fast, and `data` stays `undefined` -> `useLocalSettingsAvailable()`
+// reports false) — so every pre-existing test in this file keeps its old
+// behaviour unless it opts into a different mock.
+vi.mock('../api/localSettings', async (orig) => ({
+  ...(await orig<typeof import('../api/localSettings')>()),
+  fetchLocalSettings: vi.fn(),
+}))
+
+beforeEach(() => {
+  vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+})
 
 function renderPalette(mode: 'all' | 'projects' = 'all') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -112,5 +130,38 @@ describe('CommandPalette on Dialog', () => {
   it('has an aria-label of "Switch project" in projects mode', () => {
     renderPalette('projects')
     expect(screen.getByRole('dialog', { name: 'Switch project' })).toBeTruthy()
+  })
+})
+
+// Regression coverage for the defect that already escaped a review round on
+// this feature: deleting the `if (settingsAvailable)` gate around the
+// 'act-settings' push in CommandPalette.tsx's useCommands (mode === 'all'
+// block) leaves every other test in this suite — and the rest of the
+// frontend suite — green, because nothing else in the app asserts on ⌘K's
+// entry list. `pages/LocalSettings.test.tsx` only covers the pane itself
+// (`<LocalSettings />` rendered directly), never `useCommands` or
+// `CommandPalette`, so it cannot catch a regression reached through this
+// door. Same gate as the Sidebar row: `useLocalSettingsAvailable()`, backed
+// by the shared `['localSettings']` query.
+const SETTINGS_STATE: LocalSettingsState = { key_set: false, key_hint: null, log_path: '/tmp/pypsa-gui.log' }
+
+describe('act-settings entry (⌘K) tracks local-settings availability', () => {
+  it('is absent when local settings resolve to null (web deployment)', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    renderPalette()
+
+    // Confirms the palette actually rendered (and the mocked query had a
+    // chance to settle) before asserting the gated entry never appeared —
+    // an always-present row is the anchor, same idiom as the ArrowDown test
+    // above that keys off "Save project".
+    await screen.findByRole('button', { name: /Save project/i })
+    expect(screen.queryByRole('button', { name: /Open settings/i })).toBeNull()
+  })
+
+  it('is present once local settings resolve to a real state (desktop app)', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(SETTINGS_STATE)
+    renderPalette()
+
+    expect(await screen.findByRole('button', { name: /Open settings/i })).toBeTruthy()
   })
 })

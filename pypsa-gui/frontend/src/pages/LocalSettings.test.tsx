@@ -4,10 +4,11 @@
  * checked BEFORE the null branch so a slow response never flashes the
  * "hidden" state before content appears.
  *
- * This property had only ever been verified by reading the source — the
- * CommandPalette entry it should have caught (⌘K → Settings opening a blank
- * half-width panel on a web build) shipped anyway, because nothing asserted
- * it. See round-1 review Finding 1 / the "THIRD ITEM" follow-up.
+ * Guards only THIS component in isolation — it renders `<LocalSettings />`
+ * directly and never exercises `useCommands`/`CommandPalette`, so it says
+ * nothing about the ⌘K entry (`act-settings`) built on the same
+ * `useLocalSettingsAvailable` gate. That entry's own visibility test lives in
+ * `components/CommandPalette.test.tsx`.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'

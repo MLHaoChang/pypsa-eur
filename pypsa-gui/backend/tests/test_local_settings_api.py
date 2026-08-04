@@ -342,6 +342,11 @@ def test_reveal_runs_a_fixed_command_with_no_request_input(local_client, monkeyp
     assert isinstance(seen["argv"], list), "argv must be a list — never a shell string"
     assert seen["kwargs"]["shell"] is False
     assert seen["kwargs"]["check"] is False
+    # `subprocess.run` on the platform's file manager has no built-in bound: a
+    # hung/missing binary (e.g. no Finder/Explorer/xdg-open registered) would
+    # otherwise block the request thread indefinitely. Every element being
+    # "permitted" says nothing about whether a timeout element is even there.
+    assert seen["kwargs"]["timeout"] == 10
 
     # Every element is either a hardcoded literal or the server-computed path.
     # Nothing else may ever appear here.
@@ -355,6 +360,16 @@ def test_reveal_runs_a_fixed_command_with_no_request_input(local_client, monkeyp
             f"argv element {part!r} is neither a hardcoded literal nor the "
             f"server-computed log path — a request parameter may have reached argv"
         )
+
+    # Permitted membership alone doesn't prove the path is THERE — an argv of
+    # just ["open", "-R"] (path silently dropped) would pass every check
+    # above while revealing nothing, the exact defect
+    # `test_reveal_creates_the_log_file_if_it_is_missing` guards from the
+    # other direction (file existence, not argv shape).
+    assert any(
+        part == log_path or part == f"/select,{log_path}"
+        for part in seen["argv"]
+    ), f"log path {log_path!r} never appears in argv {seen['argv']!r}"
 
 
 def test_reveal_creates_the_log_file_if_it_is_missing(local_client, monkeypatch):

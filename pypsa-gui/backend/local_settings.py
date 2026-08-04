@@ -117,10 +117,18 @@ def apply_to_environ() -> bool:
     """
     Publish the stored key as ANTHROPIC_API_KEY. Returns True if it set it.
 
-    **The stored key NEVER overrides the environment.** This mirrors
-    `load_dotenv(override=False)` at `main.py:23` and is what keeps the web
-    deployment — and a developer shell with the key exported — unaffected by a
-    file that only the desktop app ever writes.
+    **The stored key never overrides a TRUTHY environment value.** Same
+    intent as `load_dotenv(override=False)` at `main.py:23` — an
+    operator-set value wins — but the check here is truthiness-based
+    (`os.environ.get(...)` in a boolean context), not presence-based like
+    dotenv's `if k in os.environ and not override: continue`. So
+    `ANTHROPIC_API_KEY=""` is treated as absent and the stored key still
+    applies. That is deliberate, not a gap: `chat_service._build_anthropic_client`
+    makes the same truthiness check when deciding whether a key is
+    configured, so an empty string is "missing" on the consuming side too —
+    matching it here means the web deployment and a developer shell with a
+    real key exported are still unaffected by a file only the desktop app
+    ever writes.
     """
     if os.environ.get("ANTHROPIC_API_KEY"):
         return False

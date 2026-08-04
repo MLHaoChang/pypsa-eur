@@ -25,15 +25,27 @@ except ImportError:
     pass
 
 # Publish a key stored by the desktop Settings pane, but only when the
-# environment does not already carry one — same precedence as the
-# `override=False` above, and for the same reason. The packaged app has no
-# other channel: `.env` is excluded from the bundle and a `.app` launched
-# from Finder sources no shell profile.
+# environment does not already carry a TRUTHY value — same intent as the
+# `override=False` above (an operator-set value wins), but truthiness-based
+# rather than presence-based: `apply_to_environ` checks
+# `os.environ.get("ANTHROPIC_API_KEY")`, not `"ANTHROPIC_API_KEY" in
+# os.environ`, so `ANTHROPIC_API_KEY=""` is treated as absent and the stored
+# key still applies. That matches `chat_service._build_anthropic_client`,
+# which does the same truthiness check when deciding whether a key is
+# configured — an empty env var is "missing" there too, so a mismatch would
+# mean the environment carries a key chat itself will refuse to use. The
+# packaged app has no other channel: `.env` is excluded from the bundle and a
+# `.app` launched from Finder sources no shell profile.
 #
 # Module level, not a startup event, so it lands before ANY module reads the
-# variable. `app_paths` reads PYPSAGUI_APP_DATA_DIR per call and the desktop
-# launcher applies its environment before `import main`, so the path is
-# already correct here.
+# variable. There is no launcher-ordering hazard to manage here: unlike
+# `DATABASE_URL` and the other variables `desktop/launcher.py:build_environment`
+# pins before `import main`, storage locations — including
+# `PYPSAGUI_APP_DATA_DIR` — are deliberately NOT among them
+# (`desktop/launcher.py:113-118`). `app_paths.app_data_dir()` resolves the
+# per-user default entirely on its own (platform check + `Path.home()`), with
+# no input from the launcher, so there is nothing for the launcher to apply
+# before this runs.
 import local_settings as local_settings_store  # noqa: E402
 
 local_settings_store.apply_to_environ()

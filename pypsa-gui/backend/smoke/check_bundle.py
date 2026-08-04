@@ -44,6 +44,16 @@ FORBIDDEN_FILES = {
     # key. On the forbidden list for the same reason `.env` is: a build that
     # ever ran from an app-data directory would otherwise bundle it.
     "local-settings.json",
+    # `local_settings.write_api_key`'s own atomic-write temp file
+    # (`path.with_name(path.name + ".tmp")`, `local_settings.py`). It is
+    # written with the SAME live key before `os.replace` renames it onto
+    # `local-settings.json` — so a crash (or a build run) between the
+    # `os.open` and the `os.replace` leaves this file behind holding the
+    # same secret. Listed separately, as its own exact basename, rather than
+    # relying on a `.tmp` suffix rule: the rest of this module matches by
+    # exact basename on purpose, and a generic `.tmp` rule would be a much
+    # broader (and untested) change for one file.
+    "local-settings.json.tmp",
 }
 
 # Anything starting `.env`, not an enumeration of the two that exist today.

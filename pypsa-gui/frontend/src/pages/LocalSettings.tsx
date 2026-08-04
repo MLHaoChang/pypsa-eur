@@ -42,6 +42,11 @@ export default function LocalSettings() {
       setMessage(probeMessage(result.status))
       setDraft('')
       await invalidate()
+    } catch {
+      // The axios interceptor already toasts on a transport failure (this
+      // call carries no skipErrorToast), so the user is informed either way.
+      // Catch only to keep the rejection from surfacing as unhandled-promise
+      // console noise — nothing else changes for the user.
     } finally {
       setBusy(false)
     }
@@ -61,9 +66,19 @@ export default function LocalSettings() {
   }
 
   const reveal = async () => {
-    const result = await revealLog()
-    if (!result.revealed) {
-      toast.error(`Could not open the file manager. The log is at ${result.log_path}`)
+    // `revealLog()` passes skipErrorToast: true (the backend's own failure
+    // path already returns 200 + revealed:false, handled below), so a
+    // transport-level failure (network drop, backend not reachable) reaches
+    // here as a rejected promise with no toast anywhere else in the chain.
+    // Without this catch, the button would just do nothing — the exact dead
+    // end the design says this feature must degrade away from.
+    try {
+      const result = await revealLog()
+      if (!result.revealed) {
+        toast.error(`Could not open the file manager. The log is at ${result.log_path}`)
+      }
+    } catch {
+      toast.error(`Could not reach the app to reveal the log. It is at ${state.log_path}`)
     }
   }
 
