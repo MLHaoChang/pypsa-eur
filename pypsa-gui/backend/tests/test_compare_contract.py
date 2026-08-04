@@ -63,3 +63,22 @@ def test_the_harness_derives_the_same_periods_the_fixture_declares(golden):
     s = cs.summarise(golden)
     assert s["is_multi"] is True
     assert s["periods"] == list(gf.GOLDEN_PERIODS)
+
+
+def test_every_tab_is_populated_for_a_solved_multi_period_network(golden):
+    s = cs.summarise(golden)
+    empty = [f for f in cs.TAB_FIELDS if s[f] is None]
+    assert not empty, f"tabs returning None on a solved network: {empty}"
+
+
+def test_summarising_twice_gives_an_identical_payload(golden):
+    """
+    The backend computes no delta — CompareView.tsx diffs two independent
+    fetches client-side. So A-vs-A showing zero everywhere rests on the
+    summary being a pure function of the network. If it is not, every
+    comparison inherits the noise.
+    """
+    first, second = cs.summarise(golden), cs.summarise(golden)
+    for field in cs.TAB_FIELDS:
+        assert first[field].model_dump() == second[field].model_dump(), (
+            f"{field} differs between two summarisations of one network")
