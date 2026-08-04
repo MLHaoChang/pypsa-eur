@@ -37,8 +37,9 @@ beforeEach(() => {
 describe('desktop-vs-web visibility', () => {
   it('renders nothing once resolved to null (web deployment: routes 404)', async () => {
     // Catches: the `if (state == null) return null` guard being removed,
-    // inverted, or bypassed — the exact gap ⌘K's act-settings entry had
-    // before Finding 1's fix, reached through a different door than Sidebar.
+    // inverted, or bypassed — this file's own render path only, per the
+    // header above. It does not exercise ⌘K's act-settings entry; see
+    // components/CommandPalette.test.tsx for that door.
     vi.mocked(fetchLocalSettings).mockResolvedValue(null)
     const { container } = renderPane()
     await waitFor(() => expect(container.firstChild).toBeNull())

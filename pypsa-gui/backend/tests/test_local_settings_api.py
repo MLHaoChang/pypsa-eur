@@ -365,11 +365,16 @@ def test_reveal_runs_a_fixed_command_with_no_request_input(local_client, monkeyp
     # just ["open", "-R"] (path silently dropped) would pass every check
     # above while revealing nothing, the exact defect
     # `test_reveal_creates_the_log_file_if_it_is_missing` guards from the
-    # other direction (file existence, not argv shape).
-    assert any(
-        part == log_path or part == f"/select,{log_path}"
-        for part in seen["argv"]
-    ), f"log path {log_path!r} never appears in argv {seen['argv']!r}"
+    # other direction (file existence, not argv shape). Checked against
+    # `permitted_paths` (log_path, its PARENT, or the Windows `/select,`
+    # form) rather than just log_path/select — the linux branch reveals the
+    # PARENT directory (`xdg-open`, no portable reveal-and-select exists),
+    # so restricting this to log_path/select would fail on linux-64 against
+    # entirely correct production code.
+    assert any(part in permitted_paths for part in seen["argv"]), (
+        f"no permitted path element appears in argv {seen['argv']!r} — "
+        f"expected one of {permitted_paths!r}"
+    )
 
 
 def test_reveal_creates_the_log_file_if_it_is_missing(local_client, monkeypatch):
