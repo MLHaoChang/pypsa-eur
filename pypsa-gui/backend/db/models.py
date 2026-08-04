@@ -62,6 +62,22 @@ class Project(Base):
         ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
     )
     scenario_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Scenario category: 'baseline' | 'scenario' | 'stress', or NULL for a
+    # project that has never been categorised.
+    #
+    # This used to be smuggled as a `[type]` prefix on `scenario_description`,
+    # written by one dialog and decoded by one panel — so every other surface
+    # rendered the marker as prose, nothing could query by category, and the
+    # value could not be corrected after creation without rewriting the
+    # description around it. Migration 0004 lifts the prefix out of existing
+    # rows into this column.
+    #
+    # Deliberately a plain string, not a DB enum: the set is presentational and
+    # will grow (a user asking for 'sensitivity' should not need a migration on
+    # two backends), and an unknown value must degrade to "no badge" rather
+    # than break the row. `_SCENARIO_TYPES` in routers/projects.py is the
+    # validating edge.
+    scenario_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

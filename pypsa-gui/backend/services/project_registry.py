@@ -252,6 +252,7 @@ def create_scenario(
     name: str,
     *,
     scenario_description: str | None = None,
+    scenario_type: str | None = None,
 ) -> Project:
     """
     Insert a child project row branched off ``base`` — same org, with
@@ -271,6 +272,7 @@ def create_scenario(
         ),
         parent_project_id=base.id,
         scenario_description=scenario_description,
+        scenario_type=scenario_type,
         created_at=_now(),
         updated_at=_now(),
     )

@@ -1,50 +1,81 @@
-// The `[type]` prefix is a shared ENCODING: written by the scenario-create
-// dialog, read back by three separate surfaces. It lived inside ScenariosPanel
-// — the only screen that knew to strip it — so every other one printed the
-// marker at the user. These pin the round-trip and the cases where a
-// description must survive untouched.
+// The category is a REAL FIELD now (`scenario_type`, backed by a column since
+// backend migration 0004). What still needs pinning is the PRECEDENCE between
+// that field and the retired `[type]` prefix, because both can arrive in the
+// same payload: a bundle exported by an older install carries the tag inline,
+// and a user can type a bracket into a description at any time.
 import { describe, expect, it } from 'vitest'
-import { parseScenType, scenDescriptionText, tagScenType, SCEN_TYPES } from './scenarioType'
+import {
+  parseScenType, resolveScenType, scenDescriptionText, SCEN_TYPES, SCEN_TYPE_LABEL,
+} from './scenarioType'
 
-describe('tagScenType / parseScenType round-trip', () => {
-  it('round-trips every type with a description', () => {
+describe('resolveScenType', () => {
+  it('uses the real field when it is set', () => {
+    expect(resolveScenType({ scenario_type: 'stress', scenario_description: 'cold winter' }))
+      .toEqual({ type: 'stress', text: 'cold winter' })
+  })
+
+  it('does not let a bracketed description override the real field', () => {
+    // The precedence that matters. A user editing their description to start
+    // with "[baseline]" must not silently re-categorise the project — the
+    // field is authoritative, the tag is only a fallback.
+    expect(resolveScenType({ scenario_type: 'stress', scenario_description: '[baseline] confusing' }))
+      .toEqual({ type: 'stress', text: '[baseline] confusing' })
+  })
+
+  it('falls back to decoding a legacy tag when the field is empty', () => {
+    // An older bundle the backend has not split. Without this the project
+    // imports as uncategorised AND shows the marker as prose.
+    expect(resolveScenType({ scenario_description: '[baseline] reference run' }))
+      .toEqual({ type: 'baseline', text: 'reference run' })
+  })
+
+  it('shows no badge for a category this build does not know', () => {
+    // The set can grow server-side without a frontend release. An unknown
+    // value must degrade to "no badge", never render raw or throw.
+    expect(resolveScenType({ scenario_type: 'sensitivity', scenario_description: 'x' }))
+      .toEqual({ type: null, text: 'x' })
+  })
+
+  it('handles a project with neither field', () => {
+    expect(resolveScenType({})).toEqual({ type: null, text: '' })
+    expect(resolveScenType({ scenario_type: null, scenario_description: null }))
+      .toEqual({ type: null, text: '' })
+  })
+
+  it('keeps a plain description when there is no category', () => {
+    expect(resolveScenType({ scenario_description: 'just notes' }))
+      .toEqual({ type: null, text: 'just notes' })
+  })
+})
+
+describe('parseScenType (legacy decoder)', () => {
+  it('splits every known tag', () => {
     for (const type of SCEN_TYPES) {
-      expect(parseScenType(tagScenType(type, 'cut the gas fleet')))
+      expect(parseScenType(`[${type}] cut the gas fleet`))
         .toEqual({ type, text: 'cut the gas fleet' })
     }
   })
 
-  it('round-trips a type with no description at all', () => {
-    // The common case, and the one that leaked: the dialog writes "[scenario]"
-    // on its own when the user types nothing, and a raw render showed exactly
-    // that string as the project's description.
+  it('treats a tag-only description as having no text', () => {
+    // By far the most common stored value: the old dialog wrote the tag even
+    // when the user typed nothing.
     for (const type of SCEN_TYPES) {
-      const stored = tagScenType(type, '')
-      expect(stored).toBe(`[${type}]`)
-      expect(parseScenType(stored)).toEqual({ type, text: '' })
-      expect(scenDescriptionText(stored)).toBe('')
+      expect(parseScenType(`[${type}]`)).toEqual({ type, text: '' })
     }
-  })
-})
-
-describe('parseScenType', () => {
-  it('reports no type for a plain description and returns it whole', () => {
-    expect(parseScenType('just some notes')).toEqual({ type: null, text: 'just some notes' })
   })
 
   it('leaves an unrecognised bracketed word alone', () => {
-    // A description may legitimately open with a bracket. A looser pattern
-    // would eat "[draft]" and silently drop the user's first word.
+    // A looser pattern would eat "[draft]" and silently drop the first word.
     expect(parseScenType('[draft] cut the gas fleet'))
       .toEqual({ type: null, text: '[draft] cut the gas fleet' })
   })
 
-  it('only matches the tag at the start', () => {
+  it('only matches at the start', () => {
     expect(parseScenType('see [stress] for the comparison'))
       .toEqual({ type: null, text: 'see [stress] for the comparison' })
   })
 
-  it('handles null, undefined and empty as no description', () => {
+  it('handles null, undefined and empty', () => {
     for (const v of [null, undefined, '']) {
       expect(parseScenType(v)).toEqual({ type: null, text: '' })
     }
@@ -68,6 +99,16 @@ describe('scenDescriptionText', () => {
   it('never returns a string still carrying a type marker', () => {
     for (const type of SCEN_TYPES) {
       expect(scenDescriptionText(`[${type}] whatever`)).not.toContain(`[${type}]`)
+    }
+  })
+})
+
+describe('SCEN_TYPE_LABEL', () => {
+  it('labels every category the picker offers', () => {
+    // The picker maps over SCEN_TYPES and indexes this — a missing entry
+    // renders an empty <option> rather than failing loudly.
+    for (const type of SCEN_TYPES) {
+      expect(SCEN_TYPE_LABEL[type]).toBeTruthy()
     }
   })
 })

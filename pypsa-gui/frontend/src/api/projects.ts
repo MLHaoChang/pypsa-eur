@@ -85,6 +85,9 @@ export interface UnclaimedProject {
   name: string
   parent_project: string | null
   scenario_description: string | null
+  // Split out of the description by the backend when the on-disk bundle
+  // predates migration 0004 and still carries the `[type]` prefix inline.
+  scenario_type: string | null
   // False when the bundle directory has metadata but no network file — the
   // import still succeeds, but the project opens empty.
   has_network: boolean
@@ -185,10 +188,34 @@ export const projectsApi = {
   // `skipErrorToast`: the only caller renders every failure itself, inside the
   // dialog the user is looking at. Without this the interceptor ALSO toasts,
   // so a name collision popped two messages saying the same thing.
-  createScenario: (base: string, name: string, description?: string) =>
+  createScenario: (
+    base: string, name: string,
+    description?: string | null, scenarioType?: string | null,
+  ) =>
     client.post<ProjectInfo>(
       `/projects/${encodeURIComponent(base)}/scenarios`,
-      { name, description: description ?? null },
+      {
+        name,
+        description: description ?? null,
+        scenario_type: scenarioType ?? null,
+      },
+      { skipErrorToast: true },
+    ).then(r => r.data),
+  // Edit the category and description of an EXISTING project. Both were
+  // write-once before this route — the category especially, since it lived as
+  // a `[type]` prefix inside the description that the UI never showed.
+  //
+  // PARTIAL by construction: only the keys present in `patch` are sent, so
+  // changing one field cannot blank the other. `null` is a real value that
+  // CLEARS a field; to leave one alone, omit its key entirely. Callers should
+  // build the object conditionally rather than spreading `undefined`s.
+  updateScenario: (
+    name: string,
+    patch: { description?: string | null; scenario_type?: string | null },
+  ) =>
+    client.patch<ProjectInfo>(
+      `/projects/${encodeURIComponent(name)}/scenario`,
+      patch,
       { skipErrorToast: true },
     ).then(r => r.data),
   // Read-only summary of a non-active project; safe to call from anywhere

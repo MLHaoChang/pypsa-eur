@@ -1,34 +1,70 @@
 // Scenario category (baseline / scenario / stress).
 //
-// `ProjectInfo` carries no field for it, so the category is smuggled as a
-// `[type]` prefix on `scenario_description` — written by the scenario-create
-// dialog, read back by `parseScenType`.
+// It is a REAL FIELD now — `ProjectInfo.scenario_type`, backed by a column
+// since backend migration 0004. Before that it was smuggled as a `[type]`
+// prefix on `scenario_description`, written by the branch dialog and decoded
+// by exactly one panel, so every other surface printed the marker at the user
+// and the value could not be corrected after creation.
 //
-// This lived inside ScenariosPanel, which was the only place that knew to
-// strip the prefix. Every OTHER surface that renders a description printed the
-// marker at the user: a scenario created with no description showed the
-// literal text "[scenario]" as its description on the projects home. Shared
-// encoding needs shared decoding, so both halves live here and the panel, the
-// projects home and the legacy-migrate page all read through them.
-//
-// The prefix is a workaround, not a design — a real `scenario_type` column
-// retires this module.
+// The decoder stays because the encoding still arrives from outside the
+// migrated database: a `.pypsaproj` bundle exported by an older install
+// carries the tag inline in its metadata.json. The backend splits what it can
+// on import, and this is the client-side backstop for anything it did not
+// see. Nothing here WRITES the prefix any more — `tagScenType` is gone, and
+// the create/edit calls send `scenario_type` as its own field.
 
 export const SCEN_TYPES = ['baseline', 'scenario', 'stress'] as const
 export type ScenType = typeof SCEN_TYPES[number]
 
-// Anchored, and the type alternatives are spelled out rather than `\w+`: a
+/** Human labels for the picker. Keep in step with the backend's set. */
+export const SCEN_TYPE_LABEL: Record<ScenType, string> = {
+  baseline: 'Baseline — canonical reference run',
+  scenario: 'Scenario — a named variant',
+  stress: 'Stress test',
+}
+
+// Anchored, and the alternatives are spelled out rather than `\w+`: a
 // description that legitimately opens with a bracketed word ("[draft] cut the
 // gas fleet") must survive intact, not lose its first word to the parser.
 const TAG_RE = /^\[(baseline|scenario|stress)\]\s*([\s\S]*)$/
 
+function isScenType(v: unknown): v is ScenType {
+  return typeof v === 'string' && (SCEN_TYPES as readonly string[]).includes(v)
+}
+
 export interface ParsedScenType {
-  /** The category, or null when the description carries no recognised tag. */
+  /** The category, or null when neither the field nor a tag supplied one. */
   type: ScenType | null
-  /** The description with the tag removed — '' when there was nothing else. */
+  /** The description with any legacy tag removed — '' when nothing remains. */
   text: string
 }
 
+/**
+ * The category and description to DISPLAY for a project.
+ *
+ * `scenario_type` wins whenever it is set, so a description a user later edits
+ * to start with "[baseline]" cannot silently re-categorise their project. The
+ * tag is only consulted when the field is empty, which today means a bundle
+ * that predates the split.
+ *
+ * An unrecognised `scenario_type` (a category added server-side that this
+ * build has no label for) resolves to `null` — no badge — rather than
+ * rendering a raw value or throwing the row away.
+ */
+export function resolveScenType(
+  project: { scenario_type?: string | null; scenario_description?: string | null },
+): ParsedScenType {
+  const description = project.scenario_description
+  if (project.scenario_type) {
+    return {
+      type: isScenType(project.scenario_type) ? project.scenario_type : null,
+      text: description ?? '',
+    }
+  }
+  return parseScenType(description)
+}
+
+/** Decode a legacy `[type] text` description. Prose passes through whole. */
 export function parseScenType(desc?: string | null): ParsedScenType {
   if (!desc) return { type: null, text: '' }
   const m = TAG_RE.exec(desc)
@@ -36,16 +72,11 @@ export function parseScenType(desc?: string | null): ParsedScenType {
   return { type: null, text: desc }
 }
 
-/** The stored form: `[type] description`, or just `[type]` with no text. */
-export function tagScenType(type: ScenType, description: string): string {
-  return `[${type}] ${description.trim()}`.trim()
-}
-
 /**
  * Just the human-readable part of a description, for surfaces that show the
  * text but have nowhere to put the category badge. Returns '' rather than the
- * raw string when the description was nothing but a tag, so callers can keep
- * using a falsy check to skip rendering an empty line.
+ * raw string when the description was nothing but a legacy tag, so callers can
+ * keep using a falsy check to skip rendering an empty line.
  */
 export function scenDescriptionText(desc?: string | null): string {
   return parseScenType(desc).text

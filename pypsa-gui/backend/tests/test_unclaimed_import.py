@@ -139,6 +139,9 @@ def test_flat_dir_in_projects_root_is_listed(session_local, projects_root):
         "name": "Old Study",
         "parent_project": None,
         "scenario_description": None,
+        # Split out of the description when a pre-0004 bundle carries the
+        # retired `[type]` prefix inline; None for one that never had a tag.
+        "scenario_type": None,
         "has_network": True,
         "descendant_names": [],
     }
@@ -251,7 +254,12 @@ def test_import_relinks_scenario_child_to_root(session_local, projects_root):
     with session_local() as db:
         child = db.scalar(select(Project).where(Project.name == "Variant"))
         assert child.parent_project_id == uuid.UUID(body["root"]["id"])
-        assert child.scenario_description == "[scenario] variant"
+        # A pre-auth project on disk predates migration 0004, so its category
+        # is still a `[type]` prefix inside the description. The import splits
+        # it — importing verbatim would give the row a NULL category and a
+        # description that renders the marker as prose.
+        assert child.scenario_description == "variant"
+        assert child.scenario_type == "scenario"
 
 
 def test_importing_same_name_twice_conflicts(session_local, projects_root):

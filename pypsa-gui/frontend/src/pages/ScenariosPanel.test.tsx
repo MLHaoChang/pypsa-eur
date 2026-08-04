@@ -102,7 +102,8 @@ describe('branching from a row that is not the active project', () => {
     const dlg = await branchFrom('base')
     await fillAndCreate(dlg, 'from_base')
     await waitFor(() => expect(vi.mocked(projectsApi.createScenario))
-      .toHaveBeenCalledWith('id-base', 'from_base', expect.any(String)))
+      // No description typed -> null, not ''. The category is its own arg.
+      .toHaveBeenCalledWith('id-base', 'from_base', null, 'scenario'))
   })
 
   it('does not save a project the backend is not holding in memory', async () => {
@@ -200,6 +201,157 @@ describe('a project whose files are gone', () => {
   })
 })
 
+describe('the scenario category is a real field', () => {
+  it('badges the row from scenario_type, not from the description', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({
+        name: 'typed', id: 'id-typed',
+        scenario_type: 'stress', scenario_description: 'cold winter',
+      }),
+    ] as never)
+    renderPanel()
+    const row = await rowFor('typed')
+    expect(within(row).getByText('stress')).toBeTruthy()
+    expect(within(row).getByText('cold winter')).toBeTruthy()
+  })
+
+  it('still decodes a legacy tag for a bundle the backend has not split', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({ name: 'old', id: 'id-old', scenario_description: '[baseline] ref run' }),
+    ] as never)
+    renderPanel()
+    const row = await rowFor('old')
+    expect(within(row).getByText('baseline')).toBeTruthy()
+    // And the marker itself is never shown as prose.
+    expect(within(row).getByText('ref run')).toBeTruthy()
+    expect(row.textContent).not.toContain('[baseline]')
+  })
+
+  it('sends the category as its own field when branching', async () => {
+    renderPanel()
+    const dlg = await branchFrom('base')
+    await userEvent.selectOptions(within(dlg).getByRole('combobox'), 'stress')
+    await userEvent.type(
+      within(dlg).getByPlaceholderText("What's different from the base?"), 'no imports',
+    )
+    await fillAndCreate(dlg, 'variant_a')
+    await waitFor(() => expect(vi.mocked(projectsApi.createScenario))
+      .toHaveBeenCalledWith('id-base', 'variant_a', 'no imports', 'stress'))
+  })
+})
+
+describe('editing a scenario after it was created', () => {
+  it('saves the new category and description', async () => {
+    // Both were write-once: the description was set in the branch dialog and
+    // never again, and the category lived as a `[type]` prefix inside it.
+    vi.mocked(projectsApi.updateScenario).mockResolvedValue({ name: 'base' } as never)
+    renderPanel()
+    const row = await rowFor('base')
+    await userEvent.click(within(row).getByTitle(/^Edit this scenario/))
+    const dlg = await screen.findByRole('dialog')
+    await userEvent.selectOptions(within(dlg).getByRole('combobox'), 'baseline')
+    await userEvent.type(within(dlg).getByRole('textbox'), 'the reference run')
+    await userEvent.click(within(dlg).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(vi.mocked(projectsApi.updateScenario))
+      .toHaveBeenCalledWith('id-base', {
+        description: 'the reference run', scenario_type: 'baseline',
+      }))
+  })
+
+  it('opens with the project’s current values', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({
+        name: 'typed', id: 'id-typed',
+        scenario_type: 'stress', scenario_description: 'cold winter',
+      }),
+    ] as never)
+    renderPanel()
+    const row = await rowFor('typed')
+    await userEvent.click(within(row).getByTitle(/^Edit this scenario/))
+    const dlg = await screen.findByRole('dialog')
+    expect((within(dlg).getByRole('combobox') as HTMLSelectElement).value).toBe('stress')
+    expect((within(dlg).getByRole('textbox') as HTMLTextAreaElement).value).toBe('cold winter')
+  })
+
+  it('keeps Save disabled until something actually changes', async () => {
+    renderPanel()
+    const row = await rowFor('base')
+    await userEvent.click(within(row).getByTitle(/^Edit this scenario/))
+    const dlg = await screen.findByRole('dialog')
+    expect(within(dlg).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
+    await userEvent.type(within(dlg).getByRole('textbox'), 'x')
+    expect(within(dlg).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false)
+  })
+
+  it('clears the description with null rather than an empty string', async () => {
+    // The route treats an absent key as "leave alone" and null as "clear".
+    // Sending '' would store an empty string that every reader then has to
+    // treat as if it were missing.
+    vi.mocked(projectsApi.updateScenario).mockResolvedValue({ name: 'typed' } as never)
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({
+        name: 'typed', id: 'id-typed',
+        scenario_type: 'stress', scenario_description: 'cold winter',
+      }),
+    ] as never)
+    renderPanel()
+    const row = await rowFor('typed')
+    await userEvent.click(within(row).getByTitle(/^Edit this scenario/))
+    const dlg = await screen.findByRole('dialog')
+    await userEvent.clear(within(dlg).getByRole('textbox'))
+    await userEvent.click(within(dlg).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(vi.mocked(projectsApi.updateScenario))
+      .toHaveBeenCalledWith('id-typed', { description: null, scenario_type: 'stress' }))
+  })
+
+  it('opens uncategorised as uncategorised, not pre-set to a guess', async () => {
+    // `base` has no category. Defaulting the select to 'scenario' would show
+    // the user a value they never chose and make Save look meaningful.
+    renderPanel()
+    const row = await rowFor('base')
+    await userEvent.click(within(row).getByTitle(/^Edit this scenario/))
+    const dlg = await screen.findByRole('dialog')
+    expect((within(dlg).getByRole('combobox') as HTMLSelectElement).value).toBe('')
+  })
+
+  it('can take a category back off again', async () => {
+    // The column is nullable and the route accepts null, but a select
+    // offering only the three categories could never SEND that — every
+    // project passing through the dialog would come out categorised for good.
+    vi.mocked(projectsApi.updateScenario).mockResolvedValue({ name: 'typed' } as never)
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({
+        name: 'typed', id: 'id-typed',
+        scenario_type: 'stress', scenario_description: 'cold winter',
+      }),
+    ] as never)
+    renderPanel()
+    const row = await rowFor('typed')
+    await userEvent.click(within(row).getByTitle(/^Edit this scenario/))
+    const dlg = await screen.findByRole('dialog')
+    await userEvent.selectOptions(within(dlg).getByRole('combobox'), '')
+    await userEvent.click(within(dlg).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(vi.mocked(projectsApi.updateScenario))
+      .toHaveBeenCalledWith('id-typed', {
+        description: 'cold winter', scenario_type: null,
+      }))
+  })
+
+  it('is offered even when the project’s files are gone', async () => {
+    // The label lives in the registry row, which is exactly what is still
+    // there — and renaming what you can see is how you make sense of a list
+    // you are about to clean up.
+    renderPanel()
+    const row = await rowFor('ghost')
+    expect(within(row).getByTitle(/^Edit this scenario/)).toHaveProperty('disabled', false)
+  })
+})
+
 describe('the edit lock covers the project it is held on', () => {
   it('disables the active row while another user holds it', async () => {
     useUIStore.setState({ currentProject: 'loaded', readOnly: true })
@@ -208,7 +360,8 @@ describe('the edit lock covers the project it is held on', () => {
     // Both mutating affordances, not just one: branching the active project
     // now writes to it (the pre-copy save), so the lock has to cover it too.
     const blocked = within(row).getAllByTitle(/Read-only/)
-    expect(blocked).toHaveLength(2)
+    // Branch, edit, delete — everything that writes to the locked project.
+    expect(blocked).toHaveLength(3)
     expect(blocked.every(b => (b as HTMLButtonElement).disabled)).toBe(true)
   })
 

@@ -28,6 +28,7 @@ function unclaimed(name: string): UnclaimedProject {
     name,
     parent_project: null,
     scenario_description: null,
+    scenario_type: null,
     has_network: true,
     descendant_names: [],
   }

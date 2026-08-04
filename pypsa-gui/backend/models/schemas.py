@@ -528,8 +528,12 @@ class ProjectInfo(BaseModel):
     # Free-form one-line label describing the scenario's purpose. Only
     # populated for scenarios (set at creation); root projects leave it None.
     scenario_description: str | None = None
+    # Scenario category: 'baseline' | 'scenario' | 'stress', or None when the
+    # project has never been categorised. Was a `[type]` prefix on the
+    # description until migration 0004; see `Project.scenario_type`.
+    scenario_type: str | None = None
 
-    @field_validator("parent_project", "scenario_description", mode="before")
+    @field_validator("parent_project", "scenario_description", "scenario_type", mode="before")
     @classmethod
     def _empty_str_is_none(cls, v):
         # Coerce empty / whitespace-only strings to None so downstream
@@ -549,10 +553,33 @@ class CreateScenarioRequest(BaseModel):
     `name` is the new scenario's project name (a sibling on disk to the
     base; not a sub-folder). `description` is optional, capped at 500 chars
     to keep metadata.json small.
+
+    `scenario_type` is the category. It used to arrive INSIDE `description`
+    as a `[type]` prefix; that encoding is retired, and a description still
+    carrying one is rejected rather than silently stored (see
+    `_reject_legacy_tag`) — accepting both would let the two channels
+    disagree about the same project.
     """
 
     name: str = Field(..., min_length=1, max_length=64)
     description: str | None = Field(None, max_length=500)
+    scenario_type: str | None = Field(None, max_length=32)
+
+
+class UpdateScenarioRequest(BaseModel):
+    """
+    Body for PATCH /api/projects/{name}/scenario.
+
+    Both fields are optional and only APPLIED when present, so a caller
+    changing the category cannot blank the description as a side effect — the
+    partial-PUT trap this codebase has hit repeatedly. `null` is a real value
+    here (it clears the field); omitting the key leaves it alone. That
+    distinction needs `model_fields_set`, which is why the route reads
+    `model_dump(exclude_unset=True)` rather than the attributes.
+    """
+
+    description: str | None = Field(None, max_length=500)
+    scenario_type: str | None = Field(None, max_length=32)
 
 
 class RenameProjectRequest(BaseModel):

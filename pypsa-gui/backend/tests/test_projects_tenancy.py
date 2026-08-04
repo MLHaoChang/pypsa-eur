@@ -216,13 +216,25 @@ def test_create_scenario_inherits_tree_access(session_local):
     with _client_for("member@example.com") as client_member:
         resp = client_member.post(
             f"/api/projects/{root.id}/scenarios",
-            json={"name": "S1", "description": "[scenario] x"},
+            json={"name": "S1", "description": "x", "scenario_type": "scenario"},
         )
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["parent_project"] == root.name
         assert body["id"] is not None and body["id"] != str(root.id)
-        assert body["scenario_description"] == "[scenario] x"
+        # The category is its own field now. It used to be a `[type]` prefix on
+        # the description, which this test asserted verbatim.
+        assert body["scenario_description"] == "x"
+        assert body["scenario_type"] == "scenario"
+
+        # And the retired encoding is REFUSED rather than stored, so the two
+        # channels can never disagree about one project's category.
+        legacy = client_member.post(
+            f"/api/projects/{root.id}/scenarios",
+            json={"name": "S_legacy", "description": "[scenario] x"},
+        )
+        assert legacy.status_code == 400, legacy.text
+        assert "scenario_type" in legacy.json()["detail"]
 
         # Member has tree-inherited access to the freshly-created child.
         assert client_member.get(f"/api/projects/{body['id']}").status_code == 200
@@ -235,6 +247,158 @@ def test_create_scenario_inherits_tree_access(session_local):
         assert child is not None
         assert child.parent_project_id == root.id
         assert child.org_id == org.id
+
+
+# ── PATCH /{name}/scenario ───────────────────────────────────────────────────
+# Category and description were write-once until this route: a mistyped
+# description, or a scenario that turned out to be the baseline, could only be
+# corrected by branching a replacement and deleting the original.
+
+def _seed_admin_root(session_local, *, name="Root"):
+    org = _create_org(session_local, name="Org")
+    admin = _create_user(session_local, email="admin@example.com")
+    _add_membership(session_local, user_id=admin.id, org_id=org.id, role="admin")
+    return org, admin, _create_project(session_local, org=org, creator=admin, name=name)
+
+
+def test_scenario_metadata_is_editable_after_creation(session_local):
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        resp = client.patch(
+            f"/api/projects/{root.id}/scenario",
+            json={"scenario_type": "baseline", "description": "the reference run"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scenario_type"] == "baseline"
+        assert resp.json()["scenario_description"] == "the reference run"
+        # And it is durable, not just echoed back.
+        listed = client.get("/api/projects/").json()
+        row = next(r for r in listed if r["id"] == str(root.id))
+        assert row["scenario_type"] == "baseline"
+
+
+def test_a_root_project_may_carry_a_category(session_local):
+    # A root is very often the baseline. Restricting the field to branches
+    # would be arbitrary — the category describes a project's role in a study,
+    # and roots have one.
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        resp = client.patch(
+            f"/api/projects/{root.id}/scenario", json={"scenario_type": "baseline"}
+        )
+    assert resp.status_code == 200
+    assert resp.json()["parent_project"] is None
+    assert resp.json()["scenario_type"] == "baseline"
+
+
+def test_patch_is_partial_so_changing_one_field_keeps_the_other(session_local):
+    # The partial-PUT trap this codebase has hit repeatedly: a body carrying
+    # only the category must not reset the description to a schema default.
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        client.patch(
+            f"/api/projects/{root.id}/scenario",
+            json={"scenario_type": "scenario", "description": "keep me"},
+        )
+        resp = client.patch(
+            f"/api/projects/{root.id}/scenario", json={"scenario_type": "stress"}
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["scenario_type"] == "stress"
+    assert resp.json()["scenario_description"] == "keep me"
+
+
+def test_explicit_null_clears_a_field(session_local):
+    # `null` is a real value here — it is how the user empties the box. Only
+    # an ABSENT key means "leave alone".
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        client.patch(
+            f"/api/projects/{root.id}/scenario",
+            json={"scenario_type": "stress", "description": "temporary"},
+        )
+        resp = client.patch(
+            f"/api/projects/{root.id}/scenario",
+            json={"description": None, "scenario_type": None},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["scenario_description"] is None
+    assert resp.json()["scenario_type"] is None
+
+
+def test_patch_rejects_an_unknown_category(session_local):
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        resp = client.patch(
+            f"/api/projects/{root.id}/scenario", json={"scenario_type": "sensitivity"}
+        )
+    assert resp.status_code == 400
+    assert "baseline" in resp.json()["detail"]
+
+
+def test_patch_rejects_a_description_still_carrying_the_retired_prefix(session_local):
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        resp = client.patch(
+            f"/api/projects/{root.id}/scenario", json={"description": "[stress] winter"}
+        )
+    assert resp.status_code == 400
+    assert "scenario_type='stress'" in resp.json()["detail"]
+
+
+def test_patch_mirrors_into_metadata_json_for_bundle_export(session_local):
+    import json
+
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        resp = client.post(
+            f"/api/projects/{root.id}/scenarios",
+            json={"name": "Branch", "description": "d", "scenario_type": "scenario"},
+        )
+        child_id = resp.json()["id"]
+        client.patch(
+            f"/api/projects/{child_id}/scenario",
+            json={"scenario_type": "stress", "description": "edited"},
+        )
+
+    with session_local() as db:
+        child = db.get(Project, uuid.UUID(child_id))
+    meta = json.loads((project_registry.project_dir(child) / "metadata.json").read_text())
+    assert meta["scenario_type"] == "stress"
+    assert meta["scenario_description"] == "edited"
+
+
+def test_patch_refuses_a_project_the_caller_may_not_edit(session_local):
+    # Same permission as rename/delete: relabelling a project in a shared
+    # workspace is the same class of act.
+    org = _create_org(session_local, name="Org")
+    admin = _create_user(session_local, email="admin@example.com")
+    outsider = _create_user(session_local, email="outsider@example.com")
+    _add_membership(session_local, user_id=admin.id, org_id=org.id, role="admin")
+    other_org = _create_org(session_local, name="Other")
+    _add_membership(session_local, user_id=outsider.id, org_id=other_org.id, role="admin")
+    root = _create_project(session_local, org=org, creator=admin, name="Root")
+
+    with _client_for("outsider@example.com") as client:
+        resp = client.patch(
+            f"/api/projects/{root.id}/scenario", json={"scenario_type": "stress"}
+        )
+    # 404, not 403: the check runs before the caller has proved read access, so
+    # answering 403 would confirm the project exists.
+    assert resp.status_code == 404
+
+
+def test_an_empty_patch_body_is_a_no_op(session_local):
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        client.patch(
+            f"/api/projects/{root.id}/scenario",
+            json={"scenario_type": "stress", "description": "keep"},
+        )
+        resp = client.patch(f"/api/projects/{root.id}/scenario", json={})
+    assert resp.status_code == 200
+    assert resp.json()["scenario_type"] == "stress"
+    assert resp.json()["scenario_description"] == "keep"
 
 
 def test_scenario_child_metadata_parent_name_in_sync(session_local):

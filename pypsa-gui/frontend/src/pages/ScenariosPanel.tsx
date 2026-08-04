@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { GitBranch, Plus, Trash2, ArrowRight, Layers, ChevronRight } from 'lucide-react'
+import { GitBranch, Pencil, Plus, Trash2, ArrowRight, Layers, ChevronRight } from 'lucide-react'
 import { projectsApi } from '../api/projects'
 import { networkApi } from '../api/network'
 import { formatApiDetail } from '../api/client'
@@ -9,7 +9,9 @@ import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, saveProjectQuietly, switchToProject } from '../utils/projectActions'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { confirmToast } from '../utils/toasts'
-import { parseScenType, tagScenType, type ScenType } from '../utils/scenarioType'
+import {
+  SCEN_TYPES, SCEN_TYPE_LABEL, resolveScenType, type ScenType,
+} from '../utils/scenarioType'
 import { appLog } from '../store/simulationStore'
 import type { ProjectInfo } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn, Tag } from '../components/PageKit'
@@ -177,6 +179,7 @@ export default function ScenariosPanel() {
   // UUID-backed route key (id||name) the createScenario call uses.
   const [creating, setCreating] = useState<{ base: string; baseId: string } | null>(null)
   const [switching, setSwitching] = useState<string | null>(null)
+  const [editing, setEditing] = useState<ProjectInfo | null>(null)
 
   // Shared read-only guard for the panel's mutating actions. Returns true when
   // the action may proceed; otherwise toasts and returns false.
@@ -398,6 +401,7 @@ export default function ScenariosPanel() {
                   readOnly={readOnly}
                   onSwitch={switchTo}
                   onCreateChild={(base) => { if (guardMutation(base)) setCreating({ base, baseId: apiIdFor(base) }) }}
+                  onEdit={(project) => { if (guardMutation(project.name)) setEditing(project) }}
                   onDelete={(name) => { if (guardMutation(name)) deleteMut.mutate({ id: apiIdFor(name), name, cascade: false }) }}
                 />
               ))}
@@ -405,6 +409,20 @@ export default function ScenariosPanel() {
           )}
         </PageSection>
       </PageBody>
+
+      {editing && (
+        <EditScenarioDialog
+          project={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(info) => {
+            setEditing(null)
+            qc.invalidateQueries({ queryKey: ['projects'] })
+            // The compare rail renders the description alongside the KPIs.
+            qc.invalidateQueries({ queryKey: ['compare-state', info.name] })
+            toast.success(`Updated '${info.name}'`)
+          }}
+        />
+      )}
 
       {creating && (
         <CreateScenarioDialog
@@ -440,13 +458,14 @@ interface RowProps {
   readOnly: boolean
   onSwitch: (name: string) => void
   onCreateChild: (base: string) => void
+  onEdit: (project: ProjectInfo) => void
   onDelete: (name: string) => void
 }
 
-function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChild, onDelete }: RowProps) {
+function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChild, onEdit, onDelete }: RowProps) {
   const isCurrent = node.project.name === currentProject
   const indent = node.depth * 16
-  const { type: scenType, text: scenText } = parseScenType(node.project.scenario_description)
+  const { type: scenType, text: scenText } = resolveScenType(node.project)
   // The registry row outlives a folder deleted in Finder. Switching to one
   // 404s and branching one has nothing to copy, so both are refused here —
   // matching the "+" tab's project picker, which already greys these out.
@@ -523,6 +542,20 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
           >
             <Plus size={13} />
           </button>
+          {/* Editable even when the files are gone — the label lives in the
+              registry row, which is precisely what is still there. */}
+          <button
+            onClick={() => onEdit(node.project)}
+            disabled={lockedRow}
+            className={`p-1.5 transition-colors rounded ${
+              lockedRow ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-accent'
+            }`}
+            title={lockedRow
+              ? 'Read-only — another user is editing this project'
+              : 'Edit this scenario\u2019s type and description'}
+          >
+            <Pencil size={13} />
+          </button>
           {/* Deletable even when its files are gone: the registry row is
               exactly what wants clearing in that case. */}
           <button
@@ -547,10 +580,135 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
           readOnly={readOnly}
           onSwitch={onSwitch}
           onCreateChild={onCreateChild}
+          onEdit={onEdit}
           onDelete={onDelete}
         />
       ))}
     </>
+  )
+}
+
+// ── Shared category picker ──────────────────────────────────────────────────
+// Driven off SCEN_TYPES rather than three hand-written <option>s, so the
+// create dialog and the edit dialog cannot drift apart, and adding a category
+// is one entry in one file.
+
+/**
+ * `''` is a real option — "uncategorised" — not a placeholder.
+ *
+ * The column is nullable and the PATCH route accepts null to clear it, but a
+ * select offering only the three categories can never SEND that: every project
+ * that passed through this dialog would come out categorised, and a category
+ * applied by accident could not be taken off again. It is also what an
+ * untouched project genuinely is, so the edit dialog needs it to open
+ * truthfully rather than pre-selecting a value the user never chose.
+ */
+function ScenTypeSelect(
+  { value, onChange }: { value: ScenType | ''; onChange: (v: ScenType | '') => void },
+) {
+  return (
+    <label className="block">
+      <span className="text-[10px] text-muted">Type</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value as ScenType | '')}
+        className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 focus:outline-none focus:border-accent"
+      >
+        <option value="">— none —</option>
+        {SCEN_TYPES.map(t => (
+          <option key={t} value={t}>{SCEN_TYPE_LABEL[t]}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+// ── Edit dialog ─────────────────────────────────────────────────────────────
+
+interface EditDialogProps {
+  project: ProjectInfo
+  onClose: () => void
+  onSaved: (info: ProjectInfo) => void
+}
+
+/**
+ * Change a project's category and description after the fact.
+ *
+ * Both were write-once: the description was set in the branch dialog and never
+ * again, and the category was a `[type]` prefix INSIDE it, so correcting
+ * either meant branching a replacement and deleting the original. A scenario
+ * that turns out to be the baseline is an ordinary thing to discover halfway
+ * through a study.
+ */
+function EditScenarioDialog({ project, onClose, onSaved }: EditDialogProps) {
+  const titleId = useId()
+  const initial = resolveScenType(project)
+  const [scenType, setScenType] = useState<ScenType | ''>(initial.type ?? '')
+  const [description, setDescription] = useState(initial.text)
+
+  const saveMut = useMutation({
+    // Both keys always sent: this dialog owns both fields and shows their
+    // current values, so an empty box means "clear it" — which is `null`, not
+    // an omitted key. Omission is for callers that are not editing a field at
+    // all, and sending `undefined` here would silently leave a cleared
+    // description in place.
+    mutationFn: () => projectsApi.updateScenario(project.id ?? project.name, {
+      description: description.trim() || null,
+      scenario_type: scenType || null,
+    }),
+    onSuccess: onSaved,
+    onError: (err) => {
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      toast.error(`Could not save: ${formatApiDetail(e.response?.data?.detail, (err as Error).message)}`)
+    },
+  })
+
+  const dirty = (scenType || null) !== initial.type
+    || description.trim() !== initial.text.trim()
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      aria-labelledby={titleId}
+      z={400}
+      panelClassName="bg-bg rounded-lg shadow-2xl w-[440px] max-w-[92vw] border border-border"
+    >
+      <div className="px-3 py-2 border-b border-border">
+        <div id={titleId} className="text-xs font-semibold text-text">
+          Edit <span className="text-accent">{project.name}</span>
+        </div>
+        <div className="text-[10px] text-muted mt-0.5">
+          Label only — the network, its results and the scenario tree are untouched.
+        </div>
+      </div>
+      <div className="p-3 space-y-2">
+        <ScenTypeSelect value={scenType} onChange={setScenType} />
+        <label className="block">
+          <span className="text-[10px] text-muted">Description</span>
+          <textarea
+            value={description}
+            maxLength={500}
+            rows={2}
+            autoFocus
+            onChange={e => setDescription(e.target.value)}
+            placeholder="What's different about this one?"
+            className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 resize-y focus:outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+      <div className="flex justify-end gap-1.5 px-3 py-2 border-t border-border">
+        <button
+          onClick={onClose}
+          className="px-3 py-1 text-xs border border-border rounded text-muted hover:text-text hover:border-text/40 transition-colors"
+        >Cancel</button>
+        <button
+          onClick={() => { if (dirty && !saveMut.isPending) saveMut.mutate() }}
+          disabled={!dirty || saveMut.isPending}
+          className="px-3 py-1 text-xs rounded bg-accent text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/85 transition-colors"
+        >{saveMut.isPending ? 'Saving…' : 'Save'}</button>
+      </div>
+    </Dialog>
   )
 }
 
@@ -575,7 +733,7 @@ function CreateScenarioDialog({ base, baseId, baseIsActive, onClose, onCreated }
   // Scenario category — 'baseline' is the canonical reference run; the others
   // are variants. Encoded as a `[type]` prefix on scenario_description since
   // ProjectInfo carries no dedicated field.
-  const [scenType, setScenType] = useState<ScenType>('scenario')
+  const [scenType, setScenType] = useState<ScenType | ''>('scenario')
   const createMut = useMutation({
     mutationFn: async () => {
       // Flush the base to disk FIRST when it is the loaded project.
@@ -604,7 +762,9 @@ function CreateScenarioDialog({ base, baseId, baseIsActive, onClose, onCreated }
           )
         }
       }
-      return projectsApi.createScenario(baseId, name.trim(), tagScenType(scenType, description))
+      return projectsApi.createScenario(
+        baseId, name.trim(), description.trim() || null, scenType || null,
+      )
     },
     onSuccess: onCreated,
     onError: (err) => {
@@ -661,18 +821,7 @@ function CreateScenarioDialog({ base, baseId, baseIsActive, onClose, onCreated }
             <span className="text-[10px] text-warn mt-0.5 block">{hint}</span>
           )}
         </label>
-        <label className="block">
-          <span className="text-[10px] text-muted">Type</span>
-          <select
-            value={scenType}
-            onChange={e => setScenType(e.target.value as ScenType)}
-            className="w-full mt-0.5 text-xs bg-bg border border-border rounded px-2 py-1 focus:outline-none focus:border-accent"
-          >
-            <option value="baseline">Baseline — canonical reference run</option>
-            <option value="scenario">Scenario — a named variant</option>
-            <option value="stress">Stress test</option>
-          </select>
-        </label>
+        <ScenTypeSelect value={scenType} onChange={setScenType} />
         <label className="block">
           <span className="text-[10px] text-muted">Description (optional)</span>
           <textarea

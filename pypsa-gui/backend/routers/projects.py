@@ -28,6 +28,7 @@ from models.schemas import (
     ImportSummary,
     ProjectInfo,
     RenameProjectRequest,
+    UpdateScenarioRequest,
 )
 from services import active_project, change_log_service
 from services.atomic_io import (
@@ -459,6 +460,89 @@ def _write_meta(project_dir: pathlib.Path, data: dict) -> None:
 # to decide anything.
 
 
+# ── Scenario category ────────────────────────────────────────────────────────
+
+# The categories the UI offers. Presentational, so this list is the validating
+# edge rather than a DB enum — see `Project.scenario_type`. A value outside it
+# is refused on the way IN; a value already stored outside it (an older bundle,
+# a hand-edited metadata.json) is passed through to the client, which shows no
+# badge rather than breaking the row.
+_SCENARIO_TYPES = ("baseline", "scenario", "stress")
+
+# The retired encoding: `"[stress] cold winter"` in `scenario_description`.
+# Still READ here, never written — a bundle exported before migration 0004,
+# from this app or an older install, arrives with the tag still inline and
+# would otherwise import as an uncategorised project whose description shows
+# the marker as prose.
+_LEGACY_TAG_RE = re.compile(rf"^\[({'|'.join(_SCENARIO_TYPES)})\]\s*([\s\S]*)$")
+
+
+def _split_legacy_tag(description: str | None) -> tuple[str | None, str | None]:
+    """`("[stress] cold winter")` -> `("stress", "cold winter")`. Prose passes through."""
+    if not description:
+        return None, None
+    match = _LEGACY_TAG_RE.match(description)
+    if match is None:
+        return None, description
+    return match.group(1), (match.group(2).strip() or None)
+
+
+def _scenario_fields_from_meta(meta: dict) -> dict[str, str | None]:
+    """
+    `scenario_type` + `scenario_description` out of a metadata.json.
+
+    Prefers the explicit `scenario_type` key and falls back to decoding a
+    legacy `[type]` prefix off the description, so a bundle written before
+    0004 imports with its category intact instead of as prose.
+    """
+    description = meta.get("scenario_description")
+    stored_type = meta.get("scenario_type")
+    if stored_type:
+        return {"scenario_type": stored_type, "scenario_description": description}
+    legacy_type, remainder = _split_legacy_tag(description)
+    return {"scenario_type": legacy_type, "scenario_description": remainder}
+
+
+def _validated_scenario_type(value: str | None) -> str | None:
+    """Normalise + validate a category from a request body. None clears it."""
+    if value is None:
+        return None
+    normalised = value.strip().lower()
+    if not normalised:
+        return None
+    if normalised not in _SCENARIO_TYPES:
+        raise HTTPException(
+            400,
+            f"Unknown scenario_type '{value}'. Expected one of: "
+            f"{', '.join(_SCENARIO_TYPES)}.",
+        )
+    return normalised
+
+
+def _reject_legacy_tag(description: str | None) -> str | None:
+    """
+    Refuse a description that still carries the retired `[type]` prefix.
+
+    Silently accepting one would let the two channels disagree — a project
+    stored as `scenario_type='stress'` with `"[baseline] …"` in its
+    description has no correct rendering, and whichever surface won would look
+    like the other was broken. A client that means the category should send
+    `scenario_type`; this is the error that tells it so.
+    """
+    if description is None:
+        return None
+    legacy_type, remainder = _split_legacy_tag(description)
+    if legacy_type is not None:
+        raise HTTPException(
+            400,
+            f"description must not begin with '[{legacy_type}]' — that prefix was "
+            f"how the category used to be stored. Send scenario_type="
+            f"'{legacy_type}' and a description of "
+            f"{remainder!r} instead.",
+        )
+    return description
+
+
 def _project_info(project_dir: pathlib.Path) -> ProjectInfo:
     """
     Build a ProjectInfo from a project directory. Same shape as the
@@ -484,7 +568,7 @@ def _project_info(project_dir: pathlib.Path) -> ProjectInfo:
         objective=meta.get("objective"),
         has_orphan_tmp=has_orphan,
         parent_project=meta.get("parent_project"),
-        scenario_description=meta.get("scenario_description"),
+        **_scenario_fields_from_meta(meta),
     )
 
 
@@ -526,7 +610,12 @@ def _project_info_db(db, project) -> ProjectInfo:
         )
     info.name = project.name
     info.id = str(project.id)
+    # The DB row wins over whatever `_project_info` decoded from the bundle's
+    # metadata.json: the storage dir is UUID-keyed and its metadata is only
+    # kept in sync for export/import round-trips, so a stale `[type]` prefix
+    # down there must not override a category the user has since edited.
     info.scenario_description = project.scenario_description
+    info.scenario_type = project.scenario_type
     parent_name = None
     if project.parent_project_id is not None:
         parent = db.get(_Project, project.parent_project_id)
@@ -623,6 +712,7 @@ def list_unclaimed_projects(
             "name": project.name,
             "parent_project": project.parent_project,
             "scenario_description": project.scenario_description,
+            "scenario_type": project.scenario_type,
             "has_network": project.has_network,
             "descendant_names": project.descendant_names,
         }
@@ -1548,12 +1638,21 @@ def _save_context(
         # The override path lets `create_scenario` set parent_project in the
         # same atomic write as the rest of the metadata — no half-state where
         # a GET /api/projects would see the new project as a root.
+        #
+        # The round-trip branch reads through `_scenario_fields_from_meta`, so
+        # a bundle still carrying the retired `[type]` prefix inline is written
+        # back SPLIT — the on-disk metadata migrates itself on the next save,
+        # matching what migration 0004 did to the DB rows.
         if apply_overrides:
             new_parent = parent_project_override
-            new_desc = scenario_description_override
+            legacy_type, stripped = _split_legacy_tag(scenario_description_override)
+            new_desc = stripped
+            new_type = legacy_type
         else:
             new_parent = existing_meta.get("parent_project")
-            new_desc = existing_meta.get("scenario_description")
+            scen_fields = _scenario_fields_from_meta(existing_meta)
+            new_desc = scen_fields["scenario_description"]
+            new_type = scen_fields["scenario_type"]
         _write_meta(dest, {
             "created_at": existing_meta.get(
                 "created_at", datetime.now(tz=timezone.utc).isoformat()
@@ -1570,6 +1669,7 @@ def _save_context(
             "user_ts_count": len(user_ts_data),
             "parent_project": new_parent,
             "scenario_description": new_desc,
+            "scenario_type": new_type,
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.
@@ -2130,9 +2230,11 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
     if project_registry.find_project(db, user, req.name) is not None:
         raise HTTPException(409, f"Project '{req.name}' already exists")
 
-    desc = (req.description or "").strip() or None
+    desc = _reject_legacy_tag((req.description or "").strip() or None)
+    scen_type = _validated_scenario_type(req.scenario_type)
     child = project_registry.create_scenario(
-        db, user, base_project, req.name, scenario_description=desc
+        db, user, base_project, req.name,
+        scenario_description=desc, scenario_type=scen_type,
     )
     child_dir = project_registry.ensure_project_dir(child)
 
@@ -2150,6 +2252,7 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
         now = datetime.now(tz=timezone.utc).isoformat()
         meta["parent_project"] = base_project.name
         meta["scenario_description"] = desc
+        meta["scenario_type"] = scen_type
         meta.setdefault("created_at", now)
         meta["last_saved"] = now
         _write_meta(child_dir, meta)
@@ -2192,6 +2295,95 @@ def create_scenario(
     is missing, 409 if the target name already exists.
     """
     return _create_scenario_db(db, user, base, req)
+
+
+@router.patch("/{name}/scenario")
+def update_scenario_metadata(
+    name: str,
+    req: UpdateScenarioRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> ProjectInfo:
+    """
+    Edit a project's scenario category and description after creation.
+
+    Until this route existed both were write-once, set in the branch dialog and
+    never changeable: a mistyped description, or a scenario that turned out to
+    be the baseline, could only be corrected by branching a replacement and
+    deleting the original. The category in particular was stored as a `[type]`
+    prefix INSIDE the description, so "changing the type" meant editing a piece
+    of syntax the UI never showed you.
+
+    Applies to any project, not only branches. A root is very often the
+    baseline, and refusing to let it say so is an artificial restriction — the
+    category describes the project's role in a study, and roots have one.
+
+    PARTIAL: only the keys actually present in the body are written, so a
+    caller changing the category cannot blank the description as a side
+    effect. `null` clears a field; omitting the key leaves it untouched. This
+    is the `exclude_unset` discipline the rest of this codebase learned the
+    hard way from partial PUTs resetting omitted fields to schema defaults.
+
+    Permission mirrors rename/delete (org admin, tree-root creator, or the
+    scenario's own creator) — editing how a project is labelled in a shared
+    workspace is the same class of act as renaming it.
+
+    Errors:
+      400 — unknown scenario_type, or a description still carrying a `[type]`
+            prefix (send `scenario_type` instead; the two channels must not
+            disagree)
+      403 — not yours to edit
+      404 — no such project
+    """
+    from services import project_acl, project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    if not project_acl.can_delete_project(db, user, project):
+        raise HTTPException(403, f"You do not have permission to edit '{project.name}'")
+
+    submitted = req.model_dump(exclude_unset=True)
+    if not submitted:
+        # Nothing asked for is not an error, but it must not stamp
+        # `updated_at` or write a metadata file either — a no-op is a no-op.
+        return _project_info_db(db, project)
+
+    if "description" in submitted:
+        raw = submitted["description"]
+        project.scenario_description = _reject_legacy_tag(
+            (raw or "").strip() or None
+        )
+    if "scenario_type" in submitted:
+        project.scenario_type = _validated_scenario_type(submitted["scenario_type"])
+
+    project.updated_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    db.refresh(project)
+
+    # Mirror into metadata.json so a bundle export carries the edit. The DB
+    # stays authoritative, so a failure here is logged rather than fatal —
+    # refusing the whole edit because a directory is momentarily unwritable
+    # would be a worse trade than a bundle whose sidecar lags one field.
+    try:
+        project_dir = project_registry.project_dir(project)
+        if project_dir.is_dir():
+            meta = _read_meta(project_dir)
+            if meta:
+                meta["scenario_description"] = project.scenario_description
+                meta["scenario_type"] = project.scenario_type
+                _write_meta(project_dir, meta)
+    except OSError as exc:  # noqa: BLE001
+        logger.warning(
+            "could not mirror scenario metadata for '%s': %s", project.name, exc
+        )
+
+    change_log_service.log(
+        "update_scenario", "Project", project.name,
+        f"Scenario metadata updated on '{project.name}'"
+        + (f" · type={project.scenario_type}" if project.scenario_type else "")
+        + (f" · {project.scenario_description[:60]}" if project.scenario_description else ""),
+    )
+    return _project_info_db(db, project)
 
 
 def _delete_project_db(db, user, name: str, cascade: bool) -> dict:

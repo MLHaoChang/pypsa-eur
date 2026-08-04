@@ -23,11 +23,26 @@ from services.tenancy_service import ConflictError, ValidationError
 from settings import get_settings
 
 
+def _scenario_fields(metadata: dict) -> dict[str, str | None]:
+    """
+    `scenario_type` + `scenario_description` out of a legacy metadata.json.
+
+    Thin re-export of the router's decoder so the importer and the project
+    endpoints agree on what an old bundle means. Imported lazily: this module
+    is pulled in by `routers.projects` itself, and a module-level import back
+    the other way is a cycle.
+    """
+    from routers.projects import _scenario_fields_from_meta
+
+    return _scenario_fields_from_meta(metadata)
+
+
 @dataclass(frozen=True)
 class LegacyProjectInfo:
     name: str
     parent_project: str | None
     scenario_description: str | None
+    scenario_type: str | None
     has_network: bool
     descendant_names: list[str]
 
@@ -168,7 +183,7 @@ def list_legacy_projects() -> list[LegacyProjectInfo]:
         LegacyProjectInfo(
             name=name,
             parent_project=entry.metadata.get("parent_project"),
-            scenario_description=entry.metadata.get("scenario_description"),
+            **_scenario_fields(entry.metadata),
             has_network=(entry.path / "network.nc").exists(),
             descendant_names=_descendants(entries, name),
         )
@@ -259,7 +274,12 @@ def claim_legacy_project(
             created_by=owner_id,
             storage_path=storage_value(relative),
             parent_project_id=None,
-            scenario_description=entry.metadata.get("scenario_description"),
+            # Split, not passed through: a pre-auth project on disk predates
+            # migration 0004, so its category is still a `[type]` prefix
+            # inside the description. Importing it verbatim would give the new
+            # row a NULL category and a description that renders the marker as
+            # prose — the exact state 0004 exists to clear.
+            **_scenario_fields(entry.metadata),
             created_at=_now(),
             updated_at=_now(),
         )
