@@ -28,8 +28,9 @@ import {
   putApiKeySettings,
   type ApiKeySettings,
 } from '../api/chat'
+import { useChatStore } from '../store/chatStore'
 
-export const API_KEY_SETTINGS_KEY = ['chat', 'api-key-settings']
+const API_KEY_SETTINGS_KEY = ['chat', 'api-key-settings']
 
 /** The 403 an ordinary member gets — an expected state, not a failure. */
 function isForbidden(error: unknown): boolean {
@@ -38,6 +39,7 @@ function isForbidden(error: unknown): boolean {
 
 export default function ApiKeySetup() {
   const qc = useQueryClient()
+  const setError = useChatStore((s) => s.setError)
   const [value, setValue] = useState('')
 
   const settings = useQuery<ApiKeySettings>({
@@ -49,12 +51,13 @@ export default function ApiKeySetup() {
   })
 
   function refreshDependents() {
-    // The panel's enabled/disabled state is derived from `/chat/health`, which
-    // reads `os.environ` at request time. The backend applies a saved key
-    // in-process, so invalidating here is enough — no restart, which a packaged
-    // .app gives the user no way to perform anyway.
     void qc.invalidateQueries({ queryKey: API_KEY_SETTINGS_KEY })
-    void qc.invalidateQueries({ queryKey: ['chat', 'health'] })
+    // Clearing the banner is what makes the save legible. Nothing gates the
+    // panel on a cached health probe — `getChatHealth` exists but has no
+    // callers, and the backend reads `os.environ` at request time — so the
+    // next send just works. Leaving the red "API key missing" box on screen
+    // underneath a form that reported success would say otherwise.
+    setError(null)
   }
 
   const save = useMutation({

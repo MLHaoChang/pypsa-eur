@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
-import { createChatStream, postChatConfirm, type ChatFrame } from '../api/chat'
+import {
+  createChatStream,
+  postChatConfirm,
+  putApiKeySettings,
+  type ChatFrame,
+} from '../api/chat'
 import ChatPanel from './ChatPanel'
 
 vi.mock('../api/chat', async (importOriginal) => {
@@ -86,6 +91,30 @@ it('offers the API key setup form when the backend reports missing_api_key', asy
   ])
   expect(await screen.findByText('API key missing')).toBeTruthy()
   expect(await screen.findByTestId('chat-api-key-input')).toBeTruthy()
+})
+
+it('clears the missing-key banner once a key is saved', async () => {
+  // The save has to be legible. A red "API key missing" box still on screen
+  // underneath a form that just reported success tells the user it did not
+  // work, and they have no other signal to go on.
+  vi.mocked(putApiKeySettings).mockResolvedValue({
+    configured: true,
+    source: 'settings',
+    hint: '…wxyz',
+    overridden_by_environment: false,
+    storage_path: '/tmp/user.env',
+  })
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-save' } },
+    { event: 'error', data: { error_kind: 'missing_api_key', message: 'not set' } },
+  ])
+
+  const user = userEvent.setup()
+  await user.type(await screen.findByTestId('chat-api-key-input'), 'sk-ant-typed')
+  await user.click(screen.getByTestId('chat-api-key-save'))
+
+  await waitFor(() => expect(screen.queryByTestId('chat-error-banner')).toBeNull())
 })
 
 it('does not offer the setup form for an unrelated error', async () => {

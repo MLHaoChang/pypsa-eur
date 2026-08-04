@@ -166,6 +166,43 @@ def test_a_shell_supplied_value_is_never_overwritten():
     assert reported["overridden_by_environment"] is True
 
 
+def test_user_env_beats_a_developer_backend_dotenv(tmp_path):
+    """
+    The stated precedence, and the trap it exists to avoid.
+
+    If `backend/.env` won, a developer would save a key through Settings, watch
+    it work for the rest of the process (the route also sets `os.environ`), and
+    find it silently reverted on the next restart. A setting that un-sets itself
+    overnight is worse than no setting.
+    """
+    backend_env = tmp_path / "backend.env"
+    backend_env.write_text(f"{KEY}=sk-ant-from-backend-dotenv\n", encoding="utf-8")
+    app_secrets.set_secret(KEY, SAMPLE)
+    os.environ.pop(KEY, None)
+
+    app_secrets.bootstrap_environment(backend_env=backend_env)
+
+    assert os.environ[KEY] == SAMPLE
+    assert app_secrets.status(KEY)["source"] == "settings"
+
+
+def test_a_backend_dotenv_still_wins_when_nothing_is_stored(tmp_path):
+    """
+    The negative control.
+
+    `user.env` taking precedence must not mean the developer's `.env` quietly
+    stopped being loaded at all — which is what a bootstrap that skipped it
+    would look like from the test above.
+    """
+    backend_env = tmp_path / "backend.env"
+    backend_env.write_text(f"{KEY}=sk-ant-from-backend-dotenv\n", encoding="utf-8")
+
+    app_secrets.bootstrap_environment(backend_env=backend_env)
+
+    assert os.environ[KEY] == "sk-ant-from-backend-dotenv"
+    assert app_secrets.status(KEY)["source"] == "environment"
+
+
 def test_saving_under_a_shell_override_persists_without_changing_this_process():
     """
     Otherwise a restart silently changes behaviour with nobody touching a
