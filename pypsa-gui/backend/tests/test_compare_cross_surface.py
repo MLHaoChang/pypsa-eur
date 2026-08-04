@@ -53,3 +53,44 @@ def test_capacity_capex_agrees_with_periodized_capital_costs(golden):
             expected += cc * opt * horizon_years
 
     assert tab_total_eur == pytest.approx(expected, rel=1e-6)
+
+
+# ── Task 6: Dispatch tab vs. /results/carrier_kpis ──────────────────────────
+
+def test_dispatch_agrees_with_carrier_kpis(golden):
+    """
+    `GET /results/carrier_kpis` returns `{"rows": [...]}` — NOT `{"carriers":
+    [...]}`. Each row is `{"component", "carrier", "capacity_mw",
+    "energy_mwh", "capacity_factor_pct", "curtailment_mwh", "curtailment_pct",
+    "market_value_eur_per_mwh", "revenue_eur"}` (verified by calling
+    `get_carrier_kpis()` directly against the solved golden network — see
+    task-5-6-report.md for the raw dump). There is no `energy_gwh` key: energy
+    is `energy_mwh`, in MWh, so it must be divided by 1000 before comparing to
+    the Compare tab's `dispatch_gwh_by_carrier` (GWh). Rows are per
+    (component, carrier) — e.g. a Link's H2 energy and a Generator's gas
+    energy are separate rows — so this only compares the component classes
+    the dispatch tab itself aggregates (Generator, StorageUnit; see
+    `_compute_dispatch_summary` in routers/compare.py, which walks
+    `n.generators_t.p` and the clipped-non-negative half of
+    `n.storage_units_t.p`, and does NOT include Links or Stores).
+    """
+    import routers.results as R
+
+    disp = cs.summarise(golden)["dispatch"]
+    kpis = R.get_carrier_kpis()
+    # Shape check first — a silently-renamed top-level key would otherwise
+    # make the loop below iterate zero times and pass vacuously.
+    assert "rows" in kpis and kpis["rows"], (
+        "carrier_kpis returned nothing for a solved network")
+    compared = 0
+    for row in kpis["rows"]:
+        if row.get("component") not in ("Generator", "StorageUnit"):
+            continue
+        carrier = str(row.get("carrier", "")).lower()
+        energy_mwh = row.get("energy_mwh")
+        if carrier not in disp.dispatch_gwh_by_carrier or energy_mwh is None:
+            continue
+        want_gwh = energy_mwh / 1000.0
+        assert disp.dispatch_gwh_by_carrier[carrier].total == pytest.approx(want_gwh, rel=1e-6)
+        compared += 1
+    assert compared >= 1, "no carrier compared — key names have drifted"

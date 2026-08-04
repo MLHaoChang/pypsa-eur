@@ -239,3 +239,27 @@ def test_new_capacity_never_exceeds_installed_capacity(golden):
         installed = cap.capacity_mw_by_carrier.get(carrier)
         assert installed is not None, f"{carrier} has new build but no installed entry"
         assert new.total <= installed.total * (1 + 1e-9)
+
+
+# ── Task 6: Dispatch tab — internal identity ────────────────────────────────
+
+def test_dispatch_energy_uses_the_generators_weighting_basis(golden):
+    """
+    Energy must be weighted by snapshot_weightings.generators — the basis
+    n.statistics() and the Results-tab KPIs use. Recomputed here from PyPSA
+    primitives so a change of basis in compare.py fails loudly.
+    """
+    from services import period_utils
+
+    disp = cs.summarise(golden)["dispatch"]
+    w = period_utils.snapshot_weights(golden, "generators", golden.snapshots)
+    p = golden.generators_t.p
+    expected_gwh = {}
+    for gen in golden.generators.index:
+        carrier = str(golden.generators.at[gen, "carrier"] or "unknown").lower()
+        expected_gwh[carrier] = expected_gwh.get(carrier, 0.0) + \
+            float((p[gen] * w).sum()) / 1e3
+    for carrier, want in expected_gwh.items():
+        got = disp.dispatch_gwh_by_carrier.get(carrier)
+        assert got is not None, f"carrier {carrier} missing from dispatch tab"
+        assert got.total == pytest.approx(want, rel=1e-6)
