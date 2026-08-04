@@ -1134,35 +1134,98 @@ interface TSRangeMeta {
 
 and add `range?: TSRangeMeta` to the payload type this file uses.
 
-- [ ] **Step 2: Derive the chunk per endpoint**
+- [ ] **Step 2: Write one `useChunkedSeries` hook, not nine copies of the same block**
 
-The nine endpoints have different widths — `line_reactive` is not as wide as `generators` — so one shared chunk size would size every request by whichever endpoint was probed first. Add, before the queries:
+The nine endpoints have different widths — `line_reactive` is not as wide as `generators` — so each needs its own probe, chunk and bounds. Writing that trio out nine times would be ~27 near-identical blocks. React's Rules of Hooks forbid calling hooks in a loop, but they permit calling a **custom hook** any number of times at the top level, so the repetition collapses to nine one-line calls.
+
+Add to `CanvasResultsContext.tsx`, above the component:
 
 ```ts
-  // Probe: one row, but the response carries the full `columns` array and
-  // `range.total`. A few KB, and it reuses the parameter we already added
-  // rather than needing a new endpoint.
-  const probeRange = useMemo<TSRange>(() => ({ from: 0, to: 0 }), [])
+const PROBE: TSRange = { from: 0, to: 0 }
 
-  const { data: gensProbe } = useQuery({
-    queryKey: nk(currentProject, 'results', 'generators', resultSource, 'probe'),
-    queryFn: () => resultsApi.getGeneratorResults(resultSource, probeRange),
-    enabled: enableQueries,
+/**
+ * One result series, fetched as an aligned chunk around the scrubber.
+ *
+ * Two queries per series. The PROBE asks for a single row; its response
+ * carries the full `columns` array and `range.total`, which is everything
+ * needed to size the chunk. It costs a few KB, is cached forever
+ * (`staleTime: Infinity`), and reuses the range parameter rather than
+ * needing a metadata endpoint.
+ *
+ * The chunk MUST be derived per series: `line_reactive` is far narrower than
+ * `generators`, and one shared size would size every request by whichever
+ * series happened to be probed first.
+ */
+function useChunkedSeries(
+  name: string,
+  fetch: (source: ResultSource, range?: TSRange) => Promise<TSPayload | null>,
+  opts: {
+    project: string | null
+    source: ResultSource
+    idx: number
+    clamp?: { start: number; end: number }
+    enabled: boolean
+  },
+): TSPayload | null | undefined {
+  const { project, source, idx, clamp, enabled } = opts
+
+  const { data: probe } = useQuery({
+    queryKey: nk(project, 'results', name, source, 'probe'),
+    queryFn: () => fetch(source, PROBE),
+    enabled,
     staleTime: Infinity,
   })
 
-  const total = gensProbe?.range?.total ?? 0
-  const gensChunk = useMemo(
-    () => chooseChunk(gensProbe?.columns.length ?? 0, total),
-    [gensProbe?.columns.length, total],
+  const total = probe?.range?.total ?? 0
+  const chunk = useMemo(
+    () => chooseChunk(probe?.columns.length ?? 0, total),
+    [probe?.columns.length, total],
   )
-  const gensBounds = useMemo(
-    () => chunkBounds(resultsSnapshotIdx, gensChunk, total, activeRangeClamp),
-    [resultsSnapshotIdx, gensChunk, total, activeRangeClamp],
+  const bounds = useMemo(
+    () => chunkBounds(idx, chunk, total, clamp),
+    [idx, chunk, total, clamp],
+  )
+
+  const { data } = useQuery({
+    // `bounds.from` is what makes the cache work: identical for every index
+    // inside a chunk, different across a boundary.
+    queryKey: nk(project, 'results', name, source, bounds.from),
+    queryFn: () => fetch(source, bounds),
+    enabled: enabled && total > 0,
+  })
+  return data
+}
+```
+
+Then call it nine times inside the component, replacing the nine existing `useQuery` blocks:
+
+```ts
+  const common = {
+    project: currentProject,
+    source: resultSource,
+    idx: resultsSnapshotIdx,
+    clamp: activeRangeClamp,
+    enabled: enableQueries,
+  }
+
+  const gensTS  = useChunkedSeries('generators',        resultsApi.getGeneratorResults,       common)
+  const loadTS  = useChunkedSeries('loads',             resultsApi.getLoadResults,            common)
+  const linesTS = useChunkedSeries('lines',             resultsApi.getLineResults,            common)
+  const linksTS = useChunkedSeries('links',             resultsApi.getLinkResults,            common)
+  const socTS   = useChunkedSeries('storage',           resultsApi.getStorageResults,         common)
+  const sdTS    = useChunkedSeries('storage_dispatch',  resultsApi.getStorageDispatchResults, common)
+  const stdTS   = useChunkedSeries('store_dispatch',    resultsApi.getStoreDispatchResults,   common)
+  const steTS   = useChunkedSeries('store_energy',      resultsApi.getStoreEnergyResults,     common)
+  const linesReactiveTS = useChunkedSeries(
+    'line_reactive', resultsApi.getLineReactive, { ...common, enabled: needReactive },
   )
 ```
 
-Repeat the probe/chunk/bounds trio for each of the nine endpoints, each using its own `columns.length`. Where an endpoint's probe returns 204 (no data on this network), its bounds fall back to `{from: 0, to: 0}` and the main query stays disabled — `enabled: enableQueries && total > 0`.
+Keep the existing local variable names wherever the rest of the file already uses them (`gensTS`, `loadTS`, `linesTS`, `linksTS`, `linesReactiveTS` are referenced further down) — rename only where the file has no existing name. `common` must be memoised or defined inline; an object literal recreated each render is fine here because every field it holds is already a primitive or a memoised value, and `useQuery` keys off `queryKey`, not off the options object identity.
+
+`needReactive` already exists at `CanvasResultsContext.tsx:118` and gates the reactive query today — preserve that gating rather than fetching it unconditionally.
+
+**The cost this accepts, stated rather than hidden.** Nine probes plus nine chunk queries is eighteen requests where there were nine. Each probe is a single row — a few KB — and `staleTime: Infinity` means it is fetched once per project and never refetched. There is also one genuine duplicate: when the scrubber sits at index 0 the probe and the main query request the same rows under different cache keys. Both are accepted deliberately: eighteen small requests beat nine multi-megabyte ones, and removing the probe would mean guessing a chunk size and then changing it once the first response arrives — which shifts every cache key underneath the user and refetches everything. If probe count ever matters, the fix is one batched metadata endpoint returning `{columns_count, total}` per series, not deriving the chunk after the fact.
 
 **The cost this accepts, stated rather than hidden.** Nine probes plus nine chunk
 queries is eighteen requests where there were nine. Each probe is a single row —
@@ -1190,19 +1253,20 @@ series, not deriving the chunk after the fact.
 
 Read how `SnapshotPicker.tsx:96` derives `activeRange` from `periodInfo` and reuse that source rather than duplicating the logic; if it is not exported, lift it into a shared helper and import it in both places.
 
-- [ ] **Step 3: Make each query chunk-aware**
-
-For each of the nine, add the chunk start to the key and pass the bounds:
+- [ ] **Step 3: Derive the period clamp**
 
 ```ts
-  const { data: gensTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'generators', resultSource, gensBounds.from),
-    queryFn: () => resultsApi.getGeneratorResults(resultSource, gensBounds),
-    enabled: enableQueries && total > 0,
-  })
+  // SnapshotPicker's activeRange is the WHOLE range on a flat network, so it
+  // is useless AS the window — but as a clamp it stops a chunk crossing an
+  // investment-period boundary, so the canvas never pulls rows from a period
+  // the user is not looking at.
+  const activeRangeClamp = useMemo(
+    () => (periodRange ? { start: periodRange.start, end: periodRange.end } : undefined),
+    [periodRange],
+  )
 ```
 
-The trailing `gensBounds.from` is what makes the cache work: identical inside a chunk, different across one.
+`SnapshotPicker.tsx:96` derives `activeRange` from `periodInfo` and a selected period key. That logic is not exported today. Lift it into a shared helper and import it in BOTH places rather than reimplementing it here — two copies of a window calculation drifting apart would put the canvas and the scrubber on different snapshots, which looks exactly like a data bug and is not one. If lifting it turns out to require touching more of `SnapshotPicker` than a straight extraction, stop and report rather than duplicating.
 
 - [ ] **Step 4: Fix the row lookup**
 
