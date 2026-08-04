@@ -15,6 +15,7 @@ import { projectsApi } from '../api/projects'
 import { appLog } from '../store/simulationStore'
 import { invalidateNetworkQueries, saveProjectQuietly, formatRelativeTime, switchToProject } from '../utils/projectActions'
 import { nk } from '../utils/queryKeys'
+import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
 import type { Bus, Generator, Load, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -238,6 +239,9 @@ function useCommands(mode: PaletteMode): Command[] {
   const density              = useUIStore(s => s.density)
   const toggleTheme          = useUIStore(s => s.toggleTheme)
   const toggleDensity        = useUIStore(s => s.toggleDensity)
+  // Same gate the Sidebar row uses — shares the ['localSettings'] query, so
+  // this costs no extra request.
+  const settingsAvailable    = useLocalSettingsAvailable()
 
   // Project list — shared cache with App.tsx + Sidebar.
   const { data: projects = [] } = useQuery({
@@ -347,13 +351,6 @@ function useCommands(mode: PaletteMode): Command[] {
           run: () => setSlidePanel('simparams'),
         },
         {
-          id: 'act-settings',
-          kind: 'action',
-          title: 'Open settings',
-          icon: <SlidersHorizontal size={14} />,
-          run: () => setSlidePanel('settings'),
-        },
-        {
           id: 'act-horizon',
           kind: 'action',
           title: 'Open model horizon',
@@ -429,6 +426,20 @@ function useCommands(mode: PaletteMode): Command[] {
           },
         },
       )
+      // Desktop-only: its routes 404 on a web deployment, and setSlidePanel
+      // would still open a half-width panel whose body renders null (the
+      // pane itself hides on the same condition). Gate here too, or ⌘K is a
+      // second door into the blank-panel state the Sidebar row already guards
+      // against. Shares useLocalSettings' cached query — no extra request.
+      if (settingsAvailable) {
+        cmds.push({
+          id: 'act-settings',
+          kind: 'action',
+          title: 'Open settings',
+          icon: <SlidersHorizontal size={14} />,
+          run: () => setSlidePanel('settings'),
+        })
+      }
     }
 
     // ── Projects ─────────────────────────────────────────────────────────
@@ -565,6 +576,7 @@ function useCommands(mode: PaletteMode): Command[] {
     setHighlightedComponent, openRightPanel, setSlidePanel, setCompareRailOpen, markProjectSaved,
     setProjectSwitchInProgress,
     theme, density, toggleTheme, toggleDensity,
+    settingsAvailable,
   ])
 }
 

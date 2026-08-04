@@ -92,7 +92,7 @@ export default function LocalSettings() {
         <div className="flex gap-2">
           <input
             type="password"
-            className="flex-1 rounded border border-border bg-surface px-2 py-1 text-sm"
+            className="flex-1 rounded border border-border bg-bg px-2 py-1 text-sm text-text focus:outline-none focus:border-accent"
             placeholder={keyFieldPlaceholder(state)}
             value={draft}
             onChange={e => setDraft(e.target.value)}
@@ -126,7 +126,7 @@ export default function LocalSettings() {
           Errors the app cannot show you land here. Include this file when
           reporting a problem.
         </p>
-        <code className="block break-all rounded bg-surface px-2 py-1 text-xs">
+        <code className="block break-all rounded bg-panel border border-border px-2 py-1 text-xs text-text">
           {state.log_path}
         </code>
         <div className="flex gap-2">
