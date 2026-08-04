@@ -563,6 +563,65 @@ NO_ADAPTER_REASONS: dict[str, str] = {
         "here because the LP SHRINKS it below its initial p_nom on this "
         "fixture, and `_walk_plain` clamps negative deltas to zero)."
     ),
+    # ── Task 20 additions ───────────────────────────────────────────────
+    # The remaining eight Compare-Scenarios tabs (coverage.py SURFACES). None
+    # of these report CAPEX / fixed-cost at all — they report installed
+    # capacity counts, dispatch energy, branch loading, marginal prices,
+    # emissions, curtailment, VOLL shedding and storage cycling respectively
+    # — so none of them can be forced into this loop's
+    # `{(component_class, name): horizon_capex_eur}` Adapter shape without
+    # inventing a mapping the surface doesn't provide (the exact anti-pattern
+    # `_from_asset_economics`'s own docstring and cost_breakdown's
+    # NO_ADAPTER_REASONS entry both warn against). Each is a genuinely
+    # DIFFERENT quantity from the CAPEX baseline this test cross-checks, not
+    # merely a differently-shaped view of the same one.
+    "compare_overview": (
+        "get_compare_state's `installed_capacity_by_carrier` / "
+        "`storage_capacity_by_carrier` are INSTALLED p_nom, not annuitised "
+        "CAPEX — a different quantity entirely (MW, not EUR), so there is no "
+        "sensible {(class, name): capex_eur} mapping to build. No dedicated "
+        "cross-surface CAPEX test exists for this field because it never "
+        "claims to report CAPEX in the first place."
+    ),
+    "compare_dispatch": (
+        "_compute_dispatch_summary reports dispatch_gwh_by_carrier (MWh) and "
+        "opex_meur (variable cost) — no CAPEX/fixed-cost field exists on "
+        "DispatchComparison at all. Nothing here is comparable to "
+        "asset_economics's fixed_cost_eur baseline."
+    ),
+    "compare_loading": (
+        "_compute_loading_summary reports peak/mean loading (a ratio, "
+        "dimensionless) and binding_hours (an hours count) per branch — no "
+        "cost field of any kind. Not a CAPEX surface."
+    ),
+    "compare_prices": (
+        "_compute_prices_summary reports EUR/MWh marginal-price statistics — "
+        "a price, not an investment cost, and per-bus-carrier rather than "
+        "per-asset besides. No CAPEX field exists on PricesComparison."
+    ),
+    "compare_emissions": (
+        "_compute_emissions_summary reports tCO2 (kt) and kg/MWh intensity — "
+        "physical quantities with no EUR dimension at all. No CAPEX field "
+        "exists on EmissionsComparison."
+    ),
+    "compare_curtailment": (
+        "_compute_curtailment_summary reports GWh curtailed and a percentage "
+        "rate — energy quantities, not cost. No CAPEX field exists on "
+        "CurtailmentComparison (curtailment's EUR impact, when priced, "
+        "surfaces on the Economics tab's curtailment_cost_meur instead)."
+    ),
+    "compare_lost_load": (
+        "_compute_lost_load_summary's `total_cost_meur` is a shedding cost "
+        "(unserved energy x VOLL), not an investment/CAPEX cost — a "
+        "different EUR quantity than asset_economics's fixed_cost_eur, and "
+        "bus-carrier-keyed rather than per-asset. Not comparable to the "
+        "CAPEX baseline this loop checks."
+    ),
+    "compare_storage_cycling": (
+        "_compute_storage_cycling_summary reports throughput_mwh and a "
+        "dimensionless cycles count — no cost field of any kind exists on "
+        "StorageCyclingComparison or StorageUnitCycles."
+    ),
 }
 
 

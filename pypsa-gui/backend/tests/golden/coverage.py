@@ -31,6 +31,22 @@ SURFACES = (
     "asset_results_xlsx",
     "compare_economics",
     "compare_capacity",
+    # ── Task 20: the remaining eight Compare-Scenarios tabs. compare_capacity
+    # and compare_economics (above) were already covered; these are the rest
+    # of the ten tabs routers/compare.py serves (GET .../compare-state for
+    # compare_overview, GET .../results-summary for the other seven — see
+    # test_golden_coverage.py::ROUTE_SURFACES). None of these seven report
+    # CAPEX/fixed-cost at all, so none can carry an ADAPTERS entry in
+    # test_golden_economics.py — see NO_ADAPTER_REASONS there for why each is
+    # a documented gap rather than a silent one.
+    "compare_overview",
+    "compare_dispatch",
+    "compare_loading",
+    "compare_prices",
+    "compare_emissions",
+    "compare_curtailment",
+    "compare_lost_load",
+    "compare_storage_cycling",
 )
 
 FIXTURE_CLASSES = frozenset({"Generator", "Line", "Link", "StorageUnit"})
@@ -94,6 +110,47 @@ COVERAGE: dict[str, set[str]] = {
     # test_golden_economics.py::test_compare_capacity_agrees_with_asset_economics
     # for the field-level detail.
     "compare_capacity":     {"Generator", "StorageUnit", "Link"},
+    # ── Task 20 additions ───────────────────────────────────────────────
+    # routers/compare.py::get_compare_state(). `installed_capacity_by_carrier`
+    # / `optimised_capacity_by_carrier` come from `_carrier_sum(temp_n.
+    # generators, ...)`; `storage_capacity_by_carrier` from `_carrier_sum(
+    # temp_n.storage_units, "p_nom")`. `line_count` / `link_count` are bare
+    # `len()` calls with no carrier attribution -- Line and Link are counted,
+    # never reported per-carrier, so they don't count as "covered" here (see
+    # EXCLUSIONS).
+    "compare_overview":        {"Generator", "StorageUnit"},
+    # routers/compare.py::_compute_dispatch_summary(). Walks
+    # `n.generators_t.p` (energy-mix GWh + OPEX) and `n.storage_units_t.p`
+    # (discharge-only dispatch + fleet cycling). No reference to `n.lines` /
+    # `n.links` anywhere in the function body.
+    "compare_dispatch":        {"Generator", "StorageUnit"},
+    # routers/compare.py::_compute_loading_summary(). `_walk_branches` is
+    # called for n.lines, n.transformers (not a FIXTURE_CLASS) and n.links --
+    # a branch-loading metric (|p0| / nominal rating), so Generator and
+    # StorageUnit never appear.
+    "compare_loading":         {"Line", "Link"},
+    # routers/compare.py::_compute_prices_summary(). Purely bus-level:
+    # marginal prices come from `n.buses_t.marginal_price` (via
+    # `corrected_marginal_prices`) and are grouped by `n.buses.carrier`. None
+    # of Generator/Line/Link/StorageUnit is ever referenced -- see
+    # EXCLUSIONS for all four.
+    "compare_prices":          set(),
+    # routers/compare.py::_compute_emissions_summary(). Walks
+    # `n.generators_t.p` x `carrier.co2_emissions` only -- emissions are a
+    # generator-dispatch quantity in this model.
+    "compare_emissions":       {"Generator"},
+    # routers/compare.py::_compute_curtailment_summary(). Walks
+    # `n.generators_t.p` / `n.generators_t.p_max_pu` only (renewables with a
+    # profile); no other component class contributes.
+    "compare_curtailment":     {"Generator"},
+    # routers/compare.py::_compute_lost_load_summary(). Reads the VOLL slack
+    # DataFrame (bus x snapshot) out of `results_state.pkl` and groups by
+    # `n.buses.carrier` -- no component-class walk at all, same structural
+    # shape as compare_prices.
+    "compare_lost_load":       set(),
+    # routers/compare.py::_compute_storage_cycling_summary(). Walks
+    # `n.storage_units` / `n.storage_units_t.p` only.
+    "compare_storage_cycling": {"StorageUnit"},
 }
 
 EXCLUSIONS: dict[tuple[str, str], str] = {
@@ -156,5 +213,135 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
         "capacity/CAPEX never reaches a carrier bucket in this surface. "
         "Line capacity/CAPEX is reported by cost_breakdown, statistics and "
         "asset_costs instead."
+    ),
+    # ── Task 20 additions ───────────────────────────────────────────────
+    ("compare_overview", "Line"): (
+        "get_compare_state (routers/compare.py) reports `line_count` as a "
+        "bare `len(temp_n.lines)` with no carrier attribution at all — "
+        "unlike generators/storage_units, lines never pass through "
+        "`_carrier_sum`. Per-carrier line detail is reported by the "
+        "Capacity Expansion tab's underlying cost_breakdown/statistics "
+        "surfaces instead."
+    ),
+    ("compare_overview", "Link"): (
+        "Same structural gap as Line above: `link_count` is a bare "
+        "`len(temp_n.links)`, never passed through `_carrier_sum`. No "
+        "per-carrier link figure exists on the Overview tab."
+    ),
+    ("compare_dispatch", "Line"): (
+        "_compute_dispatch_summary (routers/compare.py) walks "
+        "`n.generators_t.p` and `n.storage_units_t.p` only — a line carries "
+        "no dispatch of its own (it transports energy between buses, it "
+        "doesn't produce or consume it), so it has no place in an "
+        "energy-mix-by-carrier view. Line flow/loading is reported by the "
+        "Loading tab (compare_loading) instead."
+    ),
+    ("compare_dispatch", "Link"): (
+        "Same reasoning as Line: _compute_dispatch_summary never reads "
+        "`n.links` or `n.links_t` — a link's throughput is a branch flow, "
+        "not a generator/storage energy-mix entry. Reported by the Loading "
+        "tab (compare_loading) instead."
+    ),
+    ("compare_loading", "Generator"): (
+        "_compute_loading_summary (routers/compare.py) only calls "
+        "`_walk_branches` for n.lines / n.transformers / n.links — loading "
+        "(|p0| / nominal rating) is a branch-only concept; a generator has "
+        "no `s_nom`/`p_nom`-relative flow to report here. Generator "
+        "dispatch is reported by the Dispatch tab instead."
+    ),
+    ("compare_loading", "StorageUnit"): (
+        "Same reasoning as Generator: storage units are never passed to "
+        "`_walk_branches` — they have no branch loading concept. Storage "
+        "dispatch/cycling is reported by the Dispatch and Storage Cycling "
+        "tabs instead."
+    ),
+    ("compare_prices", "Generator"): (
+        "_compute_prices_summary (routers/compare.py) reads "
+        "`n.buses_t.marginal_price` exclusively and groups by "
+        "`n.buses.carrier` — marginal price is a BUS-level LP dual, not an "
+        "asset attribute, so no generator name or carrier walk happens "
+        "anywhere in the function body."
+    ),
+    ("compare_prices", "Line"): (
+        "Same reasoning as Generator: this surface never reads `n.lines` — "
+        "it is bus-price-only. A line's own congestion is reported by the "
+        "Loading tab (binding_hours), which is the closest analogue for a "
+        "branch."
+    ),
+    ("compare_prices", "Link"): (
+        "Same reasoning as Generator: this surface never reads `n.links` — "
+        "bus-price-only, grouped by `n.buses.carrier` alone."
+    ),
+    ("compare_prices", "StorageUnit"): (
+        "Same reasoning as Generator: this surface never reads "
+        "`n.storage_units` — bus-price-only, grouped by `n.buses.carrier` "
+        "alone."
+    ),
+    ("compare_emissions", "Line"): (
+        "_compute_emissions_summary (routers/compare.py) walks "
+        "`n.generators_t.p` x `carrier.co2_emissions` exclusively — a line "
+        "moves electricity, it doesn't burn a fuel with a CO2 intensity, so "
+        "it never enters the per-carrier emissions accumulator."
+    ),
+    ("compare_emissions", "Link"): (
+        "Same reasoning as Line: `_compute_emissions_summary` never reads "
+        "`n.links` — only generator dispatch × carrier CO2 intensity is "
+        "accumulated. A sector-coupling link (e.g. an electrolyser) has no "
+        "direct CO2 factor of its own in this model; its INPUT generator's "
+        "emissions are what's counted."
+    ),
+    ("compare_emissions", "StorageUnit"): (
+        "Same reasoning as Line: storage discharge is not a primary-fuel "
+        "combustion event and carries no `co2_emissions` factor, so "
+        "`_compute_emissions_summary` never reads `n.storage_units`."
+    ),
+    ("compare_curtailment", "Line"): (
+        "_compute_curtailment_summary (routers/compare.py) only walks "
+        "generators with a time-varying `p_max_pu` profile (renewables) — "
+        "curtailment is specifically 'available renewable output minus "
+        "actual dispatch', a concept that doesn't apply to a line."
+    ),
+    ("compare_curtailment", "Link"): (
+        "Same reasoning as Line: `_compute_curtailment_summary` never reads "
+        "`n.links` — curtailment is a generator-availability concept."
+    ),
+    ("compare_curtailment", "StorageUnit"): (
+        "Same reasoning as Line: a storage unit's dispatch is bounded by "
+        "state of charge, not a `p_max_pu` renewable-availability profile, "
+        "so it's structurally outside this function's per-generator loop."
+    ),
+    ("compare_lost_load", "Generator"): (
+        "_compute_lost_load_summary (routers/compare.py) reads the VOLL "
+        "slack DataFrame (bus x snapshot) from `results_state.pkl` and "
+        "groups by `n.buses.carrier` — the slack generators PyPSA adds "
+        "internally for VOLL are stripped right after capture (see the "
+        "function's own docstring), so no generator name ever survives "
+        "into this payload."
+    ),
+    ("compare_lost_load", "Line"): (
+        "Same reasoning as Generator: this surface is bus-shedding-only, "
+        "grouped by `n.buses.carrier` — it never reads `n.lines`."
+    ),
+    ("compare_lost_load", "Link"): (
+        "Same reasoning as Generator: this surface is bus-shedding-only, "
+        "grouped by `n.buses.carrier` — it never reads `n.links`."
+    ),
+    ("compare_lost_load", "StorageUnit"): (
+        "Same reasoning as Generator: this surface is bus-shedding-only, "
+        "grouped by `n.buses.carrier` — it never reads `n.storage_units`."
+    ),
+    ("compare_storage_cycling", "Generator"): (
+        "_compute_storage_cycling_summary (routers/compare.py) walks "
+        "`n.storage_units` / `n.storage_units_t.p` exclusively — "
+        "equivalent-full-cycles is a storage-specific metric "
+        "(throughput / 2x energy capacity) with no generator analogue."
+    ),
+    ("compare_storage_cycling", "Line"): (
+        "Same reasoning as Generator: this surface never reads `n.lines` — "
+        "cycling is a storage-only concept."
+    ),
+    ("compare_storage_cycling", "Link"): (
+        "Same reasoning as Generator: this surface never reads `n.links` — "
+        "cycling is a storage-only concept."
     ),
 }

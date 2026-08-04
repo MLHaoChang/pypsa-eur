@@ -151,13 +151,22 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/simulation.py", "get_log_history"):        frozenset(),
     ("routers/simulation.py", "log_stream"):             frozenset(),
     # ── routers/compare.py ──────────────────────────────────────────────
-    ("routers/compare.py", "get_compare_state"): frozenset(),
-    # One endpoint, two surfaces: `capacity` and `economics` are separate
-    # fields of the same ResultsSummary response, each with its own
-    # coverage.SURFACES id because they're computed by different functions
-    # (_compute_capacity_summary / _compute_economics_summary) with
-    # different class coverage.
-    ("routers/compare.py", "get_results_summary"): frozenset({"compare_capacity", "compare_economics"}),
+    # Task 20: `installed_capacity_by_carrier` / `storage_capacity_by_
+    # carrier` on CompareState are exactly the same shape of per-carrier
+    # capacity claim `compare_capacity` makes on ResultsSummary — give it its
+    # own coverage.SURFACES id (compare_overview) rather than leaving it the
+    # one Compare-tab route with no entry at all.
+    ("routers/compare.py", "get_compare_state"): frozenset({"compare_overview"}),
+    # One endpoint, nine surfaces: each optional field of the same
+    # ResultsSummary response is its own coverage.SURFACES id because each
+    # is computed by a different `_compute_*_summary` function with its own
+    # component-class coverage (Task 20 brought the other seven tabs in
+    # alongside the original two).
+    ("routers/compare.py", "get_results_summary"): frozenset({
+        "compare_capacity", "compare_economics", "compare_dispatch",
+        "compare_loading", "compare_prices", "compare_emissions",
+        "compare_curtailment", "compare_lost_load", "compare_storage_cycling",
+    }),
     # ── routers/asset_results.py ────────────────────────────────────────
     ("routers/asset_results.py", "list_assets"):                frozenset(),
     ("routers/asset_results.py", "export_asset_results_xlsx"):   frozenset({"asset_results_xlsx"}),
