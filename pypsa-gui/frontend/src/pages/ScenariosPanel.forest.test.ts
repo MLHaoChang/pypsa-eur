@@ -216,8 +216,15 @@ describe('formatSignedCount / formatSignedPct', () => {
     expect(formatSignedPct(-0.5)).toContain('−')
   })
 
-  it('renders an exact zero without a sign', () => {
-    expect(formatSignedPct(0)).toBe('0.00%')
+  it('renders anything that rounds to zero as an unsigned approximation', () => {
+    // A signed zero claims a change and no change at once, and floating-point
+    // noise between two near-identical re-solves reaches it easily — it then
+    // rendered as "−0.00%" in green, tooltip "lower by €0".
+    expect(formatSignedPct(0)).toBe('≈0%')
+    expect(formatSignedPct(-1e-9)).toBe('≈0%')
+    expect(formatSignedPct(0.00004)).toBe('≈0%')
+    // Just past the rounding threshold it becomes a real signed figure.
+    expect(formatSignedPct(0.00006)).toBe('+0.01%')
   })
 })
 
@@ -242,8 +249,11 @@ describe('collectSubtree / solvableSubtree', () => {
   })
 
   it('matches an active job by id as well as by name', () => {
-    // The queue reports `project_id`, which is a UUID in auth mode and a name
-    // in local mode. Matching only one of the two double-queues the other.
+    // `SolveJob.project_id` is the RESOLVED NAME in every mode — the router
+    // resolves the project before enqueuing — so the id arm never fires
+    // today. It is kept as belt-and-braces against that contract changing,
+    // and costs one Set lookup. (An earlier version of this comment claimed
+    // the queue reports a UUID under auth; it does not.)
     const forest = buildScenarioForest([
       { ...p('base'), id: 'uuid-base' },
       { ...p('kid', 'base'), id: 'uuid-kid' },

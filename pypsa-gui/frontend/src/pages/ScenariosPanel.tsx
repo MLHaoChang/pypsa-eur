@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import {
@@ -134,12 +134,17 @@ export function scenarioDelta(
   const a = child.objective
   const b = parent.objective
   const bothSolved = a != null && b != null && Number.isFinite(a) && Number.isFinite(b)
-  const objective = bothSolved ? a - b : null
+  // Finite inputs can still overflow when subtracted. Real objectives never
+  // reach 1e308, but `Infinity%` on a row is a worse answer than no row.
+  const raw = bothSolved ? a - b : null
+  const objective = raw != null && Number.isFinite(raw) ? raw : null
   return {
     objective,
     // Guard the divide: an objective of exactly 0 is unusual but a network
     // with nothing to pay for produces one, and Infinity% helps nobody.
-    objectivePct: bothSolved && b !== 0 ? (a - b) / Math.abs(b) : null,
+    objectivePct: objective != null && b != null && b !== 0
+      ? objective / Math.abs(b)
+      : null,
     buses: (child.bus_count ?? 0) - (parent.bus_count ?? 0),
     snapshots: (child.snapshot_count ?? 0) - (parent.snapshot_count ?? 0),
     incomparable: (child.snapshot_count ?? 0) !== (parent.snapshot_count ?? 0),
@@ -152,11 +157,23 @@ export function formatSignedCount(v: number): string | null {
   return v > 0 ? `+${v}` : `−${Math.abs(v)}`
 }
 
-/** `−2.14%`, using a true minus sign so it lines up with the counts. */
+/**
+ * `−2.14%`, using a true minus sign so it lines up with the counts.
+ *
+ * Anything that rounds to zero comes back `≈0%` WITHOUT a sign. `−0.00%` is a
+ * claim of improvement and of no change at the same time, and it is reachable
+ * from ordinary floating-point noise between two near-identical re-solves —
+ * which then rendered in "cheaper" green with a tooltip reading "lower by €0".
+ */
 export function formatSignedPct(fraction: number): string {
   const pct = fraction * 100
-  const sign = pct > 0 ? '+' : pct < 0 ? '−' : ''
-  return `${sign}${Math.abs(pct).toFixed(2)}%`
+  if (Math.abs(pct) < 0.005) return '≈0%'
+  return `${pct > 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%`
+}
+
+/** True when a delta is too small to render as a signed percentage. */
+export function isNegligiblePct(fraction: number | null): boolean {
+  return fraction != null && Math.abs(fraction * 100) < 0.005
 }
 
 // ── Subtree collection ──────────────────────────────────────────────────────
@@ -175,10 +192,18 @@ export function collectSubtree(node: ScenarioNode): ProjectInfo[] {
  * with no saved network 404s at the dispatcher.
  */
 export function solvableSubtree(
-  node: ScenarioNode, alreadyQueued: ReadonlySet<string>,
+  node: ScenarioNode,
+  alreadyQueued: ReadonlySet<string>,
+  inFlight: ReadonlySet<string> = new Set(),
 ): ProjectInfo[] {
   return collectSubtree(node).filter(p =>
     p.missing !== true
+    && !inFlight.has(p.name)
+    // Both keys because the caller enqueues by id where it has one, while the
+    // queue reports the RESOLVED NAME back (`SolveJob.project_id` is the
+    // project name in every mode — the router resolves before enqueuing). The
+    // id arm is therefore belt-and-braces against that contract changing, not
+    // a case that fires today; it costs one Set lookup.
     && !alreadyQueued.has(p.name)
     && !alreadyQueued.has(p.id ?? p.name),
   )
@@ -194,32 +219,45 @@ function DeltaChips(
   if (!delta) return null
   const buses = formatSignedCount(delta.buses)
   const snapshots = formatSignedCount(delta.snapshots)
-  const hasObjective = delta.objective != null && delta.objectivePct != null
-  if (!hasObjective && !buses && !snapshots) return null
+  // An objective difference is worth showing whenever we HAVE one — the
+  // percentage is a nicety. Requiring both hid a real €5B gap whenever the
+  // parent happened to solve to exactly 0, which is precisely the case the
+  // divide-guard exists for.
+  const diff = delta.objective
+  if (diff == null && !buses && !snapshots) return null
 
   const vs = parentName ? ` vs ${parentName}` : ' vs its parent'
+  const negligible = isNegligiblePct(delta.objectivePct) || diff === 0
   return (
     <>
       <span className="text-border-3">|</span>
-      {hasObjective && (
+      {diff != null && (
         <span
           className={
             delta.incomparable ? 'text-warn'
-              : delta.objective! < 0 ? 'text-ok'
-              : delta.objective! > 0 ? 'text-danger'
-              : 'text-muted'
+              : negligible ? 'text-muted'
+              : diff < 0 ? 'text-ok'
+              : 'text-danger'
           }
           title={
             delta.incomparable
-              ? `Objective differs by ${formatObjective(delta.objective!)}${vs}, but the two `
+              ? `Objective differs by ${formatObjective(Math.abs(diff))}${vs}, but the two `
                 + `models cover a different number of snapshots — the objectives are sums `
-                + `over different horizons, so this difference is not a like-for-like result.`
-              : `System cost ${delta.objective! < 0 ? 'lower' : 'higher'} by `
-                + `${formatObjective(Math.abs(delta.objective!))}${vs}`
+                + `over different horizons, so this difference is not a like-for-like `
+                + `result. Weightings and solver settings can make two models `
+                + `non-comparable too; this only checks the snapshot count.`
+              : diff === 0
+              ? `System cost unchanged${vs}`
+              : `System cost ${diff < 0 ? 'lower' : 'higher'} by `
+                + `${formatObjective(Math.abs(diff))}${vs}`
           }
         >
           {delta.incomparable && '≠ '}
-          {formatSignedPct(delta.objectivePct!)}
+          {/* No percentage when the baseline was zero — there isn't one to
+              give. The absolute difference is the answer in that case. */}
+          {delta.objectivePct != null
+            ? formatSignedPct(delta.objectivePct)
+            : `${diff > 0 ? '+' : '−'}${formatObjective(Math.abs(diff))}`}
         </span>
       )}
       {buses && <span title={`Buses${vs}`}>{buses} bus</span>}
@@ -324,7 +362,30 @@ export default function ScenariosPanel() {
   const requestCompareNav = useUIStore(s => s.requestCompareNav)
   const { data: queue } = useSolveQueue()
   const enqueue = useEnqueueSolve()
-  const [queueing, setQueueing] = useState(false)
+  // Names this panel is mid-enqueue for. A REF, not state: it is claimed and
+  // read synchronously inside one async callback, where a state update would
+  // not be visible in time to stop the second caller.
+  const inFlight = useRef<Set<string>>(new Set())
+
+  // Both sets are keyed by NAME, and the list they refer to refetches every
+  // ten seconds — so a project deleted (here or in another tab) or renamed
+  // leaves a name behind that no row will ever match again. Left alone, the
+  // compare bar keeps offering a project that is gone, and a stale collapsed
+  // name silently re-applies to whatever project later takes it.
+  //
+  // Only prunes once the list has actually loaded: `projects` is `[]` during
+  // the first fetch, and intersecting against that would clear a selection
+  // the user made before a refetch landed.
+  useEffect(() => {
+    if (isLoading) return
+    const live = new Set((projects as ProjectInfo[]).map(p => p.name))
+    const prune = (prev: Set<string>) => {
+      const kept = [...prev].filter(n => live.has(n))
+      return kept.length === prev.size ? prev : new Set(kept)
+    }
+    setSelected(prune)
+    setCollapsed(prune)
+  }, [projects, isLoading])
 
   const toggleCollapse = (name: string) => setCollapsed(prev => {
     const next = new Set(prev)
@@ -445,8 +506,8 @@ export default function ScenariosPanel() {
   )
 
   const solveSubtree = (node: ScenarioNode) => {
-    if (queueing) return
-    const targets = solvableSubtree(node, busy)
+    if (!guardMutation(node.project.name)) return
+    const targets = solvableSubtree(node, busy, inFlight.current)
     if (targets.length === 0) {
       toast('Everything in this branch is already queued', { icon: '·' })
       return
@@ -457,22 +518,58 @@ export default function ScenariosPanel() {
       `Queue ${names.length} solve${names.length > 1 ? 's' : ''}`
       + ` — ${preview}${names.length > 4 ? `, +${names.length - 4} more` : ''}?`,
       async () => {
-        setQueueing(true)
+        // Claim the names SYNCHRONOUSLY, before the first await.
+        //
+        // The obvious guard — a `queueing` state flag — cannot work here: it
+        // would be set inside this callback but tested at click time, so two
+        // clicks open two confirm toasts and both pass. `confirmToast` has no
+        // dismiss hook either, so setting the flag before the toast would
+        // wedge the button whenever a prompt is ignored. A ref claimed at the
+        // top of the callback is the only version that is correct in both
+        // directions: a second confirmation finds every name taken and
+        // enqueues nothing, and a dismissed prompt claims nothing at all.
+        //
+        // It matters because the backend does NOT refuse a duplicate —
+        // `solve_queue.enqueue` appends unconditionally — so a double click
+        // really does run every project in the branch twice, and on these
+        // models that is minutes of wasted solve with the second run
+        // overwriting the first's results.
+        const claimed = targets.filter(p => !inFlight.current.has(p.name))
+        if (claimed.length === 0) {
+          toast('Already queueing that branch', { icon: '·' })
+          return
+        }
+        claimed.forEach(p => inFlight.current.add(p.name))
+
         let queued = 0
         const failed: string[] = []
+        let skippedActive: string | null = null
         try {
           // The dispatcher solves what is ON DISK, so the active project has
           // to be flushed first or its queued job runs against a stale file —
           // the same trap the branch dialog closes. Non-active projects were
           // already saved on switch-away.
+          //
+          // `saveProjectQuietly` returns FALSE rather than throwing, and its
+          // first branch declines outright while a solve is running — which is
+          // exactly when someone reaches for "queue this branch". Ignoring the
+          // result meant the one case this flush exists for was the one case
+          // it silently skipped. The project is dropped from the batch instead
+          // of queued stale; the rest of the branch still goes.
+          let batch = claimed
           if (currentProject && names.includes(currentProject)) {
-            await saveProjectQuietly(currentProject)
+            const saved = await saveProjectQuietly(currentProject)
+            if (!saved) {
+              skippedActive = currentProject
+              batch = claimed.filter(p => p.name !== currentProject)
+              inFlight.current.delete(currentProject)
+            }
           }
           // Sequential, not Promise.all: the enqueue route is a mutation on
           // shared queue state, and a burst of parallel POSTs is how you get
           // half of them refused for reasons that have nothing to do with the
           // projects.
-          for (const p of targets) {
+          for (const p of batch) {
             try {
               await enqueue.mutateAsync(p.id ?? p.name)
               queued += 1
@@ -481,11 +578,20 @@ export default function ScenariosPanel() {
             }
           }
         } finally {
-          setQueueing(false)
+          // Release only what this run claimed — a concurrent run's claims are
+          // its own to clear.
+          claimed.forEach(p => inFlight.current.delete(p.name))
         }
         if (queued > 0) {
           toast.success(`Queued ${queued} solve${queued > 1 ? 's' : ''}`)
           appLog('INFO', `Queued subtree of '${node.project.name}': ${queued} project(s)`)
+        }
+        if (skippedActive) {
+          toast.error(
+            `Skipped '${skippedActive}' — it could not be saved first, and the `
+            + `queue solves the saved file. Finish or abort the running solve, `
+            + `then queue it on its own.`,
+          )
         }
         if (failed.length > 0) {
           toast.error(`Could not queue: ${failed.join(', ')}`)
@@ -782,9 +888,13 @@ function ScenarioNodeRow({
         <span className="w-[14px] shrink-0 flex items-center justify-center">
           {hasChildren && (
             <button
+              type="button"
               onClick={() => onToggleCollapse(node.project.name)}
               className="text-muted hover:text-accent transition-colors"
               aria-expanded={!isCollapsed}
+              aria-label={isCollapsed
+                ? `Show the ${node.children.length} scenario(s) under ${node.project.name}`
+                : `Hide the scenarios under ${node.project.name}`}
               title={isCollapsed
                 ? `Show the ${node.children.length} scenario(s) under this one`
                 : 'Hide this branch'}
@@ -796,13 +906,21 @@ function ScenarioNodeRow({
             </button>
           )}
         </span>
+        {/* Disabled for a project whose files are gone, matching switch and
+            branch on the same row: /compare-state 404s without a network.nc,
+            so comparing one lands on an error banner. */}
         <input
           type="checkbox"
           checked={isSelected}
+          disabled={missing}
           onChange={() => onToggleSelect(node.project.name)}
-          className="shrink-0 accent-accent"
-          aria-label={`Select ${node.project.name} to compare`}
-          title="Pick two projects to compare side by side"
+          className="shrink-0 accent-accent disabled:cursor-not-allowed"
+          aria-label={missing
+            ? `${node.project.name} cannot be compared — its files are missing`
+            : `Compare ${node.project.name}`}
+          title={missing
+            ? "This project's folder is no longer on disk — there is nothing to compare"
+            : 'Pick two projects to compare side by side'}
         />
         <GitBranch size={13} className={isCurrent ? 'text-accent shrink-0' : 'text-muted shrink-0'} />
         <div className="flex-1 min-w-0">
@@ -828,6 +946,7 @@ function ScenarioNodeRow({
         <div className="flex items-center gap-1 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
           {!isCurrent && (
             <button
+              type="button"
               onClick={() => onSwitch(node.project.name)}
               disabled={missing}
               className={`p-1.5 transition-colors rounded ${
@@ -849,6 +968,7 @@ function ScenarioNodeRow({
               outlived its reason, and cost a full project switch — reloading
               a 26k-snapshot network — for every branch. */}
           <button
+            type="button"
             onClick={() => onCreateChild(node.project.name)}
             disabled={lockedRow || missing}
             className={`p-1.5 transition-colors rounded ${
@@ -870,9 +990,15 @@ function ScenarioNodeRow({
               which the queue panel and the header already offer. */}
           {hasChildren && (
             <button
+              type="button"
               onClick={() => onSolveSubtree(node)}
-              className="p-1.5 text-muted hover:text-accent transition-colors rounded"
-              title={`Queue this project and its ${node.children.length} branch(es) to solve`}
+              disabled={lockedRow}
+              className={`p-1.5 transition-colors rounded ${
+                lockedRow ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-accent'
+              }`}
+              title={lockedRow
+                ? 'Read-only — another user is editing this project'
+                : `Queue this project and its ${node.children.length} branch(es) to solve`}
             >
               <Play size={13} />
             </button>
@@ -880,6 +1006,7 @@ function ScenarioNodeRow({
           {/* Editable even when the files are gone — the label lives in the
               registry row, which is precisely what is still there. */}
           <button
+            type="button"
             onClick={() => onEdit(node.project)}
             disabled={lockedRow}
             className={`p-1.5 transition-colors rounded ${
@@ -894,6 +1021,7 @@ function ScenarioNodeRow({
           {/* Deletable even when its files are gone: the registry row is
               exactly what wants clearing in that case. */}
           <button
+            type="button"
             onClick={() => onDelete(node.project.name)}
             disabled={lockedRow}
             className={`p-1.5 transition-colors rounded ${

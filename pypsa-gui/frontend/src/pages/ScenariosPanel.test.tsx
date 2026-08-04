@@ -20,9 +20,14 @@ vi.mock('../utils/toasts', () => ({ confirmToast: vi.fn() }))
 // The panel reads the solve queue to know which projects already have a job.
 // Unmocked it hits the network, and the resulting error is the FIRST toast —
 // which silently displaced the assertions that read `toast.error.mock.calls[0]`.
+// Mutable so a test can put a RUNNING job in the queue. The previous version
+// hardcoded `{ jobs: [] }`, so `busy` was never non-empty and the
+// already-queued filter had no component-level coverage at all.
+let queueJobs: Array<{ id: number; project_id: string; status: string }> = []
+const enqueueMock = vi.fn()
 vi.mock('../hooks/useSolveQueue', () => ({
-  useSolveQueue: () => ({ data: { jobs: [] } }),
-  useEnqueueSolve: () => ({ mutateAsync: vi.fn().mockResolvedValue({}) }),
+  useSolveQueue: () => ({ data: { jobs: queueJobs } }),
+  useEnqueueSolve: () => ({ mutateAsync: enqueueMock }),
 }))
 vi.mock('react-hot-toast', () => {
   const t = Object.assign(vi.fn(), {
@@ -101,6 +106,8 @@ beforeEach(() => {
   vi.mocked(projectsApi.delete).mockResolvedValue({ deleted: [], failed: [] } as never)
   vi.mocked(switchToProject).mockResolvedValue({ status: 'switched' } as never)
   useUIStore.setState({ currentProject: 'loaded', readOnly: false })
+  queueJobs = []
+  enqueueMock.mockReset().mockResolvedValue({})
 })
 
 describe('branching from a row that is not the active project', () => {
@@ -452,6 +459,45 @@ describe('difference from the parent, shown inline', () => {
     expect(chip.getAttribute('title')).toMatch(/not a like-for-like/i)
   })
 
+  it('colours cheaper green and dearer red, not the reverse', async () => {
+    // Inverting the two passed every other assertion here.
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({ name: 'base', id: 'id-base', objective: 1_000_000 }),
+      project({ name: 'cheap', id: 'id-c', parent_project: 'base', objective: 900_000 }),
+      project({ name: 'dear', id: 'id-d', parent_project: 'base', objective: 1_100_000 }),
+    ] as never)
+    renderPanel()
+    expect(within(await rowFor('cheap')).getByText('−10.00%').className).toContain('text-ok')
+    expect(within(await rowFor('dear')).getByText('+10.00%').className).toContain('text-danger')
+  })
+
+  it('shows the absolute difference when the parent solved to exactly zero', async () => {
+    // There is no percentage against a zero baseline, but there IS a
+    // difference — and requiring both hid a real one entirely.
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({ name: 'base', id: 'id-base', objective: 0 }),
+      project({ name: 'kid', id: 'id-kid', parent_project: 'base', objective: 5e9 }),
+    ] as never)
+    renderPanel()
+    expect(within(await rowFor('kid')).getByText(/\+€5\.00B/)).toBeTruthy()
+  })
+
+  it('does not claim an improvement that rounds to nothing', async () => {
+    // Floating-point noise between two near-identical re-solves rendered
+    // "−0.00%" in green with the tooltip "lower by €0".
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({ name: 'base', id: 'id-base', objective: 1_000_000 }),
+      project({ name: 'same', id: 'id-s', parent_project: 'base', objective: 1_000_000.001 }),
+    ] as never)
+    renderPanel()
+    const chip = within(await rowFor('same')).getByText('≈0%')
+    expect(chip.className).toContain('text-muted')
+    expect(chip.className).not.toContain('text-ok')
+  })
+
   it('says nothing about the objective when the child is unsolved', async () => {
     vi.mocked(projectsApi.list).mockResolvedValue([
       project({ name: 'loaded', id: 'id-loaded' }),
@@ -481,7 +527,7 @@ describe('picking two rows to compare', () => {
     // A checkbox that silently does nothing reads as broken. Dropping the
     // oldest keeps every click meaningful.
     renderPanel()
-    for (const name of ['base', 'variant', 'ghost']) {
+    for (const name of ['base', 'variant', 'loaded']) {
       const row = await rowFor(name)
       await userEvent.click(within(row).getByRole('checkbox'))
     }
@@ -489,8 +535,57 @@ describe('picking two rows to compare', () => {
       .toBe(false)
     expect((within(await rowFor('variant')).getByRole('checkbox') as HTMLInputElement).checked)
       .toBe(true)
-    expect((within(await rowFor('ghost')).getByRole('checkbox') as HTMLInputElement).checked)
+    expect((within(await rowFor('loaded')).getByRole('checkbox') as HTMLInputElement).checked)
       .toBe(true)
+  })
+
+  it('drops a selection whose project disappears from the list', async () => {
+    // Both session sets are keyed by NAME against a list that refetches every
+    // ten seconds. Nothing reconciled them, so a deleted project stayed
+    // ticked and the compare bar kept offering it.
+    // Same mounted panel throughout — a remount would reset the state and the
+    // test would pass without the prune existing at all.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><ScenariosPanel /></QueryClientProvider>)
+    const row = await rowFor('variant')
+    await userEvent.click(within(row).getByRole('checkbox'))
+    expect(screen.getByText(/Tick one more/)).toBeTruthy()
+
+    vi.mocked(projectsApi.list).mockResolvedValue(
+      PROJECTS.filter(p => p.name !== 'variant') as never,
+    )
+    await qc.invalidateQueries({ queryKey: ['projects'] })
+    await waitFor(() => expect(screen.queryByText('variant')).toBeNull())
+    expect(screen.queryByText(/Tick one more/)).toBeNull()
+  })
+
+  it('cannot select a project whose files are gone', async () => {
+    // /compare-state 404s without a network.nc, so comparing one lands on an
+    // error banner. Switch and branch already refuse it.
+    renderPanel()
+    const row = await rowFor('ghost')
+    expect(within(row).getByRole('checkbox')).toHaveProperty('disabled', true)
+  })
+
+  it('the compare bar can drop a pick again', async () => {
+    renderPanel()
+    const row = await rowFor('base')
+    await userEvent.click(within(row).getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: /Remove base/ }))
+    expect(screen.queryByText(/Tick one more/)).toBeNull()
+    expect((within(await rowFor('base')).getByRole('checkbox') as HTMLInputElement).checked)
+      .toBe(false)
+  })
+
+  it('the section Compare button uses the ticked pair', async () => {
+    const requestCompareNav = vi.fn()
+    useUIStore.setState({ currentProject: 'loaded', readOnly: false, requestCompareNav })
+    renderPanel()
+    for (const name of ['base', 'variant']) {
+      await userEvent.click(within(await rowFor(name)).getByRole('checkbox'))
+    }
+    await userEvent.click(screen.getByRole('button', { name: /Compare selected/ }))
+    expect(requestCompareNav).toHaveBeenCalledWith({ a: 'base', b: 'variant' })
   })
 
   it('asks for a second pick before offering to compare', async () => {
@@ -512,6 +607,20 @@ describe('collapsing a branch', () => {
     expect(screen.queryByText('variant')).toBeNull()
     await userEvent.click(within(await rowFor('base')).getByTitle(/Show the 1 scenario/))
     expect(await screen.findByText('variant')).toBeTruthy()
+  })
+
+  it('reports its state to assistive tech, matching what is on screen', async () => {
+    // `aria-expanded` inverted passed every other test here.
+    renderPanel()
+    const row = await rowFor('base')
+    const chevron = within(row).getByRole('button', { name: /Hide the scenarios under base/ })
+    expect(chevron.getAttribute('aria-expanded')).toBe('true')
+    await userEvent.click(chevron)
+    expect(
+      within(await rowFor('base'))
+        .getByRole('button', { name: /Show the 1 scenario/ })
+        .getAttribute('aria-expanded'),
+    ).toBe('false')
   })
 
   it('offers no chevron on a leaf', async () => {
@@ -540,6 +649,120 @@ describe('queueing a whole branch to solve', () => {
     const row = await rowFor('variant')
     expect(within(row).queryByTitle(/Queue this project/)).toBeNull()
   })
+
+  // Everything below runs the CONFIRM CALLBACK. A QA pass mutation-tested the
+  // handler and found twelve survivors — including deleting the enqueue loop
+  // outright — because no test had ever invoked it. The delete tests already
+  // used this idiom; the queue tests did not.
+  const confirmQueue = async (rowName: string) => {
+    const row = await rowFor(rowName)
+    await userEvent.click(within(row).getByTitle(/Queue this project and its/))
+    await waitFor(() => expect(vi.mocked(confirmToast)).toHaveBeenCalled())
+    const calls = vi.mocked(confirmToast).mock.calls
+    await calls[calls.length - 1][1]()
+  }
+
+  it('enqueues every project in the branch, in order', async () => {
+    renderPanel()
+    await confirmQueue('base')
+    expect(enqueueMock.mock.calls.map(c => c[0])).toEqual(['id-base', 'id-variant'])
+    expect(vi.mocked(toast.success)).toHaveBeenCalledWith('Queued 2 solves')
+  })
+
+  it('flushes the active project before queueing it', async () => {
+    // The dispatcher solves the SAVED file. Queue first and the job runs
+    // against whatever was on disk before the user's edits.
+    useUIStore.setState({ currentProject: 'base', readOnly: false })
+    renderPanel()
+    await confirmQueue('base')
+    expect(vi.mocked(saveProjectQuietly)).toHaveBeenCalledWith('base')
+    expect(vi.mocked(saveProjectQuietly).mock.invocationCallOrder[0])
+      .toBeLessThan(enqueueMock.mock.invocationCallOrder[0])
+  })
+
+  it('drops the active project from the batch when its save fails', async () => {
+    // `saveProjectQuietly` returns FALSE rather than throwing, and declines
+    // outright while a solve is running — which is exactly when someone
+    // reaches for "queue this branch". Queueing it anyway would solve a stale
+    // file and report success.
+    useUIStore.setState({ currentProject: 'base', readOnly: false })
+    vi.mocked(saveProjectQuietly).mockResolvedValue(false)
+    renderPanel()
+    await confirmQueue('base')
+    expect(enqueueMock.mock.calls.map(c => c[0])).toEqual(['id-variant'])
+    expect(String(vi.mocked(toast.error).mock.calls[0][0])).toMatch(/could not be saved/i)
+  })
+
+  it('does not queue the same branch twice when confirmed twice', async () => {
+    // The backend does NOT refuse a duplicate — `solve_queue.enqueue` appends
+    // unconditionally — so a double confirm really does run every project in
+    // the branch twice, the second overwriting the first's results.
+    renderPanel()
+    const row = await rowFor('base')
+    const btn = within(row).getByTitle(/Queue this project and its/)
+    await userEvent.click(btn)
+    await userEvent.click(btn)
+    await waitFor(() => expect(vi.mocked(confirmToast).mock.calls.length).toBe(2))
+    // Both prompts accepted, as a double-click would.
+    await Promise.all(vi.mocked(confirmToast).mock.calls.map(c => c[1]()))
+    expect(enqueueMock.mock.calls.map(c => c[0])).toEqual(['id-base', 'id-variant'])
+  })
+
+  it('enqueues one at a time, never in a burst', async () => {
+    // The code says sequential and explains why; nothing proved it, and
+    // swapping the loop for `Promise.all` passed every other test here.
+    // Counting overlap is the only assertion that can tell the two apart.
+    let inFlight = 0
+    let peak = 0
+    enqueueMock.mockImplementation(async () => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise(r => setTimeout(r, 0))
+      inFlight -= 1
+      return {}
+    })
+    renderPanel()
+    await confirmQueue('base')
+    expect(enqueueMock).toHaveBeenCalledTimes(2)
+    expect(peak).toBe(1)
+  })
+
+  it('skips projects that already have a queued or running job', async () => {
+    queueJobs = [{ id: 1, project_id: 'variant', status: 'running' }]
+    renderPanel()
+    await confirmQueue('base')
+    expect(enqueueMock.mock.calls.map(c => c[0])).toEqual(['id-base'])
+  })
+
+  it('ignores jobs that have already finished', async () => {
+    // A terminal job is not a reason to skip — that would make a branch
+    // un-requeueable after its first run.
+    queueJobs = [{ id: 1, project_id: 'variant', status: 'completed' }]
+    renderPanel()
+    await confirmQueue('base')
+    expect(enqueueMock.mock.calls.map(c => c[0])).toEqual(['id-base', 'id-variant'])
+  })
+
+  it('reports the ones that failed without claiming they were queued', async () => {
+    enqueueMock.mockRejectedValueOnce(new Error('409'))
+    renderPanel()
+    await confirmQueue('base')
+    expect(vi.mocked(toast.success)).toHaveBeenCalledWith('Queued 1 solve')
+    expect(String(vi.mocked(toast.error).mock.calls[0][0])).toContain('base')
+  })
+
+  it('refuses entirely while another user holds the lock', async () => {
+    // Every other mutating control on the row is gated; this one queues a
+    // solve that overwrites results AND writes to the project via the flush.
+    useUIStore.setState({ currentProject: 'base', readOnly: true })
+    renderPanel()
+    const row = await rowFor('base')
+    const blocked = within(row).getAllByTitle(/Read-only/)
+    // Branch, queue, edit, delete. The queue button was the fourth to arrive
+    // and the one that shipped ungated.
+    expect(blocked).toHaveLength(4)
+    expect(blocked.every(b => (b as HTMLButtonElement).disabled)).toBe(true)
+  })
 })
 
 describe('the edit lock covers the project it is held on', () => {
@@ -551,6 +774,7 @@ describe('the edit lock covers the project it is held on', () => {
     // now writes to it (the pre-copy save), so the lock has to cover it too.
     const blocked = within(row).getAllByTitle(/Read-only/)
     // Branch, edit, delete — everything that writes to the locked project.
+    // ('loaded' is a leaf, so it has no subtree-queue button.)
     expect(blocked).toHaveLength(3)
     expect(blocked.every(b => (b as HTMLButtonElement).disabled)).toBe(true)
   })
