@@ -123,6 +123,13 @@ follow: a number you cannot back must say so rather than look confident.
 `periods` continues to appear alongside `index` on multi-period networks,
 unchanged.
 
+**`/unit_commitment` is the one composite.** It returns
+`{generators, status_grid, n_committable}`, where only `status_grid` carries
+`index`/`columns`/`data`. Its `range` block belongs **inside `status_grid`**,
+beside the fields it describes — a consumer reading `status_grid.index` reads
+`status_grid.range`. The sibling `generators` array is per-asset, not
+per-snapshot, and is unaffected by slicing.
+
 ### Server-side row cap
 
 A backstop against a request that would build a response nobody can use:
@@ -200,9 +207,16 @@ def get_generator_results(
 `/voltages`, `/line_reactive`, `/transformer_reactive`, `/prices`,
 `/curtailment`, `/lost_load`, `/loads`.
 
-Twelve route through `_serve_ts`. Four — `/prices`, `/curtailment`,
-`/lost_load`, `/loads` — have bespoke bodies and call `slice_ts` directly before
-building their payload.
+**Eleven** route through `_serve_ts`: `/generators`, `/storage_dispatch`,
+`/store_dispatch`, `/store_energy`, `/storage`, `/lines`, `/links`,
+`/transformers`, `/voltages`, `/line_reactive`, `/transformer_reactive`.
+
+**Five** have bespoke bodies and call `slice_ts` directly before building their
+payload: `/unit_commitment`, `/prices`, `/curtailment`, `/lost_load`, `/loads`.
+
+Three of the sixteen take no `source` parameter at all — `/unit_commitment`,
+`/curtailment` and `/lost_load` read LP-only artefacts, so there is no AC-PF
+variant to select. Their signatures gain `from`/`to` only.
 
 **The twelve aggregate endpoints are untouched**: `/cost_breakdown`,
 `/objective_decomposition`, `/economics_by_carrier`, `/statistics`, `/lcoh`,
@@ -347,8 +361,12 @@ the same slice taken client-side from the unranged payload. This is what pins
 "moving the window server-side changed no number", and it is the test that would
 catch an off-by-one in the inclusive bounds.
 
-**`complete` correctness.** True only for the full range; false for any window,
-including one that happens to cover every row after clamping a too-large `to`.
+**`complete` correctness.** It is computed from what was **served**, not from
+what was **asked**: `from == 0 and to == total - 1` after clamping. So a request
+with `to=99999` against a 168-row series returns `complete: true`, because the
+caller does hold every row. Reporting `false` there would make a consumer refuse
+to compute a horizon total on data that is in fact whole — the mirror image of
+the defect this field exists to prevent.
 
 **Payload size.** A one-row request on a wide network stays under a stated
 kilobyte bound — the regression guard for the canvas win.
