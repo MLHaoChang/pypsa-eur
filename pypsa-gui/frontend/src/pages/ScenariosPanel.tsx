@@ -1,13 +1,17 @@
 import { useId, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { GitBranch, Pencil, Plus, Trash2, ArrowRight, Layers, ChevronRight } from 'lucide-react'
+import {
+  GitBranch, Pencil, Play, Plus, Trash2, ArrowRight, Layers, ChevronRight, X,
+} from 'lucide-react'
 import { projectsApi } from '../api/projects'
 import { networkApi } from '../api/network'
 import { formatApiDetail } from '../api/client'
 import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, saveProjectQuietly, switchToProject } from '../utils/projectActions'
 import { evaluateMutation } from '../utils/mutationGuard'
+import { useSolveQueue, useEnqueueSolve } from '../hooks/useSolveQueue'
+import { isActive } from '../api/solveQueue'
 import { confirmToast } from '../utils/toasts'
 import {
   SCEN_TYPES, SCEN_TYPE_LABEL, resolveScenType, type ScenType,
@@ -90,6 +94,138 @@ export function buildScenarioForest(projects: ProjectInfo[]): ScenarioNode[] {
 // Only the tone mapping is panel-local: it names PageKit tags.
 const SCEN_TYPE_TONE: Record<ScenType, 'accent' | 'purple' | 'warn'> = {
   baseline: 'accent', scenario: 'purple', stress: 'warn',
+}
+
+// ── Difference from the parent ──────────────────────────────────────────────
+
+export interface ScenarioDelta {
+  /** Absolute change in objective, child − parent. Null when either is unsolved. */
+  objective: number | null
+  /** The same as a fraction of the parent's objective. Null if the parent's is 0. */
+  objectivePct: number | null
+  buses: number
+  snapshots: number
+  /**
+   * True when the two objectives are not comparable like-for-like.
+   *
+   * A different snapshot count means a different amount of modelled time, so
+   * the objectives are sums over different horizons and their difference is
+   * not a result — it is an artefact. Worth SHOWING with a warning rather
+   * than hiding, because "this branch has a different horizon" is itself the
+   * thing the user most needs to notice.
+   */
+  incomparable: boolean
+}
+
+/**
+ * What changed between a scenario and the project it was branched from.
+ *
+ * Derived entirely from the list payload the panel already has — no extra
+ * request, so it costs nothing to show on every row. `/compare-state` gives a
+ * far richer diff (capacity by carrier, dispatch, prices) but loads each
+ * project's netcdf into a transient network, which is seconds per project on
+ * a 26k-snapshot model. That belongs behind an explicit compare, not on a
+ * list that refetches every ten seconds.
+ */
+export function scenarioDelta(
+  child: ProjectInfo, parent: ProjectInfo | null | undefined,
+): ScenarioDelta | null {
+  if (!parent) return null
+  const a = child.objective
+  const b = parent.objective
+  const bothSolved = a != null && b != null && Number.isFinite(a) && Number.isFinite(b)
+  const objective = bothSolved ? a - b : null
+  return {
+    objective,
+    // Guard the divide: an objective of exactly 0 is unusual but a network
+    // with nothing to pay for produces one, and Infinity% helps nobody.
+    objectivePct: bothSolved && b !== 0 ? (a - b) / Math.abs(b) : null,
+    buses: (child.bus_count ?? 0) - (parent.bus_count ?? 0),
+    snapshots: (child.snapshot_count ?? 0) - (parent.snapshot_count ?? 0),
+    incomparable: (child.snapshot_count ?? 0) !== (parent.snapshot_count ?? 0),
+  }
+}
+
+/** `+3` / `−2` / null when unchanged — the sign is the point, so it is explicit. */
+export function formatSignedCount(v: number): string | null {
+  if (v === 0) return null
+  return v > 0 ? `+${v}` : `−${Math.abs(v)}`
+}
+
+/** `−2.14%`, using a true minus sign so it lines up with the counts. */
+export function formatSignedPct(fraction: number): string {
+  const pct = fraction * 100
+  const sign = pct > 0 ? '+' : pct < 0 ? '−' : ''
+  return `${sign}${Math.abs(pct).toFixed(2)}%`
+}
+
+// ── Subtree collection ──────────────────────────────────────────────────────
+
+/** A node and every descendant, depth-first — the order they render in. */
+export function collectSubtree(node: ScenarioNode): ProjectInfo[] {
+  return [node.project, ...node.children.flatMap(collectSubtree)]
+}
+
+/**
+ * The projects in a subtree that can actually be queued to solve.
+ *
+ * Three exclusions, each of which would otherwise produce a failed job the
+ * user has to go and read: a project whose files are gone has nothing to
+ * solve, one already queued or running must not be enqueued twice, and one
+ * with no saved network 404s at the dispatcher.
+ */
+export function solvableSubtree(
+  node: ScenarioNode, alreadyQueued: ReadonlySet<string>,
+): ProjectInfo[] {
+  return collectSubtree(node).filter(p =>
+    p.missing !== true
+    && !alreadyQueued.has(p.name)
+    && !alreadyQueued.has(p.id ?? p.name),
+  )
+}
+
+/**
+ * The `vs parent` readout. Renders nothing at all for a root, or for a child
+ * that differs in no way this list can see — an empty chip row is noise.
+ */
+function DeltaChips(
+  { delta, parentName }: { delta: ScenarioDelta | null; parentName: string | null },
+) {
+  if (!delta) return null
+  const buses = formatSignedCount(delta.buses)
+  const snapshots = formatSignedCount(delta.snapshots)
+  const hasObjective = delta.objective != null && delta.objectivePct != null
+  if (!hasObjective && !buses && !snapshots) return null
+
+  const vs = parentName ? ` vs ${parentName}` : ' vs its parent'
+  return (
+    <>
+      <span className="text-border-3">|</span>
+      {hasObjective && (
+        <span
+          className={
+            delta.incomparable ? 'text-warn'
+              : delta.objective! < 0 ? 'text-ok'
+              : delta.objective! > 0 ? 'text-danger'
+              : 'text-muted'
+          }
+          title={
+            delta.incomparable
+              ? `Objective differs by ${formatObjective(delta.objective!)}${vs}, but the two `
+                + `models cover a different number of snapshots — the objectives are sums `
+                + `over different horizons, so this difference is not a like-for-like result.`
+              : `System cost ${delta.objective! < 0 ? 'lower' : 'higher'} by `
+                + `${formatObjective(Math.abs(delta.objective!))}${vs}`
+          }
+        >
+          {delta.incomparable && '≠ '}
+          {formatSignedPct(delta.objectivePct!)}
+        </span>
+      )}
+      {buses && <span title={`Buses${vs}`}>{buses} bus</span>}
+      {snapshots && <span title={`Snapshots${vs}`}>{snapshots} snap</span>}
+    </>
+  )
 }
 
 // ── Cascade-delete prompt ───────────────────────────────────────────────────
@@ -180,6 +316,34 @@ export default function ScenariosPanel() {
   const [creating, setCreating] = useState<{ base: string; baseId: string } | null>(null)
   const [switching, setSwitching] = useState<string | null>(null)
   const [editing, setEditing] = useState<ProjectInfo | null>(null)
+  // Collapse + selection are SESSION state, deliberately not persisted. The
+  // panel is a slide-over that closes often, and a remembered collapse that
+  // hides a branch the user forgot they collapsed is worse than re-expanding.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const requestCompareNav = useUIStore(s => s.requestCompareNav)
+  const { data: queue } = useSolveQueue()
+  const enqueue = useEnqueueSolve()
+  const [queueing, setQueueing] = useState(false)
+
+  const toggleCollapse = (name: string) => setCollapsed(prev => {
+    const next = new Set(prev)
+    next.has(name) ? next.delete(name) : next.add(name)
+    return next
+  })
+
+  // Two is the whole point — the compare view is A vs B. Picking a third
+  // drops the OLDEST rather than refusing, so the checkbox always responds:
+  // a control that silently does nothing reads as broken.
+  const toggleSelect = (name: string) => setSelected(prev => {
+    if (prev.has(name)) {
+      const next = new Set(prev)
+      next.delete(name)
+      return next
+    }
+    const kept = [...prev].slice(-1)
+    return new Set([...kept, name])
+  })
 
   // Shared read-only guard for the panel's mutating actions. Returns true when
   // the action may proceed; otherwise toasts and returns false.
@@ -271,6 +435,72 @@ export default function ScenariosPanel() {
       setSwitching(null)
       setProjectSwitchInProgress(false)
     }
+  }
+
+  // Names/ids with a queued or running job — enqueuing one twice is a
+  // guaranteed backend refusal, so they are filtered out before we ask.
+  const busy = useMemo(
+    () => new Set((queue?.jobs ?? []).filter(isActive).map(j => j.project_id)),
+    [queue],
+  )
+
+  const solveSubtree = (node: ScenarioNode) => {
+    if (queueing) return
+    const targets = solvableSubtree(node, busy)
+    if (targets.length === 0) {
+      toast('Everything in this branch is already queued', { icon: '·' })
+      return
+    }
+    const names = targets.map(p => p.name)
+    const preview = names.slice(0, 4).join(', ')
+    confirmToast(
+      `Queue ${names.length} solve${names.length > 1 ? 's' : ''}`
+      + ` — ${preview}${names.length > 4 ? `, +${names.length - 4} more` : ''}?`,
+      async () => {
+        setQueueing(true)
+        let queued = 0
+        const failed: string[] = []
+        try {
+          // The dispatcher solves what is ON DISK, so the active project has
+          // to be flushed first or its queued job runs against a stale file —
+          // the same trap the branch dialog closes. Non-active projects were
+          // already saved on switch-away.
+          if (currentProject && names.includes(currentProject)) {
+            await saveProjectQuietly(currentProject)
+          }
+          // Sequential, not Promise.all: the enqueue route is a mutation on
+          // shared queue state, and a burst of parallel POSTs is how you get
+          // half of them refused for reasons that have nothing to do with the
+          // projects.
+          for (const p of targets) {
+            try {
+              await enqueue.mutateAsync(p.id ?? p.name)
+              queued += 1
+            } catch {
+              failed.push(p.name)
+            }
+          }
+        } finally {
+          setQueueing(false)
+        }
+        if (queued > 0) {
+          toast.success(`Queued ${queued} solve${queued > 1 ? 's' : ''}`)
+          appLog('INFO', `Queued subtree of '${node.project.name}': ${queued} project(s)`)
+        }
+        if (failed.length > 0) {
+          toast.error(`Could not queue: ${failed.join(', ')}`)
+        }
+      },
+      { confirmLabel: 'Queue them' },
+    )
+  }
+
+  const compareSelected = () => {
+    const [a, b] = [...selected]
+    if (!a || !b) return
+    requestCompareNav({ a, b })
+    setSlidePanel('results')
+    setCompareRailOpen(true)
   }
 
   const deleteMut = useMutation({
@@ -374,13 +604,55 @@ export default function ScenariosPanel() {
           </div>
         )}
 
+        {/* Only once something is ticked. A permanently-present bar reading
+            "0 selected" is chrome; this one only exists while it has
+            something to say, and says what the next click will do. */}
+        {selected.size > 0 && (
+          <div className="flex items-center gap-2 text-[11px] bg-bg-2 border border-border rounded-lg px-3 py-2">
+            <span className="text-muted font-mono text-[9px] font-bold uppercase tracking-[0.14em]">
+              Compare
+            </span>
+            {[...selected].map(name => (
+              <span key={name} className="flex items-center gap-1 text-ink-700">
+                {name}
+                <button
+                  onClick={() => toggleSelect(name)}
+                  className="text-border-3 hover:text-danger transition-colors"
+                  aria-label={`Remove ${name} from the comparison`}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+            <span className="flex-1" />
+            {selected.size === 1 ? (
+              <span className="text-muted">Tick one more to compare</span>
+            ) : (
+              <Btn onClick={compareSelected} title={`Compare ${[...selected].join(' vs ')}`}>
+                <Layers size={12} /> Compare these two
+              </Btn>
+            )}
+          </div>
+        )}
+
         <PageSection
           title="Scenario tree"
           count={projectList.length}
           hint="variants linked by a parent pointer — switching auto-saves the outgoing"
           right={
-            <Btn onClick={() => { setSlidePanel('results'); setCompareRailOpen(true) }} title="Open Results with the comparison rail docked alongside">
-              <Layers size={12} /> Compare
+            <Btn
+              onClick={() => {
+                // With two rows ticked this opens the compare view ON them;
+                // with none it opens the rail as before and the user picks
+                // there. Same button, because "compare" is one intent.
+                if (selected.size === 2) compareSelected()
+                else { setSlidePanel('results'); setCompareRailOpen(true) }
+              }}
+              title={selected.size === 2
+                ? `Compare ${[...selected].join(' vs ')}`
+                : 'Open Results with the comparison rail docked alongside'}
+            >
+              <Layers size={12} /> Compare{selected.size === 2 ? ' selected' : ''}
             </Btn>
           }
           bodyClassName="p-3"
@@ -399,6 +671,12 @@ export default function ScenariosPanel() {
                   node={root}
                   currentProject={currentProject}
                   readOnly={readOnly}
+                  parent={null}
+                  collapsed={collapsed}
+                  onToggleCollapse={toggleCollapse}
+                  selected={selected}
+                  onToggleSelect={toggleSelect}
+                  onSolveSubtree={solveSubtree}
                   onSwitch={switchTo}
                   onCreateChild={(base) => { if (guardMutation(base)) setCreating({ base, baseId: apiIdFor(base) }) }}
                   onEdit={(project) => { if (guardMutation(project.name)) setEditing(project) }}
@@ -460,9 +738,20 @@ interface RowProps {
   onCreateChild: (base: string) => void
   onEdit: (project: ProjectInfo) => void
   onDelete: (name: string) => void
+  /** The project this node was branched from — the delta's reference point. */
+  parent: ProjectInfo | null
+  collapsed: ReadonlySet<string>
+  onToggleCollapse: (name: string) => void
+  /** Names picked for an A/B compare. At most two; see `toggleSelected`. */
+  selected: ReadonlySet<string>
+  onToggleSelect: (name: string) => void
+  onSolveSubtree: (node: ScenarioNode) => void
 }
 
-function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChild, onEdit, onDelete }: RowProps) {
+function ScenarioNodeRow({
+  node, currentProject, readOnly, onSwitch, onCreateChild, onEdit, onDelete,
+  parent, collapsed, onToggleCollapse, selected, onToggleSelect, onSolveSubtree,
+}: RowProps) {
   const isCurrent = node.project.name === currentProject
   const indent = node.depth * 16
   const { type: scenType, text: scenText } = resolveScenType(node.project)
@@ -473,6 +762,11 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
   // The lock is held on the ACTIVE project only; it has no bearing on a row
   // the holder never loaded. See `guardMutation` for the full reasoning.
   const lockedRow = readOnly && isCurrent
+  const delta = scenarioDelta(node.project, parent)
+  const parentName = parent?.name ?? null
+  const hasChildren = node.children.length > 0
+  const isCollapsed = collapsed.has(node.project.name)
+  const isSelected = selected.has(node.project.name)
   return (
     <>
       <div
@@ -483,6 +777,33 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
         }`}
         style={{ marginLeft: indent }}
       >
+        {/* Fixed-width slot whether or not there is a chevron, so names in a
+            mixed tree still line up on their indent level. */}
+        <span className="w-[14px] shrink-0 flex items-center justify-center">
+          {hasChildren && (
+            <button
+              onClick={() => onToggleCollapse(node.project.name)}
+              className="text-muted hover:text-accent transition-colors"
+              aria-expanded={!isCollapsed}
+              title={isCollapsed
+                ? `Show the ${node.children.length} scenario(s) under this one`
+                : 'Hide this branch'}
+            >
+              <ChevronRight
+                size={12}
+                className={`transition-transform ${isCollapsed ? '' : 'rotate-90'}`}
+              />
+            </button>
+          )}
+        </span>
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => onToggleSelect(node.project.name)}
+          className="shrink-0 accent-accent"
+          aria-label={`Select ${node.project.name} to compare`}
+          title="Pick two projects to compare side by side"
+        />
         <GitBranch size={13} className={isCurrent ? 'text-accent shrink-0' : 'text-muted shrink-0'} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -496,9 +817,12 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
               {scenText}
             </div>
           )}
-          <div className="text-[10px] text-muted font-mono mt-0.5">
-            {node.project.bus_count} buses · {node.project.snapshot_count} snapshots
-            {node.project.objective != null && ` · obj ${formatObjective(node.project.objective)}`}
+          <div className="text-[10px] text-muted font-mono mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span>
+              {node.project.bus_count} buses · {node.project.snapshot_count} snapshots
+              {node.project.objective != null && ` · obj ${formatObjective(node.project.objective)}`}
+            </span>
+            <DeltaChips delta={delta} parentName={parentName} />
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
@@ -542,6 +866,17 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
           >
             <Plus size={13} />
           </button>
+          {/* Only where it means something: on a leaf this is just "solve",
+              which the queue panel and the header already offer. */}
+          {hasChildren && (
+            <button
+              onClick={() => onSolveSubtree(node)}
+              className="p-1.5 text-muted hover:text-accent transition-colors rounded"
+              title={`Queue this project and its ${node.children.length} branch(es) to solve`}
+            >
+              <Play size={13} />
+            </button>
+          )}
           {/* Editable even when the files are gone — the label lives in the
               registry row, which is precisely what is still there. */}
           <button
@@ -572,7 +907,7 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
           </button>
         </div>
       </div>
-      {node.children.map(child => (
+      {!isCollapsed && node.children.map(child => (
         <ScenarioNodeRow
           key={child.project.name}
           node={child}
@@ -582,6 +917,12 @@ function ScenarioNodeRow({ node, currentProject, readOnly, onSwitch, onCreateChi
           onCreateChild={onCreateChild}
           onEdit={onEdit}
           onDelete={onDelete}
+          parent={node.project}
+          collapsed={collapsed}
+          onToggleCollapse={onToggleCollapse}
+          selected={selected}
+          onToggleSelect={onToggleSelect}
+          onSolveSubtree={onSolveSubtree}
         />
       ))}
     </>

@@ -17,6 +17,13 @@ import { confirmToast } from '../utils/toasts'
 vi.mock('../api/projects')
 vi.mock('../api/network', () => ({ networkApi: { resetNetwork: vi.fn() } }))
 vi.mock('../utils/toasts', () => ({ confirmToast: vi.fn() }))
+// The panel reads the solve queue to know which projects already have a job.
+// Unmocked it hits the network, and the resulting error is the FIRST toast —
+// which silently displaced the assertions that read `toast.error.mock.calls[0]`.
+vi.mock('../hooks/useSolveQueue', () => ({
+  useSolveQueue: () => ({ data: { jobs: [] } }),
+  useEnqueueSolve: () => ({ mutateAsync: vi.fn().mockResolvedValue({}) }),
+}))
 vi.mock('react-hot-toast', () => {
   const t = Object.assign(vi.fn(), {
     error: vi.fn(), success: vi.fn(), loading: vi.fn(() => 'tid'), dismiss: vi.fn(),
@@ -58,10 +65,20 @@ const renderPanel = () => {
   return render(<QueryClientProvider client={qc}><ScenariosPanel /></QueryClientProvider>)
 }
 
-/** The row container for a project, so button lookups can't cross rows. */
+/**
+ * The tree row for a project, so button lookups can't cross rows.
+ *
+ * Matches on the ROW specifically: a selected project's name also appears in
+ * the compare bar above the tree, so a bare `findByText` finds two elements
+ * as soon as anything is ticked.
+ */
 const rowFor = async (name: string): Promise<HTMLElement> => {
-  const label = await screen.findByText(name)
-  return label.closest('.group') as HTMLElement
+  await screen.findAllByText(name)
+  const row = screen.getAllByText(name)
+    .map(el => el.closest('.group'))
+    .find(Boolean)
+  if (!row) throw new Error(`no tree row for '${name}'`)
+  return row as HTMLElement
 }
 
 const branchFrom = async (name: string) => {
@@ -390,6 +407,138 @@ describe('editing a scenario after it was created', () => {
     renderPanel()
     const row = await rowFor('ghost')
     expect(within(row).getByTitle(/^Edit this scenario/)).toHaveProperty('disabled', false)
+  })
+})
+
+// ── Stage 3: the tree as a comparison surface ───────────────────────────────
+
+const SOLVED_TREE = [
+  project({ name: 'loaded', id: 'id-loaded' }),
+  project({ name: 'base', id: 'id-base', objective: 1_000_000, bus_count: 5 }),
+  project({
+    name: 'cheaper', id: 'id-cheaper', parent_project: 'base',
+    objective: 900_000, bus_count: 6,
+  }),
+  project({
+    name: 'longer', id: 'id-longer', parent_project: 'base',
+    objective: 4_000_000, bus_count: 5, snapshot_count: 96,
+  }),
+]
+
+describe('difference from the parent, shown inline', () => {
+  it('reads the objective change as a percentage on the child row', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue(SOLVED_TREE as never)
+    renderPanel()
+    const row = await rowFor('cheaper')
+    expect(within(row).getByText('−10.00%')).toBeTruthy()
+    expect(within(row).getByText('+1 bus')).toBeTruthy()
+  })
+
+  it('shows nothing on a root — there is no parent to differ from', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue(SOLVED_TREE as never)
+    renderPanel()
+    const row = await rowFor('base')
+    expect(within(row).queryByText(/%$/)).toBeNull()
+  })
+
+  it('marks a differing horizon rather than reporting a meaningless number', async () => {
+    // 'longer' covers 96 snapshots against its parent's 24, so the objectives
+    // are sums over different amounts of time. The difference is an artefact.
+    vi.mocked(projectsApi.list).mockResolvedValue(SOLVED_TREE as never)
+    renderPanel()
+    const row = await rowFor('longer')
+    const chip = within(row).getByText(/300\.00%/)
+    expect(chip.textContent).toContain('≠')
+    expect(chip.getAttribute('title')).toMatch(/not a like-for-like/i)
+  })
+
+  it('says nothing about the objective when the child is unsolved', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({ name: 'base', id: 'id-base', objective: 1_000_000 }),
+      project({ name: 'todo', id: 'id-todo', parent_project: 'base', objective: null }),
+    ] as never)
+    renderPanel()
+    const row = await rowFor('todo')
+    expect(within(row).queryByText(/%/)).toBeNull()
+  })
+})
+
+describe('picking two rows to compare', () => {
+  it('routes the pair into the compare view', async () => {
+    const requestCompareNav = vi.fn()
+    useUIStore.setState({ currentProject: 'loaded', readOnly: false, requestCompareNav })
+    renderPanel()
+    const a = await rowFor('base')
+    await userEvent.click(within(a).getByRole('checkbox'))
+    const b = await rowFor('variant')
+    await userEvent.click(within(b).getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: /Compare these two/ }))
+    expect(requestCompareNav).toHaveBeenCalledWith({ a: 'base', b: 'variant' })
+  })
+
+  it('keeps only the last two picks rather than ignoring the third', async () => {
+    // A checkbox that silently does nothing reads as broken. Dropping the
+    // oldest keeps every click meaningful.
+    renderPanel()
+    for (const name of ['base', 'variant', 'ghost']) {
+      const row = await rowFor(name)
+      await userEvent.click(within(row).getByRole('checkbox'))
+    }
+    expect((within(await rowFor('base')).getByRole('checkbox') as HTMLInputElement).checked)
+      .toBe(false)
+    expect((within(await rowFor('variant')).getByRole('checkbox') as HTMLInputElement).checked)
+      .toBe(true)
+    expect((within(await rowFor('ghost')).getByRole('checkbox') as HTMLInputElement).checked)
+      .toBe(true)
+  })
+
+  it('asks for a second pick before offering to compare', async () => {
+    renderPanel()
+    const row = await rowFor('base')
+    await userEvent.click(within(row).getByRole('checkbox'))
+    expect(screen.getByText(/Tick one more/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Compare these two/ })).toBeNull()
+  })
+})
+
+describe('collapsing a branch', () => {
+  it('hides the children and can bring them back', async () => {
+    renderPanel()
+    expect(await screen.findByText('variant')).toBeTruthy()
+    const row = await rowFor('base')
+    const chevron = within(row).getByTitle(/Hide this branch/)
+    await userEvent.click(chevron)
+    expect(screen.queryByText('variant')).toBeNull()
+    await userEvent.click(within(await rowFor('base')).getByTitle(/Show the 1 scenario/))
+    expect(await screen.findByText('variant')).toBeTruthy()
+  })
+
+  it('offers no chevron on a leaf', async () => {
+    renderPanel()
+    const row = await rowFor('variant')
+    expect(within(row).queryByTitle(/Hide this branch|Show the/)).toBeNull()
+  })
+})
+
+describe('queueing a whole branch to solve', () => {
+  it('asks before queueing, naming what it will queue', async () => {
+    renderPanel()
+    const row = await rowFor('base')
+    await userEvent.click(within(row).getByTitle(/Queue this project and its/))
+    await waitFor(() => expect(vi.mocked(confirmToast)).toHaveBeenCalled())
+    const prompt = vi.mocked(confirmToast).mock.calls[0][0]
+    expect(prompt).toContain('base')
+    expect(prompt).toContain('variant')
+    expect(prompt).toMatch(/Queue 2 solves/)
+  })
+
+  it('is offered only where it means something', async () => {
+    // On a leaf this is just "solve", which the header and the queue panel
+    // already do.
+    renderPanel()
+    const row = await rowFor('variant')
+    expect(within(row).queryByTitle(/Queue this project/)).toBeNull()
   })
 })
 

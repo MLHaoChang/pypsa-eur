@@ -9,7 +9,10 @@
 // the tree is unreachable in the UI; one that appears twice gets two delete
 // buttons pointing at the same directory.
 import { describe, expect, it } from 'vitest'
-import { buildScenarioForest, describeDescendants, type ScenarioNode } from './ScenariosPanel'
+import {
+  buildScenarioForest, collectSubtree, describeDescendants, formatSignedCount,
+  formatSignedPct, scenarioDelta, solvableSubtree, type ScenarioNode,
+} from './ScenariosPanel'
 import type { ProjectInfo } from '../api/types'
 
 const p = (name: string, parent: string | null = null): ProjectInfo => ({
@@ -124,6 +127,140 @@ describe('buildScenarioForest', () => {
     const snapshot = JSON.parse(JSON.stringify(input))
     buildScenarioForest(input)
     expect(input).toEqual(snapshot)
+  })
+})
+
+describe('scenarioDelta', () => {
+  const solved = (name: string, over: Partial<ProjectInfo> = {}): ProjectInfo =>
+    ({ ...p(name), objective: 1_000_000, bus_count: 5, snapshot_count: 24, ...over })
+
+  it('is null for a root — there is nothing to compare against', () => {
+    expect(scenarioDelta(solved('root'), null)).toBeNull()
+    expect(scenarioDelta(solved('root'), undefined)).toBeNull()
+  })
+
+  it('reports a cheaper child as a negative difference', () => {
+    const d = scenarioDelta(solved('child', { objective: 900_000 }), solved('base'))!
+    expect(d.objective).toBe(-100_000)
+    expect(d.objectivePct).toBeCloseTo(-0.1)
+    expect(d.incomparable).toBe(false)
+  })
+
+  it('reports a more expensive child as positive', () => {
+    const d = scenarioDelta(solved('child', { objective: 1_250_000 }), solved('base'))!
+    expect(d.objectivePct).toBeCloseTo(0.25)
+  })
+
+  it('gives no objective difference when either side is unsolved', () => {
+    expect(scenarioDelta(solved('child', { objective: null }), solved('base'))!.objective)
+      .toBeNull()
+    expect(scenarioDelta(solved('child'), solved('base', { objective: null }))!.objective)
+      .toBeNull()
+  })
+
+  it('treats a non-finite objective as unsolved rather than propagating NaN', () => {
+    const d = scenarioDelta(solved('child', { objective: NaN }), solved('base'))!
+    expect(d.objective).toBeNull()
+    expect(d.objectivePct).toBeNull()
+  })
+
+  it('does not divide by a zero baseline', () => {
+    // A network with nothing to pay for solves to 0. Infinity% helps nobody.
+    const d = scenarioDelta(solved('child', { objective: 5 }), solved('base', { objective: 0 }))!
+    expect(d.objective).toBe(5)
+    expect(d.objectivePct).toBeNull()
+  })
+
+  it('uses the magnitude of the base, so a negative baseline keeps its sign', () => {
+    // Objectives are normally positive costs, but a network dominated by
+    // revenue can solve negative. -50 -> -100 is a 100% INCREASE in magnitude
+    // and a decrease in value; the sign must follow the value.
+    const d = scenarioDelta(
+      solved('child', { objective: -100 }), solved('base', { objective: -50 }),
+    )!
+    expect(d.objective).toBe(-50)
+    expect(d.objectivePct).toBeCloseTo(-1)
+  })
+
+  it('reports structural differences independently of the objective', () => {
+    const d = scenarioDelta(
+      solved('child', { bus_count: 8, snapshot_count: 24 }), solved('base'),
+    )!
+    expect(d.buses).toBe(3)
+    expect(d.snapshots).toBe(0)
+  })
+
+  it('flags a different horizon as incomparable', () => {
+    // Two objectives summed over different amounts of modelled time. The
+    // difference is an artefact of the horizon, not a result.
+    const d = scenarioDelta(solved('child', { snapshot_count: 8760 }), solved('base'))!
+    expect(d.incomparable).toBe(true)
+    expect(d.objective).not.toBeNull()   // still shown, but marked
+  })
+})
+
+describe('formatSignedCount / formatSignedPct', () => {
+  it('returns null for no change so the caller can skip the chip', () => {
+    expect(formatSignedCount(0)).toBeNull()
+  })
+
+  it('always carries an explicit sign', () => {
+    expect(formatSignedCount(3)).toBe('+3')
+    expect(formatSignedCount(-2)).toBe('−2')
+    expect(formatSignedPct(0.0214)).toBe('+2.14%')
+    expect(formatSignedPct(-0.0214)).toBe('−2.14%')
+  })
+
+  it('uses a true minus sign, not a hyphen, so columns align', () => {
+    expect(formatSignedCount(-2)).toContain('−')
+    expect(formatSignedPct(-0.5)).toContain('−')
+  })
+
+  it('renders an exact zero without a sign', () => {
+    expect(formatSignedPct(0)).toBe('0.00%')
+  })
+})
+
+describe('collectSubtree / solvableSubtree', () => {
+  const tree = () => buildScenarioForest([
+    p('base'), p('mid', 'base'), p('leaf', 'mid'), p('other', 'base'), p('elsewhere'),
+  ])[0]
+
+  it('collects the node and every descendant, and nothing outside it', () => {
+    expect(collectSubtree(tree()).map(x => x.name))
+      .toEqual(['base', 'mid', 'leaf', 'other'])
+  })
+
+  it('is just the node itself for a leaf', () => {
+    const leaf = buildScenarioForest([p('lonely')])[0]
+    expect(collectSubtree(leaf).map(x => x.name)).toEqual(['lonely'])
+  })
+
+  it('skips projects already queued or running', () => {
+    const names = solvableSubtree(tree(), new Set(['mid'])).map(x => x.name)
+    expect(names).toEqual(['base', 'leaf', 'other'])
+  })
+
+  it('matches an active job by id as well as by name', () => {
+    // The queue reports `project_id`, which is a UUID in auth mode and a name
+    // in local mode. Matching only one of the two double-queues the other.
+    const forest = buildScenarioForest([
+      { ...p('base'), id: 'uuid-base' },
+      { ...p('kid', 'base'), id: 'uuid-kid' },
+    ])[0]
+    expect(solvableSubtree(forest, new Set(['uuid-kid'])).map(x => x.name))
+      .toEqual(['base'])
+  })
+
+  it('skips projects whose files are gone', () => {
+    const forest = buildScenarioForest([
+      p('base'), { ...p('ghost', 'base'), missing: true },
+    ])[0]
+    expect(solvableSubtree(forest, new Set()).map(x => x.name)).toEqual(['base'])
+  })
+
+  it('can come back empty when everything is already queued', () => {
+    expect(solvableSubtree(tree(), new Set(['base', 'mid', 'leaf', 'other']))).toEqual([])
   })
 })
 
