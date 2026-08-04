@@ -86,3 +86,77 @@ def install_network(n: pypsa.Network) -> None:
     ctx = PyPSAService._ensure_active()
     ctx.network = n
     sim_router._state["solver_config"] = SolverConfig()
+
+
+# ── Task 12: lost load ──────────────────────────────────────────────────────
+
+def build_lost_load_network() -> pypsa.Network:
+    """
+    Two buses on different carriers — just enough shape for the per-bus and
+    per-carrier lost-load roll-ups to be non-trivial. No solve is needed:
+    `_compute_lost_load_summary` (routers/compare.py) reads its numbers
+    entirely from a `results_state.pkl` capture (see `write_lost_load_
+    capture` below), never from `n.generators_t` — the VOLL slack generators
+    are stripped from the network right after the capture is taken (solver_
+    service._capture_and_remove_slacks), which is WHY the capture has to
+    live in a side-channel pickle instead of surviving on the netcdf.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "bus_elec", carrier="AC")
+    n.add("Bus", "bus_h2", carrier="H2")
+    return n
+
+
+def write_lost_load_capture(
+    project_dir: pathlib.Path,
+    n: pypsa.Network,
+    *,
+    per_bus_mwh: dict[str, list[float]],
+    voll: float,
+) -> tuple[float, float]:
+    """
+    Write a `results_state.pkl` VOLL-slack capture into `project_dir`, in the
+    EXACT format `_compute_lost_load_summary` (routers/compare.py:2306)
+    reads and `solver_service._capture_and_remove_slacks` (:4429) writes:
+
+        {"__schema__": 1, "data": {
+            "last_lost_load": {
+                "lost_load_t": DataFrame(snapshot x bus),  # MW, >= 0
+                "lost_load_total_mwh": float,
+                "lost_load_cost_eur": float,
+            },
+            <every other RESULT_STATE_KEYS entry>: None,
+        }}
+
+    `lost_load_t` is indexed by the snapshots at solve time (here, `n.
+    snapshots` — `_compute_lost_load_summary` reindexes onto the CURRENT
+    network's snapshots, so using the same index up front avoids an
+    unintended reindex-to-NaN-then-fillna(0) that would just zero everything
+    out). Columns are bare bus names (the `__voll_` prefix is stripped before
+    capture — see solver_service.py:4441).
+
+    Returns `(total_mwh, total_cost_eur)` — the SUM of `per_bus_mwh`, i.e.
+    what a caller should expect `total_mwh_scalar`/`total_cost_scalar` to
+    carry (used only to derive `voll_eur_per_mwh` inside the compute
+    function; the reported `total_mwh`/`total_cost_meur` come from
+    `lost_load_t` itself, reindexed and snapshot-weighted).
+    """
+    from routers.projects import _RESULTS_STATE_SCHEMA
+    from services.project_context import RESULT_STATE_KEYS
+
+    df = pd.DataFrame(per_bus_mwh, index=n.snapshots)
+    total_mwh = float(df.to_numpy().sum())
+    total_cost = total_mwh * voll
+
+    data: dict = {k: None for k in RESULT_STATE_KEYS}
+    data["last_lost_load"] = {
+        "lost_load_t": df,
+        "lost_load_total_mwh": total_mwh,
+        "lost_load_cost_eur": total_cost,
+    }
+    payload = {"__schema__": _RESULTS_STATE_SCHEMA, "data": data}
+
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "results_state.pkl").write_bytes(pickle.dumps(payload))
+    return total_mwh, total_cost

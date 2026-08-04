@@ -435,3 +435,58 @@ def test_curtailment_rate_is_a_percentage_between_zero_and_one_hundred(curtailme
     # fixture the true rate is a non-trivial 75% (240 MWh curtailed of
     # 320 MWh available — see build_curtailment_network's docstring).
     assert cur.system_rate_pct.total == pytest.approx(75.0, rel=1e-6)
+
+
+# ── Task 12: Lost load tab — internal identity ──────────────────────────────
+#
+# Vacuous on golden for a DIFFERENT reason than curtailment: `compare_
+# support.summarise()` deliberately passes a nonexistent `project_dir` (its
+# own docstring explains why — the golden network is installed purely
+# in-memory via `install_golden`, with no project directory and therefore no
+# `results_state.pkl`). Per the task-12 brief: "Prefer a separate,
+# locally-built network... over mutating the shared fixture" — chosen here
+# because adding a VOLL slack to `golden` would shed load on that network
+# and perturb every other test's LP optimum, exactly the risk the brief
+# warns against. This also does NOT need a solve — `_compute_lost_load_
+# summary` reads the VOLL-slack capture entirely from a `results_state.pkl`
+# written straight into a temp directory (the format `write_lost_load_
+# capture` in compare_local_networks.py documents and reproduces byte-for-
+# byte against `solver_service._capture_and_remove_slacks`).
+
+def _solved_lost_load(tmp_path):
+    """
+    Build a tiny 2-bus network + write a `results_state.pkl` VOLL capture
+    into `tmp_path`, then call `_compute_lost_load_summary` DIRECTLY with
+    that directory and `has_solve=True` passed explicitly (bypassing the
+    dispatch-freshness classifier entirely, since no LP ever ran — the
+    capture format is what's under test here, not solve-derived state).
+    `periods=[]`/`is_multi=False` mirrors a flat, single-period network.
+    """
+    import routers.compare as CMP
+
+    n = cln.build_lost_load_network()
+    cln.write_lost_load_capture(
+        tmp_path, n,
+        per_bus_mwh={"bus_elec": [10.0, 5.0, 0.0, 0.0], "bus_h2": [0.0, 0.0, 8.0, 2.0]},
+        voll=3000.0,
+    )
+    return CMP._compute_lost_load_summary(tmp_path, n, [], False, True)
+
+
+def test_lost_load_cost_is_energy_times_voll(tmp_path):
+    ll = _solved_lost_load(tmp_path)
+    assert ll.available, "lost-load capture did not register as available"
+    assert ll.total_mwh.total > 0, "lost-load capture produced zero shed energy"
+    expected_meur = ll.total_mwh.total * ll.voll_eur_per_mwh / 1e6
+    assert ll.total_cost_meur.total == pytest.approx(expected_meur, rel=1e-6)
+
+
+def test_per_bus_and_per_carrier_lost_load_agree_with_the_total(tmp_path):
+    ll = _solved_lost_load(tmp_path)
+    assert ll.available
+    assert ll.by_bus, "no per-bus lost-load rows produced"
+    assert ll.by_carrier, "no per-carrier lost-load rows produced"
+    assert sum(b.energy_mwh.total for b in ll.by_bus) == \
+        pytest.approx(ll.total_mwh.total, rel=1e-6)
+    assert sum(c.energy_mwh.total for c in ll.by_carrier) == \
+        pytest.approx(ll.total_mwh.total, rel=1e-6)
