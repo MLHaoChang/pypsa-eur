@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Query, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.economics import co2_intensity_map
@@ -28,6 +28,7 @@ from services.serialization import (
     df_to_json,
     safe_float as _safe_float,
     safe_values as _safe_values,
+    slice_ts as _slice_ts,
     ts_payload as _ts_payload,
 )
 from services.solver_service import (
@@ -126,7 +127,15 @@ def _result_df(n, accessor_name: str, attr: str, source: str = "lopf"):
 # sites in this module are unchanged.
 
 
-def _serve_ts(accessor: str, attr: str, source: str, *, echo_source: bool = False):
+def _serve_ts(
+    accessor: str,
+    attr: str,
+    source: str,
+    *,
+    from_: int | None = None,
+    to_: int | None = None,
+    echo_source: bool = False,
+):
     """
     Shared body for the trivial `<accessor>.<attr>` time-series serializers.
 
@@ -136,6 +145,12 @@ def _serve_ts(accessor: str, attr: str, source: str, *, echo_source: bool = Fals
     anything raises (logged with traceback). `echo_source=True` appends
     `{"source": source}` to the payload (the AC-PF voltage/reactive endpoints,
     so the frontend can tell which stage produced the numbers).
+
+    `from_`/`to_` are optional inclusive, positional bounds into the snapshot
+    axis (see `services.serialization.slice_ts`). When both are absent the
+    payload is byte-identical to the pre-range response — no `range` key —
+    which is what keeps every consumer that hasn't been converted to ask for
+    a slice working unchanged.
 
     The ~11 single-table endpoints below are thin wrappers over this so the
     gate + lookup + error-handling lives in ONE place; they stay as explicit
@@ -149,7 +164,15 @@ def _serve_ts(accessor: str, attr: str, source: str, *, echo_source: bool = Fals
         df = _result_df(n, accessor, attr, source)
         if df is None or df.empty:
             return _not_solved()
-        return _ts_payload(df, extra={"source": source}) if echo_source else _ts_payload(df)
+        # No bounds supplied → `range_meta` stays None and the payload is
+        # byte-identical to the pre-range response. That is what keeps every
+        # consumer that has not been converted working unchanged.
+        if from_ is None and to_ is None:
+            range_meta = None
+        else:
+            df, range_meta = _slice_ts(df, from_, to_)
+        extra = {"source": source} if echo_source else None
+        return _ts_payload(df, extra=extra, range_meta=range_meta)
     except Exception:
         logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
@@ -833,12 +856,20 @@ def get_statistics():
 
 
 @results_router.get("/generators")
-def get_generator_results(source: str = "lopf"):
-    return _serve_ts("generators_t", "p", source)
+def get_generator_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
+    return _serve_ts("generators_t", "p", source, from_=from_, to_=to_)
 
 
 @results_router.get("/storage_dispatch")
-def get_storage_dispatch_results(source: str = "lopf"):
+def get_storage_dispatch_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-snapshot StorageUnit power flow (signed MW).
 
@@ -847,40 +878,60 @@ def get_storage_dispatch_results(source: str = "lopf"):
     'production' (max(p, 0)) and 'consumption' (-min(p, 0)) for display.
     Separate from /results/storage which returns state-of-charge in MWh.
     """
-    return _serve_ts("storage_units_t", "p", source)
+    return _serve_ts("storage_units_t", "p", source, from_=from_, to_=to_)
 
 
 @results_router.get("/store_dispatch")
-def get_store_dispatch_results(source: str = "lopf"):
+def get_store_dispatch_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-snapshot Store power flow (signed MW). Mirrors /storage_dispatch
     for the Store component. Sign convention identical: positive = discharge,
     negative = charge.
     """
-    return _serve_ts("stores_t", "p", source)
+    return _serve_ts("stores_t", "p", source, from_=from_, to_=to_)
 
 
 @results_router.get("/store_energy")
-def get_store_energy_results(source: str = "lopf"):
+def get_store_energy_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-snapshot Store state of energy (MWh). Mirrors n.storage_units_t.state_of_charge
     semantics for the Store component.
     """
-    return _serve_ts("stores_t", "e", source)
+    return _serve_ts("stores_t", "e", source, from_=from_, to_=to_)
 
 
 @results_router.get("/storage")
-def get_storage_results(source: str = "lopf"):
-    return _serve_ts("storage_units_t", "state_of_charge", source)
+def get_storage_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
+    return _serve_ts("storage_units_t", "state_of_charge", source, from_=from_, to_=to_)
 
 
 @results_router.get("/lines")
-def get_line_results(source: str = "lopf"):
-    return _serve_ts("lines_t", "p0", source)
+def get_line_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
+    return _serve_ts("lines_t", "p0", source, from_=from_, to_=to_)
 
 
 @results_router.get("/links")
-def get_link_results(source: str = "lopf"):
+def get_link_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-link power flow at ``bus0`` (MW). Signed by PyPSA convention:
     positive = power flowing from bus0 → bus1 (the "forward" direction the
@@ -889,7 +940,7 @@ def get_link_results(source: str = "lopf"):
     generators / storage so the user sees the full energy balance, not
     just generation.
     """
-    return _serve_ts("links_t", "p0", source)
+    return _serve_ts("links_t", "p0", source, from_=from_, to_=to_)
 
 
 @results_router.get("/lcoh")
@@ -2053,12 +2104,16 @@ def get_emissions(source: str = "lopf"):
 
 
 @results_router.get("/transformers")
-def get_transformer_results(source: str = "lopf"):
+def get_transformer_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-snapshot transformer flows (MW on bus0 side). Mirrors /results/lines
     so the LoadFlow tab can compute loading % the same way.
     """
-    return _serve_ts("transformers_t", "p0", source)
+    return _serve_ts("transformers_t", "p0", source, from_=from_, to_=to_)
 
 
 @results_router.get("/unit_commitment")
@@ -2315,7 +2370,11 @@ def get_line_duals():
 
 
 @results_router.get("/voltages")
-def get_voltages(source: str = "ac_pf"):
+def get_voltages(
+    source: str = "ac_pf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-snapshot bus voltage magnitude (p.u.) from AC PF.
 
@@ -2324,11 +2383,15 @@ def get_voltages(source: str = "ac_pf"):
     every bus×snapshot (PyPSA's default v_mag_pu_set). The frontend treats
     "all 1.0" as "no AC PF result" and hides the voltage panel.
     """
-    return _serve_ts("buses_t", "v_mag_pu", source, echo_source=True)
+    return _serve_ts("buses_t", "v_mag_pu", source, from_=from_, to_=to_, echo_source=True)
 
 
 @results_router.get("/line_reactive")
-def get_line_reactive(source: str = "ac_pf"):
+def get_line_reactive(
+    source: str = "ac_pf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-snapshot reactive power (MVAr) on line bus0 side. AC-PF only.
 
@@ -2336,13 +2399,17 @@ def get_line_reactive(source: str = "ac_pf"):
     reactive power by construction. Returns `null` (HTTP 204 equivalent
     handled by `_not_solved`) when no AC PF snapshot exists.
     """
-    return _serve_ts("lines_t", "q0", source, echo_source=True)
+    return _serve_ts("lines_t", "q0", source, from_=from_, to_=to_, echo_source=True)
 
 
 @results_router.get("/transformer_reactive")
-def get_transformer_reactive(source: str = "ac_pf"):
+def get_transformer_reactive(
+    source: str = "ac_pf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """Per-snapshot reactive power (MVAr) on transformer bus0 side. AC-PF only."""
-    return _serve_ts("transformers_t", "q0", source, echo_source=True)
+    return _serve_ts("transformers_t", "q0", source, from_=from_, to_=to_, echo_source=True)
 
 
 @results_router.get("/prices")
