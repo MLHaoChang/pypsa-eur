@@ -677,8 +677,20 @@ class CapacityComparison(BaseModel):
     so the user can see the chronological investment plan side-by-side.
     """
 
-    # Optimised p_nom_opt by carrier (MW). For multi-period vintage-expanded
-    # networks the per-period value is the sum of vintages with build_year=P.
+    # Optimised p_nom_opt by carrier (MW). `by_period[P]` is the capacity IN
+    # SERVICE during period P, not a per-period increment: pre-existing
+    # (brownfield) capacity is replicated into EVERY period's bucket by
+    # `_bucket_replicate_per_period` (routers/compare.py) — without that
+    # replication, switching the Compare View's period selector from "All"
+    # to a single period would make in-service brownfield capacity vanish
+    # from the bar — plus, for that period only, any new capacity/vintage
+    # whose build_year equals P (each build-year increment lands in its own
+    # period's bucket, not carried forward into later periods). Because
+    # `total` counts brownfield once but every period's bucket counts it
+    # again, `sum(by_period.values())` is NOT equal to `total` and must
+    # never be treated as a per-period breakdown that sums to it — see
+    # `compare_support.py`'s KIND registry, which classifies this field STOCK
+    # for exactly that reason.
     capacity_mw_by_carrier: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     # TOTAL annuitised CAPEX in M€ (existing fleet + new build), per carrier.
     # Computed as ``Σ p_nom_opt × annuitised_capital_cost × ipw.years[P]`` per

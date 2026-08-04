@@ -202,35 +202,33 @@ def test_no_intensive_metric_is_the_sum_of_its_periods(golden):
 
 # ── Task 5: Capacity tab — internal identity ────────────────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "capacity_mw_by_carrier.by_period is NOT 'sum of vintages with "
-        "build_year=P' for plain (non vintage-expanded) assets — "
-        "_compute_capacity_summary's _walk_plain replicates brownfield "
-        "p_nom into EVERY period's by_period bucket (_bucket_replicate_"
-        "per_period) while total counts it once, so sum(by_period) ~= "
-        "N_periods x total whenever brownfield capacity exists. On the "
-        "golden fixture (2 periods): gas sum=218.57 vs total=118.57 "
-        "(ratio 1.843x — partly extendable, so less than 2x); solar "
-        "sum=120.0 vs total=60.0 and diesel sum=20.0 vs total=10.0 "
-        "(both exactly 2.0x — fully non-extendable, so it is pure "
-        "double-counting of brownfield across periods). See "
-        "task-5-6-report.md."
-    ),
-)
-def test_installed_capacity_total_is_at_least_the_sum_of_its_vintages(golden):
+def test_no_periods_installed_capacity_exceeds_the_total(golden):
     """
-    `total` is the installed stock; `by_period` are the vintages built in each
-    period. Pre-existing capacity has no vintage, so the sum of vintages can be
-    less than the total but never more.
+    Corrects `test_installed_capacity_total_is_at_least_the_sum_of_its_
+    vintages` (removed): that test asserted `sum(by_period.values()) <=
+    total`, which is the WRONG property. `_bucket_replicate_per_period`
+    (routers/compare.py) deliberately replicates brownfield capacity into
+    EVERY period's `by_period` bucket WITHOUT re-adding it to `total` — its
+    own docstring explains why: without replication, switching the Compare
+    View's period selector from "All" to a single period would make
+    in-service brownfield capacity vanish from the bar. So `by_period[P]` is
+    the capacity IN SERVICE during period P (a level), not a per-period
+    increment — summing levels across periods is meaningless, which is
+    exactly why `compare_support.py`'s KIND registry classifies this field as
+    STOCK rather than EXTENSIVE.
+
+    The invariant that DOES hold structurally, for every period P
+    independently: `total = ini + sum(all deltas)`, `by_period[P] = ini +
+    sum(deltas attributed to P)`, and every delta is >= 0 (capacity never
+    shrinks in `_walk_plain` / `_walk_vintages`) — so no single period's
+    level can exceed the horizon-total installed stock.
     """
     cap = cs.summarise(golden)["capacity"]
     for carrier, cpv in cap.capacity_mw_by_carrier.items():
-        if not cpv.by_period:
-            continue
-        assert sum(cpv.by_period.values()) <= cpv.total * (1 + 1e-9), (
-            f"{carrier}: vintages {cpv.by_period} exceed installed total {cpv.total}")
+        for period, value in cpv.by_period.items():
+            assert value <= cpv.total * (1 + 1e-9), (
+                f"{carrier}[{period}]: in-service capacity {value} exceeds "
+                f"installed total {cpv.total}")
 
 
 def test_new_capacity_never_exceeds_installed_capacity(golden):
