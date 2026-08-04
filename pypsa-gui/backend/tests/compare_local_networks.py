@@ -265,3 +265,64 @@ def solve_storage_cycling_multi_network() -> pypsa.Network:
     n = build_storage_cycling_multi_network()
     n.optimize(solver_name="highs", multi_investment_periods=True)
     return n
+
+
+# ── Task 15: weighting basis (suspect S2) ───────────────────────────────────
+
+def build_weighting_basis_network() -> pypsa.Network:
+    """
+    Two buses linked by a single, non-extendable, thermally-limited Line,
+    sized and loaded so the line is congested (loading >= 0.99, the
+    "binding" threshold `_compute_loading_summary` uses) at SOME snapshots
+    and not others — and so that congestion produces REAL locational price
+    separation, useful for both the loading and the prices half of Task 15's
+    basis question.
+
+    `b1` carries a cheap generator (marginal_cost=10) whose only route to
+    the load is across `L1` (s_nom=25). `b2` carries a load that varies
+    snapshot to snapshot (20/40/30/40 MW) and an expensive backup generator
+    (marginal_cost=200) that only dispatches once `L1`'s 25 MW cap is
+    exhausted. Verified directly against the solved network before any test
+    was written against it: snapshot 0 (load=20 <= 25) leaves `L1` at 80%
+    loading and both buses priced at 10; snapshots 1-3 (load=30/40 > 25)
+    push `L1` to exactly 100% loading (its cap) and separate the two buses'
+    prices to 10 / 200 — a genuine LP-congestion outcome, not a hand-set
+    dual. This is what makes the fixture usable for the weighting-basis
+    question at all: the golden fixture's `L_ab` line never binds and its
+    `objective`/`generators` snapshot_weightings columns are identical, so
+    neither `_compute_loading_summary` nor `_compute_prices_summary` can be
+    told which basis they're actually using from that fixture alone.
+
+    Deliberately flat (single-period, 4 snapshots) — the weighting-basis
+    question this network exists to settle doesn't need
+    investment_period_weightings in the mix, and a flat network keeps the
+    fixture (and the LP) as small as this suite's "runs in the gate on
+    every change" constraint asks for.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "b1", carrier="AC")
+    n.add("Bus", "b2", carrier="AC")
+    n.add("Carrier", "AC")
+    n.add("Carrier", "gas")
+    n.add("Carrier", "backup")
+    n.add(
+        "Generator", "gas", bus="b1", carrier="gas",
+        p_nom=100.0, p_nom_extendable=False, marginal_cost=10.0,
+    )
+    n.add(
+        "Generator", "backup", bus="b2", carrier="backup",
+        p_nom=100.0, p_nom_extendable=False, marginal_cost=200.0,
+    )
+    n.add(
+        "Line", "L1", bus0="b1", bus1="b2",
+        s_nom=25.0, s_nom_extendable=False, x=0.1, r=0.01,
+    )
+    n.add("Load", "load1", bus="b2", p_set=[20.0, 40.0, 30.0, 40.0])
+    return n
+
+
+def solve_weighting_basis_network() -> pypsa.Network:
+    n = build_weighting_basis_network()
+    n.optimize(solver_name="highs")
+    return n

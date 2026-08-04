@@ -1095,7 +1095,13 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
     if not has_solve:
         return LoadingComparison()
 
-    weights = _build_snapshot_weights(n)
+    # ENERGY/HOURS basis, not COST — binding_hours is a raw hours COUNT
+    # (Task 15 / suspect S2: measured wrong on the "objective" basis, see
+    # docs/superpowers/findings/2026-08-03-compare-tab-correctness.md §S2).
+    # mean_loading is a weighted MEAN and is unaffected by this choice (the
+    # weight series cancels under a uniform rescaling) — measured, not
+    # merely assumed.
+    weights = _build_snapshot_weights(n, "generators")
     sns = n.snapshots
 
     def _walk_branches(df, t_df, is_transformer: bool, is_link: bool = False, nom_field: str = "s_nom") -> None:

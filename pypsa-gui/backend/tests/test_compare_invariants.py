@@ -266,21 +266,22 @@ def test_dispatch_energy_uses_the_generators_weighting_basis(golden):
 
 # ── Task 7: Line loading tab — internal identity ────────────────────────────
 #
-# NOTE on suspect S2 (Task 15): `_compute_loading_summary` (routers/compare.py)
-# builds its weights via `_build_snapshot_weights(n)` with NO explicit column
-# argument, which defaults to the "objective" (COST) basis — not "generators"
-# (ENERGY/HOURS), the basis `test_dispatch_energy_uses_the_generators_
-# weighting_basis` above insists dispatch GWh use. `binding_hours` and
-# `mean_loading` are hours/loading quantities, not cost, so this reads like
-# the same class of bug. BUT on the golden fixture `snapshot_weightings
-# ["objective"]` and `["generators"]` are identical (both flat 1.0 — no
-# custom weighting is ever set in build_golden_network), so the two invariants
-# below hold under EITHER basis here and cannot distinguish which one
-# `_compute_loading_summary` is actually using. A green run of these two tests
-# is NOT evidence the weighting-basis choice is correct — it is only evidence
-# that peak/mean/binding-hours arithmetic is internally consistent. The basis
-# question stays OPEN pending the fixture Task 15 builds with `objective` !=
-# `generators`.
+# NOTE on suspect S2 (Task 15) — RESOLVED, see the dedicated section below.
+# `_compute_loading_summary` (routers/compare.py) built its weights via
+# `_build_snapshot_weights(n)` with NO explicit column argument, which
+# defaults to the "objective" (COST) basis — not "generators" (ENERGY/HOURS),
+# the basis `test_dispatch_energy_uses_the_generators_weighting_basis` above
+# insists dispatch GWh use. On the golden fixture `snapshot_weightings
+# ["objective"]` and `["generators"]` are identical (both flat 1.0), so the
+# two invariants immediately below hold under EITHER basis and cannot
+# distinguish which one `_compute_loading_summary` is actually using — a
+# green run of these two is NOT evidence the weighting-basis choice is
+# correct, only that peak/mean/binding-hours arithmetic is internally
+# consistent. `build_weighting_basis_network` (compare_local_networks.py)
+# separates the two bases for real; see "Task 15: weighting basis" below for
+# the measurement and the fix (binding_hours only — mean_loading and the
+# Prices tab were measured to need no change; see findings
+# docs/superpowers/findings/2026-08-03-compare-tab-correctness.md §S2).
 
 def test_binding_hours_never_exceed_the_horizon(golden):
     from services import period_utils
@@ -297,6 +298,138 @@ def test_binding_hours_never_exceed_the_horizon(golden):
 def test_mean_loading_never_exceeds_peak_loading(golden):
     for entry in cs.summarise(golden)["loading"].lines:
         assert entry.mean_loading.total <= entry.peak_loading.total + 1e-9, entry.name
+
+
+# ── Task 15: weighting basis (suspect S2) ───────────────────────────────────
+#
+# `build_weighting_basis_network` (compare_local_networks.py) is a flat,
+# 4-snapshot, two-bus network with a thermally-limited Line that is
+# congested (loading == 1.0, the >=0.99 binding threshold) at 3 of its 4
+# snapshots and uncongested (loading 0.8) at the 4th — verified directly
+# against the solved network's `lines_t.p0` in the network's own docstring
+# before any assertion below was written. `snapshot_weightings` are then
+# overwritten UNIFORMLY across every snapshot (`objective=1.0`,
+# `generators=3.0` — the exact `_rep_week_network` recipe from the Task 15
+# brief), on a flat network so no `investment_period_weightings.years`
+# multiplier is in play — a clean 3x divergence between the two bases with
+# nothing else confounding it.
+
+@pytest.fixture()
+def weighting_basis_net(reset_backend):
+    from tests import compare_local_networks as cln
+
+    n = cln.solve_weighting_basis_network()
+    n.snapshot_weightings["objective"] = 1.0
+    n.snapshot_weightings["generators"] = 3.0
+    return n
+
+
+def test_binding_hours_use_the_energy_basis_not_the_cost_basis(weighting_basis_net):
+    """
+    Suspect S2, CONFIRMED and fixed: `_compute_loading_summary` called
+    `_build_snapshot_weights(n)` with no explicit column, defaulting to the
+    "objective" (COST) basis, for a quantity — `binding_hours` — that is a
+    raw, un-normalized SUM of weight over the snapshots where a branch is
+    loaded >= 99%. A sum is not invariant to which basis is used (unlike
+    `mean_loading` below), so this was a real, observable defect: PyPSA's
+    own `optimization/constraints.py` calls the `generators` column
+    "elapsed hours" in a code comment, and `statistics/expressions.py::
+    transmission()` weights branch-flow -> MWh conversion by `generators`,
+    never `objective` — the same basis
+    `test_dispatch_energy_uses_the_generators_weighting_basis` (Task 6, above
+    the Task 7 section) already requires for dispatch GWh.
+
+    Fix applied: `routers/compare.py::_compute_loading_summary`'s one
+    `weights = _build_snapshot_weights(n)` call site now reads
+    `_build_snapshot_weights(n, "generators")`.
+    """
+    import routers.compare as CMP
+    from services import period_utils
+
+    n = weighting_basis_net
+    gen_hours = float(period_utils.snapshot_weights(n, "generators", n.snapshots).sum())
+    obj_hours = float(period_utils.snapshot_weights(n, "objective", n.snapshots).sum())
+    assert gen_hours != pytest.approx(obj_hours), "fixture failed to separate the bases"
+    assert gen_hours == pytest.approx(12.0)
+    assert obj_hours == pytest.approx(4.0)
+
+    loading = CMP._compute_loading_summary(n, [], False, True)
+    entries = {e.name: e for e in loading.lines}
+    assert "L1" in entries, "the thermally-limited line is missing from the loading tab"
+    l1 = entries["L1"]
+
+    # 3 of 4 snapshots bind (loading == 1.0 >= 0.99; snapshot 0 is 0.8, below
+    # threshold) — measured directly against lines_t.p0 in the network's own
+    # docstring. On the ENERGY basis that is 3 x 3.0 = 9.0 h; on the (wrong)
+    # COST basis it would be 3 x 1.0 = 3.0 h.
+    assert l1.binding_hours.total == pytest.approx(9.0), (
+        f"binding_hours={l1.binding_hours.total} h — expected the ENERGY "
+        f"basis (9.0 h); 3.0 h would mean the COST basis is still in use")
+
+
+def test_mean_loading_is_invariant_to_the_weighting_basis(weighting_basis_net):
+    """
+    `mean_loading` is a snapshot-weighted MEAN
+    (Sum(loading*w) / Sum(w)): the same weight series appears in both the
+    numerator and the denominator, so a UNIFORM rescaling of the weighting
+    column cancels algebraically — unlike `binding_hours` (a raw sum), this
+    quantity is mathematically unaffected by which of the two (uniformly
+    scaled) bases is used. Measured directly: 0.95 either way, matching the
+    brief's own prediction ("a uniform scaling cancels — it may be
+    unaffected"). The loading-tab fix above still moves this quantity onto
+    the `generators` basis (they share one `weights` variable), which is
+    also the more principled choice on its own terms (a physical
+    dispatch/loading average, the same family as PyPSA's `transmission()`
+    statistic) — but no numeric change was needed or observed here.
+    """
+    import routers.compare as CMP
+
+    n = weighting_basis_net
+    loading = CMP._compute_loading_summary(n, [], False, True)
+    l1 = {e.name: e for e in loading.lines}["L1"]
+    # loading = [0.8, 1.0, 1.0, 1.0]; weighted mean with EITHER a uniform
+    # 1.0-per-snapshot or 3.0-per-snapshot weight series is 3.8/4 = 0.95.
+    assert l1.mean_loading.total == pytest.approx(0.95, rel=1e-9)
+
+
+def test_price_statistics_are_invariant_to_the_weighting_basis_under_uniform_scaling(
+    weighting_basis_net,
+):
+    """
+    Suspect S2, prices half: MEASURED to need no fix — CLEARED, left
+    unchanged. `_compute_prices_summary` uses the same un-parameterised
+    `_build_snapshot_weights(n)` (objective/cost basis) for both the
+    101-point weighted duration curve AND `mean_price`/`median_price`/
+    `p90_price`. Both are ratios/positions built from ONE weight series
+    appearing on both sides of a scale (the duration curve's sample index is
+    `searchsorted(cum_w, linspace(0, total_w, 101))`; the stats are a
+    weighted mean/quantile) — under the UNIFORM per-snapshot rescaling this
+    fixture (and a typical representative-period run) produces, both are
+    provably invariant, the same cancellation as `mean_loading` above.
+
+    Measured here by recomputing `_compute_prices_summary` on a SECOND,
+    independently solved copy of the same network with `objective` set to
+    the value `generators` carries on the first (3.0 instead of 1.0) —
+    mimicking "what if this call site read the generators column instead" —
+    and confirming both `mean_price` and the full `duration_curve` array
+    come back identical. PyPSA's own `statistics/expressions.py::revenue()`
+    (weights price x dispatch by `.objective`) and `market_value()` (divides
+    that by `.generators`-weighted supply) also treat price/revenue
+    aggregation as legitimately living on the `objective` basis — a second,
+    independent reason not to blindly copy the loading-tab fix here.
+    """
+    from tests import compare_local_networks as cln
+    import routers.compare as CMP
+
+    n = weighting_basis_net
+    prices = CMP._compute_prices_summary(n, [], False, True)
+
+    n2 = cln.solve_weighting_basis_network()
+    n2.snapshot_weightings["objective"] = 3.0  # the value `generators` carries above
+    prices2 = CMP._compute_prices_summary(n2, [], False, True)
+
+    assert prices2.mean_price.total == pytest.approx(prices.mean_price.total, rel=1e-9)
+    assert prices2.duration_curve == pytest.approx(prices.duration_curve, rel=1e-9)
 
 
 # ── Task 8: Prices tab — internal identity ──────────────────────────────────
