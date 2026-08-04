@@ -53,6 +53,78 @@ async function sendAndScript(scriptedFrames: ChatFrame[]) {
   await user.click(screen.getByTestId('chat-send'))
 }
 
+// ── F2 — a hostile localStorage must not take the panel down ────────────────
+//
+// The panel reads four preference keys and writes six, and two of the reads run
+// inside `useState` initializers — so an unguarded throw happens DURING render
+// and React unwinds the whole subtree. The user loses the assistant, not a
+// setting.
+//
+// Two distinct failure modes, because they need different guards:
+//   * SecurityError on the PROPERTY — a browser set to block site data throws
+//     on `window.localStorage` itself, before any method is reached. A guard
+//     wrapped only around the call would not catch it.
+//   * QuotaExceededError on `setItem` — Safari Private Browsing, or a full
+//     origin quota. Reads succeed; only writes throw.
+//
+// The property descriptor is restored in a `finally` inside the test rather
+// than an `afterEach`, because vitest.setup.ts's own `afterEach` calls
+// `localStorage.clear()` and would itself throw against a hostile stand-in.
+async function withHostileStorage(
+  mode: 'throws-on-property-access' | 'throws-on-write',
+  body: () => Promise<void> | void,
+) {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')!
+  const boom = () => {
+    throw new DOMException('Access to storage is denied', 'SecurityError')
+  }
+  if (mode === 'throws-on-property-access') {
+    Object.defineProperty(globalThis, 'localStorage', { get: boom, configurable: true })
+  } else {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: () => null,
+        setItem: () => {
+          throw new DOMException('exceeded the quota', 'QuotaExceededError')
+        },
+        removeItem: () => {},
+        clear: () => {},
+      },
+      configurable: true,
+      writable: true,
+    })
+  }
+  try {
+    await body()
+  } finally {
+    Object.defineProperty(globalThis, 'localStorage', original)
+  }
+}
+
+it('still renders when reading window.localStorage throws SecurityError', async () => {
+  await withHostileStorage('throws-on-property-access', async () => {
+    renderPanel()
+    // The prompt input is below both `useState` initializers that read a
+    // preference, so its presence proves render completed rather than unwound.
+    expect(await screen.findByTestId('chat-input')).toBeTruthy()
+    expect(screen.getByTestId('chat-send')).toBeTruthy()
+  })
+})
+
+it('still sends when persisting a preference throws QuotaExceededError', async () => {
+  await withHostileStorage('throws-on-write', async () => {
+    renderPanel()
+    // Not just "it rendered": drive a real send. `onSend` reads
+    // `chat:firstSendAck` and the mount effect writes `chat:promptHeight`, so a
+    // throw on either path would surface here and not in the render-only test.
+    await sendAndScript([
+      { event: 'session_init', data: { session_id: 'sess-quota' } },
+      { event: 'turn_done', data: {} },
+    ])
+    expect(vi.mocked(createChatStream)).toHaveBeenCalledTimes(1)
+  })
+})
+
 it('renders tool_request and tool_result frames in the transcript', async () => {
   renderPanel()
   await sendAndScript([
