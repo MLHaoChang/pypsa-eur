@@ -313,3 +313,50 @@ def test_price_statistics_lie_inside_the_observed_range(golden):
     assert pr.min_price - 1e-9 <= pr.mean_price.total <= pr.max_price + 1e-9
     for carrier, stats in pr.by_carrier_stats.items():
         assert pr.min_price - 1e-9 <= stats.mean_price.total <= pr.max_price + 1e-9, carrier
+
+
+# ── Task 9: Emissions tab — internal identity ───────────────────────────────
+
+def test_per_carrier_emissions_sum_to_the_total(golden):
+    em = cs.summarise(golden)["emissions"]
+    parts = sum(c.total for c in em.by_carrier_kt.values())
+    assert parts == pytest.approx(em.total_kt.total, rel=1e-6)
+
+
+def test_intensity_is_total_emissions_over_total_generator_dispatch(golden):
+    """
+    The brief's hypothesis (``intensity = total emissions / total LOAD``,
+    i.e. ``DispatchComparison.total_load_gwh``) does NOT hold — measured
+    directly, dividing by load gives 131.746 kg/MWh against a reported
+    125.758 kg/MWh, a ~4.8% gap that is not rounding noise.
+
+    `_compute_emissions_summary`'s own docstring says "Intensity = total kt
+    x 1000 / total dispatch GWh x 1000 = kg/MWh", and its code builds
+    `total_dispatch_mwh` by summing EVERY column of `n.generators_t.p`
+    (every carrier, including zero-emission ones, weighted by the
+    "generators" snapshot-weighting column x investment-period years)
+    BEFORE the co2-intensity filter — i.e. total GENERATOR dispatch, not
+    total load. `total_load_gwh` is a different quantity entirely: it sums
+    `n.loads` magnitude across every bus, mixing electricity-MWh and
+    H2-MWh loads without unit conversion, with no relation to what the
+    generators produced.
+
+    Measured on the golden fixture: total generator dispatch = 67.8857 GWh
+    (gas 42.6857 + solar 21.6 + diesel 3.6) vs `total_load_gwh.total` =
+    64.8 GWh. Dividing total emissions by generator dispatch reproduces the
+    reported intensity exactly (ratio 1.0000000000000002) — pinning that as
+    the actual definition, per the brief's own guidance to check the
+    denominator before assuming the numerator is wrong.
+    """
+    from services import period_utils
+
+    s = cs.summarise(golden)
+    em = s["emissions"]
+    w = period_utils.snapshot_weights(golden, "generators", golden.snapshots)
+    p = golden.generators_t.p
+    total_gen_mwh = float((p.multiply(w, axis=0)).sum().sum())
+    if total_gen_mwh <= 0:
+        pytest.skip("no generator dispatch in the fixture — intensity is undefined")
+    # kt -> kg is a factor of 1e6; total_gen_mwh is already in MWh.
+    expected = em.total_kt.total * 1e6 / total_gen_mwh
+    assert em.intensity_kg_per_mwh.total == pytest.approx(expected, rel=1e-6)

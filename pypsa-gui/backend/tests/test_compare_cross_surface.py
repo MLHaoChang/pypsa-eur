@@ -145,3 +145,32 @@ def test_prices_mean_agrees_with_results_prices(golden):
     assert compared >= 1, "no price cells returned — shape has drifted"
     want = float((data_adj * w_full).sum() / w_full.sum())
     assert prices.mean_price.total == pytest.approx(want, rel=1e-6)
+
+
+# ── Task 9: Emissions tab vs. /results/emissions ────────────────────────────
+
+def test_emissions_agree_with_the_results_emissions_endpoint(golden):
+    """
+    `GET /results/emissions` (`R.get_emissions()`) returns a dict with keys
+    `{'total_tCO2', 'by_carrier', 'by_generator', 'cap', 'caps',
+    'is_multi_period', 'by_period'}` — verified by calling `get_emissions()`
+    directly against the solved golden network. NONE of the brief's guessed
+    total-key candidates (`total_kt`, `total_co2_kt`, `total`) exist in the
+    real response; the actual key is `total_tCO2`. It is also in a DIFFERENT
+    UNIT than the Compare tab's `total_kt` — tonnes, not kilotonnes (1 kt =
+    1000 t) — so a bare key rename would not have been enough.
+
+    Measured on the golden fixture: live `total_tCO2` = 8537.142857142859 t;
+    Compare `total_kt.total` = 8.53714285714286 kt;
+    8537.142857142859 / 1000 == 8.53714285714286 (ratio 1.0 exactly).
+    """
+    import routers.results as R
+
+    em = cs.summarise(golden)["emissions"]
+    live = R.get_emissions()
+    # Shape check first — a silently-renamed/-reshaped payload would
+    # otherwise let the comparison below fail with a confusing KeyError
+    # instead of a clear "the endpoint shape moved" message.
+    assert live, "emissions endpoint returned nothing"
+    assert "total_tCO2" in live, f"no total_tCO2 key in {sorted(live)}"
+    assert em.total_kt.total == pytest.approx(live["total_tCO2"] / 1000.0, rel=1e-6)
