@@ -1,5 +1,15 @@
 # Compare tab correctness — suspects S1, S2, S3 (Tasks 14–16)
 
+**Closed 2026-08-04:** all three suspects resolved. S1 CONFIRMED and
+escalated (product decision pending, no fix applied). S2 split in two:
+`binding_hours` CONFIRMED and fixed (one-line basis change,
+`routers/compare.py::_compute_loading_summary`); `mean_loading` and the
+Prices tab's mean/median/p90/duration curve MEASURED invariant to the same
+basis choice, CLEARED, left unchanged. S3 CLEARED (LCOE ratio 1.0 exactly,
+re-verified after the S2 fix landed —
+`test_lcoe_is_total_cost_over_total_energy` still passes). Full detail in
+each section below.
+
 **Date:** 2026-08-04
 **Method:** `pypsa-gui/backend/tests/golden/fixture.py`'s golden network
 (multi-period, 2030 [5 years] + 2035 [10 years], 15 modelled years total,
