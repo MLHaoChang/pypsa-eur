@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from models.schemas import CarrierPeriodValue
+from tests import compare_local_networks as cln
 from tests import compare_support as cs
 from tests.golden import fixture as gf
 
@@ -395,3 +396,42 @@ def test_lcoe_is_total_cost_over_total_energy(golden):
             f"{e.dispatch_gwh.total} GWh")
         checked += 1
     assert checked >= 1, "no carrier with positive dispatch — vacuous test"
+
+
+# ── Task 11: Curtailment tab — internal identity ────────────────────────────
+#
+# The golden fixture is PROVABLY vacuous here (see KNOWN_VACUOUS_TABS
+# ["curtailment"] above): no generator carries a time-varying `p_max_pu`, so
+# nothing is ever curtailed and both `total_gwh`/`system_rate_pct` come back
+# `total=0.0, by_period={}`. `tests/golden/fixture.py` must NOT change — it
+# would perturb every other test's LP optimum (task-11/12/13 brief) — so
+# these two tests solve their OWN tiny curtailment-forcing network from
+# `compare_local_networks.py` instead of `golden`. See that module's
+# `build_curtailment_network` docstring for why it actually curtails: a
+# single renewable generator with a time-varying `p_max_pu` profile, and a
+# load fixed below every snapshot's available power, with no storage/export
+# to absorb the surplus.
+
+@pytest.fixture()
+def curtailment_net(reset_backend):
+    return cln.solve_curtailment_network()
+
+
+def test_per_carrier_curtailment_sums_to_the_total(curtailment_net):
+    cur = cs.summarise(curtailment_net)["curtailment"]
+    assert cur.total_gwh.total > 0, (
+        "curtailment-forcing network produced no curtailment — fixture is broken")
+    parts = sum(c.total for c in cur.by_carrier_gwh.values())
+    assert parts == pytest.approx(cur.total_gwh.total, rel=1e-6)
+
+
+def test_curtailment_rate_is_a_percentage_between_zero_and_one_hundred(curtailment_net):
+    cur = cs.summarise(curtailment_net)["curtailment"]
+    assert cur.rate_pct_by_carrier, "no per-carrier curtailment rate produced"
+    for carrier, rate in cur.rate_pct_by_carrier.items():
+        assert -1e-9 <= rate.total <= 100.0 + 1e-9, f"{carrier}: {rate.total}%"
+    assert -1e-9 <= cur.system_rate_pct.total <= 100.0 + 1e-9
+    # Canary against a degenerate always-0%/always-100% pass: on this
+    # fixture the true rate is a non-trivial 75% (240 MWh curtailed of
+    # 320 MWh available — see build_curtailment_network's docstring).
+    assert cur.system_rate_pct.total == pytest.approx(75.0, rel=1e-6)

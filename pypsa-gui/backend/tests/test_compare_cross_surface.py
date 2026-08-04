@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests import compare_local_networks as cln
 from tests import compare_support as cs
 from tests.golden import fixture as gf
 
@@ -214,3 +215,63 @@ def test_compare_capex_agrees_with_asset_economics_per_carrier(golden):
         assert e.capex_meur.total * 1e6 == pytest.approx(by_carrier[carrier], rel=1e-6), carrier
         compared += 1
     assert compared >= 1, "no carrier compared — asset_economics keys have drifted"
+
+
+# ── Task 11: Curtailment tab vs. /results/curtailment ───────────────────────
+#
+# The golden fixture never curtails at all (see test_compare_invariants.py's
+# KNOWN_VACUOUS_TABS["curtailment"] and compare_local_networks.py's module
+# docstring), so this reads live data from the SAME purpose-built local
+# network `test_compare_invariants.py`'s Task 11 identity tests use, rather
+# than `golden`.
+
+def test_curtailment_agrees_with_results_curtailment():
+    """
+    `GET /results/curtailment` (`R.get_curtailment()`) returns `{index,
+    columns, data}` — a raw PER-SNAPSHOT MW time series per curtailable
+    generator (`(p_max - p).clip(lower=0)`, renewable-carrier-filtered), NOT
+    a pre-aggregated GWh total. Verified by calling `get_curtailment()`
+    directly against `compare_local_networks.solve_curtailment_network()`
+    (there is no `"gwh"`/`"total"` key at all — the brief's guess of a
+    pre-aggregated payload does not hold here any more than Task 6's
+    `carrier_kpis` guess held for `energy_gwh`).
+
+    Recomputed here as the SAME weighted-sum-to-GWh
+    `_compute_curtailment_summary` performs (`_build_snapshot_weights(n,
+    "generators")`, then ÷1000 for GWh) and compared against the Compare
+    tab's `total_gwh.total`.
+
+    Measured on the local curtailment network: live `data` = `[[80.0],
+    [40.0], [80.0], [40.0]]` under `columns=['solar']`, summing to 240.0 MWh;
+    Compare's `total_gwh.total` = 0.24 GWh; 240.0 / 1000 == 0.24 (ratio 1.0
+    exactly, 0 differing cells).
+    """
+    import numpy as np
+
+    import routers.results as R
+    from services import period_utils
+
+    n = cln.solve_curtailment_network()
+    cln.install_network(n)
+
+    cur = cs.summarise(n)["curtailment"]
+    resp = R.get_curtailment()
+    # Shape check first — a silently-renamed/-reshaped payload would
+    # otherwise make the weighted-sum computation below silently compare
+    # against an empty or malformed matrix and pass vacuously.
+    assert "data" in resp and resp["data"], (
+        "curtailment endpoint returned nothing for a solved, curtailing network")
+    assert resp.get("columns"), f"no curtailable columns in response: {sorted(resp)}"
+
+    data = np.asarray(resp["data"], dtype=float)
+    assert data.shape == (len(n.snapshots), len(resp["columns"])), (
+        f"unexpected /results/curtailment shape {data.shape} for "
+        f"{len(n.snapshots)} snapshots x {len(resp['columns'])} curtailable "
+        "generators — key names or payload shape have drifted")
+
+    w = period_utils.snapshot_weights(n, "generators")
+    w_full = np.broadcast_to(np.asarray(w.values).reshape(-1, 1), data.shape)
+    compared = int(data.size)
+    assert compared >= 1, "no curtailment cells returned — shape has drifted"
+    want_gwh = float((data * w_full).sum()) / 1000.0
+    assert cur.total_gwh.total == pytest.approx(want_gwh, rel=1e-6)
