@@ -10,6 +10,7 @@ import { nk } from '../utils/queryKeys'
 import { projectsApi } from '../api/projects'
 import { solveQueueApi, isActive, isTerminal, type SolveJob, type SolveJobStatus, type ResultsBundle } from '../api/solveQueue'
 import { useSolveQueue, useEnqueueSolve, useAbortJob, useClearFinished } from '../hooks/useSolveQueue'
+import { useAuth } from '../auth/AuthProvider'
 
 const STATUS_META: Record<SolveJobStatus, { label: string; cls: string; Icon: typeof Clock }> = {
   queued:    { label: 'Queued',    cls: 'text-muted bg-panel border-border',                Icon: Clock },
@@ -157,7 +158,15 @@ export default function SolveQueuePanel() {
   const enqueue = useEnqueueSolve()
   const abortJob = useAbortJob()
   const clearFinished = useClearFinished()
+  const { user } = useAuth()
   const [adding, setAdding] = useState<string | null>(null)
+
+  // The queue is process-global and shared across organisations, so clearing it
+  // is gated server-side on `is_super_admin` (routers/solve_queue.py). NOT on
+  // `useAuth().isAdmin` — that is `hasAdminConsoleAccess`, which is also true for
+  // an ORG admin (`role === 'admin'`), who would see an enabled button and still
+  // get a 403. Read the raw flag so the control matches the route exactly.
+  const canClearFinished = Boolean(user?.is_super_admin)
 
   const jobs = data?.jobs ?? []
   const activeCount = jobs.filter(isActive).length
@@ -225,9 +234,11 @@ export default function SolveQueuePanel() {
           </button>
           <button
             onClick={() => clearFinished.mutate()}
-            disabled={finishedCount === 0 || clearFinished.isPending}
+            disabled={!canClearFinished || finishedCount === 0 || clearFinished.isPending}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-border text-muted hover:text-text hover:bg-panel disabled:opacity-40 transition-colors"
-            title="Remove completed / failed / aborted jobs from the list"
+            title={canClearFinished
+              ? 'Remove completed / failed / aborted jobs from the list'
+              : 'Only super-admins can clear finished jobs — the solve queue is shared across organisations'}
           >
             <Trash2 size={12} /> Clear finished
           </button>
