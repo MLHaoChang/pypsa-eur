@@ -72,6 +72,73 @@ def safe_values(df: pd.DataFrame) -> list[list]:
     ]
 
 
+# ~10 bytes per JSON float was measured on a frame of the exact shape
+# `ts_payload` emits: 5,256,000 values serialised to 52.6 MB. So this cap is
+# roughly a 20 MB response — large enough that no legitimate UI request hits
+# it, small enough that a hand-crafted one cannot ask the server to build
+# something nobody can use.
+MAX_RESPONSE_VALUES = 2_000_000
+
+
+def slice_ts(
+    df: pd.DataFrame,
+    from_: int | None,
+    to_: int | None,
+    *,
+    max_values: int = MAX_RESPONSE_VALUES,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Positionally slice a time-series frame. Returns ``(sliced, range_meta)``.
+
+    Bounds are INCLUSIVE and POSITIONAL — indices into the snapshot axis, not
+    timestamps. Positional addressing is what lets one implementation serve
+    both shapes: ``df.iloc[a:b]`` does not care whether the index is a flat
+    DatetimeIndex or a ``(period, timestep)`` MultiIndex. A timestamp would be
+    ambiguous on multi-period networks, which replicate ONE operational year
+    under every investment period — the same trap CLAUDE.md documents against
+    the Horizon filter.
+
+    Clamping mirrors the frontend's own ``Math.max(0, Math.min(...))`` in
+    ``shared.tsx::weightedSum``, so client and server agree by construction
+    rather than by coincidence.
+
+    ``from_ > to_`` yields an EMPTY frame rather than raising. The client
+    already treats an inverted range as empty (``if (rFrom > rTo) return 0``),
+    and a 400 would turn a benign transient UI state into an error toast. The
+    returned meta states exactly what was served, so nothing is silent.
+
+    ``complete`` is computed from what was SERVED, not what was ASKED: a
+    request for row 99,999 of a 168-row series returns ``complete: True``,
+    because the caller does hold every row. Reporting False there would make a
+    consumer refuse to total data that is in fact whole.
+    """
+    total = len(df.index)
+    if total == 0:
+        return df, {"from": 0, "to": -1, "total": 0, "complete": True, "capped": False}
+
+    lo = 0 if from_ is None else max(0, int(from_))
+    hi = total - 1 if to_ is None else min(total - 1, int(to_))
+
+    if lo > hi:
+        return df.iloc[0:0], {
+            "from": lo, "to": hi, "total": total, "complete": False, "capped": False,
+        }
+
+    capped = False
+    width = max(1, len(df.columns))
+    if (hi - lo + 1) * width > max_values:
+        hi = min(lo + max(1, max_values // width) - 1, total - 1)
+        capped = True
+
+    return df.iloc[lo : hi + 1], {
+        "from": lo,
+        "to": hi,
+        "total": total,
+        "complete": lo == 0 and hi == total - 1,
+        "capped": capped,
+    }
+
+
 def df_to_json(df: pd.DataFrame) -> list[dict]:
     """Static component / statistics DataFrame → list of NaN-safe row dicts."""
     out = df.reset_index()
@@ -104,7 +171,12 @@ def df_to_json(df: pd.DataFrame) -> list[dict]:
     return [{k: clean_scalar(vv) for k, vv in row.items()} for row in records]
 
 
-def ts_payload(df: pd.DataFrame, *, extra: dict | None = None) -> dict:
+def ts_payload(
+    df: pd.DataFrame,
+    *,
+    extra: dict | None = None,
+    range_meta: dict | None = None,
+) -> dict:
     """
     Standard `{index, columns, data}` time-series payload, NaN-safe.
 
@@ -116,6 +188,9 @@ def ts_payload(df: pd.DataFrame, *, extra: dict | None = None) -> dict:
     Rationale: pre-fix `str(tuple)` produced `"(2026, Timestamp('...'))"` which
     no chart tickFormatter / horizon string-comparator handled correctly,
     breaking every X-axis label on multi-period runs.
+
+    ``range`` appears only when ``range_meta`` is supplied — the no-range call
+    shape stays byte-identical to what existing consumers already depend on.
     """
     if isinstance(df.index, pd.MultiIndex):
         # Period level — coerce to int when possible (PyPSA's convention is
@@ -145,4 +220,8 @@ def ts_payload(df: pd.DataFrame, *, extra: dict | None = None) -> dict:
         }
     if extra:
         payload.update(extra)
+    # AFTER `extra`, deliberately: `range` describes what was served and must
+    # not be shadowed by an endpoint's own extra dict.
+    if range_meta is not None:
+        payload["range"] = range_meta
     return payload
