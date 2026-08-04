@@ -115,3 +115,10 @@ doc/img/intro-workflow.svg
 
 # Local brainstorm / visual companion session files
 .superpowers/
+
+# macOS Finder metadata. Untracked and regenerated constantly, so it shows up
+# in every `git status` — which matters more than usual here, because several
+# agent sessions share this worktree and each one reads that output to decide
+# whether someone else is mid-edit. One permanent line of noise in a signal
+# everyone is checking.
+.DS_Store
