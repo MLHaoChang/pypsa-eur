@@ -275,3 +275,41 @@ def test_curtailment_agrees_with_results_curtailment():
     assert compared >= 1, "no curtailment cells returned — shape has drifted"
     want_gwh = float((data * w_full).sum()) / 1000.0
     assert cur.total_gwh.total == pytest.approx(want_gwh, rel=1e-6)
+
+
+# ── Task 14: Capacity vs. Economics total CAPEX (suspect S1) ────────────────
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="S1: Capacity omits link CAPEX that Economics counts — awaiting product decision, findings §S1",
+)
+def test_capacity_and_economics_agree_on_total_capex(golden):
+    """
+    Two tabs of one comparison must not report different CAPEX for one
+    network. `_compute_total_annuitised_capex` (routers/compare.py) walks
+    only Generator/StorageUnit/Store; `_compute_economics_summary` walks
+    those PLUS Link. On the golden fixture the `electrolyzer` Link is
+    extendable and the LP builds ~28.57 MW of it (overnight_cost=1,500,000,
+    horizon CAPEX EUR166,249.77 per the Task 10 / S3 measurement above) — so
+    the Capacity tab's total is short by exactly that amount.
+
+    Measured (see findings §S1 for the numbers this xfail pins): Capacity
+    25.154535 M€ vs Economics 25.320785 M€, a 0.166250 M€ gap == the
+    electrolyzer's CAPEX (0.16624977136776928 M€, per Task 10/S3 above) to
+    every printed digit.
+
+    The `_walk` helper's own trailing comment in
+    `_compute_total_annuitised_capex` says the omission is deliberate —
+    lines/links are left out because `n.statistics()` reports passive
+    branches as zero CAPEX. That holds for a FIXED line but not for an
+    EXTENDABLE link, which does enter the LP objective. Two defensible
+    resolutions (include extendable links only, or keep the omission and
+    label it in the Capacity tab's UI copy) are a product decision, not
+    something to guess at here — see the findings doc. Do not remove this
+    xfail without that decision being made.
+    """
+    s = cs.summarise(golden)
+    cap_total = sum(c.total for c in s["capacity"].capex_meur_by_carrier.values())
+    econ_total = sum(e.capex_meur.total for e in s["economics"].by_carrier.values())
+    assert cap_total == pytest.approx(econ_total, rel=1e-6), (
+        f"Capacity tab {cap_total} M€ vs Economics tab {econ_total} M€")
