@@ -160,3 +160,108 @@ def write_lost_load_capture(
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "results_state.pkl").write_bytes(pickle.dumps(payload))
     return total_mwh, total_cost
+
+
+# ── Task 13: storage cycling ────────────────────────────────────────────────
+
+def _add_arbitrage_assets(n: pypsa.Network, load_pattern: list[float]) -> None:
+    """
+    Shared asset set for both the flat and multi-period storage-cycling
+    networks: a cheap "base" generator that cannot alone cover the high-load
+    snapshots, an expensive "peak" generator that can, and a lossless,
+    zero-cost storage unit sized so it can fully absorb "base"'s spare
+    capacity during low-load snapshots and discharge it back during
+    high-load snapshots. Routing energy through storage this way costs
+    10 EUR/MWh (base) instead of 200 EUR/MWh (peak) — a genuine LP arbitrage
+    incentive, unlike the golden fixture where flat solar + flat demand +
+    zero-cost storage leaves nothing for the optimiser to trade.
+
+    Low-load feasibility: base (p_nom=50) covers load (30) with exactly 20
+    MW of spare capacity — matching storage's own p_nom (20 MW), so "charge
+    at full power every low snapshot" is feasible without exceeding base's
+    own p_nom.
+    High-load feasibility: base (50) + storage discharge (<=20) + peak (50)
+    = 120 >= 90, so peak alone never needs to exceed its own p_nom either.
+    """
+    n.add("Carrier", "base")
+    n.add("Carrier", "peak")
+    n.add(
+        "Generator", "base", bus="b1", carrier="base",
+        p_nom=50.0, p_nom_extendable=False, marginal_cost=10.0,
+    )
+    n.add(
+        "Generator", "peak", bus="b1", carrier="peak",
+        p_nom=50.0, p_nom_extendable=False, marginal_cost=200.0,
+    )
+    n.add(
+        "StorageUnit", "bess", bus="b1",
+        p_nom=20.0, p_nom_extendable=False, max_hours=2.0,
+        capital_cost=0.0, marginal_cost=0.0,
+    )
+    n.add("Load", "load1", bus="b1", p_set=load_pattern)
+
+
+def build_storage_cycling_flat_network() -> pypsa.Network:
+    """
+    Flat (single-period) network — 8 hourly snapshots alternating a 30 MW
+    "low" load and a 90 MW "high" load. Flat on purpose: `_compute_storage_
+    cycling_summary`'s horizon-wide `cycles.total` only reduces to the plain
+    `throughput / (2 x energy_capacity)` oracle on the non-multi-period
+    branch (`else: cycles_total = tp_total / (2 * final_ec)`); on a
+    multi-period network `cycles.total` is instead the AVERAGE of per-period
+    cycles (see `build_storage_cycling_multi_network` below), a DIFFERENT
+    quantity by a factor of the period count. Keeping this network flat is
+    what makes Task 13's oracle test an identity rather than an off-by-N bug.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=8, freq="h"))
+    n.add("Bus", "b1", carrier="AC")
+    n.add("Carrier", "AC")
+    _add_arbitrage_assets(n, [30.0, 90.0] * 4)
+    return n
+
+
+def solve_storage_cycling_flat_network() -> pypsa.Network:
+    n = build_storage_cycling_flat_network()
+    n.optimize(solver_name="highs")
+    return n
+
+
+def build_storage_cycling_multi_network(
+    periods: tuple[int, int] = (2030, 2035),
+    years: tuple[float, float] = (5.0, 5.0),
+) -> pypsa.Network:
+    """
+    Same bus/asset/load shape as the flat network, replicated identically
+    under TWO investment periods — enough for `cycles.by_period` to carry
+    >= 2 entries so `test_horizon_cycles_are_the_average_of_periods_not_
+    the_sum` has something real to check (on the golden fixture this guard
+    test's own `if len(u.cycles.by_period) < 2: continue` always fires,
+    since the golden storage unit never cycles at all). No `overnight_cost`
+    or `discount_rate` dependency anywhere in this network (every asset is
+    non-extendable, capital_cost fixed at 0.0), so — unlike
+    `tests/golden/fixture.py` — this solves directly through `n.optimize
+    (multi_investment_periods=True)` with no `with_periodized_cost_
+    defaults` wrapper needed.
+    """
+    n = pypsa.Network()
+    timesteps = pd.date_range("2030-01-01", periods=8, freq="h")
+    idx = pd.MultiIndex.from_product([list(periods), timesteps], names=["period", "timestep"])
+    # A MultiIndex built with from_product has `.name = None`; a multi-period
+    # LP needs `.name == "snapshot"` or linopy raises `dim_0 is not a valid
+    # dimension` (see CLAUDE.md's "multi->multi rebuild" pitfall).
+    idx.name = "snapshot"
+    n.set_snapshots(idx)
+    n.investment_periods = list(periods)
+    n.investment_period_weightings["years"] = list(years)
+
+    n.add("Bus", "b1", carrier="AC")
+    n.add("Carrier", "AC")
+    _add_arbitrage_assets(n, [30.0, 90.0] * 4 * len(periods))
+    return n
+
+
+def solve_storage_cycling_multi_network() -> pypsa.Network:
+    n = build_storage_cycling_multi_network()
+    n.optimize(solver_name="highs", multi_investment_periods=True)
+    return n

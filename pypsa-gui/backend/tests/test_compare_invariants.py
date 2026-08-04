@@ -490,3 +490,87 @@ def test_per_bus_and_per_carrier_lost_load_agree_with_the_total(tmp_path):
         pytest.approx(ll.total_mwh.total, rel=1e-6)
     assert sum(c.energy_mwh.total for c in ll.by_carrier) == \
         pytest.approx(ll.total_mwh.total, rel=1e-6)
+
+
+# ── Task 13: Storage cycling tab — oracle ────────────────────────────────────
+#
+# Vacuous on golden because `storage_units_t.p['bess']` is EXACTLY 0.0 on all
+# 48 snapshots (verified directly against the solved network, twice) — flat
+# solar output and flat demand every snapshot leave a zero-cost battery with
+# no arbitrage incentive to ever move. See KNOWN_VACUOUS_TABS
+# ["storage_cycling"] above.
+#
+# Denominator resolution (the brief's open question): `_compute_storage_
+# cycling_summary`'s own code already divides by 2 × energy_capacity
+# (routers/compare.py: `cycles_pp[p_str] = tp / (2 * ec_p)` for the
+# per-period case, and the flat-network fallback `tp_total / (2 *
+# final_ec)`), and `CompareView.tsx`'s own tab description agrees verbatim:
+# "One cycle = a full charge + discharge of total energy capacity", with the
+# chart subtitle spelling out the literal formula "Σ |p| × Δt ÷ (2 × Σ
+# p_nom_opt × max_hours)". Code and UI already agree — 2× is CONFIRMED
+# correct (no fix needed), so the brief's oracle formula is used UNCHANGED
+# below.
+
+@pytest.fixture()
+def storage_cycling_flat(reset_backend):
+    return cln.solve_storage_cycling_flat_network()
+
+
+@pytest.fixture()
+def storage_cycling_multi(reset_backend):
+    return cln.solve_storage_cycling_multi_network()
+
+
+def test_cycles_are_throughput_over_twice_the_energy_capacity(storage_cycling_flat):
+    """
+    One equivalent full cycle = a full charge AND discharge, so the
+    denominator is 2 × energy capacity. Σ|p| counts both halves.
+
+    Deliberately a FLAT (single-period) network: on a multi-period network
+    `cycles.total` is the AVERAGE of per-period cycles (see the horizon test
+    below and `build_storage_cycling_flat_network`'s docstring) — a
+    DIFFERENT quantity than throughput/(2×capacity) by a factor of the
+    period count, which would turn this into a false failure rather than a
+    real one.
+    """
+    sc = cs.summarise(storage_cycling_flat)["storage_cycling"]
+    assert sc.by_unit, "no storage units in the summary"
+    judged = 0
+    for u in sc.by_unit:
+        if u.energy_mwh <= 0:
+            continue
+        expected = u.throughput_mwh.total / (2.0 * u.energy_mwh)
+        assert u.cycles.total == pytest.approx(expected, rel=1e-6), (
+            f"{u.name}: cycles {u.cycles.total} vs throughput "
+            f"{u.throughput_mwh.total} / (2 × {u.energy_mwh})")
+        judged += 1
+    assert judged >= 1, "no storage unit had positive energy capacity — vacuous"
+    # Canary against a degenerate 0-cycles pass: the fixture is built so the
+    # battery fully charges and discharges once per low/high load pair,
+    # twice a day across the 8-snapshot horizon.
+    assert sc.by_unit[0].cycles.total == pytest.approx(2.0, rel=1e-6)
+
+
+def test_horizon_cycles_are_the_average_of_periods_not_the_sum(storage_cycling_multi):
+    """
+    Documented behaviour: a unit cycling 2.0×/period in every period reads
+    2.0 for the horizon, not 4.0 (the golden fixture's own docstring example
+    is 100×/yr reading 100, not 300 — same rule, smaller numbers here).
+    Guards against a well-meant additivity "fix".
+    """
+    sc = cs.summarise(storage_cycling_multi)["storage_cycling"]
+    judged = 0
+    for u in sc.by_unit:
+        if len(u.cycles.by_period) < 2:
+            continue
+        parts = list(u.cycles.by_period.values())
+        assert u.cycles.total == pytest.approx(sum(parts) / len(parts), rel=1e-6), u.name
+        judged += 1
+    assert judged >= 1, "no storage unit had >= 2 periods of cycling — vacuous"
+    # Canary: naive SUM would read 4.0 here; the correct AVERAGE is 2.0 — the
+    # two must differ, or this test can't tell a "fixed" additivity bug from
+    # a fixture that never exercised the distinction at all.
+    naive_sum = sum(sc.by_unit[0].cycles.by_period.values())
+    assert sc.by_unit[0].cycles.total == pytest.approx(2.0, rel=1e-6)
+    assert naive_sum == pytest.approx(4.0, rel=1e-6)
+    assert sc.by_unit[0].cycles.total != pytest.approx(naive_sum, rel=1e-6)
