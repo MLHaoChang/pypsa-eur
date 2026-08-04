@@ -174,3 +174,43 @@ def test_emissions_agree_with_the_results_emissions_endpoint(golden):
     assert live, "emissions endpoint returned nothing"
     assert "total_tCO2" in live, f"no total_tCO2 key in {sorted(live)}"
     assert em.total_kt.total == pytest.approx(live["total_tCO2"] / 1000.0, rel=1e-6)
+
+
+# ── Task 10: Economics tab vs. /results/asset_economics (suspect S3) ────────
+
+def test_compare_capex_agrees_with_asset_economics_per_carrier(golden):
+    """
+    `GET /results/asset_economics` (`R.get_asset_economics()`) returns a dict
+    with keys `{'currency', 'is_multi_period', 'periods', 'generators',
+    'storage_units', 'stores', 'links'}` — verified by calling
+    `get_asset_economics()` directly against the solved golden network.
+    Unlike Task 6's `carrier_kpis` guess, the brief's bucket names here
+    (`generators`/`storage_units`/`stores`/`links`) and field name
+    (`fixed_cost_eur`) are CORRECT; each row also carries `carrier`.
+    `fixed_cost_eur` is already horizon-total (the 922eb4d0 fix:
+    `fixed_cost = fixed_cost_annual * total_years_factor` — see
+    `get_asset_economics`'s own docstring), matching Compare's `capex_meur`
+    (also horizon-total, per the S3 identity test above).
+
+    Measured: gas/solar/diesel/h2 all agree exactly (ratio 1.0 — e.g. gas
+    376323.6185743867 == 376323.6185743867). The lone `storage_units` row
+    (`bess`) carries `carrier=''` (StorageUnit has no carrier set in this
+    fixture) so it never matches a Compare carrier bucket and is correctly
+    excluded rather than silently miscounted.
+    """
+    import routers.results as R
+
+    econ = cs.summarise(golden)["economics"]
+    live = R.get_asset_economics()
+    by_carrier = {}
+    for bucket in ("generators", "storage_units", "stores", "links"):
+        for row in live.get(bucket, []) or []:
+            c = str(row.get("carrier", "") or "").lower()
+            by_carrier[c] = by_carrier.get(c, 0.0) + float(row.get("fixed_cost_eur") or 0.0)
+    compared = 0
+    for carrier, e in econ.by_carrier.items():
+        if carrier not in by_carrier:
+            continue
+        assert e.capex_meur.total * 1e6 == pytest.approx(by_carrier[carrier], rel=1e-6), carrier
+        compared += 1
+    assert compared >= 1, "no carrier compared — asset_economics keys have drifted"

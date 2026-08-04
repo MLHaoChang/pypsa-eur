@@ -360,3 +360,38 @@ def test_intensity_is_total_emissions_over_total_generator_dispatch(golden):
     # kt -> kg is a factor of 1e6; total_gen_mwh is already in MWh.
     expected = em.total_kt.total * 1e6 / total_gen_mwh
     assert em.intensity_kg_per_mwh.total == pytest.approx(expected, rel=1e-6)
+
+
+# ── Task 10: Economics tab — the LCOE quotient (suspect S3) ─────────────────
+
+def test_lcoe_is_total_cost_over_total_energy(golden):
+    """
+    Suspect S3: `_compute_economics_summary`'s docstring says
+    ``capex (EUR/yr)`` and ``LCOE = (Sum capex + Sum opex) / Sum dispatch_MWh``.
+    If capex were a per-YEAR rate while dispatch is horizon-summed, LCOE
+    would be low by the horizon's year count. The golden fixture spans 15
+    modelled years (GOLDEN_YEARS = (5, 10)), so that confusion would show up
+    as a ~15x ratio between the reported LCOE and this identity's
+    prediction — not a subtle few percent.
+
+    Measured: for every carrier with positive dispatch (gas, solar, diesel,
+    h2) the reported/expected ratio is exactly 1.0. S3 is CLEARED —
+    `_capex_commitment` (routers/compare.py) already scales CAPEX by
+    ``Sum years_in_period`` before it reaches this quotient (its own
+    docstring: "FULL-HORIZON basis"), unlike the sibling
+    `services/asset_results/compute.py` bug (fixed 2026-08-03, commit
+    922eb4d0) this suspicion was modelled on.
+    """
+    econ = cs.summarise(golden)["economics"]
+    checked = 0
+    for carrier, e in econ.by_carrier.items():
+        if e.dispatch_gwh.total <= 0:
+            continue
+        expected = ((e.capex_meur.total + e.opex_meur.total) * 1e6) / \
+                   (e.dispatch_gwh.total * 1e3)
+        assert e.lcoe_eur_per_mwh.total == pytest.approx(expected, rel=1e-6), (
+            f"{carrier}: LCOE {e.lcoe_eur_per_mwh.total} != "
+            f"(capex {e.capex_meur.total} + opex {e.opex_meur.total}) M€ / "
+            f"{e.dispatch_gwh.total} GWh")
+        checked += 1
+    assert checked >= 1, "no carrier with positive dispatch — vacuous test"
