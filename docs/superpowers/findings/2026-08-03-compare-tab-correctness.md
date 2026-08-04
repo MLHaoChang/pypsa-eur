@@ -1,6 +1,18 @@
-# Compare tab correctness — suspects S1, S2, S3 (Tasks 14–16)
+# Compare tab correctness — full findings (Tasks 1–21)
 
-**Closed 2026-08-04:** all three suspects resolved. S1 CONFIRMED and
+**Extended 2026-08-04 (Tasks 19–21):** this document originally closed out
+suspects S1/S2/S3 (Tasks 14–16) only. It is now the authoritative record for
+the whole examination: a per-tab section covering every one of the ten
+Compare tabs (golden-fixture agreement from Tasks 1–13, plus a one-off
+real-project spot check from Task 21), the frontend curtailment defect found
+in Tasks 17–18, and the endpoint-wiring (Task 19) / coverage-matrix
+(Task 20) work that closes out the plan. Jump to "Per-tab record", "Frontend
+defect", "Task 19", "Task 20", "Task 21" or "Known limitations" below the
+original S1/S2/S3 writeup, which is unchanged from Task 16.
+
+---
+
+**Closed 2026-08-04 (S1/S2/S3, Tasks 14–16):** all three suspects resolved. S1 CONFIRMED and
 escalated (product decision pending, no fix applied). S2 split in two:
 `binding_hours` CONFIRMED and fixed (one-line basis change,
 `routers/compare.py::_compute_loading_summary`); `mean_loading` and the
@@ -272,3 +284,536 @@ permanently; no further test or code change needed for S3.
 | S2 — mean_loading (Task 15) | Correct as-is | MEASURED: invariant (0.95 either basis) | No change; basis switched alongside binding_hours anyway (harmless, and more principled) |
 | S2 — prices (Task 15) | CLEARED | MEASURED: mean_price and duration_curve invariant under the achievable basis swap; INFERRED PyPSA precedent supports the `objective` basis | No change |
 | S3 (Task 16) | CLEARED | MEASURED: LCOE ratio 1.0 exactly, all 4 carriers | No change |
+
+---
+
+## Per-tab record (Tasks 1–13, 19, 21)
+
+One section per Compare tab. "Golden" = the multi-period golden fixture
+(`tests/golden/fixture.py`, Tasks 1–13, permanent regression suite).
+"Real project" = the one-off spot check against the user's actual
+`3_nodes_system` project (Task 21, detailed numbers in its own section
+below) — **evidence, not a regression guard**; every number under that
+heading is **MEASURED** on 2026-08-04 by loading `network.nc` directly and
+calling the exact `_compute_*_summary` functions
+`routers/compare.py::get_results_summary` calls, and is not re-checked by
+any committed test. Every claim below is tagged MEASURED (read off a
+running test or script) or INFERRED (a code read / mathematical argument).
+"No complaint" is recorded explicitly per tab so it is never mistaken for
+"not checked."
+
+### Overview
+
+**Golden:** not a dedicated suspect; the tab is oracle-only (bus/generator/
+line/link/storage/store counts, snapshot range, objective) and was read for
+Task 20's coverage work — `get_compare_state`'s `installed_capacity_by_carrier`
+/ `optimised_capacity_by_carrier` come from `_carrier_sum(temp_n.generators,
+...)`, `storage_capacity_by_carrier` from `_carrier_sum(temp_n.storage_units,
+...)` — Generator and StorageUnit only; `line_count`/`link_count` are bare
+`len()` counts with no carrier attribution (see `coverage.py`'s
+`compare_overview` entry, Task 20). **AGREEMENT (INFERRED from a code read,
+Task 20):** the same `_carrier_sum` pattern the Capacity tab's
+`capacity_mw_by_carrier` uses, so the two tabs cannot structurally disagree
+on generator/storage capacity.
+
+**Real project (MEASURED):** `n.generators.groupby("carrier")["p_nom_opt"].sum()`
+gives `gas=627.275727 MW, solar=968.000000 MW` — identical to the Capacity
+tab's `capacity_mw_by_carrier` totals reported below. Installed (`p_nom`)
+capacity is `gas=300.0, solar=300.0 MW`; storage `p_nom` is
+`battery=100.0 MW`. Overview and Capacity agree on this real project too.
+
+### Capacity
+
+**Golden (Tasks 1, 5, 14):** capacity CAPEX agreement 1.0 against
+`/statistics`, `/api/simulation/asset_costs` (see `test_golden_economics.py`
+and the Task-9 CAPEX-delegation fix). S1 (below) is this tab's one open
+defect: it structurally omits Link CAPEX that the Economics tab counts.
+`test_no_periods_installed_capacity_exceeds_the_total` and
+`test_new_capacity_never_exceeds_installed_capacity`
+(`tests/test_compare_invariants.py`) hold — **AGREEMENT (MEASURED)**.
+
+**Real project (MEASURED):** `capex_meur_by_carrier` totals `gas=145.332507
+M€` (by_period 48.4442 M€ flat across 2027/2028/2029 — brownfield/existing
+capacity dominates, no material re-build across periods) and
+`solar=137.056558 M€` (by_period 45.6855 M€ flat). Horizon total =
+`282.389066 M€`. Additivity walk judged 8 EXTENSIVE/INTENSIVE values on this
+tab, 0 failures. This is the smaller side of the S1 gap — see its own
+section below.
+
+### Dispatch
+
+**Golden (Task 6):** dispatch energy basis agreement 1.0 (`generators`
+weighting column, matches `n.statistics()` / Results-tab KPIs — a real
+divergence would have shown up given the golden fixture's own weighting
+setup); dispatch vs `/carrier_kpis` agreement 1.0.
+`test_dispatch_energy_uses_the_generators_weighting_basis` recomputes GWh
+from PyPSA primitives independently and matches to `rel=1e-6` —
+**AGREEMENT (MEASURED)**.
+
+**Real project (MEASURED):** `dispatch_gwh_by_carrier`: `gas=9839.1416 GWh`,
+`solar=3520.9120 GWh`, `battery=231.2715 GWh` (discharge-only, per the
+function's own documented convention). `opex_meur.total=590.348494 M€`,
+`total_load_gwh.total=12864.4775 GWh`. Additivity walk judged 6 values, 0
+failures.
+
+### Line loading
+
+**Golden (Tasks 7, 15):** `binding_hours` CONFIRMED wrong (S2, see above) and
+fixed; `mean_loading` measured invariant to the fix, correct either way. On
+the golden fixture `snapshot_weightings["objective"]` and `["generators"]`
+are identical (both flat 1.0), so `test_binding_hours_never_exceed_the_horizon`
+/ `test_mean_loading_never_exceeds_peak_loading` on `golden` cannot by
+themselves distinguish the two bases — the dedicated
+`compare_local_networks.build_weighting_basis_network` fixture (Task 15) is
+what actually separated them (3.0 h wrong vs 9.0 h correct).
+
+**Real project (MEASURED):** 5 branch entries (3 lines + the 2 links).
+`binding_hours <= horizon hours` (26,280.0 h) holds for every entry;
+`mean_loading <= peak_loading` holds for every entry. Most-loaded branch:
+`Electrolyzer 1`, `peak_loading=1.0000`, `mean_loading=0.8552`,
+`binding_hours=1260.00 h` (≈4.8% of the 26,280 h horizon spent at ≥99%
+loaded). **Limitation, stated honestly:** `snapshot_weightings["objective"]`
+and `["generators"]` are ALSO identical on this real project (both bases give
+horizon hours = 26,280.0000 exactly) — so, like the golden fixture, this
+real-project spot check does **not** independently re-verify the S2
+`binding_hours` basis fix; that fix is verified only by the purpose-built
+Task-15 fixture. Both large networks this suite has access to happen to run
+unweighted (flat 1.0) snapshots.
+
+### Prices
+
+**Golden (Tasks 8, 15):** duration curve monotonicity, percentile bounds —
+agreement 1.0 (`test_the_duration_curve_is_monotonically_non_increasing`,
+`test_price_statistics_lie_inside_the_observed_range`). Prices basis (S2
+half) MEASURED invariant to the objective/generators choice under uniform
+rescaling, CLEARED — see S2 section above.
+
+**Real project (MEASURED):** duration curve monotonically non-increasing;
+`mean_price`/`median_price` lie inside `[min_price, max_price]`.
+`min_price≈0.0000 €/MWh`, `mean_price=429.1822 €/MWh`,
+`median_price=109.8667 €/MWh`, `p90_price=171.2381 €/MWh`,
+`max_price=100000.0000 €/MWh` — the max is exactly the project's configured
+VOLL (`solver_config.json: voll=100000.0`), consistent with the Lost-load
+tab reporting real shedding (below): the price duration curve is correctly
+picking up VOLL-priced snapshots, not clipping or dropping them. The mean
+being far above the median is exactly what a small number of VOLL spikes
+does to a weighted mean on a right-skewed price distribution — expected
+shape, not a symptom.
+
+### Emissions
+
+**Golden (Task 9):** per-carrier emissions sum to total, agreement 1.0.
+Intensity denominator PINNED as total GENERATOR DISPATCH (not load) —
+measured 125.758 kg/MWh matches dividing by generator dispatch, NOT the
+131.746 kg/MWh a load-basis division would give — see the definition note
+at the top of this document (carried over unchanged from Task 9/16).
+
+**Real project (MEASURED):** `by_carrier_kt` sums to `total_kt.total`
+exactly (`parts=4088.7099 == total=4088.7099`). Intensity identity holds:
+reported `intensity_kg_per_mwh.total=306.039935` equals
+`total_kt.total × 1e6 / total_generator_dispatch_mwh` computed independently
+from `n.generators_t.p` — same identity, same denominator, a different
+number from golden's 125.758 (different network, different carrier mix and
+CO2 price, as expected). Only `gas` carries emissions on this project
+(`solar` has no `co2_emissions`; `battery` discharge is not a combustion
+event) — consistent with `compare_emissions`'s Generator-only coverage
+established in Task 20.
+
+### Economics
+
+**Golden (Tasks 10, 14, 16):** CAPEX agreement 1.0 vs `asset_economics`
+across 4 carriers; LCOE identity 1.0 on all 4 carriers with positive
+dispatch (S3, CLEARED). S1's OTHER half — Economics counting Link CAPEX
+that Capacity omits — is this tab's side of the escalated defect, not a
+defect IN this tab (Economics is the more complete of the two).
+
+**Real project (MEASURED):** LCOE identity `((capex+opex)×1e6)/(dispatch_gwh×1e3)
+== lcoe_eur_per_mwh` holds exactly for all 5 carriers with positive
+dispatch:
+
+| carrier | capex (M€) | opex (M€) | revenue (M€) | dispatch (GWh) | LCOE (€/MWh) |
+|---|---|---|---|---|---|
+| gas | 145.3325 | 590.3485 | 1292.6593 | 9839.1416 | 74.7709 |
+| solar | 137.0566 | 0.0000 | 218.6347 | 3520.9120 | 38.9264 |
+| battery | 0.0000 | 20.6974 | 671.6063 | 231.2715 | 89.4942 |
+| h2 (Electrolyzer 1) | 54.2807 | 31.5937 | 0.0000 | 3159.3692 | 27.1809 |
+| heat-pump-air (P2H 2) | 1.9117 | 0.0000 | 0.0000 | 190.7140 | 10.0240 |
+
+`h2` and `heat-pump-air` are the two Link carriers — their `capex_meur`
+here is exactly what S1 measures as MISSING from the Capacity tab (see next
+section).
+
+### Curtailment
+
+**Golden (Tasks 11, 16):** structurally vacuous on the golden fixture —
+listed in `KNOWN_VACUOUS_TABS` (`test_compare_invariants.py`) because no
+golden generator carries a time-varying `p_max_pu`. A dedicated
+purpose-built network (`compare_local_networks.build_curtailment_network`)
+covers the additivity + rate-bounds invariants for real (75% curtailment
+rate, non-degenerate). Cross-surface agreement vs `/results/curtailment`
+1.0 (Task 13/prior work).
+
+**Real project (MEASURED) — fills the golden coverage gap for real:**
+per-carrier curtailment sums to the total exactly; `system_rate_pct` is
+inside `[0, 100]` (`11.5854%`); `total_gwh.total=461.3604 GWh`, only carrier
+`solar` (the project's only generator with a `p_max_pu` profile) — genuinely
+non-trivial, non-vacuous evidence that this tab's additivity and rate-bounds
+logic behaves correctly on real (not purpose-built) data. Still not a
+committed regression test — the purpose-built fixture remains the permanent
+guard.
+
+### Lost load
+
+**Golden (Tasks 12, 16):** vacuous on golden for the documented reason
+(`compare_support.summarise()` passes a guaranteed-nonexistent `project_dir`,
+so `_compute_lost_load_summary` always takes the no-capture branch). Covered
+for real by a dedicated fixture that writes a synthetic `results_state.pkl`
+VOLL capture and checks `cost = energy × VOLL` plus per-bus/per-carrier
+additivity (1.0 agreement).
+
+**Real project (MEASURED) — fills the golden coverage gap for real, with an
+ACTUAL solved capture:** `available=True`, `voll_eur_per_mwh=100000.0`
+(matches `solver_config.json` and the Prices tab's `max_price`, above).
+`total_cost_meur.total=43.479637 M€` equals `total_mwh.total(434.7964) ×
+voll / 1e6` exactly. `by_bus` and `by_carrier` both sum to the horizon total
+exactly (`434.7964 MWh`). Genuine, non-synthetic VOLL shedding on a real
+project, matching the identity a purpose-built fixture had to manufacture on
+golden.
+
+### Storage cycling
+
+**Golden (Tasks 13, 16):** vacuous on golden — `storage_units_t.p['bess']`
+is exactly 0.0 on all 48 snapshots (verified directly), so the one battery
+never cycles. `KNOWN_VACUOUS_TABS` documents this as a genuine golden-fixture
+coverage gap, not a code defect. Covered for real by a dedicated
+`compare_local_networks` fixture: "cycles = throughput / (2 × energy
+capacity)" per unit (2.0 cycles, oracle-exact), and "horizon total = AVERAGE
+of per-period cycles, never the sum" (2.0, not 4.0 — the naive-sum canary).
+
+**Real project (MEASURED) — fills the golden coverage gap for real:** one
+storage unit, `BESS_B3` (battery, `p_nom=100 MW`, `max_hours=4` → 400 MWh
+capacity). Horizon `cycles.total=203.1366` equals the average of its three
+per-period values (`2027: 167.2652`, `2028: 187.3131`, `2029: 254.8316`) to
+`rel=1e-6` — the AVERAGE-not-SUM rule (Task 13) holds on real, non-synthetic
+multi-period dispatch, not just the purpose-built fixture. (~200
+equivalent-full-cycles/year is aggressive but plausible arbitrage behaviour
+against a price series whose mean is 429 €/MWh and whose spikes hit the
+100,000 €/MWh VOLL price — not implausible for a battery with no capital
+cost pressure to sit idle.)
+
+---
+
+## Frontend defect: Curtailment tab renders an absent payload as zero (Tasks 17–18, NOT FIXED)
+
+**Status: CONFIRMED, deliberately NOT fixed.** Documented via a failing test
+(`it.fails`) rather than a code change — this examination's scope was to
+find defects, and changing frontend behaviour is a separate product/eng
+decision from measuring it.
+
+**The bug:** `CompareView.tsx`'s `EmissionsTab` guards its "no data" banner
+with `if (!emA || !emB) return <banner>` — an OR, correctly tripping the
+moment EITHER side is `null` (a project that never computed/serialised that
+tab). `CurtailmentTab` (`CompareView.tsx:1730`) guards with
+`if (!hasAnyA && !hasAnyB)` — an AND, which only trips when BOTH sides are
+missing. When only project B's `curtailment` field is `null` (a real state:
+Task 19 confirms `ResultsSummary`'s optional fields can legitimately be
+absent, e.g. before a tab's compute path has ever run for that project),
+the AND guard does not fire, and the tab proceeds to render B's curtailment
+as if it existed. Every per-field read then falls through `readPV`
+(`CompareView.tsx:2769`, `if (!pv) return 0`) to a literal `0`.
+
+**Measured consequence:** with A's `system_rate_pct` at 100% and B's
+`curtailment` payload `null`, the rendered delta is a literal `-100.00%` —
+"B eliminated all curtailment" — which is not information the payload
+contains. B simply never reported the field. A project that curtails
+NOTHING (a real 0%) and a project that never computed curtailment AT ALL
+(an absent field) render identically, and the delta fabricates a swing that
+does not exist in the data.
+
+**Test:** `pypsa-gui/frontend/src/pages/CompareView.test.tsx`, the `it.fails`
+block under `describe('Task 18 — zero vs absent baseline')` — reproduced
+2026-08-04, still fails as documented (`33 passed | 1 expected fail` for the
+whole file under `npx vitest run`). The adjacent
+`'emissions: a null side correctly bails to a message, not a fabricated
+-100%'` test in the same `describe` block demonstrates the CORRECT behaviour
+side by side, on the same harness, so the contrast is not hypothetical.
+
+**Why not fixed here:** per the task brief that found it, this examination's
+job was to find and document defects, not decide which ones ship a fix —
+frontend behaviour changes (what "no data" should look like, whether to
+distinguish "reported zero" from "never reported" in the UI copy) are a
+product decision the same way S1 is. The `it.fails` marker keeps this
+defect from silently regressing into "looks green" — if `CurtailmentTab`'s
+guard is ever fixed to match `EmissionsTab`'s, this test starts passing and
+`it.fails` should be replaced with a normal assertion (removing the
+now-redundant failure documentation) as part of that fix.
+
+---
+
+## Task 19 — endpoint wiring: values reach the wire
+
+**Status: VERIFIED, no defect found.** `ResultsSummary`'s docstring
+(`models/schemas.py`) says later phases "fill in additional optional
+fields" on the payload — every prior test in this suite called the
+`_compute_*_summary` functions directly, in-process, never through
+`GET /api/projects/{name}/results-summary` itself, so a tab computing
+correctly but never reaching the `return ResultsSummary(...)` statement
+would have gone uncaught.
+
+**MEASURED** (`pypsa-gui/backend/tests/test_compare_endpoint.py`, new file):
+the solved golden network, saved as a real DB-backed, org-scoped project via
+the authenticated `client` fixture + a real `POST /api/projects/{name}`
+save, then `GET .../results-summary` over HTTP. All nine optional tab
+fields (`capacity, dispatch, loading, prices, emissions, economics,
+curtailment, lost_load, storage_cycling`) are non-null. `capacity.
+capex_meur_by_carrier`, read back from the JSON HTTP response, matches
+`compare_support.summarise()` computed in-process on the identical network
+to `rel=1e-9` for every carrier and every `by_period` entry — proving the
+netcdf round-trip + HTTP/Pydantic serialisation layer preserves the
+computed VALUES, not merely their presence.
+
+**Result:** every tab that Tasks 1–18 verified as computationally correct
+does reach the real HTTP response. No wiring gap found.
+
+---
+
+## Task 20 — coverage matrix: all ten tabs now accounted for
+
+**Status: DONE, no defect found; documentation/test-infrastructure task.**
+`tests/golden/coverage.py::SURFACES` listed ten economic surfaces before
+this task, of which only two (`compare_capacity`, `compare_economics`) were
+Compare tabs — the other eight tabs (`compare_overview`, `compare_dispatch`,
+`compare_loading`, `compare_prices`, `compare_emissions`,
+`compare_curtailment`, `compare_lost_load`, `compare_storage_cycling`) had
+no entry at all, so `test_golden_coverage.py`'s exhaustive-by-default guard
+(every fixture class on every surface is COVERED or EXPLICITLY EXCLUDED)
+never looked at them.
+
+**Per-tab component-class coverage**, read off each `_compute_*_summary`
+function body (not assumed):
+
+| Surface | Covers | Excludes | Why |
+|---|---|---|---|
+| `compare_overview` | Generator, StorageUnit | Line, Link | `line_count`/`link_count` are bare counts, never carrier-attributed |
+| `compare_dispatch` | Generator, StorageUnit | Line, Link | dispatch is an energy-mix concept; branches carry no dispatch of their own |
+| `compare_loading` | Line, Link | Generator, StorageUnit | loading (branch flow magnitude / rating) is branch-only |
+| `compare_prices` | (none) | all four | purely bus-level (`buses_t.marginal_price`, grouped by `buses.carrier`) |
+| `compare_emissions` | Generator | Line, Link, StorageUnit | emissions = generator dispatch × carrier CO2 intensity |
+| `compare_curtailment` | Generator | Line, Link, StorageUnit | curtailment = renewable-availability concept |
+| `compare_lost_load` | (none) | all four | purely bus-level (VOLL slack DataFrame, grouped by `buses.carrier`) |
+| `compare_storage_cycling` | StorageUnit | Generator, Line, Link | cycling is a storage-only metric |
+
+None of the eight report CAPEX/fixed-cost at all (they report capacity
+counts, energy, loading ratios, prices, emissions, curtailment, shedding
+cost and cycling — each a genuinely different quantity), so none can carry
+an `ADAPTERS` entry in `test_golden_economics.py`'s CAPEX cross-surface
+loop; each got a `NO_ADAPTER_REASONS` entry instead — a documented gap, not
+a silent one. `ROUTE_SURFACES` (`test_golden_coverage.py`) updated to match:
+`get_compare_state` now claims `compare_overview`; `get_results_summary`
+claims all nine `ResultsSummary` fields.
+
+**Result:** the coverage matrix's exhaustiveness guard
+(`set(ADAPTERS) | set(NO_ADAPTER_REASONS) == set(coverage.SURFACES)`, plus
+`test_golden_coverage.py`'s per-class census) now covers all ten Compare
+tabs. No new numeric defect found in this task — it is entirely
+documentation/test-infrastructure, closing the "silence reads as agreement"
+gap the coverage matrix exists to prevent, one level up (at "which surfaces
+did we even look at").
+
+---
+
+## Task 21 — real-project spot check (3_nodes_system)
+
+**This section is EVIDENCE, not a regression guard.** The project lives at
+`~/Documents/PyPSA GUI/Projects/3_nodes_system` — real user data, not
+committed to the repository, and this measurement is a one-off script run
+on 2026-08-04, not a pytest test. It must never be read as "covered by the
+suite" — every number below was produced once, by hand, and is not
+re-checked automatically.
+
+**Method:** `network.nc` loaded directly via `pypsa.Network().
+import_from_netcdf(...)` (no PyPSAService, no HTTP, no FastAPI app — the
+same standalone-script pattern the Asset Detail horizon-scaling
+verification used against this same project, per the task brief). The
+project's own `solver_config.json` was loaded into
+`routers.simulation._state["solver_config"]` via
+`routers.projects._solver_config_from_dict` so CAPEX/economics numbers
+resolve against the discount rate/lifetime/CO2 price this project was
+actually solved with, not framework defaults. The exact `_compute_*_summary`
+functions `routers/compare.py::get_results_summary` calls were then invoked
+directly, and the same additivity-walk / invariant logic
+`tests/test_compare_invariants.py` runs against the golden fixture was
+re-run against the results. **The running desktop app was deliberately NOT
+driven** — it is a stale frozen build that predates today's `binding_hours`
+fix and would misreport it.
+
+**Network shape:** 5 buses (3 electrical: B1/B2/B3, 1 H2, 1 heat), 2
+generators (`Gas_B2` carrier `gas`, `PV_B3` carrier `solar`, both
+extendable), 2 extendable Links (`Electrolyzer 1`: B3→H2,
+`P2H 2`: B2→heat), 1 StorageUnit (`BESS_B3`, battery, 100 MW / 400 MWh), 3
+AC lines, 0 Stores. 3 investment periods (2027/2028/2029), 8,760 snapshots
+each = 26,280 snapshots total (vs the golden fixture's 48) —
+`multi_investment_periods=True`, `investment_period_weightings.years` = 1.0
+per period (Σ = 3.0). `discount_rate=0.07`, `default_lifetime=25.0 yr`,
+`voll=100,000 €/MWh`, per-period `co2_price` (100/120/150 €/t across
+2027/2028/2029), per-period electrical `load_scalers` (1.0/1.1/1.2). Solved
+with `sclopf=True`. `dispatch_status` classified the reloaded network as
+`fresh` (`has_solve=True`).
+
+**MEASURED, all PASS:**
+
+- **All nine tab fields non-null.** Same conclusion as Task 19's endpoint
+  test, now on a network two orders of magnitude larger (26,280 vs 48
+  snapshots) and with real Link/StorageUnit/multi-carrier content.
+- **Determinism:** summarising the network twice in-process produces a
+  byte-identical `model_dump()` for every one of the nine tabs.
+- **Additivity walk** (the same `_walk_period_values`/`_extensive_verdict`/
+  `_intensive_verdict` logic `test_compare_invariants.py` uses): judged
+  counts per tab — `capacity=8, dispatch=6, loading=12, prices=12,
+  emissions=3, economics=32, curtailment=4, lost_load=10,
+  storage_cycling=3`. **Every tab judged at least one real comparison** —
+  in contrast to golden, where `curtailment`, `lost_load` and
+  `storage_cycling` judge ZERO (see `KNOWN_VACUOUS_TABS`,
+  `test_compare_invariants.py`) and needed purpose-built fixtures to be
+  exercised at all. Zero EXTENSIVE-additivity failures, zero
+  INTENSIVE-non-additivity failures (i.e. no INTENSIVE metric was
+  accidentally summed).
+- **Loading:** `binding_hours ≤ horizon hours` (26,280.0 h) and
+  `mean_loading ≤ peak_loading` hold for all 5 branch entries. Most-loaded:
+  `Electrolyzer 1` (peak 1.0000, mean 0.8552, binding 1,260.00 h).
+- **Prices:** duration curve monotone non-increasing; mean/median inside
+  `[min, max]`. `max_price = 100,000.0000 €/MWh` exactly equals the
+  project's VOLL, correctly picked up from real shedding snapshots (see
+  Lost load below) rather than clipped.
+- **Emissions:** per-carrier sums to total exactly (4088.7099 kt both
+  sides). Intensity identity holds: `intensity_kg_per_mwh = total_kt × 1e6 /
+  total_generator_dispatch_mwh` (reported 306.039935, expected
+  306.039935) — the same denominator definition pinned on golden (Task 9),
+  confirmed on independent real data.
+- **Economics — LCOE identity** holds exactly for all 5 carriers with
+  positive dispatch (`gas, solar, battery, h2, heat-pump-air`) — see the
+  table in the "Economics" per-tab section above.
+- **Curtailment:** per-carrier sums to total; `system_rate_pct = 11.5854%`
+  is inside `[0, 100]`; `total_gwh = 461.3604 GWh`, carrier `solar` only.
+  **Non-vacuous** — fills the golden fixture's documented coverage gap with
+  real (not purpose-built) data.
+- **Lost load:** `available=True`; `total_cost_meur = total_mwh × voll /
+  1e6` exactly (`43.479637 M€ = 434.7964 MWh × 100,000 / 1e6`); `by_bus` and
+  `by_carrier` both sum to the horizon total exactly. **Non-vacuous, and a
+  genuine solved VOLL capture** (not a synthetic pickle written for a test).
+- **Storage cycling:** 1 unit (`BESS_B3`). Horizon `cycles.total =
+  203.1366` equals the average of its three per-period values (167.2652 /
+  187.3131 / 254.8316), confirming the AVERAGE-not-SUM rule (Task 13) on
+  real multi-period dispatch. **Non-vacuous.**
+
+**MEASURED — S1 escalation, second independent confirmation:**
+`capacity.capex_meur_by_carrier` totals `282.389066 M€` (`gas=145.332507 +
+solar=137.056558`); `economics.by_carrier[*].capex_meur` totals
+`338.581519 M€` (adds `h2=54.2807` and `heat-pump-air=1.9117` to the same
+gas/solar figures). Difference = `56.192453 M€`. Computed independently via
+`services.solver_service.periodized_capital_costs` (the same oracle
+`test_golden_economics.py`'s `_from_asset_costs` adapter uses) — per-link
+horizon CAPEX is `Electrolyzer 1 = 54.280730 M€` and `P2H 2 = 1.911723 M€`,
+summing to **56.192453 M€ exactly**, matching the tab-level difference to
+every printed digit. This is the SAME defect measured on golden (Δ=0.166250
+M€ there, equal to the golden fixture's single electrolyzer's CAPEX), now
+confirmed on a second, structurally independent, much larger real network
+with two Links instead of one — the omission is systematic, not a fixture
+artefact. The open product decision (include extendable links in
+`_compute_total_annuitised_capex`, or document the omission in the UI) is
+unchanged by this measurement; it strengthens the case that whichever
+option is chosen, the number at stake is not negligible on real projects
+(56.2 M€ here vs the golden fixture's comparatively small 0.17 M€).
+
+**MEASURED — limitation on S2:** `snapshot_weightings["generators"]` and
+`["objective"]` are IDENTICAL on this real project too (both produce
+26,280.0000 horizon hours) — the same limitation the golden fixture has.
+This real-project spot check therefore does **not** independently
+re-confirm the `binding_hours` basis fix (S2); that fix remains verified
+only by the dedicated `compare_local_networks.build_weighting_basis_network`
+fixture (Task 15), which is the only network in this whole examination
+whose two weighting columns actually diverge.
+
+**Read:** `pypsa-gui/backend/tests/test_compare_endpoint.py` (Task 19,
+committed) proves endpoint wiring on the golden fixture; nothing from this
+section is committed anywhere — the script that produced these numbers was
+run once from the scratchpad and is not part of the repository.
+
+---
+
+## Known limitations (honest inventory)
+
+Stated plainly so a reader six months from now knows exactly what was and
+was not checked, and does not mistake "not raised as a finding" for
+"verified."
+
+- **Three tabs are structurally vacuous on the golden fixture** —
+  `curtailment` (no generator has a time-varying `p_max_pu`), `lost_load`
+  (`compare_support.summarise()` passes a guaranteed-nonexistent
+  `project_dir`), `storage_cycling` (the one battery never cycles on flat
+  solar + flat demand). Documented in `KNOWN_VACUOUS_TABS`
+  (`tests/test_compare_invariants.py`) and covered instead by three
+  purpose-built `compare_local_networks.py` fixtures. Task 21's real-project
+  spot check additionally exercises all three for real (461 GWh curtailed,
+  434.8 MWh of genuine VOLL shedding, 203 cycles/yr of real battery
+  arbitrage) — but that is a one-off measurement, not a second permanent
+  regression guard; the purpose-built fixtures remain the committed tests.
+- **Neither large network available to this suite (golden or
+  `3_nodes_system`) has divergent `objective`/`generators` snapshot
+  weighting columns.** Both report identical horizon hours under either
+  basis. The `binding_hours` basis fix (S2) is verified ONLY by the
+  dedicated `build_weighting_basis_network` fixture (Task 15) — a real
+  representative-week run (where the two columns genuinely differ, per
+  CLAUDE.md's own note that `sample_representative_weeks` resets weights on
+  promotion to multi-period) has not been observed by this examination.
+- **S1 remains an open product decision**, now measured on two independent
+  networks: golden (Δ=0.166250 M€, one electrolyzer) and `3_nodes_system`
+  (Δ=56.192453 M€, two Links). Both differences equal exactly the sum of
+  the omitted Links' own horizon CAPEX — CONFIRMED, not merely suspected,
+  on both. The two options remain: (1) include extendable Links in
+  `_compute_total_annuitised_capex`, leaving fixed/passive branches out;
+  (2) keep the current omission and surface it explicitly in the Capacity
+  tab's UI copy. No fix applied in this examination, per its explicit
+  scope (measure and escalate, not decide).
+- **The Curtailment tab's frontend AND-vs-OR null-guard bug (Tasks 17–18)
+  is confirmed and deliberately NOT fixed** — see its own section above.
+  Frontend behaviour changes are a product decision outside this
+  examination's scope.
+- **`get_prices()` duplicates the merit-order correction inline** instead
+  of calling the shared `corrected_marginal_prices` helper `compare.py`'s
+  `_compute_prices_summary` uses, missing a branch the shared helper has.
+  MEASURED to coincide today (no observed numeric divergence on either
+  network available to this suite) — INFERRED to be a latent drift risk
+  (the two implementations can diverge silently the next time either is
+  edited without the other). Never fixed; flagged for a future pass.
+- **No fixture or real project available to this examination exercises a
+  Store.** `_compute_total_annuitised_capex` and `_compute_economics_summary`
+  both walk `Store` in their component lists (per S1's own writeup and
+  `coverage.py`'s citations), but neither the golden fixture nor
+  `3_nodes_system` contains one (`n.stores` is empty on both) — so the
+  Store branch of either function's code path is read, not measured, in
+  this examination.
+
+---
+
+## Final summary — all ten tabs and both defects
+
+| Tab / item | Verdict | Key evidence |
+|---|---|---|
+| Overview | Agreement (no defect) | INFERRED code read (Task 20); MEASURED real-project capacity match |
+| Capacity | Agreement, minus S1 | S1 CONFIRMED/escalated, both networks; otherwise 1.0 agreement |
+| Dispatch | Agreement (no defect) | MEASURED energy-basis identity (golden); MEASURED additivity (both) |
+| Line loading | Fixed (binding_hours), else agreement | S2 binding_hours FIXED; mean_loading/peak invariant on both networks |
+| Prices | Agreement (no defect) | S2 prices half CLEARED; monotonicity + range hold on both networks |
+| Emissions | Agreement (no defect) | Intensity-denominator pinned (Task 9); identity holds on both networks |
+| Economics | Agreement, minus S1's other half | LCOE identity 1.0 (S3 CLEARED) on both networks |
+| Curtailment | Agreement (no defect) | Vacuous on golden, non-vacuous + correct on real project (Task 21) |
+| Lost load | Agreement (no defect) | Vacuous on golden, non-vacuous + correct on real project (Task 21) |
+| Storage cycling | Agreement (no defect) | Vacuous on golden, non-vacuous + correct on real project (Task 21) |
+| S1 — Capacity/Economics CAPEX gap | CONFIRMED, escalated | Δ=0.166250 M€ (golden) and Δ=56.192453 M€ (real), both == omitted Link CAPEX exactly |
+| S2 — binding_hours basis | CONFIRMED, FIXED | 3.0 h → 9.0 h, one-line fix; unverifiable on either large network (both weighting-basis-degenerate) |
+| S2 — mean_loading / prices basis | CLEARED | Invariant to the basis under uniform rescaling |
+| S3 — LCOE time basis | CLEARED | Ratio 1.0 exactly, 4 (golden) + 5 (real) carriers |
+| Curtailment frontend AND/OR guard | CONFIRMED, NOT FIXED | `it.fails` test; -100% fabricated from a null payload |
+| Task 19 — endpoint wiring | Verified, no defect | All nine fields non-null over real HTTP; values match `rel=1e-9` |
+| Task 20 — coverage matrix | Done, no defect | All ten tabs now in `coverage.SURFACES`; exhaustiveness guards pass |
