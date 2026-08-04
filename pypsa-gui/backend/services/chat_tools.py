@@ -1080,6 +1080,29 @@ def _acting():
         user = db.get(User, uuid.UUID(user_id))
         if user is None:
             raise HTTPException(status_code=401, detail="Authentication required")
+        # P-2 — re-check the account status, do not trust the bind.
+        #
+        # The HTTP path refuses a non-active user at `resolve_session`
+        # (`services/auth_service.py:83`), so the request that opened this chat
+        # turn could not have reached us with a disabled account. That check is
+        # not enough on its own: the SSE generator OUTLIVES its request, and
+        # every tool it dispatches re-enters `_acting()` afterwards. Looking the
+        # user up by id and testing only `is None` meant an account disabled
+        # mid-turn kept full tool authority — save, delete, solve — until the
+        # stream ended. Deliberately the same predicate as `resolve_session`, so
+        # the two gates cannot drift: any status but "active" is refused.
+        if user.status != "active":
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error_kind": "inactive_acting_user",
+                    "message": (
+                        "This account is no longer active, so it can no longer "
+                        "act on projects. Sign in again, or ask an "
+                        "administrator to re-enable it."
+                    ),
+                },
+            )
         yield db, user
     finally:
         db.close()
