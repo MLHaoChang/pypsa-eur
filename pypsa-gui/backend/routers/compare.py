@@ -850,13 +850,13 @@ def _compute_total_annuitised_capex(
             else:
                 b["total"] += per_year_meur
 
-    # Generation / storage / stores unconditionally, plus EXTENDABLE links.
+    # Generation / storage / stores unconditionally, plus links.
     #
-    # Lines and transformers stay omitted, and so do NON-extendable links: a
-    # passive branch that the LP cannot resize contributes nothing to the
-    # objective, and reporting its notional CAPEX here produced a "line CAPEX"
-    # carrier value nobody could reconcile with the Results panel. Branch
-    # expansion is visible in the Line loading tab; that is where it belongs.
+    # Lines and transformers stay omitted: a passive branch that the LP
+    # cannot resize contributes nothing to the objective, and reporting its
+    # notional CAPEX here produced a "line CAPEX" carrier value nobody could
+    # reconcile with the Results panel. Branch expansion is visible in the
+    # Line loading tab; that is where it belongs.
     #
     # An EXTENDABLE link is a different animal, and excluding it was a defect:
     # the LP does size it, its capital_cost does enter the objective, and
@@ -867,17 +867,16 @@ def _compute_total_annuitised_capex(
     # project. See docs/superpowers/findings/
     # 2026-08-03-compare-tab-correctness.md §S1.
     #
-    # KNOWN RESIDUAL: `_compute_economics_summary` walks EVERY link with a
-    # positive capital_cost (`_walk_capex_plain("Link", ...)`), not only the
-    # extendable ones. A non-extendable link carrying a capital_cost therefore
-    # still lands in Economics and not here. That case does not arise on the
-    # fixture or on the project this was measured against, and closing it means
-    # deciding whether a sunk, unresizable asset belongs in a capacity-
-    # EXPANSION view at all — a product question, deliberately left open.
+    # Every link that carries a capital_cost, not only the extendable ones.
+    # `cost_breakdown` is built from `n.statistics()`, which charges
+    # capital_cost x p_nom_opt for EVERY asset — so restricting this walk to
+    # extendables made a fixed link with a capital_cost show up in Economics
+    # and vanish from the Capacity tab, contradicting this function's
+    # documented contract of mirroring cost_breakdown.
     _walk(n.generators,    "p_nom", "generators")
     _walk(n.storage_units, "p_nom", "storage_units")
     _walk(n.stores,        "e_nom", "stores")
-    _walk(n.links,         "p_nom", "links", extendable_only=True)
+    _walk(n.links,         "p_nom", "links")
     return out
 
 
