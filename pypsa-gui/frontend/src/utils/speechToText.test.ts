@@ -88,7 +88,7 @@ describe('parseSpeechResults', () => {
 
 describe('speechErrorMessage', () => {
   it('maps known error codes', () => {
-    expect(speechErrorMessage('not-allowed')).toMatch(/permission/i)
+    expect(speechErrorMessage('not-allowed')).toMatch(/denied/i)
     expect(speechErrorMessage('no-speech')).toMatch(/speech/i)
     expect(speechErrorMessage('audio-capture')).toMatch(/microphone/i)
   })

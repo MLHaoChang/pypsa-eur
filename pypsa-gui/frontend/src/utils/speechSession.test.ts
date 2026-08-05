@@ -119,7 +119,7 @@ describe('SpeechSession', () => {
     const session = new SpeechSession(MockRecognition as unknown as new () => SpeechRecognition, h)
     session.start()
     instances[0].onerror?.({ error: 'not-allowed' } as SpeechRecognitionErrorEvent)
-    expect(h.onError).toHaveBeenCalledWith(expect.stringMatching(/permission/i))
+    expect(h.onError).toHaveBeenCalledWith(expect.stringMatching(/denied/i))
     expect(h.onListeningChange).toHaveBeenCalledWith(false)
   })
 

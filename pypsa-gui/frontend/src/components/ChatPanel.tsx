@@ -1852,16 +1852,18 @@ export default function ChatPanel() {
                 (speech.listening
                   ? 'bg-accent/15 border-accent text-accent'
                   : 'bg-bg-3/40 hover:bg-bg-3 border-border text-muted') +
-                (speech.supported && !streaming ? '' : ' opacity-50')
+                (speech.available && !streaming ? '' : ' opacity-50')
               }
               onClick={speech.toggle}
-              disabled={!speech.supported || streaming}
+              disabled={!speech.available || streaming}
               title={
                 !speech.supported
                   ? 'Voice input needs Chrome or Edge'
-                  : speech.listening
-                    ? 'Stop voice input (Esc)'
-                    : 'Start voice input (English)'
+                  : speech.permissionDenied
+                    ? 'Microphone access denied — allow it in System Settings → Privacy & Security → Microphone'
+                    : speech.listening
+                      ? 'Stop voice input (Esc)'
+                      : 'Start voice input (English)'
               }
               aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
               aria-pressed={speech.listening}

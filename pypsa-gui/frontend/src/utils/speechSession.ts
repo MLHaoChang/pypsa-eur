@@ -1,4 +1,5 @@
 import {
+  isPermissionError,
   parseSpeechResults,
   speechErrorMessage,
   type SpeechRecognitionConstructor,
@@ -9,6 +10,8 @@ export type SpeechSessionHandlers = {
   onInterim: (text: string) => void
   onListeningChange: (listening: boolean) => void
   onError: (message: string) => void
+  /** Fired in addition to onError when the failure was a permission denial. */
+  onPermissionDenied?: () => void
 }
 
 /**
@@ -49,6 +52,7 @@ export class SpeechSession {
 
     recognition.onerror = (ev: SpeechRecognitionErrorEvent) => {
       if (ev.error === 'aborted') return
+      if (isPermissionError(ev.error)) this.handlers.onPermissionDenied?.()
       this.handlers.onError(speechErrorMessage(ev.error))
       this.wantListen = false
       this.handlers.onListeningChange(false)
