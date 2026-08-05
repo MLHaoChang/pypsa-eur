@@ -372,36 +372,64 @@ action - otherwise the narrowing would be silent."
 
 **No probe is needed.** Unlike the canvas, the snapshot index is already available independently: `Results.tsx` fetches `nk(currentProject, 'snapshots')`. Dispatch reads the same cached query and resolves the filter to positional bounds before any results payload arrives.
 
-- [ ] **Step 1: Add the imports, then resolve the window once**
+- [ ] **Step 1: Write `useResultsWindow` — one hook, not six copies**
 
-`Dispatch.tsx` already imports `useResultsFilter` and `resolveRange` from `./filterContext` (it calls `resolveRange` at `:490`) and already uses `nk`. Confirm both are present and add `networkApi` if it is not already imported:
+Six tabs each need the same three things: the snapshot query, the resolved bounds, and a validity guard. Writing that out per file would be eighteen near-identical blocks. React forbids hooks in a loop but permits a **custom hook** called once per component, so it collapses to one call site each.
 
-```ts
-import { networkApi } from '../../api/network'
-```
-
-Then, near the top of the component beside the existing `resultSource`:
+Create `pypsa-gui/frontend/src/hooks/useResultsWindow.ts` — `src/hooks/` is the established home for shared query hooks (`useSolveQueue.ts`, `useLocalSettings.ts`):
 
 ```ts
+/**
+ * Positional bounds for the active Horizon filter.
+ *
+ * Derived from the SNAPSHOT INDEX, not from a results payload, so a tab can
+ * window its fetch before any payload exists. That is why no probe is needed
+ * here, unlike the canvas overlay: `/api/network/snapshots` is already fetched
+ * by `Results.tsx` under this same key, so every tab reads it from cache.
+ */
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { networkApi } from '../api/network'
+import { nk } from '../utils/queryKeys'
+import { useResultsFilter, resolveRange } from '../pages/results/filterContext'
+
+export function useResultsWindow(currentProject: string | null): {
+  win: { from: number; to: number }
+  winValid: boolean
+} {
+  const filter = useResultsFilter()
   const { data: snap } = useQuery({
     queryKey: nk(currentProject, 'snapshots'),
     queryFn: networkApi.getSnapshots,
     staleTime: 5_000,
   })
-  // Positional bounds for the CURRENT filter, derived from the snapshot index
-  // rather than from a results payload — so the fetch can be windowed before
-  // any payload exists. Same cached query Results.tsx already uses.
   const win = useMemo(
     () => resolveRange(snap?.snapshots ?? [], filter, snap?.periods),
     [snap, filter],
   )
-  // An inverted range (selected period absent) means "nothing to show".
-  const winValid = win.from <= win.to
+  // An inverted range means the selected period is absent from this network —
+  // "nothing to show", not "fetch everything".
+  return { win, winValid: win.from <= win.to }
+}
 ```
 
-`filter` is the existing `useResultsFilter()` value.
+Confirm the `@tanstack/react-query` import path and the `nk` path against `src/hooks/useSolveQueue.ts` rather than assuming; copy its import lines if they differ.
 
-- [ ] **Step 2: Window the nine per-snapshot queries**
+- [ ] **Step 2: Use it in Dispatch**
+
+`Dispatch.tsx` already imports `resolveRange` and `useResultsFilter` (`:25`), `networkApi` (`:10`) and `nk` (`:12`). Add the hook import and call it once near the existing `resultSource`:
+
+```ts
+import { useResultsWindow } from '../../hooks/useResultsWindow'
+```
+
+```ts
+  const { win, winValid } = useResultsWindow(currentProject)
+```
+
+Leave the existing `resolveRange` call at `:490` alone — that one resolves against the *payload's* index for the client-side re-slice, and is a different thing from this one.
+
+- [ ] **Step 3: Window the nine per-snapshot queries**
 
 Each of the nine gains the bounds in its key and passes them to the getter. `generators` at `:248` in full:
 
@@ -421,11 +449,11 @@ Apply the identical shape to `storage` (`:256`), `storage_dispatch` (`:257`), `s
 
 **Leave `cost_breakdown` (`:247`) and `economics_by_carrier` (`:274`) alone** — they are aggregate endpoints with no snapshot axis.
 
-- [ ] **Step 3: Leave every client-side slice untouched**
+- [ ] **Step 4: Leave every client-side slice untouched**
 
 Do NOT change any `aggregateTS(ts, names, range)` or `weightedSum(...)` call. Once the payload is already the window, `resolveRange` against the payload's own index returns the whole payload and the second slice is an identity operation. Leaving it means no arithmetic changes and the tab still works if a fetch ever returns more than requested.
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 5: Verify**
 
 ```bash
 cd "/Users/orange/Desktop/Code Test/pypsa-eur/pypsa-gui/frontend"
@@ -436,7 +464,7 @@ npx vitest run > /tmp/w3.log 2>&1; echo "VITEST=$?"
 
 Expected `TSCB=0`, `VITEST=0`.
 
-- [ ] **Step 5: Confirm the key separation survived**
+- [ ] **Step 6: Confirm the key separation survived**
 
 ```bash
 cd "/Users/orange/Desktop/Code Test/pypsa-eur/pypsa-gui/frontend"
@@ -445,7 +473,7 @@ grep -n "results', 'generators'" src/pages/results/Dispatch.tsx src/pages/result
 
 Dispatch's key must now carry `resultSource, win.from, win.to`; AggregatedOverview's must still be the bare three-element form. If they are equal, a windowed payload can reach the summary tab — stop and report.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 cd "/Users/orange/Desktop/Code Test/pypsa-eur"
@@ -477,14 +505,14 @@ window can move either end independently."
 
 - [ ] **Step 1: Apply the Task 3 pattern to each**
 
-In each file, add the same `snap` query, `win` memo and `winValid` guard, then window every **per-snapshot** query exactly as in Task 3:
+In each file, call the hook Task 3 created — one line, no repeated query or memo — then window every **per-snapshot** query exactly as in Task 3:
 
 ```ts
-  const win = useMemo(
-    () => resolveRange(snap?.snapshots ?? [], filter, snap?.periods),
-    [snap, filter],
-  )
-  const winValid = win.from <= win.to
+import { useResultsWindow } from '../../hooks/useResultsWindow'
+```
+
+```ts
+  const { win, winValid } = useResultsWindow(currentProject)
 ```
 
 ```ts
