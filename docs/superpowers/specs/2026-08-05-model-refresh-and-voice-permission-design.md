@@ -60,14 +60,22 @@ two-line edit rather than a five-file one.
 
 `ALLOWED_MODELS` derives from the two constants and needs no separate edit.
 
-### To determine during implementation, not assumed now
+### Resolved before planning — these were open in the first draft
 
-* Whether anything outside `ChatPanel.tsx` imports `deriveCostEur`. If it
-  does, those call sites are in scope.
-* Whether any test pins the literal model strings. `test_chat_e2e.py` and
-  `test_chat_sse.py` both reference models; each hit must be read rather than
-  find-and-replaced, because a test asserting "an unknown model is rejected"
-  needs a string that stays unknown.
+* **`deriveCostEur` has exactly one consumer**: `ChatPanel.tsx:40` (import)
+  and `:281` (call). The deletion is clean.
+* **No pytest test pins a model literal.** An earlier draft of this spec
+  claimed `test_chat_e2e.py` and `test_chat_sse.py` did; that was wrong — they
+  reference `ANTHROPIC_API_KEY`, not model names. Corrected here rather than
+  left for an implementer to trip over.
+* **`backend/tests/e2e_chat_service.sh:217`** pins `claude-sonnet-4-6` in a
+  request body. In scope.
+* **`chat_tools.py:2346` hardcodes `model="claude-sonnet-4-6"`** for the vision
+  sub-call. This is a second defect, not just another rename: the vision model
+  is a literal rather than a reference, so it silently does **not** follow
+  `DEFAULT_MODEL` and would have stayed on the old generation after this
+  change. It must become a reference to the constant, so the next model bump
+  cannot leave it behind again.
 
 ### Verification
 
