@@ -138,7 +138,22 @@ export type AssetCostMap = Record<string, Record<string, {
 // picks the right snapshot. Defaults to 'lopf' so calls without an explicit
 // arg keep current behaviour.
 type ResultSource = 'lopf' | 'ac_pf'
-const srcParam = (s?: ResultSource) => s ? { params: { source: s } } : undefined
+
+export interface TSRange { from: number; to: number }
+
+/**
+ * Query params for a time-series result request.
+ *
+ * Omitting `range` produces exactly the request shape that existed before
+ * ranges: no `from`, no `to`, and a response with no `range` block. That is
+ * what lets unconverted callers keep working untouched.
+ */
+const tsParams = (s?: ResultSource, range?: TSRange) => {
+  const params: Record<string, string | number> = {}
+  if (s) params.source = s
+  if (range) { params.from = range.from; params.to = range.to }
+  return Object.keys(params).length > 0 ? { params } : undefined
+}
 
 // Per-period entry in the LCOH payload. One per investment period in
 // multi-period runs (flat runs return `by_period: undefined`).
@@ -155,18 +170,18 @@ export interface LcohPeriodEntry {
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
-  getGeneratorResults: (source?: ResultSource) => client.get('/results/generators', srcParam(source)).then(r => r.status === 204 ? null : r.data),
-  getStorageResults: (source?: ResultSource) => client.get('/results/storage', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getGeneratorResults: (source?: ResultSource, range?: TSRange) => client.get('/results/generators', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
+  getStorageResults: (source?: ResultSource, range?: TSRange) => client.get('/results/storage', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
   // StorageUnit / Store power-flow time series (signed MW; positive = discharge,
   // negative = charge). Frontend splits these into "production" and "consumption"
   // for display, mirroring how generators/loads are visualised in the Dispatch tab.
-  getStorageDispatchResults: (source?: ResultSource) => client.get('/results/storage_dispatch', srcParam(source)).then(r => r.status === 204 ? null : r.data),
-  getStoreDispatchResults:   (source?: ResultSource) => client.get('/results/store_dispatch',   srcParam(source)).then(r => r.status === 204 ? null : r.data),
-  getStoreEnergyResults:     (source?: ResultSource) => client.get('/results/store_energy',     srcParam(source)).then(r => r.status === 204 ? null : r.data),
-  getLineResults: (source?: ResultSource) => client.get('/results/lines', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getStorageDispatchResults: (source?: ResultSource, range?: TSRange) => client.get('/results/storage_dispatch', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
+  getStoreDispatchResults:   (source?: ResultSource, range?: TSRange) => client.get('/results/store_dispatch',   tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
+  getStoreEnergyResults:     (source?: ResultSource, range?: TSRange) => client.get('/results/store_energy',     tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
+  getLineResults: (source?: ResultSource, range?: TSRange) => client.get('/results/lines', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
   // Per-link p0 (signed MW): positive = bus0 → bus1. Drives the Links
   // section of the Dispatch tab, grouped by link carrier (DC, H2, electrolyser, …).
-  getLinkResults: (source?: ResultSource) => client.get('/results/links', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getLinkResults: (source?: ResultSource, range?: TSRange) => client.get('/results/links', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
   // Per-electrolyser LCOH (€/MWh_H2 and €/kg_H2). One row per electrolyser-
   // like link plus a fleet-aggregated `total`. 204 / empty rows when no
   // qualifying links exist or the run isn't solved.
@@ -195,8 +210,8 @@ export const resultsApi = {
     }
     currency: string
   }>('/results/lcoh').then(r => r.status === 204 ? null : r.data),
-  getTransformerResults: (source?: ResultSource) => client.get('/results/transformers', srcParam(source)).then(r => r.status === 204 ? null : r.data),
-  getPrices: (source?: ResultSource) => client.get('/results/prices', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getTransformerResults: (source?: ResultSource) => client.get('/results/transformers', tsParams(source)).then(r => r.status === 204 ? null : r.data),
+  getPrices: (source?: ResultSource) => client.get('/results/prices', tsParams(source)).then(r => r.status === 204 ? null : r.data),
   // Per-generator unit-commitment results (status, start/shut counts, on-hours,
   // capacity factor when on, UC costs). Populated only when committable=True
   // on at least one generator; otherwise n_committable=0 and the panel hides.
@@ -308,11 +323,11 @@ export const resultsApi = {
   // these endpoints return null (204) when no Stage 2 snapshot is available.
   // Frontend uses the null to hide the corresponding LoadFlow sections.
   getVoltages: (source?: ResultSource) =>
-    client.get('/results/voltages', srcParam(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
-  getLineReactive: (source?: ResultSource) =>
-    client.get('/results/line_reactive', srcParam(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
+    client.get('/results/voltages', tsParams(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
+  getLineReactive: (source?: ResultSource, range?: TSRange) =>
+    client.get('/results/line_reactive', tsParams(source ?? 'ac_pf', range)).then(r => r.status === 204 ? null : r.data),
   getTransformerReactive: (source?: ResultSource) =>
-    client.get('/results/transformer_reactive', srcParam(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
+    client.get('/results/transformer_reactive', tsParams(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
   // Per-cell diagnosis for prices above a threshold — used by the Load Flow
   // "Price drivers" panel to answer "why is the price 3000 at hour X?".
   // Returns the most-likely marginal generator + a one-word category
@@ -348,7 +363,7 @@ export const resultsApi = {
     }>
     error?: string
   }>('/results/economics_by_carrier').then(r => r.status === 204 ? null : r.data),
-  getLoadResults: (source?: ResultSource) => client.get('/results/loads', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  getLoadResults: (source?: ResultSource, range?: TSRange) => client.get('/results/loads', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
   // VOLL slack-generator dispatch — only populated when the solver ran with
   // voll > 0 AND the LP shed any load. Returns TSPayload + totals or null.
   // `voll_eur_per_mwh` is the per-MWh VOLL the solver used; consumers
@@ -377,7 +392,7 @@ export const resultsApi = {
     total_demand_mwh: number
     loss_pct_of_demand: number
     by_branch: Array<{ component: string; name: string; loss_mwh: number; peak_mw: number; share_pct: number }>
-  }>('/results/losses', srcParam(source)).then(r => r.status === 204 ? null : r.data),
+  }>('/results/losses', tsParams(source)).then(r => r.status === 204 ? null : r.data),
   // Stage 2 (AC PF) status. `available=false` when no AC PF has run since
   // the last solve — the frontend hides the result-source toggle in that
   // case. When available, the convergence map drives per-snapshot UI
