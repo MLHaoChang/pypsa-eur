@@ -84,4 +84,13 @@ describe('chunkBounds', () => {
     expect(chunkBounds(8928, 168, 26280, { start: 8760, end: 17519 }))
       .toEqual({ from: 8928, to: 9095 })
   })
+
+  it('maps a global snapshot index into its chunk-local row', () => {
+    // Snapshot 200 lives in chunk [168, 335] at local row 32.
+    const bounds = chunkBounds(200, 168, 26280)
+    const local = 200 - bounds.from
+
+    expect(local).toBe(32)
+    expect(bounds.from + local).toBe(200)
+  })
 })
