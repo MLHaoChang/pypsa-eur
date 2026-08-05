@@ -329,34 +329,50 @@ describe('Task 18 — zero vs absent baseline', () => {
     expect(signedTexts()).toEqual([])
   })
 
-  // FINDING (do not fix CompareView.tsx — this documents the defect).
-  // EmissionsTab guards with `if (!emA || !emB) return <banner>` (OR — trips
-  // on EITHER side missing). CurtailmentTab guards with
-  // `if (!hasAnyA && !hasAnyB) return <banner>` (AND — only trips when BOTH
-  // sides are empty). So when only B's curtailment is null, the AND guard
-  // does not fire, and every read of `cB?.<field>` falls through readPV's
-  // `if (!pv) return 0` to a literal 0 — a project that never reported
-  // curtailment renders identically to a project that curtails exactly
-  // nothing. With A's system_rate_pct pinned to 100% the resulting Δ is
-  // literally -100.00%, i.e. "B eliminated all curtailment", which is not
-  // information the payload contains. This assertion encodes the CORRECT
-  // behaviour (no rate rendered as a literal 0, no fabricated -100 delta)
-  // and is expected to fail against the current implementation.
-  it.fails(
-    'FINDING: curtailment renders a null side as literal zero, not "not reported" (see comment above)',
-    async () => {
-      seedPicker('curtailment')
-      vi.mocked(projectsApi.resultsSummary).mockImplementation(async (name: string) => {
-        const s = summary(name, 1)
-        if (name === 'A') s.curtailment = { ...s.curtailment!, system_rate_pct: pv(100, 100, 100) }
-        if (name === 'B') s.curtailment = null
-        return s as never
-      })
-      renderCompare()
-      await waitFor(() => expect(screen.queryAllByText(/20\.0 GWh/).length).toBeGreaterThan(0))
-      expect(screen.queryByText(/-100/)).toBeNull()
-    },
-  )
+  // Was a standing `it.fails` documenting the defect: CurtailmentTab guarded
+  // with `!hasAnyA && !hasAnyB` (AND — only trips when BOTH sides are empty)
+  // where EmissionsTab uses OR. With only B's curtailment null the AND guard
+  // did not fire, every `cB?.<field>` fell through readPV's `if (!pv) return 0`
+  // to a literal 0, and against A's 100% rate the delta read -100.00%
+  // ("B eliminated all curtailment") — not information the payload contains.
+  // CompareView now bails on either side missing, so this asserts for real.
+  it('curtailment: a null side bails to a message, not a fabricated -100%', async () => {
+    seedPicker('curtailment')
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(async (name: string) => {
+      const s = summary(name, 1)
+      if (name === 'A') s.curtailment = { ...s.curtailment!, system_rate_pct: pv(100, 100, 100) }
+      if (name === 'B') s.curtailment = null
+      return s as never
+    })
+    renderCompare()
+    await waitFor(() => expect(screen.getByText(/No curtailment data for/)).toBeTruthy())
+    expect(screen.queryByText(/-100/)).toBeNull()
+    expect(signedTexts()).toEqual([])
+  })
+
+  it('curtailment: the banner names the side that has no data', async () => {
+    seedPicker('curtailment')
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(async (name: string) => {
+      const s = summary(name, 1)
+      if (name === 'B') s.curtailment = null
+      return s as never
+    })
+    renderCompare()
+    // Naming the absent side is the point — "neither project" would be a lie
+    // when only one is missing, and leaves the user unable to tell which.
+    const banner = await screen.findByText(/No curtailment data for/)
+    expect(banner.textContent).toContain('B')
+    expect(banner.textContent).not.toContain('neither')
+  })
+
+  it('curtailment: both sides present still renders the comparison', async () => {
+    // Guards the fix from over-reach — the OR must not suppress the normal case.
+    seedPicker('curtailment')
+    mockBothSides(2, 1)
+    renderCompare()
+    await waitFor(() => expect(signedTexts().length).toBeGreaterThan(0))
+    expect(screen.queryByText(/No curtailment data/)).toBeNull()
+  })
 })
 
 // ── Task 18 — Step 3: period selection ───────────────────────────────────
