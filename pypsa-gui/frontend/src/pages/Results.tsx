@@ -404,7 +404,7 @@ export default function Results() {
               )}
             </span>
             <span className="flex-1" />
-            {isFiltered && (
+            {isWindowed && (
               <button
                 onClick={resetHorizon}
                 className="px-2 py-1 text-[11px] text-muted hover:text-danger"
