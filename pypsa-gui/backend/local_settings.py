@@ -1,15 +1,23 @@
 """
 Per-user local settings for the desktop app.
 
-Imports only stdlib and `app_paths`, deliberately: `main.py` reads this module
-at import time, before the router graph exists, and `app_paths` itself imports
-nothing from this package to avoid exactly that cycle.
+Imports only stdlib, `app_paths` and `services.app_secrets`, deliberately:
+`main.py` reads this module at import time, before the router graph exists.
+`app_secrets` is safe to add to that list because it imports nothing from this
+package either — the no-cycle property is preserved transitively, not
+abandoned.
 
-It holds one thing today — the Anthropic API key — and it exists because the
-packaged app has no other way to receive one. `backend/.env` is excluded from
-the bundle on purpose (`smoke/check_bundle.py`: it carries a real key and the
-SECRET_KEY that signs sessions), and a `.app` launched from Finder sources no
-shell profile, so ANTHROPIC_API_KEY is unset by construction.
+THE KEY IS NOT STORED HERE. It used to be, in `local-settings.json`, and
+`master` grew a second store for the same secret in `services/app_secrets.py`
+(`<app-data>/user.env`) while this branch was being written. The merge stacked
+both — see `docs/superpowers/findings/2026-08-05-api-key-store-collision.md`.
+`app_secrets` won because it owns the things a second store cannot have on its
+own: an allowlist of writable names, knowledge of which variables the launching
+shell supplied, and therefore the precedence rule. This module keeps its API
+and its Settings pane, and delegates the storage.
+
+`local-settings.json` survives only as a migration source — see
+`migrate_api_key_to_app_secrets`.
 """
 from __future__ import annotations
 
@@ -19,6 +27,7 @@ import os
 from pathlib import Path
 
 import app_paths
+from services import app_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +78,15 @@ def read_settings() -> dict[str, str]:
     return {k: v for k, v in data.items() if isinstance(v, str)}
 
 
-def stored_api_key() -> str | None:
-    """The stored key, or None. Blank and absent are the same answer."""
+def legacy_stored_api_key() -> str | None:
+    """The key still sitting in `local-settings.json`, if any. Migration only."""
     key = read_settings().get(_API_KEY, "").strip()
     return key or None
+
+
+def stored_api_key() -> str | None:
+    """The stored key, or None. Blank and absent are the same answer."""
+    return app_secrets.get_stored("ANTHROPIC_API_KEY")
 
 
 def api_key_hint(key: str | None) -> str | None:
@@ -84,21 +98,27 @@ def api_key_hint(key: str | None) -> str | None:
 
 def write_api_key(key: str) -> None:
     """
-    Persist the key; an empty string removes the entry.
+    Persist the key; an empty string removes it.
 
-    Two properties the tests pin, both about the same risk:
-      * mode 0600 AT CREATION via `os.open`. A `chmod` after writing leaves a
-        window in which a live key is world-readable.
-      * atomic `os.replace`, so a crash mid-write cannot leave a truncated file
-        that reads back as "no key configured".
+    Delegates to `app_secrets`, which writes 0600 at creation via `os.open` and
+    applies the value to this process — the two properties this function used
+    to own and the tests still pin. Raises `app_secrets.SecretValueError` on a
+    value that cannot be stored (empty after strip is handled here as "clear",
+    not as an error); `routers/local_settings.py` turns that into a 400.
     """
-    data = read_settings()
     key = key.strip()
     if key:
-        data[_API_KEY] = key
+        app_secrets.set_secret("ANTHROPIC_API_KEY", key)
     else:
-        data.pop(_API_KEY, None)
+        app_secrets.clear_secret("ANTHROPIC_API_KEY")
 
+
+def _remove_legacy_key() -> None:
+    """Drop `anthropic_api_key` from `local-settings.json`, keeping the rest."""
+    data = read_settings()
+    if _API_KEY not in data:
+        return
+    data.pop(_API_KEY, None)
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -109,31 +129,42 @@ def write_api_key(key: str) -> None:
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
-    # Adopts the temp file's 0600, so a pre-existing wider mode is corrected.
+    # Atomic: a crash mid-write cannot leave a truncated file that reads back
+    # as "no settings at all".
     os.replace(tmp, path)
 
 
-def apply_to_environ() -> bool:
+def migrate_api_key_to_app_secrets() -> bool:
     """
-    Publish the stored key as ANTHROPIC_API_KEY. Returns True if it set it.
+    Move a key out of `local-settings.json` into `user.env`. True if it moved.
 
-    **The stored key never overrides a TRUTHY environment value.** Same
-    intent as `load_dotenv(override=False)` at `main.py:23` — an
-    operator-set value wins — but the check here is truthiness-based
-    (`os.environ.get(...)` in a boolean context), not presence-based like
-    dotenv's `if k in os.environ and not override: continue`. So
-    `ANTHROPIC_API_KEY=""` is treated as absent and the stored key still
-    applies. That is deliberate, not a gap: `chat_service._build_anthropic_client`
-    makes the same truthiness check when deciding whether a key is
-    configured, so an empty string is "missing" on the consuming side too —
-    matching it here means the web deployment and a developer shell with a
-    real key exported are still unaffected by a file only the desktop app
-    ever writes.
+    Runs at import time from `main.py`, BEFORE `bootstrap_environment`, so a
+    migrated key is published in the same startup rather than one launch later.
+
+    Idempotent, and it never overwrites: a key already in `user.env` wins and
+    the legacy entry is dropped. That direction is deliberate. `user.env` is
+    what the live process has been reading since the merge (the finding
+    documents why), so it is the value the user has been successfully using;
+    preferring the JSON file would silently swap a working key for one that has
+    been inert, possibly for weeks.
+
+    NEVER raises. A migration that fails leaves both files untouched and logs —
+    an app-data problem must not be why the app will not start, the same rule
+    `read_settings` follows.
     """
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    try:
+        legacy = legacy_stored_api_key()
+        if not legacy:
+            return False
+        if app_secrets.get_stored("ANTHROPIC_API_KEY"):
+            # Already migrated, or the user set one through the other pane.
+            _remove_legacy_key()
+            logger.info("local settings: dropped the legacy key; user.env already has one")
+            return False
+        app_secrets.set_secret("ANTHROPIC_API_KEY", legacy)
+        _remove_legacy_key()
+        logger.info("local settings: migrated the stored API key into user.env")
+        return True
+    except Exception:  # noqa: BLE001 — logged, never fatal
+        logger.warning("local settings: could not migrate the stored API key", exc_info=True)
         return False
-    key = stored_api_key()
-    if not key:
-        return False
-    os.environ["ANTHROPIC_API_KEY"] = key
-    return True

@@ -187,6 +187,26 @@ def bootstrap_environment(backend_env: Path | None = None) -> None:
         os.environ[name] = value
 
 
+def get_stored(name: str = "ANTHROPIC_API_KEY") -> str | None:
+    """
+    The value held in `user.env`, or None. Blank and absent are one answer.
+
+    This is the one accessor that returns a secret, and it exists because a
+    caller sometimes needs the value rather than a description of it — the
+    local-settings surface computes its own hint from the last four characters
+    and cannot do that from `status()`, whose hint is already formatted and
+    reports the LIVE value rather than the stored one. Those differ exactly
+    when a shell-set key is masking a stored one, which is the case the
+    Settings pane most needs to render honestly.
+
+    It never reaches an HTTP response: `routers/local_settings.py` passes the
+    result straight to `api_key_hint` and returns only the hint.
+    """
+    if name not in MANAGED_KEYS:
+        raise SecretValueError(f"{name} is not a managed setting.")
+    return _read_managed().get(name) or None
+
+
 def status(name: str = "ANTHROPIC_API_KEY") -> dict[str, object]:
     """
     Whether `name` is configured, where it came from, and a non-reversible hint.

@@ -1,61 +1,97 @@
-"""Reproduce the two-store API-key collision on the current branch.
-
-Runs the exact startup sequence main.py performs, against a throwaway app-data
-directory, with a DIFFERENT key in each of the two stores so the winner is
-unambiguous.
 """
+Where the Anthropic API key actually comes from, and whether the stores agree.
+
+Written to reproduce the two-store collision described in
+docs/superpowers/findings/2026-08-05-api-key-store-collision.md: `master` and
+`feature/local-app-impl` each grew a store for the same secret, the merge
+stacked both, and the second publisher was dead behind the first's
+`if os.environ.get(...)` guard. It is kept, and inverted, because the same
+three cases are what you want to see when someone reports "I saved my key and
+chat still says it is missing".
+
+Runs entirely against throwaway app-data directories. It never reads, writes or
+prints the real user's key.
+
+    python smoke/repro_api_key_collision.py
+"""
+import json
 import os
 import sys
 import tempfile
 from pathlib import Path
 
-BACKEND = Path("/Users/orange/Desktop/Code Test/pypsa-eur/pypsa-gui/backend")
+BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
-tmp = Path(tempfile.mkdtemp(prefix="keycollide-"))
-os.environ["PYPSAGUI_APP_DATA_DIR"] = str(tmp)
-os.environ.pop("ANTHROPIC_API_KEY", None)
-
-import app_paths  # noqa: E402
 import local_settings  # noqa: E402
 from services import app_secrets  # noqa: E402
 
 USER_ENV_KEY = "sk-ant-FROM-user-env-AAAA"
 JSON_KEY = "sk-ant-FROM-local-settings-json-BBBB"
+SHELL_KEY = "sk-ant-FROM-the-shell-CCCC"
 
-# Store 1: master's user.env (written by ApiKeySetup.tsx via app_secrets)
-app_secrets._write_managed({"ANTHROPIC_API_KEY": USER_ENV_KEY})
-# Store 2: the feature branch's local-settings.json (written by LocalSettings.tsx)
-local_settings.write_api_key(JSON_KEY)
 
-print(f"app-data:      {tmp}")
-print(f"user.env            -> {USER_ENV_KEY}")
-print(f"local-settings.json -> {JSON_KEY}")
-print()
+def _fresh_appdata(prefix: str) -> Path:
+    tmp = Path(tempfile.mkdtemp(prefix=prefix))
+    os.environ["PYPSAGUI_APP_DATA_DIR"] = str(tmp)
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    # `_SHELL_NAMES` is module state captured by bootstrap_environment; reset it
+    # so each case below starts from "the shell said nothing".
+    app_secrets._SHELL_NAMES = frozenset()
+    return tmp
 
-# --- exactly what main.py does, in order -----------------------------------
-app_secrets.bootstrap_environment(backend_env=BACKEND / ".env")
-after_bootstrap = os.environ.get("ANTHROPIC_API_KEY")
-applied = local_settings.apply_to_environ()
-after_apply = os.environ.get("ANTHROPIC_API_KEY")
 
-print("main.py line 20  bootstrap_environment() ->", after_bootstrap)
-print("main.py line 47  apply_to_environ()      ->", f"returned {applied}")
-print("live ANTHROPIC_API_KEY                   ->", after_apply)
-print()
+def _write_legacy(appdata: Path, key: str) -> None:
+    (appdata / "local-settings.json").write_text(
+        json.dumps({"anthropic_api_key": key}), encoding="utf-8",
+    )
 
-winner = "user.env" if after_apply == USER_ENV_KEY else "local-settings.json"
-print(f"WINNER: {winner}")
-print(f"apply_to_environ set anything? {applied}")
-print()
 
-# What each UI shows the user, side by side.
-st = app_secrets.status()
-print("ApiKeySetup.tsx  (app_secrets.status): "
-      f"configured={st['configured']} source={st['source']} hint={st['hint']}")
-stored = local_settings.stored_api_key()
-print("LocalSettings.tsx (local_settings):    "
-      f"key_set={stored is not None} hint={local_settings.api_key_hint(stored)}")
-print()
-print("The Settings pane advertises a key that is NOT the one in use."
-      if stored and after_apply != stored else "stores agree")
+def _startup() -> None:
+    """The two calls main.py makes, in main.py's order."""
+    app_secrets.bootstrap_environment(backend_env=BACKEND / ".env")
+    local_settings.migrate_api_key_to_app_secrets()
+
+
+def _report(case: str) -> None:
+    live = os.environ.get("ANTHROPIC_API_KEY")
+    stored = local_settings.stored_api_key()
+    legacy = local_settings.legacy_stored_api_key()
+    status = app_secrets.status()
+    print(f"\n=== {case} ===")
+    print(f"  live ANTHROPIC_API_KEY : {live}")
+    print(f"  Settings pane shows    : {stored}")
+    print(f"  legacy json leftover   : {legacy}")
+    print(f"  status.source          : {status['source']}")
+    print(f"  masked by environment  : {status['overridden_by_environment']}")
+    agree = live == stored or status["overridden_by_environment"]
+    print(f"  COHERENT               : {agree}")
+
+
+def main() -> int:
+    appdata = _fresh_appdata("keycase-legacy-")
+    _write_legacy(appdata, JSON_KEY)
+    _startup()
+    _report("A. only the legacy json store (the upgrade path)")
+
+    appdata = _fresh_appdata("keycase-both-")
+    app_secrets._write_managed({"ANTHROPIC_API_KEY": USER_ENV_KEY})
+    _write_legacy(appdata, JSON_KEY)
+    _startup()
+    _report("B. both stores populated (what the merge produced)")
+
+    appdata = _fresh_appdata("keycase-shell-")
+    os.environ["ANTHROPIC_API_KEY"] = SHELL_KEY
+    _write_legacy(appdata, JSON_KEY)
+    _startup()
+    _report("C. the operator exported one on the command line")
+
+    print(
+        "\nExpected: A migrates and publishes; B keeps user.env and drops the "
+        "stale entry;\nC leaves the shell value in effect and says so.",
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -3,10 +3,17 @@
 **Date:** 2026-08-05
 **Found by:** a pre-merge audit of `master` → `feature/local-app-impl`, before
 `451f775a`. Predicted from the diff, then confirmed against the merged tree.
-**Status:** OPEN. Live on `feature/local-app-impl`, and on `master` as of the
-fast-forward to `96a769f3`.
+**Status:** FIXED. Was live on `feature/local-app-impl`, and on `master` as of
+the fast-forward to `96a769f3`.
 **Heads-up for:** whoever owns U-1 / local-settings. Two sessions built the
 same feature on two branches; this is the seam, not anybody's mistake.
+
+> **Resolution.** `local_settings` now delegates storage to `app_secrets`;
+> `local-settings.json` survives only as a migration source, and `main.py` runs
+> the migration instead of the dead second publisher. Both Settings surfaces
+> and both endpoints are unchanged from the user's point of view. See the
+> "Suggested direction" section at the bottom — that is what was built, with
+> one correction found while building it, recorded there.
 
 ## What happened
 
@@ -79,7 +86,7 @@ at `main.py:23`" and explains itself as a deliberate contrast to it. Master
 deleted that loader; the line it names is now the `app_secrets` import. Twenty
 lines of correct reasoning about code that is no longer there.
 
-## Suggested direction — not yet implemented
+## The direction taken
 
 Keep both surfaces, unify the storage: `local_settings` reads and writes
 through `app_secrets` instead of owning `local-settings.json`. Both UIs and
@@ -101,6 +108,35 @@ Two things any fix must not skip:
   dead call that looks load-bearing is how this arrangement survived review in
   the first place.
 
-Reproduction script used for the measurement above: it writes a distinct key
-into each store, runs the two startup calls in `main.py`'s order against a
-throwaway `PYPSAGUI_APP_DATA_DIR`, and prints what each pane would show.
+## The correction, found while building it
+
+The migration was written to run BEFORE `bootstrap_environment` — reasoning
+that a migrated key then gets published in the same startup rather than the
+next one. That is wrong, and the way it is wrong is silent.
+
+`set_secret` refuses to overwrite a variable the launching shell supplied, but
+it recognises one only through `app_secrets._SHELL_NAMES` — which
+`bootstrap_environment` is what populates. Migrating first runs that guard
+against an empty set, so it clobbers a key the operator exported on the command
+line. Caught by a hand-written check of the three startup shapes before any
+test existed; the ordering is now the other way round, and nothing is lost by
+it because `set_secret` publishes to `os.environ` itself.
+
+`smoke/repro_api_key_collision.py` is the check, kept and inverted: it runs all
+three shapes against throwaway app-data and reports which store won, what each
+pane would show, and whether they cohere. Useful the next time someone reports
+"I saved my key and chat still says it is missing".
+
+## One thing to know if you write tests near this
+
+`import pypsa` loads `backend/.env` into `os.environ`. `tests/conftest.py`
+imports pypsa before it imports `main`, so by the time `bootstrap_environment`
+runs in the test process, `_SHELL_NAMES` already contains every name in a
+developer's `.env` — and every saved key looks masked by the shell.
+
+`main.py` is not exposed to this: it calls `bootstrap_environment` above its
+own third-party imports for exactly this reason, and a packaged app ships no
+`.env`. But an in-process test that does not reset `_SHELL_NAMES` is measuring
+the developer's checkout rather than the app. `test_local_settings_startup.py`
+sidesteps it entirely by running in a subprocess, which is the only honest way
+to observe a module-level call.
