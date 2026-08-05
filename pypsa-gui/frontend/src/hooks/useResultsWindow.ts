@@ -28,5 +28,11 @@ export function useResultsWindow(currentProject: string | null): {
   )
   // An inverted range means the selected period is absent from this network —
   // "nothing to show", not "fetch everything".
-  return { win, winValid: win.from <= win.to }
+  //
+  // `snap` pending means we do not yet know the horizon. resolveRange's
+  // empty-index fallback returns {0,0}, which is a sensible no-op for
+  // slicing already-fetched data but reads as a VALID one-row window here —
+  // so every query would fire for snapshot 0, cache, then refire. Gate on the
+  // snapshot query having resolved, not just on the bounds being ordered.
+  return { win, winValid: !!snap && win.from <= win.to }
 }
