@@ -831,6 +831,7 @@ export default function ChatPanel() {
   const setStreaming = useChatStore((s) => s.setStreaming)
   const setError = useChatStore((s) => s.setError)
   const setStreamCleanup = useChatStore((s) => s.setStreamCleanup)
+  const closeStream = useChatStore((s) => s.closeStream)
 
   const currentProject = useUIStore((s) => s.currentProject)
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
@@ -850,9 +851,19 @@ export default function ChatPanel() {
   // cache is per-session, so reusing the session_id keeps the cache warm).
   useEffect(() => {
     if (!currentProject) return
+    // Only seed an EMPTY conversation. This effect re-runs on every mount, and
+    // the panel remounts whenever the agent navigates the app to another tab
+    // and the user comes back — at which point replaying chat.jsonl over the
+    // store erases the turn they just watched arrive, because a turn is only
+    // persisted once it completes. The store is authoritative while it holds a
+    // conversation; disk is the seed for a fresh one. `resetForProjectSwitch`
+    // empties it on a real project change, which is what re-arms this.
+    if (useChatStore.getState().messages.length > 0) return
     let cancelled = false
     getChatHistory().then((h) => {
       if (cancelled) return
+      // Re-check: a turn may have started while the fetch was in flight.
+      if (useChatStore.getState().messages.length > 0) return
       const turns = h.turns ?? []
       // Build a flat message list mirroring the SSE event order: each turn
       // contributes a user bubble then an assistant bubble.
@@ -1469,22 +1480,22 @@ export default function ChatPanel() {
             cache_create_tokens: d.usage.cache_create_tokens ?? 0,
           })
         }
-        setStreaming(false)
+        closeStream()
         break
       }
       case 'session_done': {
-        setStreaming(false)
+        closeStream()
         break
       }
       case 'error': {
         const d = _frame_data<{ error_kind: string; message: string }>(frame)
         setError({ error_kind: d.error_kind, message: d.message })
-        setStreaming(false)
+        closeStream()
         break
       }
     }
   }, [qc, setSessionId, appendMessage, appendTokenDelta, setPending, appendToolProgress,
-      accrueUsage, setStreaming, setError])
+      accrueUsage, setStreaming, setError, closeStream])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
@@ -1576,11 +1587,26 @@ export default function ChatPanel() {
     setStreaming(false)
   }, [sessionId, setStreaming])
 
-  // SSE cleanup on unmount (CLAUDE.md rule).
+  // SSE cleanup on unmount (CLAUDE.md rule) — but NOT while a turn is running.
+  //
+  // This panel is mounted only while `activeSlidePanel === 'chat'`, and it is
+  // itself what answers a `ui_event` by calling `setSlidePanel('results')`. So
+  // "the agent showed me the results" unmounted the panel mid-answer, and this
+  // handler then closed the connection: the backend went on generating into a
+  // socket nobody was reading, which is exactly the reported "still streaming,
+  // no tokens on screen".
+  //
+  // Leaving it open is safe because `handleFrame` writes only to Zustand and
+  // the query cache — never to this component's state — so the rest of the
+  // turn lands correctly with the panel unmounted and renders when it comes
+  // back. The connection is closed by `closeStream()` on the terminal frame,
+  // by `onAbort`, and by `resetForProjectSwitch` — all of which outlive the
+  // panel. An idle stream is still closed here.
   useEffect(() => {
     return () => {
-      const cleanup = useChatStore.getState().streamCleanup
-      try { cleanup?.() } catch { /* idempotent */ }
+      const { streaming, streamCleanup } = useChatStore.getState()
+      if (streaming) return
+      try { streamCleanup?.() } catch { /* idempotent */ }
     }
   }, [])
 

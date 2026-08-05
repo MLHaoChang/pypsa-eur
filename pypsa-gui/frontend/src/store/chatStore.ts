@@ -138,6 +138,16 @@ interface ChatState {
   setStreaming: (v: boolean) => void
   setError: (e: ChatErrorState | null) => void
   setStreamCleanup: (fn: (() => void) | null) => void
+  /**
+   * End the current turn: close the SSE and clear the streaming flag.
+   *
+   * The connection belongs to the TURN, not to whichever component happened
+   * to open it. ChatPanel used to be the only thing that closed it, from its
+   * unmount handler — and ChatPanel unmounts itself whenever the agent sends
+   * a `ui_event` that navigates to another panel, which killed the turn
+   * mid-answer. Terminal frames call this instead.
+   */
+  closeStream: () => void
   // Upload slice actions
   setUploads: (list: UploadMetaUI[]) => void
   addUpload: (meta: UploadMetaUI) => void
@@ -271,6 +281,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setStreaming: (v) => set({ streaming: v }),
   setError: (e) => set({ error: e }),
   setStreamCleanup: (fn) => set({ streamCleanup: fn }),
+  closeStream: () => {
+    const cleanup = get().streamCleanup
+    try { cleanup?.() } catch { /* idempotent */ }
+    set({ streamCleanup: null, streaming: false })
+  },
 
   setUploads: (list) => set({ uploads: list }),
   addUpload: (meta) => set((s) => {
