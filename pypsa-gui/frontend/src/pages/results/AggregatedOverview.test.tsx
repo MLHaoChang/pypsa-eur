@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
-import AggregatedOverview from './AggregatedOverview'
+import AggregatedOverview, { isPartialPayload } from './AggregatedOverview'
 import type { WeightCtx, SnapshotWeightRow } from './shared'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -170,4 +170,51 @@ it('renders a distinctive thermal generation value sourced from the mocked resul
   const thermalLabel = await screen.findByText('Thermal')
   const card = thermalLabel.parentElement as HTMLElement
   expect(within(card).getByText('424.24 MWh')).toBeTruthy()
+})
+
+// isPartialPayload is the tripwire for the one mistake this whole plan exists
+// to prevent: AggregatedOverview computes whole-horizon totals over
+// `fullRange`, at 13 sites. If a future edit ever converts one of its
+// getters to a ranged call, the backend starts returning a `range` key, and
+// without this guard the tab would silently report a WINDOW total under a
+// whole-horizon label — numbers that look right and are wrong. Today it's
+// unreachable (this tab's getters take no range argument, so `range` is
+// never present), which is exactly why it needs a direct unit test rather
+// than relying on a live payload to exercise it.
+describe('isPartialPayload', () => {
+  it('is false for an unranged payload — the normal case', () => {
+    expect(isPartialPayload([{ index: [], columns: [], data: [] }])).toBe(false)
+  })
+
+  it('is false for a payload that is ranged but complete', () => {
+    const ts = {
+      index: [], columns: [], data: [],
+      range: { from: 0, to: 47, total: 48, complete: true, capped: false },
+    }
+    expect(isPartialPayload([ts])).toBe(false)
+  })
+
+  it('is TRUE for a windowed payload', () => {
+    // The regression this guards: converting AggregatedOverview's getters to
+    // ranged calls would otherwise turn its horizon KPIs into window totals
+    // under horizon labels, silently.
+    const ts = {
+      index: [], columns: [], data: [],
+      range: { from: 0, to: 719, total: 26280, complete: false, capped: false },
+    }
+    expect(isPartialPayload([ts])).toBe(true)
+  })
+
+  it('is TRUE if ANY payload is windowed', () => {
+    const whole = { index: [], columns: [], data: [] }
+    const part = {
+      index: [], columns: [], data: [],
+      range: { from: 0, to: 0, total: 100, complete: false, capped: false },
+    }
+    expect(isPartialPayload([whole, null, part, undefined])).toBe(true)
+  })
+
+  it('ignores null and undefined payloads', () => {
+    expect(isPartialPayload([null, undefined])).toBe(false)
+  })
 })
