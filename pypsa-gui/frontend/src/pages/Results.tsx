@@ -191,6 +191,15 @@ export default function Results() {
   // that way so the warn-coloured banner only appears when the user has
   // genuinely narrowed the range.
   const seededRef = useRef(false)
+  // The bounds `defaultWindow()` seeded automatically, as opposed to bounds
+  // the user has since typed — see the `isDefaultWindow` derivation below
+  // (FIX 4, results-tabs-window final review). Only the flat (`kind ===
+  // 'iso'`) branch narrows `fromIso`/`toIso` away from the full horizon;
+  // the multi-period branch (`kind === 'period'`) narrows via
+  // `selectedPeriod` instead, which `isFiltered` already ignores, so this
+  // ref is only ever populated — and only ever needs to be — for the flat
+  // default-window case.
+  const seededDefaultRef = useRef<{ fromIso: string; toIso: string } | null>(null)
   useEffect(() => {
     if (seededRef.current) return
     if (!firstSnap16 || !lastSnap16) return
@@ -203,8 +212,11 @@ export default function Results() {
     if (w.kind === 'period') {
       setSelectedPeriod(w.period)
     } else if (w.kind === 'iso') {
-      setFromIso(w.fromIso.slice(0, 16))
-      setToIso(w.toIso.slice(0, 16))
+      const from16 = w.fromIso.slice(0, 16)
+      const to16 = w.toIso.slice(0, 16)
+      setFromIso(from16)
+      setToIso(to16)
+      seededDefaultRef.current = { fromIso: from16, toIso: to16 }
     }
     seededRef.current = true
   }, [firstSnap16, lastSnap16, snap])
@@ -254,18 +266,48 @@ export default function Results() {
     iso && baseYear && displayYear !== baseYear && iso.startsWith(displayYear)
       ? baseYear + iso.slice(4) : iso
 
-  // Active filter = the user moved at least one bound off the full horizon.
-  // When fromIso === firstSnap16 AND toIso === lastSnap16 we treat it as
-  // unfiltered, so the seeded defaults don't trigger the warn banner.
-  const isFiltered =
+  // Raw "narrower than the full horizon" check on the iso bounds alone,
+  // regardless of what caused it — a user edit, or the seeded flat-window
+  // default. This is what should drive VISIBILITY (the chip / clear / reset
+  // controls in the strip below): they need to show whenever the view isn't
+  // the whole horizon, whether or not the user is the one who narrowed it.
+  const isNarrowed =
     (!!fromIso && fromIso !== firstSnap16) ||
     (!!toIso   && toIso   !== lastSnap16)
 
-  // True whenever the ACTIVE view is not the whole horizon, whoever caused it.
-  // `isFiltered` deliberately excludes the seeded defaults so the warn styling
-  // means "you narrowed this"; a default window still has to be visible, just
-  // not alarming.
-  const isWindowed = isFiltered || selectedPeriod !== 'all'
+  // True while fromIso/toIso still equal exactly what the seeding effect put
+  // there for the flat (`kind === 'iso'`) opening window — i.e. the user
+  // hasn't touched the bounds since. The flat default (DEFAULT_FLAT_WINDOW =
+  // 720 h) narrows fromIso/toIso away from firstSnap16/lastSnap16 the same
+  // way a user-typed narrowing would — so without this check, `isFiltered`
+  // below couldn't tell "the app opened this way" from "the user did this",
+  // and every flat network over WINDOW_THRESHOLD opened already flagged as
+  // user-filtered. The moment the user edits either bound (Reset included —
+  // Reset sets them back to the FULL horizon, not to this default), the
+  // comparison stops matching and isFiltered resumes reflecting the real
+  // narrowing.
+  const isDefaultWindow =
+    !!seededDefaultRef.current
+    && fromIso === seededDefaultRef.current.fromIso
+    && toIso === seededDefaultRef.current.toIso
+
+  // Active filter = the user caused the narrowing — i.e. it's narrowed AND
+  // it is NOT (still) the seeded default. Drives WARN STYLING ONLY (the
+  // header tint + chip colour below); visibility is `isWindowed`,
+  // independent of this, so the default window's controls stay visible even
+  // though isFiltered — and therefore the warn styling — is false for it.
+  const isFiltered = isNarrowed && !isDefaultWindow
+
+  // True whenever the ACTIVE view is not the whole horizon, whoever caused
+  // it — deliberately independent of `isFiltered` so a default window still
+  // has to be visible, just not alarming. Before FIX 4 this used `isFiltered`
+  // directly, which — for the flat >8760 default — was BOTH the visibility
+  // flag AND (incorrectly) the warn-styling flag: the two purposes hadn't
+  // been split apart, so making isFiltered accurate for styling would have
+  // also hidden the strip for a genuinely windowed default view. Splitting
+  // isNarrowed (visibility) from isFiltered (styling) here is what lets both
+  // be correct at once.
+  const isWindowed = isNarrowed || selectedPeriod !== 'all'
 
   const resetHorizon = () => {
     if (firstSnap16) setFromIso(firstSnap16)

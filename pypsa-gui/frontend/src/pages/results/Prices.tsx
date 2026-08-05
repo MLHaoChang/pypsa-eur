@@ -13,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
   ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
-  useSeasonalViewMode, SeasonalLineCardGrid, durationCurvePoints,
+  useSeasonalViewMode, SeasonalLineCardGrid, durationCurvePoints, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -50,7 +50,7 @@ export default function Prices() {
   // Positional bounds for the active Horizon filter, resolved against the
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // prices query below can be windowed before any payload exists.
-  const { win, winValid } = useResultsWindow(currentProject)
+  const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   // Refs for SVG export — one per chart section.
   const hourlyChartRef   = useRef<HTMLDivElement | null>(null)
   const durationChartRef = useRef<HTMLDivElement | null>(null)
@@ -58,7 +58,7 @@ export default function Prices() {
   // PyPSA's `n.pf()` doesn't compute duals, so always pin source='lopf'.
   const { data: priceTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'prices', 'lopf', win.from, win.to),
-    queryFn: () => resultsApi.getPrices('lopf', win),
+    queryFn: () => resultsApi.getPrices('lopf', fetchRange),
     enabled: winValid,
   })
   // CO₂ emissions for the cap shadow price KPI. Other CO₂ data lives in the
@@ -200,6 +200,11 @@ export default function Prices() {
 
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+
+      {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
+          final review) — a narrow-but-wide window can still hit the
+          server's MAX_RESPONSE_VALUES cap even after the primary fix. ── */}
+      <WindowCapBanner payloads={[tsP]} />
 
       {/* ── Fallback banner (LP duals all zero → analytical fallback) ─── */}
       {tsP.source === 'fallback' && (

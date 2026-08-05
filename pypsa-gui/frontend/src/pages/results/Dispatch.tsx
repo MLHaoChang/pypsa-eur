@@ -16,7 +16,7 @@ import {
   generatorGroup, aggregateTS, isRenewableCarrier, durationCurvePoints, useWeightCtx,
   weightedSum, weightedSumSplit, averageScaling, hasScaling,
   fmtEnergy, fmtCurrency, fmtPower, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
-  ChartCard, ChartActions,
+  ChartCard, ChartActions, WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   SEASONS, SEASON_OF_MONTH, SEASON_ACCENT,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
@@ -247,7 +247,7 @@ export default function Dispatch() {
   // below can be windowed before any payload exists. Distinct from `range`
   // further down, which resolves against the fetched payload's own index to
   // re-slice client-side — see the comment at that call site.
-  const { win, winValid } = useResultsWindow(currentProject)
+  const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   // Cost breakdown: used by the OPEX KPI strip + per-class table below. Same
   // endpoint Capacity Expansion uses, cached under the shared queryKey so we
   // don't double-fetch when both tabs are mounted. (LP-only — no source, and
@@ -255,7 +255,7 @@ export default function Dispatch() {
   const { data: cost } = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'), queryFn: resultsApi.getCostBreakdown })
   const { data: gensTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'generators', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getGeneratorResults(resultSource, win),
+    queryFn: () => resultsApi.getGeneratorResults(resultSource, fetchRange),
     enabled: winValid,
   })
   // Curtailment = max(p_max_pu * p_nom_opt − p, 0). Computed server-side.
@@ -265,7 +265,7 @@ export default function Dispatch() {
   // windowed the same as its seven siblings above.
   const { data: curtailTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'curtailment', win.from, win.to),
-    queryFn: () => resultsApi.getCurtailment(win),
+    queryFn: () => resultsApi.getCurtailment(fetchRange),
     enabled: winValid,
   })
   // Storage gets BOTH SoC (MWh) AND signed power (MW). The power view is what
@@ -273,27 +273,27 @@ export default function Dispatch() {
   // negative = charging. SoC is the energy reservoir level.
   const { data: storTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'storage', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getStorageResults(resultSource, win),
+    queryFn: () => resultsApi.getStorageResults(resultSource, fetchRange),
     enabled: winValid,
   })
   const { data: storPowerTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'storage_dispatch', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getStorageDispatchResults(resultSource, win),
+    queryFn: () => resultsApi.getStorageDispatchResults(resultSource, fetchRange),
     enabled: winValid,
   })
   const { data: storeTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'store_dispatch', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getStoreDispatchResults(resultSource, win),
+    queryFn: () => resultsApi.getStoreDispatchResults(resultSource, fetchRange),
     enabled: winValid,
   })
   const { data: storeETS } = useQuery({
     queryKey: nk(currentProject, 'results', 'store_energy', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getStoreEnergyResults(resultSource, win),
+    queryFn: () => resultsApi.getStoreEnergyResults(resultSource, fetchRange),
     enabled: winValid,
   })
   const { data: loadTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'loads', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getLoadResults(resultSource, win),
+    queryFn: () => resultsApi.getLoadResults(resultSource, fetchRange),
     enabled: winValid,
   })
   // Per-link p0 (signed MW; positive = bus0→bus1). Rendered as one section
@@ -301,7 +301,7 @@ export default function Dispatch() {
   // electrolyser dispatch separately.
   const { data: linkTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'links', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getLinkResults(resultSource, win),
+    queryFn: () => resultsApi.getLinkResults(resultSource, fetchRange),
     enabled: winValid,
   })
   // VOLL slack dispatch — non-null only when last solve ran with voll > 0
@@ -309,7 +309,7 @@ export default function Dispatch() {
   // `getLostLoad` now carries an optional range — windowed like the rest.
   const { data: lostLoad } = useQuery({
     queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
-    queryFn: () => resultsApi.getLostLoad(win),
+    queryFn: () => resultsApi.getLostLoad(fetchRange),
     enabled: winValid,
   })
   // Per-carrier economics (live network) — drives the per-carrier KPI strip
@@ -524,10 +524,20 @@ export default function Dispatch() {
   }, [links])
 
   // Horizon filter — applies to every aggregation below. resolveRange picks
-  // the first non-null TSPayload to derive bounds from, since all result
-  // series share `n.snapshots` as the index. The parallel `periods` array
-  // (multi-period only) lets resolveRange narrow to a contiguous period slice
-  // when the user has picked one from the strip above.
+  // the first non-null TSPayload to derive bounds from. This is NOT because
+  // every result series is guaranteed to share `n.snapshots` as its index —
+  // per-endpoint capping (routers/results.py's MAX_RESPONSE_VALUES, see
+  // useResultsWindow's `fetchRange`) can serve a shorter window on one
+  // endpoint than another, so `gensTS`/`loadTS`/`storTS` can in principle
+  // come back different lengths. FIX 1 in the final review restores the
+  // shared-index property in the COMMON case (the default/Reset view sends
+  // no bounds at all, so nothing caps); the six windowing tabs' truncation
+  // banner (`shared.tsx::isTruncatedPayload`) is what catches the remaining
+  // narrow-but-huge-window case where one endpoint still caps and this
+  // derived `range` silently applies the wrong bounds to the others. The
+  // parallel `periods` array (multi-period only) lets resolveRange narrow to
+  // a contiguous period slice when the user has picked one from the strip
+  // above.
   const filter = useResultsFilter()
   const refTs = (gensTS as TSPayload | null)
               ?? (loadTS as TSPayload | null)
@@ -1228,6 +1238,19 @@ export default function Dispatch() {
   // with `overflow-hidden` then clip their charts to a thin sliver.
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+
+      {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
+          final review) — a genuinely narrow-but-wide window can still hit
+          MAX_RESPONSE_VALUES and get capped server-side even after the
+          primary fix restores the no-bounds path for whole-horizon requests.
+          Surface it rather than let totals/charts silently under-report. */}
+      <WindowCapBanner payloads={[
+        gensTS as TSPayload | null, curtailTS as TSPayload | null,
+        storTS as TSPayload | null, storPowerTS as TSPayload | null,
+        storeTS as TSPayload | null, storeETS as TSPayload | null,
+        loadTS as TSPayload | null, linkTS as TSPayload | null,
+        lostLoad as TSPayload | null,
+      ]} />
 
       {/* ── View switcher: Dispatch ↔ Full Load Hours ─────────── */}
       <section className="flex items-center gap-2 flex-wrap">

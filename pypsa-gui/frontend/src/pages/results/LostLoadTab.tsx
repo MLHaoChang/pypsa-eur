@@ -9,7 +9,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
   type TSPayload, type WeightCtx, weightedSumSplit, aggregateTS,
-  shortStamp, useWeightCtx,
+  shortStamp, useWeightCtx, WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
@@ -49,10 +49,10 @@ export default function LostLoadTab() {
   // Positional bounds for the active Horizon filter, resolved against the
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // lost-load query below can be windowed before any payload exists.
-  const { win, winValid } = useResultsWindow(currentProject)
+  const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   const { data: lostLoad } = useQuery({
     queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
-    queryFn: () => resultsApi.getLostLoad(win),
+    queryFn: () => resultsApi.getLostLoad(fetchRange),
     enabled: winValid,
   })
   // WeightCtx + timeline from the shared hook (fetches /snapshots +
@@ -147,6 +147,10 @@ export default function LostLoadTab() {
 
   return (
     <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+      {/* Truncated-window banner — see FIX 1 secondary in the
+          results-tabs-window final review: a narrow-but-wide window can
+          still hit the server's MAX_RESPONSE_VALUES cap. */}
+      <WindowCapBanner payloads={[lostLoad as TSPayload | null]} />
       <header>
         <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
           Lost load

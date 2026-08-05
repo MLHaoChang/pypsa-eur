@@ -10,7 +10,7 @@ import { nk } from '../../utils/queryKeys'
 import type { Generator } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, weightedSum, aggregateTS,
-  isRenewableCarrier, shortStamp, useWeightCtx,
+  isRenewableCarrier, shortStamp, useWeightCtx, WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
@@ -31,10 +31,10 @@ export default function Curtailment() {
   // Positional bounds for the active Horizon filter, resolved against the
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // per-snapshot queries below can be windowed before any payload exists.
-  const { win, winValid } = useResultsWindow(currentProject)
+  const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   const { data: curtailTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'curtailment', win.from, win.to),
-    queryFn: () => resultsApi.getCurtailment(win),
+    queryFn: () => resultsApi.getCurtailment(fetchRange),
     enabled: winValid,
   })
   const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
@@ -82,7 +82,7 @@ export default function Curtailment() {
   // Dispatch tab's same formula so the two views stay reconciled.
   const { data: gensTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'generators', win.from, win.to),
-    queryFn: () => resultsApi.getGeneratorResults(undefined, win),
+    queryFn: () => resultsApi.getGeneratorResults(undefined, fetchRange),
     enabled: winValid,
   })
   const totals = useMemo(() => {
@@ -107,6 +107,10 @@ export default function Curtailment() {
 
   return (
     <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+      {/* Truncated-window banner — see FIX 1 secondary in the
+          results-tabs-window final review: a narrow-but-wide window can
+          still hit the server's MAX_RESPONSE_VALUES cap. */}
+      <WindowCapBanner payloads={[curtailTS as TSPayload | null, gensTS as TSPayload | null]} />
       <header>
         <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
           Renewable curtailment

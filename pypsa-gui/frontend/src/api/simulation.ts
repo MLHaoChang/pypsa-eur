@@ -389,6 +389,12 @@ export const resultsApi = {
     bus_carriers?: Record<string, string>
     // Multi-period: parallel array of period years for each `index` entry.
     periods?: number[]
+    // Present on ranged requests (routers/results.py::_serve_ts /
+    // _ts_payload) — see the matching field on `TSPayload` in
+    // pages/results/shared.tsx for the full contract. Not re-exported from
+    // there (api/ doesn't depend on pages/) so the shape is inlined; keep it
+    // in sync if `TSPayload.range` ever changes.
+    range?: { from: number; to: number; total: number; complete: boolean; capped: boolean }
   }>('/results/lost_load', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
   // Transmission-losses summary. `enabled=false` ⇒ the solve didn't model
   // losses, in which case totals/peak are 0 (intentional: the LoadFlow tab

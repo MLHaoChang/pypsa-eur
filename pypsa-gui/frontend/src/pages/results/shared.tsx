@@ -66,6 +66,52 @@ export interface TSPayload {
   range?: { from: number; to: number; total: number; complete: boolean; capped: boolean }
 }
 
+// True when any payload's `range` reports the server served LESS than what
+// was asked for — either it hit MAX_RESPONSE_VALUES and capped (`capped`),
+// or the served window otherwise falls short of the request (`complete ===
+// false`; capping is the only way that happens in practice today, but the
+// two fields are checked independently since they're independent on the
+// wire). This is the counterpart to `AggregatedOverview.isPartialPayload`,
+// not a duplicate of it:
+//   • `isPartialPayload` (AggregatedOverview.tsx) guards a tab that must
+//     NEVER receive a ranged payload at all — ANY `range` key there is
+//     already a bug, because that tab reports whole-horizon totals.
+//   • `isTruncatedPayload` is for the six WINDOWING tabs (Dispatch,
+//     Curtailment, LostLoadTab, LoadFlow, Prices, StorageCycling), which
+//     legitimately request ranged payloads. A `range` key on its own is
+//     expected and fine there — what's worth surfacing to the user is the
+//     narrower case where the server gave back FEWER rows than the window
+//     asked for, so totals/charts on screen cover less than the user
+//     thinks they do.
+// Kept in this one shared spot (not inlined per-tab) so the six call sites
+// can't drift, and so it's unit-testable on its own — see shared.test.tsx.
+export function isTruncatedPayload(
+  payloads: Array<TSPayload | null | undefined>,
+): boolean {
+  return payloads.some(p => p?.range != null && (p.range.capped || p.range.complete === false))
+}
+
+// Drop-in warning banner for the six windowing tabs — renders nothing unless
+// `isTruncatedPayload(payloads)` is true. Centralised alongside the
+// predicate so the banner copy (and its tone) can't drift per tab either.
+// Wording mirrors AggregatedOverview's partial-payload message: plain-language
+// statement of what happened, phrased as a fact about the data rather than
+// an alarm.
+export function WindowCapBanner(
+  { payloads }: { payloads: Array<TSPayload | null | undefined> },
+) {
+  if (!isTruncatedPayload(payloads)) return null
+  return (
+    <div className="rounded border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+      <span className="font-semibold">Results are truncated.</span>{' '}
+      The server returned fewer snapshots than requested for the selected
+      window, so the totals and charts on this tab cover only part of it.
+      Narrow the Horizon filter further, or reduce the number of assets in
+      scope, to see the full window.
+    </div>
+  )
+}
+
 // True when the payload is multi-period (server emitted a parallel periods
 // array). Single-period payloads omit the field; treat them as one big period.
 export function isMultiPeriod(ts: TSPayload | null | undefined): boolean {
@@ -190,25 +236,54 @@ export function useWeightCtx(refTs: TSPayload | null): {
   return { weightCtx, refIndex, refPeriods }
 }
 
+// Period equality for the weight-row lookup below. Loose (string-coerced)
+// comparison because one side comes from a TSPayload's `periods` array
+// (usually numbers) and the other from a weightings row (sometimes read
+// back off JSON as the same numeric type, but not guaranteed) — matches the
+// template-literal key StorageCycling.tsx builds (`${period}|${timestep}`),
+// which coerces both sides to string implicitly.
+function _samePeriod(
+  a: number | string | null | undefined,
+  b: number | string | null | undefined,
+): boolean {
+  if (a == null || b == null) return a == null && b == null
+  return String(a) === String(b)
+}
+
 // Single-row weighting lookup. Multi-period emits `timestep` instead of
 // `snapshot` so we match on both. Falls back to positional alignment when
 // the row's key field can't be matched — both `n.snapshots` and
 // `n.snapshot_weightings` come from the same MultiIndex so positional
 // alignment is exact when lengths agree (the common case).
+//
+// `period` MUST be threaded through and checked alongside `timestep` on
+// multi-period payloads: PyPSA replicates one operational year across every
+// investment period, so `timestep` (`.isoformat()`) alone is AMBIGUOUS — the
+// same ISO string appears once per period. Without the period check, a
+// WINDOWED payload starting at period 2 has `i=0` (the window-relative row
+// index) collide positionally against `sw[0]`, which is period 1's weight
+// row — same iso, wrong period, wrong weight, and the `.find()` fallback
+// below is never even reached because the positional branch matched first.
+// `StorageCycling.tsx`'s `wAt` keys on the same `period|timestep` pair —
+// match its approach so the two stop disagreeing.
 function _snapshotWeightRow(
   sw: SnapshotWeightRow[],
   i: number,
   iso: string,
+  period: number | string | null | undefined,
 ): SnapshotWeightRow | undefined {
   const r = sw[i]
   if (r && ((r.snapshot && r.snapshot === iso)
-          || (r.timestep && r.timestep === iso)
+          || (r.timestep && r.timestep === iso && _samePeriod(r.period, period))
           || (!r.snapshot && !r.timestep))) {
-    // Positional match: name field absent or already matches.
+    // Positional match: name field absent, or present and matching BOTH the
+    // timestep AND (when this is a multi-period row) its period.
     return r
   }
-  // Fallback name search (slower, used when lengths differ or order changed).
-  return sw.find(o => o.snapshot === iso || o.timestep === iso)
+  // Fallback search (slower, used when lengths differ or order changed) —
+  // same (timestep, period) pairing as the positional branch above.
+  return sw.find(o => o.snapshot === iso
+    || (o.timestep === iso && _samePeriod(o.period, period)))
 }
 
 // True if any non-trivial weight (≠ 1.0) is present. UX uses this to decide
@@ -242,16 +317,20 @@ function effectiveWeightAt(
   iso: string,
 ): number {
   if (!ctx) return 1
+  // Computed BEFORE the snapshot-weight lookup (not after, as before) so it
+  // can be threaded into `_snapshotWeightRow` — see that function's doc
+  // comment for why the period is required to disambiguate `timestep` on
+  // multi-period payloads.
+  const periodVal = ctx.snapshotPeriods?.[i]
   const sw = ctx.snapshotWeights
   let w = 1
   if (sw && sw.length > 0) {
-    const row = _snapshotWeightRow(sw, i, iso)
+    const row = _snapshotWeightRow(sw, i, iso, periodVal)
     if (row) {
       const v = row[column]
       if (typeof v === 'number' && Number.isFinite(v)) w *= v
     }
   }
-  const periodVal = ctx.snapshotPeriods?.[i]
   if (periodVal != null && ctx.periodWeights) {
     const pr = ctx.periodWeights.find(r => r.period === periodVal)
     if (pr) {

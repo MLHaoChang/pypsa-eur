@@ -9,7 +9,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { StorageUnit } from '../../api/types'
 import {
-  type TSPayload,
+  type TSPayload, WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
@@ -90,10 +90,10 @@ export default function StorageCycling() {
   // Positional bounds for the active Horizon filter, resolved against the
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // storage-dispatch query below can be windowed before any payload exists.
-  const { win, winValid } = useResultsWindow(currentProject)
+  const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   const { data: storPowerTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'storage_dispatch', win.from, win.to),
-    queryFn: () => resultsApi.getStorageDispatchResults(undefined, win),
+    queryFn: () => resultsApi.getStorageDispatchResults(undefined, fetchRange),
     enabled: winValid,
   })
   const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
@@ -158,7 +158,15 @@ export default function StorageCycling() {
     const rTo   = Math.max(0, Math.min(range.to,   lastRow))
     // Bucket throughput by (column, period). For flat networks the period
     // key is `null` and there's only one bucket per column.
-    const periods = ts.periods ?? snap?.periods ?? null
+    //
+    // `ts.periods` only — NOT `?? snap?.periods`. `_ts_payload` (backend)
+    // emits a `periods` array for every MultiIndex frame, so the fallback
+    // never fires for a genuine multi-period payload. Worse, it was actively
+    // wrong on a WINDOWED multi-period payload: `snap.periods` is full-
+    // horizon (absolute row i), while `row` here indexes into `ts.data`,
+    // which is window-relative. Falling back to it would misalign every
+    // row's period the same way the pre-fix `_snapshotWeightRow` did.
+    const periods = ts.periods ?? null
     const throughputByColPeriod = new Map<string, Map<number | null, number>>()
     const periodSet = new Set<number | null>()
     for (let row = rFrom; row <= rTo; row++) {
@@ -278,6 +286,10 @@ export default function StorageCycling() {
 
   return (
     <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+      {/* Truncated-window banner — see FIX 1 secondary in the
+          results-tabs-window final review: a narrow-but-wide window can
+          still hit the server's MAX_RESPONSE_VALUES cap. */}
+      <WindowCapBanner payloads={[storPowerTS as TSPayload | null]} />
       <header>
         <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
           Storage cycling
