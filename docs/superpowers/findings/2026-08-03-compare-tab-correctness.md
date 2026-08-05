@@ -85,11 +85,35 @@ decision, not something to guess at in this task:
    tab's UI copy (e.g. a footnote: "excludes link investment — see
    Economics tab for full CAPEX").
 
-**Test:** `tests/test_compare_cross_surface.py::test_capacity_and_economics_agree_on_total_capex`,
-marked `@pytest.mark.xfail(strict=True, reason="S1: Capacity omits link CAPEX
-that Economics counts — awaiting product decision, findings §S1")`. No
-production code was changed for S1, per the task brief's explicit
-instruction to measure and escalate, not decide.
+### S1 RESOLVED — 2026-08-04, by the product owner
+
+**Decision: include EXTENDABLE links in the Capacity tab.** Passive branches
+(lines, transformers, and non-extendable links) stay excluded — the LP cannot
+resize them, so they contribute nothing to the objective and their notional
+CAPEX is not capacity expansion.
+
+**Implementation (MEASURED):** `_compute_total_annuitised_capex` gained
+`_walk(n.links, "p_nom", "links", extendable_only=True)`, and `_walk` gained
+an `extendable_only` filter. `test_capacity_and_economics_agree_on_total_capex`
+now passes with the `xfail` marker REMOVED, not widened — Capacity and
+Economics agree at `rel=1e-6` on the golden fixture. Full backend suite after
+the change: 2174 passed, 18 skipped, 0 failed, 0 xfailed.
+
+`test_capacity_capex_agrees_with_periodized_capital_costs` was updated in the
+same commit to mirror the new rule (its oracle now walks extendable links
+too); leaving it on the old three-class walk would have made it fail against
+correct behaviour.
+
+**KNOWN RESIDUAL — deliberately left open.** `_compute_economics_summary`
+walks EVERY link with a positive `capital_cost` (`_walk_capex_plain("Link",
+n.links, "p_nom")`), not only extendable ones. So a NON-extendable link
+carrying a `capital_cost` would still appear in Economics and not in Capacity,
+and the two tabs would disagree again by that amount. No such asset exists on
+the golden fixture or on the real project this was measured against, which is
+why the test passes — **the test does not prove the general case.** Closing it
+means deciding whether a sunk, unresizable asset belongs in a capacity-
+EXPANSION view at all, which is a further product question and was not part of
+the decision taken here.
 
 ---
 

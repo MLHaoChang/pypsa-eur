@@ -808,9 +808,16 @@ def _compute_total_annuitised_capex(
 
     out: dict = {}
 
-    def _walk(df, nom_col: str, comp_attr: str) -> None:
+    def _walk(df, nom_col: str, comp_attr: str, *, extendable_only: bool = False) -> None:
         if df is None or df.empty:
             return
+        if extendable_only:
+            ext_col = f"{nom_col}_extendable"
+            if ext_col not in df.columns:
+                return
+            df = df[df[ext_col].astype(bool)]
+            if df.empty:
+                return
         opt_col = f"{nom_col}_opt"
         capacity_col = opt_col if opt_col in df.columns else (nom_col if nom_col in df.columns else None)
         if capacity_col is None:
@@ -843,16 +850,34 @@ def _compute_total_annuitised_capex(
             else:
                 b["total"] += per_year_meur
 
-    # Walk only generation / storage / stores. Lines / links / transformers
-    # are deliberately omitted — PyPSA's `n.statistics()` reports them as
-    # zero CAPEX (passive branches with no extension don't contribute to the
-    # LP objective even when capital_cost is derived from overnight_cost),
-    # so including them here would produce a "line CAPEX" carrier value that
-    # the user can't reconcile with the live Results panel. Branch expansion
-    # is visible in the Line loading tab; that's where it belongs.
+    # Generation / storage / stores unconditionally, plus EXTENDABLE links.
+    #
+    # Lines and transformers stay omitted, and so do NON-extendable links: a
+    # passive branch that the LP cannot resize contributes nothing to the
+    # objective, and reporting its notional CAPEX here produced a "line CAPEX"
+    # carrier value nobody could reconcile with the Results panel. Branch
+    # expansion is visible in the Line loading tab; that is where it belongs.
+    #
+    # An EXTENDABLE link is a different animal, and excluding it was a defect:
+    # the LP does size it, its capital_cost does enter the objective, and
+    # `_compute_economics_summary` has always counted it. So the two tabs of
+    # one comparison reported different CAPEX for one network — MEASURED at
+    # 25.154535 vs 25.320785 M€ on the golden fixture (exactly the
+    # electrolyzer's CAPEX) and at a 56.192453 M€ gap on a real three-period
+    # project. See docs/superpowers/findings/
+    # 2026-08-03-compare-tab-correctness.md §S1.
+    #
+    # KNOWN RESIDUAL: `_compute_economics_summary` walks EVERY link with a
+    # positive capital_cost (`_walk_capex_plain("Link", ...)`), not only the
+    # extendable ones. A non-extendable link carrying a capital_cost therefore
+    # still lands in Economics and not here. That case does not arise on the
+    # fixture or on the project this was measured against, and closing it means
+    # deciding whether a sunk, unresizable asset belongs in a capacity-
+    # EXPANSION view at all — a product question, deliberately left open.
     _walk(n.generators,    "p_nom", "generators")
     _walk(n.storage_units, "p_nom", "storage_units")
     _walk(n.stores,        "e_nom", "stores")
+    _walk(n.links,         "p_nom", "links", extendable_only=True)
     return out
 
 

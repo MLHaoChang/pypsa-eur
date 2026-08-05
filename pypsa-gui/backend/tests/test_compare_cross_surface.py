@@ -44,10 +44,18 @@ def test_capacity_capex_agrees_with_periodized_capital_costs(golden):
     pcc = periodized_capital_costs(golden, _state.get("solver_config"))
     horizon_years = float(sum(gf.GOLDEN_YEARS))
     expected = 0.0
-    for attr, nom in (("generators", "p_nom"), ("storage_units", "p_nom"),
-                      ("stores", "e_nom")):
+    # Links are EXTENDABLE-ONLY here, mirroring `_walk(..., extendable_only=True)`
+    # in `_compute_total_annuitised_capex`. A passive branch the LP cannot
+    # resize contributes nothing to the objective and is deliberately excluded
+    # from this tab; an extendable link is sized by the LP and is not.
+    for attr, nom, ext_only in (("generators", "p_nom", False),
+                                ("storage_units", "p_nom", False),
+                                ("stores", "e_nom", False),
+                                ("links", "p_nom", True)):
         df = getattr(golden, attr)
         for name in df.index:
+            if ext_only and not bool(df.at[name, f"{nom}_extendable"]):
+                continue
             cc = pcc.get(attr, {}).get(name, {}).get("capital_cost", 0.0)
             opt = float(df.at[name, f"{nom}_opt"] if f"{nom}_opt" in df.columns
                         else df.at[name, nom])
@@ -279,34 +287,30 @@ def test_curtailment_agrees_with_results_curtailment():
 
 # ── Task 14: Capacity vs. Economics total CAPEX (suspect S1) ────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="S1: Capacity omits link CAPEX that Economics counts — awaiting product decision, findings §S1",
-)
 def test_capacity_and_economics_agree_on_total_capex(golden):
     """
     Two tabs of one comparison must not report different CAPEX for one
-    network. `_compute_total_annuitised_capex` (routers/compare.py) walks
-    only Generator/StorageUnit/Store; `_compute_economics_summary` walks
-    those PLUS Link. On the golden fixture the `electrolyzer` Link is
-    extendable and the LP builds ~28.57 MW of it (overnight_cost=1,500,000,
-    horizon CAPEX EUR166,249.77 per the Task 10 / S3 measurement above) — so
-    the Capacity tab's total is short by exactly that amount.
+    network. This FAILED until 2026-08-04: `_compute_total_annuitised_capex`
+    walked only Generator/StorageUnit/Store while `_compute_economics_summary`
+    walked those PLUS Link, so the golden fixture's extendable `electrolyzer`
+    (~28.57 MW built, horizon CAPEX EUR166,249.77) was counted by one tab and
+    not the other.
 
-    Measured (see findings §S1 for the numbers this xfail pins): Capacity
-    25.154535 M€ vs Economics 25.320785 M€, a 0.166250 M€ gap == the
-    electrolyzer's CAPEX (0.16624977136776928 M€, per Task 10/S3 above) to
-    every printed digit.
+    MEASURED before the fix: Capacity 25.154535 M€ vs Economics 25.320785 M€ —
+    a 0.166250 M€ gap equal to the electrolyzer's CAPEX
+    (0.16624977136776928 M€) to every printed digit. On a real three-period
+    project the same defect measured a 56.192453 M€ gap, exactly that
+    project's two links' horizon CAPEX.
 
-    The `_walk` helper's own trailing comment in
-    `_compute_total_annuitised_capex` says the omission is deliberate —
-    lines/links are left out because `n.statistics()` reports passive
-    branches as zero CAPEX. That holds for a FIXED line but not for an
-    EXTENDABLE link, which does enter the LP objective. Two defensible
-    resolutions (include extendable links only, or keep the omission and
-    label it in the Capacity tab's UI copy) are a product decision, not
-    something to guess at here — see the findings doc. Do not remove this
-    xfail without that decision being made.
+    Resolved by the product owner on 2026-08-04: EXTENDABLE links are now
+    included in the Capacity tab, passive branches remain excluded. See
+    `_compute_total_annuitised_capex`'s trailing comment and findings §S1.
+
+    KNOWN RESIDUAL, deliberately not closed: `_compute_economics_summary`
+    walks EVERY link with a positive capital_cost, not only extendable ones,
+    so a NON-extendable link carrying a capital_cost would still appear in
+    Economics and not here. No such asset exists on this fixture, which is
+    why this test passes — it does not prove the general case.
     """
     s = cs.summarise(golden)
     cap_total = sum(c.total for c in s["capacity"].capex_meur_by_carrier.values())
