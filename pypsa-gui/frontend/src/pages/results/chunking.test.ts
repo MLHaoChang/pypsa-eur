@@ -75,4 +75,13 @@ describe('chunkBounds', () => {
 
     expect(bounds).toEqual({ from: 8760, to: 8927 })
   })
+
+  it('aligns relative to the clamp start one chunk in, where zero-relative would differ', () => {
+    // The earlier clamp-start test uses idx === clampTo.start, where
+    // Math.max(lo, ...) masks a zero-relative offset. This index sits one
+    // full chunk past the period start, so the two formulas diverge:
+    // lo-relative -> 8928, zero-relative -> 8904.
+    expect(chunkBounds(8928, 168, 26280, { start: 8760, end: 17519 }))
+      .toEqual({ from: 8928, to: 9095 })
+  })
 })
