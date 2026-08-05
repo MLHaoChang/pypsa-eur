@@ -5,7 +5,7 @@ import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
-import { ResultsFilterProvider } from './results/filterContext'
+import { ResultsFilterProvider, defaultWindow } from './results/filterContext'
 import { type TSPayload, type WeightCtx } from './results/shared'
 import CompareView, { type Tab as CompareTab } from './CompareView'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -194,10 +194,20 @@ export default function Results() {
   useEffect(() => {
     if (seededRef.current) return
     if (!firstSnap16 || !lastSnap16) return
+    // Seed the inputs to the full span first — this is what suppresses the
+    // native datetime-local placeholder and shows the model's real extent.
     setFromIso(firstSnap16)
     setToIso(lastSnap16)
+    // Then narrow to the opening window, if this network warrants one.
+    const w = defaultWindow(snap?.snapshots ?? [], snap?.periods)
+    if (w.kind === 'period') {
+      setSelectedPeriod(w.period)
+    } else if (w.kind === 'iso') {
+      setFromIso(w.fromIso.slice(0, 16))
+      setToIso(w.toIso.slice(0, 16))
+    }
     seededRef.current = true
-  }, [firstSnap16, lastSnap16])
+  }, [firstSnap16, lastSnap16, snap])
 
   // datetime-local inputs return "YYYY-MM-DDTHH:mm"; PyPSA ISO timestamps are
   // "YYYY-MM-DDTHH:mm:ss". The resolveRange string compare doesn't need
@@ -251,9 +261,16 @@ export default function Results() {
     (!!fromIso && fromIso !== firstSnap16) ||
     (!!toIso   && toIso   !== lastSnap16)
 
+  // True whenever the ACTIVE view is not the whole horizon, whoever caused it.
+  // `isFiltered` deliberately excludes the seeded defaults so the warn styling
+  // means "you narrowed this"; a default window still has to be visible, just
+  // not alarming.
+  const isWindowed = isFiltered || selectedPeriod !== 'all'
+
   const resetHorizon = () => {
     if (firstSnap16) setFromIso(firstSnap16)
     if (lastSnap16)  setToIso(lastSnap16)
+    setSelectedPeriod('all')
   }
 
   // Tabs that want the horizon filter inline (Asset Detail) drive THIS state
@@ -338,13 +355,15 @@ export default function Results() {
           {filterOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           <Filter size={11} />
           Horizon filter
-          {isFiltered && (
-            <span className="ml-2 text-warn font-mono text-[10px]">
-              {toDisplay(fromIso) || '…'} → {toDisplay(toIso) || '…'}
+          {isWindowed && (
+            <span className={`ml-2 font-mono text-[10px] ${isFiltered ? 'text-warn' : 'text-muted'}`}>
+              {selectedPeriod !== 'all'
+                ? `period ${selectedPeriod}`
+                : `${toDisplay(fromIso) || '…'} → ${toDisplay(toIso) || '…'}`}
             </span>
           )}
           <span className="flex-1" />
-          {isFiltered && (
+          {isWindowed && (
             <span
               onClick={(e) => {
                 e.stopPropagation()
