@@ -169,6 +169,11 @@ class SmokePrompt:
     # project's name + base_url + a session.requests.Session for cheap reads.
     # Should return None on PASS, or a failure string on FAIL.
     post_assertion: Any = None  # Callable[[ctx], str | None] - kept loose to avoid forward-ref noise
+    # Optional shared session id — when two SmokePrompts set the SAME
+    # session_id, _run_one_prompt reuses it instead of minting a fresh
+    # smoke-{uuid} for each, giving them one continuous chat.session_id
+    # for multi-turn continuity testing (P8a/P8b).
+    session_id: str | None = None
 
 
 # ── Smoke runner ────────────────────────────────────────────────────────────
@@ -205,7 +210,7 @@ def _print_frame_compact(frame: SSEFrame, verbose: bool) -> None:
 
 def _run_one_prompt(prompt: SmokePrompt, ctx: SmokeContext) -> PromptResult:
     """Drive ONE chat turn end-to-end. Returns PromptResult."""
-    session_id = f"smoke-{uuid.uuid4().hex[:12]}"
+    session_id = prompt.session_id or f"smoke-{uuid.uuid4().hex[:12]}"
     body: dict[str, Any] = {
         "session_id": session_id,
         "message": prompt.message,
@@ -445,6 +450,35 @@ def assert_generator_named(name: str):
     return _check
 
 
+def assert_component_field(component: str, name: str, field_name: str, expected: Any):
+    def _check(ctx: SmokeContext) -> str | None:
+        r = ctx.session.get(f"{ctx.base_url}/api/network/{component}", timeout=10)
+        if r.status_code != 200:
+            return f"GET /api/network/{component} returned {r.status_code}"
+        rows = r.json()
+        row = next((row for row in rows if row.get("name") == name), None)
+        if row is None:
+            return f"expected {component[:-1]} {name!r} to exist"
+        actual = row.get(field_name)
+        if actual != expected:
+            return f"expected {name}.{field_name} == {expected!r}, got {actual!r}"
+        return None
+    return _check
+
+
+def assert_component_absent(component: str, name: str):
+    def _check(ctx: SmokeContext) -> str | None:
+        r = ctx.session.get(f"{ctx.base_url}/api/network/{component}", timeout=10)
+        if r.status_code != 200:
+            return f"GET /api/network/{component} returned {r.status_code}"
+        rows = r.json()
+        names = {row.get("name") for row in rows}
+        if name in names:
+            return f"expected {component[:-1]} {name!r} to be deleted, still in {sorted(names)}"
+        return None
+    return _check
+
+
 # ── Prompt battery ──────────────────────────────────────────────────────────
 
 
@@ -459,6 +493,7 @@ def build_prompts(smoke_project: str) -> list[SmokePrompt]:
       + smoke prompt (here)
     Three doors, three independent failure surfaces.
     """
+    p8_session_id = f"smoke-{uuid.uuid4().hex[:12]}"
     return [
         SmokePrompt(
             name="P1_save_project_empty",
@@ -493,6 +528,27 @@ def build_prompts(smoke_project: str) -> list[SmokePrompt]:
         SmokePrompt(
             name="P5_validate_network",
             message="Validate the current network for solver-readiness.",
+        ),
+        SmokePrompt(
+            name="P6_update_generator_via_chat",
+            message="Change SmokeSolar's p_nom to 150.",
+            post_assertion=assert_component_field("generators", "SmokeSolar", "p_nom", 150.0),
+        ),
+        SmokePrompt(
+            name="P7_delete_generator_via_chat",
+            message="Delete the generator SmokeSolar.",
+            post_assertion=assert_component_absent("generators", "SmokeSolar"),
+        ),
+        SmokePrompt(
+            name="P8a_add_load_multiturn",
+            message="Add a Load named SmokeLoad at Bus0 with p_set=42.",
+            session_id=p8_session_id,
+        ),
+        SmokePrompt(
+            name="P8b_update_that_load_multiturn",
+            message="Set that load's p_set to 84 instead.",
+            session_id=p8_session_id,
+            post_assertion=assert_component_field("loads", "SmokeLoad", "p_set", 84.0),
         ),
     ]
 

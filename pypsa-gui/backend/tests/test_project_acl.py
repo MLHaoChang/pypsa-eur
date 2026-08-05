@@ -260,3 +260,119 @@ def test_ensure_project_access_raises_404_for_denied_user(db) -> None:
         ensure_project_access(db, user_b, root_a)
 
     assert exc.value.status_code == 404
+
+
+# ── accessible_project_ids: the batch resolver must not drift ────────────────
+# `routers/solve_queue.py:list_queue` is polled every 1.5s while a solve is
+# active, so it cannot afford `can_access_project` per job. It calls
+# `accessible_project_ids`, which answers the same question from three queries.
+# "Same question" is only true if it is tested, so these do exactly that.
+
+
+def _acl_matrix(db):
+    """
+    One org covering every grant `can_access_project` recognises.
+
+    Returns (org, {label: user}, [projects]) — a two-level tree plus a sibling
+    root, so lineage-inherited access and root-membership access are distinct.
+    """
+    org = _create_org(db, name="Matrix Org")
+    users = {
+        "admin": _create_user(db, email="m-admin@example.com"),
+        "root_creator": _create_user(db, email="m-root@example.com"),
+        "scenario_creator": _create_user(db, email="m-scenario@example.com"),
+        "assigned": _create_user(db, email="m-assigned@example.com"),
+        "stranger": _create_user(db, email="m-stranger@example.com"),
+    }
+    _add_org_membership(db, user=users["admin"], org=org, role="admin")
+    for label in ("root_creator", "scenario_creator", "assigned", "stranger"):
+        _add_org_membership(db, user=users[label], org=org, role="member")
+
+    root = _create_project(db, org=org, creator=users["root_creator"], name="Root")
+    child = _create_project(
+        db, org=org, creator=users["scenario_creator"], name="Child", parent=root
+    )
+    grandchild = _create_project(
+        db, org=org, creator=users["root_creator"], name="Grandchild", parent=child
+    )
+    other_root = _create_project(
+        db, org=org, creator=users["scenario_creator"], name="Other", parent=None
+    )
+    _assign(db, project=root, user=users["assigned"], assigned_by=users["root_creator"])
+    return org, users, [root, child, grandchild, other_root]
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["admin", "root_creator", "scenario_creator", "assigned", "stranger"],
+)
+def test_accessible_project_ids_agrees_with_can_access_project(db, label) -> None:
+    from services.project_acl import accessible_project_ids
+
+    _org, users, projects = _acl_matrix(db)
+    user = users[label]
+
+    expected = {p.id for p in projects if can_access_project(db, user, p)}
+    actual = accessible_project_ids(db, user, [p.id for p in projects])
+
+    assert actual == expected, (
+        f"{label}: batch resolver disagrees with can_access_project "
+        f"(missing {expected - actual}, extra {actual - expected})"
+    )
+
+
+def test_accessible_project_ids_never_leaves_the_callers_org(db) -> None:
+    from services.project_acl import accessible_project_ids
+
+    _org, users, projects = _acl_matrix(db)
+    other_org = _create_org(db, name="Elsewhere")
+    outsider = _create_user(db, email="outsider@example.com")
+    _add_org_membership(db, user=outsider, org=other_org, role="admin")
+    foreign = _create_project(db, org=other_org, creator=outsider, name="Foreign")
+
+    # An org admin asking about a project in ANOTHER org gets nothing back,
+    # even though `role == "admin"` short-circuits inside their own org.
+    assert accessible_project_ids(db, users["admin"], [foreign.id]) == set()
+    # …and the outsider learns nothing about this org's projects.
+    assert accessible_project_ids(db, outsider, [p.id for p in projects]) == set()
+
+
+def test_accessible_project_ids_returns_nothing_without_a_membership(db) -> None:
+    from services.project_acl import accessible_project_ids
+
+    _org, _users, projects = _acl_matrix(db)
+    orphan = _create_user(db, email="no-org@example.com")
+
+    assert accessible_project_ids(db, orphan, [p.id for p in projects]) == set()
+
+
+def test_accessible_project_ids_ignores_ids_that_are_not_projects(db) -> None:
+    from services.project_acl import accessible_project_ids
+
+    _org, users, projects = _acl_matrix(db)
+    deleted = uuid.uuid4()
+
+    result = accessible_project_ids(
+        db, users["admin"], [p.id for p in projects] + [deleted]
+    )
+    assert deleted not in result
+    assert result == {p.id for p in projects}
+    assert accessible_project_ids(db, users["admin"], []) == set()
+
+
+def test_accessible_project_ids_survives_a_cyclic_parent_chain(db) -> None:
+    """
+    `resolve_tree_root` raises ValueError on a cycle, which would 500 a polled
+    listing. The batch resolver stops at the repeat and fails the entry closed.
+    """
+    from services.project_acl import accessible_project_ids
+
+    _org, users, projects = _acl_matrix(db)
+    root, child = projects[0], projects[1]
+    root.parent_project_id = child.id  # root -> child -> root
+    db.commit()
+
+    stranger = users["stranger"]
+    assert accessible_project_ids(db, stranger, [root.id, child.id]) == set()
+    # The creator still gets in — the lineage check hits before the walk loops.
+    assert root.id in accessible_project_ids(db, users["root_creator"], [root.id])

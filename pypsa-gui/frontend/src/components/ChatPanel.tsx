@@ -38,6 +38,7 @@ import {
   type UploadMeta,
 } from '../api/uploads'
 import { deriveCostEur, useChatStore, type UploadMetaUI } from '../store/chatStore'
+import ApiKeySetup from './ApiKeySetup'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
@@ -50,6 +51,44 @@ import { UploadProgressToast } from './UploadProgressToast'
 // Matches the upload_service.ALLOWED_MIME_TYPES allowlist.
 const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx'
 const UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+
+// F2 — every localStorage touch in this panel is a UI PREFERENCE: a dismissed
+// touch hint, a drag-resized prompt height, and two opt-in flags. Losing any of
+// it costs the user nothing they would notice; taking the panel down for it
+// costs them the whole assistant.
+//
+// Both failure modes are real and neither is exotic. Reading the
+// `window.localStorage` PROPERTY throws `SecurityError` outright when the
+// browser is configured to block site data — the throw is on the property
+// access, before any method is called, which is why the guard has to wrap the
+// access and not just the call. `setItem` separately throws
+// `QuotaExceededError` in Safari Private Browsing and when the origin's quota
+// is full.
+//
+// Two of the four reads run inside `useState` initializers, so an unguarded
+// throw happens DURING render: React unwinds the whole subtree and the user
+// gets a blank chat pane rather than a forgotten preference. That is the defect
+// being fixed here, not the lost setting.
+//
+// The rest of the codebase (topologyLayoutStore.ts, selectionMemory.ts and ~7
+// others) already inlines try/catch at each site. These two helpers are the
+// same discipline factored out because this one file has ten sites.
+function readPref(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writePref(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Private mode, blocked site data, or a full quota. The panel keeps
+    // working; it just forgets this preference on the next load.
+  }
+}
 
 function _frame_data<T = Record<string, unknown>>(f: ChatFrame): T {
   return f.data as T
@@ -410,6 +449,8 @@ function ErrorBanner() {
         {error.error_kind === 'rate_limited' && 'Rate limited'}
         {error.error_kind === 'unauthorized' && 'API key rejected'}
         {error.error_kind === 'missing_api_key' && 'API key missing'}
+        {/* P-2 — the acting account stopped being active mid-turn. */}
+        {error.error_kind === 'inactive_acting_user' && 'Account is no longer active'}
         {error.error_kind === 'solver_in_flight' && 'Solver in flight'}
         {error.error_kind === 'parallel_destructive_not_allowed' && 'Multiple destructive actions in one turn'}
         {error.error_kind === 'tool_call_cap_exceeded' && 'Tool call limit reached this turn'}
@@ -434,6 +475,7 @@ function ErrorBanner() {
         {error.error_kind === 'vision_call_failed' && 'Vision call failed'}
         {!['project_exists', 'descendants_exist', 'confirmation_expired',
             'rate_limited', 'unauthorized', 'missing_api_key',
+            'inactive_acting_user',
             'solver_in_flight', 'parallel_destructive_not_allowed',
             'file_too_large', 'empty_file', 'invalid_filename',
             'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
@@ -446,6 +488,15 @@ function ErrorBanner() {
           && error.error_kind}
       </div>
       <div className="text-muted whitespace-pre-wrap">{error.message}</div>
+      {/*
+        U-1 — "API key missing" used to be a dead end. In the packaged app it
+        was THE state: the bundle ships no `backend/.env` on purpose, so this
+        banner was every user's entire experience of the assistant, with
+        nothing anywhere to act on. The setup form renders inline here rather
+        than on a settings page, because this is where the user is when they
+        find out.
+      */}
+      {error.error_kind === 'missing_api_key' && <ApiKeySetup />}
       <button
         className="mt-2 text-[10px] underline text-muted hover:text-text"
         onClick={() => setError(null)}
@@ -1090,17 +1141,17 @@ export default function ChatPanel() {
   const [touchHintVisible, setTouchHintVisible] = useState(false)
   useEffect(() => {
     if (!isCoarsePointer) return
-    if (localStorage.getItem('chat:touchHintShown') === '1') return
+    if (readPref('chat:touchHintShown') === '1') return
     setTouchHintVisible(true)
     const timer = window.setTimeout(() => {
       setTouchHintVisible(false)
-      localStorage.setItem('chat:touchHintShown', '1')
+      writePref('chat:touchHintShown', '1')
     }, 5000)
     return () => clearTimeout(timer)
   }, [isCoarsePointer])
   const dismissTouchHint = useCallback(() => {
     setTouchHintVisible(false)
-    localStorage.setItem('chat:touchHintShown', '1')
+    writePref('chat:touchHintShown', '1')
   }, [])
 
   const onDeleteChip = useCallback(async (fileId: string, filename: string) => {
@@ -1186,13 +1237,13 @@ export default function ChatPanel() {
   const PROMPT_MAX_H = 360
   const PROMPT_DEFAULT_H = 88
   const [promptHeight, setPromptHeight] = useState<number>(() => {
-    const stored = Number(localStorage.getItem('chat:promptHeight') || NaN)
+    const stored = Number(readPref('chat:promptHeight') || NaN)
     return Number.isFinite(stored) && stored >= PROMPT_MIN_H && stored <= PROMPT_MAX_H
       ? stored
       : PROMPT_DEFAULT_H
   })
   useEffect(() => {
-    localStorage.setItem('chat:promptHeight', String(promptHeight))
+    writePref('chat:promptHeight', String(promptHeight))
   }, [promptHeight])
   const dragStartRef = useRef<{ y: number; h: number } | null>(null)
   const onDragStart = useCallback((e: React.MouseEvent) => {
@@ -1439,12 +1490,10 @@ export default function ChatPanel() {
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
   // Toggled via the ⚙ gear popover in the header.
   const [autoUncheckAfterSend, setAutoUncheckAfterSend] = useState<boolean>(
-    () => localStorage.getItem('chat:autoUncheckAfterSend') === '1',
+    () => readPref('chat:autoUncheckAfterSend') === '1',
   )
   useEffect(() => {
-    localStorage.setItem(
-      'chat:autoUncheckAfterSend', autoUncheckAfterSend ? '1' : '0',
-    )
+    writePref('chat:autoUncheckAfterSend', autoUncheckAfterSend ? '1' : '0')
   }, [autoUncheckAfterSend])
   const [gearOpen, setGearOpen] = useState(false)
 
@@ -1488,7 +1537,7 @@ export default function ChatPanel() {
     if (!text || streaming) return
     const attachIds = useChatStore.getState().attachedFileIds.slice()
     // First-send confirmation modal (default-ON friction killer).
-    const firstAck = localStorage.getItem('chat:firstSendAck') === '1'
+    const firstAck = readPref('chat:firstSendAck') === '1'
     if (attachIds.length > 0 && !firstAck) {
       setPendingSendText(text)
       setPendingSendAttachIds(attachIds)
@@ -1499,7 +1548,7 @@ export default function ChatPanel() {
 
   const confirmSendWithAttachments = useCallback(() => {
     if (pendingSendText == null) return
-    localStorage.setItem('chat:firstSendAck', '1')
+    writePref('chat:firstSendAck', '1')
     dispatchSend(pendingSendText, pendingSendAttachIds)
     setPendingSendText(null)
     setPendingSendAttachIds([])
@@ -1507,7 +1556,7 @@ export default function ChatPanel() {
 
   const confirmSendWithoutFiles = useCallback(() => {
     if (pendingSendText == null) return
-    localStorage.setItem('chat:firstSendAck', '1')
+    writePref('chat:firstSendAck', '1')
     setAttachedFileIds([])
     dispatchSend(pendingSendText, [])
     setPendingSendText(null)

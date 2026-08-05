@@ -49,6 +49,23 @@ describe('downloadPNG', () => {
   })
 
   it('scales the canvas so the file is not a blurry screenshot', async () => {
+    // vitest.setup.ts stubs Element.prototype.getBoundingClientRect globally
+    // (non-zero, fixed 500×500) so recharts' ResponsiveContainer renders in
+    // jsdom — see that file's comment. exportPng.ts's width/height fallback
+    // chain (`rect.width || svg.clientWidth || attrWidth || 640`) is written
+    // assuming jsdom's true default of an all-zero rect, so it falls through
+    // to this SVG's width="100"/height="50" attributes. Override the rect
+    // back to zero for just this test, restoring that assumption — same
+    // per-file override pattern as AssetPicker.test.tsx/AssetTable.test.tsx.
+    // Overriding `Element.prototype` (not `HTMLElement.prototype`) because
+    // `svg` here is an SVGSVGElement — SVGElement's prototype chain runs
+    // through Element, not HTMLElement, so an HTMLElement-level override
+    // (as those two files use, for plain HTML container divs) would silently
+    // not apply to it.
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) }),
+    })
     const created: HTMLCanvasElement[] = []
     const realCreate = document.createElement.bind(document)
     vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {

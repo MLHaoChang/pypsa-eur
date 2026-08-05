@@ -39,13 +39,14 @@ lists which Phase 2 turns into Messages-API content blocks.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import logging
 import math
 import uuid
 from contextvars import ContextVar
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, params as fastapi_params
 
 from services.pypsa_service import PyPSAService
 
@@ -982,12 +983,15 @@ def force_reset_simulation() -> dict:
 def solve_queue_enqueue(project_id: str) -> dict:
     # Handler is enqueue_solve(req: EnqueueRequest) — wrap the id in the model.
     from routers.solve_queue import enqueue_solve as _h, EnqueueRequest
-    return _h(EnqueueRequest(project_id=project_id))
+    return _route(_h, EnqueueRequest(project_id=project_id))
 
 
 def solve_queue_list() -> dict:
+    # P-1: `_route`, not a bare `_h()`. All four handlers take `db`/`user` now,
+    # so a direct call would hand `user` the raw `Depends` sentinel — and before
+    # they did, this tool read every org's queued project names.
     from routers.solve_queue import list_queue as _h
-    return _h()
+    return _route(_h)
 
 
 def solve_queue_abort(job_id: str) -> dict:
@@ -996,13 +1000,16 @@ def solve_queue_abort(job_id: str) -> dict:
     # thinks the abort worked. Coerce to int. A non-numeric id raises a clear
     # ValueError that the dispatcher surfaces as a tool_error.
     from routers.solve_queue import abort_job as _h
-    return _h(int(job_id))
+    return _route(_h, int(job_id))
 
 
 def solve_queue_clear_finished() -> dict:
     """N1: read-tier — drops listing entries only, idempotent."""
+    # P-1: super-admin only, so this 403s for an ordinary chat caller. That is
+    # the intended outcome — the queue is process-global and the clear crosses
+    # every org.
     from routers.solve_queue import clear_finished as _h
-    return _h()
+    return _route(_h)
 
 
 # ── Project management (21) ─────────────────────────────────────────────────
@@ -1026,6 +1033,14 @@ def solve_queue_clear_finished() -> dict:
 # the identity comes from the session row rather than a contextvar.
 
 _ACTING_USER_ID: ContextVar[str | None] = ContextVar("chat_acting_user_id", default=None)
+# The acting SESSION travels as an ID for the same reason the user does, and one
+# more: a `SessionRow` captured at request time belongs to the request's DB
+# session, which is closed before the first tool runs, so touching it would
+# raise DetachedInstanceError. `deps.current_session` re-resolves per request
+# for exactly that reason; `_acting_session` re-fetches per tool call.
+_ACTING_SESSION_ID: ContextVar[str | None] = ContextVar(
+    "chat_acting_session_id", default=None
+)
 
 
 def set_acting_user(user_id: str | None) -> None:
@@ -1035,6 +1050,11 @@ def set_acting_user(user_id: str | None) -> None:
 
 def acting_user_id() -> str | None:
     return _ACTING_USER_ID.get()
+
+
+def set_acting_session(session_id) -> None:
+    """Bind the session whose active-project pointer this turn's tools may move."""
+    _ACTING_SESSION_ID.set(str(session_id) if session_id is not None else None)
 
 
 @contextlib.contextmanager
@@ -1060,15 +1080,85 @@ def _acting():
         user = db.get(User, uuid.UUID(user_id))
         if user is None:
             raise HTTPException(status_code=401, detail="Authentication required")
+        # P-2 — re-check the account status, do not trust the bind.
+        #
+        # The HTTP path refuses a non-active user at `resolve_session`
+        # (`services/auth_service.py:83`), so the request that opened this chat
+        # turn could not have reached us with a disabled account. That check is
+        # not enough on its own: the SSE generator OUTLIVES its request, and
+        # every tool it dispatches re-enters `_acting()` afterwards. Looking the
+        # user up by id and testing only `is None` meant an account disabled
+        # mid-turn kept full tool authority — save, delete, solve — until the
+        # stream ended. Deliberately the same predicate as `resolve_session`, so
+        # the two gates cannot drift: any status but "active" is refused.
+        if user.status != "active":
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error_kind": "inactive_acting_user",
+                    "message": (
+                        "This account is no longer active, so it can no longer "
+                        "act on projects. Sign in again, or ask an "
+                        "administrator to re-enable it."
+                    ),
+                },
+            )
         yield db, user
     finally:
         db.close()
 
 
+def _acting_session(db):
+    """
+    Re-fetch the acting session row inside `db`, or None when none is bound.
+
+    Deliberately re-read rather than carried as an ORM object: the row would
+    otherwise belong to the request's DB session, which `chat_stream` closes
+    long before the SSE generator dispatches a tool, and every attribute read
+    would raise DetachedInstanceError. None is a legal answer — local mode
+    issues no session cookie at all, and there the HTTP path passes None too.
+    """
+    session_id = _ACTING_SESSION_ID.get()
+    if session_id is None:
+        return None
+    from db.models import Session as SessionRow
+
+    return db.get(SessionRow, uuid.UUID(session_id))
+
+
 def _route(handler, *args, **kwargs):
     """Call a project-router handler with the acting identity injected."""
     with _acting() as (db, user):
-        return handler(*args, db=db, user=user, **kwargs)
+        params = inspect.signature(handler).parameters
+        # `save_project` and `activate_project` declare a THIRD dependency,
+        # `session: SessionRow | None = Depends(current_session)`, and use it to
+        # move the session's active-project pointer. Unsupplied, they receive the
+        # raw `Depends` and die on `.active_project_id`; supplied as a constant
+        # None they stop crashing but a chat-driven Save-As silently leaves the
+        # browser pointing at the old project. Every injection is keyed off the
+        # signature because handlers reached here declare different subsets and
+        # would raise TypeError on an unexpected keyword — `reset_network`
+        # (`routers/network.py:1898`) declares `db` and `session` but no `user`.
+        injected = {n: v for n, v in (("db", db), ("user", user)) if n in params}
+        if "session" in params and "session" not in kwargs:
+            injected["session"] = _acting_session(db)
+        # `_route`'s contract is "resolve whatever the target declares", and
+        # nothing but this loop enforces it. A FOURTH dependency added to any
+        # routed handler would otherwise arrive as a raw `Depends` sentinel and
+        # die with an AttributeError deep inside the body — which is exactly how
+        # F3 hid behind F1's 401 for a full cycle. A static scan is no
+        # substitute: the DISPATCHERS-to-handler mapping is established by ~40
+        # function-local imports, which is why earlier AST scans missed F3.
+        consumed = set(list(params)[: len(args)]) | injected.keys() | kwargs.keys()
+        for name, param in params.items():
+            if name not in consumed and isinstance(param.default, fastapi_params.Depends):
+                raise RuntimeError(
+                    f"_route() cannot satisfy dependency {name!r} of "
+                    f"{getattr(handler, '__module__', '?')}."
+                    f"{getattr(handler, '__qualname__', handler)}: it supplies only "
+                    f"db/user/session. Resolve it at the call site or extend _route()."
+                )
+        return handler(*args, **{**injected, **kwargs})
 
 
 def _authorized_project(name: str):
@@ -1479,26 +1569,33 @@ def compare_scenarios(
 
 
 def create_project_snapshot(name: str, label: str, message: str | None = None) -> dict:
-    # Handler is create_snapshot(name, req: CreateSnapshotRequest) and reads
-    # req.label / req.message — pass the model, not a dict (a direct call doesn't
-    # get FastAPI's body parsing, so a dict would AttributeError on req.label).
+    # Handler is create_snapshot(req: CreateSnapshotRequest, project:
+    # AuthorizedProject = ProjectAccessDep) and reads req.label / req.message —
+    # pass the model, not a dict (a direct call doesn't get FastAPI's body
+    # parsing, so a dict would AttributeError on req.label). The `project`
+    # default is an unresolved `Depends`, so it has to be supplied too; these
+    # four take a resolved AuthorizedProject rather than db=/user=, so
+    # `_authorized_project` is the right helper and `_route` is NOT.
     from routers.snapshots import create_snapshot, CreateSnapshotRequest
-    return create_snapshot(name, CreateSnapshotRequest(label=label, message=message or ""))
+    return create_snapshot(
+        CreateSnapshotRequest(label=label, message=message or ""),
+        _authorized_project(name),
+    )
 
 
 def list_project_snapshots(name: str) -> list[dict]:
     from routers.snapshots import list_snapshots as _h
-    return _h(name)
+    return _h(_authorized_project(name))
 
 
 def restore_project_snapshot(name: str, snapshot_id: str) -> dict:
     from routers.snapshots import restore_snapshot as _h
-    return _h(name, snapshot_id)
+    return _h(snapshot_id, _authorized_project(name))
 
 
 def delete_project_snapshot(name: str, snapshot_id: str) -> None:
     from routers.snapshots import delete_snapshot as _h
-    _h(name, snapshot_id)
+    _h(snapshot_id, _authorized_project(name))
 
 
 # ── Import / Export (8) ─────────────────────────────────────────────────────
@@ -1608,8 +1705,10 @@ def export_matpower() -> dict:
 
 
 def audit_log(limit: int | None = None) -> list[dict]:
+    # Both changelog handlers take `user`/`db` as unresolved `Depends` defaults
+    # and org-scope the trail off `user`, so they must be routed, not called.
     from routers.changelog import get_changelog as _h
-    entries = _h()
+    entries = _route(_h)
     if limit is not None and isinstance(entries, list):
         return entries[-limit:]
     return entries
@@ -1617,7 +1716,7 @@ def audit_log(limit: int | None = None) -> list[dict]:
 
 def clear_audit_log() -> None:
     from routers.changelog import clear_changelog as _h
-    _h()
+    _route(_h)
 
 
 def undo_last() -> dict:

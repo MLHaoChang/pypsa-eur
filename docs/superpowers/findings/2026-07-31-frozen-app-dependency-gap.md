@@ -104,3 +104,10 @@ matches the user's earlier report that "chat agent does not work as it reports
 that the anthropic key is not available". Shipping the SDK removes the second
 blocker behind that message; the key story is workstream K and still needs its
 own spec.
+
+**Resolved 2026-08-04 (U-1).** The key story closed without a workstream-K spec.
+`services/app_secrets.py` gives the frozen app a supported way to be told a key
+from inside itself — a 0600 `user.env` in app-data, offered by the
+`missing_api_key` banner and applied to `os.environ` in-process, so no restart
+is needed. `.env` still never enters the bundle, which was always the correct
+half of this.

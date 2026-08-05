@@ -22,11 +22,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
-from services import chat_service
+from db.models import Session as SessionRow
+from db.models import User
+from deps import current_session, optional_user
+from services import app_secrets, chat_service
 
 
 router = APIRouter()
@@ -63,6 +66,18 @@ class ConfirmRequest(BaseModel):
     decision: str  # "approve" | "deny"
 
 
+class ApiKeyRequest(BaseModel):
+    """
+    Body for PUT /api/chat/settings/api-key.
+
+    No `Field(max_length=…)` here on purpose: `app_secrets.validate_value`
+    owns every rule about what is storable, and duplicating one of them in the
+    schema splits the error copy across two layers that would then drift.
+    """
+
+    value: str
+
+
 class ImportRequest(BaseModel):
     """
     Body for POST /api/chat/import (#27).
@@ -93,6 +108,73 @@ def chat_health() -> dict[str, Any]:
         "default_model": chat_service.DEFAULT_MODEL,
         "confirmation_ttl_seconds": chat_service.CONFIRMATION_TTL_SECONDS,
     }
+
+
+# ── U-1 — supplying the API key from inside the app ─────────────────────────
+#
+# These live on the CHAT router, not the admin one, and that is the whole point.
+# `main.py` mounts `admin.router` behind `Depends(local_mode.reject_in_local_mode)`,
+# so every `/api/admin/*` route 404s in the desktop app — which is precisely the
+# deployment that has no `backend/.env` and therefore no key. Putting the
+# setting there would have made it unreachable in the only place it is needed.
+#
+# The gate is `is_super_admin`, matching `solve_queue.clear_finished`: this key
+# is one process-global environment variable shared by every organisation, so an
+# ORG admin has no authority over it. Local mode seeds its single user with
+# `is_super_admin=True` (`local_mode.py:132`), so the desktop app passes.
+
+
+def _require_super_admin(user: User | None) -> User:
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not user.is_super_admin:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "The Anthropic API key is shared by every organization on this "
+                "instance, so only super-admins can change it."
+            ),
+        )
+    return user
+
+
+@router.get("/settings/api-key")
+def get_api_key_settings(
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Whether a key is configured, where it came from, and a 4-char hint."""
+    _require_super_admin(user)
+    return app_secrets.status("ANTHROPIC_API_KEY")
+
+
+@router.put("/settings/api-key")
+def put_api_key_settings(
+    payload: ApiKeyRequest,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """
+    Store an Anthropic API key and apply it to this process immediately.
+
+    Applying it in-process is not a convenience: a packaged `.app` gives the
+    user no way to restart the backend, so a key that only took effect on the
+    next launch would read as "saving did nothing".
+    """
+    _require_super_admin(user)
+    try:
+        return app_secrets.set_secret("ANTHROPIC_API_KEY", payload.value)
+    except app_secrets.SecretValueError as exc:
+        # 422, not 400: this is a body-validation failure in the same class as
+        # the pydantic ones, and the message is written to be shown verbatim.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/settings/api-key")
+def delete_api_key_settings(
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Forget the stored key — from the file and from this process."""
+    _require_super_admin(user)
+    return app_secrets.clear_secret("ANTHROPIC_API_KEY")
 
 
 @router.get("/history")
@@ -238,7 +320,11 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
 
 
 @router.post("/stream")
-def chat_stream(body: StreamRequest, request: Request) -> StreamingResponse:
+async def chat_stream(
+    body: StreamRequest,
+    request: Request,
+    acting_session: SessionRow | None = Depends(current_session),
+) -> StreamingResponse:
     """
     Open an SSE stream for one chat turn. The Phase 2 stub drives the
     script-provided frame sequence; Phase 3 will replace the inner loop
@@ -259,8 +345,28 @@ def chat_stream(body: StreamRequest, request: Request) -> StreamingResponse:
     # and opens its own short-lived DB session per call, because this request's
     # session is closed the moment the handler returns and the SSE generator
     # outlives it. STEP 0b: this becomes the session row's own identity.
+    #
+    # THIS HANDLER MUST STAY `async def`. As a sync `def` FastAPI runs it via
+    # `run_in_threadpool`, which copies the context per submit, so the bind
+    # below lands on a worker-thread copy discarded when the handler returns —
+    # and `_gen()` (driven by `iterate_in_threadpool`, which copies the task
+    # context afresh for EVERY yielded item) then reads the default `None`, so
+    # every project-scoped tool answers 401 `no_acting_user`. Binding from the
+    # event-loop task instead mutates the context those per-item copies descend
+    # from, so it survives all of them. Corollary: nothing blocking may be added
+    # to this handler body — it runs on the event loop now. `_gen()` itself is
+    # still sync and still runs off-loop in the threadpool.
     from services import chat_tools as _chat_tools
     _chat_tools.set_acting_user(getattr(getattr(request.state, "auth_user", None), "id", None))
+    # STEP 0b: the SESSION too, so a chat-driven save or activate moves the
+    # active-project pointer exactly as the UI path does. Bound as an ID only —
+    # `_route` re-fetches the row inside its own short-lived DB session, since
+    # the row `current_session` returns belongs to the DB session this handler
+    # closes on return. `current_session` is a SYNC dependency, so FastAPI has
+    # already resolved it in the threadpool: no I/O is added to this body, which
+    # the note above requires. None (local mode issues no cookie) is legal and
+    # is what the HTTP path passes there too.
+    _chat_tools.set_acting_session(getattr(acting_session, "id", None))
 
     session = chat_service.get_or_create_session(
         body.session_id, model=body.model or chat_service.DEFAULT_MODEL,
