@@ -2117,7 +2117,10 @@ def get_transformer_results(
 
 
 @results_router.get("/unit_commitment")
-def get_unit_commitment():
+def get_unit_commitment(
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-generator unit-commitment results for committable=True units.
 
@@ -2219,7 +2222,10 @@ def get_unit_commitment():
     cols = [c for c in status.columns if c in committable_names]
     if cols:
         grid = status[cols].fillna(0).astype(int)
-        status_payload = _ts_payload(grid)
+        range_meta = None
+        if isinstance(from_, int) or isinstance(to_, int):
+            grid, range_meta = _slice_ts(grid, from_, to_)
+        status_payload = _ts_payload(grid, range_meta=range_meta)
     else:
         status_payload = None
 
@@ -2413,7 +2419,11 @@ def get_transformer_reactive(
 
 
 @results_router.get("/prices")
-def get_prices(source: str = "lopf"):
+def get_prices(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-bus marginal prices from the LOPF dual variables.
 
@@ -2557,6 +2567,9 @@ def get_prices(source: str = "lopf"):
         # Use _ts_payload for the index+columns+data+periods shape, then merge
         # in the prices-specific extras. Keeps multi-period periods array
         # consistent with every other /results/* endpoint.
+        range_meta = None
+        if isinstance(from_, int) or isinstance(to_, int):
+            df, range_meta = _slice_ts(df, from_, to_)
         return _ts_payload(df, extra={
             # Merit-order ("subsidy-removed") version. Same shape as `data`.
             # When the LP-dual ALREADY reflects the merit order at a given
@@ -2577,7 +2590,7 @@ def get_prices(source: str = "lopf"):
                 if all_zero and fallback_per_snapshot else
                 ""
             ),
-        })
+        }, range_meta=range_meta)
     except Exception:
         logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
@@ -2741,7 +2754,10 @@ def get_price_drivers(threshold: float = 2000.0, limit: int = 200):
 
 
 @results_router.get("/curtailment")
-def get_curtailment():
+def get_curtailment(
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     import pandas as _pd
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
@@ -2856,14 +2872,20 @@ def get_curtailment():
             # No curtailable generators in the network — return an empty-shaped
             # payload (preserves index, drops all columns) rather than 204.
             curtailment = curtailment.iloc[:, 0:0]
-        return _ts_payload(curtailment)
+        range_meta = None
+        if isinstance(from_, int) or isinstance(to_, int):
+            curtailment, range_meta = _slice_ts(curtailment, from_, to_)
+        return _ts_payload(curtailment, range_meta=range_meta)
     except Exception:
         logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
 
 
 @results_router.get("/lost_load")
-def get_lost_load():
+def get_lost_load(
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-bus lost-load dispatch — i.e. the MW that VOLL slack generators
     absorbed at each snapshot. Captured by solver_service right before the
@@ -2901,12 +2923,15 @@ def get_lost_load():
                 bus_carriers[str(col)] = str(n.buses.at[col, "carrier"] or "")
             except KeyError:
                 bus_carriers[str(col)] = ""
+    range_meta = None
+    if isinstance(from_, int) or isinstance(to_, int):
+        df, range_meta = _slice_ts(df, from_, to_)
     return _ts_payload(df, extra={
         "total_mwh": total_mwh,
         "total_cost_eur": total_cost,
         "voll_eur_per_mwh": voll,
         "bus_carriers": bus_carriers,
-    })
+    }, range_meta=range_meta)
 
 
 def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = True):
@@ -2994,7 +3019,11 @@ def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = T
 
 
 @results_router.get("/loads")
-def get_load_results(source: str = "lopf"):
+def get_load_results(
+    source: str = "lopf",
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
+):
     """
     Per-snapshot load power **as seen by the LP**, after applying
     ``cfg.load_scalers`` (per-period growth factors like 2026=1.0,
@@ -3024,7 +3053,10 @@ def get_load_results(source: str = "lopf"):
         df = lp_scaled_load_frame(n, _state.get("solver_config"), source)
         if df is None or df.empty:
             return _not_solved()
-        return _ts_payload(df)
+        range_meta = None
+        if isinstance(from_, int) or isinstance(to_, int):
+            df, range_meta = _slice_ts(df, from_, to_)
+        return _ts_payload(df, range_meta=range_meta)
     except Exception:
         logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()

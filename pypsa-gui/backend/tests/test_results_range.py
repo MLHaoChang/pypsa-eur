@@ -67,6 +67,21 @@ DATA_GUARANTEED_ENDPOINTS = [
     "/api/results/transformers",
 ]
 
+# Bespoke bodies — they call slice_ts directly rather than via _serve_ts.
+BESPOKE_ENDPOINTS = [
+    "/api/results/prices",
+    "/api/results/curtailment",
+    "/api/results/lost_load",
+    "/api/results/loads",
+]
+
+# /unit_commitment is a COMPOSITE: {generators, status_grid, n_committable},
+# and only `status_grid` carries index/columns/data. Its range block lives
+# inside status_grid, so the shared assertions cannot address it.
+COMPOSITE_ENDPOINT = "/api/results/unit_commitment"
+
+ALL_SERIES_ENDPOINTS = SERVE_TS_ENDPOINTS + BESPOKE_ENDPOINTS
+
 
 @pytest.fixture()
 def solved_client(client, reset_backend):
@@ -187,7 +202,7 @@ def _expect_data(r, url):
     pytest.skip(f"{url} has no data on this fixture network")
 
 
-@pytest.mark.parametrize("url", SERVE_TS_ENDPOINTS)
+@pytest.mark.parametrize("url", ALL_SERIES_ENDPOINTS)
 def test_endpoint_accepts_from_and_to(solved_client, url):
     """A 422 here means the endpoint never declared the parameters."""
     r = _ranged(solved_client, url, **{"from": 0, "to": 0})
@@ -195,7 +210,7 @@ def test_endpoint_accepts_from_and_to(solved_client, url):
     assert r.status_code != 422
 
 
-@pytest.mark.parametrize("url", SERVE_TS_ENDPOINTS)
+@pytest.mark.parametrize("url", ALL_SERIES_ENDPOINTS)
 def test_ranged_response_echoes_what_it_served(widened_client, url):
     r = _ranged(widened_client, url, **{"from": 0, "to": 0})
     _expect_data(r, url)
@@ -208,7 +223,7 @@ def test_ranged_response_echoes_what_it_served(widened_client, url):
     assert len(body["data"]) == 1, "one row requested, one row expected"
 
 
-@pytest.mark.parametrize("url", SERVE_TS_ENDPOINTS)
+@pytest.mark.parametrize("url", ALL_SERIES_ENDPOINTS)
 def test_unranged_response_carries_no_range_key(widened_client, url):
     """The no-parameter path must stay byte-identical for existing consumers."""
     r = _ranged(widened_client, url)
@@ -217,7 +232,7 @@ def test_unranged_response_carries_no_range_key(widened_client, url):
     assert "range" not in r.json()
 
 
-@pytest.mark.parametrize("url", SERVE_TS_ENDPOINTS)
+@pytest.mark.parametrize("url", ALL_SERIES_ENDPOINTS)
 def test_a_server_slice_equals_the_same_slice_taken_client_side(widened_client, url):
     """
     The invariant this whole feature rests on: moving the window from after
@@ -237,7 +252,7 @@ def test_a_server_slice_equals_the_same_slice_taken_client_side(widened_client, 
     assert sliced["data"] == full_body["data"][1:3]
 
 
-@pytest.mark.parametrize("url", SERVE_TS_ENDPOINTS)
+@pytest.mark.parametrize("url", ALL_SERIES_ENDPOINTS)
 def test_complete_is_false_for_a_window_and_true_for_the_whole(widened_client, url):
     full = _ranged(widened_client, url)
     _expect_data(full, url)
@@ -258,6 +273,56 @@ def test_a_one_row_request_is_small(widened_client):
     _expect_data(r, "/api/results/generators")
 
     assert len(r.content) < 8_192, f"one row serialised to {len(r.content)} bytes"
+
+
+def test_the_endpoint_list_covers_every_series_endpoint():
+    """
+    Guards against a seventeenth series endpoint being added and silently
+    escaping this contract. Mirrors the SURFACES matrix from the
+    trustworthy-numbers work: the list is the test, not a comment.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "routers" / "results.py"
+    text = src.read_text()
+    declared = set(re.findall(r'@results_router\.get\("([^"]+)"', text))
+
+    ranged = {u.removeprefix("/api/results") for u in ALL_SERIES_ENDPOINTS}
+    ranged.add(COMPOSITE_ENDPOINT.removeprefix("/api/results"))
+
+    # The twelve aggregate endpoints: a snapshot range is meaningless for a
+    # scalar or a per-asset roll-up, so they are excluded BY NAME. Adding a
+    # new endpoint forces a deliberate choice between the two lists.
+    aggregates = {
+        "/cost_breakdown", "/objective_decomposition", "/economics_by_carrier",
+        "/statistics", "/lcoh", "/ac_pf/status", "/losses", "/carrier_kpis",
+        "/emissions", "/line_duals", "/price_drivers", "/asset_economics",
+    }
+
+    unclassified = declared - ranged - aggregates
+    assert not unclassified, (
+        f"unclassified /results endpoints: {sorted(unclassified)} — add each to "
+        f"ALL_SERIES_ENDPOINTS (if it returns index/columns/data) or to "
+        f"`aggregates` (if it does not)"
+    )
+
+
+def test_unit_commitment_carries_its_range_inside_status_grid(solved_client):
+    r = solved_client.get(COMPOSITE_ENDPOINT, params={"from": 0, "to": 0})
+    assert r.status_code in (200, 204), r.text[:400]
+    if r.status_code == 204:
+        pytest.skip("no committable units on this fixture network")
+
+    body = r.json()
+    grid = body.get("status_grid")
+    if grid is None:
+        pytest.skip("no status grid on this fixture network")
+
+    assert "range" not in body, "range belongs beside index/columns/data, not at the top"
+    assert grid["range"]["from"] == 0
+    assert grid["range"]["to"] == 0
+    assert len(grid["data"]) == 1
 
 
 # ── Static forwarding check: closes the AC-PF endpoints' coverage gap ──────
