@@ -66,37 +66,54 @@ export interface TSPayload {
   range?: { from: number; to: number; total: number; complete: boolean; capped: boolean }
 }
 
-// True when any payload's `range` reports the server served LESS than what
-// was asked for — either it hit MAX_RESPONSE_VALUES and capped (`capped`),
-// or the served window otherwise falls short of the request (`complete ===
-// false`; capping is the only way that happens in practice today, but the
-// two fields are checked independently since they're independent on the
-// wire). This is the counterpart to `AggregatedOverview.isPartialPayload`,
-// not a duplicate of it:
+// True when any payload's `range` reports the server ACTUALLY TRUNCATED the
+// response — i.e. `capped: true`. `capped` alone is the signal.
+//
+// `complete` is NOT a truncation signal — do not add it back in. Re-review
+// finding (results-tabs-window final review, second wave): `services/
+// serialization.py::slice_ts` computes `complete = (lo == 0 and hi == total -
+// 1)`, which is `false` for EVERY window that isn't the whole horizon —
+// including the plan's own default views (`filterContext.tsx`'s first-period
+// multi-period default, and its rows-0-719 flat->8760 default). Those are
+// ordinary, correctly-served requests: the user (or the default window) asked
+// for less than the whole horizon and got exactly that. The original
+// predicate here (`capped || complete === false`) treated "this is a window"
+// as "this was truncated" and fired the banner below on every multi-period
+// and every large flat network, permanently — the exact false-positive
+// pattern this whole plan exists to avoid, and worse than silent: wrong copy
+// on screen, and a warning users learn to ignore within a day, which erases
+// its value for the case (`capped: true`) it exists to catch.
+//
+// This is the counterpart to `AggregatedOverview.isPartialPayload`, not a
+// duplicate of it:
 //   • `isPartialPayload` (AggregatedOverview.tsx) guards a tab that must
 //     NEVER receive a ranged payload at all — ANY `range` key there is
-//     already a bug, because that tab reports whole-horizon totals.
+//     already a bug, because that tab reports whole-horizon totals. It
+//     correctly uses `!complete` for that purpose: on that tab, ANY window
+//     (not just a capped one) is the bug.
 //   • `isTruncatedPayload` is for the six WINDOWING tabs (Dispatch,
 //     Curtailment, LostLoadTab, LoadFlow, Prices, StorageCycling), which
-//     legitimately request ranged payloads. A `range` key on its own is
-//     expected and fine there — what's worth surfacing to the user is the
-//     narrower case where the server gave back FEWER rows than the window
-//     asked for, so totals/charts on screen cover less than the user
-//     thinks they do.
+//     legitimately request ranged payloads. A `range` key — and `complete:
+//     false` alongside it — is expected and fine there. Only `capped: true`
+//     means the server gave back FEWER rows than the window itself asked
+//     for, which is the one case worth surfacing.
 // Kept in this one shared spot (not inlined per-tab) so the six call sites
-// can't drift, and so it's unit-testable on its own — see shared.test.tsx.
+// can't drift, and so it's unit-testable on its own — see shared.test.ts.
 export function isTruncatedPayload(
   payloads: Array<TSPayload | null | undefined>,
 ): boolean {
-  return payloads.some(p => p?.range != null && (p.range.capped || p.range.complete === false))
+  return payloads.some(p => p?.range?.capped === true)
 }
 
 // Drop-in warning banner for the six windowing tabs — renders nothing unless
-// `isTruncatedPayload(payloads)` is true. Centralised alongside the
-// predicate so the banner copy (and its tone) can't drift per tab either.
-// Wording mirrors AggregatedOverview's partial-payload message: plain-language
-// statement of what happened, phrased as a fact about the data rather than
-// an alarm.
+// `isTruncatedPayload(payloads)` is true (i.e. some payload was `capped`).
+// Centralised alongside the predicate so the banner copy (and its tone)
+// can't drift per tab either. Wording mirrors AggregatedOverview's
+// partial-payload message: plain-language statement of what happened,
+// phrased as a fact about the data rather than an alarm — and specifically
+// describes the SERVER returning fewer rows than the WINDOW requested, not
+// "you are viewing a window" (viewing a window is normal and must not be
+// described as a problem; being served less than the window asked for is).
 export function WindowCapBanner(
   { payloads }: { payloads: Array<TSPayload | null | undefined> },
 ) {
@@ -104,10 +121,11 @@ export function WindowCapBanner(
   return (
     <div className="rounded border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
       <span className="font-semibold">Results are truncated.</span>{' '}
-      The server returned fewer snapshots than requested for the selected
-      window, so the totals and charts on this tab cover only part of it.
-      Narrow the Horizon filter further, or reduce the number of assets in
-      scope, to see the full window.
+      The selected window was too large for the server to return in full, so
+      it sent back fewer snapshots than the window covers — the totals and
+      charts on this tab reflect only part of it. Narrow the Horizon filter
+      further, or reduce the number of assets in scope, to see the full
+      window.
     </div>
   )
 }

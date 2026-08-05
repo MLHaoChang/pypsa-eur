@@ -33,12 +33,20 @@ describe('isTruncatedPayload', () => {
     expect(isTruncatedPayload([ts])).toBe(true)
   })
 
-  it('is true when the range reports complete: false even if capped is false', () => {
+  // Re-review finding (Important, NEW): `serialization.py::slice_ts` computes
+  // `complete = (lo == 0 and hi == total - 1)` — i.e. `complete: false` on
+  // EVERY legitimate window, capped or not. `filterContext.tsx`'s default
+  // windows (first period on multi-period; rows 0-719 on flat >8760) are
+  // ordinary, un-truncated requests that still carry `complete: false`. Only
+  // `capped` distinguishes "the server truncated this" from "the user is
+  // looking at a window they asked for". This case is what the previous
+  // (`capped || complete === false`) predicate got backwards.
+  it('is NOT truncated for an ordinary (uncapped) window — complete: false alone is not truncation', () => {
     const ts: TSPayload = {
       index: [], columns: [], data: [],
-      range: { from: 0, to: 227, total: 8760, complete: false, capped: false },
+      range: { from: 0, to: 719, total: 26280, complete: false, capped: false },
     }
-    expect(isTruncatedPayload([ts])).toBe(true)
+    expect(isTruncatedPayload([ts])).toBe(false)
   })
 
   it('is true if ANY payload in the array is truncated', () => {
