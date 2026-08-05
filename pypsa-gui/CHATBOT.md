@@ -83,8 +83,8 @@ The header dropdown selects the model used for the next turn:
 
 | Model | Identifier | When to use |
 |---|---|---|
-| Sonnet 4.6 (default) | `claude-sonnet-4-6` | Quick reads, single-tool calls, low-cost iteration. |
-| Opus 4.8 | `claude-opus-4-8` | Multi-step model design, complex reasoning, dependent tool chains. |
+| Sonnet 5 (default) | `claude-sonnet-5` | Quick reads, single-tool calls, low-cost iteration. |
+| Opus 5 | `claude-opus-5` | Multi-step model design, complex reasoning, dependent tool chains. |
 
 Switching models takes effect on the *next* turn; an in-flight stream
 continues on the previous model.

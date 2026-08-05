@@ -113,8 +113,12 @@ PROJECT_REBINDING_TOOLS = frozenset([
 # `PRICING_USD_PER_MTOK` (chatStore.ts). The model string is not enforced
 # server-side (it flows straight to the SDK), so a newer model the UI offers
 # works even if this list lags — but keep it accurate as documentation.
-DEFAULT_MODEL: str = "claude-sonnet-4-6"   # latest Sonnet
-OPUS_MODEL: str = "claude-opus-4-8"        # latest Opus
+# No "latest" comment here on purpose. The previous pair carried
+# `# latest Sonnet` / `# latest Opus`, which read as verified and was wrong
+# for a full generation — a comment that asserts currency is how this went
+# unnoticed. The model list is checked by tests/test_chat_models.py instead.
+DEFAULT_MODEL: str = "claude-sonnet-5"
+OPUS_MODEL: str = "claude-opus-5"
 ALLOWED_MODELS: frozenset[str] = frozenset([DEFAULT_MODEL, OPUS_MODEL])
 
 # Hard per-session token caps. Cost caps live client-side (M10 — eur derived
