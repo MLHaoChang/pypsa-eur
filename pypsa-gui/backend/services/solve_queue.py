@@ -421,7 +421,10 @@ class SolveQueue:
                     config, n, lock, stop_event, log_queue, state_update=ctx_state_update
                 )
             solve_time = round(time.time() - t0, 2)
-            objective = sim._compute_run_objective(n)
+            # Price with THIS job's config, not the foreground's — the myopic
+            # branch reads capital_cost defaults (overnight_cost / discount_rate
+            # fills) off it, and this runs outside `solving_context(ctx)`.
+            objective = sim._compute_run_objective(n, config)
             if status == "aborted":
                 final_status = "aborted"
             elif status in ("ok", "optimal"):

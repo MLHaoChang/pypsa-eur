@@ -997,6 +997,15 @@ def run_simulation(
                         f"Rolling-horizon solve: {len(network.snapshots)} snapshots "
                         f"in windows of {H} (overlap {O})"
                     )
+                if not use_myopic:
+                    # A myopic run leaves `_myopic_period_objectives` on the
+                    # network, and nothing else clears it. Re-solving the SAME
+                    # network full-horizon then left the stale marker in place,
+                    # and every "did this run go myopic?" test downstream —
+                    # `_compute_run_objective`, the Summary line,
+                    # `/results/objective_decomposition` — keys off exactly that
+                    # marker. Clear it so the marker means "THIS run was myopic".
+                    network._myopic_period_objectives = []
                 if use_myopic:
                     # Periods live on n.investment_periods (Snapshots →
                     # Multi-period promotion). cfg.investment_periods is an
@@ -1263,10 +1272,30 @@ def run_simulation(
             # capacity offset (so the LP merit-order subsidy is balanced in
             # the reported total). Showing just `n.objective` looks negative
             # when those constants are large.
+            #
+            # MYOPIC EXCEPTION: `network.objective` here is the LAST iteration's
+            # LP only — every earlier period's contribution is gone from this
+            # lens, so this line used to report ~-75% of the true horizon cost
+            # while the status bar showed a different wrong number and the
+            # Economics tab showed the right one. Report the same statistics-
+            # based horizon total the status bar and Economics use, and label it
+            # so the per-period LP value is still identifiable in the log.
             obj = float(network.objective) if getattr(network, "objective", None) is not None else None
             obj_const = float(getattr(network, "_objective_constant", 0.0) or 0.0)
             wall = time.time() - t_start
-            if obj is not None:
+            _myopic_ran = bool(getattr(network, "_myopic_period_objectives", None))
+            if _myopic_ran:
+                from services.cost_totals import horizon_system_cost
+                _horizon = horizon_system_cost(network, config)
+                if _horizon is not None:
+                    obj_str = (
+                        f"€{_horizon:,.2f} (myopic horizon total; "
+                        f"final-period LP={obj:,.2f})" if obj is not None
+                        else f"€{_horizon:,.2f} (myopic horizon total)"
+                    )
+                else:
+                    obj_str = "n/a"
+            elif obj is not None:
                 total = obj + obj_const
                 obj_str = (
                     f"€{total:,.2f} (solver={obj:,.2f} + constant={obj_const:,.2f})"
