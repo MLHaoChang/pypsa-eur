@@ -354,6 +354,65 @@ def test_prices_data_adjusted_and_fallback_stay_aligned_with_a_ranged_window(wid
         )
 
 
+def test_prices_fallback_per_snapshot_stays_aligned_with_a_ranged_window(client, reset_backend):
+    """
+    `fallback_per_snapshot` only appears when the LP duals are all zero —
+    exactly the degraded state a user is staring at when prices look broken
+    and they are trying to work out why. It must stay aligned with a sliced
+    `data` under a ranged request, same as `data_adjusted` above, but
+    neither the golden nor the widened fixture's real solve ever reaches
+    `all_zero=True` (both carry costed generators with distinct marginal
+    costs — 50/10/40/100 — so LP duals are never uniformly zero). The
+    `if body.get("fallback_per_snapshot"):` guard in the test above
+    therefore never fires on either fixture, so the fallback slice in
+    `get_prices` has never actually been exercised.
+
+    Force the degraded path deterministically WITHOUT faking the network:
+    solve the widened network normally — real dispatch, real costs, same
+    setup `_solve_widened_network` uses — THEN overwrite the solved
+    network's own `buses_t.marginal_price` with zeros before installing it.
+    That drives `all_zero=True` while leaving `generators_t.p` — the real
+    dispatch `fallback_per_snapshot` is actually computed FROM — untouched,
+    so the production code path runs for real rather than a synthetic one.
+    Stripping costs or congestion from the network to reach all-zero duals
+    honestly would produce an unrepresentative network purely to satisfy a
+    test, which is its own defect.
+
+    Catches: removing the `fallback_per_snapshot = fallback_per_snapshot[lo
+    : hi + 1]` slice from `get_prices`.
+    """
+    from services.solver_service import SolverConfig, with_periodized_cost_defaults
+
+    n = _build_widened_network()
+    cfg = SolverConfig(
+        discount_rate=gf.GOLDEN_DISCOUNT_RATE,
+        multi_investment_periods=True,
+        investment_periods=list(gf.GOLDEN_PERIODS),
+    )
+    with with_periodized_cost_defaults(n, cfg):
+        n.optimize(solver_name="highs", multi_investment_periods=True)
+    # Zeroing here, post-solve, not by editing the network's costs/topology:
+    # this fixture's real duals are non-zero BY CONSTRUCTION (costed
+    # generators, real congestion), so overwriting the solved output is the
+    # only way to reach get_prices's all-zero-duals branch without deleting
+    # the very economics that make this network representative. Real
+    # dispatch (`generators_t.p`) is left untouched — that is what
+    # `fallback_per_snapshot` actually reads.
+    n.buses_t.marginal_price.loc[:, :] = 0.0
+    gf.install_golden(n)
+
+    r = _ranged(client, "/api/results/prices", **{"from": 0, "to": 0})
+    _expect_data(r, "/api/results/prices")
+
+    body = r.json()
+    assert body.get("fallback_per_snapshot"), (
+        "fallback_per_snapshot was empty — the all-zero-duals branch never fired"
+    )
+    assert len(body["fallback_per_snapshot"]) == len(body["data"]), (
+        "fallback_per_snapshot desynchronised from data under a ranged request"
+    )
+
+
 # ── Static forwarding check: closes the AC-PF endpoints' coverage gap ──────
 #
 # /voltages, /line_reactive and /transformer_reactive default to
