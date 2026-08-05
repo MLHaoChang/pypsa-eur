@@ -8,7 +8,7 @@ import LostLoadTab from './LostLoadTab'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
-  return { ...actual, resultsApi: { ...actual.resultsApi, getLostLoad: vi.fn() } }
+  return { ...actual, resultsApi: { ...actual.resultsApi, getLostLoadRanged: vi.fn() } }
 })
 
 vi.mock('../../api/network', async (importOriginal) => {
@@ -36,7 +36,7 @@ beforeEach(() => {
   // `voll_eur_per_mwh: 0` keeps the "Lost-load cost" / "Cost (€)" / "VOLL
   // price" figures at their zero baseline (verified below), so they can't
   // coincidentally collide with the "424.2" text this test asserts on.
-  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+  vi.mocked(resultsApi.getLostLoadRanged).mockReset().mockResolvedValue({
     index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[424.24]],
     total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 0,
   })

@@ -14,6 +14,7 @@ import {
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
+import { useResultsWindow } from '../../hooks/useResultsWindow'
 
 // ── Curtailment result tab ──────────────────────────────────────────────────
 // Standalone view of renewable-curtailment data the LP rejected (cost-
@@ -27,7 +28,15 @@ const ACCENT = '#d97706'    // amber — matches the curtailment toggle in Dispa
 export default function Curtailment() {
   const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
-  const { data: curtailTS } = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'), queryFn: resultsApi.getCurtailment })
+  // Positional bounds for the active Horizon filter, resolved against the
+  // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
+  // per-snapshot queries below can be windowed before any payload exists.
+  const { win, winValid } = useResultsWindow(currentProject)
+  const { data: curtailTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'curtailment', win.from, win.to),
+    queryFn: () => resultsApi.getCurtailmentRanged(win),
+    enabled: winValid,
+  })
   const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   // WeightCtx + timeline assembled by the shared hook (fetches /snapshots +
   // /investmentPeriods) — same recipe as the Dispatch tab so the per-period ×
@@ -71,7 +80,11 @@ export default function Curtailment() {
   // Totals: curtailment energy + percent vs (curtailed + delivered) using
   // the renewable generators' supply for the denominator. Comes from the
   // Dispatch tab's same formula so the two views stay reconciled.
-  const { data: gensTS } = useQuery({ queryKey: nk(currentProject, 'results', 'generators'), queryFn: () => resultsApi.getGeneratorResults() })
+  const { data: gensTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'generators', win.from, win.to),
+    queryFn: () => resultsApi.getGeneratorResults(undefined, win),
+    enabled: winValid,
+  })
   const totals = useMemo(() => {
     const curt = weightedSum(curtailTS as TSPayload | null, renewableNames, weightCtx, range, 'generators') ?? 0
     const delivered = weightedSum(gensTS as TSPayload | null, renewableNames, weightCtx, range, 'generators') ?? 0

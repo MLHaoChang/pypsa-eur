@@ -12,7 +12,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
     ...actual,
     resultsApi: {
       ...actual.resultsApi,
-      getCurtailment: vi.fn(),
+      getCurtailmentRanged: vi.fn(),
       getGeneratorResults: vi.fn(),
     },
   }
@@ -38,7 +38,7 @@ beforeEach(() => {
   // Single renewable generator, single snapshot, weight 1 (via getSnapshots
   // below): Σ curtailed MW × weighting × years over one point equals that
   // point.
-  vi.mocked(resultsApi.getCurtailment).mockReset().mockResolvedValue({
+  vi.mocked(resultsApi.getCurtailmentRanged).mockReset().mockResolvedValue({
     index: ['2026-01-01T00:00:00'], columns: ['SolarGen'], data: [[424.24]],
   })
   vi.mocked(resultsApi.getGeneratorResults).mockReset().mockResolvedValue({

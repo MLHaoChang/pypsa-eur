@@ -19,7 +19,10 @@ vi.mock('../../api/simulation', async (importOriginal) => {
 
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
-  return { ...actual, networkApi: { ...actual.networkApi, getBuses: vi.fn() } }
+  return {
+    ...actual,
+    networkApi: { ...actual.networkApi, getBuses: vi.fn(), getSnapshots: vi.fn() },
+  }
 })
 
 afterEach(() => cleanup())
@@ -56,6 +59,17 @@ beforeEach(() => {
     { name: 'Bus 0', v_nom: 380, carrier: 'AC',
       x: 0, y: 0, country: '', unit: '', control: 'PQ', sub_network: '' },
   ])
+  // Prices.tsx now windows its `getPrices` fetch via `useResultsWindow`,
+  // which reads `/api/network/snapshots` to resolve the fetch bounds before
+  // the prices query is allowed to fire (`enabled: winValid`). Without this
+  // mock the real (unmocked) `getSnapshots` never resolves in the test
+  // environment, `winValid` stays false forever, and the prices query never
+  // fires — same single-snapshot fixture shape Curtailment/LostLoadTab's
+  // tests already use.
+  vi.mocked(networkApi.getSnapshots).mockReset().mockResolvedValue({
+    count: 1, snapshots: ['2026-01-01T00:00:00'], weightings: [], ts_start: null, ts_end: null,
+    can_sample_weeks: false,
+  })
 })
 
 function renderPage() {

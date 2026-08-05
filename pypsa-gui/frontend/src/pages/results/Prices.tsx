@@ -16,6 +16,7 @@ import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
   useSeasonalViewMode, SeasonalLineCardGrid, durationCurvePoints,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
+import { useResultsWindow } from '../../hooks/useResultsWindow'
 
 // ── Prices tab ───────────────────────────────────────────────────────────────
 // Extracted from LoadFlow. Three sections:
@@ -46,14 +47,19 @@ const PER_BUS_CHART_CAP = 12
 
 export default function Prices() {
   const currentProject = useUIStore(s => s.currentProject)
+  // Positional bounds for the active Horizon filter, resolved against the
+  // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
+  // prices query below can be windowed before any payload exists.
+  const { win, winValid } = useResultsWindow(currentProject)
   // Refs for SVG export — one per chart section.
   const hourlyChartRef   = useRef<HTMLDivElement | null>(null)
   const durationChartRef = useRef<HTMLDivElement | null>(null)
   // Marginal prices are LP duals — they only exist on the LOPF/SCLOPF solve.
   // PyPSA's `n.pf()` doesn't compute duals, so always pin source='lopf'.
   const { data: priceTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'prices', 'lopf'),
-    queryFn: () => resultsApi.getPrices('lopf'),
+    queryKey: nk(currentProject, 'results', 'prices', 'lopf', win.from, win.to),
+    queryFn: () => resultsApi.getPrices('lopf', win),
+    enabled: winValid,
   })
   // CO₂ emissions for the cap shadow price KPI. Other CO₂ data lives in the
   // Emissions tab.
