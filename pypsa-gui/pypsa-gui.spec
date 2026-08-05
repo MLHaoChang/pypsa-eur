@@ -285,6 +285,17 @@ app = BUNDLE(                              # noqa: F821 - injected
         # a version that only ever existed as "0.1.0" gives an updater nothing
         # to compare.
         "CFBundleVersion": "0.1.0",
+        # macOS denies the microphone outright to a bundle that does not
+        # declare why it wants one. Measured before adding these: a WKWebView
+        # exposes `webkitSpeechRecognition`, `.start()` runs, and it fires
+        # `not-allowed` — the signature of a permission refusal rather than a
+        # missing API. The strings are shown verbatim in the OS prompt.
+        "NSMicrophoneUsageDescription":
+            "PyPSA Studio uses the microphone only while you hold the "
+            "dictate button in the assistant, to turn speech into text.",
+        "NSSpeechRecognitionUsageDescription":
+            "PyPSA Studio uses speech recognition to transcribe what you "
+            "dictate to the assistant.",
     },
 )
 

@@ -77,6 +77,14 @@ the text and press Send as usual.
   pypsa-gui FastAPI process.
 - Toggle the mic to start/stop; **Esc** also stops listening.
 
+Voice input requires microphone permission, which the packaged app requests
+via `NSMicrophoneUsageDescription`. If macOS has denied it, the mic button is
+disabled and its tooltip says so — it is not a missing feature.
+
+Voice OUTPUT (the assistant speaking) needs no permission and is available in
+the packaged app: measured at 219 voices in a real WKWebView. It is not wired
+up yet; that is part of the assistant redesign, not this change.
+
 ## Models
 
 The header dropdown selects the model used for the next turn:
