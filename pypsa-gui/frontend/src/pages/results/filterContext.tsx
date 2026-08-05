@@ -138,3 +138,60 @@ export function resolveRange(
   }
   return { from, to }
 }
+
+/**
+ * The view a Results tab opens on.
+ *
+ * `whole` means "change nothing" — the pre-existing behaviour, and what every
+ * network at or below the threshold keeps.
+ */
+export type DefaultWindow =
+  | { kind: 'whole' }
+  | { kind: 'period'; period: number | string }
+  | { kind: 'iso'; fromIso: string; toIso: string }
+
+/**
+ * One hourly year. The largest horizon that renders as a chart without
+ * windowing, and the natural unit of this domain — below it, nothing changes.
+ */
+export const WINDOW_THRESHOLD = 8760
+
+/** One month of hourly snapshots. */
+export const DEFAULT_FLAT_WINDOW = 720
+
+/**
+ * Choose the opening window from the snapshot index alone.
+ *
+ * The threshold is tested against the TOTAL horizon BEFORE any structural
+ * branch. Branching on multi-period first would narrow a 2-period x
+ * 24-snapshot network to 24 rows — a regression on exactly the small models
+ * where the point is that nothing changes, and it would alter the golden test
+ * fixture's default view.
+ *
+ * Multi-period returns a PERIOD rather than ISO bounds because `resolveRange`
+ * matches the parallel `periods` array natively, whereas ISO bounds on a
+ * multi-period network match rows in every period at once — every period
+ * replicates the same base operational year. See the comment at the `fromIso`
+ * handling below, and CLAUDE.md's note on the Horizon filter's year remap.
+ */
+export function defaultWindow(
+  snapshots: string[],
+  periods: Array<number | string> | undefined,
+): DefaultWindow {
+  if (snapshots.length <= WINDOW_THRESHOLD) return { kind: 'whole' }
+
+  if (periods && periods.length === snapshots.length) {
+    const seen = new Set<number | string>(periods)
+    const arr = [...seen]
+    if (arr.length > 1) {
+      const allNumeric = arr.every(p => typeof p === 'number')
+      const sorted = allNumeric
+        ? (arr as number[]).sort((a, b) => a - b)
+        : arr.map(String).sort()
+      return { kind: 'period', period: sorted[0] }
+    }
+  }
+
+  const lastIdx = Math.min(DEFAULT_FLAT_WINDOW, snapshots.length) - 1
+  return { kind: 'iso', fromIso: snapshots[0], toIso: snapshots[lastIdx] }
+}
