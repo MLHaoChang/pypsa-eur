@@ -37,6 +37,7 @@ against an API that did not exist:
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import sys
 import threading
 
@@ -46,6 +47,59 @@ from desktop import bootstrap, downloads, launcher, splash
 from desktop.single_instance import AlreadyRunning, SingleInstance
 
 logger = logging.getLogger(__name__)
+
+# ── multiprocessing helper processes ────────────────────────────────────────
+#
+# A frozen app IS `sys.executable`, so when anything in the dependency stack
+# creates a semaphore or a shared-memory block, `multiprocessing` starts its
+# resource tracker by re-executing THIS BUNDLE with a `-c` command. Without
+# the diversion below the bootloader ignores that `-c` and runs the app's
+# entry point instead, so the helper opens a window, starts uvicorn, and
+# takes the single-instance lock. OBSERVED on 2026-08-03: a live process whose
+# argv was
+#
+#   PyPSA Studio -B -S -I -c from multiprocessing.resource_tracker import main;main(4)
+#
+# had become the whole application, orphaned to launchd, with the real parent
+# gone — and while the parent was still alive it was that child which raised
+# "PyPSA GUI is already running" during every solve.
+#
+# PyInstaller ships `pyi_rth_multiprocessing`, which targets exactly this and
+# IS present in the bundle, but it only diverts when
+# `set(sys.argv[1:idx]) == set(_args_from_interpreter_flags())` — and the
+# bootloader configures its own interpreter rather than honouring `-B -S -I`,
+# so in the child that equality fails and the hook returns silently.
+#
+# `multiprocessing.freeze_support()` is NOT sufficient either: its
+# `is_forking()` fires only on `argv[1] == "--multiprocessing-fork"`, and the
+# tracker's argv[1] is `-B`. It is still called below for the spawn path it
+# does cover.
+_MP_HELPER_PREFIXES = (
+    "from multiprocessing.resource_tracker import main",
+    "from multiprocessing.semaphore_tracker import main",   # Python < 3.8
+    "from multiprocessing.forkserver import main",
+    "import sys; from multiprocessing.forkserver import main",  # >= 3.13.13
+)
+
+
+def multiprocessing_helper_command(argv: list[str]) -> str | None:
+    """
+    The command this process must run as a multiprocessing helper, or None if
+    it is a real launch.
+
+    Deliberately matches on the KNOWN bootstrap prefixes rather than executing
+    whatever follows `-c`: the argv is produced by our own process tree, but a
+    narrow allowlist costs nothing and keeps this from becoming a general
+    "run arbitrary code from the command line" path in a shipped binary.
+    """
+    if "-c" not in argv:
+        return None
+    idx = argv.index("-c")
+    if idx + 1 >= len(argv):
+        return None
+    command = argv[idx + 1]
+    return command if command.startswith(_MP_HELPER_PREFIXES) else None
+
 
 WINDOW_TITLE = "PyPSA Studio"
 INITIAL_SIZE = (1440, 900)
@@ -68,6 +122,17 @@ def _app_data():
 
 def main() -> int:
     """Entry point. Returns a process exit status."""
+    # FIRST, before logging, the webview settings or the single-instance lock:
+    # a multiprocessing helper that reaches any of those has already lost. See
+    # `multiprocessing_helper_command` for what this is defending against.
+    helper = multiprocessing_helper_command(sys.argv)
+    if helper is not None:
+        exec(helper, {"__name__": "__main__"})   # noqa: S102 - allowlisted above
+        return 0
+    # Covers the `--multiprocessing-fork` spawn path, which the `-c` check
+    # above does not see. A no-op on a normal launch.
+    multiprocessing.freeze_support()
+
     bootstrap.install_file_logging()
 
     # Before any window exists, because the default is not merely "no
