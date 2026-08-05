@@ -6,7 +6,6 @@ nothing from FastAPI on purpose, which is what makes this possible.
 """
 import numpy as np
 import pandas as pd
-import pytest
 
 from services.serialization import MAX_RESPONSE_VALUES, slice_ts, ts_payload
 

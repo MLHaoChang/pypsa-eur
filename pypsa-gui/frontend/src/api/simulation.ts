@@ -136,8 +136,9 @@ export type AssetCostMap = Record<string, Record<string, {
 // Result-source: which result set to read for time-series endpoints.
 // Forwarded as `?source=lopf|ac_pf` so the backend's helper `_result_df`
 // picks the right snapshot. Defaults to 'lopf' so calls without an explicit
-// arg keep current behaviour.
-type ResultSource = 'lopf' | 'ac_pf'
+// arg keep current behaviour. Exported — CanvasResultsContext.tsx imports
+// this rather than redeclaring a duplicate local type.
+export type ResultSource = 'lopf' | 'ac_pf'
 
 export interface TSRange { from: number; to: number }
 

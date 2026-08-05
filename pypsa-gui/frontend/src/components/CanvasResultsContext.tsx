@@ -3,10 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
-import { resultsApi, type TSRange } from '../api/simulation'
-import { chooseChunk, chunkBounds } from '../pages/results/chunking'
+import { resultsApi, type TSRange, type ResultSource } from '../api/simulation'
+import { chooseChunk, chunkBounds, horizonOf, localRow } from '../pages/results/chunking'
 import type { Generator, Load, Line as LineT, Link as LinkT, StorageUnit, Store } from '../api/types'
-import { isRenewableCarrier } from '../pages/results/shared'
+import { isRenewableCarrier, type TSPayload } from '../pages/results/shared'
 
 // ── Per-snapshot results overlay context ──────────────────────────────────────
 // One provider, one shape, two consumers (BusNode and EditableEdge).
@@ -89,27 +89,17 @@ const EMPTY: OverlayData = {
 const CanvasResultsContext = createContext<OverlayData>(EMPTY)
 export const useCanvasResults = () => useContext(CanvasResultsContext)
 
-// Backend's _ts_payload returns `periods` as a separate int[] alongside
-// `index` (string[]) for multi-period results — see routers/simulation.py
-// _ts_payload. Single-period results have no `periods` key.
+// Backend's ts_payload returns `periods` as a separate int[] alongside
+// `index` (string[]) for multi-period results — see
+// services/serialization.py::ts_payload. Single-period results have no
+// `periods` key.
 //
 // `range` describes what was actually served (services/serialization.py::
 // slice_ts) — present only on ranged responses. Absent means the payload is
 // the whole series, the pre-range shape unconverted callers still receive.
-interface TSRangeMeta {
-  from: number
-  to: number
-  total: number
-  complete: boolean
-  capped: boolean
-}
-interface TSPayload {
-  index: string[]
-  columns: string[]
-  data: number[][]
-  periods?: number[]
-  range?: TSRangeMeta
-}
+// `TSPayload` (with its `range` field) is the canonical shared.tsx type —
+// imported above rather than redeclared here, so this provider and every
+// Results tab agree on one shape.
 
 // Build a lookup for a single snapshot row of a TSPayload, mapping each column
 // name to its numeric value. Returns null when the row index is out of range.
@@ -123,11 +113,6 @@ function rowMap(ts: TSPayload | null | undefined, row: number): Map<string, numb
   })
   return m
 }
-
-// Mirrors api/simulation.ts's (unexported) ResultSource. Kept local rather
-// than exporting a duplicate from there — this is the only consumer that
-// needs it as a standalone type name.
-type ResultSource = 'lopf' | 'ac_pf'
 
 // A single-row probe: cheapest possible request that still returns the
 // payload's `columns` (for width) and `range.total` (for horizon length).
@@ -170,7 +155,24 @@ function useChunkedSeries(
     () => chooseChunk(probe?.columns.length ?? 0, total),
     [probe?.columns.length, total],
   )
-  const bounds = useMemo(
+  const bounds = useMemo(() => {
+    // `resultsSnapshotIdx` is a persisted, unbounded index (uiStore doesn't
+    // know the current project's snapshot count — see CLAUDE.md "Snapshot
+    // index clamping in store") — an index of 8760 can survive into a
+    // 24-snapshot project. Clamp to this series' own horizon BEFORE
+    // computing bounds; otherwise `chunkBounds` returns an out-of-range
+    // window, the server answers an empty frame, and every series renders
+    // blank for a wasted round-trip until the index self-corrects.
+    const clampedIdx = Math.max(0, Math.min(idx, total - 1))
+    // `total === 0` (no probe response yet, or a genuinely empty series):
+    // short-circuit rather than call `chunkBounds(idx, chunk, 0)`.
+    // `chooseChunk(assetCount, 0)` always returns 1 (horizon clamps to
+    // `Math.max(1, 0)`), so without this guard `bounds.from` tracks the raw
+    // scrubber index 1:1 — the query KEY changes on every scrub step and
+    // mints an inert cache entry per index per series. The query below is
+    // already `enabled: total > 0` so nothing fetches either way; this just
+    // stops the churn.
+    if (total === 0) return { from: 0, to: 0 }
     // `chunkBounds`' third argument (`clampTo`) would stop a chunk crossing
     // an investment-period boundary — but the period selection
     // (SnapshotPicker's `activeRange`, derived from a component-local
@@ -181,9 +183,8 @@ function useChunkedSeries(
     // just carries some rows the user isn't currently looking at — never
     // rendered, never mislabelled. Revisit once period selection moves into
     // shared state.
-    () => chunkBounds(idx, chunk, total),
-    [idx, chunk, total],
-  )
+    return chunkBounds(clampedIdx, chunk, total)
+  }, [idx, chunk, total])
 
   const { data } = useQuery({
     // `bounds.from` is what makes the cache work: identical for every index
@@ -295,17 +296,15 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     const lkts = (linksTS as TSPayload | null) ?? null
     if (!enableQueries || (!ts && !lts && !lints && !lkts)) return EMPTY
 
-    // `range.total` is the HORIZON — the series' true snapshot count —
-    // while `data.length` is only the chunk that happened to be fetched.
-    // Clamping against the chunk (the pre-chunking behaviour) would
-    // silently render the WRONG snapshot's flows: asking for snapshot 5000
-    // would clamp to a chunk length of e.g. 167 and render row 167's flows
-    // labelled as snapshot 5000's. Fall back to `data.length` only for the
-    // (pre-range) unconverted shape, where there is no `range` block at
-    // all. Pull from whichever TS payload arrived first — handles
-    // link-only networks (no Lines or Generators) gracefully.
-    const horizon = ts?.range?.total ?? lts?.range?.total ?? lints?.range?.total ?? lkts?.range?.total
-      ?? ts?.data.length ?? lts?.data.length ?? lints?.data.length ?? lkts?.data.length ?? 0
+    // `horizonOf` (pages/results/chunking.ts) is the HORIZON — the series'
+    // true snapshot count — as opposed to `data.length`, which is only the
+    // chunk that happened to be fetched. Clamping against the chunk (the
+    // pre-chunking behaviour) would silently render the WRONG snapshot's
+    // flows: asking for snapshot 5000 would clamp to a chunk length of e.g.
+    // 167 and render row 167's flows labelled as snapshot 5000's. Pull from
+    // whichever TS payload arrived first — handles link-only networks (no
+    // Lines or Generators) gracefully.
+    const horizon = horizonOf([ts, lts, lints, lkts])
     if (horizon === 0) return EMPTY
     const idx = Math.max(0, Math.min(resultsSnapshotIdx, horizon - 1))
 
@@ -316,7 +315,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     // index outside that payload's rows, which renders nothing for it — the
     // safe failure — rather than a neighbouring row's numbers under this
     // snapshot's label.
-    const localIdx = (p: TSPayload | null) => idx - (p?.range?.from ?? 0)
+    const localIdx = (p: TSPayload | null) => localRow(p, idx)
     const iso = ts?.index[localIdx(ts)] ?? lts?.index[localIdx(lts)]
       ?? lints?.index[localIdx(lints)] ?? lkts?.index[localIdx(lkts)] ?? ''
 
@@ -519,9 +518,14 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     // like everything else on this payload — so it needs the same
     // global→local offset as `gMap`/`lMap`/etc., not the raw global `idx`.
     const tsAnyLocalIdx = localIdx(tsAny)
+    // `tsAny.periods` is `Array<number | string>` on the canonical TSPayload
+    // (a multi-period payload can in principle carry string period labels —
+    // see shared.tsx), but PyPSA's own convention is year-as-int, and
+    // `ts_payload` always emits ints when it can parse them. Cast rather
+    // than re-litigate the union here.
     const periodFromIso: number | null = (
       tsAny?.periods && tsAnyLocalIdx >= 0 && tsAnyLocalIdx < tsAny.periods.length
-        ? tsAny.periods[tsAnyLocalIdx]
+        ? (tsAny.periods[tsAnyLocalIdx] as number)
         : null
     )
     const vrAll = (vintageResultsRaw?.results ?? {}) as Record<string, Record<string, {

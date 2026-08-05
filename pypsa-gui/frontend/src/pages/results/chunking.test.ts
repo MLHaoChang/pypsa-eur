@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { chooseChunk, chunkBounds, CHUNK_STEPS } from './chunking'
+import { chooseChunk, chunkBounds, horizonOf, localRow, CHUNK_STEPS } from './chunking'
+import type { TSPayload } from './shared'
+
+// Minimal TSPayload builder for horizonOf/localRow tests — only the fields
+// those two functions read (`data.length`, `range.total`, `range.from`)
+// need real values; `columns`/`index` are irrelevant filler.
+function mkPayload(opts: { rows: number; range?: { from: number; to: number; total: number } }): TSPayload {
+  return {
+    index: Array.from({ length: opts.rows }, (_, i) => String(i)),
+    columns: ['A0'],
+    data: Array.from({ length: opts.rows }, () => [0]),
+    ...(opts.range ? { range: { ...opts.range, complete: false, capped: false } } : {}),
+  }
+}
 
 describe('chooseChunk', () => {
   // Sizes derived from the measured ~10 bytes per serialised value against a
@@ -92,5 +105,59 @@ describe('chunkBounds', () => {
 
     expect(local).toBe(32)
     expect(bounds.from + local).toBe(200)
+  })
+})
+
+describe('horizonOf', () => {
+  // This is the assertion that catches the original defect: clamping a
+  // snapshot index against a CHUNK's length instead of the series' true
+  // horizon silently renders the wrong row's flows under the right label.
+  it('returns the HORIZON when a payload carries range.total, not that payload\'s data.length', () => {
+    // A ranged response: the chunk actually fetched is 168 rows, but the
+    // series' true horizon (range.total) is 26280.
+    const chunked = mkPayload({ rows: 168, range: { from: 8592, to: 8759, total: 26280 } })
+
+    expect(horizonOf([chunked])).toBe(26280)
+    expect(horizonOf([chunked])).not.toBe(chunked.data.length)
+  })
+
+  it('falls back to data.length for an unranged payload', () => {
+    // Pre-range, unconverted shape: no `range` block at all, so data.length
+    // IS the whole series.
+    const unranged = mkPayload({ rows: 720 })
+
+    expect(horizonOf([unranged])).toBe(720)
+  })
+
+  it('prefers the first payload carrying range.total over later payloads', () => {
+    const first = mkPayload({ rows: 24, range: { from: 0, to: 23, total: 8760 } })
+    const second = mkPayload({ rows: 24, range: { from: 0, to: 23, total: 100 } })
+
+    expect(horizonOf([first, second])).toBe(8760)
+  })
+
+  it('returns 0 for all-null / all-empty input', () => {
+    expect(horizonOf([null, undefined])).toBe(0)
+    expect(horizonOf([mkPayload({ rows: 0 })])).toBe(0)
+    expect(horizonOf([])).toBe(0)
+  })
+})
+
+describe('localRow', () => {
+  it('offsets by the payload\'s own range.from', () => {
+    const payload = mkPayload({ rows: 168, range: { from: 8592, to: 8759, total: 26280 } })
+
+    expect(localRow(payload, 8600)).toBe(8)
+  })
+
+  it('returns the raw index for an unranged payload', () => {
+    const payload = mkPayload({ rows: 720 })
+
+    expect(localRow(payload, 42)).toBe(42)
+  })
+
+  it('returns the raw index for a null/undefined payload', () => {
+    expect(localRow(null, 42)).toBe(42)
+    expect(localRow(undefined, 42)).toBe(42)
   })
 })

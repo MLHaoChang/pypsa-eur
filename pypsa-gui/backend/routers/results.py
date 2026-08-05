@@ -127,6 +127,32 @@ def _result_df(n, accessor_name: str, attr: str, source: str = "lopf"):
 # sites in this module are unchanged.
 
 
+def _wants_slice(from_: int | None, to_: int | None) -> bool:
+    """
+    True when the caller actually asked for a `from`/`to` window.
+
+    Deliberately `isinstance(x, int)`, not `x is None` / `x is not None`:
+    when a route function decorated with a `Query(None, ...)` default is
+    called directly as plain Python — bypassing FastAPI's request handling,
+    which is the only place that actually resolves the query string into an
+    int-or-None — the unset parameter's value is the `fastapi.params.Query`
+    sentinel object itself, not `None`. `x is not None` is then True for a
+    bound the caller never supplied, and `_slice_ts` chokes on a non-int
+    bound. `tests/test_compare_cross_surface.py` calls
+    `get_prices`/`get_curtailment` exactly this way; nothing calls one of
+    the `_serve_ts`-backed endpoints directly today, but the guard is kept
+    identical across every call site on purpose — a reader who "fixes" one
+    back to `is not None` because it looks simpler must not have a second,
+    correct form to copy from.
+
+    When both bounds are absent, the caller should leave `range_meta` as
+    `None` so the payload stays byte-identical to the pre-range response —
+    that is what keeps every consumer that has not been converted to ask
+    for a slice working unchanged.
+    """
+    return isinstance(from_, int) or isinstance(to_, int)
+
+
 def _serve_ts(
     accessor: str,
     attr: str,
@@ -164,26 +190,11 @@ def _serve_ts(
         df = _result_df(n, accessor, attr, source)
         if df is None or df.empty:
             return _not_solved()
-        # No bounds supplied → `range_meta` stays None and the payload is
-        # byte-identical to the pre-range response. That is what keeps every
-        # consumer that has not been converted working unchanged.
-        #
-        # Deliberately `isinstance(x, int)`, not `x is None` / `x is not
-        # None`: when a route function decorated with a `Query(None, ...)`
-        # default is called directly as plain Python — bypassing FastAPI's
-        # request handling, which is the only place that actually resolves
-        # the query string into an int-or-None — the unset parameter's value
-        # is the `fastapi.params.Query` sentinel object itself, not `None`.
-        # `x is not None` is then True for a bound the caller never supplied,
-        # and `_slice_ts` chokes on a non-int bound. `tests/
-        # test_compare_cross_surface.py` calls `get_prices`/`get_curtailment`
-        # exactly this way; nothing calls one of these ~11 `_serve_ts`
-        # endpoints directly today, but the guard is kept identical across
-        # every call site on purpose — a reader who "fixes" one back to `is
-        # not None` because it looks simpler must not have a second, correct
-        # form to copy from.
+        # See `_wants_slice` for why this isn't `from_ is not None or to_ is
+        # not None`. No bounds supplied → `range_meta` stays None and the
+        # payload is byte-identical to the pre-range response.
         range_meta = None
-        if isinstance(from_, int) or isinstance(to_, int):
+        if _wants_slice(from_, to_):
             df, range_meta = _slice_ts(df, from_, to_)
         extra = {"source": source} if echo_source else None
         return _ts_payload(df, extra=extra, range_meta=range_meta)
@@ -2237,7 +2248,7 @@ def get_unit_commitment(
     if cols:
         grid = status[cols].fillna(0).astype(int)
         range_meta = None
-        if isinstance(from_, int) or isinstance(to_, int):
+        if _wants_slice(from_, to_):
             grid, range_meta = _slice_ts(grid, from_, to_)
         status_payload = _ts_payload(grid, range_meta=range_meta)
     else:
@@ -2585,7 +2596,7 @@ def get_prices(
         # in the prices-specific extras. Keeps multi-period periods array
         # consistent with every other /results/* endpoint.
         range_meta = None
-        if isinstance(from_, int) or isinstance(to_, int):
+        if _wants_slice(from_, to_):
             df, range_meta = _slice_ts(df, from_, to_)
             # data_adjusted / fallback_per_snapshot are per-snapshot arrays
             # computed above against the FULL (unsliced) frame — same
@@ -2901,7 +2912,7 @@ def get_curtailment(
             # payload (preserves index, drops all columns) rather than 204.
             curtailment = curtailment.iloc[:, 0:0]
         range_meta = None
-        if isinstance(from_, int) or isinstance(to_, int):
+        if _wants_slice(from_, to_):
             curtailment, range_meta = _slice_ts(curtailment, from_, to_)
         return _ts_payload(curtailment, range_meta=range_meta)
     except Exception:
@@ -2956,7 +2967,7 @@ def get_lost_load(
             except KeyError:
                 bus_carriers[str(col)] = ""
     range_meta = None
-    if isinstance(from_, int) or isinstance(to_, int):
+    if _wants_slice(from_, to_):
         df, range_meta = _slice_ts(df, from_, to_)
     return _ts_payload(df, extra={
         "total_mwh": total_mwh,
@@ -3086,7 +3097,7 @@ def get_load_results(
         if df is None or df.empty:
             return _not_solved()
         range_meta = None
-        if isinstance(from_, int) or isinstance(to_, int):
+        if _wants_slice(from_, to_):
             df, range_meta = _slice_ts(df, from_, to_)
         return _ts_payload(df, range_meta=range_meta)
     except Exception:

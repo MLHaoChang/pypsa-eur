@@ -12,6 +12,8 @@
  * too big. Deriving it from the asset count self-selects day / week / month.
  */
 
+import type { TSPayload } from './shared'
+
 /** Day, week, month, year — calendar units, so boundaries stay meaningful. */
 export const CHUNK_STEPS = [24, 168, 720, 8760] as const
 
@@ -60,4 +62,44 @@ export function chunkBounds(
   const offset = Math.floor((Math.max(lo, idx) - lo) / safeChunk) * safeChunk
   const from = Math.max(lo, lo + offset)
   return { from, to: Math.min(from + safeChunk - 1, hi) }
+}
+
+/**
+ * The series' true snapshot count — the HORIZON — as opposed to `data.length`,
+ * which is only the size of whatever chunk happened to be fetched.
+ *
+ * Clamping a snapshot index against the wrong one of these is the exact
+ * defect class Task 6 exists to prevent: asking for snapshot 5000 and
+ * clamping to a 168-row CHUNK's length would silently render row 167's
+ * flows mislabelled as snapshot 5000's. Clamp against the horizon.
+ *
+ * Prefers the first payload (in array order) that carries `range.total` — a
+ * ranged response reports the true horizon regardless of how many rows it
+ * actually served. Falls back to the first payload with a non-empty `data`
+ * array (the pre-range, unconverted shape has no `range` block at all, so
+ * `data.length` IS the whole series there). Returns 0 when nothing is
+ * available — every payload absent or empty.
+ */
+export function horizonOf(payloads: Array<TSPayload | null | undefined>): number {
+  for (const p of payloads) {
+    if (p?.range?.total != null) return p.range.total
+  }
+  for (const p of payloads) {
+    if (p && p.data.length > 0) return p.data.length
+  }
+  return 0
+}
+
+/**
+ * Global snapshot index → this payload's own chunk-local row index.
+ *
+ * Each result series is probed and chunked independently (see
+ * `useChunkedSeries` in CanvasResultsContext.tsx), so two series can sit on
+ * different chunks at the same global snapshot index — the offset must be
+ * computed PER PAYLOAD, not once against a shared chunk origin. Unranged
+ * payloads (no `range` block) have no offset — the whole series is `data`,
+ * so the global index IS the local index.
+ */
+export function localRow(payload: TSPayload | null | undefined, globalIdx: number): number {
+  return globalIdx - (payload?.range?.from ?? 0)
 }

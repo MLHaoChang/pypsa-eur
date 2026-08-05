@@ -47,6 +47,23 @@ export interface TSPayload {
   // if a user assigns non-int labels, hence the union type.
   // Absent on single-period (flat) snapshots — the backend omits the field.
   periods?: Array<number | string>
+  // Present only on RANGED responses (services/serialization.py::slice_ts /
+  // ts_payload) — a request that passed `from`/`to` query params. Absent
+  // means this payload is the whole series, the pre-range shape unconverted
+  // callers still receive.
+  //
+  // `complete` is true when the served window covers the whole series
+  // (`from === 0 && to === total - 1`), false for a partial window.
+  // `capped` is true when the server truncated the request because it
+  // exceeded MAX_RESPONSE_VALUES.
+  //
+  // A consumer that renders a HORIZON TOTAL (sums every row to report an
+  // MWh / € figure across the whole run) MUST check `!ts.range || ts.range
+  // .complete` before treating `data` as the whole series — a windowed
+  // payload silently summing only its chunk understates the total. Per-
+  // snapshot consumers (a single row, a chart of the served window) don't
+  // need this check.
+  range?: { from: number; to: number; total: number; complete: boolean; capped: boolean }
 }
 
 // True when the payload is multi-period (server emitted a parallel periods

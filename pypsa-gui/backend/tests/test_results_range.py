@@ -250,6 +250,12 @@ def test_a_server_slice_equals_the_same_slice_taken_client_side(widened_client, 
     assert sliced["columns"] == full_body["columns"]
     assert sliced["index"] == full_body["index"][1:3]
     assert sliced["data"] == full_body["data"][1:3]
+    # `periods` is parallel to `index`/`data` on multi-period payloads (the
+    # golden fixture is multi-period) — a slice that recomputed `periods`
+    # from the PRE-slice frame instead of windowing it alongside `data` would
+    # pass every other assertion here while silently mislabelling which
+    # investment period each served row belongs to.
+    assert sliced.get("periods") == full_body.get("periods", [])[1:3]
 
 
 @pytest.mark.parametrize("url", ALL_SERIES_ENDPOINTS)
