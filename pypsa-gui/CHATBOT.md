@@ -77,9 +77,11 @@ the text and press Send as usual.
   pypsa-gui FastAPI process.
 - Toggle the mic to start/stop; **Esc** also stops listening.
 
-Voice input requires microphone permission, which the packaged app requests
-via `NSMicrophoneUsageDescription`. If macOS has denied it, the mic button is
-disabled and its tooltip says so — it is not a missing feature.
+Voice input requires microphone permission. The packaged app's bundle now
+declares `NSMicrophoneUsageDescription`, but whether macOS actually grants the
+permission to the packaged app has not been verified — that requires building
+and running the packaged app, which has not been done yet. If macOS has
+denied it, the mic button is disabled and its tooltip says so.
 
 Voice OUTPUT (the assistant speaking) needs no permission and is available in
 the packaged app: measured at 219 voices in a real WKWebView. It is not wired
@@ -97,20 +99,19 @@ The header dropdown selects the model used for the next turn:
 Switching models takes effect on the *next* turn; an in-flight stream
 continues on the previous model.
 
-## Cost meter (M10)
+## Usage meter (M10)
 
-The header shows the running token totals and a derived EUR estimate:
+The header shows the running token totals for the session, e.g.:
 
 ```
-12,345 in / 6,789 out · €0.0234
+12,345 in / 6,789 out · 234 cached
 ```
 
-The server only ever reports token counts; the EUR figure is derived
-client-side from the per-model price constants in
-[frontend/src/store/chatStore.ts](frontend/src/store/chatStore.ts). When
-Anthropic ships a price update, bump `PRICING_USD_PER_MTOK` and
-`PRICING_VERSION`. **No EUR field is ever written to chat.jsonl**, so
-re-pricing a historic conversation is a pure render-time computation.
+The server reports token counts (input / output / cache-read) and the client
+renders them as-is — there is no cost figure, derived or otherwise. This app
+does not publish per-model pricing it cannot verify, so no EUR (or USD)
+estimate is shown anywhere. If that changes, it needs a verified pricing
+source, not a hardcoded constant.
 
 ## Cost caps
 

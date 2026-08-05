@@ -108,7 +108,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   results:    { eyebrow: 'SIMULATION', title: 'Results' },
   solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
   // Chatbot integration v6 (Phase 3). Half-width by default; the panel
-  // body handles its own layout (message list + composer + cost meter).
+  // body handles its own layout (message list + composer + token usage meter).
   chat:       { eyebrow: 'ASSISTANT',  title: 'Chat assistant' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },

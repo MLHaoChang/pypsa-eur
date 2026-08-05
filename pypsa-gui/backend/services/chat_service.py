@@ -32,9 +32,9 @@ Key Phase 2 invariants enforced here:
     `request.is_disconnected()`, it sets `session.abort_event` so any
     cooperating tool worker can shut down cleanly.
   * M9 — append_turn under `ctx.chat_state.lock` (Phase 0; honoured here).
-  * M10 — turn records persist token COUNTS only, never derived eur cost
-    (cost is computed at read time from PRICING constants so a price update
-    correctly re-prices history).
+  * M10 — turn records persist token COUNTS only. The client renders the
+    running totals as-is; there is no derived cost figure (no verified
+    per-model pricing is published anywhere in this app).
   * v4-MINOR-2 — rotation under the SAME lock as append, so a concurrent
     appender cannot observe a half-rotated state.
   * v4-MINOR-3 — `ChatSession._lock` guards
@@ -109,8 +109,8 @@ PROJECT_REBINDING_TOOLS = frozenset([
 ])
 
 # Default + selectable models (Phase 3 wires the Anthropic SDK using these).
-# Keep these in sync with the frontend `ChatModel` union (api/chat.ts) and
-# `PRICING_USD_PER_MTOK` (chatStore.ts). The model string is not enforced
+# Keep these in sync with the frontend `ChatModel` union (api/chat.ts). The
+# model string is not enforced
 # server-side (it flows straight to the SDK), so a newer model the UI offers
 # works even if this list lags — but keep it accurate as documentation.
 # No "latest" comment here on purpose. The previous pair carried
@@ -121,11 +121,10 @@ DEFAULT_MODEL: str = "claude-sonnet-5"
 OPUS_MODEL: str = "claude-opus-5"
 ALLOWED_MODELS: frozenset[str] = frozenset([DEFAULT_MODEL, OPUS_MODEL])
 
-# Hard per-session token caps. Cost caps live client-side (M10 — eur derived
-# at render time from token counts + PRICING constants), but the server
-# enforces a token-count ceiling so a misbehaving model + tool-use loop
-# cannot burn unbounded budget. Defaults match the v6 plan; ops can override
-# via env or a future endpoint.
+# Hard per-session token caps. The client shows the running token counts
+# (M10), but the server enforces a token-count ceiling so a misbehaving
+# model + tool-use loop cannot burn unbounded budget. Defaults match the v6
+# plan; ops can override via env or a future endpoint.
 MAX_OUTPUT_TOKENS_PER_TURN: int = 8192
 MAX_TOOL_CALLS_PER_TURN: int = 25
 MAX_TURNS_PER_SESSION: int = 100
@@ -426,8 +425,8 @@ class ChatSession:
     iterations to shut down cleanly.
 
     `usage_acc` — running token totals (in / out / cache_read / cache_create).
-    M10: cost EUR is NOT stored — it is computed at read time from PRICING
-    constants so a model-price update correctly re-prices history.
+    M10: only token counts are stored; the client renders them as-is. No
+    cost figure is computed or stored anywhere.
 
     `result_refs` — FIFO of recent tool-call result summaries the agent can
     cite without re-issuing the tool call. Bounded by RESULT_REFS_MAXLEN.
@@ -1785,7 +1784,8 @@ def run_turn(
            tool_result to the next assistant message, loop.
       4. When the model stops with no tool_use → emit turn_done.
 
-    Caps (M10 token-only persistence — eur derived client-side):
+    Caps (M10 token-only persistence — the client renders token counts, no
+    derived cost):
       * `MAX_OUTPUT_TOKENS_PER_TURN` cap is passed to the SDK as
         `max_tokens=`.
       * `MAX_TOOL_CALLS_PER_TURN` is enforced server-side — after that many

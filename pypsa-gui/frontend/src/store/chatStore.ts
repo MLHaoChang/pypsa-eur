@@ -4,9 +4,8 @@
  * Per-project conversation UI state (M6 location: src/store/, NOT src/stores/
  * which doesn't exist). Tracks the active session id, the visible message
  * list, the live pending-confirmation card (only one at a time), the per-
- * session usage accumulator (M10 — eur is DERIVED client-side at render
- * time from token counts × PRICING constants, never persisted), and an
- * abort_event proxy.
+ * session usage accumulator (M10 — raw token counts only; there is no cost
+ * figure, derived or otherwise), and an abort_event proxy.
  *
  * Project-switch reset: `resetForProjectSwitch()` clears every UI-side
  * field; the backend ProjectContext carries `chat_state` per project so
@@ -75,7 +74,7 @@ interface ChatState {
   pending: PendingConfirmationCard | null
   // Live tool-progress (the latest tool_progress payload per tool_use_id).
   toolProgress: Record<string, { kind: string; line: string }[]>
-  // Usage + cost meter
+  // Usage (token count) meter
   usage: ChatUsageAcc
   // Stream state
   streaming: boolean

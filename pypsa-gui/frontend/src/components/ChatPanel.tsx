@@ -1462,7 +1462,7 @@ export default function ChatPanel() {
       case 'turn_done': {
         const d = _frame_data<TurnDoneFrame>(frame)
         if (d.usage) {
-          // M10: server reports token counts; client derives EUR.
+          // M10: server reports token counts; client renders them as-is.
           accrueUsage({
             input_tokens: d.usage.input_tokens ?? 0,
             output_tokens: d.usage.output_tokens ?? 0,
