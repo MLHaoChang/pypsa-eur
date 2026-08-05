@@ -525,7 +525,21 @@ import { useResultsWindow } from '../../hooks/useResultsWindow'
 
 **Convert only queries whose endpoint returns `{index, columns, data}`.** The sixteen per-snapshot endpoints are: `generators`, `storage_dispatch`, `store_dispatch`, `store_energy`, `storage`, `lines`, `links`, `transformers`, `unit_commitment`, `voltages`, `line_reactive`, `transformer_reactive`, `prices`, `curtailment`, `lost_load`, `loads`. Anything else — `cost_breakdown`, `statistics`, `losses`, `carrier_kpis`, `emissions`, `line_duals`, `lcoh`, `economics_by_carrier`, `price_drivers`, `asset_economics`, `objective_decomposition`, `ac_pf/status` — is an aggregate with no snapshot axis; leave it alone.
 
-If a getter you need was not widened with an optional `range` argument in the 2026-08-04 plan, leave that query unranged and report it. Do not edit `api/simulation.ts` from inside this task — that file's contract was set by the previous plan and changing it here puts every other consumer in this task's blast radius.
+**Before converting the queries, widen the seven getters that still lack a range.** Task 3 established that `getTransformerResults`, `getUnitCommitment`, `getVoltages`, `getTransformerReactive`, `getPrices`, `getCurtailment` and `getLostLoad` take no `range` argument, while their backend endpoints all accept `from`/`to`. Add the optional second argument to each, exactly as the nine already-widened getters do — for example:
+
+```ts
+  getPrices: (source?: ResultSource, range?: TSRange) =>
+    client.get('/results/prices', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
+```
+
+`getUnitCommitment`, `getCurtailment` and `getLostLoad` take **no `source`** — their backend endpoints read LP-only artefacts — so for those the range is the FIRST parameter:
+
+```ts
+  getCurtailment: (range?: TSRange) =>
+    client.get('/results/curtailment', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
+```
+
+Read each getter's current signature before editing and preserve it exactly; only append. A widened getter called with no arguments must produce byte-identical requests to today's, which is what keeps every unconverted caller working. Verify that with `tsc -b` — a type error means a signature was changed rather than widened.
 
 - [ ] **Step 2: Verify**
 
@@ -748,7 +762,7 @@ Expected `BUILD_EXIT=0`, a clean secret-scan line, and a DMG timestamp later tha
 
 - **Do not convert `AggregatedOverview` to ranged fetches.** It is excluded by design, and Task 5 exists to make an accidental conversion fail loudly.
 - **Do not "fix" the duplicate fetch** where AggregatedOverview and Dispatch each download `generators`. That duplication is what keeps their cache entries separate; collapsing it would feed a window into the summary tab.
-- **Do not change `api/simulation.ts`.** Its contract was set by the 2026-08-04 plan. If a getter you need lacks an optional `range` argument, report it rather than widening it here.
+- **`api/simulation.ts` may be widened, but ONLY by adding optional second arguments.** Task 3 measured the gap: 9 of the 16 per-snapshot getters take a `range`; 7 do not — `getTransformerResults`, `getUnitCommitment`, `getVoltages`, `getTransformerReactive`, `getPrices`, `getCurtailment`, `getLostLoad`. Three of those are the MAIN series of the Prices, Curtailment and LostLoad tabs, so without widening them Task 4 is a no-op for three of its five files. Widening is source-compatible by construction — the 2026-08-04 plan widened nine the same way with zero call-site changes and a clean typecheck. Do not change any existing parameter, do not make `range` required, and do not touch a getter this plan does not need.
 - **`tsc --noEmit -p tsconfig.json` is not enough.** It does not build `tsconfig.node.json`; `tsc -b` does, and that is what the DMG build runs.
 - **Two tests the spec asked for are deliberately not in this plan. Do not add them; the reasoning is the deliverable.**
   - *The identity property* — "fetching window `[a,b]` and re-slicing equals fetching whole and slicing to `[a,b]`". Already asserted one layer down by `tests/test_results_range.py::test_a_server_slice_equals_the_same_slice_taken_client_side`, across all sixteen endpoints, against a real solved network. Reproducing it in vitest would require mocking the backend, and a mocked slice tests the mock. Cite the backend test instead.
