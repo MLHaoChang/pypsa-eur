@@ -19,9 +19,9 @@
 import { client } from './client'
 import { rawFetchHeaders } from './csrf'
 
-// Latest Sonnet + Opus. Keep in sync with the backend DEFAULT_MODEL/OPUS_MODEL
-// (chat_service.py) and PRICING_USD_PER_MTOK (chatStore.ts).
-export type ChatModel = 'claude-sonnet-4-6' | 'claude-opus-4-8'
+// Keep in sync with chat_service.DEFAULT_MODEL / OPUS_MODEL, which
+// tests/test_chat_models.py pins.
+export type ChatModel = 'claude-sonnet-5' | 'claude-opus-5'
 
 export interface ChatStreamRequest {
   session_id?: string

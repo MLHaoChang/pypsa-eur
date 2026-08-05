@@ -57,23 +57,11 @@ export interface ChatErrorState {
   message: string
 }
 
-// Anthropic publishes per-million-token prices. M10 — these are constants
-// the panel multiplies against `usage` to render an eur estimate; the
-// backend NEVER persists eur in chat.jsonl. Update these when prices change.
-export const PRICING_VERSION = '2025-11'
-export const PRICING_USD_PER_MTOK: Record<ChatModel, { input: number; output: number }> = {
-  'claude-sonnet-4-6': { input: 3.0,  output: 15.0 },
-  'claude-opus-4-8':   { input: 15.0, output: 75.0 },
-}
-// Rough USD→EUR ratio for the cost meter. Production replacement: a live
-// FX endpoint, or a config-loaded rate. Hardcoded here for Phase 3 polish.
-export const USD_PER_EUR = 1.08
-
-export function deriveCostEur(model: ChatModel, usage: ChatUsageAcc): number {
-  const p = PRICING_USD_PER_MTOK[model] ?? PRICING_USD_PER_MTOK['claude-sonnet-4-6']
-  const usd = (usage.input_tokens * p.input + usage.output_tokens * p.output) / 1_000_000
-  return usd / USD_PER_EUR
-}
+// The EUR cost estimate lived here and was deleted deliberately: it derived
+// from a hardcoded price table and a hardcoded USD_PER_EUR, both of which go
+// stale silently and cannot be caught by a test. The meter now shows token
+// counts, which are exact. Do not reintroduce a price table without a live
+// rate source.
 
 interface ChatState {
   // Identity
@@ -207,7 +195,7 @@ function newMessageId() {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
-  model: 'claude-sonnet-4-6',
+  model: 'claude-sonnet-5',
   messages: [],
   pending: null,
   toolProgress: {},
