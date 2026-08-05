@@ -34,7 +34,7 @@ export default function Curtailment() {
   const { win, winValid } = useResultsWindow(currentProject)
   const { data: curtailTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'curtailment', win.from, win.to),
-    queryFn: () => resultsApi.getCurtailmentRanged(win),
+    queryFn: () => resultsApi.getCurtailment(win),
     enabled: winValid,
   })
   const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })

@@ -344,24 +344,12 @@ export const resultsApi = {
       }>
     }>(`/results/price_drivers`, { params: { threshold, limit } })
       .then(r => r.status === 204 ? null : r.data),
-  getCurtailment: () => client.get('/results/curtailment').then(r => r.status === 204 ? null : r.data),
-  // Ranged sibling, NOT a widened `getCurtailment` — deliberately a separate
-  // getter. `getCurtailment` above is referenced BARE (unwrapped) as a
-  // `queryFn` by `AggregatedOverview.tsx` and by `Dispatch.tsx`'s curtailment
-  // query, both out of scope for this task (AggregatedOverview especially —
-  // it must stay on whole-horizon payloads and untouched, verified by Step
-  // 3). Appending an optional `range` param to that SAME function, as done
-  // for the other six getters in this batch, type-checks fine in isolation
-  // but breaks both bare references: TS checks a bare-referenced
-  // arrow-typed property CONTRAVARIANTLY against React Query's
-  // `QueryFunction` context type (`{client, queryKey, signal, ...}` doesn't
-  // structurally satisfy `TSRange`'s required `from`/`to`), and — had that
-  // type error been suppressed some other way — the getter would receive
-  // that context object in place of `range` at runtime, sending
-  // `?from=undefined&to=undefined`. A separate getter keeps every existing
-  // caller byte-for-byte untouched while giving the Curtailment tab (the
-  // only caller of this one) a windowed fetch.
-  getCurtailmentRanged: (range?: TSRange) => client.get('/results/curtailment', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
+  // No `source` (LP-only, see `getUnitCommitment`) — `range` is the first
+  // param. Every caller that referenced this bare as a `queryFn`
+  // (AggregatedOverview.tsx, Dispatch.tsx) has been updated to wrap it in
+  // an arrow (`() => resultsApi.getCurtailment()`); calling with no
+  // arguments still produces a byte-identical request to before.
+  getCurtailment: (range?: TSRange) => client.get('/results/curtailment', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
   // Per-carrier economic roll-up on the LIVE in-memory network. Powers the
   // per-carrier KPI strips in the Results / Dispatch tab. Shape mirrors
   // `CarrierEconomics` in Compare View (revenue_meur, opex_meur split into
@@ -387,7 +375,11 @@ export const resultsApi = {
   // `voll_eur_per_mwh` is the per-MWh VOLL the solver used; consumers
   // should prefer this over re-deriving it via cost/mwh division (which
   // breaks at zero MWh).
-  getLostLoad: () => client.get<{
+  // No `source` (LP-only) — `range` is the first param. Every bare-reference
+  // caller (AggregatedOverview.tsx, Dispatch.tsx) has been updated to wrap
+  // this in an arrow; calling with no arguments is still byte-identical to
+  // before.
+  getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;
     voll_eur_per_mwh: number;
@@ -396,16 +388,6 @@ export const resultsApi = {
     // lets the frontend split the total per carrier.
     bus_carriers?: Record<string, string>
     // Multi-period: parallel array of period years for each `index` entry.
-    periods?: number[]
-  }>('/results/lost_load').then(r => r.status === 204 ? null : r.data),
-  // Ranged sibling — same reasoning as `getCurtailmentRanged` above.
-  // `getLostLoad` is referenced bare by `AggregatedOverview.tsx` and
-  // `Dispatch.tsx`, both out of scope for this task.
-  getLostLoadRanged: (range?: TSRange) => client.get<{
-    index: string[]; columns: string[]; data: number[][];
-    total_mwh: number; total_cost_eur: number;
-    voll_eur_per_mwh: number;
-    bus_carriers?: Record<string, string>
     periods?: number[]
   }>('/results/lost_load', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
   // Transmission-losses summary. `enabled=false` ⇒ the solve didn't model

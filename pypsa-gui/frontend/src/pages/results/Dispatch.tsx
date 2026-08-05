@@ -243,7 +243,7 @@ export default function Dispatch() {
   const resultSource = useUIStore(s => s.resultSource)
   const currentProject = useUIStore(s => s.currentProject)
   // Positional bounds for the active Horizon filter, resolved against the
-  // SNAPSHOT INDEX (not a results payload) so the nine per-snapshot queries
+  // SNAPSHOT INDEX (not a results payload) so the per-snapshot queries
   // below can be windowed before any payload exists. Distinct from `range`
   // further down, which resolves against the fetched payload's own index to
   // re-slice client-side — see the comment at that call site.
@@ -260,11 +260,14 @@ export default function Dispatch() {
   })
   // Curtailment = max(p_max_pu * p_nom_opt − p, 0). Computed server-side.
   // Used for the renewables KPI + the toggleable per-section plot below.
-  // (LP-only — AC PF doesn't produce curtailment.) Per-snapshot but
-  // `getCurtailment` takes no `range` argument — it wasn't widened by the
-  // earlier plan, so this query is left unranged rather than modifying
-  // api/simulation.ts from inside this task.
-  const { data: curtailTS } = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'), queryFn: resultsApi.getCurtailment })
+  // (LP-only — AC PF doesn't produce curtailment.) `getCurtailment` now
+  // carries an optional range (widened alongside Task 4's five tabs) —
+  // windowed the same as its seven siblings above.
+  const { data: curtailTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'curtailment', win.from, win.to),
+    queryFn: () => resultsApi.getCurtailment(win),
+    enabled: winValid,
+  })
   // Storage gets BOTH SoC (MWh) AND signed power (MW). The power view is what
   // the user means by "production / consumption" — positive = discharging,
   // negative = charging. SoC is the energy reservoir level.
@@ -303,9 +306,12 @@ export default function Dispatch() {
   })
   // VOLL slack dispatch — non-null only when last solve ran with voll > 0
   // and the LP actually shed load. Drives the Lost Load KPI + chart below.
-  // Per-snapshot but `getLostLoad` takes no `range` argument (not widened
-  // by the earlier plan) — left unranged, same reasoning as curtailment.
-  const { data: lostLoad } = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'), queryFn: resultsApi.getLostLoad })
+  // `getLostLoad` now carries an optional range — windowed like the rest.
+  const { data: lostLoad } = useQuery({
+    queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
+    queryFn: () => resultsApi.getLostLoad(win),
+    enabled: winValid,
+  })
   // Per-carrier economics (live network) — drives the per-carrier KPI strip
   // above each DispatchStack. Mirrors the Compare View's by_carrier split
   // (gen/charge/curtailment/lost-load) so the single-project view shows

@@ -52,7 +52,7 @@ export default function LostLoadTab() {
   const { win, winValid } = useResultsWindow(currentProject)
   const { data: lostLoad } = useQuery({
     queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
-    queryFn: () => resultsApi.getLostLoadRanged(win),
+    queryFn: () => resultsApi.getLostLoad(win),
     enabled: winValid,
   })
   // WeightCtx + timeline from the shared hook (fetches /snapshots +

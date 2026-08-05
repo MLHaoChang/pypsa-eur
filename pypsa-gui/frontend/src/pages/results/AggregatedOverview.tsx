@@ -55,8 +55,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   const { data: gensTS }      = useQuery({ queryKey: nk(currentProject, 'results', 'generators'),       queryFn: () => resultsApi.getGeneratorResults() })
   const { data: storPowerTS } = useQuery({ queryKey: nk(currentProject, 'results', 'storage_dispatch'), queryFn: () => resultsApi.getStorageDispatchResults() })
   const { data: loadTS }      = useQuery({ queryKey: nk(currentProject, 'results', 'loads'),            queryFn: () => resultsApi.getLoadResults() })
-  const { data: curtailTS }   = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'),      queryFn: resultsApi.getCurtailment })
-  const { data: lostLoad }    = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'),        queryFn: resultsApi.getLostLoad })
+  // Wrapped (not bare) because `getCurtailment`/`getLostLoad` now take an
+  // optional `range` — calling with no arguments here is still
+  // byte-identical to the old bare-reference request, and this tab must
+  // stay on whole-horizon payloads (never pass a window).
+  const { data: curtailTS }   = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'),      queryFn: () => resultsApi.getCurtailment() })
+  const { data: lostLoad }    = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'),        queryFn: () => resultsApi.getLostLoad() })
   const { data: cost }        = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'),   queryFn: resultsApi.getCostBreakdown })
 
   const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
