@@ -1014,6 +1014,106 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
             "solve strategy — the dispatch fix needs a per-period story. "
             "Disable `run_ac_pf_after_lopf` or use the standalone Stage 2 "
             "trigger after the myopic solve completes."))
+    out.extend(_check_myopic_capacity_lock(n, network_periods or cfg_periods))
+    return out
+
+
+# Component class → (static attribute, nominal-capacity field). Mirrors
+# `solver_service._NOM_TRIPLES` / `vintage_service.SUPPORTED_COMPONENTS`; kept
+# local so validation has no import edge into the solver.
+_MYOPIC_NOM_PAIRS = (
+    ("Generator",   "generators",    "p_nom"),
+    ("StorageUnit", "storage_units", "p_nom"),
+    ("Store",       "stores",        "e_nom"),
+    ("Link",        "links",         "p_nom"),
+    ("Line",        "lines",         "s_nom"),
+    ("Transformer", "transformers",  "s_nom"),
+)
+
+
+def _check_myopic_capacity_lock(n, periods) -> list[Issue]:
+    """
+    Warn when a myopic run cannot expand capacity after its FIRST period.
+
+    After each iteration, `_freeze_period_capacities` pins every extendable
+    asset ACTIVE in that period to `p_nom = p_nom_opt, extendable = False` so
+    later periods treat it as existing plant. An asset left at the default
+    `build_year = 0` is active in every period, so the very first iteration
+    freezes it and no later period can ever add to it. The run still reports
+    `optimal`; the capacity is simply pinned at the first period's optimum
+    while demand keeps growing, and the gap is absorbed by unserved energy.
+
+    Measured on a 3-period system with +44% demand growth: gas froze at 977 MW
+    and unserved energy ran 47 → 1 756 → 5 183 MWh. With per-period vintage
+    bounds on the same asset it built 977 / +195 / +234 MW and unserved energy
+    stayed at 47 → 56 → 68 MWh.
+
+    Per-period vintage bounds (Assets → per-period bounds, stored in
+    `n.meta["vintage_bounds"]`) are the supported way to let an asset expand in
+    more than one period: `vintage_service` expands it into one extendable row
+    per period with `build_year = period`, and the myopic driver defers each
+    vintage to its own iteration. This is a WARNING, not an error — freezing is
+    legitimate when the user really does mean "decide the fleet once, then
+    operate it".
+    """
+    out: list[Issue] = []
+    try:
+        period_list = sorted({int(p) for p in (periods or [])})
+    except (TypeError, ValueError):
+        return out
+    # One period cannot lock anything — there is no "later period" to starve.
+    if len(period_list) < 2:
+        return out
+
+    try:
+        bounds = (n.meta or {}).get("vintage_bounds") or {}
+    except Exception:
+        bounds = {}
+    first_period = period_list[0]
+    locked: list[str] = []
+    covered = 0
+    for comp_class, attr, pnom in _MYOPIC_NOM_PAIRS:
+        df = getattr(n, attr, None)
+        if df is None or getattr(df, "empty", True):
+            continue
+        ext_col = f"{pnom}_extendable"
+        if ext_col not in df.columns:
+            continue
+        ext = df[df[ext_col].astype(bool)]
+        if ext.empty:
+            continue
+        class_bounds = bounds.get(comp_class) or {}
+        # build_year defaults to 0 → active from the first period onward, so the
+        # first iteration freezes it. An asset dated INTO a later period is
+        # decided by that period's iteration and is not locked out.
+        by = ext["build_year"] if "build_year" in ext.columns else None
+        for name in ext.index:
+            if class_bounds.get(str(name)):
+                covered += 1
+                continue
+            build_year = 0
+            if by is not None:
+                try:
+                    build_year = int(by.at[name])
+                except (TypeError, ValueError):
+                    build_year = 0
+            if build_year <= first_period:
+                locked.append(f"{comp_class}:{name}")
+
+    if not locked:
+        return out
+    shown = ", ".join(locked[:5]) + (f" (+{len(locked) - 5} more)" if len(locked) > 5 else "")
+    covered_note = (
+        f" {covered} asset(s) DO have per-period bounds and will expand normally."
+        if covered else ""
+    )
+    out.append(_warn("myopic_capacity_locked_after_first_period", "", "",
+        f"Myopic foresight will freeze {len(locked)} extendable asset(s) after "
+        f"period {first_period}, so they cannot grow in the remaining "
+        f"{len(period_list) - 1} period(s): {shown}. If demand rises later, the "
+        f"shortfall becomes unserved energy and the solve still reports optimal. "
+        f"Set per-period vintage bounds on the assets that should be able to "
+        f"expand in more than one period.{covered_note}"))
     return out
 
 
