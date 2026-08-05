@@ -325,6 +325,35 @@ def test_unit_commitment_carries_its_range_inside_status_grid(solved_client):
     assert len(grid["data"]) == 1
 
 
+def test_prices_data_adjusted_and_fallback_stay_aligned_with_a_ranged_window(widened_client):
+    """
+    `/prices` attaches two extra per-snapshot arrays alongside `data`:
+    `data_adjusted` (merit-order-corrected duals) and `fallback_per_snapshot`
+    (analytical fallback when duals are all zero). Both are computed against
+    the FULL frame before slicing — the correction logic itself must see the
+    whole series — but they are positionally aligned to `data` row-for-row,
+    so they must be sliced to the SAME served bounds before being returned.
+
+    Catches: removing either the `data_adjusted = data_adjusted[lo:hi+1]` or
+    the `fallback_per_snapshot = fallback_per_snapshot[lo:hi+1]` slice from
+    `get_prices` in `routers/results.py`. Without it, a ranged request
+    returns a short `data` next to full-length parallel arrays, and a UI
+    indexing `data_adjusted[i]` against `data[i]` silently renders another
+    snapshot's price as if it were this one's.
+    """
+    r = _ranged(widened_client, "/api/results/prices", **{"from": 0, "to": 0})
+    _expect_data(r, "/api/results/prices")
+
+    body = r.json()
+    assert len(body["data_adjusted"]) == len(body["data"]), (
+        "data_adjusted desynchronised from data under a ranged request"
+    )
+    if body.get("fallback_per_snapshot"):
+        assert len(body["fallback_per_snapshot"]) == len(body["data"]), (
+            "fallback_per_snapshot desynchronised from data under a ranged request"
+        )
+
+
 # ── Static forwarding check: closes the AC-PF endpoints' coverage gap ──────
 #
 # /voltages, /line_reactive and /transformer_reactive default to

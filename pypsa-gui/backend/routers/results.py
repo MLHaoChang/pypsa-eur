@@ -167,9 +167,23 @@ def _serve_ts(
         # No bounds supplied → `range_meta` stays None and the payload is
         # byte-identical to the pre-range response. That is what keeps every
         # consumer that has not been converted working unchanged.
-        if from_ is None and to_ is None:
-            range_meta = None
-        else:
+        #
+        # Deliberately `isinstance(x, int)`, not `x is None` / `x is not
+        # None`: when a route function decorated with a `Query(None, ...)`
+        # default is called directly as plain Python — bypassing FastAPI's
+        # request handling, which is the only place that actually resolves
+        # the query string into an int-or-None — the unset parameter's value
+        # is the `fastapi.params.Query` sentinel object itself, not `None`.
+        # `x is not None` is then True for a bound the caller never supplied,
+        # and `_slice_ts` chokes on a non-int bound. `tests/
+        # test_compare_cross_surface.py` calls `get_prices`/`get_curtailment`
+        # exactly this way; nothing calls one of these ~11 `_serve_ts`
+        # endpoints directly today, but the guard is kept identical across
+        # every call site on purpose — a reader who "fixes" one back to `is
+        # not None` because it looks simpler must not have a second, correct
+        # form to copy from.
+        range_meta = None
+        if isinstance(from_, int) or isinstance(to_, int):
             df, range_meta = _slice_ts(df, from_, to_)
         extra = {"source": source} if echo_source else None
         return _ts_payload(df, extra=extra, range_meta=range_meta)
@@ -2559,6 +2573,9 @@ def get_prices(
 
         # Count snapshots that the user is likely to see as "negative" so
         # the frontend can show a hint without re-scanning the whole grid.
+        # A whole-horizon aggregate (not a per-snapshot array) — it does NOT
+        # narrow with a `from`/`to` window below; `range.complete` is what
+        # tells the frontend whether it reflects the full series or a slice.
         try:
             negative_hours = int((df.values < -1e-6).any(axis=1).sum())
         except Exception:
@@ -2570,6 +2587,17 @@ def get_prices(
         range_meta = None
         if isinstance(from_, int) or isinstance(to_, int):
             df, range_meta = _slice_ts(df, from_, to_)
+            # data_adjusted / fallback_per_snapshot are per-snapshot arrays
+            # computed above against the FULL (unsliced) frame — same
+            # positionally-aligned-to-the-rows shape as `data`. Slice them to
+            # the bounds slice_ts ACTUALLY served (range_meta, not the raw
+            # from_/to_ — slice_ts clamps and may cap) or a ranged response
+            # carries N sliced `data` rows next to the full-length arrays,
+            # and a UI indexing data_adjusted[i] against data[i] silently
+            # renders another snapshot's price as if it were this one's.
+            lo, hi = range_meta["from"], range_meta["to"]
+            data_adjusted = data_adjusted[lo : hi + 1]
+            fallback_per_snapshot = fallback_per_snapshot[lo : hi + 1]
         return _ts_payload(df, extra={
             # Merit-order ("subsidy-removed") version. Same shape as `data`.
             # When the LP-dual ALREADY reflects the merit order at a given
@@ -2903,6 +2931,10 @@ def get_lost_load(
     df = cap["lost_load_t"]
     if df is None or df.empty:
         return Response(status_code=204)
+    # total_mwh / total_cost are whole-horizon aggregates captured by the
+    # solver, not per-snapshot arrays — a `from`/`to` window below narrows
+    # `data` but does NOT recompute these; `range.complete` tells the
+    # frontend whether the window covers the whole series.
     total_mwh = float(cap.get("lost_load_total_mwh", 0))
     total_cost = float(cap.get("lost_load_cost_eur", 0))
     # Surface VOLL directly so the frontend doesn't infer it via division
