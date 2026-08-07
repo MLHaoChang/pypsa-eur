@@ -398,7 +398,7 @@ interface UIStore {
   setPaletteMode: (m: PaletteMode) => void
 }
 
-export const useUIStore = create<UIStore>((set, get) => ({
+export const useUIStore = create<UIStore>((set) => ({
   sidebarExpanded: storedSidebarMode() !== 'hidden',
   sidebarMode: storedSidebarMode(),
   rightPanelOpen: true,
@@ -514,11 +514,11 @@ export const useUIStore = create<UIStore>((set, get) => ({
     persistAssistantDockOpen(open)
     set({ assistantDockOpen: open })
   },
-  toggleAssistantDock: () => {
-    const next = !get().assistantDockOpen
+  toggleAssistantDock: () => set(s => {
+    const next = !s.assistantDockOpen
     persistAssistantDockOpen(next)
-    set({ assistantDockOpen: next })
-  },
+    return { assistantDockOpen: next }
+  }),
   setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
   setCompareRailOpen: (v) => {
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
