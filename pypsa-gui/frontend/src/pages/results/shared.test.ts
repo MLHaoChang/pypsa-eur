@@ -3,6 +3,9 @@ import {
   isTruncatedPayload, weightedSum,
   type TSPayload, type WeightCtx, type SnapshotWeightRow,
 } from './shared'
+import {
+  buildMultiPeriodWindowFixture, COLUMNS, WINDOW, TIMESTEPS_PER_PERIOD,
+} from './__fixtures__/multiPeriodWindow'
 
 // ── isTruncatedPayload ───────────────────────────────────────────────────────
 // The predicate the six windowing tabs (Dispatch, Curtailment, LostLoadTab,
@@ -140,5 +143,107 @@ describe('weightedSum on a multi-period windowed payload (FIX 3)', () => {
     )
     expect(fixedSum).not.toBe(buggyPositionalSum)
     expect(fixedSum).toBe(90)
+  })
+})
+
+// ── Windowed payload vs full-horizon weights: identity + cost ────────────────
+// Real-payload scale (3 periods × 8,760 snapshots = 26,280 rows, 12 columns,
+// weight rows shaped {period, timestep, objective, stores, generators}) with
+// the window the repro used, `?from=17520&to=26279`.
+//
+// The two calls below must agree because they describe the SAME 8,760
+// snapshots — one via a window-relative payload whose weight context still
+// carries the full-horizon weightings array (what `useWeightCtx` actually
+// builds: `snapshotWeights: snap?.weightings`, never sliced), the other via
+// the whole-horizon payload restricted with `rowRange`.
+//
+// Production change under test: `_snapshotWeightRow` in shared.tsx. On a
+// windowed payload its positional fast path (`sw[i]`) misses for essentially
+// every row — `sw[0]` is period 2026's weight row while `iso`/`period` belong
+// to period 2028 — so every row fell through to a linear `sw.find(...)` over
+// 26,280 entries. 8,760 rows × 26,280 entries ≈ 2.3e8 predicate calls per
+// call site.
+describe('weightedSum: windowed payload vs full-horizon snapshot weights', () => {
+  const fx = buildMultiPeriodWindowFixture()
+  const cols = new Set(COLUMNS)
+
+  // TEST 1 — the load-bearing identity.
+  //
+  // Pre-fix failure mode: the `sw.find(...)` fallback fires on all 8,760 rows,
+  // and the windowed call alone measured ~5,853 ms — past vitest's 5,000 ms
+  // default test timeout, so this case fails before the fix and passes after.
+  // The numbers themselves match either way (the fallback resolves the RIGHT
+  // row, just at O(n) each time), which is exactly why the regression was
+  // invisible in the UI apart from the freeze.
+  it('gives the same total for the window as for the same rows of the whole horizon', () => {
+    const windowedTotal = weightedSum(fx.windowed, cols, fx.ctxWindow)
+    const wholeSliceTotal = weightedSum(fx.whole, cols, fx.ctxWhole, WINDOW)
+    expect(windowedTotal).not.toBeNull()
+    expect(wholeSliceTotal).not.toBeNull()
+    // Non-uniform weights, so this is a real number, not a degenerate 0.
+    expect(Math.abs(windowedTotal as number)).toBeGreaterThan(0)
+    expect(windowedTotal as number).toBeCloseTo(wholeSliceTotal as number, 9)
+  })
+
+  // Same identity on the 'objective' (cost) column — the other `column`
+  // selection `weightedSum` supports, and the one Economics reads.
+  it('holds for the objective column too', () => {
+    const windowedTotal = weightedSum(fx.windowed, cols, fx.ctxWindow, undefined, 'objective')
+    const wholeSliceTotal = weightedSum(fx.whole, cols, fx.ctxWhole, WINDOW, 'objective')
+    expect(windowedTotal as number).toBeCloseTo(wholeSliceTotal as number, 9)
+  })
+
+  // TEST 2 — perf guard for the O(1) weight lookup.
+  //
+  // Measured before the fix: 5,853 ms for this single call (8,760 rows against
+  // a 26,280-row weightings array). After replacing the `sw.find(...)`
+  // fallback with a Map built once per `sw` array (memoised in a module-level
+  // WeakMap), the same call is ~1e2 ms at worst on a loaded machine. The 500 ms
+  // bound is ~12x the observed post-fix cost and ~1/12th of the pre-fix cost,
+  // so it catches a reintroduced O(n^2) without being timing-flaky.
+  it('resolves a windowed payload in well under 500 ms (no O(n^2) rescan)', () => {
+    const t0 = performance.now()
+    const total = weightedSum(fx.windowed, cols, fx.ctxWindow)
+    const elapsed = performance.now() - t0
+    expect(total).not.toBeNull()
+    expect(elapsed).toBeLessThan(500)
+  })
+
+  // TEST 4 — no regression on the whole horizon.
+  //
+  // On a whole-horizon payload the positional fast path matches on every row,
+  // so the fix must not touch this number at all. Pinned against an
+  // independent positional recomputation rather than a magic constant.
+  it('leaves whole-horizon totals unchanged (positional fast path still wins)', () => {
+    const wholeTotal = weightedSum(fx.whole, cols, fx.ctxWhole)
+    let expected = 0
+    for (let row = 0; row < fx.whole.data.length; row++) {
+      let s = 0
+      for (let c = 0; c < COLUMNS.length; c++) s += fx.whole.data[row][c]
+      const sw = fx.wholeWeights[row]
+      const pw = fx.periodWeights.find(p => p.period === fx.whole.periods![row])
+      expected += s * (sw.generators ?? 1) * (pw?.years ?? 1)
+    }
+    expect(wholeTotal as number).toBeCloseTo(expected, 6)
+  })
+
+  // Discrimination proof for the identity above: if the weight lookup fell
+  // back to the window-relative POSITION (what `Dispatch.tsx`'s link-flow loop
+  // did, and what a naive Map keyed only by timestep would do), the answer
+  // would be a different number — period 2026's weights applied to period
+  // 2028's rows. Pinning that here means the identity assertion cannot pass
+  // by accident on all-uniform weights.
+  it('is discriminating — the positional reading of the same window differs', () => {
+    const windowedTotal = weightedSum(fx.windowed, cols, fx.ctxWindow) as number
+    let positional = 0
+    for (let row = 0; row < TIMESTEPS_PER_PERIOD; row++) {
+      let s = 0
+      for (let c = 0; c < COLUMNS.length; c++) s += fx.windowed.data[row][c]
+      // sw[row] on a windowed payload = period 2026's row, the wrong basis.
+      const sw = fx.wholeWeights[row]
+      const pw = fx.periodWeights.find(p => p.period === fx.windowed.periods![row])
+      positional += s * (sw.generators ?? 1) * (pw?.years ?? 1)
+    }
+    expect(Math.abs(windowedTotal - positional)).toBeGreaterThan(1)
   })
 })

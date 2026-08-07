@@ -268,6 +268,63 @@ function _samePeriod(
   return String(a) === String(b)
 }
 
+// ── Weight-row index (the fallback lookup, made O(1)) ───────────────────────
+// The fallback below used to be a linear `sw.find(...)`. That is O(n) per row
+// and the positional fast path MISSES on essentially every row of a windowed
+// multi-period payload (`sw[0]` is period 1's row; `iso`/`period` belong to
+// period 3), so the whole scan ran once per payload row — O(n²) overall.
+// Measured on the real shape (8,760-row window against a 26,280-row weightings
+// array, 12 columns): 5,853 ms for a SINGLE `weightedSum` call, versus 6 ms
+// for the whole 26,280-row horizon. The app froze 17–33 s per period switch.
+//
+// The index is built once per `sw` ARRAY and memoised in a module-level
+// WeakMap, so the cost is amortised across every call site sharing the same
+// `snapshotWeights` reference (which they all do — `useWeightCtx` hands out
+// `snap.weightings` unchanged) and the entry is collected with the array.
+//
+// Key namespaces are disjoint so the two match kinds cannot alias each other:
+//   snapshot row              ->  "s" NUL <snapshot>
+//   timestep row (+ period)   ->  "t" NUL <period>    NUL <timestep>
+//   timestep row (no period)  ->  "t" NUL <NO_PERIOD> NUL <timestep>
+// The U+0000 separator cannot occur in an ISO stamp or a period label, so
+// the two namespaces can never alias. This preserves rule 3 of the semantics
+// below: a `timestep` row that carries a period is NOT reachable by a bare
+// iso, matching `_samePeriod`'s refusal to pair a null period with a non-null
+// one. NO_PERIOD is a control character rather than "" so a (pathological)
+// row whose period really IS the empty string still keys apart from a row
+// with no period at all — `_samePeriod` treats those two as different.
+const NO_PERIOD = '\u0001'
+const _weightIndexCache = new WeakMap<SnapshotWeightRow[], Map<string, SnapshotWeightRow>>()
+
+function _snapKey(iso: string): string { return `s\u0000${iso}` }
+function _stepKey(period: number | string | null | undefined, iso: string): string {
+  return `t\u0000${period == null ? NO_PERIOD : String(period)}\u0000${iso}`
+}
+
+function _weightIndex(sw: SnapshotWeightRow[]): Map<string, SnapshotWeightRow> {
+  const cached = _weightIndexCache.get(sw)
+  if (cached) return cached
+  const map = new Map<string, SnapshotWeightRow>()
+  // Forward walk with FIRST-WINS so duplicate keys resolve exactly the way the
+  // `.find()` this replaced did (it returned the first matching row).
+  for (const row of sw) {
+    // Indexed under BOTH kinds when a row carries both fields — the old `||`
+    // predicate matched on either, so restricting to one would lose matches.
+    if (row.snapshot != null) {
+      const k = _snapKey(row.snapshot)
+      if (!map.has(k)) map.set(k, row)
+    }
+    if (row.timestep != null) {
+      const k = _stepKey(row.period, row.timestep)
+      if (!map.has(k)) map.set(k, row)
+    }
+    // Rows with neither field are unreachable by key; they stay on the
+    // positional-only path, same as before.
+  }
+  _weightIndexCache.set(sw, map)
+  return map
+}
+
 // Single-row weighting lookup. Multi-period emits `timestep` instead of
 // `snapshot` so we match on both. Falls back to positional alignment when
 // the row's key field can't be matched — both `n.snapshots` and
@@ -280,10 +337,17 @@ function _samePeriod(
 // same ISO string appears once per period. Without the period check, a
 // WINDOWED payload starting at period 2 has `i=0` (the window-relative row
 // index) collide positionally against `sw[0]`, which is period 1's weight
-// row — same iso, wrong period, wrong weight, and the `.find()` fallback
-// below is never even reached because the positional branch matched first.
+// row — same iso, wrong period, wrong weight, and the keyed fallback below
+// is never even reached because the positional branch matched first.
 // `StorageCycling.tsx`'s `wAt` keys on the same `period|timestep` pair —
 // match its approach so the two stop disagreeing.
+//
+// Semantics preserved from the `.find()` version:
+//   1. The positional fast path runs FIRST and still wins when it matches.
+//   2. First-wins on duplicate keys (see `_weightIndex`).
+//   3. Precedence is `snapshot` then `(period|timestep)` — the `||` order of
+//      the old predicate.
+//   4. Rows with neither key field keep the positional-only path.
 function _snapshotWeightRow(
   sw: SnapshotWeightRow[],
   i: number,
@@ -298,10 +362,10 @@ function _snapshotWeightRow(
     // timestep AND (when this is a multi-period row) its period.
     return r
   }
-  // Fallback search (slower, used when lengths differ or order changed) —
-  // same (timestep, period) pairing as the positional branch above.
-  return sw.find(o => o.snapshot === iso
-    || (o.timestep === iso && _samePeriod(o.period, period)))
+  // Keyed fallback (was a linear scan) — same (timestep, period) pairing and
+  // the same snapshot-before-timestep precedence as the positional branch.
+  const idx = _weightIndex(sw)
+  return idx.get(_snapKey(iso)) ?? idx.get(_stepKey(period, iso))
 }
 
 // True if any non-trivial weight (≠ 1.0) is present. UX uses this to decide
@@ -327,7 +391,16 @@ export function hasScaling(w: WeightCtx | undefined): boolean {
 //   • 'generators' — for energy (MWh) totals. PyPSA scales energy balance by
 //     this weight when summing dispatch.
 //   • 'objective'  — for cost (€) totals. Matches n.statistics()'s €/yr scaling.
-function effectiveWeightAt(
+//
+// EXPORTED so there is exactly ONE weight-resolution path in the Results tabs.
+// `Dispatch.tsx`'s per-port link-flow loop used to index `ctx.snapshotWeights`
+// by the payload row instead, with no snapshot/period check at all — which is
+// wrong on every windowed payload (the weights array is full-horizon; the row
+// index is window-relative) and is exactly the drift this export prevents.
+// Callers pass the payload's own `index`/row; the period is read off
+// `ctx.snapshotPeriods[i]`, so the ctx handed in must have `snapshotPeriods`
+// parallel to the payload being summed.
+export function effectiveWeightAt(
   ctx: WeightCtx | undefined,
   index: string[],
   i: number,

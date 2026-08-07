@@ -14,7 +14,7 @@ import type { Generator, Load, StorageUnit, Store, Link as LinkT } from '../../a
 import {
   type TSPayload, type WeightCtx, type ResultsViewMode, type Season,
   generatorGroup, aggregateTS, isRenewableCarrier, durationCurvePoints, useWeightCtx,
-  weightedSum, weightedSumSplit, averageScaling, hasScaling,
+  weightedSum, weightedSumSplit, effectiveWeightAt, averageScaling, hasScaling,
   fmtEnergy, fmtCurrency, fmtPower, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
   ChartCard, ChartActions, WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
@@ -2164,6 +2164,63 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
   )
 }
 
+// ── Link-flow totals (per-port, weighted) ─────────────────────────────────
+/** One port of a link as it lands on the carrier under inspection.
+ *  `coeff` is -1 at bus0, `efficiency` at bus1, `efficiency2` at bus2. */
+export interface LinkPort { coeff: number }
+
+/** Weighted per-port link contributions to a bus carrier, over `range`.
+ *
+ *  Split out of `CarrierKpiPanel` so it can be unit-tested directly against a
+ *  windowed payload — see `Dispatch.test.tsx`. `portsByLink` maps a link name
+ *  (a column of `linkTS`) to the ports that touch this carrier's buses; links
+ *  absent from the map contribute nothing.
+ *
+ *  The per-row weight comes from `effectiveWeightAt` (shared.tsx) — the SAME
+ *  resolution path `weightedSum`/`weightedSumSplit` use. This loop used to
+ *  index `weightCtx.snapshotWeights[row]` directly, which is wrong the moment
+ *  the payload is a window: `snapshotWeights` is always FULL-HORIZON (it comes
+ *  from /api/network/snapshots, which takes no from/to), while `row` is
+ *  window-relative. On a `?from=17520` window every row silently picked up the
+ *  first investment period's weight. There is one weight-resolution path now
+ *  precisely so the two cannot drift apart again. */
+export function linkFlowTotals(
+  linkTS: TSPayload,
+  portsByLink: Map<string, LinkPort[]>,
+  range: { from: number; to: number },
+  weightCtx: WeightCtx | undefined,
+): { linkGen: number; linkOutflow: number } {
+  let linkGen = 0, linkOutflow = 0
+  const lastRow = linkTS.data.length - 1
+  if (lastRow < 0) return { linkGen, linkOutflow }
+  const rFrom = Math.max(0, Math.min(range.from, lastRow))
+  const rTo   = Math.max(0, Math.min(range.to,   lastRow))
+  if (rFrom > rTo) return { linkGen, linkOutflow }
+  // Keep the pre-existing `linkTS.periods` fallback: a weight context with no
+  // `snapshotPeriods` (flat network, or the snapshots query not resolved yet)
+  // still period-qualifies from the payload's own parallel array.
+  const ctx: WeightCtx | undefined = !weightCtx
+    ? undefined
+    : weightCtx.snapshotPeriods
+      ? weightCtx
+      : { ...weightCtx, snapshotPeriods: linkTS.periods }
+  for (let row = rFrom; row <= rTo; row++) {
+    const w = effectiveWeightAt(ctx, linkTS.index, row, 'generators', linkTS.index[row])
+    for (let i = 0; i < linkTS.columns.length; i++) {
+      const ports = portsByLink.get(linkTS.columns[i])
+      if (!ports) continue
+      const p0 = linkTS.data[row][i]
+      if (!Number.isFinite(p0)) continue
+      for (const port of ports) {
+        const contrib = port.coeff * p0
+        if (contrib > 0) linkGen     += contrib * w
+        else if (contrib < 0) linkOutflow += -contrib * w
+      }
+    }
+  }
+  return { linkGen, linkOutflow }
+}
+
 // ── Per-carrier KPI panel ─────────────────────────────────────────────────
 // Renders the dispatch + economic KPI strips for a single bus carrier
 // (electricity / H2 / heat / …). Pulls dispatch totals from the existing
@@ -2316,10 +2373,9 @@ function CarrierKpiPanel({
     // a frontend link-cost term on top would double-count.
     let linkGen = 0, linkOutflow = 0
     if (linkTS && linkTS.columns.length > 0 && group.busNames.size > 0) {
-      type Port = { coeff: number }
-      const meta = new Map<string, Port[]>()
+      const meta = new Map<string, LinkPort[]>()
       for (const l of links) {
-        const ports: Port[] = []
+        const ports: LinkPort[] = []
         if (l.bus0 && group.busNames.has(l.bus0)) ports.push({ coeff: -1 })
         if (l.bus1 && group.busNames.has(l.bus1)) ports.push({ coeff: l.efficiency ?? 1 })
         const bus2 = (l as { bus2?: string; efficiency2?: number }).bus2
@@ -2328,40 +2384,9 @@ function CarrierKpiPanel({
         if (ports.length === 0) continue
         meta.set(l.name, ports)
       }
-      const lastRow = linkTS.data.length - 1
-      const rFrom = Math.max(0, Math.min(range.from, lastRow))
-      const rTo   = Math.max(0, Math.min(range.to,   lastRow))
-      if (rFrom <= rTo) {
-        const sw = weightCtx?.snapshotWeights ?? []
-        const periods = weightCtx?.snapshotPeriods ?? linkTS.periods ?? []
-        const pwArr = weightCtx?.periodWeights
-        for (let row = rFrom; row <= rTo; row++) {
-          let w = 1
-          if (sw[row]) {
-            const v = sw[row].generators
-            if (typeof v === 'number' && Number.isFinite(v)) w *= v
-          }
-          const periodVal = periods[row]
-          if (periodVal != null && pwArr) {
-            const pr = pwArr.find(r => r.period === periodVal)
-            if (pr) {
-              const y = pr.years
-              if (typeof y === 'number' && Number.isFinite(y)) w *= y
-            }
-          }
-          for (let i = 0; i < linkTS.columns.length; i++) {
-            const ports = meta.get(linkTS.columns[i])
-            if (!ports) continue
-            const p0 = linkTS.data[row][i]
-            if (!Number.isFinite(p0)) continue
-            for (const port of ports) {
-              const contrib = port.coeff * p0
-              if (contrib > 0) linkGen     += contrib * w
-              else if (contrib < 0) linkOutflow += -contrib * w
-            }
-          }
-        }
-      }
+      const totals = linkFlowTotals(linkTS, meta, range, weightCtx)
+      linkGen = totals.linkGen
+      linkOutflow = totals.linkOutflow
     }
 
     const demand = nativeLoad + Math.abs(sinkAbsorption) + linkOutflow
