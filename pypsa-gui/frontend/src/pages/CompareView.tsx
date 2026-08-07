@@ -1730,6 +1730,21 @@ function CurtailmentTab({ a, b }: { a: string; b: string }) {
   if (!hasAnyA && !hasAnyB) {
     return <p className="text-[11px] text-muted py-2">No curtailment data — neither project has renewable generators with a time-varying p_max_pu profile.</p>
   }
+  // A ONE-SIDED absence is not zero. `readPV` maps a null payload to 0, so a
+  // project that never reported curtailment rendered identically to one that
+  // curtails exactly nothing — and against a side with a real rate the delta
+  // read a fabricated -100.00% ("B eliminated all curtailment"), which is not
+  // information the payload contains. Withhold the comparison and name the
+  // side that has no data. EmissionsTab already bails on either side missing.
+  if (!hasAnyA || !hasAnyB) {
+    const missing = [!hasAnyA && sa.project, !hasAnyB && sb.project].filter(Boolean) as string[]
+    return (
+      <p className="text-[11px] text-muted py-2">
+        No curtailment data for {missing.join(' and ')} — nothing to compare against.
+        An absent value is not the same as zero curtailment, so no rate or delta is shown.
+      </p>
+    )
+  }
 
   const fmtGwh = (v: number) => `${v.toFixed(1)} GWh`
   const fmtPct = (v: number) => `${v.toFixed(2)}%`

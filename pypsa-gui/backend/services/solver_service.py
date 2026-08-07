@@ -997,6 +997,15 @@ def run_simulation(
                         f"Rolling-horizon solve: {len(network.snapshots)} snapshots "
                         f"in windows of {H} (overlap {O})"
                     )
+                if not use_myopic:
+                    # A myopic run leaves `_myopic_period_objectives` on the
+                    # network, and nothing else clears it. Re-solving the SAME
+                    # network full-horizon then left the stale marker in place,
+                    # and every "did this run go myopic?" test downstream —
+                    # `_compute_run_objective`, the Summary line,
+                    # `/results/objective_decomposition` — keys off exactly that
+                    # marker. Clear it so the marker means "THIS run was myopic".
+                    network._myopic_period_objectives = []
                 if use_myopic:
                     # Periods live on n.investment_periods (Snapshots →
                     # Multi-period promotion). cfg.investment_periods is an
@@ -1263,10 +1272,30 @@ def run_simulation(
             # capacity offset (so the LP merit-order subsidy is balanced in
             # the reported total). Showing just `n.objective` looks negative
             # when those constants are large.
+            #
+            # MYOPIC EXCEPTION: `network.objective` here is the LAST iteration's
+            # LP only — every earlier period's contribution is gone from this
+            # lens, so this line used to report ~-75% of the true horizon cost
+            # while the status bar showed a different wrong number and the
+            # Economics tab showed the right one. Report the same statistics-
+            # based horizon total the status bar and Economics use, and label it
+            # so the per-period LP value is still identifiable in the log.
             obj = float(network.objective) if getattr(network, "objective", None) is not None else None
             obj_const = float(getattr(network, "_objective_constant", 0.0) or 0.0)
             wall = time.time() - t_start
-            if obj is not None:
+            _myopic_ran = bool(getattr(network, "_myopic_period_objectives", None))
+            if _myopic_ran:
+                from services.cost_totals import horizon_system_cost
+                _horizon = horizon_system_cost(network, config)
+                if _horizon is not None:
+                    obj_str = (
+                        f"€{_horizon:,.2f} (myopic horizon total; "
+                        f"final-period LP={obj:,.2f})" if obj is not None
+                        else f"€{_horizon:,.2f} (myopic horizon total)"
+                    )
+                else:
+                    obj_str = "n/a"
+            elif obj is not None:
                 total = obj + obj_const
                 obj_str = (
                     f"€{total:,.2f} (solver={obj:,.2f} + constant={obj_const:,.2f})"
@@ -4775,6 +4804,110 @@ def _frozen_vintage_store() -> dict:
     return s
 
 
+# Marks a `vintage_results` entry this module wrote, so a later myopic run can
+# clear its OWN stale entries without touching the ones `vintage_service`
+# writes for real per-period vintages.
+_MYOPIC_VINTAGE_SOURCE = "myopic_freeze"
+
+
+def _clear_myopic_build_periods(n) -> None:
+    """
+    Drop `vintage_results` entries left by a PREVIOUS myopic run.
+
+    `apply_vintage_bounds` resets the whole dict at solve start, but it returns
+    early when the user has no per-period bounds — which is exactly the case
+    this feature exists for. Without this, a myopic run's build periods would
+    accumulate across solves and the Capacity Expansion chart would show
+    capacity that is no longer there.
+    """
+    meta = getattr(n, "meta", None)
+    if not isinstance(meta, dict):
+        return
+    root = meta.get("vintage_results")
+    if not isinstance(root, dict):
+        return
+    for comp_class in list(root.keys()):
+        by_asset = root.get(comp_class)
+        if not isinstance(by_asset, dict):
+            continue
+        for name in [
+            k for k, v in by_asset.items()
+            if isinstance(v, dict) and v.get("source") == _MYOPIC_VINTAGE_SOURCE
+        ]:
+            by_asset.pop(name, None)
+        if not by_asset:
+            root.pop(comp_class, None)
+
+
+def _record_myopic_build_period(
+    n, comp_class: str, pnom_field: str, names, initial, decided, period,
+) -> None:
+    """
+    Record WHICH PERIOD decided each asset's capacity, through the existing
+    ``vintage_results`` channel the Capacity Expansion view already reads.
+
+    Why this is needed: a myopic run freezes assets that carry the default
+    ``build_year = 0``, and `_freeze_period_capacities` deliberately does not
+    touch ``build_year`` — that column drives PyPSA's activity mask, so writing
+    the freeze period into it would change which periods the asset is active in
+    and when it retires. Changing the model to populate a chart is the wrong
+    trade.
+
+    But the chart groups strictly by ``build_year > 0``, so a myopic run without
+    per-period vintage bounds produced an EMPTY "Capacity expansion by period"
+    section — precisely the run where the user most needs to see that everything
+    was decided in the first period and nothing could be added later.
+
+    ``vintage_results`` already carries ``{class: {asset: {capacity_field,
+    initial_capacity, periods: [{build_year, p_nom_opt, ...}]}}}`` and the
+    frontend already emits one row per entry, so filling it in needs no
+    frontend change. ``p_nom_opt`` here is the vintage's OWN contribution (the
+    frontend accumulates it onto ``initial_capacity``), i.e. the delta this
+    period added — not the cumulative total.
+
+    Transient vintage rows are skipped: `vintage_service` writes the real
+    per-vintage breakdown for their PARENT at restore, and a competing entry
+    under the vintage's own name would double-count it in the chart.
+    """
+    meta = getattr(n, "meta", None)
+    if not isinstance(meta, dict):
+        return
+    try:
+        transient = PyPSAService.get_transient_rows(comp_class)
+    except Exception:  # noqa: BLE001 — never let bookkeeping break a solve
+        transient = set()
+    try:
+        root = meta.setdefault("vintage_results", {})
+        by_asset = root.setdefault(comp_class, {})
+        for nm in names:
+            name = str(nm)
+            if name in transient:
+                continue
+            existing = by_asset.get(name)
+            # Never overwrite vintage_service's richer breakdown.
+            if isinstance(existing, dict) and existing.get("source") != _MYOPIC_VINTAGE_SOURCE:
+                continue
+            ini = float(initial.loc[nm])
+            opt = float(decided.loc[nm]) if nm in decided.index else float(initial.loc[nm])
+            delta = opt - ini
+            if not math.isfinite(delta) or delta <= 1e-6:
+                continue  # nothing was added in this period — no row to draw
+            by_asset[name] = {
+                "capacity_field": pnom_field,
+                "initial_capacity": ini,
+                "source": _MYOPIC_VINTAGE_SOURCE,
+                "periods": [{
+                    "build_year": int(period),
+                    pnom_field + "_opt": delta,
+                    "p_nom_opt": delta,
+                }],
+            }
+        if not by_asset:
+            root.pop(comp_class, None)
+    except Exception:  # noqa: BLE001 — a chart hint must never abort a solve
+        return
+
+
 def _freeze_period_capacities(n, period, undo_actions, phase) -> int:
     """
     For every extendable asset *active in `period`* (build_year ≤ period
@@ -4877,6 +5010,9 @@ def _freeze_period_capacities(n, period, undo_actions, phase) -> int:
                 store[(comp_class, str(nm))] = float(val)
             except (TypeError, ValueError):
                 pass
+        _record_myopic_build_period(
+            n, comp_class, pf, names, orig_pnom, opt_vals, period,
+        )
         frozen += len(names)
     if frozen:
         phase(f"Period {period}: froze {frozen} extendable asset(s) at p_nom_opt.")
@@ -5163,6 +5299,10 @@ def _run_myopic_foresight(
     # across runs. Populated inside the loop below, consumed by the outer
     # status worker to compute the horizon-total objective.
     network._myopic_period_objectives = []
+    # Drop the previous myopic run's build-period records before this run
+    # writes its own — see `_clear_myopic_build_periods` for why
+    # `apply_vintage_bounds`' reset does not cover this case.
+    _clear_myopic_build_periods(network)
     for i, current_period in enumerate(periods, start=1):
         # Honour abort between period iterations. Single-period LPs are
         # still uninterruptible (the C-level solver doesn't yield), but on

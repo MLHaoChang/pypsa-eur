@@ -211,14 +211,14 @@ export const resultsApi = {
     }
     currency: string
   }>('/results/lcoh').then(r => r.status === 204 ? null : r.data),
-  getTransformerResults: (source?: ResultSource) => client.get('/results/transformers', tsParams(source)).then(r => r.status === 204 ? null : r.data),
-  getPrices: (source?: ResultSource) => client.get('/results/prices', tsParams(source)).then(r => r.status === 204 ? null : r.data),
+  getTransformerResults: (source?: ResultSource, range?: TSRange) => client.get('/results/transformers', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
+  getPrices: (source?: ResultSource, range?: TSRange) => client.get('/results/prices', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
   // Per-generator unit-commitment results (status, start/shut counts, on-hours,
   // capacity factor when on, UC costs). Populated only when committable=True
   // on at least one generator; otherwise n_committable=0 and the panel hides.
   // status_grid is the binary on/off matrix (snapshot × committable_gen) used
   // by the heatmap visualisation.
-  getUnitCommitment: () =>
+  getUnitCommitment: (range?: TSRange) =>
     client.get<{
       generators: Array<{
         name: string; carrier: string; p_nom_MW: number
@@ -230,7 +230,7 @@ export const resultsApi = {
       status_grid: { index: string[]; columns: string[]; data: number[][] } | null
       n_committable: number
       note?: string
-    }>('/results/unit_commitment').then(r => r.status === 204 ? null : r.data),
+    }>('/results/unit_commitment', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
   // Per-line congestion shadow prices (€/MWh) from the LP duals. Captures
   // binding_hours / max_mu / mean_mu_when_binding / congestion_rent_eur.
   // Requires assign_all_duals=True at solve time (backend default).
@@ -323,12 +323,12 @@ export const resultsApi = {
   // AC-PF-only result series. The LP stage doesn't compute v_mag_pu or q —
   // these endpoints return null (204) when no Stage 2 snapshot is available.
   // Frontend uses the null to hide the corresponding LoadFlow sections.
-  getVoltages: (source?: ResultSource) =>
-    client.get('/results/voltages', tsParams(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
+  getVoltages: (source?: ResultSource, range?: TSRange) =>
+    client.get('/results/voltages', tsParams(source ?? 'ac_pf', range)).then(r => r.status === 204 ? null : r.data),
   getLineReactive: (source?: ResultSource, range?: TSRange) =>
     client.get('/results/line_reactive', tsParams(source ?? 'ac_pf', range)).then(r => r.status === 204 ? null : r.data),
-  getTransformerReactive: (source?: ResultSource) =>
-    client.get('/results/transformer_reactive', tsParams(source ?? 'ac_pf')).then(r => r.status === 204 ? null : r.data),
+  getTransformerReactive: (source?: ResultSource, range?: TSRange) =>
+    client.get('/results/transformer_reactive', tsParams(source ?? 'ac_pf', range)).then(r => r.status === 204 ? null : r.data),
   // Per-cell diagnosis for prices above a threshold — used by the Load Flow
   // "Price drivers" panel to answer "why is the price 3000 at hour X?".
   // Returns the most-likely marginal generator + a one-word category
@@ -344,7 +344,12 @@ export const resultsApi = {
       }>
     }>(`/results/price_drivers`, { params: { threshold, limit } })
       .then(r => r.status === 204 ? null : r.data),
-  getCurtailment: () => client.get('/results/curtailment').then(r => r.status === 204 ? null : r.data),
+  // No `source` (LP-only, see `getUnitCommitment`) — `range` is the first
+  // param. Every caller that referenced this bare as a `queryFn`
+  // (AggregatedOverview.tsx, Dispatch.tsx) has been updated to wrap it in
+  // an arrow (`() => resultsApi.getCurtailment()`); calling with no
+  // arguments still produces a byte-identical request to before.
+  getCurtailment: (range?: TSRange) => client.get('/results/curtailment', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
   // Per-carrier economic roll-up on the LIVE in-memory network. Powers the
   // per-carrier KPI strips in the Results / Dispatch tab. Shape mirrors
   // `CarrierEconomics` in Compare View (revenue_meur, opex_meur split into
@@ -370,7 +375,11 @@ export const resultsApi = {
   // `voll_eur_per_mwh` is the per-MWh VOLL the solver used; consumers
   // should prefer this over re-deriving it via cost/mwh division (which
   // breaks at zero MWh).
-  getLostLoad: () => client.get<{
+  // No `source` (LP-only) — `range` is the first param. Every bare-reference
+  // caller (AggregatedOverview.tsx, Dispatch.tsx) has been updated to wrap
+  // this in an arrow; calling with no arguments is still byte-identical to
+  // before.
+  getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;
     voll_eur_per_mwh: number;
@@ -380,7 +389,7 @@ export const resultsApi = {
     bus_carriers?: Record<string, string>
     // Multi-period: parallel array of period years for each `index` entry.
     periods?: number[]
-  }>('/results/lost_load').then(r => r.status === 204 ? null : r.data),
+  }>('/results/lost_load', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
   // Transmission-losses summary. `enabled=false` ⇒ the solve didn't model
   // losses, in which case totals/peak are 0 (intentional: the LoadFlow tab
   // renders "0 MWh" instead of a not-solved placeholder). For source='ac_pf',

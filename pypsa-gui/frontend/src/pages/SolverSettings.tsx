@@ -424,8 +424,15 @@ export default function SolverSettings() {
               before the next period is optimised, so each period sees the
               earlier ones as fixed existing capacity. Matches the way real
               planners commit to investments — pure myopic has no forward
-              visibility across periods. Per-period vintage bounds (set on
-              extendable assets via the Properties panel) are still honoured.
+              visibility across periods.
+            </p>
+            <p className="text-[10px] text-warn leading-relaxed">
+              An asset can only be sized <em>once</em> unless you give it
+              per-period vintage bounds (Properties panel → per-period bounds).
+              Without them, the first period freezes the whole fleet and no
+              later period can add capacity — if demand grows, the shortfall
+              shows up as unserved energy and the run still reports optimal.
+              Set bounds on every asset you expect to expand more than once.
             </p>
             <label className="flex items-center gap-2 cursor-pointer pt-1">
               <input

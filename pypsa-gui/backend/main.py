@@ -21,31 +21,34 @@ from services import app_secrets
 
 app_secrets.bootstrap_environment(backend_env=Path(__file__).parent / ".env")
 
-# Publish a key stored by the desktop Settings pane, but only when the
-# environment does not already carry a TRUTHY value — same intent as the
-# `override=False` above (an operator-set value wins), but truthiness-based
-# rather than presence-based: `apply_to_environ` checks
-# `os.environ.get("ANTHROPIC_API_KEY")`, not `"ANTHROPIC_API_KEY" in
-# os.environ`, so `ANTHROPIC_API_KEY=""` is treated as absent and the stored
-# key still applies. That matches `chat_service._build_anthropic_client`,
-# which does the same truthiness check when deciding whether a key is
-# configured — an empty env var is "missing" there too, so a mismatch would
-# mean the environment carries a key chat itself will refuse to use. The
-# packaged app has no other channel: `.env` is excluded from the bundle and a
-# `.app` launched from Finder sources no shell profile.
+# Carry a key out of the older `local-settings.json` store into `user.env`.
+# One-time and idempotent; a no-op for everyone who never used that store.
 #
-# Module level, not a startup event, so it lands before ANY module reads the
-# variable. There is no launcher-ordering hazard to manage here: unlike
-# `DATABASE_URL` and the other variables `desktop/launcher.py:build_environment`
-# pins before `import main`, storage locations — including
-# `PYPSAGUI_APP_DATA_DIR` — are deliberately NOT among them
-# (`desktop/launcher.py:113-118`). `app_paths.app_data_dir()` resolves the
-# per-user default entirely on its own (platform check + `Path.home()`), with
-# no input from the launcher, so there is nothing for the launcher to apply
-# before this runs.
+# Two stores existed because `master` and `feature/local-app-impl` each solved
+# "the packaged app has no way to receive an ANTHROPIC_API_KEY" without knowing
+# about the other, and the merge stacked both — the second publisher was dead
+# on arrival behind the first's `if os.environ.get(...)` guard. See
+# docs/superpowers/findings/2026-08-05-api-key-store-collision.md.
+#
+# AFTER the load above, and that order is load-bearing in the one direction it
+# is easy to get wrong. `set_secret` refuses to overwrite a shell-supplied
+# variable, but it recognises one only through `_SHELL_NAMES`, which
+# `bootstrap_environment` is what populates. Migrating first therefore runs the
+# guard against an empty set and clobbers a key the operator exported on the
+# command line. Nothing is lost by going second: `set_secret` applies the value
+# to `os.environ` itself, so a migrated key still reaches this startup rather
+# than the next one.
+#
+# Module level, not a startup event, so both land before ANY module reads the
+# variable. There is no launcher-ordering hazard: unlike `DATABASE_URL` and the
+# other variables `desktop/launcher.py:build_environment` pins before `import
+# main`, storage locations — including `PYPSAGUI_APP_DATA_DIR` — are
+# deliberately NOT among them (`desktop/launcher.py:113-118`).
+# `app_paths.app_data_dir()` resolves the per-user default on its own (platform
+# check + `Path.home()`), so there is nothing for the launcher to apply first.
 import local_settings as local_settings_store  # noqa: E402
 
-local_settings_store.apply_to_environ()
+local_settings_store.migrate_api_key_to_app_secrets()
 
 import pypsa
 from fastapi import Depends, FastAPI, HTTPException, Request

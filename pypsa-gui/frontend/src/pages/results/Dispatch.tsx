@@ -23,6 +23,7 @@ import {
   parseSeasonStamp, useSeasonalViewMode, colourForCarrier,
 } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
+import { useResultsWindow } from '../../hooks/useResultsWindow'
 import DispatchStack from './DispatchStack'
 import StorageHeatmap from './StorageHeatmap'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
@@ -241,30 +242,76 @@ export default function Dispatch() {
   // for the LP-only quantities too.
   const resultSource = useUIStore(s => s.resultSource)
   const currentProject = useUIStore(s => s.currentProject)
+  // Positional bounds for the active Horizon filter, resolved against the
+  // SNAPSHOT INDEX (not a results payload) so the per-snapshot queries
+  // below can be windowed before any payload exists. Distinct from `range`
+  // further down, which resolves against the fetched payload's own index to
+  // re-slice client-side — see the comment at that call site.
+  const { win, winValid } = useResultsWindow(currentProject)
   // Cost breakdown: used by the OPEX KPI strip + per-class table below. Same
   // endpoint Capacity Expansion uses, cached under the shared queryKey so we
-  // don't double-fetch when both tabs are mounted. (LP-only — no source.)
+  // don't double-fetch when both tabs are mounted. (LP-only — no source, and
+  // an aggregate with no snapshot axis — not windowed.)
   const { data: cost } = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'), queryFn: resultsApi.getCostBreakdown })
-  const { data: gensTS } = useQuery({ queryKey: nk(currentProject, 'results', 'generators', resultSource), queryFn: () => resultsApi.getGeneratorResults(resultSource) })
+  const { data: gensTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'generators', resultSource, win.from, win.to),
+    queryFn: () => resultsApi.getGeneratorResults(resultSource, win),
+    enabled: winValid,
+  })
   // Curtailment = max(p_max_pu * p_nom_opt − p, 0). Computed server-side.
   // Used for the renewables KPI + the toggleable per-section plot below.
-  // (LP-only — AC PF doesn't produce curtailment.)
-  const { data: curtailTS } = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'), queryFn: resultsApi.getCurtailment })
+  // (LP-only — AC PF doesn't produce curtailment.) `getCurtailment` now
+  // carries an optional range (widened alongside Task 4's five tabs) —
+  // windowed the same as its seven siblings above.
+  const { data: curtailTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'curtailment', win.from, win.to),
+    queryFn: () => resultsApi.getCurtailment(win),
+    enabled: winValid,
+  })
   // Storage gets BOTH SoC (MWh) AND signed power (MW). The power view is what
   // the user means by "production / consumption" — positive = discharging,
   // negative = charging. SoC is the energy reservoir level.
-  const { data: storTS }     = useQuery({ queryKey: nk(currentProject, 'results', 'storage', resultSource),          queryFn: () => resultsApi.getStorageResults(resultSource) })
-  const { data: storPowerTS }= useQuery({ queryKey: nk(currentProject, 'results', 'storage_dispatch', resultSource), queryFn: () => resultsApi.getStorageDispatchResults(resultSource) })
-  const { data: storeTS }    = useQuery({ queryKey: nk(currentProject, 'results', 'store_dispatch', resultSource),   queryFn: () => resultsApi.getStoreDispatchResults(resultSource) })
-  const { data: storeETS }   = useQuery({ queryKey: nk(currentProject, 'results', 'store_energy', resultSource),     queryFn: () => resultsApi.getStoreEnergyResults(resultSource) })
-  const { data: loadTS } = useQuery({ queryKey: nk(currentProject, 'results', 'loads', resultSource),      queryFn: () => resultsApi.getLoadResults(resultSource) })
+  const { data: storTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'storage', resultSource, win.from, win.to),
+    queryFn: () => resultsApi.getStorageResults(resultSource, win),
+    enabled: winValid,
+  })
+  const { data: storPowerTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'storage_dispatch', resultSource, win.from, win.to),
+    queryFn: () => resultsApi.getStorageDispatchResults(resultSource, win),
+    enabled: winValid,
+  })
+  const { data: storeTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'store_dispatch', resultSource, win.from, win.to),
+    queryFn: () => resultsApi.getStoreDispatchResults(resultSource, win),
+    enabled: winValid,
+  })
+  const { data: storeETS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'store_energy', resultSource, win.from, win.to),
+    queryFn: () => resultsApi.getStoreEnergyResults(resultSource, win),
+    enabled: winValid,
+  })
+  const { data: loadTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'loads', resultSource, win.from, win.to),
+    queryFn: () => resultsApi.getLoadResults(resultSource, win),
+    enabled: winValid,
+  })
   // Per-link p0 (signed MW; positive = bus0→bus1). Rendered as one section
   // per link carrier so the user can compare e.g. HVDC interconnect vs
   // electrolyser dispatch separately.
-  const { data: linkTS } = useQuery({ queryKey: nk(currentProject, 'results', 'links', resultSource), queryFn: () => resultsApi.getLinkResults(resultSource) })
+  const { data: linkTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'links', resultSource, win.from, win.to),
+    queryFn: () => resultsApi.getLinkResults(resultSource, win),
+    enabled: winValid,
+  })
   // VOLL slack dispatch — non-null only when last solve ran with voll > 0
   // and the LP actually shed load. Drives the Lost Load KPI + chart below.
-  const { data: lostLoad } = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'), queryFn: resultsApi.getLostLoad })
+  // `getLostLoad` now carries an optional range — windowed like the rest.
+  const { data: lostLoad } = useQuery({
+    queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
+    queryFn: () => resultsApi.getLostLoad(win),
+    enabled: winValid,
+  })
   // Per-carrier economics (live network) — drives the per-carrier KPI strip
   // above each DispatchStack. Mirrors the Compare View's by_carrier split
   // (gen/charge/curtailment/lost-load) so the single-project view shows

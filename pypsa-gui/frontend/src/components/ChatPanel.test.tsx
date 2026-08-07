@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import {
   createChatStream,
+  getChatHistory,
   postChatConfirm,
   putApiKeySettings,
   type ChatFrame,
@@ -43,8 +44,15 @@ vi.mock('../api/uploads', () => ({
 afterEach(() => cleanup())
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo' })
-  useChatStore.setState({ sessionId: null, pending: null, messages: [] })
+  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: null })
+  // `streaming` and `streamCleanup` have to be reset too: `onSend` returns
+  // early while `streaming` is true, so a test that leaves it set makes every
+  // later test's send a silent no-op — which reads as "the component ignored
+  // my click" rather than as pollution.
+  useChatStore.setState({
+    sessionId: null, pending: null, messages: [],
+    streaming: false, streamCleanup: null,
+  })
   vi.mocked(postChatConfirm).mockClear()
   // `createChatStream` accumulates across every `it()` in this file — each one
   // sends at least once — so an assertion on its call COUNT is otherwise
@@ -243,4 +251,130 @@ it('renders an approve/reject control for tool_pending_confirmation and calls po
     token: 'tok-abc',
     decision: 'approve',
   })
+})
+
+// ── The agent navigating to Results must not kill the turn ────────────────
+//
+// Reported: "show a summary of the key results and the key graphs" switches
+// the app to Results, and then either the conversation is gone or the chat is
+// still streaming with no tokens on screen.
+//
+// Both come from one fact: ChatPanel's ONLY mount is `activeSlidePanel ===
+// 'chat'` (App.tsx), and the ErrorBoundary around it is keyed on that value —
+// so the moment ChatPanel's own frame handler answers a `ui_event` by calling
+// setSlidePanel('results'), React unmounts it mid-turn.
+
+function scriptNavigateMidTurn() {
+  const cleanup = vi.fn()
+  let emit: ((f: ChatFrame) => void) | undefined
+  vi.mocked(createChatStream).mockImplementation((_req, onFrame) => {
+    emit = onFrame
+    onFrame({ event: 'session_init', data: { session_id: 'sess-nav' } })
+    onFrame({ event: 'token', data: { delta: 'Key results: ' } })
+    // The agent opens Results. ChatPanel is what performs this.
+    onFrame({ event: 'ui_event', data: { kind: 'navigate', panel_id: 'results' } })
+    return cleanup
+  })
+  return { cleanup, emit: (f: ChatFrame) => emit?.(f) }
+}
+
+async function sendSummaryRequest() {
+  const user = userEvent.setup()
+  await user.type(screen.getByTestId('chat-input'), 'summarise the key results')
+  await user.click(screen.getByTestId('chat-send'))
+}
+
+it('does not abort the live stream when the agent navigates to Results', async () => {
+  const { cleanup } = scriptNavigateMidTurn()
+  const { unmount } = renderPanel()
+  await sendSummaryRequest()
+
+  // The agent's own directive moved the app off the chat panel.
+  expect(useUIStore.getState().activeSlidePanel).toBe('results')
+  // Which is what unmounts ChatPanel.
+  unmount()
+
+  expect(cleanup).not.toHaveBeenCalled()
+})
+
+it('keeps recording tokens that arrive after the panel is unmounted', async () => {
+  // The stream's frame handler writes only to Zustand and react-query, never
+  // to component state — so the turn can complete with the panel unmounted,
+  // and does, as long as nobody closes the connection.
+  const { emit } = scriptNavigateMidTurn()
+  const { unmount } = renderPanel()
+  await sendSummaryRequest()
+  unmount()
+
+  emit({ event: 'token', data: { delta: 'objective fell 12%.' } })
+
+  const text = useChatStore.getState().messages.map((m) => m.content).join('')
+  expect(text).toContain('objective fell 12%.')
+})
+
+it('does not wipe an in-flight turn when the panel is reopened', async () => {
+  // Remount re-runs the chat.jsonl hydration, which calls setMessages() with
+  // whatever is on disk. The turn still streaming has not been persisted yet,
+  // so replaying disk over it erases what the user already watched arrive.
+  //
+  // The assertion has to happen AFTER that replay would have landed. A bare
+  // `waitFor` on the message text passes on its first tick — before the
+  // hydration promise resolves — so it reports success under the very bug it
+  // is meant to catch. Wait for the fetch itself, then flush, then assert.
+  scriptNavigateMidTurn()
+  const { unmount } = renderPanel()
+  await sendSummaryRequest()
+  unmount()
+
+  const callsBefore = vi.mocked(getChatHistory).mock.calls.length
+  renderPanel()
+  // Flush the mount effect and the promise chain the unguarded version would
+  // have run — otherwise this asserts before the clobber could have happened
+  // and passes under the bug.
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+
+  // The guard short-circuits ahead of the fetch, so the re-read never happens.
+  expect(vi.mocked(getChatHistory).mock.calls.length).toBe(callsBefore)
+  const text = useChatStore.getState().messages.map((m) => m.content).join('')
+  expect(text).toContain('Key results: ')
+})
+
+it('closes the stream when the turn ends, even with the panel unmounted', async () => {
+  // The other half of the contract. Not aborting on unmount is only correct if
+  // something else still closes the connection — otherwise every turn that
+  // navigated away would leak an EventSource. The terminal frame owns it now.
+  const cleanup = vi.fn()
+  let emit: ((f: ChatFrame) => void) | undefined
+  vi.mocked(createChatStream).mockImplementation((_req, onFrame) => {
+    emit = onFrame
+    onFrame({ event: 'session_init', data: { session_id: 'sess-end' } })
+    onFrame({ event: 'ui_event', data: { kind: 'navigate', panel_id: 'results' } })
+    return cleanup
+  })
+  const { unmount } = renderPanel()
+  await sendSummaryRequest()
+  unmount()
+  expect(cleanup).not.toHaveBeenCalled()
+
+  emit?.({ event: 'turn_done', data: {} })
+
+  expect(cleanup).toHaveBeenCalledTimes(1)
+  expect(useChatStore.getState().streaming).toBe(false)
+})
+
+it('still closes an idle stream when the panel unmounts', async () => {
+  // Unmounting after the turn finished must not leave the connection open.
+  const cleanup = vi.fn()
+  vi.mocked(createChatStream).mockImplementation((_req, onFrame) => {
+    onFrame({ event: 'session_init', data: { session_id: 'sess-idle' } })
+    return cleanup
+  })
+  const { unmount } = renderPanel()
+  await sendSummaryRequest()
+  // Simulate an idle-but-open stream: streaming false, cleanup still set.
+  useChatStore.setState({ streaming: false, streamCleanup: cleanup })
+
+  unmount()
+
+  expect(cleanup).toHaveBeenCalledTimes(1)
 })

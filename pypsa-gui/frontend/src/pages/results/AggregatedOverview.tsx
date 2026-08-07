@@ -41,6 +41,25 @@ interface AggregatedOverviewProps {
   weightCtx: WeightCtx
 }
 
+/**
+ * True when any payload is a WINDOW rather than the whole series.
+ *
+ * This tab reports whole-horizon energy and cost: it computes over `fullRange`
+ * — the entire payload, whatever it holds — at 13 sites, deliberately ignoring
+ * the Horizon filter, because summarising the horizon is its job. Hand it a
+ * windowed payload and every KPI silently becomes a window total under a
+ * horizon label.
+ *
+ * Unreachable today: this tab's getters are called with one argument, so the
+ * backend emits no `range` key at all. It exists for the day someone converts
+ * them, which is the most likely way this design gets broken later.
+ */
+export function isPartialPayload(
+  payloads: Array<TSPayload | null | undefined>,
+): boolean {
+  return payloads.some(p => p?.range != null && !p.range.complete)
+}
+
 export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProps) {
   const currentProject = useUIStore(s => s.currentProject)
   // Refs for SVG export — one per chart section. Recharts emits a single
@@ -55,8 +74,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   const { data: gensTS }      = useQuery({ queryKey: nk(currentProject, 'results', 'generators'),       queryFn: () => resultsApi.getGeneratorResults() })
   const { data: storPowerTS } = useQuery({ queryKey: nk(currentProject, 'results', 'storage_dispatch'), queryFn: () => resultsApi.getStorageDispatchResults() })
   const { data: loadTS }      = useQuery({ queryKey: nk(currentProject, 'results', 'loads'),            queryFn: () => resultsApi.getLoadResults() })
-  const { data: curtailTS }   = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'),      queryFn: resultsApi.getCurtailment })
-  const { data: lostLoad }    = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'),        queryFn: resultsApi.getLostLoad })
+  // Wrapped (not bare) because `getCurtailment`/`getLostLoad` now take an
+  // optional `range` — calling with no arguments here is still
+  // byte-identical to the old bare-reference request, and this tab must
+  // stay on whole-horizon payloads (never pass a window).
+  const { data: curtailTS }   = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'),      queryFn: () => resultsApi.getCurtailment() })
+  const { data: lostLoad }    = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'),        queryFn: () => resultsApi.getLostLoad() })
   const { data: cost }        = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'),   queryFn: resultsApi.getCostBreakdown })
 
   const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
@@ -438,6 +461,20 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
     return (
       <div className="p-6 text-center text-xs text-muted">
         No solved network. Run a simulation (header → <span className="font-medium text-text">Run LOPF</span>) to populate aggregated results.
+      </div>
+    )
+  }
+
+  // Must come AFTER the loading/empty-state guard above so a tab that is
+  // still loading is never mistaken for one that received a partial
+  // payload — see isPartialPayload's doc comment for why this matters.
+  const partial = isPartialPayload([gensTS as TSPayload | null, loadTS as TSPayload | null, storPowerTS as TSPayload | null])
+  if (partial) {
+    return (
+      <div className="p-4 text-sm text-warn">
+        This tab reports whole-horizon totals, but the results it received cover
+        only part of the horizon. Totals are unavailable — reload the Results
+        panel, and if this persists it is a bug rather than a setting.
       </div>
     )
   }

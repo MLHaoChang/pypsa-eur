@@ -14,10 +14,33 @@ from fastapi.testclient import TestClient
 import local_mode
 import local_settings
 import main
+from services import app_secrets
 
 
 @pytest.fixture
-def local_client(_auth_db, monkeypatch, tmp_path):
+def _shell_is_silent(monkeypatch):
+    """
+    Reset `app_secrets._SHELL_NAMES` — the desktop app's actual condition.
+
+    `_SHELL_NAMES` is whatever was in `os.environ` when `bootstrap_environment`
+    ran, and nothing in it may be overwritten by a saved setting. In THIS
+    process it is polluted: conftest does `import pypsa` before `import main`,
+    and importing pypsa loads `backend/.env` into `os.environ` — so a developer
+    checkout's `.env` key is already present when bootstrap captures the set,
+    and every save below would be treated as masked by the shell.
+
+    `main.py` is not exposed to this: it calls `bootstrap_environment` ABOVE
+    its third-party imports precisely so nothing can load configuration ahead
+    of it, and a packaged app ships no `.env` at all. That ordering is the
+    thing being modelled here, not worked around — `test_local_settings_startup`
+    proves it end-to-end in a subprocess, which is the only way to observe a
+    module-level call honestly.
+    """
+    monkeypatch.setattr(app_secrets, "_SHELL_NAMES", frozenset())
+
+
+@pytest.fixture
+def local_client(_auth_db, monkeypatch, tmp_path, _shell_is_silent):
     """Local mode on, app data isolated to tmp_path."""
     monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
@@ -118,6 +141,60 @@ def test_empty_string_clears_key_and_environment(local_client, no_probe):
     assert r.json()["key_set"] is False
     assert local_settings.stored_api_key() is None
     assert "ANTHROPIC_API_KEY" not in os.environ
+
+
+def test_a_shell_supplied_key_is_persisted_but_not_clobbered(
+    _auth_db, monkeypatch, tmp_path, no_probe,
+):
+    """
+    Saving under a shell override persists without changing this process.
+
+    This route used to write `os.environ` itself, unconditionally, which
+    overrode a key the operator had exported on the command line — and did the
+    opposite of what the other Settings surface did with the same input. Both
+    now go through `app_secrets`, which owns the precedence: the value is
+    stored, the running process keeps the shell's, and `status()` reports the
+    mask so the pane can say why.
+    """
+    monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-shell")
+    monkeypatch.setattr(app_secrets, "_SHELL_NAMES", frozenset({"ANTHROPIC_API_KEY"}))
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        local_mode.ensure_local_identity(db)
+    try:
+        with TestClient(main.app) as c:
+            c.cookies.clear()
+            r = c.put(
+                "/api/local-settings/anthropic-key",
+                json={"api_key": "sk-ant-typed-into-settings"},
+            )
+    finally:
+        with session_local() as db:
+            local_mode.remove_local_identity(db)
+
+    assert r.status_code == 200, r.text
+    assert local_settings.stored_api_key() == "sk-ant-typed-into-settings"
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-from-the-shell", (
+        "the running process must keep the operator's exported value"
+    )
+    assert app_secrets.status()["overridden_by_environment"] is True
+
+
+def test_an_unstorable_key_is_a_400_not_a_500(local_client, no_probe):
+    """
+    `set_secret` validates; a control character would truncate the stored line
+    or travel into an HTTP header. That is the caller's problem to fix, so it
+    has to come back as a 400 with the reason, not as an unhandled exception.
+    """
+    r = local_client.put(
+        "/api/local-settings/anthropic-key", json={"api_key": "sk-ant-with-a\nnewline"},
+    )
+
+    assert r.status_code == 400, r.text
+    assert "cannot be stored" in r.json()["detail"]
+    assert local_settings.stored_api_key() is None, "a rejected value must not be stored"
 
 
 def test_key_is_saved_even_when_the_probe_cannot_reach_anthropic(

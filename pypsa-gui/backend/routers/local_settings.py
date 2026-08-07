@@ -10,17 +10,17 @@ the server's app-data path is not theirs to learn — so these routes 404 there.
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 import app_paths
 import local_mode
 import local_settings
+from services import app_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -93,13 +93,19 @@ def put_anthropic_key(body: ApiKeyBody) -> dict:
     just typed. The probe result is reported, never conflated with success.
     """
     key = body.api_key.strip()
-    local_settings.write_api_key(key)
+    try:
+        # Also applies it to this process — `app_secrets.set_secret` does that
+        # itself, and is the only thing that should, because it alone knows
+        # whether a shell-set value is masking the stored one. Writing
+        # `os.environ` here as well would clobber that.
+        local_settings.write_api_key(key)
+    except app_secrets.SecretValueError as exc:
+        # A value that cannot be stored is the caller's problem, not a crash.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if key:
-        os.environ["ANTHROPIC_API_KEY"] = key
         status, detail = probe_api_key()
     else:
-        os.environ.pop("ANTHROPIC_API_KEY", None)
         status, detail = "cleared", "Key removed. Chat is disabled."
 
     logger.info("local settings: anthropic key updated, probe=%s", status)

@@ -13,6 +13,7 @@ import {
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
+import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 
 // ── Lost-load result tab ────────────────────────────────────────────────────
@@ -45,7 +46,15 @@ function carrierLabel(k: string): string {
 export default function LostLoadTab() {
   const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
-  const { data: lostLoad } = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'), queryFn: resultsApi.getLostLoad })
+  // Positional bounds for the active Horizon filter, resolved against the
+  // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
+  // lost-load query below can be windowed before any payload exists.
+  const { win, winValid } = useResultsWindow(currentProject)
+  const { data: lostLoad } = useQuery({
+    queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
+    queryFn: () => resultsApi.getLostLoad(win),
+    enabled: winValid,
+  })
   // WeightCtx + timeline from the shared hook (fetches /snapshots +
   // /investmentPeriods); refTs = the lost-load series.
   const { weightCtx, refIndex, refPeriods } = useWeightCtx(lostLoad as TSPayload | null)

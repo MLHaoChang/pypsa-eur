@@ -13,6 +13,7 @@ import {
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
+import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 
 // ── Storage cycling result tab ──────────────────────────────────────────────
@@ -86,7 +87,15 @@ function vintageCapAtPeriod(
 export default function StorageCycling() {
   const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
-  const { data: storPowerTS } = useQuery({ queryKey: nk(currentProject, 'results', 'storage_dispatch'), queryFn: () => resultsApi.getStorageDispatchResults() })
+  // Positional bounds for the active Horizon filter, resolved against the
+  // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
+  // storage-dispatch query below can be windowed before any payload exists.
+  const { win, winValid } = useResultsWindow(currentProject)
+  const { data: storPowerTS } = useQuery({
+    queryKey: nk(currentProject, 'results', 'storage_dispatch', win.from, win.to),
+    queryFn: () => resultsApi.getStorageDispatchResults(undefined, win),
+    enabled: winValid,
+  })
   const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const { data: snap } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots })
   const { data: vintageResults } = useQuery({ queryKey: nk(currentProject, 'vintage_results'), queryFn: networkApi.listVintageResults })
@@ -119,11 +128,28 @@ export default function StorageCycling() {
       const maxHours = Number((s as unknown as { max_hours?: number }).max_hours ?? 0)
       meta.set(s.name, { pNom, maxHours, carrier: storageCarrierKey(s.carrier) })
     }
-    const weight = (snap?.weightings as unknown as Array<{ objective?: number }> | undefined)
-      ?? null
-    const wAt = (row: number): number => {
-      if (!weight) return 1
-      const w = weight[row]?.objective
+    // Keyed by snapshot ISO (flat) or `period|timestep` (multi-period) rather
+    // than array position. `snap.weightings` always covers the FULL horizon,
+    // but `storPowerTS` — and therefore `row` below — is now a WINDOWED
+    // slice: row 0 is whichever absolute snapshot the window starts at, not
+    // absolute row 0. A positional `weight[row]` lookup silently pulled the
+    // wrong snapshot's weight whenever the window didn't start at the
+    // horizon's first row. Matching by the row's own timestamp/period is
+    // correct regardless of the window's offset — same approach `shared.tsx`
+    // uses for `weightedSum`/`weightedSumSplit`.
+    const weightByKey = new Map<string, number>()
+    for (const r of (snap?.weightings as unknown as Array<Record<string, unknown>> | undefined) ?? []) {
+      const w = r.objective
+      if (typeof w !== 'number' || !Number.isFinite(w)) continue
+      const snapshotIso = r.snapshot as string | undefined
+      const timestep = r.timestep as string | undefined
+      const period = r.period as number | string | undefined
+      if (snapshotIso != null) weightByKey.set(snapshotIso, w)
+      else if (timestep != null) weightByKey.set(period != null ? `${period}|${timestep}` : timestep, w)
+    }
+    const wAt = (iso: string, period: number | null): number => {
+      if (weightByKey.size === 0) return 1
+      const w = (period != null ? weightByKey.get(`${period}|${iso}`) : undefined) ?? weightByKey.get(iso)
       return typeof w === 'number' && Number.isFinite(w) ? w : 1
     }
 
@@ -136,11 +162,11 @@ export default function StorageCycling() {
     const throughputByColPeriod = new Map<string, Map<number | null, number>>()
     const periodSet = new Set<number | null>()
     for (let row = rFrom; row <= rTo; row++) {
-      const w = wAt(row)
       const raw = periods ? periods[row] : undefined
       const p: number | null = typeof raw === 'number' ? raw
                               : typeof raw === 'string' && /^-?\d+$/.test(raw) ? Number(raw)
                               : null
+      const w = wAt(ts.index[row], p)
       periodSet.add(p)
       for (let col = 0; col < ts.columns.length; col++) {
         const v = ts.data[row][col]

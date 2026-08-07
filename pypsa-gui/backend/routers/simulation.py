@@ -423,7 +423,7 @@ def preflight():
 
 # ── Run / Abort / Status ──────────────────────────────────────────────────────
 
-def _compute_run_objective(n) -> float | None:
+def _compute_run_objective(n, cfg=None) -> float | None:
     """
     Total system cost reported in the status bar = n.objective + n.objective_constant.
 
@@ -433,20 +433,49 @@ def _compute_run_objective(n) -> float | None:
     constant offset. The user-visible objective is the TOTAL — otherwise it
     appears wildly negative on networks with large existing-capacity CAPEX.
 
-    MYOPIC: each period is a SEPARATE LP. `n.objective` at the end of the loop
-    reflects only the FINAL period's LP-variable; `objective_constant` only the
-    final iteration's constant (the earlier periods' contributions are gone from
-    the n.objective lens, though still present in n.statistics() via the
-    per-period `_t` tables). To get the FULL-HORIZON total we sum the per-period
-    (variable + constant) captured by `_run_myopic_foresight` into
-    `n._myopic_period_objectives`; falls back to the single-LP (variable +
-    constant) for full-horizon solves. Returns None when no objective is available.
+    MYOPIC: each period is a SEPARATE LP, and NO combination of the per-period
+    LP objectives is the horizon system cost.
+
+    Capacity frozen by an earlier period carries `p_nom_extendable=False`, and
+    PyPSA charges CAPEX only for extendables — a non-extendable's capex is meant
+    to reach the total through `n.objective_constant`, which is IDENTICALLY ZERO
+    under `multi_investment_periods=True` (PyPSA's `define_objective` builds the
+    multi-invest constant but appends it to `terms` only in the single-period
+    branch). Summing the per-period LPs therefore charges each asset's CAPEX
+    once, in its build period, and never for the rest of its service life.
+    Measured on a 3-period system: -42.9% against the true cost, and +22.2% the
+    OTHER way with `lf_aggregate_future=True`, where the lookahead window's
+    future-period OPEX is counted once in the lookahead and again when that
+    period is actually solved. The sign of the error depends on config, so the
+    number was not trustworthy in either direction.
+
+    So for myopic we report the statistics-based horizon cost — the same basis
+    the Economics tab (`/results/cost_breakdown`) and the Compare tab already
+    use, which is what makes a myopic run comparable with a full-foresight one.
+    `n._myopic_period_objectives` is still populated and still surfaced by
+    `/results/objective_decomposition` for anyone who wants the per-period LP
+    values.
+
+    Full-horizon solves keep the LP total (variable + constant): a single LP
+    already prices the whole horizon, and the two bases agree there.
+
+    `cfg` is the solver config to price with. It is a parameter rather than a
+    read of `_state["solver_config"]` because the solve-queue dispatcher prices
+    a background project with ITS own config; omitting it falls back to the
+    foreground config, which is right for the `/run` path only.
 
     Shared by the foreground `/run` worker and the multi-project solve-queue
     dispatcher (services/solve_queue.py) so both report the objective identically.
     """
     myopic_entries = getattr(n, "_myopic_period_objectives", None)
     if isinstance(myopic_entries, list) and myopic_entries:
+        from services.cost_totals import horizon_system_cost
+        total = horizon_system_cost(n, cfg if cfg is not None else _state["solver_config"])
+        if total is not None:
+            return total
+        # Statistics unavailable (unsolved / empty frame). The per-period LP sum
+        # is wrong as established above, but it beats reporting nothing at all
+        # for a run that did complete — the alternative is a blank status bar.
         try:
             return sum(v + c for _, v, c in myopic_entries)
         except Exception:
