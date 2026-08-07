@@ -105,8 +105,16 @@ closer to a rename than a redesign.
 
 The harness owns the neutral kinds already in use — `missing_api_key`,
 `sdk_not_installed`, `unauthorized`, `rate_limited`, `upstream_error`,
-`internal_error`. Each provider maps its own exceptions into them.
-`_map_sdk_exception` moves into `AnthropicProvider` essentially unchanged.
+`invalid_request`, `internal_error`. Each provider maps its own exceptions
+into them. `_map_sdk_exception` moves into `AnthropicProvider` essentially
+unchanged.
+
+`invalid_request` (any 4xx that is not a 429) is the one kind whose
+retryability is load-bearing rather than cosmetic: it is deliberately absent
+from `_RETRYABLE_SDK_KINDS`, because a malformed request is deterministic and
+retrying it is guaranteed waste. Any provider that maps a client-side
+rejection onto a retryable kind reintroduces the thinking-block incident's
+four-calls-before-the-user-sees-anything behaviour.
 
 ## The three implementations
 

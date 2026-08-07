@@ -479,11 +479,19 @@ class ChatSession:
         """
         Append one history message and trim pairing-aware if over cap.
 
-        Every write into the message history funnels through here — the live
-        turn AND the GET /history rehydration that replays chat.jsonl — so
-        this is the single seam where malformed thinking blocks written by
-        the pre-fix serialiser get dropped before they can be replayed to the
-        API. A message left with no content at all is skipped entirely.
+        Scope of the sanitisation here — stated precisely, because the earlier
+        wording overclaimed: this is the only writer to `self.messages`, so
+        every entry in THIS deque is sanitised, whether it came from the live
+        turn or from the GET /history rehydration that replays chat.jsonl.
+        It is NOT the array sent to the API — `_run_turn_body` keeps a separate
+        local `messages` list which it appends to directly. That list is
+        seeded from this deque once per turn (and sanitised again at the seed,
+        since a caller may pass its own `message_history=`); everything
+        appended to it afterwards is freshly serialised by
+        `_serialise_for_anthropic` and therefore already well-formed.
+
+        A message left with no content at all is skipped entirely — an empty
+        content array is itself a 400.
         """
         sanitised = _sanitise_history_message(msg)
         if sanitised is None:
@@ -1534,6 +1542,11 @@ def _map_sdk_exception(exc: Exception) -> tuple[str, str]:
         if status == 429:
             return "rate_limited", _redact_for_log(exc)
         if isinstance(status, int) and 400 <= status < 500:
+            # Whole-range on purpose, which does sweep in 408 Request Timeout
+            # (arguably transient). Accepted: 408 is not observed from this
+            # API, and a false "terminal" costs one avoidable user-visible
+            # error, whereas a false "retryable" on a 400 costs every user
+            # every turn — the failure this branch exists to stop.
             return "invalid_request", _redact_for_log(exc)
         return "upstream_error", _redact_for_log(exc)
     return "internal_error", _redact_for_log(exc)
@@ -1836,17 +1849,26 @@ _THINKING_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
 
 def _thinking_block_is_wellformed(block: Any) -> bool:
     """
-    True unless `block` is a thinking / redacted_thinking block missing (or
-    emptying) a field the Messages API requires. Non-thinking blocks and
-    non-dict entries are always True — this predicate only ever rejects the
-    shape that produced the observed 400.
+    True unless `block` is a thinking / redacted_thinking block whose required
+    field is ABSENT or not a string. Non-thinking blocks and non-dict entries
+    are always True — this predicate only ever rejects the shape that produced
+    the observed 400.
+
+    PRESENCE AND TYPE, NOT TRUTHINESS — do not "tighten" this to `all(...)` on
+    the values. Measured against the live API (SDK 0.117.0, claude-sonnet-5,
+    reasoning-heavy prompt): adaptive thinking is on by default and returns
+    ThinkingBlock(thinking="", signature=<436 chars>) — an EMPTY thinking text
+    with a valid signature. That block is well-formed and replays fine; a
+    truthiness test drops it and silently discards the model's signed
+    reasoning from history. Only the shape the old serialiser produced —
+    the field missing entirely — is malformed.
     """
     if not isinstance(block, dict):
         return True
     required = _THINKING_REQUIRED_FIELDS.get(block.get("type"))
     if required is None:
         return True
-    return all(block.get(field) for field in required)
+    return all(isinstance(block.get(field), str) for field in required)
 
 
 def _sanitise_history_message(msg: dict[str, Any]) -> dict[str, Any] | None:
@@ -2064,10 +2086,20 @@ def _run_turn_body(
     # the session's deque so multi-turn conversations stay coherent across
     # /stream calls (E2E QA: INT-001).
     if message_history is not None:
-        messages: list[dict[str, Any]] = list(message_history)
+        seed: list[dict[str, Any]] = list(message_history)
     else:
         with session._lock:
-            messages = list(session.messages)
+            seed = list(session.messages)
+    # Sanitise the SEED, not every append: this local list is the array that
+    # actually goes to the API, and this is its only external input. Entries
+    # appended later (below, and at the tool-result / cap sites) are freshly
+    # serialised by _serialise_for_anthropic and cannot carry the malformed
+    # thinking shape. session.messages is already sanitised on write, so this
+    # is belt-and-braces there — it earns its keep for a caller-supplied
+    # `message_history=`, which nothing sanitises.
+    messages: list[dict[str, Any]] = [
+        m for m in (_sanitise_history_message(x) for x in seed) if m is not None
+    ]
 
     # Phase C — multimodal pass-through + tool-accessible-file annotation.
     #
@@ -2230,10 +2262,14 @@ def _run_turn_body(
         max_attempts = MAX_STREAM_RETRIES + 1
         while attempt < max_attempts:
             emitted_this_attempt = False
-            # Drain the streaming events. We accumulate content blocks locally
-            # so we can replay them as a single assistant message back into the
-            # SDK on the next turn (tool-use convention).
-            pending_blocks: list[dict[str, Any]] = []
+            # Drain the streaming events purely for their SSE side-effects
+            # (token / thinking / tool_preparing frames). The blocks that get
+            # replayed to the SDK next turn are read from
+            # `stream.get_final_message()` below, NOT accumulated here — an
+            # earlier `pending_blocks` list did accumulate them and was never
+            # read by anything, while a comment claimed it was the replay
+            # source. A comment asserting a fact the code does not have is
+            # what let the original thinking-block bug hide.
             try:
                 with client.messages.stream(
                     model=session.model,
@@ -2269,14 +2305,12 @@ def _run_turn_body(
                                     "tool_use_id": getattr(block, "id", "") or "",
                                     "tool_name": getattr(block, "name", "") or "",
                                 }
-                        # content_block_stop indicates a tool_use block has
-                        # fully accumulated. The SDK exposes it as
-                        # event.content_block.
-                        elif etype == "content_block_stop":
-                            block = getattr(event, "content_block", None)
-                            if block is not None:
-                                d = _serialise_for_anthropic(block)
-                                pending_blocks.append(d)
+                        # NOTE: `content_block_stop` is deliberately NOT
+                        # handled. It carries the finished block, but the SDK
+                        # also hands us every block on get_final_message(),
+                        # which is what we replay — handling it here as well
+                        # only re-serialised the same blocks into a list
+                        # nothing read.
 
                     final_message = stream.get_final_message()
                 break  # stream completed — leave the retry loop
@@ -2294,13 +2328,17 @@ def _run_turn_body(
                         MAX_STREAM_RETRY_DELAY,
                         BASE_STREAM_RETRY_DELAY * (2 ** attempt),
                     )
-                    # `msg` is already through _redact_for_log. It used to be
-                    # computed and thrown away, which is why the thinking-block
-                    # 400 could not be diagnosed from the log file at all and
-                    # had to be reproduced against a live app.
+                    # `msg` used to be computed and thrown away, which is why
+                    # the thinking-block 400 could not be diagnosed from the
+                    # log file at all and had to be reproduced against a live
+                    # app. It arrives already through _redact_for_log (API key
+                    # only); the second pass adds the stronger persist-side
+                    # patterns (password=/token=/bearer) because this line
+                    # writes arbitrary upstream exception text to disk.
                     logger.warning(
                         "chat: transient SDK error %r — retry %d/%d in %.1fs: %s",
-                        error_kind, attempt + 1, MAX_STREAM_RETRIES, delay, msg,
+                        error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
+                        _redact_secrets_in_str(msg),
                     )
                     time.sleep(delay)
                     attempt += 1
@@ -2331,11 +2369,11 @@ def _run_turn_body(
                     continue
                 _metric_error(error_kind)
                 # Terminal failures used to yield the frame and log NOTHING,
-                # so a non-retryable turn left no trace on disk. `msg` is
-                # already redacted by _map_sdk_exception.
+                # so a non-retryable turn left no trace on disk. Same
+                # double-scrub as the retry warning above.
                 logger.error(
                     "chat: turn failed (terminal) %r after %d attempt(s): %s",
-                    error_kind, attempt + 1, msg,
+                    error_kind, attempt + 1, _redact_secrets_in_str(msg),
                 )
                 yield "error", {"error_kind": error_kind, "message": msg}
                 yield "session_done", {"reason": error_kind}
@@ -2358,8 +2396,9 @@ def _run_turn_body(
             # #20 — process-lifetime cumulative tokens for GET /metrics.
             _metric_add_tokens(in_tok, out_tok)
 
-        # Drain pending_blocks for tool_use blocks. Add the final assistant
-        # message to the message_history for the next iteration.
+        # The SDK's assembled final message is the ONLY source of the blocks
+        # we replay. Serialise them and add the assistant turn to both the
+        # outbound array and the session history for the next iteration.
         assistant_blocks = [
             _serialise_for_anthropic(b)
             for b in getattr(final_message, "content", []) or []

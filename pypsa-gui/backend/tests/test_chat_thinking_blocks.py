@@ -165,16 +165,17 @@ def fake_anthropic_module():
 
 
 def test_status_400_maps_to_a_non_retryable_kind(fake_anthropic_module) -> None:
-    exc = fake_anthropic_module.APIStatusError(
-        "messages.1.content.0.thinking.thinking: Field required", status_code=400,
-    )
+    body = "messages.1.content.0.thinking.thinking: Field required"
+    exc = fake_anthropic_module.APIStatusError(body, status_code=400)
 
     kind, msg = chat_service._map_sdk_exception(exc)
 
     assert kind not in chat_service._RETRYABLE_SDK_KINDS
     assert kind == "invalid_request"
-    # The upstream body must survive the mapping — it names the bad field.
-    assert "thinking" in msg
+    # The upstream body must survive the mapping VERBATIM — it is the only
+    # place the offending field is named. Contrast AuthenticationError, which
+    # is deliberately replaced with a canned string.
+    assert msg == body
 
 
 @pytest.mark.parametrize("status", [400, 404, 413, 422])
@@ -237,6 +238,69 @@ def test_malformed_redacted_thinking_block_dropped() -> None:
 
     (msg,) = list(session.messages)
     assert msg["content"] == [{"type": "text", "text": "kept"}]
+
+
+def test_signed_thinking_block_with_empty_text_is_kept() -> None:
+    """
+    The real shape `claude-sonnet-5` returns, measured against the live API
+    (SDK 0.117.0) on a reasoning-heavy prompt: adaptive thinking is on by
+    default and yields ThinkingBlock(thinking="", signature=<436 chars>).
+
+    This block is well-formed and replays fine. A truthiness-based predicate
+    drops it — silently discarding the model's signed reasoning from history
+    on the SHIPPED DEFAULT MODEL. Presence and type, never truthiness.
+    """
+    session = chat_service.ChatSession()
+    signed_empty = {"type": "thinking", "thinking": "", "signature": "s" * 436}
+
+    session.append_history_message({
+        "role": "assistant",
+        "content": [signed_empty, {"type": "text", "text": "the answer"}],
+    })
+
+    (msg,) = list(session.messages)
+    assert msg["content"] == [signed_empty, {"type": "text", "text": "the answer"}]
+
+
+def test_thinking_block_missing_signature_is_dropped() -> None:
+    """Presence is still required — only the *value* may be empty."""
+    session = chat_service.ChatSession()
+
+    session.append_history_message({
+        "role": "assistant",
+        "content": [
+            {"type": "thinking", "thinking": "reasoned"},   # no signature
+            {"type": "text", "text": "kept"},
+        ],
+    })
+
+    (msg,) = list(session.messages)
+    assert msg["content"] == [{"type": "text", "text": "kept"}]
+
+
+def test_thinking_field_of_wrong_type_is_dropped() -> None:
+    session = chat_service.ChatSession()
+
+    session.append_history_message({
+        "role": "assistant",
+        "content": [
+            {"type": "thinking", "thinking": None, "signature": "sig"},
+            {"type": "text", "text": "kept"},
+        ],
+    })
+
+    (msg,) = list(session.messages)
+    assert msg["content"] == [{"type": "text", "text": "kept"}]
+
+
+def test_redacted_thinking_with_empty_data_is_kept() -> None:
+    session = chat_service.ChatSession()
+    block = {"type": "redacted_thinking", "data": ""}
+
+    session.append_history_message({"role": "assistant", "content": [block]})
+
+    (msg,) = list(session.messages)
+    assert msg["content"] == [block]
 
 
 def test_wellformed_thinking_block_is_preserved() -> None:
@@ -336,4 +400,52 @@ def test_streamed_thinking_block_survives_into_replayed_history(
     thinking = [b for b in blocks if b.get("type") == "thinking"]
     assert thinking == [
         {"type": "thinking", "thinking": "deliberating", "signature": "sig-1"},
+    ]
+
+
+def test_malformed_history_is_sanitised_out_of_the_outbound_payload(
+    tmp_projects_dir, install_network,
+) -> None:
+    """
+    The array actually sent to `client.messages.stream(...)` — not just
+    `session.messages` — must be free of the malformed shape. This covers the
+    one input to that array nothing else sanitises: a caller-supplied
+    `message_history=`.
+    """
+    import pypsa
+
+    from tests.test_chat_e2e import (
+        FakeAnthropicClient,
+        _FakeFinalMessage,
+        _FakeUsage,
+        _text_block,
+    )
+
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name=None)
+
+    history = [
+        {"role": "user", "content": "earlier question"},
+        {"role": "assistant", "content": [
+            {"type": "thinking"},                       # written by the old bug
+            {"type": "text", "text": "earlier answer"},
+        ]},
+    ]
+    final = _FakeFinalMessage(content=[_text_block("ok")], usage=_FakeUsage())
+    client = FakeAnthropicClient([([], final)])
+
+    list(chat_service.run_turn(
+        chat_service.ChatSession(), "next question",
+        client=client, message_history=history,
+    ))
+
+    sent = client.calls[0]["messages"]
+    blocks = [b for m in sent if isinstance(m.get("content"), list)
+              for b in m["content"] if isinstance(b, dict)]
+    assert not [b for b in blocks if b.get("type") == "thinking"]
+    # The valid neighbour survives. Compared on its own fields, because
+    # _with_history_cache_breakpoint stamps cache_control onto the anchor.
+    assert "earlier answer" in [
+        b.get("text") for b in blocks if b.get("type") == "text"
     ]
