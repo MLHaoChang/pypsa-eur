@@ -7,7 +7,8 @@
  *     bubble until a tool_request / tool_result lands)
  *   * confirmation card (renders when chatStore.pending is set; carries a
  *     live countdown and approve/deny buttons that POST /confirm)
- *   * cost meter (M10 — derives EUR client-side from session usage_acc)
+ *   * usage meter (exact token counts from session usage_acc — no currency
+ *     estimate; see the note in chatStore.ts for why that was removed)
  *   * project_exists / descendants_exist UX paths (v4-MAJOR-1 / v4-MINOR-1)
  *   * connection-lost toast (M8)
  *
@@ -37,7 +38,7 @@ import {
   UploadError,
   type UploadMeta,
 } from '../api/uploads'
-import { deriveCostEur, useChatStore, type UploadMetaUI } from '../store/chatStore'
+import { useChatStore, type UploadMetaUI } from '../store/chatStore'
 import ApiKeySetup from './ApiKeySetup'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -275,16 +276,16 @@ interface TurnDoneFrame {
   }
 }
 
-function CostMeter() {
+function UsageMeter() {
   const usage = useChatStore((s) => s.usage)
-  const model = useChatStore((s) => s.model)
-  const eur = deriveCostEur(model, usage)
   return (
     <span
       className="font-mono text-[10px] text-muted whitespace-nowrap"
-      data-testid="chat-cost-meter"
+      data-testid="chat-usage-meter"
+      title="Tokens this session: input / output / read from cache"
     >
-      {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out · €{eur.toFixed(4)}
+      {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
+      {' · '}{usage.cache_read_tokens.toLocaleString()} cached
     </span>
   )
 }
@@ -1472,7 +1473,7 @@ export default function ChatPanel() {
       case 'turn_done': {
         const d = _frame_data<TurnDoneFrame>(frame)
         if (d.usage) {
-          // M10: server reports token counts; client derives EUR.
+          // M10: server reports token counts; client renders them as-is.
           accrueUsage({
             input_tokens: d.usage.input_tokens ?? 0,
             output_tokens: d.usage.output_tokens ?? 0,
@@ -1655,10 +1656,10 @@ export default function ChatPanel() {
           className="bg-bg border border-border rounded px-1 py-0.5 text-[10px]"
           data-testid="chat-model-select"
         >
-          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-          <option value="claude-opus-4-8">Opus 4.8</option>
+          <option value="claude-sonnet-5">Sonnet 5</option>
+          <option value="claude-opus-5">Opus 5</option>
         </select>
-        <CostMeter />
+        <UsageMeter />
         {/* Phase D polish #3 — ⚙ gear popover for chat-panel preferences.
             Currently holds one toggle (auto-uncheck after send); future
             settings live here too. */}
@@ -1877,16 +1878,18 @@ export default function ChatPanel() {
                 (speech.listening
                   ? 'bg-accent/15 border-accent text-accent'
                   : 'bg-bg-3/40 hover:bg-bg-3 border-border text-muted') +
-                (speech.supported && !streaming ? '' : ' opacity-50')
+                (speech.available && !streaming ? '' : ' opacity-50')
               }
               onClick={speech.toggle}
-              disabled={!speech.supported || streaming}
+              disabled={!speech.available || streaming}
               title={
                 !speech.supported
                   ? 'Voice input needs Chrome or Edge'
-                  : speech.listening
-                    ? 'Stop voice input (Esc)'
-                    : 'Start voice input (English)'
+                  : speech.permissionDenied
+                    ? 'Microphone access denied — allow it in System Settings → Privacy & Security → Microphone'
+                    : speech.listening
+                      ? 'Stop voice input (Esc)'
+                      : 'Start voice input (English)'
               }
               aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
               aria-pressed={speech.listening}

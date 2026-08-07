@@ -2342,8 +2342,10 @@ def reconstruct_network_from_image(
     user_content.append({"type": "text", "text": VISION_INSTRUCTION})
 
     async def _ask_vision() -> dict:
+        from services.chat_service import DEFAULT_MODEL  # noqa: PLC0415
+
         with client.messages.stream(
-            model="claude-sonnet-4-6",
+            model=DEFAULT_MODEL,
             max_tokens=2048,
             system="You return ONLY raw JSON when asked.",
             messages=[{"role": "user", "content": user_content}],
