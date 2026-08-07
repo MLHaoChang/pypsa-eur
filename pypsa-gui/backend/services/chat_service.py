@@ -476,8 +476,19 @@ class ChatSession:
         return self.session_id[:6]
 
     def append_history_message(self, msg: dict[str, Any]) -> None:
-        """Append one history message and trim pairing-aware if over cap."""
-        self.messages.append(msg)
+        """
+        Append one history message and trim pairing-aware if over cap.
+
+        Every write into the message history funnels through here — the live
+        turn AND the GET /history rehydration that replays chat.jsonl — so
+        this is the single seam where malformed thinking blocks written by
+        the pre-fix serialiser get dropped before they can be replayed to the
+        API. A message left with no content at all is skipped entirely.
+        """
+        sanitised = _sanitise_history_message(msg)
+        if sanitised is None:
+            return
+        self.messages.append(sanitised)
         trim_session_messages(self.messages)
 
     # ── Confirmation lifecycle (F13 + v4-MINOR-3) ──────────────────────────
@@ -1499,8 +1510,15 @@ def _map_sdk_exception(exc: Exception) -> tuple[str, str]:
       * AuthenticationError → unauthorized
       * RateLimitError → rate_limited
       * APIStatusError 429 → rate_limited
+      * APIStatusError other 4xx → invalid_request (TERMINAL — see below)
       * Other APIStatusError → upstream_error
       * Anything else → internal_error
+
+    `invalid_request` is deliberately absent from `_RETRYABLE_SDK_KINDS`. A
+    4xx that is not a 429 means WE sent a request the API refuses; it is
+    deterministic, so every retry is guaranteed waste. In the observed
+    thinking-block incident the old `upstream_error` mapping burned four API
+    calls and ~7 seconds of the user's time before surfacing the error.
     """
     # Lazy import so callers don't need anthropic installed at import time.
     try:
@@ -1512,8 +1530,11 @@ def _map_sdk_exception(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, anthropic.RateLimitError):
         return "rate_limited", _redact_for_log(exc)
     if isinstance(exc, anthropic.APIStatusError):
-        if getattr(exc, "status_code", None) == 429:
+        status = getattr(exc, "status_code", None)
+        if status == 429:
             return "rate_limited", _redact_for_log(exc)
+        if isinstance(status, int) and 400 <= status < 500:
+            return "invalid_request", _redact_for_log(exc)
         return "upstream_error", _redact_for_log(exc)
     return "internal_error", _redact_for_log(exc)
 
@@ -1747,17 +1768,112 @@ def _build_system_prompt(
 def _serialise_for_anthropic(content_block: Any) -> dict[str, Any]:
     """
     Coerce an Anthropic streaming content_block to a plain JSON dict the
-    agent loop can stash in `session` and the tool dispatcher can consume.
-    The SDK exposes both attribute-style and dict-style access; we normalise
-    to dict so downstream code never touches SDK internals.
+    agent loop can stash in `session` and replay to the Messages API.
+
+    Contract: EVERY public field the block carries survives the round-trip,
+    except fields whose value is `None` (dropped, so an optional field the API
+    does not expect is never sent as `null`). Dicts pass through unchanged.
+    There is deliberately NO allowlist of field names — see below.
     """
+    # WHY NO ALLOWLIST — do not reintroduce one.
+    #
+    # This function used to copy a fixed five-name list:
+    #     ("type", "id", "name", "input", "text")
+    # `claude-sonnet-5` returns `thinking` blocks by default (4-6 did not).
+    # A thinking block carries its payload in `thinking` + `signature`; a
+    # `redacted_thinking` block carries it in `data`. None of those three
+    # names was on the list, so the block was serialised as a bare
+    # {"type": "thinking"} and replayed with its required field missing. The
+    # SECOND API call of every tool-using turn — the one replaying the
+    # assistant turn plus tool results — then failed, verbatim:
+    #
+    #   400 invalid_request_error —
+    #   'messages.1.content.0.thinking.thinking: Field required'
+    #
+    # An allowlist goes stale the moment the API grows a block type or a
+    # field, and that staleness IS the outage. Copy what the block actually
+    # carries instead.
     if isinstance(content_block, dict):
         return content_block
+    # SDK content blocks are pydantic models — model_dump is the faithful,
+    # forward-compatible dump. `anthropic` is NOT imported here on purpose:
+    # this module must stay importable without the SDK installed.
+    dump = getattr(content_block, "model_dump", None)
+    if callable(dump):
+        try:
+            data = dump(exclude_none=True)
+        except TypeError:  # pragma: no cover — pre-pydantic-v2 signature
+            data = dump()
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v is not None}
+    # Fallback for plain objects (test doubles, non-pydantic SDK shapes).
+    raw = getattr(content_block, "__dict__", None)
+    if isinstance(raw, dict):
+        return {
+            k: v for k, v in raw.items()
+            if not k.startswith("_") and v is not None
+        }
     out: dict[str, Any] = {}
-    for attr in ("type", "id", "name", "input", "text"):
-        if hasattr(content_block, attr):
-            out[attr] = getattr(content_block, attr)
+    for name in dir(content_block):
+        if name.startswith("_"):
+            continue
+        value = getattr(content_block, name, None)
+        if value is None or callable(value):
+            continue
+        out[name] = value
     return out
+
+
+# Thinking blocks the API will reject on replay. `thinking` requires both
+# `thinking` and `signature`; `redacted_thinking` requires `data`. Blocks
+# written by the pre-fix serialiser (bare {"type": "thinking"}) are already
+# on disk in users' chat.jsonl — see _sanitise_history_message.
+_THINKING_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "thinking": ("thinking", "signature"),
+    "redacted_thinking": ("data",),
+}
+
+
+def _thinking_block_is_wellformed(block: Any) -> bool:
+    """
+    True unless `block` is a thinking / redacted_thinking block missing (or
+    emptying) a field the Messages API requires. Non-thinking blocks and
+    non-dict entries are always True — this predicate only ever rejects the
+    shape that produced the observed 400.
+    """
+    if not isinstance(block, dict):
+        return True
+    required = _THINKING_REQUIRED_FIELDS.get(block.get("type"))
+    if required is None:
+        return True
+    return all(block.get(field) for field in required)
+
+
+def _sanitise_history_message(msg: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Drop malformed thinking blocks from one history message.
+
+    The pre-fix serialiser persisted bare {"type": "thinking"} blocks into
+    live sessions' chat.jsonl. Fixing the serialiser does not repair what is
+    already stored: rehydrating that history replays the same invalid shape
+    and 400s again ('...thinking.thinking: Field required'). A thinking block
+    with no content carries no information and the API accepts an assistant
+    turn without one, so dropping is lossless. Well-formed thinking blocks
+    are preserved — the API rejects a turn whose signed thinking is altered.
+
+    Returns the message unchanged (same object) when nothing needed dropping,
+    a shallow copy with the surviving blocks otherwise, or None when nothing
+    survived — an empty content array is itself a 400.
+    """
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return msg
+    kept = [b for b in content if _thinking_block_is_wellformed(b)]
+    if len(kept) == len(content):
+        return msg
+    if not kept:
+        return None
+    return {**msg, "content": kept}
 
 
 def run_turn(
@@ -2178,9 +2294,13 @@ def _run_turn_body(
                         MAX_STREAM_RETRY_DELAY,
                         BASE_STREAM_RETRY_DELAY * (2 ** attempt),
                     )
+                    # `msg` is already through _redact_for_log. It used to be
+                    # computed and thrown away, which is why the thinking-block
+                    # 400 could not be diagnosed from the log file at all and
+                    # had to be reproduced against a live app.
                     logger.warning(
-                        "chat: transient SDK error %r — retry %d/%d in %.1fs",
-                        error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
+                        "chat: transient SDK error %r — retry %d/%d in %.1fs: %s",
+                        error_kind, attempt + 1, MAX_STREAM_RETRIES, delay, msg,
                     )
                     time.sleep(delay)
                     attempt += 1
@@ -2210,6 +2330,13 @@ def _run_turn_body(
                     attempt += 1
                     continue
                 _metric_error(error_kind)
+                # Terminal failures used to yield the frame and log NOTHING,
+                # so a non-retryable turn left no trace on disk. `msg` is
+                # already redacted by _map_sdk_exception.
+                logger.error(
+                    "chat: turn failed (terminal) %r after %d attempt(s): %s",
+                    error_kind, attempt + 1, msg,
+                )
                 yield "error", {"error_kind": error_kind, "message": msg}
                 yield "session_done", {"reason": error_kind}
                 return
