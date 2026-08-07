@@ -65,6 +65,7 @@ const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
+const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
 
 const RECENTS_MAX = 5
 // Floor for the docked comparison rail width — keeps both the rail and the
@@ -170,6 +171,17 @@ function storedCompareRailWidth(): number {
   return 560
 }
 
+function storedAssistantDockOpen(): boolean {
+  try {
+    return localStorage.getItem(ASSISTANT_DOCK_KEY) === 'open'
+  } catch { /* noop */ }
+  return false
+}
+
+function persistAssistantDockOpen(open: boolean) {
+  try { localStorage.setItem(ASSISTANT_DOCK_KEY, open ? 'open' : 'closed') } catch { /* noop */ }
+}
+
 function persistOpenTabs(tabs: OpenTab[]) {
   try { localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(tabs)) } catch { /* noop */ }
 }
@@ -264,6 +276,10 @@ interface UIStore {
   canvasMode: CanvasMode
   canvasView: CanvasView
   activeSlidePanel: SlidePanel | null
+  // The assistant is NOT a SlidePanel. It has its own open/closed state so it
+  // can stay on screen while it navigates you somewhere — see Task 3's
+  // regression test and the 2026-08-05 presence spec.
+  assistantDockOpen: boolean
   // True while a project switch/load is mid-flight (between the moment the
   // backend starts swapping the in-memory network and the moment
   // currentProject is updated to the new project). Autosave checks this and
@@ -340,6 +356,8 @@ interface UIStore {
   setCanvasMode: (mode: CanvasMode) => void
   setCanvasView: (view: CanvasView) => void
   setSlidePanel: (p: SlidePanel | null) => void
+  setAssistantDockOpen: (open: boolean) => void
+  toggleAssistantDock: () => void
   setProjectSwitchInProgress: (v: boolean) => void
   setCompareRailOpen: (v: boolean) => void
   toggleCompareRail: () => void
@@ -380,7 +398,7 @@ interface UIStore {
   setPaletteMode: (m: PaletteMode) => void
 }
 
-export const useUIStore = create<UIStore>((set) => ({
+export const useUIStore = create<UIStore>((set, get) => ({
   sidebarExpanded: storedSidebarMode() !== 'hidden',
   sidebarMode: storedSidebarMode(),
   rightPanelOpen: true,
@@ -398,6 +416,7 @@ export const useUIStore = create<UIStore>((set) => ({
   canvasMode: 'select',
   canvasView: storedCanvasView(),
   activeSlidePanel: null,
+  assistantDockOpen: storedAssistantDockOpen(),
   projectSwitchInProgress: false,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
@@ -491,6 +510,15 @@ export const useUIStore = create<UIStore>((set) => ({
     set({ canvasView: view })
   },
   setSlidePanel: (p) => set({ activeSlidePanel: p }),
+  setAssistantDockOpen: (open) => {
+    persistAssistantDockOpen(open)
+    set({ assistantDockOpen: open })
+  },
+  toggleAssistantDock: () => {
+    const next = !get().assistantDockOpen
+    persistAssistantDockOpen(next)
+    set({ assistantDockOpen: next })
+  },
   setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
   setCompareRailOpen: (v) => {
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
