@@ -3221,6 +3221,30 @@ def get_asset_economics():
     Multi-period response also emits `by_period[period] = {...}` per asset so
     the frontend can show both the horizon-wide total AND a per-period view
     without re-running the same arithmetic on the client.
+
+    What these numbers reconcile with (measured on a live network, not
+    inferred from the code):
+
+      • Σ `fixed_cost_eur` == Σ `economics_by_carrier.capex_meur` × 1e6
+        EXACTLY — both 352,864,456.77, Δ = 0.00. That is the Dispatch tab's
+        "CAPEX (annuitised)" KPI, and it is the reconciliation to quote.
+      • Σ `vom_cost_eur` == `cost_breakdown.opex` EXACTLY — both
+        691,055,137.75, Δ = 0.00.
+      • It does NOT reconcile with `cost_breakdown.capex`. That figure was
+        8,420,504,580.76 against Σ `fixed_cost_eur` of 352,864,456.77 — a
+        23.9× difference — because `cost_breakdown` includes Line capex
+        (8,067,640,123.99) and transformers, while this endpoint covers only
+        Generator / StorageUnit / Store / Link. An earlier version of this
+        docstring claimed `cost_breakdown.capex = Σ fixed_cost`; it was
+        false, and comparing against it will look like a bug that isn't one.
+
+    `capital_costs_available` (top level) is False when the capital-cost
+    resolver raised. In that case every capital-cost-derived field —
+    `fixed_cost_eur`, `fom_cost_eur`, `net_profit_eur`, `lcoe_eur_per_mwh`,
+    `lcos_eur_per_mwh` — is emitted as `null` rather than 0.0, at the top
+    level AND inside every `by_period` entry. Fields that owe nothing to
+    capital cost (revenue, VOM, energy, capacity factor, prices, spread) keep
+    their real values. See `_capital_derived` below for why.
     """
     import math
 
@@ -3233,13 +3257,26 @@ def get_asset_economics():
 
     cfg = _state["solver_config"]
 
+    # ── Pre-compute the effective annualised capital_cost for every asset.
+    # Same resolver the cost_breakdown endpoint feeds from, so Σ fixed_cost
+    # here matches `economics_by_carrier`'s Σ capex — see the docstring for
+    # what does and does not reconcile.
+    #
+    # When this raises, EVERY downstream lookup below falls through to its
+    # `.get("capital_cost", 0.0)` default, and the whole tab renders €0.00
+    # fixed cost, a net profit inflated by the missing CAPEX, and an
+    # understated LCOE — all with the same confidence as real figures. The
+    # flag and the nulls exist so that cannot happen silently again.
+    capital_costs_available = True
     try:
-        # ── Pre-compute the effective annualised capital_cost for every asset.
-        # Mirrors the same context the cost_breakdown endpoint uses — so the
-        # numbers reconcile (cost_breakdown.capex = Σ fixed_cost across assets).
         asset_costs = periodized_capital_costs(n, cfg)
     except Exception:
+        logger.exception(
+            "periodized_capital_costs failed in /results/asset_economics; "
+            "capital-cost-derived fields will be reported as unavailable",
+        )
         asset_costs = {}
+        capital_costs_available = False
 
     # ── Snapshot + period weighting helpers ──────────────────────────────
     # Multi-period: `snapshot_weightings.objective` carries the per-row weight
@@ -3324,6 +3361,20 @@ def get_asset_economics():
 
     def _safe_finite(x: float) -> float:
         return 0.0 if x is None or not math.isfinite(x) else float(x)
+
+    def _capital_derived(x: float | None) -> float | None:
+        """
+        Emit a capital-cost-derived field, or `null` if the resolver failed.
+
+        Use this — NOT `_safe_finite` — for anything computed from
+        `asset_costs`. `_safe_finite(0.0)` is indistinguishable on the wire
+        from a genuine zero, and the Economics tab formats it as "€0.00"
+        beside real revenue figures. `null` is the only value the frontend
+        cannot accidentally render as a number.
+        """
+        if not capital_costs_available:
+            return None
+        return None if x is None else _safe_finite(x)
 
     def _accumulate_per_period(
         series: _pd.Series,
@@ -3567,11 +3618,11 @@ def get_asset_economics():
                         "period": p_key,
                         "energy_mwh": _safe_finite(e_p),
                         "revenue_eur": _safe_finite(rev_p),
-                        "fixed_cost_eur": _safe_finite(fixed_p),
-                        "fom_cost_eur": _safe_finite(fom_p),
+                        "fixed_cost_eur": _capital_derived(fixed_p),
+                        "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vom_p),
-                        "net_profit_eur": _safe_finite(net_p),
-                        "lcoe_eur_per_mwh": _safe_finite(lcoe_p) if lcoe_p is not None else None,
+                        "net_profit_eur": _capital_derived(net_p),
+                        "lcoe_eur_per_mwh": _capital_derived(lcoe_p),
                         "avg_price_eur_per_mwh": _safe_finite(avg_price_p) if avg_price_p is not None else None,
                     })
 
@@ -3584,10 +3635,10 @@ def get_asset_economics():
                 "capacity_factor": _safe_finite(cap_factor) if cap_factor is not None else None,
                 "revenue_eur": _safe_finite(revenue_total),
                 "vom_cost_eur": _safe_finite(vom_total),
-                "fixed_cost_eur": _safe_finite(fixed_cost),
-                "fom_cost_eur": _safe_finite(fom_cost),
-                "net_profit_eur": _safe_finite(revenue_total - fixed_cost - vom_total),
-                "lcoe_eur_per_mwh": _safe_finite(lcoe) if lcoe is not None else None,
+                "fixed_cost_eur": _capital_derived(fixed_cost),
+                "fom_cost_eur": _capital_derived(fom_cost),
+                "net_profit_eur": _capital_derived(revenue_total - fixed_cost - vom_total),
+                "lcoe_eur_per_mwh": _capital_derived(lcoe),
                 "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
                 "by_period": by_period_rows,
             })
@@ -3716,11 +3767,11 @@ def get_asset_economics():
                         "charge_mwh": _safe_finite(cm),
                         "discharge_revenue_eur": _safe_finite(dr),
                         "charge_cost_eur": _safe_finite(cc),
-                        "fixed_cost_eur": _safe_finite(fixed_p),
-                        "fom_cost_eur": _safe_finite(fom_p),
+                        "fixed_cost_eur": _capital_derived(fixed_p),
+                        "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vp),
-                        "net_profit_eur": _safe_finite(np_period),
-                        "lcos_eur_per_mwh": _safe_finite(lcos_p) if lcos_p is not None else None,
+                        "net_profit_eur": _capital_derived(np_period),
+                        "lcos_eur_per_mwh": _capital_derived(lcos_p),
                         "spread_eur_per_mwh": _safe_finite(spread_p) if spread_p is not None else None,
                     })
 
@@ -3737,10 +3788,10 @@ def get_asset_economics():
                 "discharge_revenue_eur": _safe_finite(discharge_revenue_total),
                 "charge_cost_eur": _safe_finite(charge_cost_total),
                 "vom_cost_eur": _safe_finite(vom_total_su),
-                "fixed_cost_eur": _safe_finite(fixed_cost),
-                "fom_cost_eur": _safe_finite(fom_cost),
-                "net_profit_eur": _safe_finite(net_profit),
-                "lcos_eur_per_mwh": _safe_finite(lcos) if lcos is not None else None,
+                "fixed_cost_eur": _capital_derived(fixed_cost),
+                "fom_cost_eur": _capital_derived(fom_cost),
+                "net_profit_eur": _capital_derived(net_profit),
+                "lcos_eur_per_mwh": _capital_derived(lcos),
                 "spread_eur_per_mwh": _safe_finite(spread) if spread is not None else None,
                 "avg_discharge_price_eur_per_mwh": _safe_finite(avg_discharge_price) if avg_discharge_price is not None else None,
                 "avg_charge_price_eur_per_mwh": _safe_finite(avg_charge_price) if avg_charge_price is not None else None,
@@ -3847,11 +3898,11 @@ def get_asset_economics():
                         "charge_mwh": _safe_finite(cm),
                         "discharge_revenue_eur": _safe_finite(dr),
                         "charge_cost_eur": _safe_finite(cc),
-                        "fixed_cost_eur": _safe_finite(fixed_p),
-                        "fom_cost_eur": _safe_finite(fom_p),
+                        "fixed_cost_eur": _capital_derived(fixed_p),
+                        "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vp),
-                        "net_profit_eur": _safe_finite(np_period),
-                        "lcos_eur_per_mwh": _safe_finite(lcos_p) if lcos_p is not None else None,
+                        "net_profit_eur": _capital_derived(np_period),
+                        "lcos_eur_per_mwh": _capital_derived(lcos_p),
                         "spread_eur_per_mwh": _safe_finite(spread_p) if spread_p is not None else None,
                     })
 
@@ -3865,10 +3916,10 @@ def get_asset_economics():
                 "discharge_revenue_eur": _safe_finite(discharge_revenue_total),
                 "charge_cost_eur": _safe_finite(charge_cost_total),
                 "vom_cost_eur": _safe_finite(vom_total_st),
-                "fixed_cost_eur": _safe_finite(fixed_cost),
-                "fom_cost_eur": _safe_finite(fom_cost),
-                "net_profit_eur": _safe_finite(net_profit),
-                "lcos_eur_per_mwh": _safe_finite(lcos) if lcos is not None else None,
+                "fixed_cost_eur": _capital_derived(fixed_cost),
+                "fom_cost_eur": _capital_derived(fom_cost),
+                "net_profit_eur": _capital_derived(net_profit),
+                "lcos_eur_per_mwh": _capital_derived(lcos),
                 "spread_eur_per_mwh": _safe_finite(spread) if spread is not None else None,
                 "avg_discharge_price_eur_per_mwh": _safe_finite(avg_discharge_price) if avg_discharge_price is not None else None,
                 "avg_charge_price_eur_per_mwh": _safe_finite(avg_charge_price) if avg_charge_price is not None else None,
@@ -4047,11 +4098,11 @@ def get_asset_economics():
                         "revenue_eur": _safe_finite(rev_p),
                         "gross_revenue_eur": _safe_finite(gross_p),
                         "input_cost_eur": _safe_finite(in_p),
-                        "fixed_cost_eur": _safe_finite(fixed_p),
-                        "fom_cost_eur": _safe_finite(fom_p),
+                        "fixed_cost_eur": _capital_derived(fixed_p),
+                        "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vom_p),
-                        "net_profit_eur": _safe_finite(rev_p - fixed_p - vom_p),
-                        "lcoe_eur_per_mwh": _safe_finite(lcoe_p) if lcoe_p is not None else None,
+                        "net_profit_eur": _capital_derived(rev_p - fixed_p - vom_p),
+                        "lcoe_eur_per_mwh": _capital_derived(lcoe_p),
                         "avg_price_eur_per_mwh": _safe_finite((gross_p / e_p) if e_p > 1e-6 else 0.0) if e_p > 1e-6 else None,
                     })
 
@@ -4069,10 +4120,10 @@ def get_asset_economics():
                 "gross_revenue_eur": _safe_finite(gross_revenue_total),
                 "input_cost_eur": _safe_finite(input_cost_total),
                 "vom_cost_eur": _safe_finite(vom_total),
-                "fixed_cost_eur": _safe_finite(fixed_cost),
-                "fom_cost_eur": _safe_finite(fom_cost),
-                "net_profit_eur": _safe_finite(revenue_total - fixed_cost - vom_total),
-                "lcoe_eur_per_mwh": _safe_finite(lcoe) if lcoe is not None else None,
+                "fixed_cost_eur": _capital_derived(fixed_cost),
+                "fom_cost_eur": _capital_derived(fom_cost),
+                "net_profit_eur": _capital_derived(revenue_total - fixed_cost - vom_total),
+                "lcoe_eur_per_mwh": _capital_derived(lcoe),
                 "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
                 "by_period": by_period_rows,
             })
@@ -4093,6 +4144,13 @@ def get_asset_economics():
     return {
         "currency": "EUR",
         "is_multi_period": is_multi,
+        # False when `periodized_capital_costs` raised. Every capital-cost-
+        # derived field in every row (and every `by_period` entry) is `null`
+        # in that case — see `_capital_derived`. The flag is the summary; the
+        # nulls are the wire signal. Consumers need both: the flag so one
+        # banner can explain forty blank cells, the nulls so a consumer that
+        # ignores the flag still cannot format a zero.
+        "capital_costs_available": capital_costs_available,
         "periods": periods_list,
         "generators": gen_rows,
         "storage_units": su_rows,
