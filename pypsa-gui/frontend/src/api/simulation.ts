@@ -437,6 +437,14 @@ export const resultsApi = {
 }
 
 // ── Asset economics types ──────────────────────────────────────────────
+//
+// `fixed_cost_eur` / `fom_cost_eur` / `net_profit_eur` / `lcoe_eur_per_mwh` /
+// `lcos_eur_per_mwh` are `number | null` on EVERY row and every `by_period`
+// entry. `null` means the backend's capital-cost resolver raised and the
+// figure could not be computed — it is NOT a zero and must never be coalesced
+// into one (`?? 0` here is the bug this nullability exists to prevent).
+// `AssetEconomicsPayload.capital_costs_available` is the matching summary
+// flag; see its comment below.
 export interface GeneratorEconomicsRow {
   name: string
   bus: string
@@ -446,19 +454,19 @@ export interface GeneratorEconomicsRow {
   capacity_factor: number | null
   revenue_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number       // capital_cost × p_nom_opt (annualised)
-  fom_cost_eur: number         // user-typed fom_cost × p_nom_opt (informational)
-  net_profit_eur: number       // revenue − fixed − vom
+  fixed_cost_eur: number | null       // capital_cost × p_nom_opt (annualised)
+  fom_cost_eur: number | null         // user-typed fom_cost × p_nom_opt (informational)
+  net_profit_eur: number | null       // revenue − fixed − vom
   lcoe_eur_per_mwh: number | null
   avg_price_eur_per_mwh: number | null
   by_period: Array<{
     period: number | string
     energy_mwh: number
     revenue_eur: number
-    fixed_cost_eur: number
-    fom_cost_eur: number
+    fixed_cost_eur: number | null
+    fom_cost_eur: number | null
     vom_cost_eur: number
-    net_profit_eur: number
+    net_profit_eur: number | null
     lcoe_eur_per_mwh: number | null
     avg_price_eur_per_mwh: number | null
   }>
@@ -476,9 +484,9 @@ export interface StorageUnitEconomicsRow {
   discharge_revenue_eur: number
   charge_cost_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number
-  fom_cost_eur: number
-  net_profit_eur: number       // discharge_revenue − charge_cost − vom − fixed
+  fixed_cost_eur: number | null
+  fom_cost_eur: number | null
+  net_profit_eur: number | null       // discharge_revenue − charge_cost − vom − fixed
   lcos_eur_per_mwh: number | null
   spread_eur_per_mwh: number | null
   avg_discharge_price_eur_per_mwh: number | null
@@ -489,10 +497,10 @@ export interface StorageUnitEconomicsRow {
     charge_mwh: number
     discharge_revenue_eur: number
     charge_cost_eur: number
-    fixed_cost_eur: number
-    fom_cost_eur: number
+    fixed_cost_eur: number | null
+    fom_cost_eur: number | null
     vom_cost_eur: number
-    net_profit_eur: number
+    net_profit_eur: number | null
     lcos_eur_per_mwh: number | null
     spread_eur_per_mwh: number | null
   }>
@@ -507,9 +515,9 @@ export interface StoreEconomicsRow {
   discharge_revenue_eur: number
   charge_cost_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number
-  fom_cost_eur: number
-  net_profit_eur: number
+  fixed_cost_eur: number | null
+  fom_cost_eur: number | null
+  net_profit_eur: number | null
   lcos_eur_per_mwh: number | null
   spread_eur_per_mwh: number | null
   avg_discharge_price_eur_per_mwh: number | null
@@ -535,9 +543,9 @@ export interface LinkEconomicsRow {
   gross_revenue_eur: number
   input_cost_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number
-  fom_cost_eur: number
-  net_profit_eur: number       // revenue − fixed − vom
+  fixed_cost_eur: number | null
+  fom_cost_eur: number | null
+  net_profit_eur: number | null       // revenue − fixed − vom
   lcoe_eur_per_mwh: number | null  // ALL-IN per MWh of output; matches /results/lcoh
   avg_price_eur_per_mwh: number | null
   by_period: Array<{
@@ -546,10 +554,10 @@ export interface LinkEconomicsRow {
     revenue_eur: number
     gross_revenue_eur: number
     input_cost_eur: number
-    fixed_cost_eur: number
-    fom_cost_eur: number
+    fixed_cost_eur: number | null
+    fom_cost_eur: number | null
     vom_cost_eur: number
-    net_profit_eur: number
+    net_profit_eur: number | null
     lcoe_eur_per_mwh: number | null
     avg_price_eur_per_mwh: number | null
   }>
@@ -557,6 +565,11 @@ export interface LinkEconomicsRow {
 export interface AssetEconomicsPayload {
   currency: string
   is_multi_period: boolean
+  // False when the backend's capital-cost resolver raised. Every
+  // capital-cost-derived field in every row is then `null` rather than 0.0.
+  // Optional because a response cached from a backend older than this field
+  // has no opinion; read it as `!== false`, never as `=== true`.
+  capital_costs_available?: boolean
   periods: Array<number | string>
   generators: GeneratorEconomicsRow[]
   storage_units: StorageUnitEconomicsRow[]
