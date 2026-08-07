@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isTruncatedPayload, weightedSum,
+  isTruncatedPayload, weightedSum, snapshotWeightAt, effectiveWeightAt,
   type TSPayload, type WeightCtx, type SnapshotWeightRow,
 } from './shared'
 import {
@@ -245,5 +245,64 @@ describe('weightedSum: windowed payload vs full-horizon snapshot weights', () =>
       positional += s * (sw.generators ?? 1) * (pw?.years ?? 1)
     }
     expect(Math.abs(windowedTotal - positional)).toBeGreaterThan(1)
+  })
+})
+
+// ── snapshotWeightAt: FullLoadHoursSection's windowed-payload basis ─────────
+// `Dispatch.tsx`'s `FullLoadHoursSection` (`perColumnPerPeriodEnergy`) has the
+// SAME window-vs-full-horizon mismatch the tests above cover for
+// `weightedSum`/`effectiveWeightAt`, at a site those two can't fix: it reads
+// `weightCtx.snapshotWeights` (always full-horizon) by raw payload ROW index
+// on a WINDOWED payload, and it deliberately must NOT apply
+// `periodWeights.years` (full-load hours are per-solved-year hours, not an
+// annualised figure — `effectiveWeightAt` always applies `years`, so it can't
+// be reused here). `snapshotWeightAt` is the narrow export for this one site,
+// sharing `_snapshotWeightRow`'s keyed lookup so there is still exactly one
+// weight-resolution path.
+describe('snapshotWeightAt: FullLoadHoursSection\'s windowed-payload basis', () => {
+  const fx = buildMultiPeriodWindowFixture()
+  const colIdx = 0 // COLUMNS[0]
+
+  // Mirrors Dispatch.tsx's `perColumnPerPeriodEnergy` in 'positive' mode:
+  // skip negative values, weight by `snapshotWeights.generators` ONLY.
+  function flhEnergy(
+    ts: TSPayload, ctx: WeightCtx, rFrom: number, rTo: number,
+  ): number {
+    const periods = ts.periods ?? ctx.snapshotPeriods ?? []
+    let total = 0
+    for (let row = rFrom; row <= rTo; row++) {
+      const raw = ts.data[row][colIdx]
+      if (raw < 0) continue
+      const period = periods[row] ?? null
+      total += raw * snapshotWeightAt(ctx, row, ts.index[row], period, 'generators')
+    }
+    return total
+  }
+
+  // TEST 1 — the load-bearing identity, same shape as FIX 3's TEST 1 above.
+  it('gives the same FLH energy for the windowed payload as for the whole horizon sliced to the same rows', () => {
+    const windowed = flhEnergy(fx.windowed, fx.ctxWindow, 0, fx.windowed.data.length - 1)
+    const wholeSlice = flhEnergy(fx.whole, fx.ctxWhole, WINDOW.from, WINDOW.to)
+    // Non-degenerate: real non-uniform weights, real (mostly-positive) data.
+    expect(Math.abs(windowed)).toBeGreaterThan(0)
+    expect(windowed).toBeCloseTo(wholeSlice, 6)
+  })
+
+  // TEST 2 — the `years` exclusion is load-bearing on its own; guard it so a
+  // future "route this through effectiveWeightAt" tidy-up fails loudly.
+  it('does NOT apply periodWeights.years — period 2028 (the windowed period) has years=3', () => {
+    const noYears = flhEnergy(fx.windowed, fx.ctxWindow, 0, fx.windowed.data.length - 1)
+    // Recompute the SAME sum but through `effectiveWeightAt`, which DOES fold
+    // in `years` — the two must diverge by exactly that factor.
+    let withYears = 0
+    for (let row = 0; row < fx.windowed.data.length; row++) {
+      const raw = fx.windowed.data[row][colIdx]
+      if (raw < 0) continue
+      withYears += raw * effectiveWeightAt(
+        fx.ctxWindow, fx.windowed.index, row, 'generators', fx.windowed.index[row],
+      )
+    }
+    expect(withYears).toBeCloseTo(noYears * 3, 6)
+    expect(noYears).not.toBeCloseTo(withYears, 0)
   })
 })

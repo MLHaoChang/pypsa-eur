@@ -14,7 +14,7 @@ import type { Generator, Load, StorageUnit, Store, Link as LinkT } from '../../a
 import {
   type TSPayload, type WeightCtx, type ResultsViewMode, type Season,
   generatorGroup, aggregateTS, isRenewableCarrier, durationCurvePoints, useWeightCtx,
-  weightedSum, weightedSumSplit, effectiveWeightAt, averageScaling, hasScaling,
+  weightedSum, weightedSumSplit, effectiveWeightAt, snapshotWeightAt, averageScaling, hasScaling,
   fmtEnergy, fmtCurrency, fmtPower, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
   ChartCard, ChartActions, WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
@@ -3356,7 +3356,6 @@ function FullLoadHoursSection(props: {
     const rFrom = Math.max(0, Math.min(range.from, lastRow))
     const rTo   = Math.max(0, Math.min(range.to,   lastRow))
     if (rFrom > rTo) return out
-    const sw = weightCtx.snapshotWeights ?? []
     const periods = ts.periods ?? weightCtx.snapshotPeriods ?? []
     for (let row = rFrom; row <= rTo; row++) {
       const raw = ts.data[row][colIdx]
@@ -3367,16 +3366,13 @@ function FullLoadHoursSection(props: {
       } else {
         val = Math.abs(val)
       }
-      // Snapshot weight only (energy-side scaling) — NO ipw.years here.
-      let w = 1
-      if (sw.length > 0) {
-        const swr = sw[row]
-        if (swr) {
-          const v = swr.generators
-          if (typeof v === 'number' && Number.isFinite(v)) w = v
-        }
-      }
       const p = periods[row] ?? null
+      // Snapshot weight only (energy-side scaling) — NO ipw.years here.
+      // `weightCtx.snapshotWeights` is always FULL-HORIZON while `ts` (and
+      // therefore `row`) is WINDOW-RELATIVE on a windowed payload —
+      // `snapshotWeightAt` resolves by (iso, period) via `_snapshotWeightRow`
+      // instead of indexing `snapshotWeights` by the raw payload row.
+      const w = snapshotWeightAt(weightCtx, row, ts.index[row], p, 'generators')
       out.set(p, (out.get(p) ?? 0) + val * w)
     }
     return out

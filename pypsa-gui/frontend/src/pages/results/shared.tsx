@@ -439,6 +439,29 @@ export function effectiveWeightAt(
   return w
 }
 
+// Snapshot weight ONLY — no `periodWeights.years` multiplier. Narrowly
+// scoped for `Dispatch.tsx`'s `FullLoadHoursSection`, which deliberately
+// excludes `years` (full-load hours are per-solved-year hours, not an
+// annualised/lifetime-equivalent figure — see that call site's comment).
+// `effectiveWeightAt` cannot be reused there because it always folds in
+// `years`. This still shares the ONE keyed lookup (`_snapshotWeightRow`)
+// so there is exactly one weight-resolution path, not two that can drift.
+export function snapshotWeightAt(
+  ctx: WeightCtx | undefined,
+  i: number,
+  iso: string,
+  period: number | string | null | undefined,
+  column: 'generators' | 'objective' | 'stores' = 'generators',
+): number {
+  if (!ctx) return 1
+  const sw = ctx.snapshotWeights
+  if (!sw || sw.length === 0) return 1
+  const row = _snapshotWeightRow(sw, i, iso, period)
+  if (!row) return 1
+  const v = row[column]
+  return (typeof v === 'number' && Number.isFinite(v)) ? v : 1
+}
+
 /** Sum extensive series with per-snapshot + per-period weights applied.
  *  Returns a single scalar (Σ p_t × w_t) — the annualised total. */
 export function weightedSum(
