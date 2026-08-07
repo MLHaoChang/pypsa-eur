@@ -349,6 +349,98 @@ def test_message_left_with_no_content_is_not_appended() -> None:
     assert list(session.messages) == []
 
 
+def test_message_arriving_with_empty_content_is_not_appended() -> None:
+    """
+    `content: []` is a 400 in its own right ("all messages must have non-empty
+    content") and is reachable WITHOUT any dropping — a refused or aborted
+    generation returns an empty `final_message.content`. The predicate that
+    skips emptied messages must cover this case on the same path; testing
+    `len(kept) == len(content)` first does not, because that is `0 == 0`.
+    """
+    session = chat_service.ChatSession()
+
+    session.append_history_message({"role": "assistant", "content": []})
+
+    assert list(session.messages) == []
+
+
+def test_generation_with_no_blocks_is_not_recorded_in_history(
+    tmp_projects_dir, install_network,
+) -> None:
+    """
+    A refused / aborted generation returns `final_message.content == []`. The
+    turn must still complete, and the empty assistant turn must not be stored
+    — it would 400 the NEXT turn, which seeds from this history.
+    """
+    import pypsa
+
+    from tests.test_chat_e2e import (
+        FakeAnthropicClient,
+        _FakeFinalMessage,
+        _FakeUsage,
+    )
+
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name=None)
+
+    final = _FakeFinalMessage(content=[], usage=_FakeUsage())
+    session = chat_service.ChatSession()
+    client = FakeAnthropicClient([([], final)])
+
+    events = list(chat_service.run_turn(session, "hi", client=client))
+
+    assert any(ev == "turn_done" for ev, _ in events)
+    assert not [m for m in session.messages if m.get("content") == []]
+
+
+def test_empty_content_does_not_reach_the_outbound_payload(
+    tmp_projects_dir, install_network,
+) -> None:
+    """
+    The same guard on the array actually handed to the SDK. Seeding is the
+    path that matters: an empty assistant turn recorded by an older build
+    reaches the API only on a LATER turn, via the history seed.
+    """
+    import pypsa
+
+    from tests.test_chat_e2e import (
+        FakeAnthropicClient,
+        _FakeFinalMessage,
+        _FakeUsage,
+        _text_block,
+    )
+
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name=None)
+
+    history = [
+        {"role": "user", "content": "earlier question"},
+        {"role": "assistant", "content": []},          # aborted generation
+    ]
+    final = _FakeFinalMessage(content=[_text_block("ok")], usage=_FakeUsage())
+    client = FakeAnthropicClient([([], final)])
+
+    list(chat_service.run_turn(
+        chat_service.ChatSession(), "next question",
+        client=client, message_history=history,
+    ))
+
+    sent = client.calls[0]["messages"]
+    assert not [m for m in sent if m.get("content") == []]
+    # The valid neighbour survives. Flattened, because
+    # _with_history_cache_breakpoint rewrites string content into blocks.
+    texts: list[Any] = []
+    for m in sent:
+        c = m.get("content")
+        if isinstance(c, str):
+            texts.append(c)
+        elif isinstance(c, list):
+            texts += [b.get("text") for b in c if isinstance(b, dict)]
+    assert "earlier question" in texts
+
+
 def test_string_content_is_untouched() -> None:
     session = chat_service.ChatSession()
 

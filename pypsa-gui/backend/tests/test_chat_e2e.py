@@ -135,6 +135,20 @@ def _text_event(text: str):
 
 
 def _tool_use_event(tool_use_id: str, name: str, args: dict):
+    """
+    INERT — this event does NOT drive tool dispatch, despite the ~23 call
+    sites that read as though it does.
+
+    `run_turn` ignores `content_block_stop` entirely: dispatch is driven by
+    the blocks in `stream.get_final_message()`, so what makes these tests work
+    is the matching `_tool_use_block(...)` scripted into the `_FakeFinalMessage`,
+    not this event. (It used to be appended to a `pending_blocks` list that
+    nothing read; that dead accumulation is gone.)
+
+    Kept because deleting it would touch ~23 unrelated e2e tests for no
+    behaviour change. If you are diagnosing a dispatch failure, this helper is
+    not where it comes from — check the final message.
+    """
     block = _FakeBlock("tool_use", id=tool_use_id, name=name, input=args)
     return _FakeStreamEvent("content_block_stop", content_block=block)
 

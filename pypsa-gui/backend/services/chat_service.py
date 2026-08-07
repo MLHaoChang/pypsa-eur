@@ -490,8 +490,11 @@ class ChatSession:
         appended to it afterwards is freshly serialised by
         `_serialise_for_anthropic` and therefore already well-formed.
 
-        A message left with no content at all is skipped entirely — an empty
-        content array is itself a 400.
+        A message with no blocks the API will accept is skipped entirely —
+        whether it was emptied by dropping or arrived with `content: []`,
+        which an aborted or refused generation produces. An empty content
+        array is itself a 400, so admitting one would swap the bug this
+        branch fixes for a neighbouring one.
         """
         sanitised = _sanitise_history_message(msg)
         if sanitised is None:
@@ -1883,18 +1886,26 @@ def _sanitise_history_message(msg: dict[str, Any]) -> dict[str, Any] | None:
     turn without one, so dropping is lossless. Well-formed thinking blocks
     are preserved — the API rejects a turn whose signed thinking is altered.
 
-    Returns the message unchanged (same object) when nothing needed dropping,
-    a shallow copy with the surviving blocks otherwise, or None when nothing
-    survived — an empty content array is itself a 400.
+    Returns None when the message has no blocks the API will accept — whether
+    they were dropped here or the list arrived empty. BOTH cases must return
+    None: `content: []` is itself a 400 ("all messages must have non-empty
+    content"), and it is reachable without any dropping at all, from a refused
+    or aborted generation whose `final_message.content` comes back empty. An
+    earlier version tested `len(kept) == len(content)` first, which is `0 == 0`
+    for an already-empty list and returned it unchanged — a guard the
+    docstring claimed but the code did not have.
+
+    Otherwise returns the message unchanged (same object) when nothing needed
+    dropping, or a shallow copy with the surviving blocks.
     """
     content = msg.get("content")
     if not isinstance(content, list):
         return msg
     kept = [b for b in content if _thinking_block_is_wellformed(b)]
-    if len(kept) == len(content):
-        return msg
     if not kept:
         return None
+    if len(kept) == len(content):
+        return msg
     return {**msg, "content": kept}
 
 
@@ -2403,10 +2414,22 @@ def _run_turn_body(
             _serialise_for_anthropic(b)
             for b in getattr(final_message, "content", []) or []
         ]
-        messages.append({"role": "assistant", "content": assistant_blocks})
-        # Persist to session for next-turn rehydration (E2E QA: INT-001).
-        with session._lock:
-            session.append_history_message({"role": "assistant", "content": assistant_blocks})
+        # One rule for both arrays: a turn with no blocks the API accepts is
+        # not replayed at all. `final_message.content` comes back EMPTY on a
+        # refused or aborted generation, and `{"role": "assistant",
+        # "content": []}` is a 400 on the next call. Skipping cannot orphan a
+        # tool_result: tool_use blocks are never dropped by the sanitiser, so
+        # a turn that is empty here had no tool_use, and `tool_uses` below is
+        # therefore empty too — the turn ends without any tool_result being
+        # appended.
+        assistant_msg = _sanitise_history_message(
+            {"role": "assistant", "content": assistant_blocks}
+        )
+        if assistant_msg is not None:
+            messages.append(assistant_msg)
+            # Persist to session for next-turn rehydration (E2E QA: INT-001).
+            with session._lock:
+                session.append_history_message(assistant_msg)
 
         tool_uses = [b for b in assistant_blocks if b.get("type") == "tool_use"]
 
