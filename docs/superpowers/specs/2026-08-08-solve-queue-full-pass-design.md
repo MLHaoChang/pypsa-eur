@@ -161,6 +161,37 @@ The frontend has no way to say so: `readOnly` is one boolean
 about another user holding the lock (`utils/mutationGuard.ts:28-30`). It widens to
 a three-state value so the reason is honest.
 
+### Job status vocabulary
+
+Today the status set is `queued | running | completed | failed | aborted`
+(`services/solve_queue.py:79`), and the service already names the finished subset
+`_TERMINAL = ("completed", "failed", "aborted")` (`services/solve_queue.py:57`).
+R25 adds `interrupted`. The complete set after this work, and which members are
+terminal:
+
+| Status | Terminal | Meaning |
+|---|---|---|
+| `queued` | no | accepted, not yet started |
+| `running` | no | a dispatcher worker is solving it |
+| `completed` | **yes** | solved |
+| `failed` | **yes** | raised |
+| `aborted` | **yes** | a user stopped it, singly or through R29 |
+| `interrupted` | **yes** | the process died under it; nobody stopped it (R25) |
+
+**`terminal` is the single term the requirements use**, and it denotes exactly
+`completed`, `failed`, `aborted` and `interrupted`. `_TERMINAL` gains
+`"interrupted"` so the constant and the term remain the same set; its three
+existing read sites (`services/solve_queue.py:203,260,273`) therefore treat an
+`interrupted` job as finished. "Finished", "the job ends" and "a terminal job"
+are not distinct concepts in this spec and are not used as requirement wording.
+
+`interrupted` gets no exceptions. It is dismissible (R32) and requeueable (R31)
+like any other terminal status, its log is retained and served like any other
+terminal job's (R18, R20), and a transition into it invalidates caches like any
+other terminal transition (R9). Its only distinctions are presentational —
+R27's separate label and icon — and R25's rule that it is never re-enqueued
+automatically.
+
 ## Requirements
 
 ### Increment 1 — stop the data loss
@@ -182,9 +213,12 @@ a three-state value so the reason is honest.
 - **R7.** After that job completes, the activated context holds the results with no
   reload, and a subsequent foreground save does not remove dispatch from disk.
 - **R8.** The `>0 → 0` resync effect in `ProjectTabs.tsx` is deleted.
-- **R9.** When a job reaches a terminal state, the React Query caches for **that job's
+- **R9.** When a job transitions into a **terminal** status as defined in
+  Architecture § Job status vocabulary, the React Query caches for **that job's
   project only** are invalidated — `results`, `simulationStatus` and `meta`. No other
-  project's cache is touched and no backend reload is issued.
+  project's cache is touched and no backend reload is issued. All four terminal
+  statuses invalidate, `interrupted` included; the invalidation carries no
+  per-status branch.
 - **R10.** `readOnly` carries a reason: `writable | locked-by-user | solving`.
   `evaluateMutation` returns a distinct message per reason. Every existing consumer
   enumerated in `recon.md` §9.2 keeps its current behaviour for the two pre-existing
@@ -213,15 +247,18 @@ a three-state value so the reason is honest.
   point; the server refuses duplicates for every caller including the chat tool.
 - **R17.** Each `SolveJob` owns its `BufferedLogQueue` for the life of the job.
 - **R18.** `GET /api/simulation/queue/{job_id}/log_stream` streams that job's log
-  live, and a history endpoint returns its retained lines after the job ends. Both
-  are authorized by the same predicate as the listing (`_may_see`), and both answer
-  `404` — byte-identical to the genuine not-found message — when the caller may not
-  see the job.
-- **R19.** A running or finished job's log is readable through R18 regardless of
-  which project the caller is viewing and regardless of whether the job's context is
-  still resident.
-- **R20.** `SolveQueuePanel`'s expand control shows the live log for a running row
-  and the retained log for a finished one.
+  live, and a history endpoint returns its retained lines once the job is
+  **terminal**. Retention and the history endpoint apply to all four terminal
+  statuses, `interrupted` included — an `interrupted` job's lines are retained and
+  served exactly as a `completed` one's. Both endpoints are authorized by the same
+  predicate as the listing (`_may_see`), and both answer `404` — byte-identical to
+  the genuine not-found message — when the caller may not see the job.
+- **R19.** A job's log is readable through R18 both while the job is `running` and
+  after it has reached any **terminal** status, regardless of which project the
+  caller is viewing and regardless of whether the job's context is still resident.
+- **R20.** `SolveQueuePanel`'s expand control shows the live log for a `running`
+  row and the retained log for a **terminal** row. It does so for all four terminal
+  statuses, `interrupted` included.
 - **R21.** The `solve_queue_enqueue` tool description in `chat_tools_schema.py`
   declares `already_queued`.
 
@@ -247,14 +284,32 @@ a three-state value so the reason is honest.
   resume under R25. A running job is still stopped, and the quit confirmation names
   its project rather than `job <id>` — the `shutdown.py:176` `project_name` bug is
   fixed.
-- **R29.** Cancelling all queued jobs is one operation.
+- **R29.** Cancelling queued jobs in bulk is one operation, and its scope is
+  exactly the `queued` jobs the caller could cancel individually. Every candidate
+  is filtered through the existing `_may_abort` predicate
+  (`routers/solve_queue.py:152-185`) — the same predicate the single-job abort
+  route already applies (`routers/solve_queue.py:257`) — so for every job in the
+  queue the two agree: a caller who cannot abort a job individually cannot cancel
+  it through the bulk operation. Jobs the caller may not cancel stay `queued` and
+  otherwise untouched, and the response reports only the count the caller actually
+  cancelled. `running` jobs are outside this operation's scope; stopping one
+  remains the single-job abort. There is **no global variant and no super-admin
+  escalation**: `clear_finished`'s unconditionally-global precedent
+  (`services/solve_queue.py:190-200`, `routers/solve_queue.py:267-295`) is
+  deliberately not followed, because clearing finished rows is listing hygiene
+  while this destroys queued work.
 - **R30.** The dispatcher can be paused and resumed. Pausing lets the running job or
   jobs finish and starts no more; resuming continues in FIFO order.
-- **R31.** A terminal job can be requeued in one action, producing a new job for the
-  same project, subject to R15.
-- **R32.** A user can dismiss finished jobs from their own view, filtered on
-  `enqueued_by_user_id`. Dismissal is per user and does not affect another user's
-  listing. The existing super-admin `clear_finished` is unchanged.
+- **R31.** A job in any **terminal** status can be requeued in one action,
+  producing a new `queued` job for the same project, subject to R15. All four
+  terminal statuses are eligible, `interrupted` included and on the same terms as
+  the other three — R25 bars only *automatic* re-enqueue at boot, not a user's
+  explicit requeue. A `queued` or `running` job is not requeueable.
+- **R32.** A user can dismiss **terminal** jobs from their own view, filtered on
+  `enqueued_by_user_id`. All four terminal statuses are dismissible, `interrupted`
+  included; a `queued` or `running` job is not. Dismissal is per user and does not
+  affect another user's listing. The existing super-admin `clear_finished` is
+  unchanged.
 - **R33.** `PYPSA_GUI_MAX_CONCURRENT_SOLVES` bounds how many jobs run at once and
   defaults to `1`. At the default, observable behaviour is unchanged from increment 2.
 - **R34.** The listing reports `running` as a list of job ids in place of the scalar
@@ -265,6 +320,12 @@ a three-state value so the reason is honest.
   write to disk.
 - **R36.** Contexts belonging to jobs that are running under R33 are all protected
   from eviction, not merely one.
+- **R37.** The `solve_queue_abort` tool description in `chat_tools_schema.py`
+  (`services/chat_tools_schema.py:676-681`; the description string is `:678`,
+  today `"Abort a running OR cancel a queued job. Safety: destructive."`) states
+  that `job_id` is a UUID. This is D18's third chat-surface update and is distinct
+  from R23: R23 makes the id a UUID on the wire, R37 documents that fact to the
+  model. It lands in increment 3 alongside R23.
 
 ## Success criteria
 
@@ -284,8 +345,34 @@ Each is independently verifiable.
 ## Verification
 
 The baseline at branch base `c2cc4510`, established before any change, is **2282
-passed / 22 skipped / 0 failed** for `pixi run gui-tests` and **660 passed across 82
-files** for the frontend suite. Both must still hold at each increment boundary.
+passed / 22 skipped / 0 failed** for `pixi run gui-tests` and **660 passed / 0
+skipped / 0 failed across 82 files** for the frontend suite.
+
+The baseline is a **no-regression floor, not an exact match.** An exact match is
+not achievable and is not the intent: R14's regression test and R25's boot test
+raise the passed count by construction, so "the baseline still holds" would be
+false the moment either lands. `N` is defined **per suite**: `N_backend` is the
+net number of test cases that increment's diff adds **to the backend suite** and
+`N_frontend` the net it adds **to the frontend suite** — in each case cases added
+minus cases removed in that suite, counted from the diff, `N >= 0`. The two are
+independent; neither constrains the other. At each increment boundary each suite
+must satisfy all three conditions:
+
+| Condition | Backend (`pixi run gui-tests`) | Frontend (`npm run test`) |
+|---|---|---|
+| failed | `== 0` | `== 0` |
+| skipped | `<= 22` | `<= 0` |
+| passed | `== 2282 + N_backend` | `== 660 + N_frontend` |
+
+A suite's `N` is `0` whenever that increment's diff adds no test to that suite,
+which is the ordinary case for the untouched suite of a single-sided increment:
+R14's and R25's tests are backend-only, so `N_frontend == 0` at those
+boundaries. Requiring `passed == baseline + N` rather than `passed >= baseline`
+is deliberate: a deleted test compensated by an added one nets to the baseline
+total and would pass a floor-only check, so the diff's `N` is what makes the
+condition falsifiable. A passed count below that suite's floor, or above it by
+any amount other than that suite's `N`, fails the gate. Success criterion 10
+means exactly these three conditions, per suite, and nothing more.
 
 R14's regression test is the load-bearing one: it must fail against the pre-R1 code.
 The probe that proved D-1 is the template — block the dispatcher inside
@@ -299,8 +386,10 @@ R25's "never re-enqueued automatically" is what prevents a job that crashed the
 process from crash-looping the boot, and needs a test that a `running` job at boot
 does not start.
 
-R33's default is verified negatively: with the variable unset the suite result is
-identical to increment 2's.
+R33's default is verified negatively, and under the same floor rule: with the
+variable unset, increment 3's backend suite meets the three conditions above and
+no test that passed at increment 2's boundary fails. That, and not literal
+equality of the counts, is what success criterion 9's "passes unchanged" means.
 
 ## Constraints
 
