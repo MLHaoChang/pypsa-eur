@@ -548,31 +548,69 @@ the two changes ship together.
 The table lives in `utils/attributeCatalog.ts`, each entry naming the backend
 function it mirrors:
 
+**What the two columns mean, stated once so every row is checkable.**
+*Reveal* makes a field visible; it asserts nothing about the network and cannot
+over-report, so it is never mode-gated. *Require* marks a field as blocking, and
+it carries exactly one meaning throughout this table: **its absence produces a
+backend `_err`, and `_err`s are what `has_errors` (`validation_service.py:1479-1480`)
+blocks the solve on — warnings never block.** A rule that mirrors a `_warn` is
+therefore not a require rule, and no row below is one.
+
 | # | When | Reveal | Require | Mirrors |
 |---|---|---|---|---|
 | 1 | `*_nom_extendable` is true | `*_nom_min`, `*_nom_max` | — | `_check_extendable_bounds` (`validation_service.py:364-402`) |
-| 2 | `*_nom_extendable` is true | — | `capital_cost > 0` **OR** `overnight_cost > 0`, marked on the pair, reported only when both are unset or ≤ 0 | same |
-| 3 | `*_nom_extendable` is true | — | `*_nom_min` and `*_nom_max` finite with min < max | same |
-| 4 | `*_nom_extendable` is false | — | `*_nom > 0` | same |
+| 2 | mode is `lopf` **and** `*_nom_extendable` is true | — | `capital_cost > 0` **OR** `overnight_cost > 0`, marked on the pair, reported only when both are unset or ≤ 0 | same, `_err` at `:398` |
+| 3 | mode is `lopf` **and** `*_nom_extendable` is true | — | `*_nom_min` and `*_nom_max` finite with min < max | same, `_err` at `:388` |
+| 4 | mode is `lopf` **and** `*_nom_extendable` is false | — | `*_nom > 0` | same, `_err` at `:381` |
 | 5 | `committable` is true | the seven unit-commitment fields | — | already ships at `PropertiesPanel.tsx:411-419` |
-| 6 | the solve mode runs an AC power flow **and** no Bus in the network has `control` equal to Slack | — | `control` marked required, network-wide (see below) | `_check_pf` (`validation_service.py:337-359`, gated at `:1448-1457`) |
+| 6 | mode is `pf` **and** no Bus in the network has `control` equal to Slack | — | `control` marked required, network-wide (see below) | `_check_pf` `_err` at `:350`, gated at `:1448-1450` |
 
 Rule 2 is a disjunction because the backend's is; a frontend that demanded
 `capital_cost` alone would over-report against a network the solver accepts.
 
-**Rule 6's scope, stated to the same standard as rule 2.** The backend's test is
-network-wide and satisfied by a single bus: `n.buses["control"].astype(str).str.lower() == "slack"`
-with a non-empty result (`validation_service.py:347-348`) — one match anywhere
-clears it, and the comparison is case-insensitive. The marker therefore behaves
-network-wide, not per bus: while the condition holds, `control` is marked
-required on **every** Bus edit form and on the Buses tab's `control` column
-header, and it is never attributed to one particular bus, because no particular
-bus is at fault. Setting any one bus to `Slack` clears the marker on all of
-them in the same render. Two conditions keep it from over-reporting: it appears
-only when the configured solve mode is `pf`, or is `lopf` with
-`run_ac_pf_after_lopf` set — the same gate the backend uses (`:1448-1457`), read
-from the solver configuration the Solver Settings page already loads — and it
-disappears the instant any bus is Slack. An LOPF-only project never sees it.
+**Rules 2, 3 and 4 carry a mode condition, because their backend counterparts
+do.** `_check_extendable_bounds` is reachable from exactly one caller —
+`_check_lopf` (`validation_service.py:1231`, six call sites at `:1238, 1239,
+1252, 1299, 1319, 1326`) — which the dispatcher runs only for `mode == "lopf"`
+(`:1451`). In `pf` mode the backend never inspects `capital_cost` or the
+`*_nom` bounds at all, so marking them required there would block the user on a
+field the run does not need. The mode itself comes from one place for all four
+mode-gated rules — the solver configuration the Solver Settings page already
+loads — so the table has exactly one new data dependency, not four.
+Rules 1 and 5 are reveals and are deliberately left
+unconditional: they are existing shipped behaviour
+(`PropertiesPanel.tsx:367-377, 411-419`), they make no claim, and gating them
+would hide fields the user is editing.
+
+**Rule 6's scope.** The backend's test is network-wide and satisfied by a single
+bus: `n.buses["control"].astype(str).str.lower() == "slack"` with a non-empty
+result (`validation_service.py:347-349`) — one match anywhere clears it, and the
+comparison is case-insensitive. The marker therefore behaves network-wide, not
+per bus: while the condition holds, `control` is marked required on **every** Bus
+edit form and on the Buses tab's `control` column header, and it is never
+attributed to one particular bus, because no particular bus is at fault. Setting
+any one bus to `Slack` clears the marker on all of them in the same render. Two
+conditions keep it from over-reporting: the configured solve mode must be `pf` —
+read from the solver configuration the Solver Settings page already loads — and
+it disappears the instant any bus is Slack.
+
+**Rule 6 deliberately does not fire on the LOPF → AC-PF chain, and this was the
+harder call.** When `mode == "lopf"` with `run_ac_pf_after_lopf` set, the
+dispatcher runs `_check_stage2_ac_pf` (`:1120`, called at `:1456-1457`), *not*
+`_check_pf`, and that check differs in both directions: it emits
+`_warn("stage2_no_explicit_slack")` (`:1171`) rather than an `_err`, and it is
+satisfied by **any** of a Slack generator, a Slack bus, or a non-blank
+`ac_pf_slack_bus` override (`:1162-1170`). Ledger decision 10 is about the
+variables a simulation needs in
+order to launch; a warning never stops a launch, and the backend's own message
+says Stage 2 auto-picks the largest generating bus. Firing a *required* marker
+there would tell the user a run is blocked when it is not — round 1's I2
+over-reporting failure one level down — and avoiding that would mean the
+frontend also reading Slack generators and the override, two new data
+dependencies bought for a marker that cannot block anything. Dropping the branch
+keeps "required" meaning exactly one thing across all six rows. The advisory
+itself is not lost: preflight already surfaces it in `IssuesPanel`, which is
+where warnings belong.
 The table replaces the five derived booleans (`PropertiesPanel.tsx:225,226,521,725,1126`)
 and the two inlined predicates (`:1934`, `:2191`) in the **edit** views, and it
 also drives `CreationForm`'s render loop (`CreationForm.tsx:485`), which today
@@ -820,12 +858,15 @@ Each item is independently verifiable.
 31. The chosen extras persist across a reload under
     `creationform:extras:<paletteId>`, and a value whose `v` field is not `1` is
     discarded rather than read.
-32. Ticking `p_nom_extendable` on a Generator with `capital_cost = 0` and
-    `overnight_cost = 5` produces **no** required-field error; setting both to 0
-    produces one naming the pair.
+32. In `lopf` mode, ticking `p_nom_extendable` on a Generator with
+    `capital_cost = 0` and `overnight_cost = 5` produces **no** required-field
+    error; setting both to 0 produces one naming the pair; switching the mode to
+    `pf` clears it, because the backend's extendable checks run only under
+    `lopf`.
 33. On a network with no Slack bus and a solve mode of `pf`, `control` is marked
     required on every Bus form; setting one bus to Slack clears it on all of
-    them; switching the mode to `lopf` without the AC-PF chain clears it too.
+    them; switching the mode to `lopf` clears it, including when
+    `run_ac_pf_after_lopf` is enabled.
 34. `p_nom_min` and `p_nom_max` are hidden in the **creation** form until
     `p_nom_extendable` is ticked, matching the edit form.
 35. Dropping a Generator on a bus in the schematic canvas opens the creation form
@@ -856,6 +897,10 @@ Each item is independently verifiable.
   onto the new catalog service (D3).
 - Unifying the edit view's `{cond && …}` idiom with the read view's null-out
   idiom (D22).
+- Surfacing the Stage 2 AC-PF slack advisory (`stage2_no_explicit_slack`,
+  `validation_service.py:1171`) as a form marker. It is a `_warn`, it is
+  satisfied by three different signals, and preflight already reports it in
+  `IssuesPanel`; D22 records why rule 6 stops at `pf` mode.
 - De-duplicating the carrier grouping tables between `cardKit.tsx:598-604` and
   `components/CarrierSelect.tsx:47-50`. D4 consumes `CarrierSelect` for the
   grid's carrier cell rather than adding a third copy, which is the cheapest way
