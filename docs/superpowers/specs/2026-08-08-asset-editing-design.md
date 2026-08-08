@@ -90,14 +90,18 @@ creates no new location.** The terms it introduces:
 
 | Term | Meaning | Settled by |
 |---|---|---|
+| **Typed cell editor** | The input affordance a cell opens, chosen from the column's identity and catalog `dtype`: bus dropdown, carrier dropdown, closed-set dropdown, boolean checkbox, colour picker, `inf`-aware numeric, or plain text. | D4 |
 | **Paste target** | The set of rows a paste writes to: the checkbox row selection if non-empty, otherwise the active cell's row. Rows past the render cap are included. | D7 |
-| **Fill gesture** | One value applied to every cell of the paste target in the active column. Produced by a 1×1 paste or by a Ctrl/Cmd+Enter commit. | D7 |
+| **Fill gesture** | One value applied to every cell of the paste target in the active column. Produced by a 1×1 paste, a Ctrl/Cmd+Enter commit, or a Ctrl/Cmd+click on a boolean cell. | D7 |
 | **Block paste** | An N×M clipboard matrix mapped row-by-row and column-by-column onto the paste target. | D7 |
 | **Series-shadowed cell** | A cell whose attribute is `varying` in the catalog *and* for which a time series exists on that specific asset, so the static value is dead. Never editable. | D14 |
 | **Editability override list** | The short named list of attributes whose editability differs from their catalog `status`, each with its reason. Exactly two entries today. | D13 |
 | **Extras section** | The appended block on an edit card holding attributes beyond the card's curated set. | D20 |
 | **Terminal prefill** | Seeding `bus` (or `bus0`) on the creation form from the bus a palette item was dropped on. | D27 |
 | **`data-bus-name`** | The DOM attribute, emitted by both canvases' bus renderers, that carries the bus name for drop hit-testing. | D25 |
+| **Schematic canvas / map canvas** | The React Flow view (`.react-flow`, `TopologyCanvas.tsx`) and the Leaflet view (`.leaflet-container`, `MapCanvas.tsx`). `App.tsx:590` picks between them on `canvasView` (recon §0); the map's Satellite and Hybrid basemap modes (`MapModeSwitcher.tsx:6-10`, per `2026-07-30-unplaced-buses-map-design.md:17-19`) are one canvas, not two drop surfaces. | D25 |
+| **Cap-splice** | The existing behaviour that injects the selected row into `displayed` when the selection falls past the 1000-row render cap, so `PropertiesPanel` stays in sync (`BottomPanel.tsx:212-217`, recon §13). | D1 |
+| **Slide panel** | The right-hand panel the app opens for creation and properties. Navigation in this app is slide-panel based via `uiStore`, not routes (`.cursor/rules/pypsa-gui-frontend.mdc:24`); `App.tsx:478-481` closes the open one on Escape. | D5 |
 
 **One prior spec's wording is scoped, not reversed.**
 `2026-07-31-line-parameters-and-carrier-icons-design.md:262-264` records that the
@@ -152,23 +156,114 @@ Recorded under Out of scope rather than left unmentioned.
 
 ### Scope A — the editable grid
 
-**D4. One cell editor is mounted at a time; a single click opens it.**
-Non-editing cells render as they do today. The draft is a single
-`{ name, col, raw }`, not the flat draft map `CarriersTable` uses
-(`BottomPanel.tsx:1065,1099`). Rationale: `CarriersTable`'s always-on controlled
-input is correct for a handful of carriers, but at the render cap it would mount
-1000 × 15 inputs, which is the DOM-node budget the cap exists to protect
-(`BottomPanel.tsx:202-206`). Because a fresh editor mounts per cell, the
+**D4. One editor per cell, typed by column; one draft, one commit path.**
+Decision 3 requires **typed widgets** — bus and carrier dropdowns, boolean
+toggles, `inf`-aware numerics — and this decision is where each one is named.
+Free-text entry into a bus column is the specific footgun being avoided: the
+backend does not validate a bus *reference*, only a row *name*, so
+`df.loc[names,'bus'] = 'Nrth'` (`network.py:2043-2044`) returns 200 and the
+dangling reference surfaces only at preflight.
+
+One editor is mounted at a time and a single click opens it; non-editing cells
+render as text, as they do today. The draft stays a single `{ name, col, raw }`
+where `raw` is the string the typed widget produced — not the flat draft map
+`CarriersTable` uses (`BottomPanel.tsx:1065,1099`), because at the render cap
+that would mount 1000 × 15 inputs, which is the DOM-node budget the cap exists to
+protect (`BottomPanel.tsx:202-206`). Because a fresh editor mounts per cell, the
 uncontrolled-input staleness rule (`CLAUDE.md:586-587`) is satisfied structurally
-and no `key`-remount trick is needed. Commit on blur and on Enter, no round-trip
+and no `key`-remount trick is needed. Commit on blur and on Enter; no round-trip
 when the committed text equals the cell's current display text — the no-op skip
 `BottomPanel.tsx:1122` already does.
 
-**D5. The keyboard map, and the two global Escape handlers are guarded.**
+**Editor resolution, evaluated in this order** for a cell that D13 and D14 have
+already found editable:
+
+| # | Test on (component class, column) | Editor | Commits |
+|---|---|---|---|
+| 1 | The pair is in the **widget map**, which holds two kinds of entry: `Carrier.color`, and the closed-option-set columns `Bus.control` and `Generator.control`. An entry may be added only for a column whose valid values are a closed set the app already enumerates elsewhere | `Carrier.color`: swatch + `<input type="color">` (preserves `BottomPanel.tsx:1204-1218`). Both `control` columns: native `<select>` over `PQ` / `PV` / `Slack`, the set `CreationForm.tsx:74`, `PropertiesPanel.tsx:1636` and `:346-360` already offer | the `#rrggbb` string; the option string verbatim |
+| 2 | Column name matches `/^bus\d*$/` (`bus`, `bus0`, `bus1`, `bus2` — recon §6's terminal fields) | **`components/BusAutocomplete.tsx`**, with `allowUnknown={false}` | the selected bus name verbatim |
+| 3 | Column name is `carrier` | **`components/CarrierSelect.tsx`** with `label={null}` and cell styling via its existing `className` / `wrapperClassName` props | the selected carrier name verbatim |
+| 4 | Catalog `dtype` is boolean | checkbox rendered in the cell (see the exception below) | `'true'` / `'false'` |
+| 5 | Catalog `dtype` is numeric | `inf`-aware text input (D12) | the typed token |
+| 6 | otherwise | plain text input | the typed text |
+
+Every editor commits a **string** into the same `gridEdit` validate-then-coerce
+entry point, so there is exactly one commit path and the paste path (D7) and the
+editor path share one validator. The widget is an input affordance; it is never
+the thing that enforces correctness. `gridEdit`'s validators are pure and take an
+explicit context — `{ catalog, busNames, carrierNames }` — supplied by the grid,
+so the module stays React-free per D2.
+
+**Per-column validation, applied identically to a typed commit, a fill and a
+block paste:**
+
+- **Bus columns:** the value must be an existing bus name, **exact and
+  case-sensitive**. This is deliberately stricter than `BusAutocomplete`'s own
+  `exactMatch`, which lower-cases both sides (`BusAutocomplete.tsx:26`); PyPSA's
+  index lookup is case-sensitive, so a case-mismatched name is a dangling
+  reference that no layer below would catch.
+- **Carrier column:** an unknown carrier is **accepted**, because `bulk_update`
+  calls `ensure_carrier(n, new_carrier)` and creates the row with catalog
+  metadata. A paste can therefore introduce a carrier; the dropdown cannot, and
+  does not need to — the Carriers tab is where carriers are created.
+- **Boolean columns:** `true`/`false`/`1`/`0`/`yes`/`no`, case-**insensitive**,
+  matching the backend's `value.strip().lower()` test rather than `coerce.ts`'s
+  case-sensitive one; `gridEdit` lower-cases the token before delegating, so
+  `coerce.ts` stays unmodified (D2).
+- **Closed-set columns:** the value must be one of that column's options.
+- **Numeric columns:** D12.
+
+**Three adaptations to `BusAutocomplete.tsx`, each closing a hazard recon §15-E
+measured**, all additive and leaving its single existing caller
+(`CreationForm.tsx:514`) behaving exactly as it does today:
+
+1. A new `allowUnknown?: boolean` prop, defaulting to `true`. The grid passes
+   `false`, which converts the "No bus with this name — it will be created
+   automatically" line (`:26,107-111`) into a validation refusal. That message is
+   true for the creation form and false in a grid, where an unknown bus is a
+   dangling reference rather than a new bus.
+2. The fixed-position dropdown recomputes on `scroll` (capture, so it sees the
+   table body) and on `resize` while open. Today it recomputes only on
+   `[open, value]` (`:66`), so it would not follow the grid's scroll.
+3. `ArrowUp`/`ArrowDown` call `stopPropagation()` in both dropdown states.
+   Today neither branch does (`:43-53`, recon §7), so with the dropdown closed an
+   arrow would reach the grid and move the active cell out from under an open
+   editor — the one exception D5's "arrows never navigate while editing" needs
+   made real.
+
+Its outside-click `document` mousedown listener (`:29-34`) needs no change:
+closing the dropdown is not closing the editor, and the editor still commits on
+blur.
+
+`CarrierSelect.tsx` is consumed **as-is**, with styling props only. Recon §15-E
+measured it as the one kit-adjacent widget needing no structural change, it is a
+native `<select>` whose OS-rendered popup cannot be clipped by the grid's scroll
+container, and consuming it makes the grid the third consumer of one grouping
+table rather than a fourth copy of it — the duplication `cardKit.tsx:598-604` and
+`CarrierSelect.tsx:47-48` both document as debt.
+
+**Two argued exceptions.**
+
+- **`cardKit`'s `ChkInput` is not reused for the boolean cell.** Recon §15-D
+  found it adaptable, but the two things that would have to go are its
+  `col-span-2` layout (`:517`) and its `onCheck` side-effect hook (`:519-525`,
+  meaningless where each cell commits independently) — and what remains is a bare
+  `<input type="checkbox">`. Extracting a shared component out of a file with
+  zero test coverage to share three lines is not worth it. The grid renders its
+  own checkbox and `ChkInput` is untouched.
+- **The boolean cell is always-on, with no click-to-edit step**, a stated
+  exception to the one-editor-at-a-time rule above: a checkbox holds no draft, so
+  there is nothing to open. The DOM cost is bounded by the number of boolean
+  columns × 1000, which is at most two columns on any tab in `TAB_COLUMNS`.
+  A plain click toggles the active cell only; **Ctrl/Cmd+click toggles it as a
+  fill gesture** over the paste target, mirroring Ctrl/Cmd+Enter (D5) and
+  preserving the deleted toolbar's set-many-booleans capability.
+
+**D5. The keyboard map, and the one capture-phase Escape handler that has to be guarded.**
 
 | Key | Editor closed | Editor open |
 |---|---|---|
-| Arrow keys | move the active cell | move the caret inside the input; never navigate |
+| Arrow keys | move the active cell | never navigate: move the caret inside a text input, or move the highlight in an open bus dropdown (D4 adaptation 3) |
 | Enter | open the editor on the active cell | commit, close, move down one row |
 | Ctrl/Cmd+Enter | — | commit as a **fill gesture** over the whole paste target, close |
 | Tab / Shift+Tab | move the active cell right / left | commit, move right / left |
@@ -177,14 +272,27 @@ when the committed text equals the cell's current display text — the no-op ski
 | Ctrl/Cmd+C, Ctrl/Cmd+V | copy / paste (D6) | native input copy / paste |
 | Ctrl/Cmd+S | not handled by the grid | commit the draft, `stopPropagation`, toast "Cell saved — press again to save the project" |
 
-Escape-cancels-edit must survive two unguarded global handlers. The grid calls
-`stopPropagation()`, and — because a capture-phase `document` listener runs
-before any element handler regardless of registration order — the two global
-Escape branches that lack an editable-element guard gain the one already present
-three lines away at `App.tsx:485`: `App.tsx:478-481` and `AppHeader.tsx:281`.
-Two inline guards using the in-file idiom, no new module, no arbitration layer.
-`Dialog.tsx:148` is left alone; D18 keeps the grid's only confirmation out of a
-`Dialog`.
+Escape-cancels-edit must survive the app's existing Escape handlers, and the two
+phases need two different mechanisms. Stating which fixes which, because one of
+them cannot work for the other:
+
+- **Bubble-phase listeners are fixed by `stopPropagation()` alone, and no file
+  changes.** `App.tsx:512` (which closes the compare rail or the open slide
+  panel, `:478-481`), plus the unguarded Escape handlers in `TopologyCanvas`,
+  `MapCanvas` and `ChatPanel`, all listen on `window`/`document` in the bubble
+  phase. The editor's own React `onKeyDown` runs at the root container, which is
+  an ancestor of the grid and a descendant of `document`, so it runs first and
+  `stopPropagation()` prevents every one of them.
+- **The one capture-phase Escape listener without a guard, `AppHeader.tsx:281`,
+  must be guarded at the source.** Capture runs `window → document → … → target`,
+  so it fires *before* the editor's handler no matter the registration order —
+  `recon.md:443` states this outright. `stopPropagation()` is therefore useless
+  against it. It gains the editable-element guard already present three lines
+  away from its sibling at `App.tsx:485`: one inline condition using the in-file
+  idiom, no new module and no arbitration layer.
+- **`Dialog.tsx:148` is left alone.** It is capture-phase *and* calls
+  `stopPropagation()`, so nothing the grid does can pre-empt it; D18 keeps the
+  grid's only confirmation out of a `Dialog` instead.
 
 Ctrl/Cmd+S is intercepted because `CLAUDE.md:650-666,812` requires that a save
 never runs with a pending edit outstanding, and the grid cannot make its PATCH
@@ -206,10 +314,13 @@ since recon §9 found no rule to inherit:
   containing a tab or a newline cannot be represented; see Known limitations.
 - **CSV-injection guard, scoped to string columns.** On copy, a cell in a column
   whose catalog `dtype` is neither numeric nor boolean and whose text starts with
-  `=`, `+`, `-`, `@`, tab or CR is prefixed with a single quote
-  (`CLAUDE.md:575-576`). On paste, exactly one leading single quote is stripped
-  from a cell targeting a string column. Numeric and boolean columns are never
-  prefixed, so negative numbers round-trip byte-exactly.
+  `=`, `+`, `-` or `@` is prefixed with a single quote (`CLAUDE.md:575-576`).
+  On paste, exactly one leading single quote is stripped from a cell targeting a
+  string column. Numeric and boolean columns are never prefixed, so negative
+  numbers round-trip byte-exactly. The house rule's other two triggers, tab and
+  CR, are deliberately **not** in the set: a cell value cannot contain either —
+  it is the same fact that lets the parser above do without a quote grammar — so
+  including them would add an unreachable branch, not protection.
 
 **D7. Three paste shapes, resolved against the paste target.** The **paste target**
 is the checkbox row selection if non-empty, otherwise the active cell's row, in
@@ -225,14 +336,19 @@ and the target be T rows.
 4. **Anything else** is rejected whole, with a message stating the clipboard
    shape and the target shape.
 
-A **fill gesture** is shape 1 or a Ctrl/Cmd+Enter commit (D5) and is subject to
-the same rules.
+A **fill gesture** is shape 1, a Ctrl/Cmd+Enter commit (D5) or a Ctrl/Cmd+click
+on a boolean cell (D4), and is subject to the same rules. A paste never travels
+through a typed editor; both paths meet at `gridEdit`'s validators (D4), so a
+pasted bus name is checked against the real bus list exactly as a dropdown
+selection is.
 
 **D8. Rejection is whole-batch and names the offending cells.** A paste is
 rejected, changing nothing, if any of the following holds: the shape does not
 match (D7); a target cell is not editable (`name`, an `Output` attribute, an
 override-list read-only entry, or a series-shadowed cell); or a value fails
-`gridEdit` validation for its column. The message names up to five offending
+`gridEdit` validation for its column (D4) — most consequentially a bus column
+value that is not an existing bus name, which nothing below the frontend would
+reject. The message names up to five offending
 cells as `row / column` and states the count of the rest. This matches the
 backend's own all-or-nothing semantics (`network.py:1954-1957`) and
 `CLAUDE.md:693-694`. FastAPI error arrays are formatted into readable strings
@@ -312,8 +428,10 @@ middleware to serve a client-side timing concern.
   deliberate, named behaviour change from `coerce.ts:19`, which silently returns
   `null` and clears the field; `coerce.ts` itself is unchanged and keeps that
   behaviour for its existing callers.
-- The numeric cell editor is `type="text"`, not `type="number"`: recon §15-D
-  measured that `<input type="number">` cannot hold `inf` and reads back `''`.
+- The numeric cell editor — editor 5 of D4's six — is `type="text"`, not
+  `type="number"`: recon §15-D measured that `<input type="number">` cannot hold
+  `inf` and reads back `''`. It is the one typed widget decision 3 names that has
+  no in-repo precedent; the other three are adapted or consumed under D4.
 
 **D13. Editability is the catalog `status` plus an override list of exactly two
 entries (ruling 17).** Default: `Input (required)` and `Input (optional)` are
@@ -356,8 +474,10 @@ that the properties panel shows the same attributes per km. The split itself,
 **D16. `CarriersTable` is absorbed and deleted; tab names do not change.**
 The `Carriers` tab renders through the shared grid. Two behaviours are carried
 over rather than lost: the colour column keeps an `<input type="color">` editor
-(the sole entry in a per-column widget map, keyed `Carrier.color`, matching
-`BottomPanel.tsx:1204-1218`), and the tab keeps its help line
+(row 1 of D4's editor-resolution table, keyed `Carrier.color`, matching
+`BottomPanel.tsx:1204-1218`); its remaining columns —
+`co2_emissions`, `nice_name`, `unit` — fall to rows 5 and 6 of that table.
+The tab also keeps its help line
 (`BottomPanel.tsx:1229-1234`). `Carrier` is already in `_COMPONENT_ATTRS`
 (`network.py:277-288`), so bulk edits work on it. Tab labels stay exactly as they
 are because a chat `ui_event` frame requests a bottom tab **by name**
@@ -435,10 +555,24 @@ function it mirrors:
 | 3 | `*_nom_extendable` is true | — | `*_nom_min` and `*_nom_max` finite with min < max | same |
 | 4 | `*_nom_extendable` is false | — | `*_nom > 0` | same |
 | 5 | `committable` is true | the seven unit-commitment fields | — | already ships at `PropertiesPanel.tsx:411-419` |
-| 6 | no bus in the network has `control == 'Slack'` | — | `Bus.control` marked required | `_check_pf` (`validation_service.py:337-359`) |
+| 6 | the solve mode runs an AC power flow **and** no Bus in the network has `control` equal to Slack | — | `control` marked required, network-wide (see below) | `_check_pf` (`validation_service.py:337-359`, gated at `:1448-1457`) |
 
 Rule 2 is a disjunction because the backend's is; a frontend that demanded
 `capital_cost` alone would over-report against a network the solver accepts.
+
+**Rule 6's scope, stated to the same standard as rule 2.** The backend's test is
+network-wide and satisfied by a single bus: `n.buses["control"].astype(str).str.lower() == "slack"`
+with a non-empty result (`validation_service.py:347-348`) — one match anywhere
+clears it, and the comparison is case-insensitive. The marker therefore behaves
+network-wide, not per bus: while the condition holds, `control` is marked
+required on **every** Bus edit form and on the Buses tab's `control` column
+header, and it is never attributed to one particular bus, because no particular
+bus is at fault. Setting any one bus to `Slack` clears the marker on all of
+them in the same render. Two conditions keep it from over-reporting: it appears
+only when the configured solve mode is `pf`, or is `lopf` with
+`run_ac_pf_after_lopf` set — the same gate the backend uses (`:1448-1457`), read
+from the solver configuration the Solver Settings page already loads — and it
+disappears the instant any bus is Slack. An LOPF-only project never sees it.
 The table replaces the five derived booleans (`PropertiesPanel.tsx:225,226,521,725,1126`)
 and the two inlined predicates (`:1934`, `:2191`) in the **edit** views, and it
 also drives `CreationForm`'s render loop (`CreationForm.tsx:485`), which today
@@ -456,8 +590,12 @@ mismatched `v` drops the entry — versioning inside the value, never in the key
 (`topologyLayoutStore.ts:19,41`). No regex sweep ships, because unlike
 `network-diagram:*:state` this family is not project-scoped and has nothing to
 clean up on project deletion. The picker lists the component's `Input` attributes
-that the form does not already show, using the catalog's `description` as help
-text and `unit` as the suffix.
+that the form does not already show, one row each: `description` as the help
+text, `unit` as the suffix, and `type` plus the attribute's default so the user
+can see what they are adding before they add it. The default is displayed as
+`default_text` whenever `default` is `null`, so an unbounded attribute reads
+`inf` rather than blank. Adding a parameter never seeds a value — the field opens
+empty and PyPSA's default continues to apply until the user types one.
 
 **D24. The catalog query key is `['catalog', component]`, deliberately unscoped.**
 `.cursor/rules/pypsa-gui-frontend.mdc:15-16` requires `nk(projectId, …)`; this is
@@ -466,10 +604,23 @@ PyPSA's attribute catalog is class-level metadata that is identical across
 projects and cannot change at runtime, so project-scoping it would refetch nine
 identical payloads on every project switch. `staleTime: Infinity` for the same
 reason. The exception and its reason are recorded in a comment at the key.
-The endpoint returns, per attribute: `name`, `type`, `unit` (`NaN` → `null`),
-`default` (scrubbed by `clean_scalar`, so non-finite → `null`), `default_text`
-(the exact text PyPSA holds, so `inf` is not erased), `description`, `status`,
-`varying`, and `dtype` as its string name.
+The endpoint returns nine fields per attribute — seven of the catalog's nine
+native columns, the attribute name from the index, and one derived text field —
+each with a named consumer. The two native columns left out are `static` and
+`typ`: nothing here reads them, and `dtype` already carries the type information
+in a JSON-safe form.
+
+| Field | Consumed by |
+|---|---|
+| `status` | D13's editability default |
+| `varying` | D14's series-shadow check |
+| `dtype`, as its string name | D4's editor resolution and D6's injection-guard scoping |
+| `unit`, with `NaN` → `null` | D15's column headers and D23's picker suffix |
+| `description` | D15's header `InfoTip` and D23's picker help text |
+| `type` | D23's picker, so the user sees what kind of value an attribute takes |
+| `default`, scrubbed by `clean_scalar` so non-finite → `null` | D23's picker |
+| `default_text`, the exact text PyPSA holds | D23's picker, standing in whenever `default` is `null`, so an `inf` default is not erased into a blank |
+| `name` | the key everything above is looked up by |
 
 ### Scope C — drop-on-a-bus
 
@@ -542,14 +693,19 @@ files and coverage stops precisely at this feature's boundary: `PATCH /_bulk`,
 | C | `layout/Sidebar.drag.test.tsx` | pointer-down/move/up over `.react-flow` sets `creationItem` with a `dropPosition`; a click without movement sets it without one; release outside cancels silently |
 | A | `backend/tests/test_bulk_update.py` | rename refusal (`:1944-1945`); whole-batch 404 (`:1954-1957`); transient-row 409 (`:1967-1977`); unknown-column 400; the three-way blank rule (`:2015-2020`) on a `*_max`, on `lifetime`, on `e_sum_min` and on a plain numeric column; boolean string coercion; non-numeric 400; string-column cast; exactly one changelog entry per call |
 | A | `layout/BottomPanel.test.tsx` | checkbox selection, shift-click range, select-all over the uncapped set, sort, search, the cap-splice at `:212-217`, the `truncated` notice. Needs the jsdom measurement stub declared above the component import, copied from `pages/results/asset/AssetTable.test.tsx:4-14` |
+| A | `components/BusAutocomplete.test.tsx` | before D4's three adaptations: the type-ahead filter and its 60-result cap (`:23-24`), the case-insensitive `exactMatch` and its warning line (`:26,107-111`), the fixed-position dropdown geometry (`:61-66`), and the Up/Down handling (`:43-53`). Zero coverage today, and this is the widget the grid leans on hardest |
+| A | `components/CarrierSelect.test.tsx` | before it gains a third consumer: the `<optgroup>` categories, `label={null}` omitting the label (`:26`), and the synthetic-current-option behaviour. Zero coverage today; consumed unchanged, so this pins that "unchanged" is true |
 | B | `layout/PropertiesPanel.save.test.tsx` | the eight edit forms' save payloads — the enumerated keys are sent, and a field present in the cached object but absent from the enumeration survives at its old value (the `...current` behaviour at `:144`) |
 | B | `layout/properties/cardKit.test.tsx` | `EditShell` renders arbitrary children into its 2-column grid and keeps the Save/Cancel footer — the seam D20 depends on |
 
 New-module tests ship with their modules: `clipboardTsv.test.ts` (round-trip of
 each row separator, the trailing-row rule, the three shapes and the four
 rejection cases), `gridEdit.test.ts` (the blank rule, the infinity grammar, the
-non-numeric rejection, and that `coerceForColumn` still owns the blank path),
-`attributeCatalog.test.ts` (status default, both override entries, series-shadow
+non-numeric rejection, the case-sensitive bus-membership check, the
+case-insensitive boolean grammar, the accepted unknown carrier, and that
+`coerceForColumn` still owns the blank path),
+`attributeCatalog.test.ts` (status default, both override entries, the six
+editor-resolution rows of D4, series-shadow
 resolution, the six reveal rules), `hooks/useAssetDrag.test.tsx` (the four drop
 outcomes), and `backend/tests/test_attribute_catalog.py` (endpoint payload
 including `default_text` for an `inf` default and `null` for a `NaN` unit; the
@@ -576,7 +732,11 @@ handle. The map is a new drop surface; the schematic is a branch on an existing
 one, and the estimate must not be uniform across them.
 
 **Scope A.** The largest scope: three new modules, the grid's interaction layer,
-the optimistic mutation, and the only backend contract change (D9) — all on files
+the typed cell editors of D4's six resolution rows — three additive adaptations
+to `BusAutocomplete.tsx`, `CarrierSelect.tsx` consumed as-is, the colour cell
+carried over from `CarriersTable`, and the checkbox, closed-set, numeric and text
+cells written fresh, of which only the `inf`-aware numeric is substantive — the
+optimistic mutation, and the only backend contract change (D9) — all on files
 with zero prior coverage, so the characterization tests above are a prerequisite
 and not a nicety.
 
@@ -625,42 +785,64 @@ Each item is independently verifiable.
     the string `"inf"`.
 16. Typing `12o0` into a numeric cell is rejected with a message and leaves the
     stored value unchanged.
-17. A Generator with a `marginal_cost` time series renders that cell dimmed with
+17. Clicking a `bus` cell on the Generators tab opens the `BusAutocomplete`
+    dropdown listing existing bus names; scrolling the table body while it is
+    open keeps the dropdown aligned to its cell.
+18. Typing a bus name that does not exist into a `bus` cell is refused, the cell
+    keeps its previous value, and no "it will be created automatically" line
+    appears.
+19. Pasting a bus name that differs from a real bus only in letter case changes
+    nothing and names the cell.
+20. Clicking a `carrier` cell opens the grouped carrier dropdown; pasting a
+    carrier name that does not yet exist succeeds and that carrier appears in the
+    Carriers tab.
+21. A `p_nom_extendable` cell renders a checkbox; Ctrl/Cmd+clicking it applies its
+    new value to every selected row in exactly one request.
+22. A `control` cell offers exactly `PQ`, `PV` and `Slack`, and a paste of any
+    other value into it changes nothing and names the cell.
+23. Pressing ArrowDown inside an open `bus` cell moves the dropdown highlight and
+    does not move the active cell.
+24. A Generator with a `marginal_cost` time series renders that cell dimmed with
     a series badge, cannot be edited, and cannot be a paste target.
-18. `Bus.control` is editable in the grid; `Generator.committable` is not; both
+25. `Bus.control` is editable in the grid; `Generator.committable` is not; both
     appear in the override list with a written reason.
-19. The Lines tab's `r` header reads `r (Ω)` and its tooltip states that the
+26. The Lines tab's `r` header reads `r (Ω)` and its tooltip states that the
     properties panel shows the value per km.
-20. Pasting into more than 200 rows shows a `confirmToast`, and dismissing it
+27. Pasting into more than 200 rows shows a `confirmToast`, and dismissing it
     changes nothing.
-21. The Carriers tab renders in the shared grid, its colour cell still opens a
+28. The Carriers tab renders in the shared grid, its colour cell still opens a
     colour picker, and the tab is still named `Carriers`.
-22. Adding a catalog attribute through "+ Add parameter" on a Generator, saving,
+29. Adding a catalog attribute through "+ Add parameter" on a Generator, saving,
     and reloading the project shows the saved value — proving the form seed, the
     payload builder and the Pydantic model were all opened.
-23. The chosen extras persist across a reload under
+30. The "+ Add parameter" picker shows each attribute's type, unit, description
+    and default, and shows `inf` rather than a blank for `p_nom_max`.
+31. The chosen extras persist across a reload under
     `creationform:extras:<paletteId>`, and a value whose `v` field is not `1` is
     discarded rather than read.
-24. Ticking `p_nom_extendable` on a Generator with `capital_cost = 0` and
+32. Ticking `p_nom_extendable` on a Generator with `capital_cost = 0` and
     `overnight_cost = 5` produces **no** required-field error; setting both to 0
     produces one naming the pair.
-25. `p_nom_min` and `p_nom_max` are hidden in the **creation** form until
+33. On a network with no Slack bus and a solve mode of `pf`, `control` is marked
+    required on every Bus form; setting one bus to Slack clears it on all of
+    them; switching the mode to `lopf` without the AC-PF chain clears it too.
+34. `p_nom_min` and `p_nom_max` are hidden in the **creation** form until
     `p_nom_extendable` is ticked, matching the edit form.
-26. Dropping a Generator on a bus in the schematic view opens the creation form
+35. Dropping a Generator on a bus in the schematic canvas opens the creation form
     with `bus` prefilled to that bus's name.
-27. Dropping a Generator on a bus in Satellite view does the same.
-28. Dropping an Electrolyzer on a hydrogen bus leaves `bus0` empty and shows the
+36. Dropping a Generator on a bus in the map canvas does the same.
+37. Dropping an Electrolyzer on a hydrogen bus leaves `bus0` empty and shows the
     existing carrier-mismatch line.
-29. Dropping a Bus on the schematic canvas creates it with `x == 0 and y == 0`,
+38. Dropping a Bus on the schematic canvas creates it with `x == 0 and y == 0`,
     and it appears in `UnplacedBusesPanel`.
-30. `AssetPalette.tsx`, `SimpleTable`, `CarriersTable`, the bulk-edit toolbar and
+39. `AssetPalette.tsx`, `SimpleTable`, `CarriersTable`, the bulk-edit toolbar and
     the three orphan `FIELD_MAP` entries are absent from the tree, and
     `npm run build` passes.
-31. Reverting the whole-batch 404 in `bulk_update` fails a test; reverting the
+40. Reverting the whole-batch 404 in `bulk_update` fails a test; reverting the
     blank-to-`inf` rule fails a different test.
-32. `pypsa-gui/frontend/src/utils/coerce.ts` is unchanged, and its ten existing
+41. `pypsa-gui/frontend/src/utils/coerce.ts` is unchanged, and its ten existing
     tests pass unmodified.
-33. Full suites green against the `c2cc4510` baseline: frontend 660 tests plus
+42. Full suites green against the `c2cc4510` baseline: frontend 660 tests plus
     the new ones, 0 failures; backend 2183 passed / 23 skipped plus the new ones,
     0 failures, run in pixi's `test` env (the `default` env omits `pywebview` and
     yields 7 spurious failures).
@@ -675,9 +857,9 @@ Each item is independently verifiable.
 - Unifying the edit view's `{cond && …}` idiom with the read view's null-out
   idiom (D22).
 - De-duplicating the carrier grouping tables between `cardKit.tsx:598-604` and
-  `components/CarrierSelect.tsx:47-50`. The grid consumes `CarrierSelect` rather
-  than adding a third copy, which is the cheapest way to avoid making the
-  documented debt worse without paying it off here.
+  `components/CarrierSelect.tsx:47-50`. D4 consumes `CarrierSelect` for the
+  grid's carrier cell rather than adding a third copy, which is the cheapest way
+  to avoid making the documented debt worse without paying it off here.
 - Clearing a time series from the grid (ruling 18 states this explicitly).
 - Any change to `layout.json` persistence or the diagnosed-not-fixed node-drag
   revert (`docs/superpowers/findings/2026-07-31-blank-canvas-node-drags-revert.md`).
@@ -699,7 +881,10 @@ the existing serializer and bulk endpoint, not something introduced here.
 **A cell value containing a tab or a newline cannot round-trip through the
 clipboard** (D6, no quote grammar). No PyPSA attribute in any of the nine tabs
 holds such a value — names, carriers, booleans and numbers are the whole domain —
-and a quote grammar would add an escaping surface for no measured need.
+and a quote grammar would add an escaping surface for no measured need. The same
+fact is why D6's injection guard omits the house rule's tab and CR triggers:
+those two arms would be unreachable, and an unreachable branch reads as
+protection that is not there.
 
 **The one-gesture-one-undo-step guarantee covers gestures that originate in the
 grid.** The 500 ms wait (D11) is measured against the grid's own last mutation.
