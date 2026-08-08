@@ -354,6 +354,15 @@ def asset_costs():
     try:
         return periodized_capital_costs(n, cfg)
     except Exception:
+        # Return contract is deliberately unchanged (``{}``): the frontend
+        # already treats a missing asset as "no cost recorded", and changing
+        # the shape without auditing every consumer is out of scope here. What
+        # was NOT acceptable is that the failure left no trace at all — an
+        # empty map renders the whole "Investments by asset" table as EUR 0.
+        logger.exception(
+            "periodized_capital_costs failed in /simulation/asset_costs; the "
+            "per-asset investment table will show 0 for every asset",
+        )
         return {}
 
 

@@ -65,6 +65,10 @@ from routers.projects import (
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.results import corrected_marginal_prices, lp_scaled_load_frame
 
+import logging
+
+logger = logging.getLogger("pypsa_gui.compare")
+
 router = APIRouter()
 
 
@@ -376,6 +380,17 @@ def _periodized_lookup(n) -> dict:
     try:
         return periodized_capital_costs(n, cfg)
     except Exception:
+        # Return contract is deliberately unchanged (``{}``): every caller
+        # already reads through ``_safe_capital_cost``, and reshaping this
+        # without auditing all of them is how the last round of bugs happened.
+        # But the degradation is silent and total — every asset's CAPEX reads
+        # 0.0 — so it must at least be diagnosable from pypsa-gui.log. Matches
+        # `services/asset_results/compute.py`, which names the consequence in
+        # the log line rather than just recording that something failed.
+        logger.exception(
+            "periodized_capital_costs failed while building the Compare view; "
+            "every asset's capital cost will read 0.00 in this comparison",
+        )
         return {}
 
 
