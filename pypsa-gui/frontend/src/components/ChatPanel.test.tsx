@@ -416,12 +416,21 @@ it('re-fires the stick-to-bottom autoscroll when the assistant dock expands', as
     { event: 'turn_done', data: {} },
   ])
 
+  // Restored in a finally: this spy replaces vitest.setup.ts's own
+  // `Element.prototype.scrollIntoView` no-op for the whole prototype, so
+  // leaving it installed would silently hand the stand-in to every test
+  // appended after this one in the file. Harmless today only because this is
+  // currently last.
   const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
-  scrollSpy.mockClear()
+  try {
+    scrollSpy.mockClear()
 
-  act(() => {
-    useUIStore.setState({ assistantDockOpen: true })
-  })
+    act(() => {
+      useUIStore.setState({ assistantDockOpen: true })
+    })
 
-  expect(scrollSpy).toHaveBeenCalled()
+    expect(scrollSpy).toHaveBeenCalled()
+  } finally {
+    scrollSpy.mockRestore()
+  }
 })

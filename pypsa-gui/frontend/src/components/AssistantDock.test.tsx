@@ -55,7 +55,8 @@ describe('AssistantDock', () => {
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
     // No jest-dom toBeVisible() here either; this repo's own convention for
     // CSS-class-driven visibility is a className check (see
-    // CommandPalette.test.tsx). It is also the more accurate check in this
+    // CommandPalette.test.tsx's ArrowDown highlight assertions, which match
+    // on className for the same reason). It is also the more accurate check in this
     // suite: vitest's jsdom environment doesn't load Tailwind's stylesheet
     // (no `css: true`), so getComputedStyle-based visibility checks would
     // report "visible" regardless of the `hidden` class. Splitting on
@@ -79,8 +80,8 @@ describe('AssistantDock', () => {
   // would stay green even if ChatPanel were unmounted and immediately
   // remounted at the same position — e.g. by keying the ErrorBoundary on
   // assistantDockOpen. A same-position remount kills a streaming turn the
-  // same way an unmount does (see ChatPanel.tsx:1606's SSE-cleanup effect),
-  // so instance identity across a toggle is itself load-bearing.
+  // same way an unmount does (see ChatPanel.tsx's SSE-cleanup effect), so
+  // instance identity across a toggle is itself load-bearing.
   it('keeps the same ChatPanel instance across a collapse/expand cycle', async () => {
     const user = userEvent.setup()
     render(<AssistantDock />)

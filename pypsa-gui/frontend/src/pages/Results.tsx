@@ -101,6 +101,10 @@ export default function Results() {
   const currentProject    = useUIStore(s => s.currentProject)
   const compareRailOpen   = useUIStore(s => s.compareRailOpen)
   const compareRailWidth  = useUIStore(s => s.compareRailWidth)
+  // Subscribed purely so the clamp effect below re-runs when the dock toggles
+  // — the dock is a fixed-width sibling in App.tsx's body row, so opening it
+  // shrinks this component's wrapper without any other signal reaching here.
+  const assistantDockOpen = useUIStore(s => s.assistantDockOpen)
   const toggleCompareRail = useUIStore(s => s.toggleCompareRail)
   const setCompareRailOpen  = useUIStore(s => s.setCompareRailOpen)
   const setCompareRailWidth = useUIStore(s => s.setCompareRailWidth)
@@ -141,17 +145,44 @@ export default function Results() {
     window.addEventListener('mouseup', onUp)
   }, [setCompareRailWidth])
 
-  // When the rail opens, clamp a stale-wide persisted width against the current
-  // wrapper so the left pane never drops below its floor (e.g. after the window
-  // was resized narrower while the rail was closed).
-  useEffect(() => {
-    if (!compareRailOpen) return
+  // Clamp a stale-wide persisted rail width against the CURRENT wrapper so the
+  // live Results pane on the left never drops below its floor.
+  //
+  // Re-runs on any event that can shrink the wrapper, not just the rail
+  // opening. Opening the assistant dock is one: it takes a fixed 380px out of
+  // the same row (App.tsx's three-column body), and with the rail already open
+  // at its persisted width nothing re-measured. Worked example on a 1280px
+  // screen with the rail at its stored 560 — main drops to ~660, the rail
+  // stays 560, and the left pane collapses to ~99px with no recovery short of
+  // dragging the splitter. Window resize has always had the same shape and is
+  // covered here too.
+  //
+  // It stays a CLAMP: it only ever shrinks a rail that no longer fits, and
+  // never grows one back when room reappears. Restoring width automatically
+  // would silently overwrite a width the user chose by dragging, and
+  // `compareRailWidth` is persisted — so the wrong call here is not a
+  // transient layout blip, it is a lost preference.
+  const clampRailWidth = useCallback(() => {
+    if (!useUIStore.getState().compareRailOpen) return
     const wrapW = splitWrapRef.current?.getBoundingClientRect().width
-    if (wrapW && compareRailWidth > wrapW - RAIL_MIN_W) {
-      setCompareRailWidth(Math.max(RAIL_MIN_W, wrapW - RAIL_MIN_W))
+    if (!wrapW) return
+    const max = wrapW - RAIL_MIN_W
+    // Read through getState() rather than the `compareRailWidth` render
+    // binding: this also runs from a resize listener whose closure would
+    // otherwise pin a stale value between re-renders.
+    if (useUIStore.getState().compareRailWidth > max) {
+      setCompareRailWidth(Math.max(RAIL_MIN_W, max))
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compareRailOpen])
+  }, [setCompareRailWidth])
+
+  useEffect(() => {
+    clampRailWidth()
+  }, [clampRailWidth, compareRailOpen, assistantDockOpen])
+
+  useEffect(() => {
+    window.addEventListener('resize', clampRailWidth)
+    return () => window.removeEventListener('resize', clampRailWidth)
+  }, [clampRailWidth])
   // Used by every tab — fetched once here, propagated via props so they don't
   // each issue their own poll.
   const { data: status } = useQuery({

@@ -873,15 +873,35 @@ export default function ChatPanel() {
   // also rehydrates `session.messages` so subsequent turns can thread prior
   // context into the Anthropic SDK AND benefit from prompt caching (the
   // cache is per-session, so reusing the session_id keeps the cache warm).
+  //
+  // BEHAVIOUR CHANGE, recorded deliberately: now that AssistantDock mounts
+  // ChatPanel for the app's lifetime, this fires at boot for EVERY user with a
+  // project open — including one who never opens the assistant — where it
+  // previously waited until the 'chat' slide panel was opened. Same for the
+  // uploads hydration further down. Both are one GET each, both swallow their
+  // errors, and the transcript they replay lands in chatStore rather than on
+  // screen, so the cost is a request and some memory, not a failure mode.
+  // Deliberately NOT made lazy here: gating hydration on first-open is a
+  // design change (it needs a "has the user ever opened the dock" concept and
+  // changes when the session_id becomes available for prompt caching), and
+  // this branch is a bug fix. Revisit if boot latency is ever measured to care.
   useEffect(() => {
     if (!currentProject) return
-    // Only seed an EMPTY conversation. This effect re-runs on every mount, and
-    // the panel remounts whenever the agent navigates the app to another tab
-    // and the user comes back — at which point replaying chat.jsonl over the
-    // store erases the turn they just watched arrive, because a turn is only
-    // persisted once it completes. The store is authoritative while it holds a
-    // conversation; disk is the seed for a fresh one. `resetForProjectSwitch`
-    // empties it on a real project change, which is what re-arms this.
+    // Only seed an EMPTY conversation. Replaying chat.jsonl over a store that
+    // already holds a conversation erases the turn the user just watched
+    // arrive, because a turn is only persisted once it completes. The store is
+    // authoritative while it holds a conversation; disk is the seed for a
+    // fresh one. `resetForProjectSwitch` empties it on a real project change,
+    // which is what re-arms this.
+    //
+    // The guard is still live even though the panel no longer remounts on
+    // navigation (it is mounted for the app's lifetime inside AssistantDock).
+    // This effect re-runs whenever `currentProject` changes AND on every
+    // mount, and the mounts that remain all reach it with a populated store:
+    // the dock's ErrorBoundary swapping back to its children after a Retry,
+    // HMR in dev, and a project switch whose reset has not landed yet. Do not
+    // conclude the early return is dead — ChatPanel.test.tsx's "does not wipe
+    // an in-flight turn when the panel is reopened" fails without it.
     if (useChatStore.getState().messages.length > 0) return
     let cancelled = false
     getChatHistory().then((h) => {
@@ -947,6 +967,10 @@ export default function ChatPanel() {
   // strip mirrors what's on disk so a tab switch doesn't lose previously-
   // uploaded files. We don't auto-attach any of these; only freshly
   // uploaded files default to checked-ON.
+  //
+  // Also boot-time for every user now that the panel is always mounted — see
+  // the note on the chat.jsonl hydration above for why that is accepted here
+  // rather than made lazy.
   useEffect(() => {
     if (!currentProject) {
       setUploads([])
@@ -1956,7 +1980,16 @@ export default function ChatPanel() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Escape' && speech.listening) {
+                  // stopPropagation as well as preventDefault. App.tsx's
+                  // window-level keydown handler also acts on Escape (close
+                  // the compare rail, then the active slide panel), and
+                  // preventDefault does NOT stop propagation — so without
+                  // this the keystroke that stops the mic also closed the
+                  // panel the agent had just opened. App.tsx now skips
+                  // Escape for editable targets too; this is the near side of
+                  // the same fix and keeps the behaviour correct on its own.
                   e.preventDefault()
+                  e.stopPropagation()
                   speech.stop()
                   return
                 }

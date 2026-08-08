@@ -469,11 +469,28 @@ export default function App() {
       // dismiss the comparison without also closing the Results view; a
       // second Esc then closes the panel as before.
       //
+      // Skipped entirely while the caret is in an editable element, using the
+      // same INPUT / TEXTAREA / contentEditable check as the '?' branch below.
+      // The assistant's composer is now permanently on screen (AssistantDock),
+      // and ChatPanel binds Escape in it to "stop dictation" — so without this
+      // guard the keystroke that stops the mic also closes the compare rail,
+      // and a second Escape closes the very panel the agent just opened. That
+      // is the keyboard twin of the `data-no-panel-close` exemption on the
+      // dock, and it was structurally impossible before this branch because
+      // the assistant WAS the slide panel. Every other editable surface in the
+      // app (Properties forms, the palette's search field, dialog inputs)
+      // benefits from the same guard.
+      //
       // ShortcutsHelp's own Escape (via Dialog) now owns closing it — no
       // special-case here anymore, so this branch never fires while it's open.
       if (e.key === 'Escape') {
-        if (compareRailOpen) { setCompareRailOpen(false); return }
-        if (activeSlidePanel) setSlidePanel(null)
+        const t = e.target as HTMLElement | null
+        const isEditableTarget =
+          t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || !!t?.isContentEditable
+        if (!isEditableTarget) {
+          if (compareRailOpen) { setCompareRailOpen(false); return }
+          if (activeSlidePanel) setSlidePanel(null)
+        }
       }
       // "?" opens the keyboard-shortcuts help (unless the user is typing).
       if (e.key === '?') {

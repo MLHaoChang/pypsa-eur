@@ -32,12 +32,12 @@ describe('the assistant survives its own navigation', () => {
     render(<AssistantDock />)
     // No @testing-library/jest-dom in this repo — getByTestId already throws
     // when the node is absent, so toBeTruthy() (a vitest built-in) is this
-    // codebase's idiom for presence. See AssistantDock.test.tsx:39-43.
+    // codebase's idiom for presence. Same convention as AssistantDock.test.tsx.
     expect(screen.getByTestId('chat-panel-stub')).toBeTruthy()
 
     // Exactly what applyUiNavigate does on `ui_open_panel` → results.
-    // `results` is a FULL_SCREEN_TAB, the case that used to take over the
-    // whole main area (App.tsx's FULL_SCREEN_TABS).
+    // `results` is a member of App.tsx's FULL_SCREEN_TABS, the case that used
+    // to take over the whole main area.
     act(() => {
       useUIStore.getState().setSlidePanel('results')
     })
@@ -47,17 +47,18 @@ describe('the assistant survives its own navigation', () => {
     // Visibility here is CSS-class-driven and jsdom loads no stylesheet, so a
     // getComputedStyle check (toBeVisible) would report "visible" regardless
     // of the `hidden` class. The className-token check is the working
-    // assertion — same convention as CommandPalette.test.tsx:115-122 and
-    // AssistantDock.test.tsx:64. Split on whitespace rather than matching a
+    // assertion — same convention as CommandPalette.test.tsx and
+    // AssistantDock.test.tsx. Split on whitespace rather than matching a
     // substring so the unrelated `overflow-hidden` utility can't false-match.
     expect(screen.getByTestId('assistant-dock-body').className.split(/\s+/)).not.toContain('hidden')
   })
 
   // The same coexistence requirement, running the other direction.
   //
-  // App.tsx's click-outside-to-close effect closes the active slide panel on
-  // any mousedown outside the panel, the Sidebar (<aside>), or an element
-  // marked `data-no-panel-close`. The dock is a plain div outside all three,
+  // App.tsx's click-outside-to-close effect (the `onPointerDown` handler
+  // mounted while a panel is open) closes the active slide panel on any
+  // mousedown outside the panel, the Sidebar (<aside>), or an element marked
+  // `data-no-panel-close`. The dock is a plain div outside all three,
   // so without the marker, clicking the composer to ask a follow-up question
   // about Results would close Results. That was structurally impossible while
   // the assistant WAS the slide panel; making it a sibling is what put it in

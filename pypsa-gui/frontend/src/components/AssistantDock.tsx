@@ -18,7 +18,7 @@ import { ErrorBoundary } from './ErrorBoundary'
  */
 export default function AssistantDock() {
   // Per-field selectors, not the bare useUIStore() — see the identical
-  // convention (and rationale) at CommandPalette.tsx:223-227: the bare hook
+  // convention (and rationale) in CommandPalette.tsx: the bare hook
   // subscribes to every slice, so an unrelated mutation elsewhere (e.g.
   // SnapshotPicker scrubbing resultsSnapshotIdx per frame) re-renders this
   // whole subtree. That cost is new to this branch: ChatPanel previously
@@ -36,7 +36,8 @@ export default function AssistantDock() {
   // explains cannot coexist" failure this component exists to remove, just
   // running the other direction. It was structurally impossible before only
   // because the assistant WAS the slide panel. Pinned by
-  // AssistantDock.eviction.test.tsx.
+  // AssistantDock.eviction.test.tsx; its keyboard twin is the editable-target
+  // guard on App.tsx's global Escape handler.
   return (
     <div
       className={`flex flex-col min-h-0 border-l border-border bg-bg shrink-0 ${
@@ -81,13 +82,14 @@ export default function AssistantDock() {
         data-testid="assistant-dock-body"
       >
         {/*
-          No `key` here, unlike the ErrorBoundary around the FullPageTab at
-          App.tsx:616 (keyed on `${activeSlidePanel}-${currentProject}` so
-          navigating away and back clears a stuck error). That one wraps a
+          No `key` here, unlike App.tsx's ErrorBoundary around `FullPageTab`
+          (keyed on `${activeSlidePanel}-${currentProject}` so navigating away
+          and back clears a stuck error). That one wraps a
           *conditionally-mounted* panel, where a remount is a normal,
           frequent event driven by navigation. This dock's true sibling is
-          the always-mounted, `display:none`-toggled canvas column at
-          App.tsx:589, which also has no key — and for the same reason: this
+          App.tsx's always-mounted canvas column — the div whose className
+          toggles `hidden` for a full-screen tab rather than unmounting the
+          canvas — which also has no key, and for the same reason: this
           subtree is deliberately never remounted by anything, so there is no
           navigation event a key could hook into. (Do not "fix" this by
           keying on `assistantDockOpen` — that reintroduces a remount on
