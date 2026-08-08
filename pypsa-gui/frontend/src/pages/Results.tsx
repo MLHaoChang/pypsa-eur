@@ -21,6 +21,12 @@ import LostLoadTab from './results/LostLoadTab'
 import StorageCycling from './results/StorageCycling'
 import AssetDetail from './results/asset/AssetDetail'
 import { PageHeader } from '../components/PageKit'
+import {
+  RAIL_MIN_W,
+  nextDesiredRailWidth,
+  railCeiling,
+  renderedRailWidth as constrainRailWidth,
+} from './results/railWidth'
 
 // ── Tabbed shell for the Results panel ────────────────────────────────────────
 // Three sections per the user's request:
@@ -83,10 +89,6 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   asset: 'overview',
 }
 
-// Min px kept for BOTH the live Results pane and the comparison rail when the
-// splitter is dragged. The store's setCompareRailWidth enforces the same floor.
-const RAIL_MIN_W = 360
-
 export default function Results() {
   const [tab, setTabState] = useState<ResultsTab>(loadInitialTab)
   const setTab = (t: ResultsTab) => {
@@ -111,7 +113,20 @@ export default function Results() {
   const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
   const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
   const splitWrapRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ startX: number; startW: number } | null>(null)
+  // `desiredAtStart` is the stored width as it was when the gesture BEGAN, and
+  // `releasedAt` is the raw (unclamped) width the pointer last implied. The
+  // write decision is made once, on mouseup, from those two — never from the
+  // live store value, which this same gesture is in the middle of rewriting.
+  const dragRef = useRef<
+    { startX: number; startW: number; desiredAtStart: number; releasedAt: number } | null
+  >(null)
+  // Detaches the in-flight gesture's window listeners. Held in a ref so a
+  // gesture whose mouseup was lost (released outside the window, pointer
+  // stolen) can be torn down by the next mousedown and by unmount.
+  const dragDetachRef = useRef<(() => void) | null>(null)
+  // The live width during a drag. Local, not the store: the rail must follow
+  // the pointer, but following is not choosing, and only the release chooses.
+  const [dragWidth, setDragWidth] = useState<number | null>(null)
 
   // Chat / agent navigation — switch Results sub-tab on request.
   useEffect(() => {
@@ -123,65 +138,75 @@ export default function Results() {
     clearResultsTabRequest()
   }, [resultsTabRequest, clearResultsTabRequest])
 
-  // Vertical splitter — transpose of BottomPanel's row-resize. The handle sits
-  // on the rail's LEFT edge, so dragging left grows the rail. Clamp against the
-  // wrapper's measured width (NOT window width — it's offset by sidebar/panel).
+  // Vertical splitter. The handle sits on the rail's LEFT edge, so dragging
+  // left grows the rail. Bounds come from the wrapper's measured width (NOT
+  // window width — it's offset by sidebar/panel/dock).
+  //
+  // The gesture decides ONCE, on release. Deciding per mousemove is what made
+  // this defect recur three times: the guard read the live stored width, which
+  // the same gesture was rewriting, so one intermediate sub-ceiling write
+  // disarmed it for every later move. On a 1440 viewport (wrapper 820, ceiling
+  // 460) a 1px press drift wrote 459, and the following left-drag then wrote
+  // 460 because it compared against 459 rather than the user's 700. The rail
+  // rendered 460 before and after — a visually identical, no-op gesture — and
+  // the stored preference ratcheted down to the ceiling, permanently.
+  //
+  // See results/railWidth.ts for the write decision itself, which is a pure
+  // function precisely so this class of bug is reachable by a table test
+  // instead of only by a full DOM drag simulation.
   const onSplitMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
+    // A mouseup released outside the window (or a stolen pointer) leaves the
+    // previous gesture's listeners attached, holding a stale `ceiling` in
+    // their closure. Two live handlers would then both fire, oldest first,
+    // and the stale one's write could survive the current gesture's decision.
+    // Tear down before arming.
+    dragDetachRef.current?.()
+
     const wrapW = splitWrapRef.current?.getBoundingClientRect().width ?? window.innerWidth
+    const ceiling = railCeiling(wrapW)
+    const desiredAtStart = useUIStore.getState().compareRailWidth
     // Start from the width that is ON SCREEN, not the stored desired width.
-    // With the desired/rendered split below, those differ whenever the rail is
-    // space-constrained — and starting from the desired width would teleport
-    // the handle away from the cursor on the first pixel of movement. Same
-    // formula as `renderedRailWidth`, recomputed from live values so this
-    // callback needs no extra dependency and can never read a stale one.
-    // The widest the rail may be while the live pane keeps its floor. ONE
-    // expression, used by the drag start, by every mouse move, and (as the
-    // same arithmetic) by `renderedRailWidth` below.
-    //
-    // `onMove` used to recompute this as a bare `wrapW - RAIL_MIN_W`. That
-    // diverges from this one once `wrapW < 2 × RAIL_MIN_W`, and the outer
-    // `Math.max(RAIL_MIN_W, …)` hid the divergence instead of surfacing it:
-    // at 1280px with the dock open and the sidebar expanded the wrapper is
-    // 1280 − 220 − 380 = 680, so `min(320, …)` pinned EVERY mouse position to
-    // 360 and the first pixel of any drag wrote 360 to the store.
-    //
-    // The pinned-write guard below now also catches that case, so this
-    // reconciliation is not independently observable — no test distinguishes
-    // the two spellings. It stays because leaning on an outer `Math.max` to
-    // paper over a divergent inner bound is precisely how the 680px bug hid.
-    const ceiling = Math.max(RAIL_MIN_W, wrapW - RAIL_MIN_W)
-    const startW = Math.max(RAIL_MIN_W, Math.min(useUIStore.getState().compareRailWidth, ceiling))
-    dragRef.current = { startX: e.clientX, startW }
+    // Those differ whenever the rail is space-constrained, and starting from
+    // the stored one would teleport the handle away from the cursor on the
+    // first pixel of movement.
+    const startW = Math.max(RAIL_MIN_W, Math.min(desiredAtStart, ceiling))
+    dragRef.current = { startX: e.clientX, startW, desiredAtStart, releasedAt: startW }
+    setDragWidth(startW)
+
     const onMove = (ev: MouseEvent) => {
-      if (!dragRef.current) return
-      const delta = dragRef.current.startX - ev.clientX
-      const next = Math.max(RAIL_MIN_W, Math.min(ceiling, dragRef.current.startW + delta))
-      // A drag that ends up PINNED against the ceiling is not a width the user
-      // picked — it is the constraint. Recording it would overwrite a larger
-      // saved preference with whatever this window happens to allow, which is
-      // the same silent loss the desired/rendered split exists to prevent, one
-      // gesture away instead of zero.
-      //
-      // Reachable, not theoretical: dragging left to make a rail bigger is the
-      // natural reaction to it having just shrunk, and at the 680px wrapper
-      // above every position is pinned, so any drag at all would do it.
-      //
-      // Only skips the WRITE. A drag that lands short of the ceiling records
-      // normally, including one that deliberately shrinks the rail, and
-      // growing INTO the ceiling from a smaller stored width is a real choice
-      // and is still recorded (the guard needs stored > ceiling to fire).
-      if (next === ceiling && useUIStore.getState().compareRailWidth > ceiling) return
-      setCompareRailWidth(next)
+      const d = dragRef.current
+      if (!d) return
+      // Raw, unclamped — `nextDesiredRailWidth` owns the bounds. Storing it
+      // unclamped keeps "where the pointer actually is" distinct from "what
+      // the rail can show", which is the same desired/rendered distinction
+      // one level down.
+      d.releasedAt = d.startW + (d.startX - ev.clientX)
+      // Follow the pointer, but only in local state. Following is not
+      // choosing; nothing is persisted until release.
+      setDragWidth(Math.max(RAIL_MIN_W, Math.min(ceiling, d.releasedAt)))
     }
     const onUp = () => {
+      const d = dragRef.current
+      detach()
+      setDragWidth(null)
       dragRef.current = null
+      if (!d) return
+      const next = nextDesiredRailWidth(d.desiredAtStart, wrapW, d.releasedAt)
+      if (next != null) setCompareRailWidth(next)
+    }
+    function detach() {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      dragDetachRef.current = null
     }
+    dragDetachRef.current = detach
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   }, [setCompareRailWidth])
+
+  // A gesture in flight when Results unmounts must not leave listeners behind.
+  useEffect(() => () => { dragDetachRef.current?.() }, [])
 
   // ── Desired width vs rendered width ────────────────────────────────────
   //
@@ -238,11 +263,13 @@ export default function Results() {
     }
   }, [measureWrap])
 
-  // Before the first measurement lands there is nothing to constrain against,
-  // so render the desired width; the layout effect corrects it pre-paint.
-  const renderedRailWidth = wrapWidth == null
-    ? compareRailWidth
-    : Math.max(RAIL_MIN_W, Math.min(compareRailWidth, wrapWidth - RAIL_MIN_W))
+  // A drag in flight wins: the rail follows the pointer from local state, and
+  // nothing is persisted until release. Otherwise the stored desired width,
+  // constrained to what fits. Before the first measurement lands there is
+  // nothing to constrain against, so render the desired width; the layout
+  // effect corrects it pre-paint.
+  const railWidth = dragWidth
+    ?? (wrapWidth == null ? compareRailWidth : constrainRailWidth(compareRailWidth, wrapWidth))
   // Used by every tab — fetched once here, propagated via props so they don't
   // each issue their own poll.
   const { data: status } = useQuery({
@@ -631,7 +658,7 @@ export default function Results() {
             <div
               data-no-panel-close
               data-testid="compare-rail"
-              style={{ width: renderedRailWidth }}
+              style={{ width: railWidth }}
               className="shrink-0 min-w-0 overflow-hidden border-l border-border bg-bg"
             >
               {/* Own boundary so a crash inside the comparison rail shows an

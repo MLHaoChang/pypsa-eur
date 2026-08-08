@@ -111,9 +111,12 @@ describe('dictation vs the dock', () => {
   // UNCONDITIONALLY on re-render (`useEffect(() => { speech.stop() })`) makes
   // the count 3 and fails here. It does NOT catch merely dropping the
   // dependency array while keeping the `if (!assistantDockOpen)` guard — that
-  // variant re-runs but correctly does nothing while the dock is open, and is
-  // not a behavioural regression. Exactly ONE call is expected, from the
-  // project-switch effect that is supposed to stop the mic on a switch.
+  // variant re-runs but does nothing while the dock is OPEN, which is the only
+  // state this test exercises. (It does differ while the dock is CLOSED:
+  // `stop()` on every render rather than once. Idempotent on an already-
+  // stopped session and unobservable, but not literally identical.) Exactly
+  // ONE call is expected, from the project-switch effect that is supposed to
+  // stop the mic on a switch.
   it('does not stop the mic again on a re-render that leaves the dock open', () => {
     renderPanel()
     speechStop.mockClear()
