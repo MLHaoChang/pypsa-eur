@@ -835,6 +835,10 @@ export default function ChatPanel() {
   const closeStream = useChatStore((s) => s.closeStream)
 
   const currentProject = useUIStore((s) => s.currentProject)
+  // Read only for the autoscroll effect below — see the dependency-array
+  // comment there for why AssistantDock's collapsed state has to be visible
+  // here at all.
+  const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
   const prevProjectRef = useRef<string | null | undefined>(undefined)
 
@@ -1300,6 +1304,25 @@ export default function ChatPanel() {
     if (nearBottom) setShowJumpLatest(false)
   }, [])
 
+  // `assistantDockOpen` is a dependency, not just a read, because of
+  // AssistantDock: while the dock is collapsed this panel sits under a
+  // `display:none` ancestor (kept mounted so a streaming turn survives the
+  // collapse — see AssistantDock.tsx), and an element with no layout box
+  // cannot be scrolled. `scrollIntoView` calls that land while collapsed are
+  // silent no-ops in a real browser (not just jsdom), and none of the other
+  // deps here change on an expand-only click, so without this the effect
+  // would never re-run and the transcript could sit scrolled to wherever it
+  // last had layout — "ask a question, collapse, the answer streams in,
+  // expand" would land on stale scroll position instead of the latest token.
+  //
+  // This does not override a deliberate scroll-up: `stickToBottom` already
+  // gates the branch below, and nothing here touches it. Collapsing hides
+  // the scroll container, so the user cannot fire onMessagesScroll while
+  // it's hidden — whatever `stickToBottom` was at collapse time is exactly
+  // what it still is on expand, and the existing if/else already respects
+  // it (bottom-follow if they were following, only the "jump to latest"
+  // affordance if they'd scrolled up). Expanding just gives the same
+  // decision a chance to actually run once there's a box to scroll.
   useEffect(() => {
     if (stickToBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -1307,7 +1330,7 @@ export default function ChatPanel() {
     } else {
       setShowJumpLatest(true)
     }
-  }, [messages.length, pendingTokenForScroll, stickToBottom])
+  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen])
 
   // Frame handler — translates SSE frames into chatStore updates.
   const handleFrame = useCallback((frame: ChatFrame) => {

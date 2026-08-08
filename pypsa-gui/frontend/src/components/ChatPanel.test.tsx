@@ -44,7 +44,7 @@ vi.mock('../api/uploads', () => ({
 afterEach(() => cleanup())
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: null })
+  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: null, assistantDockOpen: false })
   // `streaming` and `streamCleanup` have to be reset too: `onSend` returns
   // early while `streaming` is true, so a test that leaves it set makes every
   // later test's send a silent no-op — which reads as "the component ignored
@@ -377,4 +377,34 @@ it('still closes an idle stream when the panel unmounts', async () => {
   unmount()
 
   expect(cleanup).toHaveBeenCalledTimes(1)
+})
+
+// ── AssistantDock expanding must re-run the stick-to-bottom autoscroll ─────
+//
+// While the dock is collapsed, ChatPanel sits under a `display:none`
+// ancestor (kept mounted, not unmounted — see AssistantDock.tsx), so a
+// scrollIntoView call made while collapsed lands on an element with no
+// layout box and is a silent no-op in a real browser. jsdom does no layout
+// at all — there is no way for any test to observe "the transcript ended up
+// visually at the bottom" — so this only pins the narrower, still real
+// precondition: the autoscroll effect has to re-run when the dock expands,
+// so a scrollIntoView call happens at all once there's a box to scroll.
+// The actual visual outcome (ask a question, collapse, let it stream,
+// expand, see the latest token) needs a manual check in the built app.
+it('re-fires the stick-to-bottom autoscroll when the assistant dock expands', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-dock-scroll' } },
+    { event: 'token', data: { delta: 'hello' } },
+    { event: 'turn_done', data: {} },
+  ])
+
+  const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
+  scrollSpy.mockClear()
+
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: true })
+  })
+
+  expect(scrollSpy).toHaveBeenCalled()
 })

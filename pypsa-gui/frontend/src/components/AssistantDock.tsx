@@ -17,7 +17,15 @@ import { ErrorBoundary } from './ErrorBoundary'
  * screen"; keeping it mounted is the fix, not an optimisation.
  */
 export default function AssistantDock() {
-  const { assistantDockOpen, setAssistantDockOpen } = useUIStore()
+  // Per-field selectors, not the bare useUIStore() — see the identical
+  // convention (and rationale) at CommandPalette.tsx:223-227: the bare hook
+  // subscribes to every slice, so an unrelated mutation elsewhere (e.g.
+  // SnapshotPicker scrubbing resultsSnapshotIdx per frame) re-renders this
+  // whole subtree. That cost is new to this branch: ChatPanel previously
+  // only rendered while the 'chat' slide panel was open, so it never paid
+  // for updates it doesn't consume — now that it's always mounted, it does.
+  const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
+  const setAssistantDockOpen = useUIStore((s) => s.setAssistantDockOpen)
 
   return (
     <div
@@ -35,6 +43,8 @@ export default function AssistantDock() {
           <button
             onClick={() => setAssistantDockOpen(false)}
             title="Collapse the assistant"
+            aria-label="Collapse the assistant"
+            aria-expanded={assistantDockOpen}
             data-testid="assistant-dock-collapse"
             className="text-muted hover:text-text p-1 rounded hover:bg-panel transition-colors"
           >
@@ -45,6 +55,8 @@ export default function AssistantDock() {
         <button
           onClick={() => setAssistantDockOpen(true)}
           title="Open the assistant"
+          aria-label="Open the assistant"
+          aria-expanded={assistantDockOpen}
           data-testid="assistant-dock-launcher"
           className="flex items-center justify-center h-10 w-full text-muted hover:text-accent hover:bg-panel transition-colors"
         >
@@ -57,6 +69,27 @@ export default function AssistantDock() {
         className={`flex-1 min-h-0 overflow-hidden ${assistantDockOpen ? '' : 'hidden'}`}
         data-testid="assistant-dock-body"
       >
+        {/*
+          No `key` here, unlike the ErrorBoundary around the FullPageTab at
+          App.tsx:616 (keyed on `${activeSlidePanel}-${currentProject}` so
+          navigating away and back clears a stuck error). That one wraps a
+          *conditionally-mounted* panel, where a remount is a normal,
+          frequent event driven by navigation. This dock's true sibling is
+          the always-mounted, `display:none`-toggled canvas column at
+          App.tsx:589, which also has no key — and for the same reason: this
+          subtree is deliberately never remounted by anything, so there is no
+          navigation event a key could hook into. (Do not "fix" this by
+          keying on `assistantDockOpen` — that reintroduces a remount on
+          every collapse/expand, which kills a streaming turn exactly like
+          the unmount this component exists to prevent; see
+          AssistantDock.test.tsx's mount-identity test.)
+
+          Residual: if a crash is deterministic from persisted chat state
+          (e.g. a malformed message replayed from chat.jsonl), Retry
+          re-renders that same state and can re-throw immediately — there is
+          no navigation-driven remount to fall back on here, unlike the
+          slide-panel case. Acceptable for now; revisit if that shows up.
+        */}
         <ErrorBoundary label="The assistant crashed">
           <ChatPanel />
         </ErrorBoundary>
