@@ -1276,6 +1276,29 @@ export default function ChatPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to project identity
   }, [currentProject])
 
+  // Stop dictation when the dock collapses.
+  //
+  // This replaces a guarantee the branch removed. While ChatPanel was the
+  // 'chat' SlidePanel, closing it unmounted the panel and useSpeechToText's
+  // `useEffect(() => () => stop(), [stop])` turned the microphone off. The
+  // panel is now deliberately never unmounted, so that cleanup no longer
+  // fires — and SpeechSession sets `continuous = true` with an `onend`
+  // auto-restart, so the session runs indefinitely once started.
+  //
+  // What made it serious rather than untidy: the mic button's active state
+  // and the interim-transcript line are both inside the dock's `hidden` body,
+  // so a user who starts dictating, collapses the dock and walks away gets no
+  // in-app signal at all that the microphone is still recording. The OS
+  // indicator is the only remaining cue, and it is weakest in the packaged
+  // WKWebView build.
+  //
+  // STOP, not disable. `enabled` stays `!streaming`, so expanding the dock
+  // again and clicking the mic works exactly as before — this ends the
+  // current session, it does not make dictation unavailable while collapsed.
+  useEffect(() => {
+    if (!assistantDockOpen) speech.stop()
+  }, [assistantDockOpen, speech.stop])
+
   useEffect(() => {
     if (!speech.listening) return
     const onKey = (e: KeyboardEvent) => {

@@ -132,10 +132,14 @@ describe('where App mounts the assistant dock', () => {
     // Results is a FULL_SCREEN_TABS member — the case the user reported.
     expect(screen.getByTestId('results-stub')).toBeTruthy()
     expect(screen.getByTestId('assistant-dock')).toBeTruthy()
-    // And it is genuinely OUTSIDE the panel, not merely rendered somewhere.
-    // `contains` is true for the node itself, so this also fails if the two
-    // are ever collapsed into one element.
-    expect(screen.getByTestId('results-stub').contains(screen.getByTestId('assistant-dock'))).toBe(false)
+    // And genuinely outside the SLIDE-PANEL CONTAINER — the div App mounts
+    // under `{activeSlidePanel && …}` and wraps in an ErrorBoundary keyed on
+    // `${activeSlidePanel}-${currentProject}`. Asserting against the container
+    // rather than the stubbed tab body matters: the tab body is a leaf, so a
+    // dock nested as its sibling inside the container would not be "inside"
+    // it and this assertion would pass under the very regression it names.
+    // `data-testid="panel-container"` exists in App.tsx for this.
+    expect(screen.getByTestId('panel-container').contains(screen.getByTestId('assistant-dock'))).toBe(false)
   })
 
   // The load-bearing one. Presence checks alone stay green if the dock is

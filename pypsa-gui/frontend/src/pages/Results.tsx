@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
@@ -129,7 +129,15 @@ export default function Results() {
   const onSplitMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     const wrapW = splitWrapRef.current?.getBoundingClientRect().width ?? window.innerWidth
-    dragRef.current = { startX: e.clientX, startW: useUIStore.getState().compareRailWidth }
+    // Start from the width that is ON SCREEN, not the stored desired width.
+    // With the desired/rendered split below, those differ whenever the rail is
+    // space-constrained — and starting from the desired width would teleport
+    // the handle away from the cursor on the first pixel of movement. Same
+    // formula as `renderedRailWidth`, recomputed from live values so this
+    // callback needs no extra dependency and can never read a stale one.
+    const maxW = Math.max(RAIL_MIN_W, wrapW - RAIL_MIN_W)
+    const startW = Math.max(RAIL_MIN_W, Math.min(useUIStore.getState().compareRailWidth, maxW))
+    dragRef.current = { startX: e.clientX, startW }
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return
       const delta = dragRef.current.startX - ev.clientX
@@ -145,44 +153,53 @@ export default function Results() {
     window.addEventListener('mouseup', onUp)
   }, [setCompareRailWidth])
 
-  // Clamp a stale-wide persisted rail width against the CURRENT wrapper so the
-  // live Results pane on the left never drops below its floor.
+  // ── Desired width vs rendered width ────────────────────────────────────
   //
-  // Re-runs on any event that can shrink the wrapper, not just the rail
-  // opening. Opening the assistant dock is one: it takes a fixed 380px out of
-  // the same row (App.tsx's three-column body), and with the rail already open
-  // at its persisted width nothing re-measured. Worked example on a 1280px
-  // screen with the rail at its stored 560 — main drops to ~660, the rail
-  // stays 560, and the left pane collapses to ~99px with no recovery short of
-  // dragging the splitter. Window resize has always had the same shape and is
-  // covered here too.
+  // `compareRailWidth` in the store is the width the user ASKED for. It is
+  // written by exactly one thing — an actual splitter drag — and it is
+  // persisted to localStorage. Nothing else may touch it.
   //
-  // It stays a CLAMP: it only ever shrinks a rail that no longer fits, and
-  // never grows one back when room reappears. Restoring width automatically
-  // would silently overwrite a width the user chose by dragging, and
-  // `compareRailWidth` is persisted — so the wrong call here is not a
-  // transient layout blip, it is a lost preference.
-  const clampRailWidth = useCallback(() => {
-    if (!useUIStore.getState().compareRailOpen) return
-    const wrapW = splitWrapRef.current?.getBoundingClientRect().width
-    if (!wrapW) return
-    const max = wrapW - RAIL_MIN_W
-    // Read through getState() rather than the `compareRailWidth` render
-    // binding: this also runs from a resize listener whose closure would
-    // otherwise pin a stale value between re-renders.
-    if (useUIStore.getState().compareRailWidth > max) {
-      setCompareRailWidth(Math.max(RAIL_MIN_W, max))
-    }
-  }, [setCompareRailWidth])
+  // What gets rendered is that width constrained to what currently fits:
+  // `min(desired, wrapW - RAIL_MIN_W)`, floored at RAIL_MIN_W. The constraint
+  // is recomputed from a measurement, never stored.
+  //
+  // This separation is the whole point. The previous version clamped by
+  // WRITING the smaller value back through `setCompareRailWidth`, which
+  // persists — so a user who dragged the rail to 700 on a 1440px laptop and
+  // opened the assistant once had their 700 rewritten to 500 in both the store
+  // and localStorage. Closing the dock did not bring it back, and neither did
+  // a reload: the preference was destroyed, silently, by a layout event. It
+  // "only ever shrank", which satisfied the letter of a clamp while causing
+  // exactly the data loss a clamp was supposed to avoid.
+  //
+  // Now the rail still visibly shrinks when space runs out — same pixels on
+  // screen — but the desired width survives, so it comes back when the dock
+  // closes, the window grows, or the app reloads.
+  const [wrapWidth, setWrapWidth] = useState<number | null>(null)
+
+  const measureWrap = useCallback(() => {
+    const w = splitWrapRef.current?.getBoundingClientRect().width
+    setWrapWidth(w && w > 0 ? w : null)
+  }, [])
+
+  // useLayoutEffect, not useEffect: this runs after the DOM has been updated
+  // (so the dock's 380px is already reflected in the measurement) but before
+  // paint, so the constrained width is what the user actually sees rather than
+  // a one-frame flash of the unconstrained one.
+  useLayoutEffect(() => {
+    measureWrap()
+  }, [measureWrap, compareRailOpen, assistantDockOpen])
 
   useEffect(() => {
-    clampRailWidth()
-  }, [clampRailWidth, compareRailOpen, assistantDockOpen])
+    window.addEventListener('resize', measureWrap)
+    return () => window.removeEventListener('resize', measureWrap)
+  }, [measureWrap])
 
-  useEffect(() => {
-    window.addEventListener('resize', clampRailWidth)
-    return () => window.removeEventListener('resize', clampRailWidth)
-  }, [clampRailWidth])
+  // Before the first measurement lands there is nothing to constrain against,
+  // so render the desired width; the layout effect corrects it pre-paint.
+  const renderedRailWidth = wrapWidth == null
+    ? compareRailWidth
+    : Math.max(RAIL_MIN_W, Math.min(compareRailWidth, wrapWidth - RAIL_MIN_W))
   // Used by every tab — fetched once here, propagated via props so they don't
   // each issue their own poll.
   const { data: status } = useQuery({
@@ -569,7 +586,8 @@ export default function Results() {
             />
             <div
               data-no-panel-close
-              style={{ width: compareRailWidth }}
+              data-testid="compare-rail"
+              style={{ width: renderedRailWidth }}
               className="shrink-0 min-w-0 overflow-hidden border-l border-border bg-bg"
             >
               {/* Own boundary so a crash inside the comparison rail shows an

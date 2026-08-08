@@ -1,29 +1,29 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { act, render } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 
-// The comparison rail's clamp has to re-run when the AVAILABLE width changes,
-// not only when the rail itself opens.
+// The comparison rail's width has two meanings that must not be conflated.
 //
-// Opening the assistant dock takes a fixed 380px out of App.tsx's body row,
-// which is the same row Results lays out in. With the rail already open at its
-// persisted width, nothing re-measured: on a 1280px screen with the rail at
-// its stored 560, main drops to ~660, the rail stays 560, and the live Results
-// pane collapses to ~99px — unrecoverable short of dragging the splitter.
+//   DESIRED  — `compareRailWidth` in the store. What the user dragged the rail
+//              to. Persisted to localStorage. Written by the drag and nothing
+//              else.
+//   RENDERED — `min(desired, wrapW - RAIL_MIN_W)`, floored at RAIL_MIN_W.
+//              Recomputed from a measurement on every layout change. Never
+//              stored.
 //
-// What these tests can and cannot show: jsdom does no layout, and
-// vitest.setup.ts pins every getBoundingClientRect to a fixed 500px box, so
-// the wrapper does NOT actually shrink here when the dock opens. They
-// therefore pin the defect that is real code — that the clamp RE-EVALUATES on
-// a dock toggle instead of going stale — by putting the rail in the
-// already-too-wide state the shrink would produce and checking the toggle
-// notices. The pixel outcome needs the built app.
+// The version these tests replaced clamped by writing the smaller value back
+// through `setCompareRailWidth`, which persists. A user who dragged the rail to
+// 700 on a 1440px laptop and opened the assistant once had their 700 rewritten
+// to 500 in the store AND localStorage; closing the dock did not restore it and
+// neither did a reload. It "only ever shrank", which is a clamp by the letter
+// while being exactly the silent data loss a clamp is meant to prevent.
+//
+// Unlike the previous round, these tests can see real widths: they replace
+// vitest.setup.ts's fixed-500px getBoundingClientRect for the duration of the
+// file, which lets them model the reported 1440 → dock opens → 860 sequence
+// directly rather than standing in for it.
 
-// vi.hoisted, not a plain const: Results.tsx's own imports run these factories
-// during the import phase, before this file's body executes, so a top-level
-// `const stub` would still be in its temporal dead zone. The returned
-// component closure runs at render time, when the jsx runtime is ready.
 const { stub } = vi.hoisted(() => ({
   stub: (testid: string) => ({ default: () => <div data-testid={testid} /> }),
 }))
@@ -57,12 +57,19 @@ vi.mock('../api/network', () => ({
 
 import Results from './Results'
 
-// vitest.setup.ts's global getBoundingClientRect stub reports 500px wide for
-// every element, so the wrapper the clamp measures is 500 and RAIL_MIN_W is
-// 360 — anything above 140 no longer fits.
-const WRAP_W = 500
 const RAIL_MIN_W = 360
-const MAX_FITTING = WRAP_W - RAIL_MIN_W // 140
+const WIDTH_KEY = 'network-diagram:compare-rail-width'
+
+// vitest.setup.ts pins getBoundingClientRect to a fixed 500px box for every
+// element, which is narrower than 2 × RAIL_MIN_W and so degenerate for this
+// component. Swap in a controllable width for this file only.
+const originalRect = Element.prototype.getBoundingClientRect
+function setViewportWidth(width: number) {
+  Element.prototype.getBoundingClientRect = () => ({
+    width, height: 500, top: 0, left: 0, right: width, bottom: 500, x: 0, y: 0,
+    toJSON() {},
+  }) as DOMRect
+}
 
 function renderResults() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -73,59 +80,101 @@ function renderResults() {
   )
 }
 
+function renderedWidth(): number {
+  return Number.parseFloat(screen.getByTestId('compare-rail').style.width)
+}
+
 beforeEach(() => {
   localStorage.clear()
-  useUIStore.setState({
-    currentProject: 'Demo',
-    compareRailOpen: true,
-    // Fits inside MAX_FITTING, so the mount-time clamp is a no-op and any
-    // later change is unambiguously attributable to the toggle under test.
-    compareRailWidth: 120,
-    assistantDockOpen: false,
-  })
+  setViewportWidth(1440)
+  useUIStore.setState({ currentProject: 'Demo', compareRailOpen: true, assistantDockOpen: false })
+  // Through the real setter, so localStorage carries the same value a real
+  // drag would have persisted — that is what the reload assertions read.
+  useUIStore.getState().setCompareRailWidth(700)
 })
 
-describe('compare rail clamp vs the assistant dock', () => {
-  it('re-clamps a rail that no longer fits when the dock opens', () => {
+afterEach(() => {
+  Element.prototype.getBoundingClientRect = originalRect
+})
+
+describe('compare rail width vs the assistant dock', () => {
+  it('renders the desired width when there is room for it', () => {
     renderResults()
-    // Mount clamp left the fitting width alone.
-    expect(useUIStore.getState().compareRailWidth).toBe(120)
-
-    // Stand in for the wrapper shrinking under a rail that used to fit —
-    // set directly rather than through setCompareRailWidth, whose own floor
-    // would rewrite the value before the effect ever saw it.
-    act(() => { useUIStore.setState({ compareRailWidth: 560 }) })
-    // Nothing re-measures on a width change alone, which is the point: this
-    // is the stale state the user was left in.
-    expect(useUIStore.getState().compareRailWidth).toBe(560)
-
-    act(() => { useUIStore.getState().setAssistantDockOpen(true) })
-
-    expect(useUIStore.getState().compareRailWidth).toBe(Math.max(RAIL_MIN_W, MAX_FITTING))
+    expect(renderedWidth()).toBe(700)
   })
 
-  it('only ever shrinks — it does not grow the rail back when room reappears', () => {
+  it('constrains the RENDERED width when the dock takes the space', () => {
     renderResults()
-    act(() => { useUIStore.setState({ compareRailWidth: 560 }) })
-    act(() => { useUIStore.getState().setAssistantDockOpen(true) })
-    expect(useUIStore.getState().compareRailWidth).toBe(RAIL_MIN_W)
+    expect(renderedWidth()).toBe(700)
 
-    // Closing the dock gives the width back. The rail must NOT spring back to
-    // 560: compareRailWidth is persisted and is usually a width the user chose
-    // by dragging, so restoring it automatically would silently overwrite a
-    // preference rather than fix a layout.
-    act(() => { useUIStore.getState().setAssistantDockOpen(false) })
+    // The dock opens: 1440 − 380 (dock) − ~200 (sidebar etc.) ≈ 860 for this
+    // component's wrapper. max = 860 − 360 = 500.
+    act(() => {
+      setViewportWidth(860)
+      useUIStore.getState().setAssistantDockOpen(true)
+    })
 
-    expect(useUIStore.getState().compareRailWidth).toBe(RAIL_MIN_W)
+    expect(renderedWidth()).toBe(500)
   })
 
-  it('leaves a rail that still fits untouched across a dock toggle', () => {
-    // The negative control: a clamp that fired unconditionally would pass both
-    // tests above while resizing rails that were perfectly fine.
+  it('preserves the desired width in the store and in localStorage', () => {
     renderResults()
 
-    act(() => { useUIStore.getState().setAssistantDockOpen(true) })
+    act(() => {
+      setViewportWidth(860)
+      useUIStore.getState().setAssistantDockOpen(true)
+    })
 
-    expect(useUIStore.getState().compareRailWidth).toBe(120)
+    // The rail on screen shrank to 500 (asserted above), but the user's 700
+    // is untouched — this is the assertion the previous implementation failed.
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+    // And a reload would restore it, because localStorage was never rewritten.
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('700')
+  })
+
+  it('gives the width back when the dock closes again', () => {
+    renderResults()
+
+    act(() => {
+      setViewportWidth(860)
+      useUIStore.getState().setAssistantDockOpen(true)
+    })
+    expect(renderedWidth()).toBe(500)
+
+    act(() => {
+      setViewportWidth(1440)
+      useUIStore.getState().setAssistantDockOpen(false)
+    })
+
+    expect(renderedWidth()).toBe(700)
+  })
+
+  it('never renders the rail below its own floor', () => {
+    // A window so narrow that `wrapW - RAIL_MIN_W` drops under RAIL_MIN_W.
+    // The rail must not be squeezed past its minimum — at that point both
+    // panes simply overflow, which is the pre-existing behaviour.
+    renderResults()
+
+    act(() => {
+      setViewportWidth(500)
+      useUIStore.getState().setAssistantDockOpen(true)
+    })
+
+    expect(renderedWidth()).toBe(RAIL_MIN_W)
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+  })
+
+  it('recomputes on a window resize without touching the stored width', () => {
+    renderResults()
+    expect(renderedWidth()).toBe(700)
+
+    act(() => {
+      setViewportWidth(900)
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    expect(renderedWidth()).toBe(540)
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('700')
   })
 })

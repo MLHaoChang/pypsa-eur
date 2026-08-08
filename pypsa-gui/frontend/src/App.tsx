@@ -618,6 +618,10 @@ export default function App() {
             {activeSlidePanel && (
               <div
                 ref={panelRef}
+                // Named so tests can assert what is and is not inside the
+                // slide-panel subtree — specifically that the assistant dock
+                // never is. See App.dock.test.tsx.
+                data-testid="panel-container"
                 className={`min-w-0 flex flex-col min-h-0 overflow-hidden ${
                   fullScreenTab ? 'flex-1' : 'w-1/2 border-l border-border'
                 }`}
