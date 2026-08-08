@@ -105,6 +105,24 @@ export function isTruncatedPayload(
   return payloads.some(p => p?.range?.capped === true)
 }
 
+// ── "Unavailable", never a number ────────────────────────────────────────
+// The word a results tab prints when the backend says a cost figure could not
+// be computed (`capital_costs_available: false` on /asset_economics,
+// `capex_lifetime_available: false` on /cost_breakdown — both accompanied by
+// `null` on every affected field). Two renderings are forbidden wherever this
+// is used, and both were shipped before:
+//
+//   • `€0.00` — indistinguishable from a genuinely free asset, and styled
+//     identically to the real figures beside it.
+//   • `—` — the results tables' existing "not applicable" marker (a generator
+//     has no charge cost; a battery has no capacity factor). Reusing it would
+//     fold "could not be computed" into "does not apply".
+//
+// So the value gets its own word. It lives here rather than in one tab
+// because a second tab now needs it, and two tabs each spelling their own
+// version of "unavailable" is exactly the drift this module exists to stop.
+export const COST_UNAVAILABLE = 'unavailable'
+
 // Drop-in warning banner for the six windowing tabs — renders nothing unless
 // `isTruncatedPayload(payloads)` is true (i.e. some payload was `capped`).
 // Centralised alongside the predicate so the banner copy (and its tone)

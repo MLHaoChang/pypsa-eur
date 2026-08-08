@@ -15,7 +15,7 @@ import {
 import {
   KPI, ChartCard, ChartActions, Seg, fmtCurrency, fmtEnergy, downloadCSV,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
-  isRenewableCarrier, colourForCarrier,
+  isRenewableCarrier, colourForCarrier, COST_UNAVAILABLE,
 } from './shared'
 import { useResultsFilter } from './filterContext'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
@@ -85,20 +85,18 @@ interface AggregatedAssetRow {
 
 // ── "Unavailable", never a number ─────────────────────────────────────────
 // When `/results/asset_economics` reports `capital_costs_available: false`,
-// every capital-cost-derived field arrives as `null`. Two renderings are
-// forbidden here, both of which the tab used to produce:
+// every capital-cost-derived field arrives as `null`, and this tab prints
+// `COST_UNAVAILABLE` rather than formatting it. The word — and the two
+// renderings it exists to rule out, `€0.00` and `—` — now live in `shared.tsx`
+// because the Capacity Expansion tab needs exactly the same thing for
+// `cost_breakdown.capex_lifetime`. Re-exported here so this module's surface
+// is unchanged.
 //
-//   • `€0.00` — the old backend zero. Indistinguishable from a genuinely free
-//     asset, and it sat beside real revenue with identical styling.
-//   • `—` — this table's existing "not applicable" marker (a generator has no
-//     charge cost; a battery has no capacity factor). Reusing it would fold
-//     "could not be computed" into "does not apply", which is the same loss of
-//     information in quieter clothing.
-//
-// So the value gets its own word, and the tab says why once at the top. This
-// mirrors AggregatedOverview's `isPartialPayload` guard: refuse to print a
-// number the tab cannot stand behind.
-export const COST_UNAVAILABLE = 'unavailable'
+// The tab also says why once at the top rather than leaving the reader to
+// infer it from blank cells. That mirrors AggregatedOverview's
+// `isPartialPayload` guard: refuse to print a number the tab cannot stand
+// behind, and explain the refusal in one place.
+export { COST_UNAVAILABLE }
 
 const UNAVAILABLE_TITLE =
   'The capital-cost resolver failed for this run, so this figure could not be '

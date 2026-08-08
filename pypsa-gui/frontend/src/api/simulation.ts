@@ -67,12 +67,26 @@ export interface CostBreakdown {
   // The "_lifetime" fields back the "Total over lifetime" toggle on the
   // CapacityExpansion tab. OPEX stays per-year — multiplying it by lifetime
   // would mix construction cost with operating cost and break LCOE intuition.
+  //
+  // EVERY `*_lifetime` field is `number | null`. `null` means the backend
+  // could not resolve an upfront (overnight) cost for at least one component
+  // class — it is NOT a zero, and `?? 0` on any of them is precisely the bug
+  // this nullability exists to prevent. Nulls propagate: an unknown class
+  // makes the horizon total unknown too, because a total that silently omits
+  // a component (Line was 95.8% of one user's CAPEX) reads as an answer.
+  // `capex_lifetime_available` below is the matching summary flag.
+  // The ANNUALISED fields are never null — they come from `n.statistics()`
+  // and owe nothing to the upfront-cost resolve.
   capex: number
-  capex_lifetime: number
+  capex_lifetime: number | null
   capex_expansion: number
-  capex_expansion_lifetime: number
+  capex_expansion_lifetime: number | null
   opex: number
   total: number
+  // False when the backend could not resolve an upfront cost for some
+  // component class. Optional because a response cached from a backend older
+  // than this field has no opinion; read it as `!== false`, never `=== true`.
+  capex_lifetime_available?: boolean
   // Σ curtailment_t × curtailment_cost over renewables that opted in.
   // Already weighting-aware (snapshot × period years). Zero unless the
   // user set curtailment_cost > 0 on a renewable generator.
@@ -80,13 +94,13 @@ export interface CostBreakdown {
   // CAPEX-expansion bucket for StorageUnit + Store only — quick "how much
   // of the new investment goes into storage" KPI for the cost overview.
   storage_capex_expansion: number
-  storage_capex_expansion_lifetime: number
+  storage_capex_expansion_lifetime: number | null
   by_component: Array<{
     component: string
     capex: number
-    capex_lifetime: number
+    capex_lifetime: number | null
     capex_expansion: number
-    capex_expansion_lifetime: number
+    capex_expansion_lifetime: number | null
     opex: number
     total: number
   }>

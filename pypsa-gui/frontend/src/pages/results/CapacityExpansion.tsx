@@ -12,7 +12,8 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { Generator, Line as LineT, Link as LinkT, StorageUnit, Store, Transformer } from '../../api/types'
 import { fmtCurrency, fmtPower, fmtEnergy, downloadCSV, KPI, isRenewableCarrier, ChartActions,
-  ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel } from './shared'
+  ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
+  COST_UNAVAILABLE } from './shared'
 import { useResultsFilter } from './filterContext'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
@@ -814,9 +815,36 @@ export default function CapacityExpansion() {
     ? cost.by_period.find(p => p.period === filter.selectedPeriod)
     : null
   const displayOpex = periodEntry?.opex ?? cost.opex
-  const displayCapex = costMode === 'lifetime'
-    ? (cost.capex_lifetime ?? 0)
+  // ── The PV (lifetime) CAPEX figures are `number | null` ──────────────────
+  // `null` means the backend could not resolve an upfront cost for some
+  // component class — see `CostBreakdown` in api/simulation.ts. It is NOT a
+  // zero, so `?? 0` is banned here: it was `cost.capex_lifetime ?? 0` that
+  // rendered "€0.00" for a network whose lines were 95.8% of its CAPEX.
+  // Annualised mode is unaffected and stays a plain number.
+  const capexLifetimeAvailable = cost.capex_lifetime_available !== false
+  const displayCapex: number | null = costMode === 'lifetime'
+    ? cost.capex_lifetime
     : (periodEntry?.capex ?? cost.capex)
+  // `||` not `??` on the expansion figure, deliberately: PyPSA's
+  // `expanded_capex()` returns 0 (not null) on multi-period runs, so a zero
+  // must still fall through to the frontend-computed per-asset sum. A NULL is
+  // a different thing — the resolve failed, and `totalExpansionCapex` is built
+  // from the same unresolved upfront costs, so it cannot stand in.
+  const displayExpansionCapex: number | null = costMode === 'lifetime'
+    ? (cost.capex_expansion_lifetime == null
+        ? null
+        : cost.capex_expansion_lifetime || totalExpansionCapex)
+    : (cost.capex_expansion || totalExpansionCapex)
+  const displayStorageCapex: number | null = costMode === 'lifetime'
+    ? cost.storage_capex_expansion_lifetime
+    : (cost.storage_capex_expansion ?? 0)
+  // Total system cost is CAPEX + OPEX; an unknown CAPEX makes it unknown too.
+  // `null + number` is NaN in JS, which would print "€NaN" — a different kind
+  // of confident nonsense, so the null is carried through explicitly.
+  const displayTotalCost: number | null =
+    displayCapex == null ? null : displayCapex + displayOpex
+  const fmtCostOrUnavailable = (v: number | null) =>
+    v == null ? COST_UNAVAILABLE : fmtCurrency(v)
   const scopeLabel = periodEntry ? `period ${filter.selectedPeriod}` : 'horizon (all periods)'
   // Sum storage-charge market cost across carriers (Meur → eur). Period
   // selector applies when by_period is populated; otherwise horizon total.
@@ -839,6 +867,29 @@ export default function CapacityExpansion() {
 
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full [&>*]:shrink-0">
+
+      {/* ── Upfront (PV) CAPEX unavailable ─────────────────────── */}
+      {/* Gated on lifetime mode on purpose: in Annualised mode not one figure
+          on this tab depends on the failed resolve, and a banner that fires
+          when nothing on screen is affected is one users learn to ignore.
+          A banner and not an early return, for the same reason Economics
+          chose one — capacities, annualised CAPEX and OPEX are all still
+          correct, and blanking them would trade one wrong impression for
+          another. Copy and tokens follow that tab and shared.tsx's
+          WindowCapBanner. */}
+      {!capexLifetimeAvailable && costMode === 'lifetime' && (
+        <div className="rounded border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+          <span className="font-semibold">Upfront (PV) investment costs are unavailable.</span>{' '}
+          The backend could not resolve an upfront cost for at least one
+          component class, so the present-value CAPEX figures could not be
+          computed — they are shown as “{COST_UNAVAILABLE}” rather than as
+          zero, including the horizon totals, which would otherwise silently
+          omit the missing component. Switch to{' '}
+          <span className="font-medium">Annualised</span> for figures that do
+          not depend on it; the reason for the failure is in{' '}
+          <span className="font-mono">pypsa-gui.log</span>.
+        </div>
+      )}
 
       {/* ── Cost KPIs ──────────────────────────────────────────── */}
       <section>
@@ -875,20 +926,15 @@ export default function CapacityExpansion() {
           <KPI
             accent
             label={costMode === 'lifetime' ? 'Total new investment (PV)' : 'Total new investment (annualised)'}
-            // `||` not `??`: PyPSA's n.statistics.expanded_capex() returns 0
-            // (not null) for multi-period runs, so `??` would keep the 0.
-            // Fall back to the frontend-computed per-asset sum, which is
-            // mode-aware (overnight_cost_pv in lifetime mode, capital_cost in
-            // annualised) and derived from the same sized-rows the tables show.
-            value={fmtCurrency(costMode === 'lifetime'
-              ? cost.capex_expansion_lifetime || totalExpansionCapex
-              : cost.capex_expansion || totalExpansionCapex)}
+            // See `displayExpansionCapex` for why the zero-fallback to the
+            // frontend-computed per-asset sum survives but a null does not.
+            value={fmtCostOrUnavailable(displayExpansionCapex)}
             hint={costMode === 'lifetime'
               ? 'Sum of (Δcapacity × overnight_cost × PV factor) for new capacity built this run. PV factor = (1+r)^-(build_year − reference) per asset. Includes every vintage row for assets with per-period bounds.'
               : 'PyPSA n.statistics.expanded_capex() — capital_cost × Δp_nom for new capacity built this run. Includes every vintage row for assets with per-period bounds.'} />
           <KPI
             label={costMode === 'lifetime' ? 'CAPEX (installed, PV)' : 'CAPEX (installed)'}
-            value={fmtCurrency(displayCapex)}
+            value={fmtCostOrUnavailable(displayCapex)}
             hint={costMode === 'lifetime'
               ? 'Present value of upfront overnight investment for ALL installed capacity. Future-year builds are discounted at each asset\'s discount_rate from build_year back to the model reference year.'
               : periodEntry
@@ -900,7 +946,7 @@ export default function CapacityExpansion() {
               : 'LP variable OPEX over the horizon: Σ marginal_cost × dispatch (PyPSA n.statistics). Does NOT include storage charge at bus price — see Storage charge cost below. Dispatch "OPEX (total)" = this + storage charge + curtailment + lost-load.'} />
           <KPI
             label="Total system cost"
-            value={fmtCurrency(displayCapex + displayOpex)}
+            value={fmtCostOrUnavailable(displayTotalCost)}
             hint={costMode === 'lifetime'
               ? 'PV of upfront investment + LP OPEX. Mixed-horizon by design — toggle to Annualised for an apples-to-apples comparison.'
               : periodEntry
@@ -918,9 +964,7 @@ export default function CapacityExpansion() {
             hint="Σ curtailment_t × curtailment_cost over renewables that opted in (curtailment_cost > 0). Already weighted by snapshot × period years. Zero unless a renewable was given a curtailment_cost." />
           <KPI
             label={costMode === 'lifetime' ? 'Storage CAPEX (new, PV)' : 'Storage CAPEX (new)'}
-            value={fmtCurrency(costMode === 'lifetime'
-              ? cost.storage_capex_expansion_lifetime ?? 0
-              : cost.storage_capex_expansion ?? 0)}
+            value={fmtCostOrUnavailable(displayStorageCapex)}
             hint="CAPEX-expansion across StorageUnit + Store assets only — the storage slice of total new investment. Multi-vintage assets contribute one term per build year." />
         </div>
       </section>
