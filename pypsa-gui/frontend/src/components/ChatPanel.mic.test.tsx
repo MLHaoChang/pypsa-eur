@@ -99,15 +99,27 @@ describe('dictation vs the dock', () => {
     expect(speechStop).not.toHaveBeenCalled()
   })
 
-  // Negative control for the mount path: a panel that starts up with the dock
-  // already open must not stop a session the user could not have started yet,
-  // and more importantly must not be stopping on every render.
-  it('does not stop the mic while the dock stays open', () => {
+  // Render-path control: the dock effect must not stop the mic on re-renders
+  // that leave `assistantDockOpen` alone.
+  //
+  // `currentProject` specifically, because ChatPanel subscribes to it. An
+  // earlier version mutated `resultsSnapshotIdx`, which ChatPanel does not
+  // subscribe to — nothing re-rendered, so the test could not observe
+  // anything at all.
+  //
+  // What this actually catches, verified by trying each: an effect that stops
+  // UNCONDITIONALLY on re-render (`useEffect(() => { speech.stop() })`) makes
+  // the count 3 and fails here. It does NOT catch merely dropping the
+  // dependency array while keeping the `if (!assistantDockOpen)` guard — that
+  // variant re-runs but correctly does nothing while the dock is open, and is
+  // not a behavioural regression. Exactly ONE call is expected, from the
+  // project-switch effect that is supposed to stop the mic on a switch.
+  it('does not stop the mic again on a re-render that leaves the dock open', () => {
     renderPanel()
     speechStop.mockClear()
 
-    act(() => { useUIStore.setState({ resultsSnapshotIdx: 3 }) })
+    act(() => { useUIStore.getState().setCurrentProject('Other') })
 
-    expect(speechStop).not.toHaveBeenCalled()
+    expect(speechStop).toHaveBeenCalledTimes(1)
   })
 })

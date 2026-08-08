@@ -101,8 +101,8 @@ export default function Results() {
   const currentProject    = useUIStore(s => s.currentProject)
   const compareRailOpen   = useUIStore(s => s.compareRailOpen)
   const compareRailWidth  = useUIStore(s => s.compareRailWidth)
-  // Subscribed purely so the clamp effect below re-runs when the dock toggles
-  // — the dock is a fixed-width sibling in App.tsx's body row, so opening it
+  // Subscribed purely so the wrapper is re-measured when the dock toggles —
+  // the dock is a fixed-width sibling in App.tsx's body row, so opening it
   // shrinks this component's wrapper without any other signal reaching here.
   const assistantDockOpen = useUIStore(s => s.assistantDockOpen)
   const toggleCompareRail = useUIStore(s => s.toggleCompareRail)
@@ -135,13 +135,43 @@ export default function Results() {
     // the handle away from the cursor on the first pixel of movement. Same
     // formula as `renderedRailWidth`, recomputed from live values so this
     // callback needs no extra dependency and can never read a stale one.
-    const maxW = Math.max(RAIL_MIN_W, wrapW - RAIL_MIN_W)
-    const startW = Math.max(RAIL_MIN_W, Math.min(useUIStore.getState().compareRailWidth, maxW))
+    // The widest the rail may be while the live pane keeps its floor. ONE
+    // expression, used by the drag start, by every mouse move, and (as the
+    // same arithmetic) by `renderedRailWidth` below.
+    //
+    // `onMove` used to recompute this as a bare `wrapW - RAIL_MIN_W`. That
+    // diverges from this one once `wrapW < 2 × RAIL_MIN_W`, and the outer
+    // `Math.max(RAIL_MIN_W, …)` hid the divergence instead of surfacing it:
+    // at 1280px with the dock open and the sidebar expanded the wrapper is
+    // 1280 − 220 − 380 = 680, so `min(320, …)` pinned EVERY mouse position to
+    // 360 and the first pixel of any drag wrote 360 to the store.
+    //
+    // The pinned-write guard below now also catches that case, so this
+    // reconciliation is not independently observable — no test distinguishes
+    // the two spellings. It stays because leaning on an outer `Math.max` to
+    // paper over a divergent inner bound is precisely how the 680px bug hid.
+    const ceiling = Math.max(RAIL_MIN_W, wrapW - RAIL_MIN_W)
+    const startW = Math.max(RAIL_MIN_W, Math.min(useUIStore.getState().compareRailWidth, ceiling))
     dragRef.current = { startX: e.clientX, startW }
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return
       const delta = dragRef.current.startX - ev.clientX
-      const next = Math.max(RAIL_MIN_W, Math.min(wrapW - RAIL_MIN_W, dragRef.current.startW + delta))
+      const next = Math.max(RAIL_MIN_W, Math.min(ceiling, dragRef.current.startW + delta))
+      // A drag that ends up PINNED against the ceiling is not a width the user
+      // picked — it is the constraint. Recording it would overwrite a larger
+      // saved preference with whatever this window happens to allow, which is
+      // the same silent loss the desired/rendered split exists to prevent, one
+      // gesture away instead of zero.
+      //
+      // Reachable, not theoretical: dragging left to make a rail bigger is the
+      // natural reaction to it having just shrunk, and at the 680px wrapper
+      // above every position is pinned, so any drag at all would do it.
+      //
+      // Only skips the WRITE. A drag that lands short of the ceiling records
+      // normally, including one that deliberately shrinks the rail, and
+      // growing INTO the ceiling from a smaller stored width is a real choice
+      // and is still recorded (the guard needs stored > ceiling to fire).
+      if (next === ceiling && useUIStore.getState().compareRailWidth > ceiling) return
       setCompareRailWidth(next)
     }
     const onUp = () => {
@@ -190,9 +220,22 @@ export default function Results() {
     measureWrap()
   }, [measureWrap, compareRailOpen, assistantDockOpen])
 
+  // Coalesced to one measurement per frame. Every resize event now produces a
+  // genuinely new `setWrapWidth` — unlike the old clamp, which only wrote when
+  // the rail was over-wide and so was a no-op for most of a drag-resize. Left
+  // unthrottled, dragging a window edge would re-render the whole Results tree
+  // (charts included) once per event.
   useEffect(() => {
-    window.addEventListener('resize', measureWrap)
-    return () => window.removeEventListener('resize', measureWrap)
+    let frame: number | null = null
+    const onResize = () => {
+      if (frame != null) return
+      frame = requestAnimationFrame(() => { frame = null; measureWrap() })
+    }
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      if (frame != null) cancelAnimationFrame(frame)
+    }
   }, [measureWrap])
 
   // Before the first measurement lands there is nothing to constrain against,
@@ -582,6 +625,7 @@ export default function Results() {
             <div
               className="w-1 shrink-0 cursor-col-resize bg-border/60 hover:bg-accent/50 transition-colors"
               onMouseDown={onSplitMouseDown}
+              data-testid="compare-rail-splitter"
               title="Drag to resize"
             />
             <div

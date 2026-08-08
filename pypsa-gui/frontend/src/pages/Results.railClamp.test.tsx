@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 
@@ -84,6 +84,23 @@ function renderedWidth(): number {
   return Number.parseFloat(screen.getByTestId('compare-rail').style.width)
 }
 
+// The resize listener coalesces to one measurement per animation frame, so a
+// dispatched resize is not observable until a frame has run.
+async function flushFrame() {
+  await act(async () => {
+    await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()) })
+  })
+}
+
+// Drive the splitter. The handle is on the rail's LEFT edge, so a NEGATIVE
+// dx (cursor moves left) grows the rail — matching `delta = startX - clientX`.
+function dragSplitter(dx: number) {
+  const startX = 900
+  fireEvent.mouseDown(screen.getByTestId('compare-rail-splitter'), { clientX: startX })
+  fireEvent.mouseMove(window, { clientX: startX + dx })
+  fireEvent.mouseUp(window)
+}
+
 beforeEach(() => {
   localStorage.clear()
   setViewportWidth(1440)
@@ -164,17 +181,93 @@ describe('compare rail width vs the assistant dock', () => {
     expect(useUIStore.getState().compareRailWidth).toBe(700)
   })
 
-  it('recomputes on a window resize without touching the stored width', () => {
+  it('recomputes on a window resize without touching the stored width', async () => {
     renderResults()
     expect(renderedWidth()).toBe(700)
 
-    act(() => {
-      setViewportWidth(900)
-      window.dispatchEvent(new Event('resize'))
-    })
+    setViewportWidth(900)
+    act(() => { window.dispatchEvent(new Event('resize')) })
+    await flushFrame()
 
     expect(renderedWidth()).toBe(540)
     expect(useUIStore.getState().compareRailWidth).toBe(700)
     expect(localStorage.getItem(WIDTH_KEY)).toBe('700')
+  })
+})
+
+// ── Dragging a CONSTRAINED rail must not record the constraint ─────────────
+//
+// The desired/rendered split stops a layout event from destroying the user's
+// width. These pin the gesture that could still do it: a drag whose result is
+// decided by the ceiling rather than by where the user let go.
+describe('dragging the splitter while the rail is constrained', () => {
+  it('records a drag that lands short of the ceiling', () => {
+    // The control. With room to spare (wrapper 1440 → ceiling 1080), dragging
+    // right to shrink is an ordinary choice and must be saved normally —
+    // including to localStorage, so it survives a reload.
+    renderResults()
+    expect(renderedWidth()).toBe(700)
+
+    dragSplitter(+200)
+
+    expect(useUIStore.getState().compareRailWidth).toBe(500)
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('500')
+  })
+
+  it('does not shrink the stored width when the drag is pinned at the ceiling', () => {
+    // Reviewer's case (a). Desired 700, wrapper 860, ceiling 500, rendered
+    // 500. The user drags LEFT to make the rail bigger — the natural response
+    // to it having just shrunk — and there is no room, so every position pins
+    // at 500. Writing that would replace their 700 with this window's limit.
+    renderResults()
+    act(() => {
+      setViewportWidth(860)
+      useUIStore.getState().setAssistantDockOpen(true)
+    })
+    expect(renderedWidth()).toBe(500)
+
+    dragSplitter(-200)
+
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('700')
+  })
+
+  it('does not write the floor when the wrapper is too narrow to honour any drag', () => {
+    // Reviewer's case (b), and the worse one: it needs no pinning gesture.
+    // 1280px with the dock open and the sidebar expanded leaves a 680px
+    // wrapper, under 2 × RAIL_MIN_W — so the ceiling IS the floor and every
+    // mouse position resolves to 360. The first pixel of any drag, in either
+    // direction, used to write 360 and destroy the stored 700.
+    renderResults()
+    act(() => {
+      setViewportWidth(680)
+      useUIStore.getState().setAssistantDockOpen(true)
+    })
+    expect(renderedWidth()).toBe(RAIL_MIN_W)
+
+    dragSplitter(-50)
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+
+    dragSplitter(+50)
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('700')
+  })
+
+  it('still records growing INTO the ceiling from a smaller stored width', () => {
+    // The guard must not swallow a real choice. Stored 400 with a 860 wrapper
+    // (ceiling 500): dragging left to 500 or beyond is the user genuinely
+    // asking for the widest rail that fits, and must be saved.
+    renderResults()
+    act(() => {
+      setViewportWidth(860)
+      useUIStore.getState().setAssistantDockOpen(true)
+      useUIStore.getState().setCompareRailWidth(400)
+    })
+    expect(renderedWidth()).toBe(400)
+
+    dragSplitter(-300)
+
+    expect(useUIStore.getState().compareRailWidth).toBe(500)
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('500')
   })
 })
