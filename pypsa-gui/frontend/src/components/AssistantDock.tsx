@@ -27,12 +27,23 @@ export default function AssistantDock() {
   const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
   const setAssistantDockOpen = useUIStore((s) => s.setAssistantDockOpen)
 
+  // `data-no-panel-close` below is load-bearing. App.tsx's
+  // click-outside-to-close effect closes the active slide panel on any
+  // mousedown that isn't inside the panel itself, the Sidebar (<aside>), or
+  // an element marked that way — and the dock is none of the three. Without
+  // the marker, clicking the composer to ask a follow-up question about
+  // Results would close Results: the same "the assistant and the view it
+  // explains cannot coexist" failure this component exists to remove, just
+  // running the other direction. It was structurally impossible before only
+  // because the assistant WAS the slide panel. Pinned by
+  // AssistantDock.eviction.test.tsx.
   return (
     <div
       className={`flex flex-col min-h-0 border-l border-border bg-bg shrink-0 ${
         assistantDockOpen ? 'w-[380px]' : 'w-10'
       }`}
       data-testid="assistant-dock"
+      data-no-panel-close
     >
       {assistantDockOpen ? (
         <div className="flex items-center gap-2 px-3 h-9 border-b border-border bg-bg-2 shrink-0">

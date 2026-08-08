@@ -1,8 +1,13 @@
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
- * UI shell for the chat assistant. Lives in the SlidePanel slot (kind='chat')
- * mounted by App.tsx. The panel owns:
+ * UI shell for the chat assistant. Mounted unconditionally inside
+ * `AssistantDock` (its own column beside the main area, hidden with CSS when
+ * collapsed) — NOT in the SlidePanel slot it used to occupy as kind='chat'.
+ * That move is the fix for "it switches to the results panel, but the chat
+ * disappears": `activeSlidePanel` holds one value, so as a slide panel the
+ * assistant was mutually exclusive with every view it exists to explain. The
+ * panel owns:
  *   * message list (assistant token deltas accumulate into one assistant
  *     bubble until a tool_request / tool_result lands)
  *   * confirmation card (renders when chatStore.pending is set; carries a
@@ -95,7 +100,16 @@ function _frame_data<T = Record<string, unknown>>(f: ChatFrame): T {
   return f.data as T
 }
 
-/** Map chat tool panel_id → SlidePanel / special navigation targets. */
+/**
+ * Map chat tool panel_id → SlidePanel / special navigation targets.
+ *
+ * Not every value here is a `SlidePanel`. 'topology', 'map', 'properties',
+ * 'palette', 'bottom', 'import_export', 'project_picker', 'new_project' and
+ * 'chat' name surfaces that live outside `activeSlidePanel`; applyUiNavigate
+ * dispatches on each of them explicitly before falling through to the
+ * setSlidePanel branch. 'chat' in particular now resolves to the assistant
+ * dock, not to a slide panel.
+ */
 function _normalizePanelId(raw: string): string {
   const key = raw.trim()
   const aliases: Record<string, string> = {
@@ -191,11 +205,16 @@ function applyUiNavigate(d: {
   } else if (panel === 'compare') {
     ui.setSlidePanel('results')
     ui.setCompareRailOpen(true)
+  } else if (panel === 'chat') {
+    // 'chat' is no longer a SlidePanel member — it resolves to the dock. The
+    // agent can still be asked to open the assistant, and doing so no longer
+    // evicts whatever view is currently on screen.
+    ui.setAssistantDockOpen(true)
   } else if (
     panel === 'results' || panel === 'simparams' || panel === 'timeseries'
     || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
     || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
-    || panel === 'solveQueue' || panel === 'chat'
+    || panel === 'solveQueue'
   ) {
     ui.setSlidePanel(panel)
   }
@@ -1613,12 +1632,19 @@ export default function ChatPanel() {
 
   // SSE cleanup on unmount (CLAUDE.md rule) — but NOT while a turn is running.
   //
-  // This panel is mounted only while `activeSlidePanel === 'chat'`, and it is
-  // itself what answers a `ui_event` by calling `setSlidePanel('results')`. So
-  // "the agent showed me the results" unmounted the panel mid-answer, and this
-  // handler then closed the connection: the backend went on generating into a
-  // socket nobody was reading, which is exactly the reported "still streaming,
-  // no tokens on screen".
+  // This panel is now mounted for the app's lifetime inside `AssistantDock`,
+  // which renders it unconditionally and hides it with CSS when collapsed. So
+  // the case that motivated this guard is gone: the panel answering a
+  // `ui_event` by calling `setSlidePanel('results')` no longer unmounts
+  // itself, because it does not live in the SlidePanel slot anymore, and
+  // collapsing the dock does not unmount it either.
+  //
+  // The guard stays because unmount paths that still exist are exactly the
+  // ones a mid-turn stream can hit: the dock's ErrorBoundary swapping in its
+  // fallback after a render crash, a project switch or route change that tears
+  // down the workbench tree, and HMR in dev. On any of those, closing a live
+  // connection would leave the backend generating into a socket nobody is
+  // reading — the reported "still streaming, no tokens on screen".
   //
   // Leaving it open is safe because `handleFrame` writes only to Zustand and
   // the query cache — never to this component's state — so the rest of the

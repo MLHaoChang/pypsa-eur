@@ -253,16 +253,30 @@ it('renders an approve/reject control for tool_pending_confirmation and calls po
   })
 })
 
-// ── The agent navigating to Results must not kill the turn ────────────────
+// ── An unmount mid-turn must not kill the turn ────────────────────────────
 //
 // Reported: "show a summary of the key results and the key graphs" switches
 // the app to Results, and then either the conversation is gone or the chat is
-// still streaming with no tokens on screen.
+// still streaming with no tokens on screen. Both came from one fact —
+// ChatPanel's only mount used to be `activeSlidePanel === 'chat'`, so its own
+// frame handler answering a `ui_event` with setSlidePanel('results') unmounted
+// it mid-turn.
 //
-// Both come from one fact: ChatPanel's ONLY mount is `activeSlidePanel ===
-// 'chat'` (App.tsx), and the ErrorBoundary around it is keyed on that value —
-// so the moment ChatPanel's own frame handler answers a `ui_event` by calling
-// setSlidePanel('results'), React unmounts it mid-turn.
+// That specific trigger is now structurally impossible: 'chat' is not a
+// SlidePanel member and AssistantDock keeps ChatPanel mounted regardless of
+// navigation (see AssistantDock.eviction.test.tsx, which guards it).
+//
+// These tests still guard the OTHER half of the contract, which navigation
+// only happened to be the loudest trigger for: an unmount from any cause must
+// not abort a live turn, tokens arriving while unmounted must still land, a
+// remount must not clobber the in-flight turn with disk state, the terminal
+// frame must still close the connection, and an idle stream must still be
+// closed on unmount. Those paths remain reachable — an ErrorBoundary fallback
+// after a render crash, a project switch, HMR — so `scriptNavigateMidTurn`
+// still drives a real one: the ui_event frame it emits is exactly the frame
+// the reported bug arrived on, and the explicit `unmount()` below now stands
+// in for those remaining causes rather than being something navigation does
+// by itself.
 
 function scriptNavigateMidTurn() {
   const cleanup = vi.fn()
@@ -284,14 +298,17 @@ async function sendSummaryRequest() {
   await user.click(screen.getByTestId('chat-send'))
 }
 
-it('does not abort the live stream when the agent navigates to Results', async () => {
+it('does not abort the live stream when the panel unmounts mid-turn', async () => {
   const { cleanup } = scriptNavigateMidTurn()
   const { unmount } = renderPanel()
   await sendSummaryRequest()
 
-  // The agent's own directive moved the app off the chat panel.
+  // The agent's own directive opened Results. It no longer takes the
+  // assistant down with it — the dock is outside everything activeSlidePanel
+  // governs — so this is now just a check that the navigation happened.
   expect(useUIStore.getState().activeSlidePanel).toBe('results')
-  // Which is what unmounts ChatPanel.
+  // Stand-in for the unmount causes that DO remain: an ErrorBoundary
+  // fallback, a project switch, HMR. Any of them can land mid-turn.
   unmount()
 
   expect(cleanup).not.toHaveBeenCalled()

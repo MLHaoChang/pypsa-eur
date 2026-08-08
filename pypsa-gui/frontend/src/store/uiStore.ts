@@ -24,10 +24,11 @@ export interface CreationRequest {
 // the new component appears in the React Query cache.
 export interface PendingNodePosition { name: string; position: { x: number; y: number } }
 export type CanvasMode = 'select' | 'connect'
-// `chat` is the chatbot integration v6 panel (Phase 3). It opens a
-// half-width slide-panel on the right with the conversation, confirmation
-// cards, and live tool-progress streams. Reset via chatStore on project switch.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'chat' | 'workspace' | 'settings'
+// The panels that can occupy the single slide-panel slot. The assistant is
+// deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
+// `'chat'` was a member the assistant was mutually exclusive with every view
+// it exists to explain. It lives in `assistantDockOpen` below instead.
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null

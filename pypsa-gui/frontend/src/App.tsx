@@ -30,7 +30,7 @@ import RescaleDialogHost from './components/RescaleDialogHost'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import ChatPanel from './components/ChatPanel'
+import AssistantDock from './components/AssistantDock'
 import { useUIStore, type SlidePanel } from './store/uiStore'
 import { authEnabled } from './auth/config'
 import AuthMismatchGate from './auth/AuthMismatchGate'
@@ -107,9 +107,6 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
   results:    { eyebrow: 'SIMULATION', title: 'Results' },
   solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
-  // Chatbot integration v6 (Phase 3). Half-width by default; the panel
-  // body handles its own layout (message list + composer + token usage meter).
-  chat:       { eyebrow: 'ASSISTANT',  title: 'Chat assistant' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
 }
@@ -136,7 +133,6 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'compare':    return <CompareView />
     case 'capacityBounds': return <CapacityBoundsEditor />
     case 'solveQueue': return <SolveQueuePanel />
-    case 'chat':       return <ChatPanel />
     case 'settings':   return <LocalSettings />
     default:           return null
   }
@@ -623,6 +619,14 @@ export default function App() {
           {/* Zone 3 — Right properties panel. Only renders alongside the
               Topology Canvas — hidden while a tab panel occupies the right half. */}
           {!activeSlidePanel && <PropertiesPanel />}
+
+          {/* Zone 5 — The assistant. Outside the panel container on purpose:
+              it must stay on screen while a full-screen tab owns the main
+              area, because it is what put that tab there. A direct flex child
+              of this row (not nested inside the `flex-1` zone above) so its
+              fixed 380px / 40px width isn't fought over by the flex
+              algorithm. */}
+          <AssistantDock />
         </div>
 
         <StatusBar />

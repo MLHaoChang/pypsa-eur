@@ -1258,7 +1258,10 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   onCloseModal?: () => void
   requestBottomTab: (tab: string) => void
 }) {
-  const { setSlidePanel, activeSlidePanel, currentProject } = useUIStore()
+  const {
+    setSlidePanel, activeSlidePanel, currentProject,
+    assistantDockOpen, toggleAssistantDock,
+  } = useUIStore()
   void requestBottomTab
   // Polls /preflight to surface the error+warning count as a badge on the
   // Issues row. 30 s feels right for an out-of-view indicator — long enough
@@ -1336,11 +1339,12 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
       />
-      {/* Chatbot integration v6 (Phase 3) — toggle the ChatPanel slide. */}
-      <SItem icon={<MessageSquare size={15} />} label="Chat"
+      {/* The assistant is not a slide panel — it has its own dock so it can
+          stay open while it navigates you somewhere. */}
+      <SItem icon={<MessageSquare size={15} />} label="Assistant"
         title="Conversational assistant. Ask questions about the open network, drive tools, confirm destructive actions through a card."
-        active={activeSlidePanel === 'chat'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'chat' ? null : 'chat'); onCloseModal?.() }}
+        active={assistantDockOpen}
+        onClick={() => { toggleAssistantDock(); onCloseModal?.() }}
       />
     </div>
   )

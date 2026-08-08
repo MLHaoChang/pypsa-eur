@@ -61,4 +61,25 @@ describe('assistant dock state', () => {
     spy.mockRestore()
     vi.resetModules()
   })
+
+  // The read-back half of persistence, which nothing above covers. Every
+  // other case here loads the module with the key ABSENT (or with getItem
+  // throwing) — so they all exercise the default branch and none of them
+  // ever sees a stored value come back as `true`. A bug confined to that
+  // branch — writing 'Open' where the reader compares to 'open', or the
+  // writer and reader disagreeing about the key name — would leave all four
+  // green while silently discarding the user's saved preference on every
+  // launch. `KEY` above is an independent literal, so a key-name drift in
+  // uiStore.ts fails here rather than cancelling itself out.
+  //
+  // The value has to be in localStorage BEFORE the module's initial-state
+  // literal is evaluated (storedAssistantDockOpen() runs eagerly at module
+  // scope), hence resetModules + dynamic import, same as the case above.
+  it('opens on load when localStorage holds the stored open value', async () => {
+    localStorage.setItem(KEY, 'open')
+    vi.resetModules()
+    const fresh = await import('./uiStore')
+    expect(fresh.useUIStore.getInitialState().assistantDockOpen).toBe(true)
+    vi.resetModules()
+  })
 })
