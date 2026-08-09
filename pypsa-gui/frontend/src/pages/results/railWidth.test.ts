@@ -54,28 +54,69 @@ describe('renderedRailWidth', () => {
 })
 
 describe('desiredFromDrag', () => {
-  it('records exactly where the user dragged to', () => {
-    expect(desiredFromDrag(700)).toBe(700)
-    expect(desiredFromDrag(1234)).toBe(1234)
+  // Signature is (storedAtStart, startW, delta). No wrapper width, no ceiling.
+
+  describe('on an UNCONSTRAINED rail (startW === storedAtStart)', () => {
+    it('records exactly where the user dragged to', () => {
+      expect(desiredFromDrag(700, 700, +200)).toBe(900)
+      expect(desiredFromDrag(700, 700, -200)).toBe(500)
+      expect(desiredFromDrag(700, 700, 0)).toBe(700)
+    })
+
+    it('floors at RAIL_MIN_W', () => {
+      expect(desiredFromDrag(700, 700, -600)).toBe(RAIL_MIN_W)
+    })
+
+    it('records widths larger than any plausible wrapper, unchanged', () => {
+      // The intended consequence: asking for wider than fits is stored
+      // faithfully, and the render shows what fits.
+      expect(desiredFromDrag(700, 700, +2300)).toBe(3000)
+    })
   })
 
-  it('floors at RAIL_MIN_W', () => {
-    expect(desiredFromDrag(100)).toBe(RAIL_MIN_W)
-    expect(desiredFromDrag(-50)).toBe(RAIL_MIN_W)
-  })
+  describe('on a CONSTRAINED rail (startW < storedAtStart)', () => {
+    // wrapper 820 → ceiling 460, stored 700, so startW = 460.
+    const stored = 700
+    const startW = 460
 
-  it('records widths larger than any plausible wrapper, unchanged', () => {
-    // The intended consequence. Dragging left on a constrained rail asks for
-    // wider than currently fits; storing it faithfully is what lets the user
-    // get that width back when the dock closes. There is no ceiling to clamp
-    // against here — that is the entire fix.
-    expect(desiredFromDrag(3000)).toBe(3000)
-  })
+    it('never records less than the user already had when asked to WIDEN', () => {
+      // The defect this branch exists for. `startW + delta` is 461 here, and
+      // recording it would drop a 700px preference to 461 — 239px lost, in
+      // the opposite direction from the gesture, with zero visible change
+      // because the rail renders 460 either way.
+      expect(desiredFromDrag(stored, startW, +1)).toBe(700)
+      expect(desiredFromDrag(stored, startW, +2)).toBe(700)
+      expect(desiredFromDrag(stored, startW, +50)).toBe(700)
+      expect(desiredFromDrag(stored, startW, +200)).toBe(700)
+    })
 
-  it('depends on nothing but the released position', () => {
-    // Structural, not behavioural: the function takes one argument, so no
-    // stale wrapper, no live store read, and no gesture history can reach it.
-    // Every previous defect in this logic entered through one of those.
-    expect(desiredFromDrag.length).toBe(1)
+    it('is worst at the smallest gestures, which is why the boundary matters', () => {
+      // Without the guard the recorded value would be startW + delta, so the
+      // loss is `stored - (startW + delta)`: 239 at 1px, 0 only once the drag
+      // exceeds the constraint gap (240 here). Trackpad click-drags routinely
+      // carry 1-3px.
+      for (const delta of [1, 2, 3]) {
+        expect(desiredFromDrag(stored, startW, delta)).toBe(stored)
+      }
+    })
+
+    it('treats a return to the origin as asking for no change', () => {
+      // `>= 0`, not `> 0`. A drag out and back asks for nothing, and must not
+      // become a write that drops to the constrained width.
+      expect(desiredFromDrag(stored, startW, 0)).toBe(700)
+    })
+
+    it('grows past the stored width once the gesture asks for more than it', () => {
+      expect(desiredFromDrag(stored, startW, +500)).toBe(960)
+      expect(desiredFromDrag(stored, startW, +240)).toBe(700)
+      expect(desiredFromDrag(stored, startW, +241)).toBe(701)
+    })
+
+    it('records a SHRINK exactly as asked', () => {
+      // Nothing to protect: the user asked for narrower, it is visible on
+      // screen, and the guard must not swallow it.
+      expect(desiredFromDrag(stored, startW, -100)).toBe(RAIL_MIN_W)
+      expect(desiredFromDrag(stored, startW, -1)).toBe(459)
+    })
   })
 })

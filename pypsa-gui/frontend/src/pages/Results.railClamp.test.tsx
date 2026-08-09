@@ -56,8 +56,7 @@ vi.mock('../api/network', () => ({
 }))
 
 import Results from './Results'
-
-const RAIL_MIN_W = 360
+import { RAIL_MIN_W } from './results/railWidth'
 const WIDTH_KEY = 'network-diagram:compare-rail-width'
 
 // vitest.setup.ts pins getBoundingClientRect to a fixed 500px box for every
@@ -92,8 +91,47 @@ async function flushFrame() {
   })
 }
 
-// Drive the splitter through a gesture.
+// Drive the splitter.
 //
+// EVERY simulated drag must go through `beginDrag`/`dragSplitter`. Do not call
+// `fireEvent.mouseMove` directly, because these helpers own one detail that is
+// silently destructive to get wrong:
+//
+//   `buttons: 1` on every move. Results.tsx ends a gesture on the first move
+//   that arrives with no button held — that is how it recovers from a mouseup
+//   released outside the window. A move fired WITHOUT `buttons` therefore ends
+//   the gesture immediately, with `delta === null`, so NOTHING is written and
+//   no error is raised. A regression test shaped "assert the preference was
+//   not destroyed" would then pass vacuously, forever, against any bug.
+//   `ends the gesture on a move with no button held` below pins that
+//   behaviour so this trap stays visible.
+//
+// `mouseDown` also carries `button: 0`; the handler ignores non-primary
+// buttons.
+const DRAG_START_X = 900
+
+function beginDrag() {
+  fireEvent.mouseDown(screen.getByTestId('compare-rail-splitter'), {
+    clientX: DRAG_START_X, button: 0, buttons: 1,
+  })
+  let lastDx = 0
+  return {
+    move(dx: number) {
+      lastDx = dx
+      fireEvent.mouseMove(window, { clientX: DRAG_START_X + dx, buttons: 1 })
+    },
+    /** A layout event with the button still held. */
+    interleave(fn: () => void) { act(() => { fn() }) },
+    release() {
+      fireEvent.mouseUp(window, { clientX: DRAG_START_X + lastDx })
+    },
+    /** The pointer returns over the document after an off-window release. */
+    loseButton() {
+      fireEvent.mouseMove(window, { clientX: DRAG_START_X + lastDx, buttons: 0 })
+    },
+  }
+}
+
 // A step is either a `dx` (one mousemove; NEGATIVE moves the cursor left,
 // which grows the rail, matching `delta = startX - clientX`) or a thunk run
 // mid-gesture with the button still held.
@@ -105,18 +143,13 @@ async function flushFrame() {
 // unrepresentable. Multi-move and interleaved-layout are the default shapes of
 // a real drag, not exotic ones.
 type DragStep = number | (() => void)
-const DRAG_START_X = 900
 function dragSplitter(...steps: DragStep[]) {
-  fireEvent.mouseDown(screen.getByTestId('compare-rail-splitter'), { clientX: DRAG_START_X })
-  let lastDx = 0
+  const g = beginDrag()
   for (const step of steps) {
-    if (typeof step === 'function') act(() => { step() })
-    else {
-      lastDx = step
-      fireEvent.mouseMove(window, { clientX: DRAG_START_X + step, buttons: 1 })
-    }
+    if (typeof step === 'function') g.interleave(step)
+    else g.move(step)
   }
-  fireEvent.mouseUp(window, { clientX: DRAG_START_X + lastDx })
+  g.release()
 }
 
 // Wrapper widths used below, computed from the real constants:
@@ -216,13 +249,13 @@ describe('dragging the splitter', () => {
   it('follows the pointer during the drag without persisting anything', () => {
     renderResults()
 
-    fireEvent.mouseDown(screen.getByTestId('compare-rail-splitter'), { clientX: DRAG_START_X })
-    fireEvent.mouseMove(window, { clientX: DRAG_START_X + 100, buttons: 1 })
+    const g = beginDrag()
+    g.move(+100)
 
     expect(renderedWidth()).toBe(600)
     expect(useUIStore.getState().compareRailWidth).toBe(700)
 
-    fireEvent.mouseUp(window, { clientX: DRAG_START_X + 100 })
+    g.release()
     expect(useUIStore.getState().compareRailWidth).toBe(600)
   })
 
@@ -234,8 +267,7 @@ describe('dragging the splitter', () => {
     act(openDockTo(WRAP_1440_DOCKED))
     expect(renderedWidth()).toBe(460)
 
-    fireEvent.mouseDown(screen.getByTestId('compare-rail-splitter'), { clientX: DRAG_START_X })
-    fireEvent.mouseUp(window, { clientX: DRAG_START_X })
+    beginDrag().release()
 
     expect(useUIStore.getState().compareRailWidth).toBe(700)
     expect(localStorage.getItem(WIDTH_KEY)).toBe('700')
@@ -266,25 +298,80 @@ describe('dragging the splitter', () => {
     expect(useUIStore.getState().compareRailWidth).toBe(RAIL_MIN_W)
   })
 
-  it('stores a width LARGER than fits when dragged left on a constrained rail', () => {
-    // The intended consequence of removing the ceiling from the write path.
-    // Rendered 460 (ceiling), user pulls left 200 asking for more: we store
-    // 660, render 460, and they get 660 back when the dock closes. Clamping
-    // this to 460 is exactly what destroyed preferences in earlier rounds.
+  // ── Widening a CONSTRAINED rail ─────────────────────────────────────────
+  //
+  // Wrapper 820, ceiling 460, stored 700, rendered 460. `startW` is 460, so
+  // `startW + delta` is BELOW the stored 700 for any drag shorter than the
+  // 240px constraint gap. Recording that loses width in the opposite
+  // direction from the gesture, and the rail renders 460 either way, so
+  // nothing on screen betrays it.
+  it('loses nothing when a small widening nudge is made on a constrained rail', () => {
+    // 1px. The worst case, and well inside trackpad click-drag jitter: the
+    // naive value is 461, a 239px silent loss.
     renderResults()
     act(openDockTo(WRAP_1440_DOCKED))
     expect(renderedWidth()).toBe(460)
 
+    dragSplitter(-1)
+
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('700')
+    expect(renderedWidth()).toBe(460)
+  })
+
+  it('loses nothing on a widening drag shorter than the constraint gap', () => {
+    renderResults()
+    act(openDockTo(WRAP_1440_DOCKED))
+
     dragSplitter(-200)
 
-    expect(useUIStore.getState().compareRailWidth).toBe(660)
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+
+    act(() => {
+      setViewportWidth(WRAP_1440_UNDOCKED)
+      useUIStore.getState().setAssistantDockOpen(false)
+    })
+    expect(renderedWidth()).toBe(700)
+  })
+
+  it('treats a drag that returns to its origin as asking for no change', () => {
+    renderResults()
+    act(openDockTo(WRAP_1440_DOCKED))
+
+    dragSplitter(-150, 0)
+
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+  })
+
+  it('stores a width LARGER than fits once the drag exceeds the stored width', () => {
+    // The intended consequence of keeping the ceiling out of the write path:
+    // the user asks for wider than fits, we store it, the render shows what
+    // fits, and they get it back when the dock closes.
+    renderResults()
+    act(openDockTo(WRAP_1440_DOCKED))
+
+    dragSplitter(-500)
+
+    expect(useUIStore.getState().compareRailWidth).toBe(960)
     expect(renderedWidth()).toBe(460)
 
     act(() => {
       setViewportWidth(WRAP_1440_UNDOCKED)
       useUIStore.getState().setAssistantDockOpen(false)
     })
-    expect(renderedWidth()).toBe(660)
+    expect(renderedWidth()).toBe(840) // ceiling(1200); desired is 960
+  })
+
+  it('records a SHRINK on a constrained rail exactly as asked', () => {
+    // The guard protects widening only. Asking for narrower is visible on
+    // screen and must be recorded.
+    renderResults()
+    act(openDockTo(WRAP_1440_DOCKED))
+
+    dragSplitter(+50)
+
+    expect(useUIStore.getState().compareRailWidth).toBe(410)
+    expect(renderedWidth()).toBe(410)
   })
 
   // ── Layout events landing INSIDE a gesture ───────────────────────────────
@@ -308,19 +395,19 @@ describe('dragging the splitter', () => {
     // 820px container until release.
     renderResults()
 
-    fireEvent.mouseDown(screen.getByTestId('compare-rail-splitter'), { clientX: DRAG_START_X })
-    fireEvent.mouseMove(window, { clientX: DRAG_START_X - 200, buttons: 1 })
+    const g = beginDrag()
+    g.move(-200)
     // Desired 900, but the render constrains the preview exactly like it
     // constrains the resting width: ceiling(1200) = 840. The handle stops
     // following once there is no room, which is correct and is the same rule
     // at rest and in flight.
     expect(renderedWidth()).toBe(840)
 
-    act(openDockTo(WRAP_1440_DOCKED))
+    g.interleave(openDockTo(WRAP_1440_DOCKED))
 
     expect(renderedWidth()).toBe(460)
 
-    fireEvent.mouseUp(window, { clientX: DRAG_START_X - 200 })
+    g.release()
     expect(useUIStore.getState().compareRailWidth).toBe(900)
   })
 
@@ -331,15 +418,13 @@ describe('dragging the splitter', () => {
     // agreed to it — through dock toggles and resizes — and the listeners
     // stay live.
     renderResults()
-    const splitter = screen.getByTestId('compare-rail-splitter')
-
-    fireEvent.mouseDown(splitter, { clientX: DRAG_START_X })
-    fireEvent.mouseMove(window, { clientX: DRAG_START_X - 200, buttons: 1 })
+    const g = beginDrag()
+    g.move(-200)
     expect(renderedWidth()).toBe(840)
     expect(useUIStore.getState().compareRailWidth).toBe(700)
 
     // Button released off-window; the pointer comes back over the document.
-    fireEvent.mouseMove(window, { clientX: DRAG_START_X - 200, buttons: 0 })
+    g.loseButton()
 
     // The gesture is honoured at the last position we actually observed...
     expect(useUIStore.getState().compareRailWidth).toBe(900)
@@ -354,10 +439,8 @@ describe('dragging the splitter', () => {
 
   it('does not let an abandoned gesture write across the next one', () => {
     renderResults()
-    const splitter = screen.getByTestId('compare-rail-splitter')
-
-    fireEvent.mouseDown(splitter, { clientX: DRAG_START_X })
-    fireEvent.mouseMove(window, { clientX: DRAG_START_X - 200, buttons: 1 })
+    const abandoned = beginDrag()
+    abandoned.move(-200)
 
     act(openDockTo(WRAP_1440_DOCKED))
 
@@ -368,16 +451,75 @@ describe('dragging the splitter', () => {
   })
 
   it('does not write the constraint on a narrow wrapper', () => {
-    // Wrapper 660: the ceiling IS the floor, so the rail cannot move. A drag
-    // still records where the pointer went; what it must never record is 360
-    // simply because that is all the room there is.
+    // Wrapper 660: the ceiling IS the floor, so the rail cannot move at all.
+    // A widening drag shorter than the gap must still leave the stored width
+    // alone rather than recording the floor.
     renderResults()
     act(openDockTo(WRAP_1280_DOCKED))
     expect(renderedWidth()).toBe(RAIL_MIN_W)
 
-    dragSplitter(-300)
+    dragSplitter(-100)
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
 
-    expect(useUIStore.getState().compareRailWidth).toBe(660)
+    dragSplitter(-500)
+    expect(useUIStore.getState().compareRailWidth).toBe(860)
     expect(renderedWidth()).toBe(RAIL_MIN_W)
+  })
+
+  // ── Layout events INSIDE a gesture, with the drag continuing ────────────
+  it('keeps tracking the pointer after a layout event lands mid-drag', () => {
+    // The shape the thunk harness exists for, and the one that was untested:
+    // every other interleaved case fires its layout event as the LAST step.
+    // Here the dock opens and the user keeps dragging afterwards, so the
+    // moves that follow have to be measured against the same origin — the
+    // gesture's origin, not the new layout's.
+    renderResults()
+
+    const g = beginDrag()
+    g.move(-100)
+    expect(renderedWidth()).toBe(800)
+
+    g.interleave(openDockTo(WRAP_1440_DOCKED))
+    expect(renderedWidth()).toBe(460) // constrained by the NEW wrapper
+
+    g.move(-300)
+    // Origin is still the gesture's startW (700), so desired is 1000; the
+    // render constrains it to the new ceiling.
+    expect(renderedWidth()).toBe(460)
+
+    g.release()
+    expect(useUIStore.getState().compareRailWidth).toBe(1000)
+  })
+
+  // ── The harness trap ────────────────────────────────────────────────────
+  it('ends the gesture on a move with no button held', () => {
+    // Pins the behaviour that makes `buttons: 1` mandatory in the helpers.
+    // A test that forgets it ends the drag on its first move with delta null,
+    // so NOTHING is written and no error is raised — which would make any
+    // "the preference survived" assertion pass vacuously forever.
+    renderResults()
+
+    const g = beginDrag()
+    g.loseButton()          // first move, no button: gesture over, nothing recorded
+    g.move(-200)            // too late; the listeners are gone
+    g.release()
+
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+    expect(renderedWidth()).toBe(700)
+  })
+
+  it('ignores a non-primary button drag', () => {
+    // Middle-click drag (autoscroll on Windows/Linux) must not resize or
+    // write.
+    renderResults()
+
+    fireEvent.mouseDown(screen.getByTestId('compare-rail-splitter'), {
+      clientX: DRAG_START_X, button: 1, buttons: 4,
+    })
+    fireEvent.mouseMove(window, { clientX: DRAG_START_X - 200, buttons: 4 })
+    fireEvent.mouseUp(window, { clientX: DRAG_START_X - 200 })
+
+    expect(useUIStore.getState().compareRailWidth).toBe(700)
+    expect(renderedWidth()).toBe(700)
   })
 })

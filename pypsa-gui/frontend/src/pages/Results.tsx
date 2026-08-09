@@ -111,10 +111,13 @@ export default function Results() {
   const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
   const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
   const splitWrapRef = useRef<HTMLDivElement>(null)
-  // `releasedAt` is the raw, unclamped width the pointer last implied, or null
-  // if the pointer never moved. It is the ONLY input to what a gesture records.
+  // `delta` is the pointer's travel, or null if it never moved. `startW` is
+  // the on-screen width at mousedown (what the preview follows) and
+  // `storedAtStart` is the user's preference as it stood then (what the write
+  // may not fall below on a widening gesture) — the two differ exactly when
+  // the rail is space-constrained, which is where the loss used to happen.
   const dragRef = useRef<
-    { startX: number; startW: number; releasedAt: number | null } | null
+    { startX: number; startW: number; storedAtStart: number; delta: number | null } | null
   >(null)
   // Detaches the in-flight gesture's window listeners. Held in a ref so a
   // gesture whose mouseup was lost (released outside the window, pointer
@@ -147,6 +150,9 @@ export default function Results() {
   //
   // Constraining is the render's job, from a live measurement, every render.
   const onSplitMouseDown = useCallback((e: React.MouseEvent) => {
+    // Primary button only. Without this a middle-click drag (autoscroll on
+    // Windows/Linux) or a right-drag resizes the rail and writes a preference.
+    if (e.button !== 0) return
     e.preventDefault()
     // A mouseup released outside the window (or a stolen pointer) leaves the
     // previous gesture's listeners attached. Two live handlers would then both
@@ -154,17 +160,23 @@ export default function Results() {
     // Tear down before arming.
     dragDetachRef.current?.()
 
-    // Measured once, and used ONLY to place the handle under the cursor —
-    // never to bound what gets stored. Starting from the on-screen width
-    // rather than the stored one keeps the handle with the pointer when the
-    // two differ; a stale value here can at worst offset the grab point by
-    // whatever the layout changed by, never corrupt a persisted preference.
+    // Measured once, to place the handle under the cursor. `startW` is the
+    // CONSTRAINED (on-screen) width, so it is below the stored width whenever
+    // the rail does not fit.
+    //
+    // Do not read this as harmless. `startW` is the numeric base of everything
+    // the gesture records, so a wrong value here corrupts the persisted
+    // preference just as surely as a wrong ceiling did — an earlier version of
+    // this comment claimed it could "at worst offset the grab point", and that
+    // claim is what let a 1px nudge silently overwrite a 700px preference with
+    // 461. `desiredFromDrag` is what makes it safe, by taking `storedAtStart`
+    // alongside it; `startW` alone is not a safe thing to write.
     const wrapW = splitWrapRef.current?.getBoundingClientRect().width ?? window.innerWidth
-    const startW = constrainRailWidth(useUIStore.getState().compareRailWidth, wrapW)
-    // `releasedAt` stays null until the pointer actually moves, so a bare
-    // click on the splitter records nothing. Without this a click would store
-    // `startW` — the CONSTRAINED width — which is the round-2 defect again.
-    dragRef.current = { startX: e.clientX, startW, releasedAt: null }
+    const storedAtStart = useUIStore.getState().compareRailWidth
+    const startW = constrainRailWidth(storedAtStart, wrapW)
+    // `delta` stays null until the pointer actually moves, so a bare click on
+    // the splitter records nothing.
+    dragRef.current = { startX: e.clientX, startW, storedAtStart, delta: null }
     setDragWidth(startW)
 
     const onMove = (ev: MouseEvent) => {
@@ -181,17 +193,20 @@ export default function Results() {
       // runs on the NEXT mousedown, which immediately sets a fresh preview
       // anyway, so it is inert. Something has to end the stranded gesture.
       if (ev.buttons === 0) { finish(); return }
-      // Unclamped by design. The floor is applied by `desiredFromDrag`; the
-      // ceiling is applied by the render, live, so a layout change mid-drag
-      // is reflected on the very next render with nothing to keep in sync.
-      d.releasedAt = d.startW + (d.startX - ev.clientX)
-      setDragWidth(d.releasedAt)
+      // The preview follows the pointer pixel-for-pixel from the on-screen
+      // origin. What gets RECORDED is decided separately at release — the two
+      // origins are deliberately not the same number. Unclamped: the floor is
+      // applied by `desiredFromDrag`, the ceiling by the render, live, so a
+      // layout change mid-drag needs nothing kept in sync.
+      d.delta = d.startX - ev.clientX
+      setDragWidth(d.startW + d.delta)
     }
     function finish() {
-      const released = dragRef.current?.releasedAt ?? null
+      const d = dragRef.current
+      const delta = d?.delta ?? null
       detach()
-      if (released == null) return
-      setCompareRailWidth(desiredFromDrag(released))
+      if (d == null || delta == null) return
+      setCompareRailWidth(desiredFromDrag(d.storedAtStart, d.startW, delta))
     }
     const onUp = () => { finish() }
     function detach() {

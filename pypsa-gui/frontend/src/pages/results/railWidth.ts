@@ -33,6 +33,12 @@
  * Every one of those fixes was locally correct. The class survived because the
  * question "how much room is there" was being asked at write time at all.
  * It is not asked here any more.
+ *
+ * The rule is about the CEILING specifically, not about "the write path knows
+ * nothing". `desiredFromDrag` does take the stored width as it stood at
+ * mousedown, and that is sound: the drag is the only writer, so that snapshot
+ * cannot be invalidated by anything else mid-gesture. The ceiling could be,
+ * and was.
  */
 
 /**
@@ -66,20 +72,47 @@ export function renderedRailWidth(desired: number, wrapW: number): number {
 }
 
 /**
- * The width a drag records: exactly where the user dragged to, floored.
+ * The width a drag records.
  *
- * No ceiling parameter, deliberately — see the module comment. This is a
- * one-line function that exists to be a NAMED, greppable, table-tested place
- * where the absence of a ceiling is visible, because every previous version of
- * this logic looked obviously correct at the call site too.
+ * THE FORBIDDEN INPUT IS THE CEILING, NOT THE STORED PREFERENCE. Nothing here
+ * may ask how much room there is — that is what went stale in round 4 and what
+ * self-referenced in round 3. `storedAtStart` is safe to consult for a reason
+ * the ceiling never was: a drag is the ONLY writer of the stored width, so a
+ * value snapshotted at mousedown cannot be changed by anyone else before the
+ * release. It cannot go stale; the ceiling could, on any layout event.
  *
- * INTENDED CONSEQUENCE, which will look wrong to the next reader: dragging
- * left on a rail that is already space-constrained records a desired width
- * LARGER than currently fits. That is correct. The user asked for wider, so we
- * store wider and render what fits; when the dock closes or the window grows
- * they get the width they asked for. Clamping it here is precisely the bug
- * this module exists to prevent.
+ * `startW` is the ON-SCREEN width at mousedown (already constrained), so
+ * `startW + delta` is what the pointer is asking for and is what the preview
+ * follows pixel-for-pixel. But it must not be recorded blindly: whenever the
+ * rail is space-constrained, `startW` is BELOW the stored width, so a small
+ * leftward nudge computes a value below what the user already had.
+ *
+ * Concretely, and this is the whole reason for the `delta >= 0` branch:
+ * wrapper 820, ceiling 460, stored 700, rendered 460. Pull 1px left — the
+ * natural "make it wider" nudge, and well inside trackpad click-drag jitter —
+ * and `startW + delta` is 461. Recording that loses 239px of the user's
+ * preference, in the OPPOSITE direction from what the gesture asked, with the
+ * rail rendering 460 before and after: no visible change at all. The loss is
+ * `stored - (startW + delta)`, i.e. LARGEST for the smallest gestures, and it
+ * only reaches zero once the drag exceeds the constraint gap.
+ *
+ * So: a gesture that asks for the rail to be at least as wide as it started
+ * may never record less than the user already had. `>= 0` rather than `> 0`
+ * because a drag that returns to exactly its origin asks for no change, and
+ * must not be a write that silently drops to the constrained width either.
+ *
+ * A gesture that asks for LESS is recorded as asked — that is a real shrink,
+ * it is visible on screen, and there is nothing to protect.
+ *
+ * On an unconstrained rail `startW === storedAtStart`, so `max` is an
+ * identity and this reduces to `startW + delta` in every case.
  */
-export function desiredFromDrag(releasedAt: number): number {
-  return Math.max(RAIL_MIN_W, releasedAt)
+export function desiredFromDrag(
+  storedAtStart: number,
+  startW: number,
+  delta: number,
+): number {
+  const askedFor = startW + delta
+  const next = delta >= 0 ? Math.max(storedAtStart, askedFor) : askedFor
+  return Math.max(RAIL_MIN_W, next)
 }
