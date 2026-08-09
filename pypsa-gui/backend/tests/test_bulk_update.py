@@ -205,6 +205,143 @@ def test_empty_names_and_empty_updates_are_400(client, net):
     }).status_code == 400
 
 
+# ── The additive row-wise form (spec D9) ─────────────────────────────────────
+
+
+def test_row_form_writes_a_different_value_per_row(client, net):
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [
+            {"name": "gas", "updates": {"p_nom": 11.0}},
+            {"name": "solar", "updates": {"p_nom": 22.0}},
+        ],
+    })
+    assert r.status_code == 200
+    assert float(net.generators.at["gas", "p_nom"]) == 11.0
+    assert float(net.generators.at["solar", "p_nom"]) == 22.0
+
+
+def test_row_form_reports_the_union_of_columns(client, net):
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [
+            {"name": "gas", "updates": {"p_nom": 1.0}},
+            {"name": "solar", "updates": {"marginal_cost": 2.0}},
+        ],
+    })
+    assert r.status_code == 200
+    assert r.json() == {"updated": 2, "fields": ["marginal_cost", "p_nom"]}
+
+
+def test_row_form_writes_exactly_one_changelog_entry(client, net):
+    before = len(client.get("/api/changelog/").json())
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [
+            {"name": "gas", "updates": {"p_nom": 1.0}},
+            {"name": "solar", "updates": {"p_nom": 2.0}},
+        ],
+    })
+    assert r.status_code == 200
+    entries = client.get("/api/changelog/").json()
+    assert len(entries) == before + 1
+    assert "2 row(s)" in entries[0]["description"]
+
+
+def test_row_form_refuses_the_whole_batch_on_an_unknown_name(client, net):
+    before = float(net.generators.at["gas", "p_nom"])
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [
+            {"name": "gas", "updates": {"p_nom": 999.0}},
+            {"name": "ghost", "updates": {"p_nom": 999.0}},
+        ],
+    })
+    assert r.status_code == 404
+    assert float(net.generators.at["gas", "p_nom"]) == before
+
+
+def test_row_form_refuses_an_unknown_column(client, net):
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [{"name": "gas", "updates": {"nope": 1.0}}],
+    })
+    assert r.status_code == 400
+    assert "no column" in r.json()["detail"].lower()
+
+
+def test_row_form_refuses_a_rename(client, net):
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [{"name": "gas", "updates": {"name": "gas2"}}],
+    })
+    assert r.status_code == 400
+    assert "rename" in r.json()["detail"].lower()
+
+
+def test_row_form_applies_the_same_blank_sentinels(client, net):
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [
+            {"name": "gas", "updates": {"p_nom_max": None}},
+            {"name": "solar", "updates": {"e_sum_min": None}},
+        ],
+    })
+    assert r.status_code == 200
+    assert math.isinf(float(net.generators.at["gas", "p_nom_max"]))
+    assert float(net.generators.at["solar", "e_sum_min"]) == -math.inf
+
+
+def test_row_form_rejects_a_non_numeric_value_whole_batch(client, net):
+    before = float(net.generators.at["gas", "p_nom"])
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [
+            {"name": "gas", "updates": {"p_nom": 5.0}},
+            {"name": "solar", "updates": {"p_nom": "12o0"}},
+        ],
+    })
+    assert r.status_code == 400
+    # Nothing applied — coercion runs before the lock, so "gas" is untouched.
+    assert float(net.generators.at["gas", "p_nom"]) == before
+
+
+def test_row_form_rejects_a_duplicate_name(client, net):
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [
+            {"name": "gas", "updates": {"p_nom": 1.0}},
+            {"name": "gas", "updates": {"p_nom": 2.0}},
+        ],
+    })
+    assert r.status_code == 400
+    assert "duplicate" in r.json()["detail"].lower()
+
+
+def test_sending_both_forms_is_refused(client, net):
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "names": ["gas"], "updates": {"p_nom": 1.0},
+        "rows": [{"name": "solar", "updates": {"p_nom": 2.0}}],
+    })
+    assert r.status_code == 400
+
+
+def test_row_form_rejects_an_empty_rows_list(client, net):
+    assert client.patch(BULK, json={
+        "component_class": "Generator", "rows": [],
+    }).status_code == 400
+
+
+def test_row_form_creates_a_carrier_it_introduces(client, net):
+    r = client.patch(BULK, json={
+        "component_class": "Generator",
+        "rows": [{"name": "gas", "updates": {"carrier": "row_form_carrier"}}],
+    })
+    assert r.status_code == 200
+    assert "row_form_carrier" in net.carriers.index
+
+
 def test_carrier_class_is_bulk_editable(client, install_network):
     # D16 absorbs the Carriers tab into the shared grid, which requires that
     # Carrier is a valid component_class here. It already is.
