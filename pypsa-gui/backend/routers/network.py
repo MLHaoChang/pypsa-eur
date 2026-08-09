@@ -29,7 +29,7 @@ from models.schemas import (
 from db.models import Session as SessionRow
 from db.session import get_db
 from deps import current_session
-from services import active_project, change_log_service, vintage_service
+from services import active_project, attribute_catalog, change_log_service, vintage_service
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
@@ -3013,13 +3013,43 @@ def _parse_upload(content: bytes, filename: str) -> pd.DataFrame:
     df.index.name = "timestamp"
     return df
 
+# ── Attribute catalog ─────────────────────────────────────────────────────────
+
+@router.get("/catalog/{component}")
+def get_attribute_catalog(component: str) -> dict:
+    """
+    PyPSA's own attribute metadata for one component class (spec D3, D24).
+
+    Class-level and immutable at runtime, which is why the client caches it
+    under the unscoped key ['catalog', component] with staleTime: Infinity.
+    All catalog logic lives in services/attribute_catalog.py; this stays thin
+    per .cursor/rules/pypsa-gui-backend.mdc:10-12.
+    """
+    n = PyPSAService.get_network()
+    try:
+        attributes = attribute_catalog.catalog_for(n, component)
+    except KeyError:
+        raise HTTPException(
+            400,
+            f"Unknown component '{component}'. Expected one of: "
+            f"{', '.join(attribute_catalog.known_components())}.",
+        )
+    return {"component": component, "attributes": attributes}
+
+
 # ── Time Series ───────────────────────────────────────────────────────────────
 
 @router.get("/timeseries")
 def list_timeseries():
     n = PyPSAService.get_network()
     result = []
-    for component in ["generators", "loads", "storage_units", "stores", "lines", "links"]:
+    # buses and transformers are here for the grid's series-shadow check (spec
+    # D14): a `varying` attribute is only dead if a series actually exists for
+    # that specific asset, and the grid renders both those tabs. The deliberate
+    # side effect is that the Time-Series tab also lists bus and transformer
+    # series that genuinely exist, which is correct, not a regression.
+    for component in ["generators", "loads", "storage_units", "stores", "lines",
+                      "links", "buses", "transformers"]:
         ts_store = getattr(n, f"{component}_t", None)
         if ts_store is None:
             continue
