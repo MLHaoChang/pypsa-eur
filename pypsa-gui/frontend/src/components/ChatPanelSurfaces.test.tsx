@@ -231,6 +231,37 @@ it('shows what the cache is doing once it has done something', async () => {
   expect(meter.textContent).toContain('48,000')
 })
 
+it('can give up meter width without pushing the header controls out', async () => {
+  renderPanel()
+  act(() => {
+    useChatStore.setState({
+      usage: {
+        input_tokens: 1_234_567, output_tokens: 234_567,
+        cache_read_tokens: 12_345_678, cache_create_tokens: 98_765,
+      },
+    })
+  })
+
+  const meter = await screen.findByTestId('chat-cost-meter')
+
+  // The meter sits in a fixed-height flex row with the model picker and the
+  // gear button, and its content is `whitespace-nowrap`. That combination
+  // sets its min-content width to the whole string, so on a long session it
+  // cannot shrink and instead shoves the gear out of the panel. `min-w-0`
+  // is what releases that; `truncate` is what makes the overflow degrade to
+  // an ellipsis. jsdom has no layout engine, so the class list is the only
+  // place this invariant is observable — asserting it is what keeps a
+  // future edit from silently reintroducing the overflow.
+  expect(meter.className).toMatch(/\bmin-w-0\b/)
+  expect(meter.className).toMatch(/\btruncate\b/)
+
+  // Truncation must not lose the numbers — hovering has to give them back.
+  const title = meter.getAttribute('title')
+  expect(title).toBeTruthy()
+  expect(title).toContain('12,345,678')
+  expect(title).toContain('98,765')
+})
+
 it('keeps the meter uncluttered before anything is cached', async () => {
   renderPanel()
   act(() => {

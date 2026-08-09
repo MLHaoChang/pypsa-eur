@@ -38,7 +38,9 @@ import {
   UploadError,
   type UploadMeta,
 } from '../api/uploads'
-import { deriveCostEur, useChatStore, type UploadMetaUI } from '../store/chatStore'
+import {
+  deriveCostEur, PRICING_VERSION, useChatStore, type UploadMetaUI,
+} from '../store/chatStore'
 import ApiKeySetup from './ApiKeySetup'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -289,7 +291,22 @@ function CostMeter() {
   const cached = usage.cache_read_tokens + usage.cache_create_tokens
   return (
     <span
-      className="font-mono text-[10px] text-muted whitespace-nowrap"
+      // `truncate` (overflow-hidden + ellipsis + nowrap) with `min-w-0`.
+      // Both are load-bearing: this sits in a fixed-height flex row with the
+      // model picker and the gear button, and nowrap content sets an
+      // element's min-content width to the entire string — so without
+      // min-w-0 the meter refuses to shrink and shoves the gear out of the
+      // panel on a long session. With them, it gives up width and ellipses.
+      className="font-mono text-[10px] text-muted truncate min-w-0"
+      // Nothing is lost to the ellipsis — the full breakdown is one hover
+      // away, including cache writes, which the visible line omits.
+      title={
+        `${usage.input_tokens.toLocaleString()} input, `
+        + `${usage.output_tokens.toLocaleString()} output, `
+        + `${usage.cache_read_tokens.toLocaleString()} cache read, `
+        + `${usage.cache_create_tokens.toLocaleString()} cache write `
+        + `— €${eur.toFixed(4)} at ${PRICING_VERSION} prices`
+      }
       data-testid="chat-cost-meter"
     >
       {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
