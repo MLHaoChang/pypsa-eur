@@ -24,6 +24,7 @@ import SolveQueuePanel from './SolveQueuePanel'
 const finishedJob: SolveJob = {
   id: 1,
   project_id: 'demo',
+  project_key: 'org:demo',
   status: 'completed',
   position: null,
   objective: 1.0,

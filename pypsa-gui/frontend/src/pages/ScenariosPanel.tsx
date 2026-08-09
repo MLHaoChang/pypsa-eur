@@ -500,8 +500,13 @@ export default function ScenariosPanel() {
 
   // Names/ids with a queued or running job — enqueuing one twice is a
   // guaranteed backend refusal, so they are filtered out before we ask.
+  // A redacted row (R13) names no project and can't mark anything busy — drop
+  // nulls rather than let them sit in the set (mirrors SolveQueuePanel's
+  // activeProjects).
   const busy = useMemo(
-    () => new Set((queue?.jobs ?? []).filter(isActive).map(j => j.project_id)),
+    () => new Set(
+      (queue?.jobs ?? []).filter(isActive).map(j => j.project_id).filter((n): n is string => n != null),
+    ),
     [queue],
   )
 

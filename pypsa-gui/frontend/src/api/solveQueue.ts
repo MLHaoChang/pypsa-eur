@@ -7,12 +7,21 @@ export type SolveJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'ab
 
 export interface SolveJob {
   id: number
-  project_id: string
+  // NULLED for a job the caller may not see. `routers/solve_queue.py` redacts
+  // `project_id`, `project_key` and `error` rather than dropping the row,
+  // because `position` is a place in a GLOBALLY sequential queue and hiding
+  // other orgs' rows would leave a caller at "#4" with one job visible.
+  project_id: string | null
+  // `org:uuid`. Always emitted by the backend, nulled by the same redaction.
+  // Was missing from this interface entirely.
+  project_key: string | null
   status: SolveJobStatus
   position: number | null
   objective: number | null
   solve_time: number | null
   condition: string | null
+  // Nulled by redaction too — a failure message routinely quotes a project
+  // name or a path.
   error: string | null
   enqueued_at: number
   started_at: number | null
