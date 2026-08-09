@@ -93,3 +93,24 @@ describe('terminal prefill', () => {
       .toMatch(/^Bus \d+$/)
   })
 })
+
+describe('schematic drops no longer seed coordinates (spec D28)', () => {
+  it('a Bus dropped at flow-space (45, 30) opens with x=0 and y=0', () => {
+    // (45, 30) is in-range for lon/lat, so before D28 this produced a bus
+    // silently placed off the coast of Egypt rather than an unplaced one.
+    renderForm({ id: 'bus', label: 'Bus', dropPosition: { x: 45, y: 30 } })
+    const lon = screen.getByText('Longitude').parentElement
+      ?.querySelector('input') as HTMLInputElement
+    const lat = screen.getByText('Latitude').parentElement
+      ?.querySelector('input') as HTMLInputElement
+    expect(lon.value).toBe('0')
+    expect(lat.value).toBe('0')
+  })
+
+  it('a Bus dropped at out-of-range flow-space also opens with x=0 and y=0', () => {
+    renderForm({ id: 'bus', label: 'Bus', dropPosition: { x: 1420.5, y: 883.25 } })
+    const lon = screen.getByText('Longitude').parentElement
+      ?.querySelector('input') as HTMLInputElement
+    expect(lon.value).toBe('0')
+  })
+})

@@ -72,11 +72,14 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'v_nom',   label: 'Voltage',    type: 'number', defaultValue: '1',  unit: 'kV',  half: true },
     { key: 'carrier', label: 'Carrier',    type: 'select', defaultValue: 'AC',              half: true, options: ['AC','DC','H2','heat','gas'] },
     { key: 'control', label: 'Control',    type: 'select', defaultValue: 'PQ',              half: true, options: ['PQ','PV','Slack'] },
-    // x/y are the bus's geographic coordinates (longitude / latitude),
-    // surfaced here so the user can edit. When the user drags an item onto
-    // the canvas, these get pre-populated with the React-Flow drop coords
-    // — the same numbers feed n.buses.x / n.buses.y AND posCache, so the
-    // new bus appears exactly where it was dropped.
+    // x/y are the bus's geographic coordinates (longitude / latitude).
+    // A canvas drop does NOT seed them: React Flow flow-space pixels are not
+    // a geographic position, and an in-range pair (e.g. 45, 30) would be
+    // accepted as one — a bus silently placed off the coast of Egypt, with
+    // the backend then measuring line lengths to it. A dropped bus keeps
+    // these '0' defaults, lands as unplaced (utils/geo.ts:44), and is picked
+    // up by UnplacedBusesPanel. The drop point still reaches the canvas via
+    // setPendingNodePosition below, which is a layout cache, not PyPSA data.
     { key: 'x',       label: 'Longitude',  type: 'number', defaultValue: '0',               half: true },
     { key: 'y',       label: 'Latitude',   type: 'number', defaultValue: '0',               half: true },
   ],
