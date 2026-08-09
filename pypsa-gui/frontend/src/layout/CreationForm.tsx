@@ -241,6 +241,27 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
   ],
 }
 
+/**
+ * Palette id → the field a drop-on-a-bus prefills (spec D27).
+ *
+ * 17 of the 18 palette items have a terminal. `bus` is deliberately absent:
+ * it IS the terminal, so dropping a bus onto a bus behaves as a plain canvas
+ * drop. The six branch types take `bus0`; the eleven single-terminal types
+ * take `bus`.
+ *
+ * The orphan FIELD_MAP keys `link` / `generator` / `load` are not listed —
+ * they are unreachable from the live UI and are deleted in the same change as
+ * AssetPalette.tsx (spec D29).
+ */
+export const TERMINAL_FIELD: Record<string, 'bus' | 'bus0'> = {
+  line: 'bus0', transformer: 'bus0',
+  electrolyzer: 'bus0', fuel_cell: 'bus0', power_to_heat: 'bus0', chp: 'bus0',
+  thermal: 'bus', renewable: 'bus',
+  battery: 'bus', psh: 'bus', caes: 'bus', flywheel: 'bus', hydrogen: 'bus',
+  thermal_storage: 'bus',
+  load_elec: 'bus', load_h2: 'bus', load_heat: 'bus',
+}
+
 const AUTO_PREFIX: Record<string, string> = {
   bus: 'Bus', line: 'Line', link: 'Link', transformer: 'Tx',
   thermal: 'Gas', renewable: 'Wind', generator: 'Gen',
@@ -382,13 +403,21 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
     const init: Record<string, string> = {}
     fields.forEach(f => { init[f.key] = f.defaultValue ?? '' })
     init.name = `${prefix} ${existingCount + 1}`
-    // Drop-position pre-population. Only meaningful for the Bus form — other
-    // assets attach to a bus and don't carry their own coordinate. Format
-    // with limited precision so the user sees a clean number; they can still
-    // edit before submitting.
-    if (item.dropPosition && item.id === 'bus') {
-      init.x = String(Number(item.dropPosition.x.toFixed(2)))
-      init.y = String(Number(item.dropPosition.y.toFixed(2)))
+    // Terminal prefill from a drop-on-a-bus (spec D27). Applied only when the
+    // target bus passes the field's own carrier filter — otherwise the form
+    // opens unprefilled and the existing mismatch line ("No H₂ bus in
+    // network…") does the explaining, rather than a hydrogen bus silently
+    // landing in an electricity-only terminal.
+    //
+    // A schematic drop deliberately does NOT seed init.x / init.y (spec D28):
+    // React Flow flow-space pixels are not a geographic position. See the
+    // comment on FIELD_MAP.bus's x/y fields.
+    const terminal = TERMINAL_FIELD[item.id]
+    if (item.dropBusName && terminal) {
+      const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+      if (spec && filteredBusNames(spec.busCarrierFilter).includes(item.dropBusName)) {
+        init[terminal] = item.dropBusName
+      }
     }
     return init
   })
