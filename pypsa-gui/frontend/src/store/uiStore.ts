@@ -1,5 +1,10 @@
 import { create } from 'zustand'
 import type { LockState } from '../utils/lockState'
+// Floor for the docked comparison rail width — keeps both the rail and the
+// live Results pane usable when the splitter is dragged to an extreme. Single
+// definition, shared with the rail's own width arithmetic: this store and
+// Results.tsx enforcing the same number independently is how they can drift.
+import { RAIL_MIN_W } from '../pages/results/railWidth'
 
 interface SelectedComponent { type: string; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
@@ -69,9 +74,6 @@ const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
 
 const RECENTS_MAX = 5
-// Floor for the docked comparison rail width — keeps both the rail and the
-// live Results pane usable when the splitter is dragged to an extreme.
-const COMPARE_RAIL_MIN_W = 360
 
 function storedSidebarMode(): SidebarMode {
   try {
@@ -167,7 +169,7 @@ function storedCompareRailOpen(): boolean {
 function storedCompareRailWidth(): number {
   try {
     const v = Number(localStorage.getItem(COMPARE_RAIL_WIDTH_KEY))
-    if (Number.isFinite(v) && v >= COMPARE_RAIL_MIN_W) return v
+    if (Number.isFinite(v) && v >= RAIL_MIN_W) return v
   } catch { /* noop */ }
   return 560
 }
@@ -531,7 +533,7 @@ export const useUIStore = create<UIStore>((set) => ({
     return { compareRailOpen: next }
   }),
   setCompareRailWidth: (px) => {
-    const w = Math.max(COMPARE_RAIL_MIN_W, Math.round(px))
+    const w = Math.max(RAIL_MIN_W, Math.round(px))
     try { localStorage.setItem(COMPARE_RAIL_WIDTH_KEY, String(w)) } catch { /* noop */ }
     set({ compareRailWidth: w })
   },

@@ -1,36 +1,54 @@
 /**
  * Width arithmetic for the docked comparison rail in Results.
  *
- * Extracted because the WRITE DECISION — "does this gesture record a new
- * desired width, and what is it" — is where three rounds of the same defect
- * kept landing. It previously existed only as a one-line `if` reading live
- * global state, inside a closure, inside a `useCallback`, inside a 900-line
- * component: unreachable by any test that was not a full DOM drag simulation,
- * which is why every version of it shipped looking obviously correct.
+ * ONE RULE, and it is the whole design:
  *
- * The invariant these functions exist to protect:
+ *   The WRITE path never consults available space.
+ *   The RENDER path is the only thing that does.
  *
- *   `compareRailWidth` is the width the USER ASKED FOR. It is persisted. It
- *   must never be overwritten by a value that the available space chose.
+ * `compareRailWidth` (store, persisted) is the width the user asked for. A
+ * drag records exactly what the user dragged to, floored at `RAIL_MIN_W`, and
+ * nothing else ever writes it. What appears on screen is
+ * `renderedRailWidth(desired, wrapW)` — derived per render, never stored, and
+ * therefore incapable of corrupting anything.
  *
- * The rail still shrinks on screen when it does not fit — that is
- * `renderedRailWidth`, computed per render and never stored.
+ * Why the write path is forbidden from knowing the ceiling: four separate
+ * defects, each individually fixed and each of which came back somewhere else,
+ * all had the same root — the write decision consulting available space.
+ *
+ *   1. The clamp WROTE the constrained value back through a persisting setter,
+ *      so opening the assistant destroyed a dragged 700 on a layout event.
+ *   2. Fixed by rendering the constraint instead — but a drag pinned against
+ *      the ceiling still recorded the ceiling, so the constraint was written
+ *      by a gesture rather than by a layout event.
+ *   3. Fixed by suppressing pinned writes — but the guard read the LIVE stored
+ *      width, which the same gesture was rewriting, so one pixel of press
+ *      drift disarmed it and the preference ratcheted down.
+ *   4. Fixed by deciding once per gesture from a mousedown snapshot — but the
+ *      ceiling in that snapshot goes stale when the assistant dock opens
+ *      mid-drag (`applyUiNavigate` does exactly that, on an agent turn, with
+ *      no idea a mouse button is held), so the release computed against a
+ *      wrapper that no longer existed.
+ *
+ * Every one of those fixes was locally correct. The class survived because the
+ * question "how much room is there" was being asked at write time at all.
+ * It is not asked here any more.
  */
 
 /**
  * Minimum px kept for BOTH the live Results pane and the comparison rail.
- * `uiStore.setCompareRailWidth` enforces the same floor on the stored value.
+ * The single definition — `uiStore`'s `setCompareRailWidth` floor and its
+ * stored-value validation both import this.
  */
 export const RAIL_MIN_W = 360
 
 /**
  * The widest the rail may be while the live pane keeps its floor.
  *
- * The outer `max` matters: below a `2 × RAIL_MIN_W` wrapper, `wrapW -
- * RAIL_MIN_W` is smaller than the rail's own minimum, and returning it would
- * let callers compute a rail narrower than the floor. Every caller must use
- * THIS, not a bare subtraction — a caller that spelled the bound differently
- * is how the 660px-wrapper bug hid.
+ * RENDER-SIDE ONLY. Do not use this to decide what to store. The outer `max`
+ * matters: below a `2 × RAIL_MIN_W` wrapper, `wrapW - RAIL_MIN_W` is smaller
+ * than the rail's own minimum, and returning it would let a caller compute a
+ * rail narrower than the floor.
  */
 export function railCeiling(wrapW: number): number {
   return Math.max(RAIL_MIN_W, wrapW - RAIL_MIN_W)
@@ -38,45 +56,30 @@ export function railCeiling(wrapW: number): number {
 
 /**
  * What the rail actually renders at: the desired width, constrained to what
- * currently fits. Never stored.
+ * currently fits. Derived state — never stored, so it cannot go stale and
+ * cannot lose anything. Recomputed from a live measurement on every render,
+ * which is also why a layout event landing mid-gesture needs no special
+ * handling: the next render simply constrains against the new width.
  */
 export function renderedRailWidth(desired: number, wrapW: number): number {
   return Math.max(RAIL_MIN_W, Math.min(desired, railCeiling(wrapW)))
 }
 
 /**
- * The width a completed drag should RECORD, or `null` for "record nothing".
+ * The width a drag records: exactly where the user dragged to, floored.
  *
- * Called once per gesture, on mouseup, with the position the user released at
- * (unclamped) and the desired width as it stood when the gesture STARTED.
- * Both of those are deliberate:
+ * No ceiling parameter, deliberately — see the module comment. This is a
+ * one-line function that exists to be a NAMED, greppable, table-tested place
+ * where the absence of a ceiling is visible, because every previous version of
+ * this logic looked obviously correct at the call site too.
  *
- *  * Once per gesture, because a drag is one decision. Deciding per mousemove
- *    meant an intermediate position could be recorded and then leave the
- *    guard disarmed for the rest of the gesture — one pixel of press drift
- *    wrote a sub-ceiling width, and every later move compared against THAT
- *    instead of the user's real preference. The gesture rendered identically
- *    at both ends while the stored value ratcheted down to the ceiling.
- *
- *  * `desiredAtDragStart`, not the live store value, because the live value is
- *    what this same gesture is in the middle of rewriting. A guard that reads
- *    it is comparing against its own output.
- *
- * Returns `null` when the release lands pinned against the ceiling while a
- * LARGER width is already stored: that is the space constraint deciding, not
- * the user, and recording it would replace their preference with whatever this
- * window happens to allow. Growing INTO the ceiling from a smaller stored
- * width is a real choice and IS recorded.
+ * INTENDED CONSEQUENCE, which will look wrong to the next reader: dragging
+ * left on a rail that is already space-constrained records a desired width
+ * LARGER than currently fits. That is correct. The user asked for wider, so we
+ * store wider and render what fits; when the dock closes or the window grows
+ * they get the width they asked for. Clamping it here is precisely the bug
+ * this module exists to prevent.
  */
-export function nextDesiredRailWidth(
-  desiredAtDragStart: number,
-  wrapW: number,
-  releasedAt: number,
-): number | null {
-  const ceiling = railCeiling(wrapW)
-  const next = Math.max(RAIL_MIN_W, Math.min(ceiling, releasedAt))
-  // Float equality is exact here: `Math.min` returns the ceiling OPERAND
-  // bit-identically when it wins, so no arithmetic happens on this path.
-  if (next === ceiling && desiredAtDragStart > ceiling) return null
-  return next
+export function desiredFromDrag(releasedAt: number): number {
+  return Math.max(RAIL_MIN_W, releasedAt)
 }
