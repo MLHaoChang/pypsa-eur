@@ -3501,115 +3501,19 @@ def get_asset_economics():
             by_p[p] = by_p.get(p, 0.0) + float(weighted[i])
         return total, by_p
 
-    # ── Marginal prices per bus (one bus per row in n.buses) ─────────────
-    try:
-        prices = _result_df(n, "buses_t", "marginal_price", "lopf")
-    except Exception:
-        prices = None
-    if prices is None or prices.empty:
-        prices = _pd.DataFrame(0.0, index=snapshots, columns=n.buses.index)
-    # Replace NaN with 0 so missing duals don't poison weighted sums.
-    prices = prices.fillna(0.0)
-
-    # ── Merit-order ("subsidy-removed") price adjustment ─────────────────
-    # The curtailment_cost extra-functionality term in solver_service adds
-    # `-cost × p` to the LP objective for any renewable with
-    # curtailment_cost > 0. That distorts the LP dual at the renewable's
-    # bus: when the renewable is the marginal unit (dispatching strictly
-    # between 0 and p_max_pu × p_nom_opt), the dual equals its effective
-    # LP MC, i.e. (marginal_cost − curtailment_cost). With marginal_cost=0
-    # and a typical curtailment_cost of 100–5000 €/MWh, the dual is large
-    # and negative — and any asset trading against that bus sees a
-    # "negative charge cost" or "negative revenue" that's not physical
-    # (no money flows; the negative number is purely the LP's internal
-    # accounting).
+    # ── Marginal prices per bus, merit-order corrected ───────────────────
+    # Was a third verbatim copy of the curtailment-subsidy correction. The
+    # shared helper performs the IDENTICAL fetch this block used to do by
+    # hand — `_result_df(..., "lopf")`, zero-fallback on `n.snapshots`
+    # (`snapshots` here is bound to exactly that), then `fillna(0.0)` — so
+    # the collapse is behaviour-preserving, pinned by
+    # tests/test_asset_economics_merit_order_parity.py.
     #
-    # The fix here is TARGETED — fire ONLY when the LP dual actually
-    # equals the renewable's effective LP MC (within a small tolerance),
-    # which is the diagnostic signal that the renewable IS the unit
-    # setting the dual. A naive "renewable strictly between 0 and
-    # ceiling → adjust" rule over-corrects on real networks where
-    # other binding constraints (line limits, ramping, storage SoC)
-    # determine the dual while the subsidised renewable just happens
-    # to be operating in the middle of its range — that produces prices
-    # 30×–50× too high (observed in QA: avg charge price jumping from
-    # +50 €/MWh to +1700 €/MWh).
-    try:
-        gens = n.generators
-        if (not gens.empty
-                and "curtailment_cost" in gens.columns
-                and not n.generators_t.p.empty):
-            subsidised = gens.index[gens["curtailment_cost"].fillna(0) > 0]
-            if len(subsidised) > 0:
-                p_gens = n.generators_t.p
-                p_max_pu_full = n.get_switchable_as_dense("Generator", "p_max_pu")
-                p_nom_opt = (gens["p_nom_opt"]
-                             if "p_nom_opt" in gens.columns
-                             else gens["p_nom"])
-                eps = 1e-6
-                dual_tol = 1.0  # €/MWh — LP duals are exact to numerical eps
-                by_bus: dict[str, list[tuple[str, float, float]]] = {}
-                for g in subsidised:
-                    if g not in p_gens.columns:
-                        continue
-                    bus = str(gens.at[g, "bus"])
-                    cost = float(gens.at[g, "curtailment_cost"])
-                    real_mc = float(gens.at[g, "marginal_cost"]) if "marginal_cost" in gens.columns else 0.0
-                    by_bus.setdefault(bus, []).append((g, cost, real_mc))
-                if by_bus:
-                    prices = prices.copy()
-                    for bus, members in by_bus.items():
-                        if bus not in prices.columns:
-                            continue
-                        for i in range(len(p_gens.index)):
-                            t = p_gens.index[i]
-                            raw_dual = float(prices.at[t, bus])
-                            # Walk subsidised renewables at this bus. Adjust
-                            # only if one is dispatching (pv > 0) AND the
-                            # observed LP dual matches its effective LP MC
-                            # within tolerance — the unambiguous diagnostic
-                            # that THIS renewable is setting the dual via
-                            # the subsidy term. The renewable can be either
-                            # mid-range OR at its ceiling; the dual-match
-                            # check captures both LP-degenerate situations.
-                            for g, cost, real_mc in members:
-                                pv = float(p_gens.at[t, g])
-                                if pv <= eps:
-                                    continue
-                                effective_lp_mc = real_mc - cost
-                                # Two diagnostics trigger the adjustment:
-                                #  (a) dual exactly at the subsidised LP MC
-                                #      → renewable IS the marginal unit.
-                                #  (b) dual BELOW the subsidised LP MC AND
-                                #      the renewable is dispatching at its
-                                #      ceiling (p == p_max_pu × p_nom_opt).
-                                #      Here PyPSA stacks the upper-bound
-                                #      shadow on top of the subsidy, dragging
-                                #      the dual further negative. Without
-                                #      this branch, hours where Solar is
-                                #      saturated (the common case at noon)
-                                #      keep an artificially negative dual
-                                #      that flows through to storage's
-                                #      "charge_cost" as a phantom subsidy.
-                                if abs(raw_dual - effective_lp_mc) <= dual_tol:
-                                    prices.at[t, bus] = real_mc
-                                    break
-                                if raw_dual < effective_lp_mc - dual_tol:
-                                    # Ceiling check: only adjust when this
-                                    # renewable is actually at its upper
-                                    # bound (within numerical tolerance).
-                                    try:
-                                        pmp = float(p_max_pu_full.at[t, g])
-                                        nom = float(p_nom_opt.get(g, 0.0))
-                                        ceiling = pmp * nom
-                                    except Exception:
-                                        ceiling = None
-                                    if ceiling is not None and ceiling > eps and abs(pv - ceiling) <= 1e-3 * max(ceiling, 1.0):
-                                        prices.at[t, bus] = real_mc
-                                        break
-                    prices = prices.fillna(0.0)
-    except Exception:
-        pass  # defensive — keep raw LP duals if adjustment fails
+    # Why it matters that this is one function now: the copy that lived in
+    # `get_prices` implemented only the first of the two branches and had
+    # silently drifted (02b5e806). Three copies of a rule this subtle is how
+    # that happened.
+    prices = corrected_marginal_prices(n)
 
     # ── Generator block ──────────────────────────────────────────────────
     gen_rows: list[dict] = []
