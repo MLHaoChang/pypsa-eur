@@ -132,6 +132,19 @@ def _context_solves() -> list[tuple[Any, Any, str | None]]:
         except Exception:  # pragma: no cover - defensive
             logger.exception("could not read solver state for a context")
             continue
+        if kind == "queue":
+            # A queue job's context is REGISTERED now (one ProjectContext per
+            # project, always), so this walk and the job table in
+            # `solves_in_flight` would each report the same solve. The job
+            # table stays the single source for the queue path because it is
+            # the only one that also sees a job that is still `queued`.
+            #
+            # Skipping here is also what keeps a background queue solve out of
+            # the `"active"` bucket, which claims `interruptible=True` via
+            # `/api/simulation/abort` — that endpoint reaches the FOREGROUND
+            # worker only. `solve_queue.abort` is what stops a queue job, and
+            # `desktop/gui.py:_abort_everything` already calls it separately.
+            continue
         if thread is not None and thread.is_alive():
             found.append((ctx, thread, kind))
     return found
@@ -142,15 +155,17 @@ def solves_in_flight() -> list[InFlightSolve]:
     Every running solve, across all three paths.
 
     Path (b) consults the QUEUE'S OWN JOB TABLE, not the context registry.
-    `solve_queue._run_job` reuses the RESIDENT context when the project already
-    has one — so that a foreground edit is included in the solve — and only
-    otherwise calls `PyPSAService.build_context()`, which is documented as "off
-    to the side, not activated" and is never registered.
+    Every queue job's context IS registered now — `solve_queue._run_job` and
+    `PyPSAService.build_context()` both go through the shared
+    `hydrate_or_adopt` lock, one `ProjectContext` per project, always — and
+    `_context_solves()` deliberately SKIPS any context whose `kind` is
+    `"queue"` so this walk and the job table never double-report the same
+    solve.
 
-    So the registry finds SOME queue solves and not others, which is worse than
-    finding none: it looks like it works. The job table is the only complete
-    source. (Constraint #6 originally stated the unqualified "neither", which
-    is half wrong; corrected in the plan.)
+    The job table stays the source for path (b) regardless: it is the only
+    one that also sees a job that is still `queued` (not yet dispatched to a
+    context at all), so a context-only view would still be incomplete even
+    though every RUNNING queue solve now has a resident context.
     """
     found: list[InFlightSolve] = []
 
