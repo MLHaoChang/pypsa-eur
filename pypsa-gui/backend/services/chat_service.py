@@ -1790,15 +1790,129 @@ def _drop_oldest_turn_group(messages: collections.deque) -> bool:
     return True
 
 
+# A11 — the marker that identifies the synthetic summary message. Kept as a
+# literal prefix rather than a side table because `session.messages` is a
+# plain deque that gets rebuilt from chat.jsonl on reload; anything held
+# beside it would not survive that round trip.
+TURN_SUMMARY_PREFIX = "[Earlier conversation summary]"
+# The summary rides on EVERY subsequent request, so an unbounded one would
+# eat the context budget it exists to defend.
+TURN_SUMMARY_MAX_CHARS = 1200
+_SUMMARY_LINE_CHARS = 110
+_SUMMARY_MAX_LINES = 8
+
+
+def is_turn_summary(msg: dict[str, Any]) -> bool:
+    """True for the synthetic message that stands in for trimmed turns."""
+    content = msg.get("content")
+    return (
+        msg.get("role") == "user"
+        and isinstance(content, str)
+        and content.startswith(TURN_SUMMARY_PREFIX)
+    )
+
+
+def _describe_dropped(group: list[dict[str, Any]]) -> str | None:
+    """One line for one dropped turn: what was asked, and what ran."""
+    asked = ""
+    tools: list[str] = []
+    for msg in group:
+        content = msg.get("content")
+        if msg.get("role") == "user" and isinstance(content, str) and not asked:
+            asked = content.strip()
+        elif msg.get("role") == "assistant" and isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    name = str(block.get("name") or "")
+                    if name and name not in tools:
+                        tools.append(name)
+    if not asked and not tools:
+        return None
+    line = f'· "{asked[:_SUMMARY_LINE_CHARS]}"' if asked else "· (tool-only turn)"
+    if tools:
+        line += f" → {', '.join(tools[:4])}"
+    return line
+
+
+def _render_summary(count: int, lines: list[str]) -> str:
+    head = (
+        f"{TURN_SUMMARY_PREFIX} {count} earlier "
+        f"{'turn' if count == 1 else 'turns'} were dropped to stay inside the "
+        f"context budget. You cannot see them; say so rather than guessing if "
+        f"the user refers back to one."
+    )
+    body = "\n".join(lines[-_SUMMARY_MAX_LINES:])
+    out = f"{head}\n{body}" if body else head
+    if len(out) > TURN_SUMMARY_MAX_CHARS:
+        out = out[:TURN_SUMMARY_MAX_CHARS - 1] + "…"
+    return out
+
+
+def _parse_summary(msg: dict[str, Any]) -> tuple[int, list[str]]:
+    """Recover (count, lines) from an existing summary so drops accumulate."""
+    text = str(msg.get("content") or "")
+    lines = [ln for ln in text.split("\n")[1:] if ln.startswith("·")]
+    count = 0
+    for token in text.split("\n", 1)[0].split():
+        if token.isdigit():
+            count = int(token)
+            break
+    return count, lines
+
+
 def trim_session_messages(
     messages: collections.deque,
     max_len: int | None = None,
 ) -> None:
-    """Drop oldest complete turn groups until `len(messages) <= max_len`."""
+    """
+    Drop oldest complete turn groups until `len(messages) <= max_len`, and
+    leave one summary message in their place (A11 / Improvement #11).
+
+    The drop itself was already pairing-aware — it never orphans a tool_use.
+    What it was not is *visible*: the agent did not experience a trim, it
+    experienced those turns never happening, so a user referring back to one
+    got a confident guess instead of "I no longer have that".
+
+    The summary is deterministic rather than an LLM call. An extra model
+    call here would sit inside a loop that already carries a bounded retry,
+    a model-fallback path, and cache breakpoints that must stay byte-stable
+    across retries — and it would have to be computed once per turn rather
+    than once per attempt, or it would bill twice and move the breakpoint
+    underneath itself. Recovering the REFERENT is the fix; better prose is
+    not what was broken.
+    """
     limit = SESSION_MESSAGES_MAX if max_len is None else max_len
-    while len(messages) > limit:
+    if len(messages) <= limit:
+        return
+
+    # Absorb any existing summary rather than dropping it (which would lose
+    # the record) or prepending beside it (which would grow a pile of
+    # summaries that eventually fills the window it defends).
+    count, lines = 0, []
+    if messages and is_turn_summary(messages[0]):
+        count, lines = _parse_summary(messages.popleft())
+
+    # The summary occupies a slot of its own, so once one exists the deque
+    # has to come one below the cap to leave room. Every drop runs through
+    # THIS loop — a second uncounted drop pass to make that room would
+    # silently lose turns, which is the defect this function exists to fix.
+    while True:
+        target = max(limit - 1, 0) if (count or lines) else limit
+        if len(messages) <= target:
+            break
+        before = list(messages)
         if not _drop_oldest_turn_group(messages):
             break
+        dropped = before[:len(before) - len(messages)]
+        # A stray leading tool_result is recovery from a previously-broken
+        # history, not a turn — it gets no line, but the deque still shrank.
+        line = _describe_dropped(dropped)
+        if line:
+            count += 1
+            lines.append(line)
+
+    if count or lines:
+        messages.appendleft({"role": "user", "content": _render_summary(count, lines)})
 
 
 def _format_live_network_meta(ctx: Any) -> str | None:
