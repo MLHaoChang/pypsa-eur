@@ -168,6 +168,18 @@ TOOLS: list[dict[str, Any]] = [
         ["component_class", "name"],
     ),
     _empty(
+        "diagnose_network",
+        "Electrical connectivity diagnosis: how many islands the network "
+        "splits into, which buses have no branch attached, and — the usual "
+        "cause of an infeasible solve — which islands hold load but nothing "
+        "able to serve it. Returns {bus_count, island_count, islands, "
+        "isolated_buses, islands_without_generation, verdict}, where verdict "
+        "is connected | fragmented | infeasible_topology | empty. Call this "
+        "FIRST when a solve is infeasible or a result looks impossible. Does "
+        "not check dangling bus references — run_preflight covers those. "
+        "Safety: read.",
+    ),
+    _empty(
         "get_meta",
         "Network meta: {name, bus_count, line_count, snapshot_count, ...}. Safety: read.",
     ),
@@ -1458,6 +1470,9 @@ TOOL_ROUTES: dict[str, list] = {
     # read (22)
     "list_components": _COMP_LIST_ROUTES,
     "get_component": _SERVICE_CALL,
+    # #15: derived entirely from the in-memory graph — there is no HTTP
+    # endpoint to mirror, same as dispatch_status.
+    "diagnose_network": _SERVICE_CALL,
     "get_meta": [("GET", "/api/network/meta")],
     "list_snapshots": [("GET", "/api/network/snapshots")],
     "list_carriers": [("GET", "/api/network/carriers")],
