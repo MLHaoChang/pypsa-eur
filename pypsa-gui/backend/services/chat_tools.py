@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import json
 import logging
 import math
 import uuid
@@ -178,8 +179,81 @@ def _sync(value):
 # ── Read tools (22) ─────────────────────────────────────────────────────────
 
 
-def list_components(component_class: str) -> list[dict]:
-    """List all components of one class (transient-filtered)."""
+# Pagination bounds for the list-shaped read tools (#16).
+#
+# Rows are the wrong unit on their own. `_truncate_result` serialises any
+# dict result and replaces it with a `preview` string past ~4000 chars, so a
+# 200-row page is fine for Carriers and 45 KB for Buses — and a page that
+# gets previewed is exactly the opaque blob this item exists to remove.
+# MAX_PAGE_CHARS is therefore the real bound and the row counts are
+# secondary caps; the packing loop below stops at whichever binds first.
+DEFAULT_PAGE_SIZE = 200
+MAX_PAGE_SIZE = 1000
+# Under _truncate_result's 4000, leaving headroom for the envelope's own
+# keys and for JSON escaping of names we did not write.
+MAX_PAGE_CHARS = 3000
+
+
+def _paginate(rows: list[dict], offset: int, limit: int | None) -> dict:
+    """
+    Wrap `rows` in the page envelope shared by the list-shaped read tools.
+
+    The envelope is returned ALWAYS, not only when a page was requested.
+    A bare list cannot answer "did I see everything?" — 200 rows and
+    200-of-5000 look identical at the call site — and a shape that changes
+    depending on the arguments is harder for a model to reason about than
+    one that does not. `total_count` is the field that makes every response
+    self-describing.
+
+    Being a dict also matters mechanically: `_truncate_result` replaces any
+    list over 200 entries with a `sample`, which is the very truncation this
+    exists to replace.
+    """
+    if offset < 0:
+        raise HTTPException(400, f"offset must be >= 0, got {offset}")
+    if limit is not None and limit < 1:
+        raise HTTPException(400, f"limit must be >= 1, got {limit}")
+
+    requested = DEFAULT_PAGE_SIZE if limit is None else limit
+    effective = min(requested, MAX_PAGE_SIZE)
+    candidate = rows[offset:offset + effective]
+
+    # Pack by serialised size. Row width varies by an order of magnitude
+    # across component classes, so no fixed row count is right for all of
+    # them — and overshooting means the whole page comes back as a preview
+    # string, which is worse than a short page.
+    page: list[dict] = []
+    used = 0
+    for row in candidate:
+        cost = len(json.dumps(row, default=str)) + 2  # +2 for ", "
+        # Always take the first row even if it alone busts the budget:
+        # returning an empty page would leave `offset` unable to advance and
+        # the agent looping forever on a row it can never get past.
+        if page and used + cost > MAX_PAGE_CHARS:
+            break
+        page.append(row)
+        used += cost
+
+    out = {
+        "items": page,
+        "total_count": len(rows),
+        "offset": offset,
+        "returned": len(page),
+        "has_more": offset + len(page) < len(rows),
+    }
+    # Say so whenever the ask was reduced, by either bound. A model that
+    # asked for 10 000 and got 13 with no note would read `has_more` as the
+    # network being smaller than it is, or stop early believing it had
+    # reached the end of what it requested.
+    if len(page) < min(requested, len(candidate)):
+        out["limit_clamped_to"] = len(page)
+    return out
+
+
+def list_components(
+    component_class: str, *, offset: int = 0, limit: int | None = None,
+) -> dict:
+    """List one class of component, one page at a time (transient-filtered)."""
     from routers.network import _get_component
     if component_class == "GlobalConstraint":
         attr = "global_constraints"
@@ -187,7 +261,7 @@ def list_components(component_class: str) -> list[dict]:
         raise HTTPException(400, f"Unknown component_class: {component_class!r}")
     else:
         attr = _GENERIC_CRUD_ATTRS[component_class]
-    return _get_component(component_class, attr)
+    return _paginate(_get_component(component_class, attr), offset, limit)
 
 
 def get_component(component_class: str, name: str) -> dict:
@@ -311,13 +385,17 @@ def get_timeseries(component: str, name: str, attribute: str, period: int | None
     return _h(component=component, attribute=attribute, columns=name)
 
 
-def list_all_timeseries() -> list[dict]:
+def list_all_timeseries(*, offset: int = 0, limit: int | None = None) -> dict:
     # NOTE: the route handler is `list_timeseries` (GET /api/network/timeseries),
     # not `list_all_timeseries`. It walks every `<component>_t` accessor and
     # reports non-empty frames + columns directly off the network, so time series
     # baked into an imported .nc are surfaced (not just user uploads).
+    #
+    # Paginated for the same reason as list_components (#16): a sector-coupled
+    # network has thousands of profiles, and the blind 200-row cut gave the
+    # agent no way to reach the rest.
     from routers.network import list_timeseries as _h
-    return _h()
+    return _paginate(list(_h()), offset, limit)
 
 
 def get_aggregate_load(section: str | None = None, names: str | None = None) -> dict:

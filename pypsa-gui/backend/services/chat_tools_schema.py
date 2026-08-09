@@ -133,10 +133,27 @@ TOOLS: list[dict[str, Any]] = [
 
     _t(
         "list_components",
-        "List all components of one class as JSON rows (transient-filtered: "
-        "solver-internal vintage clones and VOLL slack generators are hidden). "
-        "Safety: read.",
-        {"component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM}},
+        "List one class of component as JSON rows, one page at a time "
+        "(transient-filtered: solver-internal vintage clones and VOLL slack "
+        "generators are hidden). Returns "
+        "{items, total_count, offset, returned, has_more}. `total_count` is "
+        "the size of the WHOLE class, not the page — compare it against "
+        "`returned` to see what you are missing, and re-call with "
+        "offset=offset+returned while has_more is true. Safety: read.",
+        {
+            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+            "offset": {
+                "type": "integer",
+                "description": "Row to start at. Defaults to 0.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": (
+                    "Rows to return. Defaults to 200; values above 1000 are "
+                    "clamped, and the response then carries limit_clamped_to."
+                ),
+            },
+        },
         ["component_class"],
     ),
     _t(
@@ -222,10 +239,26 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["component", "name", "attribute"],
     ),
-    _empty(
+    _t(
         "list_all_timeseries",
-        "Enumerate every (component, attribute, column) _user_ts entry with "
-        "metadata. Safety: read.",
+        "Enumerate every (component, attribute, column) time-series entry "
+        "with metadata, one page at a time. Returns "
+        "{items, total_count, offset, returned, has_more} — re-call with "
+        "offset=offset+returned while has_more is true. Safety: read.",
+        {
+            "offset": {
+                "type": "integer",
+                "description": "Row to start at. Defaults to 0.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": (
+                    "Rows to return. Defaults to 200; values above 1000 are "
+                    "clamped, and the response then carries limit_clamped_to."
+                ),
+            },
+        },
+        [],
     ),
     _empty(
         "get_solver_config",
