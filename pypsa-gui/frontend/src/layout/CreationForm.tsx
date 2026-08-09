@@ -122,15 +122,6 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 's_nom',            label: 'S nom',         type: 'number',   defaultValue: '100', unit: 'MVA',  half: true },
     { key: 's_nom_extendable', label: 'S nom extendable', type: 'checkbox', defaultValue: 'false' },
   ],
-  link: [
-    { key: 'name',         label: 'Name',        type: 'text',   required: true },
-    { key: 'bus0',         label: 'From Bus',     type: 'bus',    required: false },
-    { key: 'bus1',         label: 'To Bus',       type: 'bus',    required: false },
-    { key: 'carrier',      label: 'Carrier',      type: 'text',   defaultValue: 'AC' },
-    { key: 'p_nom',        label: 'P nom',        type: 'number', defaultValue: '0',  unit: 'MW',      half: true },
-    { key: 'efficiency',   label: 'Efficiency',   type: 'number', defaultValue: '1',                   half: true },
-    { key: 'marginal_cost',label: 'Marginal cost',type: 'number', defaultValue: '0',  unit: '$/MWh' },
-  ],
   electrolyzer: [
     { key: 'name',         label: 'Name',                    type: 'text',   required: true },
     { key: 'bus0',         label: 'Electricity bus (input)', type: 'bus',    required: true,  busCarrierFilter: 'non-h2' } as BusFieldSpec,
@@ -156,7 +147,6 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
   ],
   thermal:   genFields('gas'),
   renewable: genFields('wind'),
-  generator: genFields(''),
   battery:   storFields('battery', '4'),
   psh:       storFields('hydro',   '6'),
   hydrogen:  storFields('H2',      '24'),
@@ -235,13 +225,6 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'carrier', label: 'Carrier',       type: 'text',   defaultValue: 'heat' },
     { key: 'p_set',   label: 'P set',         type: 'number', defaultValue: '0', unit: 'MW' },
   ],
-  // Generic load — kept for callers that aren't carrier-specific (legacy).
-  load: [
-    { key: 'name',    label: 'Name',          type: 'text',   required: true },
-    { key: 'bus',     label: 'Attach to Bus', type: 'bus',    required: true },
-    { key: 'carrier', label: 'Carrier',       type: 'text',   defaultValue: 'AC' },
-    { key: 'p_set',   label: 'P set',         type: 'number', defaultValue: '0',  unit: 'MW' },
-  ],
 }
 
 /**
@@ -266,34 +249,34 @@ export const TERMINAL_FIELD: Record<string, 'bus' | 'bus0'> = {
 }
 
 const AUTO_PREFIX: Record<string, string> = {
-  bus: 'Bus', line: 'Line', link: 'Link', transformer: 'Tx',
-  thermal: 'Gas', renewable: 'Wind', generator: 'Gen',
+  bus: 'Bus', line: 'Line', transformer: 'Tx',
+  thermal: 'Gas', renewable: 'Wind',
   battery: 'Battery', psh: 'PSH', hydrogen: 'H2', caes: 'CAES', flywheel: 'FW',
   electrolyzer: 'Electrolyzer', fuel_cell: 'FuelCell',
   power_to_heat: 'P2H', chp: 'CHP', thermal_storage: 'TES',
-  load: 'Load', load_elec: 'Load', load_h2: 'H2Load', load_heat: 'HeatLoad',
+  load_elec: 'Load', load_h2: 'H2Load', load_heat: 'HeatLoad',
 }
 
 const QUERY_KEY: Record<string, string> = {
-  bus: 'buses', line: 'lines', link: 'links', transformer: 'transformers',
-  thermal: 'generators', renewable: 'generators', generator: 'generators',
+  bus: 'buses', line: 'lines', transformer: 'transformers',
+  thermal: 'generators', renewable: 'generators',
   battery: 'storage_units', psh: 'storage_units', hydrogen: 'storage_units',
   caes: 'storage_units', flywheel: 'storage_units',
   electrolyzer: 'links', fuel_cell: 'links',
   power_to_heat: 'links', chp: 'links',
   thermal_storage: 'stores',
-  load: 'loads', load_elec: 'loads', load_h2: 'loads', load_heat: 'loads',
+  load_elec: 'loads', load_h2: 'loads', load_heat: 'loads',
 }
 
 const COMPONENT_TYPE: Record<string, string> = {
-  bus: 'Bus', line: 'Line', link: 'Link', transformer: 'Transformer',
-  thermal: 'Generator', renewable: 'Generator', generator: 'Generator',
+  bus: 'Bus', line: 'Line', transformer: 'Transformer',
+  thermal: 'Generator', renewable: 'Generator',
   battery: 'StorageUnit', psh: 'StorageUnit', hydrogen: 'StorageUnit',
   caes: 'StorageUnit', flywheel: 'StorageUnit',
   electrolyzer: 'Link', fuel_cell: 'Link',
   power_to_heat: 'Link', chp: 'Link',
   thermal_storage: 'Store',
-  load: 'Load', load_elec: 'Load', load_h2: 'Load', load_heat: 'Load',
+  load_elec: 'Load', load_h2: 'Load', load_heat: 'Load',
 }
 
 type CreateFn = (p: Record<string, unknown>) => Promise<unknown>
@@ -301,7 +284,6 @@ type CreateFn = (p: Record<string, unknown>) => Promise<unknown>
 const CREATE_FN: Record<string, CreateFn> = {
   bus:           p => networkApi.createBus(p as Partial<Bus>),
   line:          p => networkApi.createLine(p as Partial<Line>),
-  link:          p => networkApi.createLink(p as Partial<Link>),
   transformer:   p => networkApi.createTransformer(p as Partial<Transformer>),
   electrolyzer:  p => networkApi.createLink(p as Partial<Link>),
   fuel_cell:     p => networkApi.createLink(p as Partial<Link>),
@@ -309,14 +291,12 @@ const CREATE_FN: Record<string, CreateFn> = {
   chp:           p => networkApi.createLink(p as Partial<Link>),
   thermal:       p => networkApi.createGenerator(p as Partial<Generator>),
   renewable:     p => networkApi.createGenerator(p as Partial<Generator>),
-  generator:     p => networkApi.createGenerator(p as Partial<Generator>),
   battery:       p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   psh:           p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   hydrogen:      p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   caes:          p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   flywheel:      p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   thermal_storage: p => networkApi.createStore(p as Partial<Store>),
-  load:          p => networkApi.createLoad(p as Partial<Load>),
   load_elec:     p => networkApi.createLoad(p as Partial<Load>),
   load_h2:       p => networkApi.createLoad(p as Partial<Load>),
   load_heat:     p => networkApi.createLoad(p as Partial<Load>),
