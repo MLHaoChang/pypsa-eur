@@ -20,6 +20,8 @@ TestClient.
 """
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -363,6 +365,107 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
     return {"imported": imported, "project": ctx.loaded_project}
 
 
+# How often the disconnect watcher asks whether the client is still there.
+# The poll is cheap (a non-blocking drain of the receive channel), so the
+# interval is set by how long we are willing to keep paying for a turn nobody
+# will read, not by cost. Module-level so a test can shorten it.
+DISCONNECT_POLL_SECONDS = 2.0
+
+
+class _DisconnectWatcher:
+    """
+    Abort a turn whose client has gone away (QA #14).
+
+    Until now the only early exit was an explicit POST to `/{id}/abort`,
+    which the panel sends when it closes cleanly. A tab that is killed, a
+    laptop that sleeps, a dropped connection and a quit app all send nothing,
+    and the turn ran to completion — more model tokens, and every remaining
+    tool in the agent's plan actually executed against a network nobody was
+    watching.
+
+    Lives here rather than inside `_gen()` because `_gen()` is a SYNC
+    generator handed to `StreamingResponse` and run in a worker thread: there
+    is no event loop in there to await anything on. The async handler has
+    both `request` and the running loop, so the watcher is a task on that
+    loop, and the only thing it ever touches is `session.abort_event` — the
+    same thread-safe primitive `/abort` sets. `_gen()` is unchanged.
+
+    Reliability note, because the obvious reading says this cannot work:
+    Starlette runs its own `listen_for_disconnect` alongside the response
+    body whenever the server advertises ASGI spec_version < 2.4 (uvicorn's
+    HTTP protocols say 2.3), and that listener is parked in `await receive()`
+    so it wins every delivery race against our opportunistic poll. It does
+    not matter: uvicorn's `receive()` is LEVEL-triggered — once the
+    connection is gone it returns `http.disconnect` to every later call
+    rather than once. Both observers therefore see it. A server with an
+    edge-triggered `receive()` would starve this watcher, so it is written to
+    be harmless when it never fires: the pre-existing `/abort` path and
+    `_gen()`'s own teardown remain the guaranteed stops, and this is the one
+    that makes them prompt.
+    """
+
+    def __init__(
+        self,
+        request: Request,
+        session: Any,
+        *,
+        finished: threading.Event | None = None,
+        poll_seconds: float | None = None,
+    ) -> None:
+        self._request = request
+        self._session = session
+        # Set by `_gen()`'s finally BEFORE it disarms, so a watcher that
+        # wakes in that window can tell "the client vanished mid-turn" from
+        # "the response is simply over".
+        self.finished = finished if finished is not None else threading.Event()
+        self._poll = (
+            poll_seconds if poll_seconds is not None else DISCONNECT_POLL_SECONDS
+        )
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task: asyncio.Task[None] | None = None
+
+    async def _run(self) -> None:
+        while not self.finished.is_set():
+            await asyncio.sleep(self._poll)
+            if self.finished.is_set():
+                return
+            try:
+                gone = await self._request.is_disconnected()
+            except Exception:  # noqa: BLE001 — never break the stream over a probe
+                return
+            if not gone:
+                continue
+            # Re-check under the same condition that gated the sleep. Without
+            # it, a watcher that wakes just after the response completed sees
+            # a (correctly) disconnected client and flips an event that is
+            # SESSION-scoped — aborting whatever turn that session runs next.
+            if not self.finished.is_set():
+                self._session.abort_event.set()
+            return
+
+    def arm(self) -> None:
+        """Start watching. Must be called from the event loop's own task."""
+        self._loop = asyncio.get_running_loop()
+        self._task = self._loop.create_task(self._run())
+
+    def disarm(self) -> None:
+        """
+        Stop watching. Called from `_gen()`'s finally — i.e. from a WORKER
+        THREAD — so the cancel has to be marshalled onto the loop. Never
+        raises: it runs in a finally, where an exception would replace
+        whatever real failure is already in flight.
+        """
+        self.finished.set()
+        task, loop = self._task, self._loop
+        if task is None or loop is None:
+            return
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except RuntimeError:
+            # Loop already closed — the task died with it.
+            pass
+
+
 @router.post("/stream")
 async def chat_stream(
     body: StreamRequest,
@@ -377,11 +480,14 @@ async def chat_stream(
     Abort handling (M8): the SSE generator (and the agent_loop_stub it
     drives) check `session.abort_event` between steps. Clients abort a
     stream by POSTing to `/api/chat/{session_id}/abort` (set by the
-    ChatPanel on close or by an explicit Cancel button). Phase 3 may also
-    poll `request.is_disconnected()` once an asyncio-native handler is
-    written; Phase 2 keeps the abort path purely synchronous so the
-    StreamingResponse generator runs in the standard threadpool without
-    needing `asyncio.run` from a worker thread.
+    ChatPanel on close or by an explicit Cancel button).
+
+    QA #14: a client that never gets to send that POST — a killed tab, a
+    sleeping laptop, a dropped connection — is covered by
+    `_DisconnectWatcher`, which polls `request.is_disconnected()` from THIS
+    handler's event loop and flips the same `abort_event`. `_gen()` stays a
+    plain sync generator running in the standard threadpool; nothing here
+    needs `asyncio.run` from a worker thread.
     """
     # Bind the acting identity for this turn's tools (Step 0a). The project
     # tools call `routers.projects` handlers in-process and must authorize
@@ -453,6 +559,13 @@ async def chat_stream(
     # Phase 4 QA fix: previously a body.message would mutate script and
     # accidentally trip the stub path, bypassing the LLM entirely.
     has_explicit_script = bool(body.script)
+
+    # QA #14 — armed HERE, on the event loop, because `_gen()` below has no
+    # loop to await `request.is_disconnected()` on. Disarmed in `_gen()`'s
+    # finally so no polling task outlives its stream.
+    watcher = _DisconnectWatcher(request, session)
+    watcher.arm()
+
     def _gen():
         try:
             if has_explicit_script:
@@ -470,6 +583,10 @@ async def chat_stream(
                 {"error_kind": "internal_error",
                  "message": chat_service._redact_for_log(exc)},
             )
+        finally:
+            # Covers every exit: normal completion, the error frame above, and
+            # GeneratorExit when the consumer stops pulling.
+            watcher.disarm()
 
     return StreamingResponse(
         _gen(),
