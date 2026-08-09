@@ -108,17 +108,25 @@ def resolve_for_session(db: DBSession, session: SessionRow) -> tuple[ProjectCont
         if (src / "network.nc").exists():
             from routers.projects import _hydrate_context_from_disk
 
-            ctx = PyPSAService.build_context()
-            try:
-                _hydrate_context_from_disk(ctx, src, project.name)
-                project_registry.bind_context(ctx, project)
-                PyPSAService.register(key, ctx)
-                return ctx, key
-            except Exception:  # noqa: BLE001 — a corrupt project must not 500 every route
-                logger.exception(
-                    "active-project hydrate failed for %s; falling back to scratch",
-                    project.id,
-                )
+            # This function runs TWICE per authenticated request on EVERY route
+            # (main.py:525 and the constructor dependency at deps.py:78), so it
+            # is the highest-frequency context builder in the process and the
+            # one whose race the 1.5 s queue poll makes ordinary rather than
+            # exotic. Lock order: hydrate -> _registry_lock -> solve_queue._lock.
+            with PyPSAService.hydrate_or_adopt(key) as adopted:
+                if adopted is not None:
+                    return adopted, key
+                ctx = PyPSAService.build_context()
+                try:
+                    _hydrate_context_from_disk(ctx, src, project.name)
+                    project_registry.bind_context(ctx, project)
+                    PyPSAService.register(key, ctx)
+                    return ctx, key
+                except Exception:  # noqa: BLE001 — a corrupt project must not 500 every route
+                    logger.exception(
+                        "active-project hydrate failed for %s; falling back to scratch",
+                        project.id,
+                    )
         else:
             # Pointed at a project whose blob is gone (deleted behind the app's
             # back). Drop the pointer so the next request starts clean instead
@@ -127,12 +135,15 @@ def resolve_for_session(db: DBSession, session: SessionRow) -> tuple[ProjectCont
             db.commit()
 
     key = scratch_key(session)
-    resident = PyPSAService.get_context(key)
-    if resident is not None:
-        return resident, key
-    ctx = PyPSAService.adopt_process_foreground() or PyPSAService.build_context()
-    PyPSAService.register(key, ctx)
-    return ctx, key
+    # The scratch branch races the same way: two requests for one session can
+    # both miss and both `register`, and the loser's draft network is the one
+    # the user was typing into.
+    with PyPSAService.hydrate_or_adopt(key) as resident:
+        if resident is not None:
+            return resident, key
+        ctx = PyPSAService.adopt_process_foreground() or PyPSAService.build_context()
+        PyPSAService.register(key, ctx)
+        return ctx, key
 
 
 def set_active_project(db: DBSession, session: SessionRow, project: Project | None) -> None:

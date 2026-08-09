@@ -1983,19 +1983,25 @@ def activate_project(
             )
 
     evicted: list[str] = []
-    if PyPSAService.get_context(registry_id) is not None:
-        # Resident → instant pointer swap. Already in the registry, so no new
-        # registration and no eviction can fire.
-        PyPSAService.set_active(registry_id)
-    else:
-        # Cold: build, hydrate from disk, then publish + register atomically.
-        # activate_context(register=True) runs the B9 cap check and returns any
-        # projects evicted to make room — the freshly-activated project is
-        # protected (it's the new active id) so it's never its own victim.
-        ctx = PyPSAService.build_context()
-        _hydrate_context_from_disk(ctx, src, project.name)
-        project_registry.bind_context(ctx, project)
-        evicted = PyPSAService.activate_context(ctx, register=True)
+    # Hold this key's hydrate lock across the MISS so a concurrent cold path
+    # (a path-scoped read, the session resolver, the solve dispatcher) cannot
+    # build a SECOND context for the same project. A resident hit takes no
+    # lock at all, so the instant tab switch is unchanged.
+    # Lock order: hydrate -> _registry_lock -> solve_queue._lock.
+    with PyPSAService.hydrate_or_adopt(registry_id) as resident:
+        if resident is not None:
+            # Resident → instant pointer swap. Already in the registry, so no
+            # new registration and no eviction can fire.
+            PyPSAService.set_active(registry_id)
+        else:
+            # Cold: build, hydrate from disk, then publish + register atomically.
+            # activate_context(register=True) runs the B9 cap check and returns any
+            # projects evicted to make room — the freshly-activated project is
+            # protected (it's the new active id) so it's never its own victim.
+            ctx = PyPSAService.build_context()
+            _hydrate_context_from_disk(ctx, src, project.name)
+            project_registry.bind_context(ctx, project)
+            evicted = PyPSAService.activate_context(ctx, register=True)
 
     # Persist the pointer (Step 0b). Until this, "which project am I looking
     # at" lived only in process memory, so it was shared by every user on the
