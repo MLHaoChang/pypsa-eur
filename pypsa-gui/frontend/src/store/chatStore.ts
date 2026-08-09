@@ -60,18 +60,45 @@ export interface ChatErrorState {
 // Anthropic publishes per-million-token prices. M10 — these are constants
 // the panel multiplies against `usage` to render an eur estimate; the
 // backend NEVER persists eur in chat.jsonl. Update these when prices change.
-export const PRICING_VERSION = '2025-11'
+//
+// The 2025-11 table priced claude-opus-4-8 at $15/$75 — Opus 4.1-era rates.
+// Opus 4.8 is $5/$25, so every Opus turn was reported at 3x its real cost,
+// and the header told a user choosing between models that Opus was 5x
+// Sonnet on input when it is under 2x.
+export const PRICING_VERSION = '2026-08'
 export const PRICING_USD_PER_MTOK: Record<ChatModel, { input: number; output: number }> = {
-  'claude-sonnet-4-6': { input: 3.0,  output: 15.0 },
-  'claude-opus-4-8':   { input: 15.0, output: 75.0 },
+  'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
+  'claude-opus-4-8':   { input: 5.0, output: 25.0 },
 }
+// Prompt-cache multipliers, applied to the model's INPUT rate — cached
+// tokens are input tokens that took a different path, so they are never
+// priced against the output rate.
+//
+// A read is a tenth of sending the tokens uncached; a write is a 25%
+// premium over it. That premium is the whole economics of caching: the
+// second request on a cached prefix has already paid for the first
+// (1.25 + 0.1 < 2), and everything after is nearly free. 1.25 is the
+// 5-minute-TTL rate, which is what the backend writes — it sets
+// `cache_control: {type: "ephemeral"}` with no `ttl`, and 5 minutes is that
+// default. Switching any breakpoint to `ttl: "1h"` makes the write 2.0 and
+// this constant wrong.
+export const CACHE_READ_MULTIPLIER = 0.1
+export const CACHE_WRITE_MULTIPLIER = 1.25
 // Rough USD→EUR ratio for the cost meter. Production replacement: a live
 // FX endpoint, or a config-loaded rate. Hardcoded here for Phase 3 polish.
 export const USD_PER_EUR = 1.08
 
 export function deriveCostEur(model: ChatModel, usage: ChatUsageAcc): number {
   const p = PRICING_USD_PER_MTOK[model] ?? PRICING_USD_PER_MTOK['claude-sonnet-4-6']
-  const usd = (usage.input_tokens * p.input + usage.output_tokens * p.output) / 1_000_000
+  // Cached tokens were tracked in the store and threaded through every turn
+  // but never billed here, so a long session — where the cache is doing the
+  // most work — under-reported by the widest margin.
+  const usd = (
+    usage.input_tokens * p.input
+    + usage.output_tokens * p.output
+    + usage.cache_read_tokens * p.input * CACHE_READ_MULTIPLIER
+    + usage.cache_create_tokens * p.input * CACHE_WRITE_MULTIPLIER
+  ) / 1_000_000
   return usd / USD_PER_EUR
 }
 

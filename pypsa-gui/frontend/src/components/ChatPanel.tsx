@@ -27,6 +27,7 @@ import {
   postChatAbort,
   postChatConfirm,
   type ChatFrame,
+  type InterruptedTurn,
 } from '../api/chat'
 import { nk } from '../utils/queryKeys'
 import {
@@ -279,12 +280,21 @@ function CostMeter() {
   const usage = useChatStore((s) => s.usage)
   const model = useChatStore((s) => s.model)
   const eur = deriveCostEur(model, usage)
+  // Cached tokens are billed (reads at a tenth of input, writes at a 25%
+  // premium) and on a long session they dominate. Showing them is also the
+  // only way the meter's own number is checkable — an in/out pair that
+  // doesn't account for the euros beside it reads as a bug in the meter.
+  // Hidden until the cache has actually done something: a permanent
+  // "cache: 0" is noise in a header this narrow.
+  const cached = usage.cache_read_tokens + usage.cache_create_tokens
   return (
     <span
       className="font-mono text-[10px] text-muted whitespace-nowrap"
       data-testid="chat-cost-meter"
     >
-      {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out · €{eur.toFixed(4)}
+      {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
+      {cached > 0 && ` · cache ${usage.cache_read_tokens.toLocaleString()} read`}
+      {' '}· €{eur.toFixed(4)}
     </span>
   )
 }
@@ -292,6 +302,7 @@ function CostMeter() {
 function ConfirmationCard() {
   const pending = useChatStore((s) => s.pending)
   const setPending = useChatStore((s) => s.setPending)
+  const setError = useChatStore((s) => s.setError)
   const sessionId = useChatStore((s) => s.sessionId)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const [secondsLeft, setSecondsLeft] = useState<number>(0)
@@ -317,6 +328,17 @@ function ConfirmationCard() {
       if (left <= 0 && timerRef.current != null) {
         clearInterval(timerRef.current)
         timerRef.current = null
+        // The countdown used to just stop here, leaving a dead card on
+        // screen with Approve still clickable — which 409s
+        // `confirmation_expired`. Teaching a user that confirming an expired
+        // destructive action is harmless is the one lesson this card must
+        // not give. Withdraw it and say why; the agent re-prompts with a
+        // fresh token, which is the flow the backend already implements.
+        setPending(null)
+        setError({
+          error_kind: 'confirmation_expired',
+          message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
+        })
       }
     }
     tick()
@@ -370,6 +392,16 @@ function ConfirmationCard() {
 
   return (
     <div
+      // A destructive action blocking on the user is the strongest reason
+      // this panel has to interrupt a screen reader. `alertdialog` both
+      // interrupts AND says the thing is interactive — `alert` alone would
+      // announce the text and imply there is nothing to do about it.
+      // aria-modal is false because focus is deliberately NOT trapped: the
+      // card sits inline in the transcript and the user must stay free to
+      // scroll back and read what they are approving.
+      role="alertdialog"
+      aria-modal="false"
+      aria-labelledby="chat-confirmation-title"
       className="border border-amber-500/60 bg-amber-500/5 rounded p-3 mx-3 my-2"
       data-testid="chat-confirmation-card"
       data-tool-name={pending.tool_name}
@@ -378,7 +410,9 @@ function ConfirmationCard() {
       <div className="text-[11px] uppercase tracking-wider text-amber-500 mb-1">
         Confirm · {pending.safety_tier}
       </div>
-      <div className="text-sm font-medium mb-1 text-text">{pending.tool_name}</div>
+      <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
+        {pending.tool_name}
+      </div>
       <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
         {JSON.stringify(pending.args, null, 2)}
       </pre>
@@ -438,6 +472,12 @@ function ErrorBanner() {
   // descendants_exist — same shape but with the descendant list.
   return (
     <div
+      // A turn that failed is an interruption, not a status update — the
+      // user is waiting on a reply that is not coming. `alert` announces it
+      // without moving focus, which is right here: there is nothing in the
+      // banner to operate except the API-key form, and that case renders its
+      // own labelled controls.
+      role="alert"
       className="border-l-2 border-rose-500 bg-rose-500/5 px-3 py-2 mx-3 my-2 text-xs"
       data-testid="chat-error-banner"
       data-error-kind={error.error_kind}
@@ -837,6 +877,13 @@ export default function ChatPanel() {
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
   const prevProjectRef = useRef<string | null | undefined>(undefined)
 
+  // #20 — what the last reload recovered. Component state rather than the
+  // chat store: both are facts about one hydration, not about the
+  // conversation, and neither should survive a project switch or be
+  // rehydrated into a transcript.
+  const [historyGap, setHistoryGap] = useState<number>(0)
+  const [interruptedTurn, setInterruptedTurn] = useState<InterruptedTurn | null>(null)
+
   // Reset chat state on project switch (mirrors simulationStore pattern).
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
@@ -903,6 +950,12 @@ export default function ChatPanel() {
       if (h.last_session_id) {
         setSessionId(h.last_session_id)
       }
+      // #20 — the backend detects both of these and reports them exactly
+      // once. Dropping them here would make that whole recovery path
+      // invisible: the user would see a shorter conversation than they had,
+      // or a message of theirs simply missing, with nothing to explain it.
+      setHistoryGap(h.history_gap ?? 0)
+      setInterruptedTurn(h.pending_turn ?? null)
     }).catch(() => { /* missing chat.jsonl is fine — first time on this project */ })
     return () => { cancelled = true }
   }, [currentProject, setMessages, setSessionId])
@@ -1726,6 +1779,59 @@ export default function ChatPanel() {
         )}
       </div>
       <ErrorBanner />
+      {historyGap > 0 && (
+        <div
+          role="status"
+          className="border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 mx-3 my-2 text-xs"
+          data-testid="chat-history-gap"
+        >
+          <div className="font-medium text-amber-400 mb-0.5">
+            {historyGap} earlier {historyGap === 1 ? 'message' : 'messages'} could not be read
+          </div>
+          <div className="text-muted">
+            Part of this project&apos;s saved conversation is damaged and has been
+            skipped. What you see below is incomplete.
+          </div>
+        </div>
+      )}
+      {interruptedTurn && (
+        <div
+          role="status"
+          className="border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 mx-3 my-2 text-xs"
+          data-testid="chat-interrupted-turn"
+        >
+          <div className="font-medium text-amber-400 mb-0.5">
+            Your last message was interrupted
+          </div>
+          <div className="text-muted mb-2">
+            It was never answered, so it is not part of the conversation below.
+          </div>
+          {/* Shown verbatim: this is the thing the user lost, and reading it
+              is what lets them decide whether it is still worth sending. */}
+          <blockquote className="border-l border-border pl-2 text-text whitespace-pre-wrap break-words">
+            {interruptedTurn.user}
+          </blockquote>
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              className="px-2 py-1 text-[11px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+              onClick={() => {
+                setInput(interruptedTurn.user)
+                setInterruptedTurn(null)
+              }}
+              data-testid="chat-interrupted-restore"
+            >
+              Put it back in the composer
+            </button>
+            <button
+              className="px-2 py-1 text-[11px] rounded text-muted hover:text-text"
+              onClick={() => setInterruptedTurn(null)}
+              data-testid="chat-interrupted-dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <div className="relative flex-1 min-h-0 flex flex-col">
         <div
           ref={messagesScrollRef}

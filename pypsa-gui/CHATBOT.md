@@ -91,10 +91,11 @@ continues on the previous model.
 
 ## Cost meter (M10)
 
-The header shows the running token totals and a derived EUR estimate:
+The header shows the running token totals and a derived EUR estimate. The
+cache segment appears only once the cache has done something:
 
 ```
-12,345 in / 6,789 out · €0.0234
+12,345 in / 6,789 out · cache 48,000 read · €0.0234
 ```
 
 The server only ever reports token counts; the EUR figure is derived
@@ -103,6 +104,24 @@ client-side from the per-model price constants in
 Anthropic ships a price update, bump `PRICING_USD_PER_MTOK` and
 `PRICING_VERSION`. **No EUR field is ever written to chat.jsonl**, so
 re-pricing a historic conversation is a pure render-time computation.
+
+All four token classes are billed. Cached tokens are priced against the
+model's **input** rate: a read at `CACHE_READ_MULTIPLIER` (0.1) and a write
+at `CACHE_WRITE_MULTIPLIER` (1.25). That 25% write premium is why caching
+pays: the second request on a cached prefix has already covered the first
+(1.25 + 0.1 < 2). The 1.25 figure is the **5-minute-TTL** rate, which is
+what the backend writes — it sets `cache_control: {"type": "ephemeral"}`
+with no `ttl`. Moving any breakpoint to a 1-hour TTL makes the write 2.0×
+and that constant wrong.
+
+Two corrections landed together with the cache line, both of which had been
+silently reporting a wrong number rather than no number:
+
+- Cached tokens were tracked, threaded through every turn, and then omitted
+  from the total — so the longer a session ran, the more it under-reported.
+- `claude-opus-4-8` was priced at $15/$75 per MTOK (Opus 4.1-era rates)
+  instead of $5/$25, overstating every Opus turn threefold and making the
+  model picker imply Opus costs 5× Sonnet when it is under 2×.
 
 ## Cost caps
 
