@@ -538,12 +538,18 @@ function AssetTable({
   const toggleRow = (row: Record<string, unknown>, idx: number, ev: React.MouseEvent) => {
     const name = row.name as string
     if (!name) return
+    // Read the modifier BEFORE the updater. React runs a functional setState
+    // updater later, by which point the synthetic event has been recycled and
+    // `ev.shiftKey` reads false — the range would silently degrade to a single
+    // toggle. Same reason the anchor is snapshotted here.
+    const rangeSelect = ev.shiftKey
+    const anchor = lastClickedIdxRef.current
     setSelectedRows(prev => {
       const next = new Set(prev)
-      if (ev.shiftKey && lastClickedIdxRef.current !== null) {
+      if (rangeSelect && anchor !== null) {
         // Range select: include every row between the last anchor and this one.
-        const lo = Math.min(lastClickedIdxRef.current, idx)
-        const hi = Math.max(lastClickedIdxRef.current, idx)
+        const lo = Math.min(anchor, idx)
+        const hi = Math.max(anchor, idx)
         for (let i = lo; i <= hi; i++) {
           const n = sorted[i]?.name as string | undefined
           if (n) next.add(n)
@@ -562,13 +568,7 @@ function AssetTable({
     setSelectedRows(new Set(sorted.map(r => r.name as string).filter(Boolean)))
   }
 
-  // Bulk edit
   const [showColMenu, setShowColMenu] = useState(false)
-  const [editCol, setEditCol] = useState<string>('')
-  const [editValue, setEditValue] = useState<string>('')
-  // Reset bulk-edit fields whenever selection changes — re-asking for the
-  // column + value avoids the "wait, what was I editing?" footgun.
-  useEffect(() => { setEditCol(''); setEditValue('') }, [selectedRows])
 
   // ── Optimistic bulk write (spec D10, D11) ─────────────────────────────────
   // No in-repo precedent (recon §4), so the contract is implemented exactly as
@@ -630,7 +630,6 @@ function AssetTable({
       qc.invalidateQueries({ queryKey: ['changelog'] })
       qc.invalidateQueries({ queryKey: nk(projectId, 'results') })
       toast.success(`Updated ${r.updated} ${componentClass.toLowerCase()}(s)`)
-      setEditCol(''); setEditValue('')
     },
   })
 
@@ -791,23 +790,6 @@ function AssetTable({
     applyBulk(rows, true)                                  // true → D11 spacing
   }
 
-  const onApply = () => {
-    if (!editCol) { toast.error('Pick a column first'); return }
-    if (selectedRows.size === 0) { toast.error('No rows selected'); return }
-    // Use the first non-null sample to type-coerce the value
-    const sample = data.find(r => r[editCol] != null)?.[editCol]
-    const value = coerceForColumn(editValue, sample)
-    confirmToast(
-      `Set ${editCol} = ${value === null ? '(unset)' : JSON.stringify(value)} on ${selectedRows.size} ${componentClass.toLowerCase()}(s)?`,
-      () => bulkMut.mutate({
-        component_class: componentClass,
-        names: [...selectedRows],
-        updates: { [editCol]: value },
-      }),
-      { confirmLabel: 'Apply' },
-    )
-  }
-
   useEffect(() => {
     if (!selectedName) return
     rowRefs.current[selectedName]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -924,35 +906,16 @@ function AssetTable({
           )}
         </div>
 
+        {/* The select-a-column-and-type-a-value toolbar is gone (D29): paste
+            respects the row selection and Ctrl/Cmd+Enter fills it, so the
+            capability survives with a better interface. */}
         {selectedRows.size > 0 ? (
           <>
             <span className="text-muted">·</span>
             <span className="font-medium text-text">{selectedRows.size} selected</span>
-            <span className="text-muted">·</span>
-            <span className="text-muted">Set</span>
-            <select
-              value={editCol}
-              onChange={e => setEditCol(e.target.value)}
-              className="px-1.5 py-0.5 border border-border rounded bg-bg font-mono text-[11px]"
-            >
-              <option value="">(column)</option>
-              {availableCols.filter(c => c !== 'name').map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <span className="text-muted">to</span>
-            <input
-              value={editValue}
-              onChange={e => setEditValue(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') onApply() }}
-              placeholder="value"
-              className="px-1.5 py-0.5 border border-border rounded bg-bg font-mono text-[11px] w-32"
-            />
-            <button
-              onClick={onApply}
-              disabled={bulkMut.isPending || !editCol}
-              className="px-2 py-0.5 bg-accent text-white rounded text-[11px] font-medium hover:bg-accent/90 disabled:opacity-40"
-            >{bulkMut.isPending ? 'Applying…' : 'Apply'}</button>
+            <span className="text-muted">
+              ·  Paste to write every selected row, or Ctrl/Cmd+Enter in a cell to fill them.
+            </span>
             <button
               onClick={() => setSelectedRows(new Set())}
               className="text-muted hover:text-danger flex items-center gap-0.5"
@@ -960,7 +923,9 @@ function AssetTable({
             ><X size={11} /></button>
           </>
         ) : (
-          <span className="text-muted">·  Click checkboxes to select rows for bulk edit (shift-click for range).</span>
+          <span className="text-muted">
+            ·  Click a cell to edit it. Select rows to paste or fill across many.
+          </span>
         )}
       </div>
 
@@ -1100,111 +1065,6 @@ function AssetTable({
         </table>
       </div>
     </div>
-  )
-}
-
-// ── SimpleTable (legacy, retained for any future read-only callers) ──────────
-
-function SimpleTable({
-  columns, data, selectedName, onRowClick,
-}: {
-  columns: string[]
-  data: Record<string, unknown>[]
-  selectedName?: string | null
-  onRowClick: (row: Record<string, unknown>) => void
-}) {
-  const [sortCol, setSortCol] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({})
-
-  useEffect(() => {
-    if (!selectedName) return
-    rowRefs.current[selectedName]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [selectedName])
-
-  const sorted = useMemo(() => {
-    if (!sortCol) return data
-    return [...data].sort((a, b) => {
-      const av = a[sortCol], bv = b[sortCol]
-      if (av == null && bv == null) return 0
-      if (av == null) return 1
-      if (bv == null) return -1
-      const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true })
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-  }, [data, sortCol, sortDir])
-
-  const handleSort = (col: string) => {
-    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortCol(col); setSortDir('asc') }
-  }
-
-  const fmt = (v: unknown): string => {
-    if (v == null) return '–'
-    if (typeof v === 'boolean') return v ? '✓' : '–'
-    if (typeof v === 'number') {
-      if (!isFinite(v)) return '–'
-      return Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/\.?0+$/, '')
-    }
-    return String(v)
-  }
-
-  if (data.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-16 text-muted text-xs">
-        No data
-      </div>
-    )
-  }
-
-  return (
-    <table className="w-full text-xs border-collapse" style={{ minWidth: 'max-content' }}>
-      <thead>
-        <tr className="sticky top-0 bg-panel z-10 border-b border-border">
-          {columns.map(col => (
-            <th
-              key={col}
-              onClick={() => handleSort(col)}
-              className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wide cursor-pointer hover:text-text whitespace-nowrap select-none"
-            >
-              {COL_LABELS[col] ?? col}
-              {sortCol === col && (
-                <span className="ml-0.5 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>
-              )}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((row, i) => {
-          const name = row.name as string
-          const isSelected = selectedName === name
-          return (
-            <tr
-              key={name ?? i}
-              ref={el => { rowRefs.current[name] = el }}
-              onClick={() => onRowClick(row)}
-              className={`border-b border-border/40 cursor-pointer transition-colors
-                ${isSelected
-                  ? 'bg-accent/10 hover:bg-accent/15'
-                  : i % 2 === 0
-                  ? 'bg-bg hover:bg-accent/5'
-                  : 'bg-panel hover:bg-accent/5'}`}
-            >
-              {columns.map(col => (
-                <td
-                  key={col}
-                  className={`px-2 font-mono whitespace-nowrap text-[11px] ${isSelected ? 'text-text' : 'text-text'}`}
-                  style={{ paddingBlock: 'var(--row-padding-y)' }}
-                >
-                  {fmt(row[col])}
-                </td>
-              ))}
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
   )
 }
 
