@@ -803,13 +803,29 @@ was not checked, and does not mistake "not raised as a finding" for
   is confirmed and deliberately NOT fixed** — see its own section above.
   Frontend behaviour changes are a product decision outside this
   examination's scope.
-- **`get_prices()` duplicates the merit-order correction inline** instead
-  of calling the shared `corrected_marginal_prices` helper `compare.py`'s
-  `_compute_prices_summary` uses, missing a branch the shared helper has.
-  MEASURED to coincide today (no observed numeric divergence on either
-  network available to this suite) — INFERRED to be a latent drift risk
-  (the two implementations can diverge silently the next time either is
-  edited without the other). Never fixed; flagged for a future pass.
+- ~~**`get_prices()` duplicates the merit-order correction inline**~~ —
+  **CLOSED 2026-08-09 (`02b5e806`).** The inline copy implemented only the
+  first of the shared helper's two branches; a subsidised renewable pinned
+  AT its ceiling with the dual below its effective LP cost was corrected by
+  `corrected_marginal_prices` (and so by `/asset_economics` and both Compare
+  price surfaces) but left as the raw negative dual on the Prices tab. The
+  drift this entry predicted was therefore already present, not merely
+  latent — it just could not be observed on either network available to this
+  suite, both of which lack the triggering configuration.
+
+  The algorithm now lives in `_apply_merit_order_correction(n, prices)`,
+  which takes already-fetched duals; `corrected_marginal_prices` and
+  `get_prices` each keep their own fetch. That split is what made the
+  collapse possible: `corrected_marginal_prices` hardcodes `source="lopf"`,
+  so `get_prices` could never have called it without losing its own `source`
+  parameter — which is why the copy grew in the first place. Guarded by
+  `tests/test_prices_merit_order_parity.py`, whose parity assertion pins the
+  two surfaces to each other rather than to hardcoded values.
+
+  **Still open:** `get_asset_economics` holds a THIRD copy. It implements
+  both branches, so it is a maintenance duplicate rather than a drift
+  source, and collapsing it would touch an economics surface — deliberately
+  left rather than swept into the Prices fix.
 - **No fixture or real project available to this examination exercises a
   Store.** `_compute_total_annuitised_capex` and `_compute_economics_summary`
   both walk `Store` in their component lists (per S1's own writeup and
