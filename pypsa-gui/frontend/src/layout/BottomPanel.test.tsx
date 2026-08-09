@@ -6,9 +6,10 @@
 // AssetTable is not exported, so these drive it through the real BottomPanel
 // with the nine network getters mocked.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
 
 vi.mock('../api/network', async (importOriginal) => {
@@ -354,5 +355,87 @@ describe('AssetTable cell editors — D4', () => {
     const cell = await openEditor('control')
     const select = cell.querySelector('select') as HTMLSelectElement
     expect(Array.from(select.options).map(o => o.value)).toEqual(['PQ', 'PV', 'Slack'])
+  })
+})
+
+describe('AssetTable optimistic mutation — D10', () => {
+  /** Open the first v_nom cell, set it to `to`, commit with Enter. */
+  async function editFirstVNom(to: string) {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: to } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    return cell
+  }
+
+  it('sends the scalar form when every row gets the same value', async () => {
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue(
+      { updated: 1, fields: ['v_nom'] } as never)
+    await editFirstVNom('123')
+    // onMutate awaits cancelQueries, so the request fires a microtask later.
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalled())
+    expect(vi.mocked(networkApi).bulkUpdate.mock.calls[0][0]).toEqual({
+      component_class: 'Bus', names: ['B0'], updates: { v_nom: 123 },
+    })
+  })
+
+  it('shows the new value before the request resolves', async () => {
+    let release: (v: unknown) => void = () => {}
+    vi.mocked(networkApi).bulkUpdate.mockReturnValue(
+      new Promise(res => { release = res }) as never)
+    const cell = await editFirstVNom('456')
+    await waitFor(() => expect(cell.textContent).toContain('456'))
+    release({ updated: 1, fields: ['v_nom'] })
+  })
+
+  it('rolls the value back and reports the backend detail on failure', async () => {
+    // The toast is asserted through toast.error rather than rendered text:
+    // renderPanel mounts BottomPanel alone, and <Toaster/> lives in App.tsx.
+    const errSpy = vi.spyOn(toast, 'error')
+    vi.mocked(networkApi).bulkUpdate.mockRejectedValue({
+      response: { data: { detail: 'Column is numeric; got non-numeric value' } },
+    })
+    const cell = await editFirstVNom('456')
+    await waitFor(() => expect(errSpy).toHaveBeenCalled())
+    expect(errSpy.mock.calls[0][0]).toContain('got non-numeric value')
+    expect(cell.textContent).toContain('380')      // the original v_nom
+    expect(cell.textContent).not.toContain('456')
+  })
+
+  it('restores the checkbox selection after a failure', async () => {
+    const errSpy = vi.spyOn(toast, 'error')
+    vi.mocked(networkApi).bulkUpdate.mockRejectedValue({
+      response: { data: { detail: 'nope' } },
+    })
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(rowCheckboxes()[0])
+    await userEvent.click(rowCheckboxes()[1])
+    expect(screen.getByText(/2 selected/)).toBeTruthy()
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '9' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(errSpy).toHaveBeenCalled())
+    expect(screen.getByText(/2 selected/)).toBeTruthy()
+  })
+
+  it('formats a FastAPI error array instead of printing [object Object]', async () => {
+    const errSpy = vi.spyOn(toast, 'error')
+    vi.mocked(networkApi).bulkUpdate.mockRejectedValue({
+      response: { data: { detail: [{ loc: ['body', 'p_nom'], msg: 'not a number' }] } },
+    })
+    await editFirstVNom('7')
+    await waitFor(() => expect(errSpy).toHaveBeenCalled())
+    const shown = errSpy.mock.calls[0][0] as string
+    expect(shown).toContain('not a number')
+    expect(shown).toContain('p_nom')
+    expect(shown).not.toContain('[object Object]')
   })
 })

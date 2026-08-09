@@ -130,6 +130,26 @@ interface AssetTableProps {
 // coerceForColumn moved to utils/coerce.ts so it can be unit-tested without
 // mounting this panel. Imported at the top of the file.
 
+/**
+ * FastAPI's `detail` is either a string or an array of validation objects.
+ * Rendering the array directly gives "[object Object]", which
+ * .cursor/rules/pypsa-gui-frontend.mdc:19 forbids and success criterion 10
+ * tests for.
+ */
+function formatDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail)) {
+    const parts = detail.map(d => {
+      if (typeof d === 'string') return d
+      const o = d as { loc?: unknown[]; msg?: string }
+      const where = Array.isArray(o.loc) ? o.loc.filter(x => x !== 'body').join('.') : ''
+      return where ? `${where}: ${o.msg ?? 'invalid'}` : (o.msg ?? 'invalid')
+    })
+    if (parts.length) return parts.join('; ')
+  }
+  return fallback
+}
+
 // ── CellEditor ───────────────────────────────────────────────────────────────
 // One editor is mounted at a time, chosen by D4's resolution table. Every
 // editor commits a STRING through the same gridEdit validator, so the typed
@@ -546,46 +566,91 @@ function AssetTable({
   // column + value avoids the "wait, what was I editing?" footgun.
   useEffect(() => { setEditCol(''); setEditValue('') }, [selectedRows])
 
+  // ── Optimistic bulk write (spec D10, D11) ─────────────────────────────────
+  // No in-repo precedent (recon §4), so the contract is implemented exactly as
+  // the spec states it. The key MUST use the same projectId the useQuery that
+  // populated the cache used, or getQueryData returns undefined and the
+  // rollback wipes the payload (queryKeys.ts:16-22).
+  const lastMutationAtRef = useRef(0)
+
+  type BulkRow = { name: string; updates: Record<string, unknown> }
+  type BulkBody = {
+    component_class: string
+    names?: string[]
+    updates?: Record<string, unknown>
+    rows?: BulkRow[]
+  }
+  type BulkCtx = { previous: unknown; selection: Set<string>; key: unknown[] }
+
   const bulkMut = useMutation({
-    mutationFn: (body: {
-      component_class: string
-      names?: string[]
-      updates?: Record<string, unknown>
-      rows?: { name: string; updates: Record<string, unknown> }[]
-    }) => networkApi.bulkUpdate(body),
+    mutationFn: (body: BulkBody) => networkApi.bulkUpdate(body),
+    onMutate: async (body: BulkBody): Promise<BulkCtx> => {
+      const projectId = useUIStore.getState().currentProject
+      const key = nk(projectId, TAB_TO_API_KEY[componentClass] ?? componentClass.toLowerCase() + 's')
+      await qc.cancelQueries({ queryKey: key })
+      const previous = qc.getQueryData(key)
+      const selection = new Set(selectedRows)
+
+      const patch = new Map<string, Record<string, unknown>>()
+      if (body.rows) for (const r of body.rows) patch.set(r.name, r.updates)
+      else for (const n of body.names ?? []) patch.set(n, body.updates ?? {})
+
+      qc.setQueryData(key, (old: Record<string, unknown>[] | undefined) =>
+        (old ?? []).map(r => {
+          const up = patch.get(r.name as string)
+          return up ? { ...r, ...up } : r
+        }))
+      return { previous, selection, key }
+    },
+    onError: (e: { response?: { data?: { detail?: unknown } } }, _body, ctx) => {
+      if (ctx) {
+        qc.setQueryData(ctx.key, ctx.previous)
+        setSelectedRows(ctx.selection)
+        // Re-read the truth rather than trusting the rollback.
+        qc.invalidateQueries({ queryKey: ctx.key })
+      }
+      toast.error(formatDetail(e.response?.data?.detail, 'Bulk update failed'))
+    },
     onSuccess: (r) => {
-      // SCOPED invalidation. The previous `qc.invalidateQueries()` (no key)
-      // wiped EVERY cached query, triggering ~15 refetches (carriers, profiles,
-      // ac_pf_status, snapshots, etc.) per bulk apply. On large networks this
-      // was the dominant source of perceived lag. We only need:
+      lastMutationAtRef.current = Date.now()
+      // SCOPED invalidation. A bare `qc.invalidateQueries()` would wipe EVERY
+      // cached query, triggering ~15 refetches (carriers, profiles,
+      // ac_pf_status, snapshots, …) per apply. We only need:
       //  • the table for the component class we edited
       //  • the audit-trail surfaces (undoInfo, changelog)
       //  • result queries (they reference component data via bus/name joins)
-      // Other caches (carriers, snapshots, ac_pf_status) are untouched by a
-      // bulk attribute write, so leave them alone.
+      const projectId = useUIStore.getState().currentProject
       const tableKey = TAB_TO_API_KEY[componentClass] ?? componentClass.toLowerCase() + 's'
       qc.invalidateQueries({ queryKey: [tableKey] })
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'undoInfo') })
+      qc.invalidateQueries({ queryKey: nk(projectId, 'undoInfo') })
       qc.invalidateQueries({ queryKey: ['changelog'] })
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'results') })
+      qc.invalidateQueries({ queryKey: nk(projectId, 'results') })
       toast.success(`Updated ${r.updated} ${componentClass.toLowerCase()}(s)`)
-      setSelectedRows(new Set())
       setEditCol(''); setEditValue('')
-    },
-    onError: (e: { response?: { data?: { detail?: string } } }) => {
-      const detail = e.response?.data?.detail ?? 'Bulk update failed'
-      toast.error(detail)
     },
   })
 
   /**
-   * Issue one request for one gesture. Replaced by Task 13's optimistic
-   * mutation; the scalar-vs-row form choice below is the part that stays.
+   * Issue one request for one gesture.
+   *
+   * `spaceUndo` is true for a paste or a fill: D11 requires each of those to
+   * get its OWN undo step, and the middleware coalesces pushes inside a 500 ms
+   * window (undo_service.py:55,90-102). Waiting out the remainder of that
+   * window is a client-side timing concern, deliberately not a server flag.
+   * Single-cell commits pass false and are allowed to coalesce (ruling 16).
    */
-  const applyBulk = (rows: { name: string; updates: Record<string, unknown> }[]) => {
+  const applyBulk = async (rows: BulkRow[], spaceUndo = false) => {
     if (rows.length === 0) return
     const first = JSON.stringify(rows[0].updates)
     const sameEverywhere = rows.every(r => JSON.stringify(r.updates) === first)
+
+    if (spaceUndo) {
+      const elapsed = Date.now() - lastMutationAtRef.current
+      if (lastMutationAtRef.current > 0 && elapsed < 500) {
+        await new Promise(res => setTimeout(res, 500 - elapsed))
+      }
+    }
+
     // The scalar form whenever every row gets the same value in every column
     // (every fill gesture); the row form otherwise. One gesture is always
     // exactly one request (D9).
@@ -860,7 +925,10 @@ function AssetTable({
                       className={cellClass(name, col)}
                       style={{ paddingBlock: 'var(--row-padding-y)' }}
                     >
-                      {editing?.name === name && editing?.col === col ? (
+                      {/* Editors are disabled while a write is in flight — the
+                          ModelHorizon.tsx:907-913 pattern, which prevents a
+                          double-blur race. */}
+                      {editing?.name === name && editing?.col === col && !bulkMut.isPending ? (
                         <CellEditor
                           componentClass={componentClass}
                           column={col}
