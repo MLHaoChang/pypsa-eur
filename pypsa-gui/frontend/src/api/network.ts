@@ -228,7 +228,15 @@ export const networkApi = {
   // Refuses the whole batch if any name is unknown, so the caller can rely on
   // partial-failure-safety. component_class must be a PyPSA class name like
   // "Generator" / "Bus" / "StorageUnit".
-  bulkUpdate: (body: { component_class: string; names: string[]; updates: Record<string, unknown> }) =>
+  // Two body forms (spec D9): names+updates applies one value per column to
+  // every named row; rows carries a per-row patch, which is what a row-by-row
+  // paste needs. Send one or the other, never both — the backend 400s on both.
+  bulkUpdate: (body: {
+    component_class: string
+    names?: string[]
+    updates?: Record<string, unknown>
+    rows?: { name: string; updates: Record<string, unknown> }[]
+  }) =>
     client.patch<{ updated: number; fields: string[] }>('/network/_bulk', body)
       .then(r => r.data),
 

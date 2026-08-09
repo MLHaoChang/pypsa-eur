@@ -11,9 +11,13 @@ import { coerceForColumn } from '../utils/coerce'
 import { useSimulationStore } from '../store/simulationStore'
 import { useCatalog } from '../hooks/useCatalog'
 import {
-  buildSeriesIndex, columnHeaderLabel, columnHeaderTooltip, resolveEditability,
-  toCatalogMap,
+  CLOSED_SETS, buildSeriesIndex, columnHeaderLabel, columnHeaderTooltip,
+  isBooleanDtype, resolveEditability, resolveEditor, toCatalogMap,
+  type CatalogMap,
 } from '../utils/attributeCatalog'
+import { validateAndCoerce } from '../utils/gridEdit'
+import BusAutocomplete from '../components/BusAutocomplete'
+import CarrierSelect from '../components/CarrierSelect'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -126,6 +130,137 @@ interface AssetTableProps {
 // coerceForColumn moved to utils/coerce.ts so it can be unit-tested without
 // mounting this panel. Imported at the top of the file.
 
+// ── CellEditor ───────────────────────────────────────────────────────────────
+// One editor is mounted at a time, chosen by D4's resolution table. Every
+// editor commits a STRING through the same gridEdit validator, so the typed
+// path and the paste path cannot disagree.
+//
+// Because a fresh editor mounts per cell, the uncontrolled-input staleness rule
+// (CLAUDE.md:586-587) is satisfied structurally — no key-remount trick needed.
+function CellEditor({
+  componentClass, column, initial, seed, busNames, catalog, onCommit, onCancel,
+}: {
+  componentClass: string
+  column: string
+  initial: string
+  seed?: string
+  busNames: string[]
+  catalog: CatalogMap
+  onCommit: (raw: string, fill: boolean) => void
+  onCancel: () => void
+}) {
+  const [raw, setRaw] = useState(seed ?? initial)
+  const kind = resolveEditor(componentClass, column, catalog)
+  const inputCls = 'w-full bg-bg border border-accent px-1 py-0 text-[11px] font-mono outline-none'
+
+  // Shared key handling for the text-like editors (D5, open-editor column).
+  const onKey = (e: React.KeyboardEvent) => {
+    const modifier = e.ctrlKey || e.metaKey
+    if (e.key === 'Enter') {
+      e.preventDefault(); e.stopPropagation()
+      onCommit(raw, modifier)              // Ctrl/Cmd+Enter = fill gesture
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation()
+      onCancel()
+      return
+    }
+    if (modifier && (e.key === 's' || e.key === 'S')) {
+      // A save must never run with a pending edit outstanding
+      // (CLAUDE.md:650-666,812) and the grid cannot make its PATCH land
+      // synchronously. Swallowing the first keypress is the honest behaviour.
+      e.preventDefault(); e.stopPropagation()
+      onCommit(raw, false)
+      toast.success('Cell saved — press again to save the project')
+      return
+    }
+    // Arrows must not reach the grid while an editor is open (D5). Bus cells
+    // are the exception and handle their own arrows (BusAutocomplete).
+    if (e.key.startsWith('Arrow')) e.stopPropagation()
+  }
+
+  if (kind === 'bus') {
+    return (
+      <BusAutocomplete
+        value={raw}
+        onChange={v => { setRaw(v); onCommit(v, false) }}
+        buses={busNames}
+        allowUnknown={false}
+        placeholder="Bus…"
+      />
+    )
+  }
+
+  if (kind === 'carrier') {
+    // Consumed as-is, styling props only (D4). Its native <select> popup cannot
+    // be clipped by the grid's scroll container.
+    return (
+      <CarrierSelect
+        value={raw}
+        onChange={v => { setRaw(v); onCommit(v, false) }}
+        label={null}
+        className="w-full text-[11px] py-0"
+        wrapperClassName="block"
+      />
+    )
+  }
+
+  if (kind === 'closedSet') {
+    const options = CLOSED_SETS[`${componentClass}.${column}`] ?? []
+    return (
+      <select
+        autoFocus
+        value={raw}
+        onChange={e => { setRaw(e.target.value); onCommit(e.target.value, false) }}
+        onKeyDown={onKey}
+        className={inputCls}
+      >
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    )
+  }
+
+  if (kind === 'color') {
+    // Carried over from CarriersTable: the picker fires on every keystroke, so
+    // commit on blur for one request per change.
+    return (
+      <span className="flex items-center gap-1">
+        <input
+          type="color"
+          value={/^#[0-9a-f]{6}$/i.test(raw) ? raw : '#888888'}
+          onChange={e => setRaw(e.target.value)}
+          onBlur={() => onCommit(raw, false)}
+          className="w-6 h-5 rounded border border-border cursor-pointer"
+        />
+        <input
+          autoFocus
+          type="text"
+          value={raw}
+          onChange={e => setRaw(e.target.value)}
+          onBlur={() => onCommit(raw, false)}
+          onKeyDown={onKey}
+          className={inputCls}
+        />
+      </span>
+    )
+  }
+
+  // numeric and text both use a type="text" input: type="number" cannot hold
+  // `inf` and reads back '' (D12).
+  return (
+    <input
+      autoFocus
+      type="text"
+      value={raw}
+      onChange={e => setRaw(e.target.value)}
+      onBlur={() => onCommit(raw, false)}
+      onKeyDown={onKey}
+      className={inputCls}
+    />
+  )
+}
+
 function AssetTable({
   tab, componentClass, data, defaultColumns, selectedName, onRowClick,
 }: AssetTableProps) {
@@ -214,6 +349,26 @@ function AssetTable({
       resolveEditability({ componentClass, column: col, rowName, catalog, series }),
     [componentClass, catalog, series],
   )
+
+  // The bus list the bus-terminal editor offers, and the set gridEdit checks
+  // membership against (exact and case-sensitive).
+  const { data: allBusRows = [] } = useQuery({
+    queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses,
+  })
+  const busNames = useMemo(
+    () => (allBusRows as Array<{ name: string }>).map(b => b.name).sort(),
+    [allBusRows],
+  )
+
+  const isBooleanCell = useCallback((col: string): boolean => {
+    const attr = catalog.get(col)
+    return !!attr && isBooleanDtype(attr.dtype)
+  }, [catalog])
+
+  const seriesShadowed = useCallback((rowName: string, col: string): boolean => {
+    const ed = editabilityOf(rowName, col)
+    return !ed.editable && ed.reason === 'series'
+  }, [editabilityOf])
 
   // Search: substring match on row.name. Filter happens BEFORE sort so the
   // user sees the same ordering as the unfiltered table — sort is purely
@@ -392,8 +547,12 @@ function AssetTable({
   useEffect(() => { setEditCol(''); setEditValue('') }, [selectedRows])
 
   const bulkMut = useMutation({
-    mutationFn: (body: { component_class: string; names: string[]; updates: Record<string, unknown> }) =>
-      networkApi.bulkUpdate(body),
+    mutationFn: (body: {
+      component_class: string
+      names?: string[]
+      updates?: Record<string, unknown>
+      rows?: { name: string; updates: Record<string, unknown> }[]
+    }) => networkApi.bulkUpdate(body),
     onSuccess: (r) => {
       // SCOPED invalidation. The previous `qc.invalidateQueries()` (no key)
       // wiped EVERY cached query, triggering ~15 refetches (carriers, profiles,
@@ -418,6 +577,44 @@ function AssetTable({
       toast.error(detail)
     },
   })
+
+  /**
+   * Issue one request for one gesture. Replaced by Task 13's optimistic
+   * mutation; the scalar-vs-row form choice below is the part that stays.
+   */
+  const applyBulk = (rows: { name: string; updates: Record<string, unknown> }[]) => {
+    if (rows.length === 0) return
+    const first = JSON.stringify(rows[0].updates)
+    const sameEverywhere = rows.every(r => JSON.stringify(r.updates) === first)
+    // The scalar form whenever every row gets the same value in every column
+    // (every fill gesture); the row form otherwise. One gesture is always
+    // exactly one request (D9).
+    bulkMut.mutate(sameEverywhere
+      ? { component_class: componentClass, names: rows.map(r => r.name), updates: rows[0].updates }
+      : { component_class: componentClass, rows })
+  }
+
+  /**
+   * The single commit path for a typed editor (D4). `fill` means the value
+   * applies to the whole paste target (Ctrl/Cmd+Enter, or Ctrl/Cmd+click on a
+   * boolean), not just this row.
+   */
+  const commitCell = (rowName: string, col: string, raw: string, fill: boolean) => {
+    setEditing(null)
+    const row = sorted.find(r => r.name === rowName)
+    const currentText = row?.[col] == null ? '' : String(row[col])
+    // No round-trip when the committed text equals the cell's current display
+    // text — the same skip the old CarriersTable did (criterion 2).
+    if (!fill && raw === currentText) return
+
+    const result = validateAndCoerce(col, raw, {
+      componentClass, catalog, busNames: new Set(busNames),
+    })
+    if (!result.ok) { toast.error(result.error); return }
+
+    const targets = fill && selectedRows.size > 0 ? [...selectedRows] : [rowName]
+    applyBulk(targets.map(n => ({ name: n, updates: { [col]: result.value } })))
+  }
 
   const onApply = () => {
     if (!editCol) { toast.error('Pick a column first'); return }
@@ -663,7 +860,46 @@ function AssetTable({
                       className={cellClass(name, col)}
                       style={{ paddingBlock: 'var(--row-padding-y)' }}
                     >
-                      {fmt(row[col])}
+                      {editing?.name === name && editing?.col === col ? (
+                        <CellEditor
+                          componentClass={componentClass}
+                          column={col}
+                          initial={row[col] == null ? '' : String(row[col])}
+                          busNames={busNames}
+                          catalog={catalog}
+                          onCommit={(raw, fill) => commitCell(name, col, raw, fill)}
+                          onCancel={() => setEditing(null)}
+                        />
+                      ) : isBooleanCell(col) ? (
+                        // The one exception to click-to-edit (D4): a checkbox
+                        // holds no draft, so there is nothing to open. Bounded
+                        // by boolean columns x 1000, at most two per tab.
+                        <input
+                          type="checkbox"
+                          checked={row[col] === true}
+                          disabled={!editabilityOf(name, col).editable}
+                          onClick={e => {
+                            e.stopPropagation()
+                            // Ctrl/Cmd+click is a FILL gesture over the paste
+                            // target, mirroring Ctrl/Cmd+Enter and preserving
+                            // the deleted toolbar's set-many-booleans ability.
+                            const modifier = e.ctrlKey || e.metaKey
+                            commitCell(name, col, row[col] === true ? 'false' : 'true', modifier)
+                          }}
+                          onChange={() => { /* commit happens in onClick */ }}
+                          className="cursor-pointer"
+                        />
+                      ) : seriesShadowed(name, col) ? (
+                        <span className="flex items-center gap-1">
+                          <span className="opacity-50">{fmt(row[col])}</span>
+                          <span
+                            title="A time series exists for this asset — the static value is not what the solver reads."
+                            className="px-1 rounded bg-border/40 text-[8px] uppercase tracking-wide"
+                          >series</span>
+                        </span>
+                      ) : (
+                        fmt(row[col])
+                      )}
                     </td>
                   ))}
                   <td className="w-7 px-1 whitespace-nowrap" style={{ paddingBlock: 'var(--row-padding-y)' }}>

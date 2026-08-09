@@ -20,13 +20,37 @@ vi.mock('../api/network', async (importOriginal) => {
       getBuses: vi.fn(), getLines: vi.fn(), getLinks: vi.fn(),
       getTransformers: vi.fn(), getGenerators: vi.fn(), getLoads: vi.fn(),
       getStorageUnits: vi.fn(), getStores: vi.fn(), getCarriers: vi.fn(),
-      bulkUpdate: vi.fn(),
+      bulkUpdate: vi.fn(), getCatalog: vi.fn(), listTimeseries: vi.fn(),
     },
   }
 })
 
 import { networkApi } from '../api/network'
+import type { CatalogAttribute } from '../api/types'
 import BottomPanel from './BottomPanel'
+
+function catalogAttr(
+  over: Partial<CatalogAttribute> & { name: string },
+): CatalogAttribute {
+  return {
+    status: 'Input (optional)', varying: false, dtype: 'float64', unit: null,
+    description: null, type: 'float', default: 0, default_text: '0.0', ...over,
+  }
+}
+
+/** The Bus catalog, matching what the real endpoint reports for these columns. */
+const BUS_CATALOG: CatalogAttribute[] = [
+  catalogAttr({ name: 'name', dtype: 'object', status: 'Input (required)' }),
+  catalogAttr({ name: 'v_nom', unit: 'kV' }),
+  catalogAttr({ name: 'carrier', dtype: 'object', type: 'string' }),
+  // Output in PyPSA, made editable by D13's override list.
+  catalogAttr({ name: 'control', dtype: 'object', status: 'Output', type: 'string' }),
+  catalogAttr({ name: 'x', unit: 'deg' }),
+  catalogAttr({ name: 'y', unit: 'deg' }),
+  catalogAttr({ name: 'sub_network', dtype: 'object', status: 'Output' }),
+  catalogAttr({ name: 'country', dtype: 'object', type: 'string' }),
+  catalogAttr({ name: 'unit', dtype: 'object', type: 'string' }),
+]
 
 /** n buses named "B0".."B(n-1)" with a descending v_nom so sort is observable. */
 function buses(n: number) {
@@ -74,6 +98,9 @@ beforeEach(() => {
     fn.mockReset().mockResolvedValue([] as never)
   }
   api.bulkUpdate.mockReset()
+  api.listTimeseries.mockReset().mockResolvedValue([] as never)
+  api.getCatalog.mockReset().mockImplementation(async (component: string) =>
+    ({ component, attributes: component === 'Bus' ? BUS_CATALOG : [] }) as never)
   useUIStore.setState({ currentProject: 'Demo', selectedComponent: null })
 })
 
@@ -246,5 +273,86 @@ describe('availableCols stays derived from the data — D17', () => {
     renderPanel()
     await screen.findByText('B0')
     expect(document.querySelector('tbody td[data-col="name"]')).toBeTruthy()
+  })
+})
+
+describe('AssetTable cell editors — D4', () => {
+  /** Click the cell then press Enter to open its editor. */
+  async function openEditor(col: string) {
+    const cell = document.querySelector(`tbody tr td[data-col="${col}"]`) as HTMLElement
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    return cell
+  }
+
+  it('Enter on an editable numeric cell opens a type="text" input', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = await openEditor('v_nom')
+    const input = cell.querySelector('input') as HTMLInputElement
+    // type="text", not "number": <input type="number"> cannot hold `inf`.
+    expect(input.getAttribute('type')).toBe('text')
+  })
+
+  it('mounts at most one editor at a time', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cells = document.querySelectorAll('tbody td[data-col="v_nom"]')
+    await userEvent.click(cells[0] as HTMLElement)
+    fireEvent.keyDown(cells[0] as HTMLElement, { key: 'Enter' })
+    await userEvent.click(cells[1] as HTMLElement)
+    fireEvent.keyDown(cells[1] as HTMLElement, { key: 'Enter' })
+    expect(document.querySelectorAll('tbody input[type="text"]').length).toBe(1)
+  })
+
+  it('Escape discards the draft and closes the editor', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = await openEditor('v_nom')
+    const input = cell.querySelector('input') as HTMLInputElement
+    // fireEvent.change rather than userEvent.type: typing round-trips through
+    // focus, and this input commits on blur, so user-event's focus juggling
+    // would close and reopen the editor and leave `input` detached. The
+    // behaviour under test is Escape, not typing.
+    fireEvent.change(input, { target: { value: '999' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(cell.querySelector('input')).toBeNull()
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('committing unchanged text issues no request (criterion 2)', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = await openEditor('v_nom')
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('a read-only Output cell does not open an editor', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    // sub_network is Output on Bus, so the cell must refuse to open.
+    const cell = document.querySelector('tbody tr td[data-col="sub_network"]') as HTMLElement
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    expect(cell.querySelector('input')).toBeNull()
+  })
+
+  it('the `name` cell never opens an editor', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = document.querySelector('tbody tr td[data-col="name"]') as HTMLElement
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    expect(cell.querySelector('input')).toBeNull()
+  })
+
+  it('a closed-set cell offers exactly PQ, PV and Slack (criterion 22)', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = await openEditor('control')
+    const select = cell.querySelector('select') as HTMLSelectElement
+    expect(Array.from(select.options).map(o => o.value)).toEqual(['PQ', 'PV', 'Slack'])
   })
 })
