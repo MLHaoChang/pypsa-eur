@@ -53,10 +53,10 @@ describe('BusAutocomplete keyboard — behaviour as of e8614a35', () => {
     expect(document.querySelectorAll('li').length).toBeGreaterThan(0)
   })
 
-  it('ArrowDown does NOT stop propagation today', () => {
-    // Task 10 adds stopPropagation so an arrow key cannot escape an open editor
-    // and move the grid's active cell. Pinning the current behaviour makes that
-    // change visible rather than silent.
+  it('ArrowDown stops propagation so it cannot reach the grid', () => {
+    // Flipped by Task 10 (spec D4 adaptation 3). With the dropdown open OR
+    // closed, an arrow key belongs to this widget: letting it bubble would move
+    // the grid's active cell out from under an open editor (criterion 23).
     const outer = vi.fn()
     render(
       <div onKeyDown={outer}>
@@ -66,7 +66,7 @@ describe('BusAutocomplete keyboard — behaviour as of e8614a35', () => {
     const input = screen.getByRole('textbox')
     fireEvent.focus(input)
     fireEvent.keyDown(input, { key: 'ArrowDown' })
-    expect(outer).toHaveBeenCalled()
+    expect(outer).not.toHaveBeenCalled()
   })
 
   it('Enter selects the highlighted suggestion', () => {
@@ -96,15 +96,37 @@ describe('BusAutocomplete dropdown geometry — behaviour as of e8614a35', () =>
     expect(list.style.position).toBe('fixed')
   })
 
-  it('does not reposition on scroll today', () => {
-    // Task 10 adds a capture-phase scroll listener. Today nothing recomputes,
-    // which is exactly why the dropdown would drift inside the grid's scrolling
-    // table body.
+  it('repositions on scroll so it follows the grid body', () => {
+    // Flipped by Task 10 (adaptation 2). jsdom reports a zero rect, so this
+    // asserts that a recompute HAPPENED, not a pixel value: the listener is
+    // capture-phase because a scroll on the table body does not bubble.
     const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
     render(<BusAutocomplete value="Bus" onChange={() => {}} buses={BUSES} />)
     fireEvent.focus(screen.getByRole('textbox'))
     const before = spy.mock.calls.length
     fireEvent.scroll(document, {})
-    expect(spy.mock.calls.length).toBe(before)
+    expect(spy.mock.calls.length).toBeGreaterThan(before)
+  })
+})
+
+describe('BusAutocomplete allowUnknown — added by Task 10', () => {
+  it('still promises auto-creation by default, for the creation form', () => {
+    render(<BusAutocomplete value="Nrth" onChange={() => {}} buses={BUSES} />)
+    expect(screen.getByText(/created automatically/)).toBeTruthy()
+  })
+
+  it('refuses instead of promising when allowUnknown is false', () => {
+    render(
+      <BusAutocomplete value="Nrth" onChange={() => {}} buses={BUSES} allowUnknown={false} />,
+    )
+    expect(screen.queryByText(/created automatically/)).toBeNull()
+    expect(screen.getByText(/no bus named/i)).toBeTruthy()
+  })
+
+  it('says nothing when the value matches a real bus', () => {
+    render(
+      <BusAutocomplete value="North" onChange={() => {}} buses={BUSES} allowUnknown={false} />,
+    )
+    expect(screen.queryByText(/no bus named/i)).toBeNull()
   })
 })
