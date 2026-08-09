@@ -782,14 +782,31 @@ was not checked, and does not mistake "not raised as a finding" for
   434.8 MWh of genuine VOLL shedding, 203 cycles/yr of real battery
   arbitrage) — but that is a one-off measurement, not a second permanent
   regression guard; the purpose-built fixtures remain the committed tests.
-- **Neither large network available to this suite (golden or
-  `3_nodes_system`) has divergent `objective`/`generators` snapshot
-  weighting columns.** Both report identical horizon hours under either
-  basis. The `binding_hours` basis fix (S2) is verified ONLY by the
-  dedicated `build_weighting_basis_network` fixture (Task 15) — a real
-  representative-week run (where the two columns genuinely differ, per
-  CLAUDE.md's own note that `sample_representative_weeks` resets weights on
-  promotion to multi-period) has not been observed by this examination.
+- ~~**Neither large network available to this suite has divergent
+  `objective`/`generators` snapshot weighting columns**~~ — **RESOLVED
+  2026-08-09 (`e563548b`..).** The entry hoped for "a real
+  representative-week run (where the two columns genuinely differ)". **That
+  run cannot exist.** `sample_representative_weeks`
+  (`routers/network.py`) assigns the SAME vector to every column, and says
+  so deliberately: *"Set all three weight columns so the LP objective,
+  generator energy balance and storage SoC equations scale consistently."*
+  A representative-week network is weighting-basis-degenerate by
+  construction.
+
+  The `objective`/`generators` split is therefore reachable ONLY through a
+  manual weightings edit — the CSV upload or the PATCH endpoint, both of
+  which write per-column — which is exactly what
+  `build_weighting_basis_network` models. The examination's coverage of S2
+  was appropriate all along; the gap was in this entry's premise, not in
+  the tests.
+
+  What was genuinely missing is a guard on the invariant, now in
+  `tests/test_rep_week_weighting_basis.py`: if anyone ever makes rep-week
+  differentiate the columns, `_compute_loading_summary`'s ENERGY-basis
+  choice becomes observable on real networks and S2 must be re-measured
+  there. The test fails loudly at that moment rather than letting it pass
+  unnoticed. (Verified by mutation: differentiating one column in the
+  sampler fails it.)
 - **S1 remains an open product decision**, now measured on two independent
   networks: golden (Δ=0.166250 M€, one electrolyzer) and `3_nodes_system`
   (Δ=56.192453 M€, two Links). Both differences equal exactly the sum of
@@ -822,17 +839,38 @@ was not checked, and does not mistake "not raised as a finding" for
   `tests/test_prices_merit_order_parity.py`, whose parity assertion pins the
   two surfaces to each other rather than to hardcoded values.
 
-  **Still open:** `get_asset_economics` holds a THIRD copy. It implements
-  both branches, so it is a maintenance duplicate rather than a drift
-  source, and collapsing it would touch an economics surface — deliberately
-  left rather than swept into the Prices fix.
-- **No fixture or real project available to this examination exercises a
-  Store.** `_compute_total_annuitised_capex` and `_compute_economics_summary`
-  both walk `Store` in their component lists (per S1's own writeup and
-  `coverage.py`'s citations), but neither the golden fixture nor
-  `3_nodes_system` contains one (`n.stores` is empty on both) — so the
-  Store branch of either function's code path is read, not measured, in
-  this examination.
+  **The third copy is also gone (2026-08-09).** `get_asset_economics` held
+  a verbatim duplicate — both branches, so no live drift, but three copies
+  of a rule this subtle is how the `get_prices` drift happened. Collapsed
+  to `corrected_marginal_prices(n)`, which performs the identical fetch it
+  was doing by hand (`_result_df(..., "lopf")`, zero-fallback on
+  `n.snapshots` — the local `snapshots` name is bound to exactly that —
+  then `fillna(0.0)`), so the change is behaviour-preserving.
+
+  Pinned by `tests/test_asset_economics_merit_order_parity.py` on the
+  observable consequence: the revenue a subsidised renewable is credited
+  with. Confirmed passing BEFORE the collapse (characterisation), and shown
+  capable of failing by disabling only that copy's at-ceiling branch, which
+  reports −10 000 EUR instead of 0. **One implementation now remains.**
+- ~~**No fixture or real project available to this examination exercises a
+  Store**~~ — **CLOSED 2026-08-09 (`e563548b`).** The Store branch is now
+  measured by `tests/test_compare_store_capex_parity.py`, which builds a
+  network containing one and asserts the same Capacity-vs-Economics parity
+  property S1 was about.
+
+  **No defect found** — `_walk(n.stores, "e_nom", "stores")` is correct,
+  including on the extendable path where CAPEX must follow `e_nom_opt`. So
+  this is a characterisation test, and it was verified by mutation rather
+  than trusted: swapping the walk's nominal field to `p_nom` (Stores are
+  billed on ENERGY capacity, so the power field is the plausible wrong
+  answer) fails all three tests.
+
+  Worth recording, because the first mutation round killed only two of the
+  three: the extendable test had a flat load and flat marginal cost, so the
+  optimiser had no arbitrage to fund, built nothing, and the assertion
+  reduced to `0 == 0` — green under a broken walk. Fixed with a
+  time-varying marginal cost plus an explicit `built > 0` guard. A
+  coverage-gap test can itself be vacuous; mutation is what surfaces it.
 
 ---
 
