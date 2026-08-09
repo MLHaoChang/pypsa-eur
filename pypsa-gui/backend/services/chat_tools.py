@@ -790,6 +790,154 @@ def cascade_delete_bus(name: str) -> None:
 # ── Bulk (1) ────────────────────────────────────────────────────────────────
 
 
+# One tool call must not be able to wedge the event loop or bury the undo
+# stack. Unlike a read, where a short page is fine, a partial write is the
+# failure mode — so an oversized batch is refused rather than trimmed.
+MAX_BATCH_SIZE = 200
+
+
+def _check_batch_size(items: list, what: str) -> None:
+    if not isinstance(items, list) or not items:
+        raise HTTPException(400, f"{what} must be a non-empty list")
+    if len(items) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            400,
+            f"{len(items)} {what} exceeds the {MAX_BATCH_SIZE}-item batch "
+            f"limit; split the work across several calls",
+        )
+
+
+def batch_create_components(component_class: str, components: list[dict]) -> dict:
+    """
+    Create many components of one class in a single call (#17).
+
+    Building a 30-bus network was 30 turns — 30 model round-trips, 30 audit
+    entries, and 30 chances for the turn's 25-tool-call cap to cut the job
+    in half, which is a task the agent cannot finish rather than one it
+    finishes slowly.
+
+    Validate-then-apply, refusing the whole batch on any bad entry, per the
+    same rule as /_bulk: a half-created network is not a state the agent can
+    reason about, and undo unwinds one entry at a time.
+
+    Each entry still goes through `create_component`, so every per-class
+    handler runs unchanged — carrier auto-create, line haversine length
+    fill, transformer voltage validation. A batch path that wrote rows
+    directly would silently skip all of it.
+    """
+    _check_batch_size(components, "components")
+    schema_name = _COMPONENT_CREATE_SCHEMAS.get(component_class)
+    if schema_name is None:
+        raise HTTPException(400, f"Unknown component_class: {component_class!r}")
+
+    # ── Pass 1: validate everything, write nothing. ──
+    Schema = _get_schema(schema_name)
+    existing = set(_component_index(component_class))
+    seen: set[str] = set()
+    for i, entry in enumerate(components):
+        if not isinstance(entry, dict):
+            raise HTTPException(400, f"entry {i} is not an object")
+        name = entry.get("name")
+        if not name or not isinstance(name, str):
+            raise HTTPException(400, f"entry {i} has no 'name'")
+        if name in existing:
+            raise HTTPException(
+                409, f"entry {i}: {component_class} {name!r} already exists",
+            )
+        # Caught here rather than by the second create failing — otherwise
+        # entry 1 lands and entry 2 raises, which is the partial state this
+        # design exists to avoid.
+        if name in seen:
+            raise HTTPException(400, f"entry {i}: {name!r} appears twice in the batch")
+        seen.add(name)
+        attrs = {k: v for k, v in entry.items() if k != "name"}
+        try:
+            Schema(name=name, **attrs)
+        except Exception as exc:  # noqa: BLE001 — pydantic + coercion errors
+            raise HTTPException(
+                400, f"entry {i} ({name!r}) is invalid: {exc}",
+            ) from exc
+
+    # ── Pass 2: apply. ──
+    created: list[str] = []
+    for entry in components:
+        name = entry["name"]
+        try:
+            create_component(component_class, name,
+                             {k: v for k, v in entry.items() if k != "name"})
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Validation passed and this still failed, so the batch IS
+            # partial. Say exactly what landed — claiming atomicity we did
+            # not deliver would send the agent looking for the wrong bug.
+            raise HTTPException(
+                500,
+                f"batch partially applied: created {created} before "
+                f"{name!r} failed: {exc}",
+            ) from exc
+        created.append(name)
+    return {"created": created, "count": len(created)}
+
+
+def batch_delete_components(component_class: str, names: list[str]) -> dict:
+    """
+    Delete many components of one class in a single call (#17).
+
+    Same validate-then-apply contract as `batch_create_components`. Each
+    delete routes through `delete_component`, so the per-class handlers
+    keep running — and with them the `_user_ts` profile cleanup and the
+    vintage-bounds cascade that a direct row drop would orphan.
+    """
+    _check_batch_size(names, "names")
+    handlers = _delete_component_handlers()
+    if component_class not in handlers:
+        raise HTTPException(400, f"Unknown component_class: {component_class!r}")
+
+    name_strs = [str(x) for x in names]
+    index = set(_component_index(component_class))
+    missing = [x for x in name_strs if x not in index]
+    if missing:
+        sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+        raise HTTPException(
+            404, f"{len(missing)} {component_class}(s) not found: {sample}",
+        )
+    transient = [x for x in name_strs
+                 if x in PyPSAService.get_transient_rows(component_class)]
+    if transient:
+        sample = ", ".join(transient[:3]) + ("…" if len(transient) > 3 else "")
+        raise HTTPException(
+            409,
+            f"Cannot delete {len(transient)} {component_class}(s) ({sample}) — "
+            f"these rows are LP scaffolding from the current solve.",
+        )
+
+    deleted: list[str] = []
+    for name in name_strs:
+        try:
+            delete_component(component_class, name)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                500,
+                f"batch partially applied: deleted {deleted} before "
+                f"{name!r} failed: {exc}",
+            ) from exc
+        deleted.append(name)
+    return {"deleted": deleted, "count": len(deleted)}
+
+
+def _component_index(component_class: str) -> list[str]:
+    """Current row names for one class, straight off the network."""
+    attr = ("global_constraints" if component_class == "GlobalConstraint"
+            else _GENERIC_CRUD_ATTRS.get(component_class))
+    if attr is None:
+        return []
+    df = getattr(PyPSAService.get_network(), attr, None)
+    return [] if df is None else [str(x) for x in df.index]
+
+
 def bulk_update_components(component_class: str, names: list[str], updates: dict) -> dict:
     """PATCH /api/network/_bulk."""
     # Handler is bulk_update(body: dict) — it reads body.get("component_class"/
@@ -3162,9 +3310,38 @@ def _validate_cascade_delete_bus(args: dict[str, Any]) -> str | None:
     return None
 
 
+def _validate_batch_delete_components(args: dict[str, Any]) -> str | None:
+    component_class = args.get("component_class")
+    names = args.get("names")
+    if not isinstance(names, list) or not names:
+        return "names must be a non-empty list"
+    attr = _COMPONENT_CLASS_TO_ATTR.get(str(component_class))
+    if attr is None:
+        return (
+            f"unknown component_class {component_class!r}; expected one of: "
+            + ", ".join(sorted(_COMPONENT_CLASS_TO_ATTR))
+        )
+    from services.pypsa_service import PyPSAService
+    df = getattr(PyPSAService.get_network(), attr, None)
+    index = set() if df is None else {str(x) for x in df.index}
+    missing = [str(x) for x in names if str(x) not in index]
+    if missing:
+        sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+        return (
+            f"{len(missing)} of {len(names)} {component_class}(s) are not in "
+            f"the network: {sample}. The whole batch would be refused — list "
+            f"the existing ones and retry with names that exist."
+        )
+    return None
+
+
 PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
     "delete_component": _validate_delete_component,
     "cascade_delete_bus": _validate_cascade_delete_bus,
+    # The widest blast radius in the set: do not make someone approve
+    # deleting thirty components when one name is wrong and the call 404s
+    # either way.
+    "batch_delete_components": _validate_batch_delete_components,
 }
 
 
@@ -3227,6 +3404,8 @@ DISPATCHERS: dict[str, Any] = {
     "cascade_delete_bus": cascade_delete_bus,
     # write_bulk (1)
     "bulk_update_components": bulk_update_components,
+    "batch_create_components": batch_create_components,
+    "batch_delete_components": batch_delete_components,
     # write_carriers (1)
     "create_carrier": create_carrier,
     # write_meta (1)

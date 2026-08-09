@@ -395,6 +395,41 @@ TOOLS: list[dict[str, Any]] = [
         ["component_class", "names", "updates"],
     ),
 
+    _t(
+        "batch_create_components",
+        "Create MANY components of one class in a single call. Prefer this "
+        "over repeated create_component: a turn allows only 25 tool calls, "
+        "so building a network one component at a time is a task that gets "
+        "cut off rather than one that finishes slowly. Each entry is an "
+        "object with 'name' plus that class's attributes. The WHOLE batch is "
+        "refused if any entry is invalid, duplicates another entry's name, "
+        "or collides with an existing component — nothing is created in that "
+        "case, and the error names the offending entry and its index. Max "
+        "200 per call. Safety: write.",
+        {
+            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+            "components": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "One object per component: {name, ...attributes}.",
+            },
+        },
+        ["component_class", "components"],
+    ),
+
+    _t(
+        "batch_delete_components",
+        "Delete MANY components of one class in a single call. The WHOLE "
+        "batch is refused if any name is absent or is solver scaffolding — "
+        "nothing is deleted in that case. Max 200 per call. "
+        "Safety: destructive.",
+        {
+            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+            "names": {"type": "array", "items": {"type": "string"}},
+        },
+        ["component_class", "names"],
+    ),
+
     # ── Carriers (1) ───────────────────────────────────────────────────────
 
     _t(
@@ -1513,6 +1548,10 @@ TOOL_ROUTES: dict[str, list] = {
     "cascade_delete_bus": [("DELETE", "/api/network/buses/{name}/cascade")],
     # write_bulk (1)
     "bulk_update_components": [("PATCH", "/api/network/_bulk")],
+    # #17: loops the per-class handlers so their dedicated logic and the
+    # _user_ts / vintage cleanup keep running; no single endpoint mirrors it.
+    "batch_create_components": _SERVICE_CALL,
+    "batch_delete_components": _SERVICE_CALL,
     # write_carriers (1)
     "create_carrier": [("POST", "/api/network/carriers")],
     # write_meta (1)
