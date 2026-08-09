@@ -793,20 +793,46 @@ def read_all_turns(ctx: ProjectContext) -> list[dict[str, Any]]:
     chat_history so callers like the cap / export don't accidentally trigger it).
     Empty list when the context is unbound (no persist path).
 
+    Callers that need to know whether anything was skipped want
+    `read_all_turns_with_gap`; this shape is preserved for the two callers
+    (the daily-spend cap, the export route) for which a damaged line changes
+    nothing they can act on.
+    """
+    return read_all_turns_with_gap(ctx)[0]
+
+
+def read_all_turns_with_gap(
+    ctx: ProjectContext,
+) -> tuple[list[dict[str, Any]], int]:
+    """
+    `read_all_turns`, plus the number of lines that failed to parse.
+
+    QA #10 — the skip itself is correct (a torn trailing line from a
+    concurrent write is exactly what the rotation lock cannot prevent, and
+    refusing to serve the other 200 turns over it would be worse). What was
+    wrong is that the skip was SILENT: a transcript that lost a turn read as
+    a transcript that never had one, so the panel rendered a shorter
+    conversation than the user had and nothing anywhere said so.
+
+    The count is deliberately a count and not the raw lines — the damaged
+    bytes are unparseable by definition, so there is nothing to show; the
+    honest statement is "N records here are unreadable".
+
     Holds `ctx.chat_state.lock` for path resolution + reads so a concurrent
     `append_turn` rotation (rename chat.jsonl → chat.jsonl.1) cannot expose a
     missing/empty file mid-read.
     """
     # Unbound: no files to touch — skip the lock.
     if ctx.loaded_project is None and ctx.chat_state.persist_path is None:
-        return []
+        return [], 0
     with ctx.chat_state.lock:
         path = get_persist_path(ctx)
         if path is None or not path.exists():
-            return []
+            return [], 0
         rotated = path.with_suffix(path.suffix + ".1")
         sources = [rotated, path] if rotated.exists() else [path]
         turns: list[dict[str, Any]] = []
+        gap = 0
         for src in sources:
             try:
                 for line in src.read_text(encoding="utf-8").splitlines():
@@ -816,11 +842,13 @@ def read_all_turns(ctx: ProjectContext) -> list[dict[str, Any]]:
                     try:
                         turns.append(json.loads(line))
                     except json.JSONDecodeError:
-                        # Trailing partial line from a concurrent write — skip.
+                        # Trailing partial line from a concurrent write — skip
+                        # it, but count it so the caller can say so.
+                        gap += 1
                         continue
             except OSError:
                 continue
-        return turns
+        return turns, gap
 
 
 def _today_token_spend(ctx: ProjectContext) -> int:
@@ -939,6 +967,100 @@ def append_turn(ctx: ProjectContext, turn: dict[str, Any]) -> None:
             # accepted here: this protects a chat transcript, not a ledger.
             f.flush()
             os.fsync(f.fileno())
+
+
+def _pending_turn_path_unlocked(ctx: ProjectContext) -> Path | None:
+    """`chat.jsonl.pending` beside the transcript. Caller MUST hold the lock."""
+    path = get_persist_path(ctx)
+    if path is None:
+        return None
+    return path.with_suffix(path.suffix + ".pending")
+
+
+def begin_pending_turn(ctx: ProjectContext, record: dict[str, Any]) -> None:
+    """
+    Record that a turn STARTED, before anything risky happens (#20 / QA #10).
+
+    `append_turn` only ever runs on the success path, so until now a turn that
+    died between Send and completion left no evidence at all: not in
+    chat.jsonl, not in the session (gone with the process). The user's own
+    message was simply lost, and the reload could not even say so.
+
+    This file survives a crash for the same reason it is useless against a
+    clean exit — the code that removes it (`clear_pending_turn`, in
+    `run_turn`'s `finally`) does not get to run when the process dies. So the
+    presence of the file after a restart IS the signal.
+
+    Written via tmp + `os.replace` so a crash DURING this write leaves either
+    the old record or the new one, never a half-record that would then be
+    reported as an unreadable pending turn. fsync'd for the same reason
+    `append_turn` is: the page cache survives `os._exit`, not a power cut.
+
+    Best-effort throughout: a WAL that cannot be written must not stop the
+    turn the user asked for. Silent no-op on an unbound context.
+    """
+    try:
+        with ctx.chat_state.lock:
+            pending = _pending_turn_path_unlocked(ctx)
+            if pending is None:
+                return
+            pending.parent.mkdir(parents=True, exist_ok=True)
+            tmp = pending.with_suffix(pending.suffix + ".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, pending)
+    except OSError:
+        logger.exception("chat: could not write the pending-turn record")
+
+
+def read_pending_turn(ctx: ProjectContext) -> dict[str, Any] | None:
+    """
+    The pending record, or None when there is none / it is unreadable.
+
+    An unreadable pending file is treated as absent rather than surfaced: it
+    carries no message to show, and the only honest thing left to say about
+    it is what `history_gap` already says about chat.jsonl.
+    """
+    try:
+        with ctx.chat_state.lock:
+            pending = _pending_turn_path_unlocked(ctx)
+            if pending is None or not pending.exists():
+                return None
+            raw = pending.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    try:
+        rec = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def clear_pending_turn(ctx: ProjectContext) -> None:
+    """
+    Drop the pending record — the turn reached an end this process observed.
+
+    Called from `run_turn`'s `finally`, so it runs on EVERY exit path the
+    process lives through: normal completion, an error frame, a cap
+    rejection, `GeneratorExit` on client disconnect. All of those are ends
+    the user can see; none of them is the crash this file exists for.
+
+    Never raises. It runs in a `finally`, where an exception would replace
+    whatever real failure is already in flight.
+    """
+    try:
+        with ctx.chat_state.lock:
+            pending = _pending_turn_path_unlocked(ctx)
+            if pending is None:
+                return
+            pending.unlink(missing_ok=True)
+            pending.with_suffix(pending.suffix + ".tmp").unlink(missing_ok=True)
+    except OSError:
+        logger.exception("chat: could not clear the pending-turn record")
 
 
 def flush_to_disk(ctx: ProjectContext) -> None:
@@ -1830,6 +1952,27 @@ def run_turn(
 
     _metric_incr("turns")
     _t_start = time.monotonic()
+
+    # #20 — pending-turn WAL. Written HERE, before the body runs, because the
+    # window it protects opens the moment we start talking to the model and
+    # `append_turn` does not fire until the turn has already succeeded. The
+    # context is resolved the same way `_run_turn_body` resolves its P0 pin,
+    # and on the same `next()`, so both see the same project.
+    from services.pypsa_service import PyPSAService
+    _wal_ctx: ProjectContext | None = None
+    try:
+        _wal_ctx = PyPSAService.get_active_context()
+        begin_pending_turn(_wal_ctx, {
+            "ts": time.time(),
+            "session_id": session.session_id,
+            "model": session.model,
+            # Redacted like the durable record in `append_turn` — this file is
+            # equally on-disk and equally reaches snapshot/copy bundles.
+            "user": _redact_for_persist(message),
+        })
+    except Exception:  # noqa: BLE001 — the WAL must never block the turn
+        logger.exception("chat: failed to open the pending-turn record")
+
     try:
         # The body is a separate generator so this one try/finally clears the
         # in-flight flag + records the duration on EVERY exit path (normal
@@ -1846,6 +1989,11 @@ def run_turn(
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
+        # Every exit reached from inside this process is an end the user can
+        # observe, so none of them should leave a "this turn was interrupted"
+        # record behind. Only a crash skips this line — which is the point.
+        if _wal_ctx is not None:
+            clear_pending_turn(_wal_ctx)
 
 
 def _run_turn_body(

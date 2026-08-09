@@ -197,10 +197,25 @@ export interface ChatTurn {
   attachment_file_ids?: string[]
 }
 
+// A turn that started and never finished, recovered from the server's
+// pending-turn WAL. Carries the user's message only — there is no assistant
+// half, which is precisely what makes it worth reporting.
+export interface InterruptedTurn {
+  ts: number
+  session_id: string
+  model: ChatModel
+  user: string
+}
+
 export interface ChatHistory {
   turns: ChatTurn[]
   last_session_id: string | null
   bound_project: string | null
+  // How many on-disk records were unreadable. Non-zero means `turns` is
+  // INCOMPLETE — say so rather than rendering a quietly shorter conversation.
+  history_gap: number
+  // Reported once, then cleared server-side; null on a clean reload.
+  pending_turn: InterruptedTurn | null
 }
 
 export async function getChatHistory(limit = 200): Promise<ChatHistory> {

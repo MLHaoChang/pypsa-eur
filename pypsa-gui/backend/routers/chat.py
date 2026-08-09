@@ -177,6 +177,39 @@ def delete_api_key_settings(
     return app_secrets.clear_secret("ANTHROPIC_API_KEY")
 
 
+def _recover_pending_turn(ctx: Any) -> dict[str, Any] | None:
+    """
+    Resolve the WAL record left by an interrupted turn (#20), or None.
+
+    Two cases have to be told apart, and the file alone cannot do it — a
+    pending record looks identical whether the turn died with the process or
+    is streaming right now in another tab:
+
+      * The owning session is in this process AND has a turn in flight. The
+        turn is alive. Report nothing and — critically — leave the file
+        alone: deleting it here would strip a running turn of the protection
+        it is currently relying on.
+      * Otherwise (the usual post-restart case, where SESSIONS is empty).
+        Nobody is going to finish this turn. Report it, then clear it, so one
+        interruption produces one notice rather than a permanent banner.
+
+    The turn is deliberately NOT promoted into `turns`. It was never
+    answered; writing it into the transcript would fabricate a record of a
+    conversation that did not happen. Reporting it lets the panel say "this
+    message was interrupted" and let the user decide whether to resend.
+    """
+    pending = chat_service.read_pending_turn(ctx)
+    if pending is None:
+        return None
+    owner = chat_service.get_session(str(pending.get("session_id") or ""))
+    if owner is not None:
+        with owner._lock:
+            if owner._turn_in_flight:
+                return None
+    chat_service.clear_pending_turn(ctx)
+    return pending
+
+
 @router.get("/history")
 def chat_history(limit: int = 200) -> dict[str, Any]:
     """
@@ -194,16 +227,25 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
       * `turns`: list of turn records, oldest first.
       * `last_session_id`: id of the most recent turn (or None if empty).
       * `bound_project`: the project name we read from, or None when unbound.
+      * `history_gap`: how many on-disk records were unreadable (QA #10). Zero
+        on a healthy transcript. Non-zero means the list above is INCOMPLETE,
+        which the panel must say rather than render a quietly shorter
+        conversation.
+      * `pending_turn`: a turn that started and never finished — recovered
+        from the WAL (#20), reported ONCE, then cleared. None normally.
     """
     from services.pypsa_service import PyPSAService
     ctx = PyPSAService.get_active_context()
     # Shared two-source (rotation + current) read — also used by the #9 daily
     # cap and the #27 export route. read_all_turns returns ONLY parsed turns
     # (no session rebuild side-effect); the rehydration below stays local.
-    turns: list[dict[str, Any]] = chat_service.read_all_turns(ctx)
+    turns, history_gap = chat_service.read_all_turns_with_gap(ctx)
+    pending_turn = _recover_pending_turn(ctx)
     if not turns:
         return {"turns": [], "last_session_id": None,
-                "bound_project": ctx.loaded_project}
+                "bound_project": ctx.loaded_project,
+                "history_gap": history_gap,
+                "pending_turn": pending_turn}
     if limit > 0:
         turns = turns[-limit:]
 
@@ -239,6 +281,8 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
         "turns": turns,
         "last_session_id": last_session_id,
         "bound_project": ctx.loaded_project,
+        "history_gap": history_gap,
+        "pending_turn": pending_turn,
     }
 
 
