@@ -1,5 +1,5 @@
 import client from './client'
-import type { Bus, Carrier, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
+import type { Bus, Carrier, CatalogPayload, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
 import type { RescalePreview } from '../utils/rescale'
 
 export const networkApi = {
@@ -236,6 +236,11 @@ export const networkApi = {
   // wedged backend doesn't tie up axios sockets for 30s and bring down the UI.
   undoInfo: () => client.get<{ depth: number }>('/network/undo/info', { timeout: 5000 }).then(r => r.data),
   undo: () => client.post<{ undone: boolean; remaining: number }>('/network/undo').then(r => r.data),
+
+  // Attribute catalog (spec D3/D24). Class-level metadata; cached forever by
+  // hooks/useCatalog.ts under a deliberately unscoped key.
+  getCatalog: (component: string) =>
+    client.get<CatalogPayload>(`/network/catalog/${encodeURIComponent(component)}`).then(r => r.data),
 
   // Time series
   listTimeseries: () => client.get<TimeseriesInfo[]>('/network/timeseries').then(r => r.data),
