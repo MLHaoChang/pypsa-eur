@@ -6,7 +6,7 @@
 // AssetTable is not exported, so these drive it through the real BottomPanel
 // with the nine network getters mocked.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
@@ -437,5 +437,136 @@ describe('AssetTable optimistic mutation — D10', () => {
     expect(shown).toContain('not a number')
     expect(shown).toContain('p_nom')
     expect(shown).not.toContain('[object Object]')
+  })
+})
+
+/**
+ * jsdom has neither ClipboardEvent nor DataTransfer, so both events are built
+ * by hand. `bubbles: true` matters — the grid listens on its scroll container.
+ */
+function firePaste(el: Element, text: string) {
+  const e = new Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(e, 'clipboardData', {
+    value: { getData: () => text, setData: () => {} },
+  })
+  el.dispatchEvent(e)
+}
+
+function fireCopy(el: Element): string {
+  let written = ''
+  const e = new Event('copy', { bubbles: true, cancelable: true })
+  Object.defineProperty(e, 'clipboardData', {
+    value: { getData: () => '', setData: (_t: string, v: string) => { written = v } },
+  })
+  el.dispatchEvent(e)
+  return written
+}
+
+describe('AssetTable clipboard — D6, D7, D8', () => {
+  async function activate(col = 'v_nom') {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = document.querySelector(`tbody tr td[data-col="${col}"]`) as HTMLElement
+    await userEvent.click(cell)
+    return cell
+  }
+
+  it('copy emits the active cell as TSV', async () => {
+    const cell = await activate()
+    expect(fireCopy(cell)).toBe('380')
+  })
+
+  it('a 1x1 paste fills every selected row in one request', async () => {
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue(
+      { updated: 5, fields: ['v_nom'] } as never)
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())              // select all 5
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    await act(async () => { firePaste(cell, '111') })
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalled())
+    expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledTimes(1)
+    const body = vi.mocked(networkApi).bulkUpdate.mock.calls[0][0]
+    expect(body.names?.length).toBe(5)
+    expect(body.updates).toEqual({ v_nom: 111 })
+  })
+
+  it('an Nx1 paste of distinct values uses the row form, one request', async () => {
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue(
+      { updated: 5, fields: ['v_nom'] } as never)
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    await act(async () => { firePaste(cell, '1\r\n2\r\n3\r\n4\r\n5') })
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalled())
+    expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledTimes(1)
+    const body = vi.mocked(networkApi).bulkUpdate.mock.calls[0][0]
+    expect(body.rows?.length).toBe(5)
+    expect(body.names).toBeUndefined()
+  })
+
+  it('a row-count mismatch changes nothing and reports both counts', async () => {
+    const errSpy = vi.spyOn(toast, 'error')
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())              // 5 rows
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    await act(async () => { firePaste(cell, '1\r\n2') })
+    expect(errSpy).toHaveBeenCalled()
+    const msg = errSpy.mock.calls[0][0] as string
+    expect(msg).toContain('2 row(s)')
+    expect(msg).toContain('5 row(s)')
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('one invalid value rejects the whole paste and names the cell', async () => {
+    const errSpy = vi.spyOn(toast, 'error')
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    await act(async () => { firePaste(cell, '1\r\n2\r\n12o0\r\n4\r\n5') })
+    expect(errSpy).toHaveBeenCalled()
+    expect(errSpy.mock.calls[0][0]).toContain('B2 / v_nom')
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('a paste into a read-only column changes nothing and names the cell', async () => {
+    const errSpy = vi.spyOn(toast, 'error')
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = document.querySelector('tbody tr td[data-col="name"]') as HTMLElement
+    await userEvent.click(cell)
+    await act(async () => { firePaste(cell, 'renamed') })
+    expect(errSpy).toHaveBeenCalled()
+    expect(errSpy.mock.calls[0][0]).toContain('name')
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('pasting the same values back issues no request (criterion 3)', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    await act(async () => { firePaste(cell, '380\r\n379\r\n378\r\n377\r\n376') })
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('a paste over 200 rows asks for confirmation first (D18)', async () => {
+    vi.mocked(networkApi).getBuses.mockResolvedValue(buses(300) as never)
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    await act(async () => { firePaste(cell, '111') })
+    // Nothing sent until the user confirms.
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
   })
 })

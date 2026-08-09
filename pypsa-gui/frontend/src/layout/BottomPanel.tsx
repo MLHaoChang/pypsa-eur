@@ -16,6 +16,10 @@ import {
   type CatalogMap,
 } from '../utils/attributeCatalog'
 import { validateAndCoerce } from '../utils/gridEdit'
+import {
+  guardCell, parseTsv, resolvePasteShape, serialiseTsv, unguardCell,
+} from '../utils/clipboardTsv'
+import { isNumericDtype } from '../utils/attributeCatalog'
 import BusAutocomplete from '../components/BusAutocomplete'
 import CarrierSelect from '../components/CarrierSelect'
 
@@ -681,6 +685,112 @@ function AssetTable({
     applyBulk(targets.map(n => ({ name: n, updates: { [col]: result.value } })))
   }
 
+  /**
+   * The paste target (D7): the checkbox selection if non-empty, otherwise the
+   * active cell's row — in `sorted` order, NOT `displayed`, so rows past the
+   * 1000-row render cap are included (criterion 4).
+   */
+  const pasteTargetRows = useCallback((): string[] => {
+    if (selectedRows.size > 0) {
+      return sorted.map(r => r.name as string).filter(n => selectedRows.has(n))
+    }
+    return active ? [active.name] : []
+  }, [selectedRows, sorted, active])
+
+  /** True when a column's values are text, i.e. injection-guard territory. */
+  const isStringColumn = useCallback((col: string): boolean => {
+    const attr = catalog.get(col)
+    if (!attr) return true
+    return !isNumericDtype(attr.dtype) && !isBooleanDtype(attr.dtype)
+  }, [catalog])
+
+  const onCopy = (e: React.ClipboardEvent) => {
+    if (editing) return                        // native input copy
+    const rows = pasteTargetRows()
+    if (!active || rows.length === 0) return
+    e.preventDefault()
+    const cols = selectedRows.size > 0 ? visibleCols : [active.col]
+    const matrix = rows.map(rowName => {
+      const row = sorted.find(r => r.name === rowName)
+      return cols.map(c => guardCell(
+        row?.[c] == null ? '' : String(row[c]), isStringColumn(c),
+      ))
+    })
+    e.clipboardData.setData('text/plain', serialiseTsv(matrix))
+  }
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    if (editing) return                        // native input paste
+    if (!active) return
+    e.preventDefault()
+
+    const matrix = parseTsv(e.clipboardData.getData('text/plain'))
+    const targets = pasteTargetRows()
+    const startCol = visibleCols.indexOf(active.col)
+    const columnsAvailable = Math.max(visibleCols.length - startCol, 0)
+    const shape = resolvePasteShape(matrix, targets.length, columnsAvailable)
+    if (shape.kind === 'reject') { toast.error(shape.message); return }
+
+    // Expand every shape into the same (row, col, raw) list so validation and
+    // the no-op skip have exactly one implementation (D7, D8).
+    const cells: { name: string; col: string; raw: string }[] = []
+    if (shape.kind === 'fill') {
+      for (const nm of targets) cells.push({ name: nm, col: active.col, raw: shape.value })
+    } else if (shape.kind === 'rowwise') {
+      targets.forEach((nm, i) => cells.push({ name: nm, col: active.col, raw: shape.values[i] }))
+    } else {
+      targets.forEach((nm, i) => shape.matrix[i].forEach((raw, j) => {
+        cells.push({ name: nm, col: visibleCols[startCol + j], raw })
+      }))
+    }
+
+    // Whole-batch validation (D8): editability first, then the value.
+    const offenders: string[] = []
+    const accepted: { name: string; col: string; value: unknown }[] = []
+    for (const cell of cells) {
+      const ed = editabilityOf(cell.name, cell.col)
+      if (!ed.editable) { offenders.push(`${cell.name} / ${cell.col}`); continue }
+      const raw = unguardCell(cell.raw, isStringColumn(cell.col))
+      const result = validateAndCoerce(cell.col, raw, {
+        componentClass, catalog, busNames: new Set(busNames),
+      })
+      if (!result.ok) { offenders.push(`${cell.name} / ${cell.col}`); continue }
+      const row = sorted.find(r => r.name === cell.name)
+      const currentText = row?.[cell.col] == null ? '' : String(row[cell.col])
+      if (raw === currentText) continue                    // no-op, criterion 3
+      accepted.push({ name: cell.name, col: cell.col, value: result.value })
+    }
+
+    if (offenders.length > 0) {
+      const shown = offenders.slice(0, 5).join(', ')
+      const rest = offenders.length > 5 ? ` and ${offenders.length - 5} more` : ''
+      toast.error(`Paste rejected — cannot write ${shown}${rest}.`)
+      return
+    }
+    if (accepted.length === 0) { toast('No changes'); return }
+
+    // Group by row so one gesture is one request (D9).
+    const byRow = new Map<string, Record<string, unknown>>()
+    for (const a of accepted) {
+      const existing = byRow.get(a.name) ?? {}
+      existing[a.col] = a.value
+      byRow.set(a.name, existing)
+    }
+    const rows = [...byRow].map(([name, updates]) => ({ name, updates }))
+
+    // D18: a confirmToast, never a Dialog — Dialog.tsx:148 is capture-phase AND
+    // calls stopPropagation, so while one is open it swallows the grid's Escape.
+    if (targets.length > 200) {
+      confirmToast(
+        `Apply this paste to ${targets.length} rows?`,
+        () => { applyBulk(rows, true) },
+        { confirmLabel: 'Paste' },
+      )
+      return
+    }
+    applyBulk(rows, true)                                  // true → D11 spacing
+  }
+
   const onApply = () => {
     if (!editCol) { toast.error('Pick a column first'); return }
     if (selectedRows.size === 0) { toast.error('No rows selected'); return }
@@ -854,8 +964,11 @@ function AssetTable({
         )}
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto">
+      {/* Table. Copy/paste are bound here rather than on each cell so a paste
+          anywhere in the grid is caught, and via ClipboardEvent rather than
+          navigator.clipboard — no secure context, no gesture permission, no
+          Firefox prompt (spec D6). */}
+      <div className="flex-1 overflow-auto" onCopy={onCopy} onPaste={onPaste}>
         <table className="w-full text-xs border-collapse" style={{ minWidth: 'max-content' }}>
           <thead>
             <tr className="sticky top-0 bg-panel z-10 border-b border-border">
