@@ -998,6 +998,17 @@ def begin_pending_turn(ctx: ProjectContext, record: dict[str, Any]) -> None:
 
     Best-effort throughout: a WAL that cannot be written must not stop the
     turn the user asked for. Silent no-op on an unbound context.
+
+    KNOWN LIMIT — one pending slot per PROJECT, not per session. Two tabs
+    running turns against the same project at once (each tab has its own
+    session_id, so this is reachable) share this file: the second write
+    overwrites the first, and whichever turn ends first clears it for both.
+    The failure mode is strictly under-reporting — an interruption that goes
+    unreported, never a wrong report and never a damaged transcript — so the
+    single slot is accepted rather than keyed per session, which would make
+    recovery a glob-and-choose over files no reader would ever clean up. The
+    guarantee to state out loud is therefore: an interrupted turn on a
+    project with ONE active conversation is always recoverable.
     """
     try:
         with ctx.chat_state.lock:
@@ -2613,10 +2624,8 @@ def _dispatch_real_tool_call(
     # the one habit a destructive prompt must not build.
     #
     # `test_chat_tools_schema_match.py` already guards that parity, so this is
-    # defence in depth against a regression rather than a live defect. It is
-    # deliberately NOT the `pre_dispatch_validate` hook Improvement #19 asks
-    # for — validating destructive tool ARGUMENTS before prompting (deleting a
-    # component that does not exist) is still open and needs a per-tool hook.
+    # defence in depth against a regression rather than a live defect. Arguments
+    # are checked separately, just below, by the Improvement #19 validator hook.
     #
     # `tool_request` has already fired above, so the audit trail is intact, and
     # the confirmation gate below is unchanged for every tool that exists.
@@ -2636,6 +2645,45 @@ def _dispatch_real_tool_call(
             "content": "unknown_tool",
         })
         return
+
+    # #19 — argument validation BEFORE the confirmation gate. The gate below
+    # takes the user's authorisation for an operation the dispatcher may then
+    # refuse outright ("delete Solar_typo" → 404), and for the typed-
+    # confirmation tools that means making someone retype a name to authorise
+    # nothing. A few of those and confirming reads as harmless.
+    #
+    # Advisory, not a gate: a validator that raises must leave the tool exactly
+    # as callable as it was. It is a courtesy check running ahead of the real
+    # handler, which remains the authority on whether the call succeeds.
+    if tier in DESTRUCTIVE_TIERS:
+        from services.chat_tools import PRE_DISPATCH_VALIDATORS
+        validator = PRE_DISPATCH_VALIDATORS.get(tool_name)
+        problem: str | None = None
+        if validator is not None:
+            try:
+                problem = validator(args or {})
+            except Exception:  # noqa: BLE001 — never make a tool uncallable
+                logger.exception(
+                    "chat: pre-dispatch validator for %r failed; falling back "
+                    "to the unvalidated path", tool_name,
+                )
+                problem = None
+        if problem:
+            yield "tool_error", {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": "invalid_tool_args",
+                "message": problem,
+            }
+            # Anthropic requires a tool_result for every tool_use; omitting it
+            # breaks the NEXT request of the turn, far from this cause.
+            tool_results_collector.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": problem,
+            })
+            return
 
     # #18 — per-tier auto-approve policy. The tool_request frame already fired
     # above (audit trail intact), so an auto-approved destructive tool is still

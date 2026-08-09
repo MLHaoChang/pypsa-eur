@@ -542,10 +542,17 @@ def update_component(
     )
 
 
-def delete_component(component_class: str, name: str) -> None:
-    """Generic delete via the dedicated route handler (so the same lock + audit run)."""
+def _delete_component_handlers() -> dict[str, Any]:
+    """
+    The classes `delete_component` accepts, and the route handler for each.
+
+    Extracted from the function body so `_COMPONENT_CLASS_TO_ATTR` (used by
+    the #19 pre-dispatch validator) can be checked against it — a class added
+    here and missed there would make that component undeletable via chat, the
+    validator refusing it before the handler ever saw it.
+    """
     from routers import network as net
-    handlers = {
+    return {
         "Bus": net.delete_bus,
         "Carrier": net.delete_carrier,
         "Line": net.delete_line,
@@ -558,6 +565,11 @@ def delete_component(component_class: str, name: str) -> None:
         "ShuntImpedance": net.delete_shunt,
         "GlobalConstraint": net.delete_global_constraint,
     }
+
+
+def delete_component(component_class: str, name: str) -> None:
+    """Generic delete via the dedicated route handler (so the same lock + audit run)."""
+    handlers = _delete_component_handlers()
     h = handlers.get(component_class)
     if h is None:
         raise HTTPException(400, f"Unknown component_class: {component_class!r}")
@@ -2869,6 +2881,86 @@ def export_chat_summary(
     return _save_agent_export(
         payload, target, "text/markdown" if fmt == "md" else "text/plain",
     )
+
+
+# ── Pre-dispatch validation (Improvement #19) ───────────────────────────────
+#
+# A validator answers one question about a destructive call BEFORE the user is
+# asked to authorise it: can this possibly work? It returns an error message
+# to refuse with, or None to proceed. `chat_service` consults this map right
+# before `issue_confirmation`.
+#
+# The problem it solves is not a wasted round-trip. `cascade_delete_bus`
+# carries a TYPED confirmation — the user retypes the bus name before Approve
+# unlocks — so a call that was never going to succeed made someone type a
+# name to authorise nothing. Do that a few times and confirming reads as
+# harmless, which is the one habit a destructive prompt must not build.
+#
+# SCOPE, and why it stops where it does: every validator here checks the
+# ACTIVE in-memory network, which the caller has already proved access to by
+# having it open. Project- and snapshot-level tools (delete_project,
+# restore_project_snapshot, …) are deliberately absent. Their existence check
+# is inseparable from tenancy resolution, and CLAUDE.md's 403→404 rule exists
+# because a check that runs before the caller has proved read access IS an
+# existence oracle. A second, sloppier copy of that logic in a validator is
+# precisely the wrong thing to add; those tools keep answering through the
+# route handler that already gets it right.
+#
+# A validator must be cheap and side-effect-free — it runs on the SSE thread
+# before any lock is taken.
+
+
+# Mirrors `delete_component`'s own handler table, which is the authority on
+# what that tool accepts.
+_COMPONENT_CLASS_TO_ATTR: dict[str, str] = {
+    "Bus": "buses",
+    "Carrier": "carriers",
+    "Line": "lines",
+    "Link": "links",
+    "Transformer": "transformers",
+    "Generator": "generators",
+    "StorageUnit": "storage_units",
+    "Store": "stores",
+    "Load": "loads",
+    "ShuntImpedance": "shunt_impedances",
+    "GlobalConstraint": "global_constraints",
+}
+
+
+def _validate_delete_component(args: dict[str, Any]) -> str | None:
+    from services.pypsa_service import PyPSAService
+    component_class = args.get("component_class")
+    name = args.get("name")
+    attr = _COMPONENT_CLASS_TO_ATTR.get(str(component_class))
+    if attr is None:
+        return (
+            f"unknown component_class {component_class!r}; expected one of: "
+            + ", ".join(sorted(_COMPONENT_CLASS_TO_ATTR))
+        )
+    df = getattr(PyPSAService.get_network(), attr, None)
+    if df is None or name not in df.index:
+        return (
+            f"no {component_class} named {name!r} in the network — nothing to "
+            f"delete. List the existing ones before retrying."
+        )
+    return None
+
+
+def _validate_cascade_delete_bus(args: dict[str, Any]) -> str | None:
+    from services.pypsa_service import PyPSAService
+    name = args.get("name")
+    if name not in PyPSAService.get_network().buses.index:
+        return (
+            f"no Bus named {name!r} in the network — nothing to delete. "
+            f"List the buses before retrying."
+        )
+    return None
+
+
+PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
+    "delete_component": _validate_delete_component,
+    "cascade_delete_bus": _validate_cascade_delete_bus,
+}
 
 
 # ── Registry entry-point ────────────────────────────────────────────────────
