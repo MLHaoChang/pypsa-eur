@@ -124,7 +124,9 @@ export interface CostBreakdown {
 }
 
 // Per-asset CAPEX inputs.
-//   capital_cost     — annualised cost per unit (LP-objective value).
+//   capital_cost     — annualised cost per unit (LP-objective value). Always
+//                       a real, finite number — independent of whether the
+//                       upfront cost below resolves.
 //   overnight_cost   — nominal upfront lump-sum per unit (PyPSA's
 //                       `comp.overnight_cost`, either as-typed or back-
 //                       calculated). Same value for every asset
@@ -137,12 +139,23 @@ export interface CostBreakdown {
 //                       toggle uses this so future-year capex is shown
 //                       in today's money — e.g. a 2035 build at 7% looks
 //                       smaller than a 2025 build of the same nominal €/MW.
+//
+//   `overnight_cost` / `overnight_cost_pv` are `number | null`. `null` means
+//   the backend could not resolve THIS asset's upfront cost — see
+//   `overnight_cost_available`. NOT a zero, and never a stand-in for
+//   `capital_cost` (a different unit: EUR/MW/yr vs EUR/MW — substituting one
+//   for the other was the defect this nullability exists to prevent).
+//   overnight_cost_available — false exactly when the two fields above are
+//                       null for this asset. Optional because a response
+//                       cached from a backend older than this field has no
+//                       opinion; read it as `!== false`, never `=== true`.
 //   lifetime         — years, kept for tooltips / CSV.
 //   build_year       — optional; only present when the asset carries one.
 export type AssetCostMap = Record<string, Record<string, {
   capital_cost: number
-  overnight_cost: number
-  overnight_cost_pv: number
+  overnight_cost: number | null
+  overnight_cost_pv: number | null
+  overnight_cost_available?: boolean
   lifetime: number
   build_year?: number
 }>>

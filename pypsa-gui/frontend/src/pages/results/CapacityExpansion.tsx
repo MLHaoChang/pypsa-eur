@@ -52,6 +52,18 @@ function buildYear(obj: object): number | '' {
   return v == null || !Number.isFinite(v) ? '' : v
 }
 
+// Currency cell for a per-asset capex/capital_cost/savings figure that may be
+// NaN — `costPerUnit` returns NaN (not null) for an asset whose upfront cost
+// the backend could not resolve, specifically so it propagates through the
+// arithmetic below (cc * delta, reduce sums) without widening every row type
+// in this file to `number | null`. This is the ONE place that needs to
+// become visible again: every table cell rendering a capex-derived number
+// MUST go through this, never bare `fmtCurrency`, or an unresolved asset
+// prints "—" (shared.tsx's existing "does not apply" marker — wrong word) or
+// silently renders whatever `fmtCurrency`'s own non-finite fallback is.
+const fmtCapexCell = (v: number, digits = 1) =>
+  Number.isFinite(v) ? fmtCurrency(v, digits) : COST_UNAVAILABLE
+
 interface SizedRowBase {
   name: string
   carrier?: string
@@ -163,10 +175,28 @@ export default function CapacityExpansion() {
   // Per-asset cost lookup. In lifetime mode we return the PV-adjusted
   // overnight value so the table / chart / KPIs all show today's-money
   // capex for assets the optimiser placed in future years.
+  //
+  // `overnight_cost_available === false` means the backend could not resolve
+  // THIS asset's upfront cost (see AssetCostMap in api/simulation.ts) — the
+  // trap this branch exists to close: falling through to `raw` below is
+  // `capital_cost`, which is exactly 0 for assets priced via `overnight_cost`
+  // alone (the whole reason this per-asset lookup exists — see the comment
+  // on the `assetCosts` query above). Returning `raw` for an unresolved asset
+  // would silently reprint the "€0" this endpoint exists to fix. Returning
+  // NaN instead lets it propagate through the downstream capex/savings
+  // arithmetic (`cc * delta`, `reduce` sums) without widening every row type
+  // in this file to `number | null`; every render site that turns one of
+  // these numbers into a currency string MUST go through `fmtCapexCell`
+  // (never bare `fmtCurrency`), which renders NaN as "unavailable".
   const costPerUnit = (comp: string, name: string, raw: number): number => {
     const m = assetCosts[comp]?.[name]
     if (!m) return raw
-    const v = costMode === 'lifetime' ? m.overnight_cost_pv : m.capital_cost
+    if (costMode === 'lifetime') {
+      if (m.overnight_cost_available === false) return NaN
+      const v = m.overnight_cost_pv
+      return v != null && Number.isFinite(v) && v > 0 ? v : raw
+    }
+    const v = m.capital_cost
     return v != null && Number.isFinite(v) && v > 0 ? v : raw
   }
 
@@ -1232,7 +1262,7 @@ export default function CapacityExpansion() {
             <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Retired assets</h3>
             <span className="text-[11px] text-muted">
               {totalRetired} asset{totalRetired === 1 ? '' : 's'} retired
-              {' · saves '}{fmtCurrency(totalRetirementSavings)}
+              {' · saves '}{fmtCapexCell(totalRetirementSavings, 2)}
             </span>
           </div>
           {visibleRetiredGens.length > 0       && <RetirementGenerationTable rows={visibleRetiredGens} />}
@@ -1376,8 +1406,8 @@ function GenerationTable({ rows }: { rows: SizedRowBase[] }) {
               <Td align="right" mono color="#16a34a">+{fmtPower(r.delta, 1)}</Td>
               <Td align="right" mono>{fmtPower(r.optimal, 1)}</Td>
               <Td align="right" mono>{r.build_year || '—'}</Td>
-              <Td align="right" mono>{fmtCurrency(r.capital_cost, 1)}</Td>
-              <Td align="right" mono bold>{fmtCurrency(r.capex, 1)}</Td>
+              <Td align="right" mono>{fmtCapexCell(r.capital_cost)}</Td>
+              <Td align="right" mono bold>{fmtCapexCell(r.capex)}</Td>
             </RowBg>
           )
         })}
@@ -1416,7 +1446,7 @@ function LinesTable({ rows }: { rows: SizedLineRow[] }) {
             <Td align="right" mono color="#16a34a">+{fmtPower(r.delta, 1).replace('MW', 'MVA')}</Td>
             <Td align="right" mono>{fmtPower(r.optimal, 1).replace('MW', 'MVA')}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.capex, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.capex)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1452,7 +1482,7 @@ function TransformersTable({ rows }: { rows: SizedRowBase[] }) {
             <Td align="right" mono color="#16a34a">+{fmtPower(r.delta, 1).replace('MW', 'MVA')}</Td>
             <Td align="right" mono>{fmtPower(r.optimal, 1).replace('MW', 'MVA')}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.capex, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.capex)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1513,7 +1543,7 @@ function StorageTable({ rows }: { rows: SizedStorageRow[] }) {
             <Td align="right" mono>{r.max_hours ? r.max_hours.toFixed(1) : '—'}</Td>
             <Td align="right" mono>{fmtEnergy(r.optimal_energy, 1)}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.capex, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.capex)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1550,7 +1580,7 @@ function StoresTable({ rows }: { rows: SizedRowBase[] }) {
             <Td align="right" mono color="#16a34a">+{fmtEnergy(r.delta, 1)}</Td>
             <Td align="right" mono>{fmtEnergy(r.optimal, 1)}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.capex, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.capex)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1598,7 +1628,7 @@ function LinksTable({ rows }: { rows: SizedRowBase[] }) {
             <Td align="right" mono color="#16a34a">+{fmtPower(r.delta, 1)}</Td>
             <Td align="right" mono>{fmtPower(r.optimal, 1)}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.capex, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.capex)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1656,8 +1686,8 @@ function RetirementGenerationTable({ rows }: { rows: RetiredRowBase[] }) {
               <Td align="right" mono color={RETIRED_COLOR}>−{fmtPower(r.retired, 1)}</Td>
               <Td align="right" mono>{fmtPower(r.optimal, 1)}</Td>
               <Td align="right" mono>{r.build_year || '—'}</Td>
-              <Td align="right" mono>{fmtCurrency(r.capital_cost, 1)}</Td>
-              <Td align="right" mono bold>{fmtCurrency(r.savings, 1)}</Td>
+              <Td align="right" mono>{fmtCapexCell(r.capital_cost)}</Td>
+              <Td align="right" mono bold>{fmtCapexCell(r.savings)}</Td>
             </RowBg>
           )
         })}
@@ -1693,7 +1723,7 @@ function RetirementLinesTable({ rows }: { rows: RetiredLineRow[] }) {
             <Td align="right" mono color={RETIRED_COLOR}>−{fmtPower(r.retired, 1).replace('MW', 'MVA')}</Td>
             <Td align="right" mono>{fmtPower(r.optimal, 1).replace('MW', 'MVA')}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.savings, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.savings)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1726,7 +1756,7 @@ function RetirementTransformersTable({ rows }: { rows: RetiredRowBase[] }) {
             <Td align="right" mono color={RETIRED_COLOR}>−{fmtPower(r.retired, 1).replace('MW', 'MVA')}</Td>
             <Td align="right" mono>{fmtPower(r.optimal, 1).replace('MW', 'MVA')}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.savings, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.savings)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1770,7 +1800,7 @@ function RetirementStorageTable({ rows }: { rows: RetiredStorageRow[] }) {
             <Td align="right" mono>{r.max_hours ? r.max_hours.toFixed(1) : '—'}</Td>
             <Td align="right" mono>{fmtEnergy(r.retired_energy, 1)}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.savings, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.savings)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1804,7 +1834,7 @@ function RetirementStoresTable({ rows }: { rows: RetiredRowBase[] }) {
             <Td align="right" mono color={RETIRED_COLOR}>−{fmtEnergy(r.retired, 1)}</Td>
             <Td align="right" mono>{fmtEnergy(r.optimal, 1)}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.savings, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.savings)}</Td>
           </RowBg>
         ))}
       </tbody>
@@ -1838,7 +1868,7 @@ function RetirementLinksTable({ rows }: { rows: RetiredRowBase[] }) {
             <Td align="right" mono color={RETIRED_COLOR}>−{fmtPower(r.retired, 1)}</Td>
             <Td align="right" mono>{fmtPower(r.optimal, 1)}</Td>
             <Td align="right" mono>{r.build_year || '—'}</Td>
-            <Td align="right" mono bold>{fmtCurrency(r.savings, 1)}</Td>
+            <Td align="right" mono bold>{fmtCapexCell(r.savings)}</Td>
           </RowBg>
         ))}
       </tbody>

@@ -246,3 +246,93 @@ it('renders real PV figures untouched when every class resolved', async () => {
   expect(screen.queryByText('unavailable')).toBeNull()
   expect(screen.queryByText(/upfront \(PV\) investment costs are unavailable/i)).toBeNull()
 })
+
+// ── Per-asset overnight-cost unavailable (Investments-by-asset table) ─────
+// A SEPARATE consumer from the KPI strip above: `assetCosts` (GET
+// /api/simulation/asset_costs, `AssetCostMap`) feeds `costPerUnit`
+// (CapacityExpansion.tsx), which builds the per-asset "CAPEX" column on the
+// Lines/Generators/etc tables below the KPIs. The trap this guards: falling
+// through to `raw` (the row's own `capital_cost` field) whenever the backend
+// per-asset value looks unusable — `raw` is exactly 0 (or whatever the
+// network's raw column holds) for an asset priced through `overnight_cost`
+// alone, so an unresolved upfront cost used to render a confident currency
+// figure instead of a missing-data marker, silently reintroducing the exact
+// "€0" bug the backend fix exists to close.
+
+it('shows the unavailable marker — not a raw fallback number — for an asset whose upfront cost failed to resolve', async () => {
+  // Fails if: `costPerUnit`'s lifetime branch drops the
+  // `overnight_cost_available === false` check and falls through to
+  // `v != null && Number.isFinite(v) && v > 0 ? v : raw` unconditionally —
+  // `m.overnight_cost_pv` is `null` here, so that expression evaluates to
+  // `raw` (777), and the CAPEX cell would print a real currency figure
+  // (777 x 324.24 delta ≈ "€251.9 k") instead of "unavailable".
+  const unresolvedLine: Line & { s_nom_opt: number } = {
+    name: 'Line 1', bus0: 'Bus 0', bus1: 'Bus 1', length: 10, r: 0, x: 0, b: 0,
+    s_nom: 100, s_nom_extendable: true, s_nom_min: 0, s_nom_max: null,
+    // A distinctive nonzero `raw` so a reverted `costPerUnit` prints a
+    // distinctive, greppable wrong number rather than a `€0.00` that could
+    // be confused with the top KPI strip's own (legitimate) zero.
+    capital_cost: 777, fom_cost: 0, overnight_cost: null, discount_rate: null,
+    carrier: '', build_year: 2026, lifetime: null,
+    s_nom_opt: 424.24,
+  }
+  vi.mocked(networkApi.getLines).mockReset().mockResolvedValue([unresolvedLine])
+  vi.mocked(simulationApi.getAssetCosts).mockReset().mockResolvedValue({
+    lines: {
+      'Line 1': {
+        // Annualised resolves fine — independent of the upfront resolve.
+        capital_cost: 50_000,
+        overnight_cost: null,
+        overnight_cost_pv: null,
+        overnight_cost_available: false,
+        lifetime: 40,
+      },
+    },
+  })
+
+  renderPage()
+  await switchToLifetimeMode()
+
+  const row = (await screen.findByText('Line 1')).closest('tr')
+  if (!row) throw new Error('Lines table row not found')
+  // The CAPEX column is the last cell — read it directly rather than
+  // substring-searching the whole row, which also contains an (unrelated)
+  // "324.2 MVA" Built/Total cell that could otherwise collide with a numeric
+  // substring check.
+  const capexCell = row.querySelectorAll('td')[row.querySelectorAll('td').length - 1]
+  expect(capexCell.textContent).toBe('unavailable')
+})
+
+it('still derives a real per-asset PV figure when the upfront cost resolved', async () => {
+  // Fails if: the unavailable path fires unconditionally regardless of
+  // `overnight_cost_available`, which would make the derivable-case test
+  // above pass for the wrong reason (every asset "unavailable").
+  const resolvedLine: Line & { s_nom_opt: number } = {
+    name: 'Line 1', bus0: 'Bus 0', bus1: 'Bus 1', length: 10, r: 0, x: 0, b: 0,
+    s_nom: 100, s_nom_extendable: true, s_nom_min: 0, s_nom_max: null,
+    capital_cost: 0, fom_cost: 0, overnight_cost: null, discount_rate: null,
+    carrier: '', build_year: 2026, lifetime: null,
+    s_nom_opt: 424.24,
+  }
+  vi.mocked(networkApi.getLines).mockReset().mockResolvedValue([resolvedLine])
+  vi.mocked(simulationApi.getAssetCosts).mockReset().mockResolvedValue({
+    lines: {
+      'Line 1': {
+        capital_cost: 50_000,
+        overnight_cost: 1_000,
+        overnight_cost_pv: 1_000,
+        overnight_cost_available: true,
+        lifetime: 40,
+      },
+    },
+  })
+
+  renderPage()
+  await switchToLifetimeMode()
+
+  const row = (await screen.findByText('Line 1')).closest('tr')
+  if (!row) throw new Error('Lines table row not found')
+  // capex = overnight_cost_pv (1_000) x delta (324.24) = 324_240 -> "€324.2 k"
+  const capexCell = row.querySelectorAll('td')[row.querySelectorAll('td').length - 1]
+  expect(capexCell.textContent).toBe('€324.2 k')
+})
