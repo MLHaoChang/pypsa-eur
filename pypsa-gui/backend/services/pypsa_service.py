@@ -96,6 +96,30 @@ class PyPSAService:
     # take it, and they take it FIRST) — prevents the two-lock deadlock.
     _registry_lock: threading.RLock = threading.RLock()
 
+    # ── Hydrate-or-adopt lock (one ProjectContext per project, always) ────────
+    # Per-registry-key lock, taken ONLY on a registry miss. FOUR cold paths
+    # build-and-register a context — `activate_project`, `resolve_project_context`,
+    # `active_project.resolve_for_session` (both branches, twice per authenticated
+    # request on every route) and the solve-queue dispatcher — and every one of
+    # them ran an UNSYNCHRONISED get_context -> build -> hydrate -> register.
+    # `get_context` is an unlocked dict read and `register` takes `_registry_lock`
+    # only for the insert without re-checking for a concurrent winner, so two
+    # cold paths racing on the same non-resident project each built a context and
+    # the second overwrote the first in `_contexts` while the first was already
+    # bound into a live request.
+    #
+    # LOCK ORDER — hydrate -> `_registry_lock` -> `solve_queue._lock`. A hydrate
+    # lock is NEVER acquired while `_registry_lock` is held. `_hydrate_guard` is a
+    # leaf lock held only for the dict lookup that hands out the per-key lock, and
+    # nothing is called while it is held. The pre-existing rule that
+    # `_registry_lock` never nests a per-ctx `mutation_lock` (see
+    # `_evict_if_over_cap`) is unchanged.
+    #
+    # The dict grows one small entry per registry key ever missed — bounded by
+    # the number of distinct projects the process has hydrated, not by traffic.
+    _hydrate_locks: dict[str, threading.Lock] = {}
+    _hydrate_guard: threading.Lock = threading.Lock()
+
     # ── Request-scoped active context (Step 0b) ──────────────────────────────
     # The "active project" is per SESSION, not per process. `_request_ctx` holds
     # the context resolved for the request currently on this thread/task; when
@@ -718,6 +742,35 @@ class PyPSAService:
         B6 path-scoped endpoints resolve their target context through this.
         """
         return cls._contexts.get(project_id)
+
+    @classmethod
+    @contextmanager
+    def hydrate_or_adopt(cls, registry_key: str):
+        """
+        Yield the resident ctx for `registry_key` if one exists, else yield None
+        while holding this key's hydrate lock so the caller may build+hydrate+register
+        exactly once. Fast path (registry hit) takes NO lock.
+        Lock order: hydrate -> _registry_lock -> solve_queue._lock.
+        """
+        resident = cls._contexts.get(registry_key)
+        if resident is not None:
+            # The common path. Deliberately identical to `get_context` — no
+            # lock, no bookkeeping — so routing every cold path through this
+            # helper costs a resident hit nothing.
+            yield resident
+            return
+
+        with cls._hydrate_guard:
+            lock = cls._hydrate_locks.get(registry_key)
+            if lock is None:
+                lock = threading.Lock()
+                cls._hydrate_locks[registry_key] = lock
+
+        with lock:
+            # Re-check UNDER the lock: the thread that just released it may have
+            # registered the very context we were about to build. Yielding it
+            # here is the "adopt" half of the name.
+            yield cls._contexts.get(registry_key)
 
     @classmethod
     def set_active(cls, project_id: str) -> ProjectContext:
