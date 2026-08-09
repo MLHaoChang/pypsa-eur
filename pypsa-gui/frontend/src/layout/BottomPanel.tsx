@@ -9,6 +9,11 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { coerceForColumn } from '../utils/coerce'
 import { useSimulationStore } from '../store/simulationStore'
+import { useCatalog } from '../hooks/useCatalog'
+import {
+  buildSeriesIndex, columnHeaderLabel, columnHeaderTooltip, resolveEditability,
+  toCatalogMap,
+} from '../utils/attributeCatalog'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -169,6 +174,47 @@ function AssetTable({
   useEffect(() => { setSelectedRows(new Set()) }, [tab])
   const lastClickedIdxRef = useRef<number | null>(null)
 
+  // AssetTable does not receive currentProject as a prop and does not
+  // destructure it today — only its parent BottomPanel does. The grid needs it
+  // for every nk() key below, so take it reactively here. In the non-React
+  // mutation callbacks read it via useUIStore.getState().currentProject
+  // instead: the parity rule at queryKeys.ts:16-22 is what makes a mismatched
+  // id return undefined.
+  const currentProject = useUIStore(s => s.currentProject)
+
+  // ── Active cell (spec D19) ─────────────────────────────────────────────────
+  // Exactly one cell is tabbable at a time; everything else carries -1. Focus
+  // stays on a real element, so blur-commit and Escape work unchanged and no
+  // ARIA grid roles are needed — the <table> already carries the right ones.
+  type CellRef = { name: string; col: string }
+  const [active, setActive] = useState<CellRef | null>(null)
+  // Which cell has an OPEN editor. One at a time: the draft is a single
+  // { name, col, raw }, not a flat draft map, because at the render cap a map
+  // would mount 1000 x 15 inputs — the DOM budget the cap exists to protect.
+  const [editing, setEditing] = useState<CellRef | null>(null)
+  useEffect(() => { setActive(null); setEditing(null) }, [tab])
+
+  // ── Catalog + series shadow (D13, D14) ────────────────────────────────────
+  const { data: catalogPayload } = useCatalog(componentClass)
+  const catalog = useMemo(
+    () => toCatalogMap(catalogPayload?.attributes ?? []),
+    [catalogPayload],
+  )
+  const { data: tsList = [] } = useQuery({
+    queryKey: nk(currentProject, 'timeseries'),
+    queryFn: networkApi.listTimeseries,
+  })
+  const series = useMemo(
+    () => buildSeriesIndex(tsList, TAB_TO_API_KEY[componentClass] ?? ''),
+    [tsList, componentClass],
+  )
+
+  const editabilityOf = useCallback(
+    (rowName: string, col: string) =>
+      resolveEditability({ componentClass, column: col, rowName, catalog, series }),
+    [componentClass, catalog, series],
+  )
+
   // Search: substring match on row.name. Filter happens BEFORE sort so the
   // user sees the same ordering as the unfiltered table — sort is purely
   // visual and shouldn't surprise the search workflow.
@@ -232,6 +278,82 @@ function AssetTable({
       return Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/\.?0+$/, '')
     }
     return String(v)
+  }
+
+  /**
+   * Composite key for the cell-ref map. A tab cannot occur in a PyPSA name or
+   * attribute — the same fact utils/clipboardTsv.ts relies on to do without a
+   * quote grammar — so it is a safe separator for `col` + `name`.
+   */
+  const cellKey = (name: string, col: string) => `${col}\t${name}`
+  const cellRefs = useRef<Record<string, HTMLTableCellElement | null>>({})
+  useEffect(() => {
+    if (!active) return
+    cellRefs.current[cellKey(active.name, active.col)]?.focus()
+  }, [active])
+
+  /** Move the active cell by (dRow, dCol) within `displayed` x `visibleCols`. */
+  const moveActive = useCallback((dRow: number, dCol: number) => {
+    setActive(prev => {
+      if (!prev) return prev
+      const rowIdx = displayed.findIndex(r => r.name === prev.name)
+      const colIdx = visibleCols.indexOf(prev.col)
+      if (rowIdx < 0 || colIdx < 0) return prev
+      const nextRow = Math.min(Math.max(rowIdx + dRow, 0), displayed.length - 1)
+      const nextCol = Math.min(Math.max(colIdx + dCol, 0), visibleCols.length - 1)
+      return { name: displayed[nextRow].name as string, col: visibleCols[nextCol] }
+    })
+  }, [displayed, visibleCols])
+
+  /**
+   * Keyboard map for a cell with NO open editor (spec D5). The open-editor
+   * column of that table lives in the editor component.
+   *
+   * stopPropagation() on Escape is what keeps an open slide panel open: every
+   * other Escape listener in the app is bubble-phase (App.tsx:512 and the
+   * unguarded ones in TopologyCanvas / MapCanvas / ChatPanel), so stopping
+   * here pre-empts all of them without touching those files. The one
+   * capture-phase listener, AppHeader.tsx:277, is guarded at its source.
+   */
+  const onCellKeyDown = (e: React.KeyboardEvent, rowName: string, col: string) => {
+    if (editing) return                       // the editor owns the keyboard
+    const modifier = e.ctrlKey || e.metaKey
+    if (modifier) return                      // copy/paste
+
+    switch (e.key) {
+      case 'ArrowDown':  e.preventDefault(); moveActive(1, 0); return
+      case 'ArrowUp':    e.preventDefault(); moveActive(-1, 0); return
+      case 'ArrowRight': e.preventDefault(); moveActive(0, 1); return
+      case 'ArrowLeft':  e.preventDefault(); moveActive(0, -1); return
+      case 'Tab':
+        e.preventDefault(); moveActive(0, e.shiftKey ? -1 : 1); return
+      case 'Escape':
+        e.stopPropagation()
+        setActive(null)
+        return
+      case 'Enter':
+        e.preventDefault()
+        if (editabilityOf(rowName, col).editable) setEditing({ name: rowName, col })
+        return
+      default:
+        // A printable character opens the editor seeded with it (D5).
+        if (e.key.length === 1 && editabilityOf(rowName, col).editable) {
+          setEditing({ name: rowName, col })
+        }
+    }
+  }
+
+  /** Visual state for a cell: active ring, and the read-only/series greys. */
+  const cellClass = (rowName: string, col: string): string => {
+    const base = 'px-2 font-mono whitespace-nowrap text-[11px] outline-none'
+    const ring = active?.name === rowName && active?.col === col
+      ? ' ring-1 ring-inset ring-accent' : ''
+    const ed = editabilityOf(rowName, col)
+    if (ed.editable) return base + ring
+    // Output / override / unknown read as "not yours to edit"; a series-shadowed
+    // cell reads as "the static value is dead here" (D14) and gets its badge in
+    // the cell body.
+    return `${base}${ring} text-muted bg-panel/40`
   }
 
   const toggleRow = (row: Record<string, unknown>, idx: number, ev: React.MouseEvent) => {
@@ -484,9 +606,13 @@ function AssetTable({
                 <th
                   key={col}
                   onClick={() => handleSort(col)}
+                  // D15: a curated COL_LABELS entry wins; otherwise the catalog
+                  // unit is appended, so Lines read `r (Ohm)`. The tooltip
+                  // additionally states the per-km split for r/x/b.
+                  title={columnHeaderTooltip(componentClass, col, catalog) ?? undefined}
                   className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wide cursor-pointer hover:text-text whitespace-nowrap select-none"
                 >
-                  {COL_LABELS[col] ?? col}
+                  {columnHeaderLabel(col, catalog, COL_LABELS)}
                   {sortCol === col && (
                     <span className="ml-0.5 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>
                   )}
@@ -524,7 +650,17 @@ function AssetTable({
                   {visibleCols.map(col => (
                     <td
                       key={col}
-                      className={`px-2 font-mono whitespace-nowrap text-[11px] ${isSelected ? 'text-text' : 'text-text'}`}
+                      ref={el => { cellRefs.current[cellKey(name, col)] = el }}
+                      data-row={name}
+                      data-col={col}
+                      // Roving tabindex (D19): exactly one cell is tabbable, so
+                      // focus stays on a real element and blur-commit works.
+                      tabIndex={active?.name === name && active?.col === col ? 0 : -1}
+                      // No stopPropagation: the row's own onClick still opens
+                      // the properties panel, which is existing behaviour.
+                      onClick={() => setActive({ name, col })}
+                      onKeyDown={e => onCellKeyDown(e, name, col)}
+                      className={cellClass(name, col)}
                       style={{ paddingBlock: 'var(--row-padding-y)' }}
                     >
                       {fmt(row[col])}

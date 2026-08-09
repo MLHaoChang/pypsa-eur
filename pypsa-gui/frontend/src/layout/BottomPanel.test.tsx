@@ -169,3 +169,82 @@ describe('AssetTable render cap — behaviour as of e8614a35', () => {
     expect(screen.getByText(/1200 selected/)).toBeTruthy()
   })
 })
+
+describe('AssetTable active cell — added by Task 11', () => {
+  it('clicking a cell makes it the only tabbable one (D19 roving tabindex)', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = document.querySelector('tbody td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    expect(document.querySelectorAll('tbody td[tabindex="0"]').length).toBe(1)
+  })
+
+  it('ArrowDown moves the active cell one row down', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const first = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(first)
+    fireEvent.keyDown(first, { key: 'ArrowDown' })
+    const active = document.querySelector('td[tabindex="0"]') as HTMLElement
+    expect(active.dataset.row).toBe('B1')
+    expect(active.dataset.col).toBe('v_nom')
+  })
+
+  it('ArrowRight moves to the next visible column', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = document.querySelector('tbody tr td[data-col="name"]') as HTMLElement
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'ArrowRight' })
+    const active = document.querySelector('td[tabindex="0"]') as HTMLElement
+    expect(active.dataset.col).not.toBe('name')
+  })
+
+  it('does not move past the last row', async () => {
+    renderPanel()
+    await screen.findByText('B4')
+    const last = document.querySelector(
+      'tbody tr:last-child td[data-col="v_nom"]',
+    ) as HTMLElement
+    await userEvent.click(last)
+    fireEvent.keyDown(last, { key: 'ArrowDown' })
+    expect((document.querySelector('td[tabindex="0"]') as HTMLElement).dataset.row).toBe('B4')
+  })
+
+  it('Escape clears the active cell', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = document.querySelector('tbody tr td[data-col="v_nom"]') as HTMLElement
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Escape' })
+    expect(document.querySelectorAll('td[tabindex="0"]').length).toBe(0)
+  })
+})
+
+describe('AssetTable headers — D15', () => {
+  it('renders the curated COL_LABELS entry where one exists', async () => {
+    renderPanel()
+    // COL_LABELS maps v_nom → 'V nom (kV)' (BottomPanel.tsx:46-60).
+    expect(await screen.findByText('V nom (kV)')).toBeTruthy()
+  })
+})
+
+describe('availableCols stays derived from the data — D17', () => {
+  it('does not offer a catalog attribute that no row carries', async () => {
+    // The catalog ANNOTATES columns; it does not add them. A column absent
+    // from the DataFrame is 400-rejected by _bulk ("has no column(s)"), so
+    // offering it would produce a guaranteed failure. This is the test that
+    // fails if someone later drives the column list from the catalog instead
+    // of from the data.
+    renderPanel()
+    await screen.findByText('B0')
+    // `v_mag_pu_set` is a real PyPSA Bus attribute; the mocked rows omit it.
+    expect(screen.queryByText('v_mag_pu_set')).toBeNull()
+  })
+
+  it('keeps `name` pinned visible', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    expect(document.querySelector('tbody td[data-col="name"]')).toBeTruthy()
+  })
+})
