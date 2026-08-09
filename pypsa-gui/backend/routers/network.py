@@ -1285,11 +1285,19 @@ def update_snapshot_weightings(body: dict):
         # Pass 1 — resolve + parse every cell into `pending`, raising before
         # any write.
         pending: list[tuple[object, str, float]] = []
+        # A bare ISO key on a MultiIndex network is ambiguous — it is
+        # registered once per period and last-write-wins, so it silently
+        # resolves to the LAST period. The GUI now sends `period|iso`; anything
+        # still sending bare keys (older clients, chat tools) gets recorded in
+        # the audit log rather than writing to a surprising row in silence.
+        ambiguous_bare_keys = 0
         for key, vals in updates.items():
             if not isinstance(vals, dict):
                 continue
             if key in iso_to_idx:
                 idx = iso_to_idx[key]
+                if is_multi and "|" not in str(key):
+                    ambiguous_bare_keys += 1
             else:
                 try:
                     pos = int(key)
@@ -1313,7 +1321,10 @@ def update_snapshot_weightings(body: dict):
         applied = len(pending)
         change_log_service.log(
             "update", "Network", "snapshot_weightings",
-            f"Updated snapshot weightings: all={all_val}, per-row updates={applied}",
+            f"Updated snapshot weightings: all={all_val}, per-row updates={applied}"
+            + (f" — WARNING: {ambiguous_bare_keys} bare-ISO key(s) on a multi-period "
+               "network each resolved to the LAST period; send `period|iso` to target "
+               "a specific period." if ambiguous_bare_keys else ""),
         )
     return {
         "count": len(n.snapshot_weightings),

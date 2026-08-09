@@ -9,6 +9,7 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
+import { buildWeightingRows, type WeightingRow } from './modelHorizonModel'
 
 // ── Load carrier canonicaliser ──────────────────────────────────────────────
 // Mirrors loadCarrierKey in Dispatch.tsx + _canonical_load_carrier_key on the
@@ -355,8 +356,8 @@ export default function ModelHorizon() {
       toast.error(e.response?.data?.detail ?? 'Failed to update weights'),
   })
   const updateOneWeight = useMutation({
-    mutationFn: (args: { iso: string; objective: number }) =>
-      networkApi.updateSnapshotWeightings({ updates: { [args.iso]: { objective: args.objective } } }),
+    mutationFn: (args: { key: string; objective: number }) =>
+      networkApi.updateSnapshotWeightings({ updates: { [args.key]: { objective: args.objective } } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'snapshots') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to update weight'),
@@ -580,6 +581,15 @@ export default function ModelHorizon() {
   const pageRows = useMemo(
     () => snap?.weightings?.slice(pageStart, pageEnd) ?? [],
     [snap?.weightings, pageStart, pageEnd],
+  )
+  const weightingRows = useMemo(
+    () => buildWeightingRows(
+      pageRows as WeightingRow[],
+      snap?.snapshots ?? [],
+      snapshotsAreMulti,
+      pageStart,
+    ),
+    [pageRows, snap?.snapshots, snapshotsAreMulti, pageStart],
   )
 
   const csvUploadRef = useRef<HTMLInputElement>(null)
@@ -1403,9 +1413,12 @@ export default function ModelHorizon() {
 
           {/* Per-row table — paginated so 8760-hour horizons are reachable */}
           <div className="border border-border rounded overflow-auto max-h-64">
-            <table className="w-full text-xs border-collapse" style={{ minWidth: 480 }}>
+            <table className="w-full text-xs border-collapse" style={{ minWidth: snapshotsAreMulti ? 560 : 480 }}>
               <thead className="sticky top-0 bg-bg-2 z-10">
                 <tr className="border-b border-border">
+                  {snapshotsAreMulti && (
+                    <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Period</th>
+                  )}
                   <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Snapshot</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Objective</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Generators</th>
@@ -1413,48 +1426,44 @@ export default function ModelHorizon() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((w, i) => {
-                  const wm = w as Record<string, unknown>
-                  const iso = String(wm.snapshot ?? wm.name ?? snap.snapshots[pageStart + i])
-                  return (
-                    <tr key={iso} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
-                      <td className="px-2 py-1 font-mono text-[11px] whitespace-nowrap">{iso}</td>
-                      <td className="px-2 py-1 text-right">
-                        <input
-                          key={`sw-${iso}-${wm.objective ?? 1}`}
-                          type="number"
-                          step="0.1"
-                          min={0}
-                          defaultValue={Number(wm.objective ?? 1).toFixed(2)}
-                          // Disable while the per-snapshot weight mutation is
-                          // in flight — same double-blur race protection as
-                          // the per-period table above. updateOneWeight is a
-                          // single mutation shared across every row in this
-                          // pageRows table, so disable cascades to other
-                          // rows during the PUT. Cosmetic only.
-                          disabled={updateOneWeight.isPending}
-                          onBlur={e => {
-                            const v = parseFloat(e.target.value)
-                            if (!Number.isFinite(v) || v < 0) {
-                              e.target.value = String(wm.objective ?? 1)
-                              return
-                            }
-                            if (v !== Number(wm.objective ?? 1)) {
-                              updateOneWeight.mutate({ iso, objective: v })
-                            }
-                          }}
-                          className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
-                        />
-                      </td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
-                        {Number(wm.generators ?? 1).toFixed(2)}
-                      </td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
-                        {Number(wm.stores ?? 1).toFixed(2)}
-                      </td>
-                    </tr>
-                  )
-                })}
+                {weightingRows.map((row, i) => (
+                  <tr key={row.key} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
+                    {snapshotsAreMulti && (
+                      <td className="px-2 py-1 font-mono text-[11px]">{row.period}</td>
+                    )}
+                    <td className="px-2 py-1 font-mono text-[11px] whitespace-nowrap">{row.iso}</td>
+                    <td className="px-2 py-1 text-right">
+                      <input
+                        key={`sw-${row.key}-${row.objective}`}
+                        type="number"
+                        step="0.1"
+                        min={0}
+                        defaultValue={row.objective.toFixed(2)}
+                        // Disabled while the shared per-snapshot mutation is
+                        // in flight — same double-blur race protection as
+                        // the per-period table above. Cosmetic only.
+                        disabled={updateOneWeight.isPending}
+                        onBlur={e => {
+                          const v = parseFloat(e.target.value)
+                          if (!Number.isFinite(v) || v < 0) {
+                            e.target.value = row.objective.toFixed(2)
+                            return
+                          }
+                          if (v !== row.objective) {
+                            updateOneWeight.mutate({ key: row.key, objective: v })
+                          }
+                        }}
+                        className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
+                      />
+                    </td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
+                      {row.generators.toFixed(2)}
+                    </td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
+                      {row.stores.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
