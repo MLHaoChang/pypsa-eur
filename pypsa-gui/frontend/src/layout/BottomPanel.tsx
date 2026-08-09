@@ -1581,210 +1581,29 @@ export default function BottomPanel() {
             <SolverLog />
           ) : activeTab === 'History' ? (
             <ChangeHistory />
-          ) : activeTab === 'Carriers' ? (
-            <CarriersTable rows={tableData.Carriers} />
           ) : (
-            <AssetTable
-              tab={activeTab}
-              componentClass={TAB_TYPES[activeTab] ?? ''}
-              data={tableData[activeTab]}
-              defaultColumns={TAB_COLUMNS[activeTab]}
-              selectedName={selectedName}
-              onRowClick={handleRowClick}
-            />
+            <>
+              <AssetTable
+                tab={activeTab}
+                componentClass={TAB_TYPES[activeTab] ?? ''}
+                data={tableData[activeTab]}
+                defaultColumns={TAB_COLUMNS[activeTab]}
+                selectedName={selectedName}
+                onRowClick={handleRowClick}
+              />
+              {activeTab === 'Carriers' && (
+                // Carried over from the deleted CarriersTable — the one piece
+                // of that component the shared grid has no place for (D16).
+                <p className="text-[10px] text-muted px-2 py-1.5 border-t border-border bg-bg-2/50">
+                  CO₂ values are per MWh of <em>primary</em> energy — output-MWh
+                  intensity is computed in the Emissions tab as
+                  <code> co2_emissions / efficiency</code>.
+                </p>
+              )}
+            </>
           )}
         </div>
       )}
-    </div>
-  )
-}
-
-// ── CarriersTable ──────────────────────────────────────────────────────────
-// Inline-editable table for `n.carriers`. Each cell is its own controlled
-// input that calls PUT /api/network/carriers/{name} on blur. The generic
-// AssetTable doesn't do inline edit (it relies on bulk-edit toolbar), but
-// for a small N (~10-30 carriers, typically) per-cell typing is the
-// natural interaction.
-//
-// Editable columns: co2_emissions (number), nice_name / color / unit
-// (string). Name is read-only — renaming a carrier means touching every
-// asset that references it, which would silently break dispatch.
-interface CarriersTableProps {
-  rows: Array<Record<string, unknown>>
-}
-
-function CarriersTable({ rows }: CarriersTableProps) {
-  const qc = useQueryClient()
-  const [draftValues, setDraftValues] = useState<Record<string, string>>({})
-
-  const updateMut = useMutation({
-    mutationFn: ({ name, body }: { name: string; body: Record<string, unknown> }) =>
-      networkApi.updateCarrier(name, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'carriers') })
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'undoInfo') })
-      // The carriers DataFrame is referenced by every result endpoint that
-      // groups by carrier — invalidate those too so the next render sees
-      // the new CO2 intensity / nice_name without a manual refresh.
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'results') })
-    },
-    onError: (e: { response?: { data?: { detail?: unknown } } }) => {
-      // FastAPI returns `detail: string` for HTTPException, but `detail: [
-      // {type, loc, msg, input}, ...]` for Pydantic validation failures.
-      // Passing the raw array to react-hot-toast crashes React because
-      // it tries to render objects as JSX children. Coerce to a string
-      // before display.
-      const raw = e?.response?.data?.detail
-      const msg = typeof raw === 'string'
-        ? raw
-        : Array.isArray(raw)
-          // Validation array: surface every msg with its field path.
-          ? raw.map((d) => {
-              const r = d as { loc?: unknown[]; msg?: string }
-              const field = Array.isArray(r.loc) ? r.loc.slice(1).join('.') : ''
-              return field ? `${field}: ${r.msg ?? 'invalid'}` : (r.msg ?? 'invalid')
-            }).join(' · ')
-          : 'Failed to update carrier'
-      toast.error(msg)
-    },
-  })
-
-  const draftKey = (name: string, col: string) => `${name}|${col}`
-
-  const commit = (name: string, col: string, raw: string, current: unknown) => {
-    const key = draftKey(name, col)
-    // Strip the draft regardless of outcome — the input falls back to the
-    // backend value via the React Query cache invalidation above.
-    setDraftValues(d => { const c = { ...d }; delete c[key]; return c })
-    let next: unknown
-    if (col === 'co2_emissions') {
-      if (raw.trim() === '') { next = 0 }
-      else {
-        const v = Number(raw)
-        if (!Number.isFinite(v) || v < 0) {
-          toast.error('CO₂ emissions must be a non-negative number')
-          return
-        }
-        next = v
-      }
-    } else {
-      next = raw
-    }
-    // Skip the round-trip when the value didn't actually change. Compare as
-    // strings to avoid the 0 vs 0.0 / int vs float false-positives.
-    if (String(next) === String(current ?? '')) return
-    // Build the full carrier object from the React Query cache so the
-    // backend's remove+add cycle (in `_update_component`) doesn't reset
-    // the other columns (`color`, `nice_name`, `unit`, `co2_emissions`)
-    // to schema defaults. Same pattern as the PropertiesPanel cards.
-    const cached = qc.getQueryData<Array<Record<string, unknown>>>(nk(useUIStore.getState().currentProject, 'carriers')) ?? []
-    const row = cached.find(c => c.name === name) ?? rows.find(r => r.name === name) ?? { name }
-    updateMut.mutate({ name, body: { ...row, [col]: next } })
-  }
-
-  const cellInput = (name: string, col: string, value: unknown, kind: 'number' | 'string') => {
-    const key = draftKey(name, col)
-    const displayValue = draftValues[key] !== undefined
-      ? draftValues[key]
-      : (value == null ? '' : String(value))
-    return (
-      <input
-        // Force remount when the cached value changes so the field re-syncs
-        // after a refetch (otherwise React reuses the old DOM element and
-        // the typed-then-reset cycle leaks stale text — a documented
-        // PyPSA-GUI footgun for uncontrolled inputs).
-        key={`${key}-${value ?? ''}`}
-        type={kind === 'number' ? 'number' : 'text'}
-        step={kind === 'number' ? 'any' : undefined}
-        min={kind === 'number' && col === 'co2_emissions' ? 0 : undefined}
-        value={displayValue}
-        onChange={e => setDraftValues(d => ({ ...d, [key]: e.target.value }))}
-        onBlur={() => commit(name, col, displayValue, value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-          if (e.key === 'Escape') {
-            setDraftValues(d => { const c = { ...d }; delete c[key]; return c })
-            ;(e.target as HTMLInputElement).blur()
-          }
-        }}
-        className="w-full px-1.5 py-0.5 border border-transparent rounded text-[11px] font-mono bg-transparent
-                   focus:bg-bg focus:border-accent hover:border-border"
-        placeholder={kind === 'number' ? '0' : ''}
-      />
-    )
-  }
-
-  if (rows.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-32 text-muted text-xs gap-1">
-        <span>No carriers yet.</span>
-        <span className="text-[10px]">Set a generator's <code>carrier</code> field to auto-create one.</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="overflow-auto h-full">
-      <table className="w-full text-xs border-collapse" style={{ minWidth: 'max-content' }}>
-        <thead>
-          <tr className="sticky top-0 bg-panel z-10 border-b border-border">
-            <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap">Name</th>
-            <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap"
-                title="Carrier CO₂ intensity, tCO₂ per MWh of primary energy. The Emissions tab divides by generator efficiency to get tCO₂ per MWh of output.">
-              CO₂ (t/MWh primary)
-            </th>
-            <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap">Display name</th>
-            <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap">Color</th>
-            <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap">Unit</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => {
-            const name = row.name as string
-            return (
-              <tr key={name ?? i}
-                  className={`border-b border-border/40 ${i % 2 === 0 ? 'bg-bg' : 'bg-panel'}`}>
-                <td className="px-2 py-0.5 font-mono text-[11px] text-text whitespace-nowrap" title="Rename via a per-asset workflow only — changing the key here would silently break every reference.">
-                  {name}
-                </td>
-                <td className="px-1 py-0.5 text-right">
-                  {cellInput(name, 'co2_emissions', row.co2_emissions, 'number')}
-                </td>
-                <td className="px-1 py-0.5">
-                  {cellInput(name, 'nice_name', row.nice_name, 'string')}
-                </td>
-                <td className="px-1 py-0.5 flex items-center gap-1">
-                  <input
-                    type="color"
-                    value={(row.color as string) || '#888888'}
-                    onChange={e => {
-                      // Color picker fires every keystroke — buffer in the
-                      // draft, commit on blur for a single PUT per change.
-                      setDraftValues(d => ({ ...d, [draftKey(name, 'color')]: e.target.value }))
-                    }}
-                    onBlur={() => {
-                      const k = draftKey(name, 'color')
-                      const v = draftValues[k]
-                      if (v !== undefined) commit(name, 'color', v, row.color)
-                    }}
-                    className="w-6 h-5 rounded border border-border cursor-pointer"
-                  />
-                  {cellInput(name, 'color', row.color, 'string')}
-                </td>
-                <td className="px-1 py-0.5">
-                  {cellInput(name, 'unit', row.unit, 'string')}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      <p className="text-[10px] text-muted px-2 py-1.5 border-t border-border bg-bg-2/50">
-        Click any cell to edit. <kbd className="px-1 border border-border rounded text-[9px] font-mono">Enter</kbd> saves,
-        {' '}<kbd className="px-1 border border-border rounded text-[9px] font-mono">Esc</kbd> reverts.
-        CO₂ values are per MWh of <em>primary</em> energy — output-MWh intensity is computed in the Emissions tab as
-        <code> co2_emissions / efficiency</code>.
-      </p>
     </div>
   )
 }

@@ -570,3 +570,57 @@ describe('AssetTable clipboard — D6, D7, D8', () => {
     expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
   })
 })
+
+describe('Carriers tab absorbed into the shared grid — D16', () => {
+  const CARRIERS = [
+    { name: 'AC', co2_emissions: 0, color: '#ff0000', nice_name: 'AC', unit: '' },
+    { name: 'gas', co2_emissions: 0.2, color: '#00ff00', nice_name: 'Gas', unit: '' },
+  ]
+  const CARRIER_CATALOG: CatalogAttribute[] = [
+    catalogAttr({ name: 'name', dtype: 'object', status: 'Input (required)' }),
+    catalogAttr({ name: 'co2_emissions', unit: 't/MWh' }),
+    catalogAttr({ name: 'color', dtype: 'object', type: 'string' }),
+    catalogAttr({ name: 'nice_name', dtype: 'object', type: 'string' }),
+    catalogAttr({ name: 'unit', dtype: 'object', type: 'string' }),
+  ]
+
+  beforeEach(() => {
+    const api = vi.mocked(networkApi)
+    api.getCarriers.mockResolvedValue(CARRIERS as never)
+    api.getCatalog.mockImplementation(async (component: string) => ({
+      component,
+      attributes: component === 'Bus' ? BUS_CATALOG
+        : component === 'Carrier' ? CARRIER_CATALOG : [],
+    }) as never)
+  })
+
+  it('renders through AssetTable, with checkboxes like every other tab', async () => {
+    renderPanel()
+    await userEvent.click(screen.getByText('Carriers'))
+    await screen.findByText('gas')
+    expect(document.querySelectorAll('tbody input[type="checkbox"]').length).toBe(2)
+  })
+
+  it('is still called "Carriers" — a chat ui_event requests it by name', () => {
+    renderPanel()
+    expect(screen.getByText('Carriers')).toBeTruthy()
+  })
+
+  it('keeps the colour picker on the color column', async () => {
+    renderPanel()
+    await userEvent.click(screen.getByText('Carriers'))
+    await screen.findByText('gas')
+    const cell = document.querySelector('tbody tr td[data-col="color"]') as HTMLElement
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    expect(cell.querySelector('input[type="color"]')).toBeTruthy()
+  })
+
+  it('keeps the CO2 help line', async () => {
+    renderPanel()
+    await userEvent.click(screen.getByText('Carriers'))
+    // /primary/ alone is ambiguous: COL_LABELS.co2_emissions is
+    // 'CO₂ (t/MWh primary)', so the column header matches it too.
+    expect(await screen.findByText(/output-MWh/)).toBeTruthy()
+  })
+})
