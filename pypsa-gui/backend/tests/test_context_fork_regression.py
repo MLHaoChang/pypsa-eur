@@ -9,8 +9,10 @@ second copy and the first ordinary save — `switchToProject` fires
 `saveProjectQuietly` on every tab switch — wrote it over the dispatch the queue
 had just persisted. The solve results vanished with no error anywhere.
 
-This file also pins the lock's own contract: exactly one builder per key, and
-NO lock at all on the common path (a registry hit).
+This file also pins the lock's own contract: exactly one builder per key, NO
+lock at all on the common path (a registry hit), the per-key entry is pruned
+once the last waiter leaves (it must not grow forever on a long-lived
+process), and a raise mid-body leaves neither a held lock nor a poisoned key.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import threading
 import time
 
 import pypsa
+import pytest
 
 from services.pypsa_service import PyPSAService
 from services.solve_queue import solve_queue
@@ -105,6 +108,52 @@ def test_hydrate_or_adopt_takes_no_lock_on_a_registry_hit():
     finally:
         with PyPSAService._registry_lock:
             PyPSAService._contexts.pop(key, None)
+
+
+def test_hydrate_or_adopt_prunes_its_lock_entry_when_the_last_waiter_leaves():
+    """
+    `_hydrate_locks` must not grow forever. Every miss registers a per-key
+    entry; the ONLY safe place to remove it is the last waiter still using it,
+    inside `hydrate_or_adopt` itself. Without pruning, a long-lived server
+    process pins one permanent entry per registry key ever missed — and Task 2
+    routes the per-session `scratch:<id>` key through this same helper, so
+    every session ever created would leak one.
+    """
+    key = "probe-org:prune-me"
+    assert key not in PyPSAService._hydrate_locks
+    try:
+        with PyPSAService.hydrate_or_adopt(key) as resident:
+            assert resident is None
+            # Mid-body: this thread is the sole waiter, so the entry must exist.
+            assert key in PyPSAService._hydrate_locks
+            ctx = PyPSAService.build_context()
+            PyPSAService.register(key, ctx)
+        assert key not in PyPSAService._hydrate_locks, (
+            "the per-key lock entry was never pruned after the last waiter left"
+        )
+    finally:
+        with PyPSAService._registry_lock:
+            PyPSAService._contexts.pop(key, None)
+
+
+def test_hydrate_or_adopt_leaves_no_lock_held_and_no_key_poisoned_after_a_raise():
+    """
+    A caller whose build/hydrate/register step raises must not leave the
+    per-key lock held or its `_hydrate_locks` entry behind — either would
+    deadlock or permanently skip adoption for every future miss on that key.
+    """
+    key = "probe-org:raises"
+    assert key not in PyPSAService._hydrate_locks
+    with pytest.raises(RuntimeError, match="boom"):
+        with PyPSAService.hydrate_or_adopt(key) as resident:
+            assert resident is None
+            raise RuntimeError("boom")
+    assert key not in PyPSAService._hydrate_locks, "a raise left the key's lock entry behind"
+
+    # The key is neither poisoned nor deadlocked: a fresh miss proceeds normally.
+    with PyPSAService.hydrate_or_adopt(key) as resident:
+        assert resident is None
+    assert key not in PyPSAService._hydrate_locks
 
 
 def test_activating_a_project_mid_queue_solve_does_not_fork_its_context(

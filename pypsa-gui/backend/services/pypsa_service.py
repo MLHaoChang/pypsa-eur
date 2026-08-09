@@ -115,9 +115,16 @@ class PyPSAService:
     # `_registry_lock` never nests a per-ctx `mutation_lock` (see
     # `_evict_if_over_cap`) is unchanged.
     #
-    # The dict grows one small entry per registry key ever missed — bounded by
-    # the number of distinct projects the process has hydrated, not by traffic.
-    _hydrate_locks: dict[str, threading.Lock] = {}
+    # Refcounted: `hydrate_or_adopt` increments the waiter count on entry and
+    # decrements (deleting the entry once it hits zero) in a `finally`, so the
+    # dict holds an entry only while at least one thread is actually inside
+    # the slow path for that key — bounded by CONCURRENT misses in flight, not
+    # by how many distinct keys were EVER missed. Without this the dict would
+    # be a genuine leak on a long-lived server process: `active_project.
+    # resolve_for_session` (Task 2) routes the per-session `scratch:<id>` key
+    # through this same helper, and every session ever created would else
+    # pin a permanent entry that nothing removes.
+    _hydrate_locks: dict[str, tuple[threading.Lock, int]] = {}
     _hydrate_guard: threading.Lock = threading.Lock()
 
     # ── Request-scoped active context (Step 0b) ──────────────────────────────
@@ -760,17 +767,36 @@ class PyPSAService:
             yield resident
             return
 
+        # Register as a waiter on this key's lock BEFORE acquiring it, so the
+        # lock object stays referenced (and the dict entry stays alive) for as
+        # long as ANY thread is still using it — including a thread still
+        # queued on `with lock:` below. Only the waiter that brings the count
+        # back to zero, in `finally`, deletes the entry.
         with cls._hydrate_guard:
-            lock = cls._hydrate_locks.get(registry_key)
-            if lock is None:
-                lock = threading.Lock()
-                cls._hydrate_locks[registry_key] = lock
+            entry = cls._hydrate_locks.get(registry_key)
+            if entry is None:
+                lock, waiters = threading.Lock(), 0
+            else:
+                lock, waiters = entry
+            cls._hydrate_locks[registry_key] = (lock, waiters + 1)
 
-        with lock:
-            # Re-check UNDER the lock: the thread that just released it may have
-            # registered the very context we were about to build. Yielding it
-            # here is the "adopt" half of the name.
-            yield cls._contexts.get(registry_key)
+        try:
+            with lock:
+                # Re-check UNDER the lock: the thread that just released it may
+                # have registered the very context we were about to build.
+                # Yielding it here is the "adopt" half of the name. If the
+                # caller's body raises (a build/hydrate/register failure), the
+                # exception propagates through `with lock:` (releasing it
+                # normally) straight into `finally` below — no lock is left
+                # held and no waiter is left uncounted.
+                yield cls._contexts.get(registry_key)
+        finally:
+            with cls._hydrate_guard:
+                lock, waiters = cls._hydrate_locks[registry_key]
+                if waiters <= 1:
+                    del cls._hydrate_locks[registry_key]
+                else:
+                    cls._hydrate_locks[registry_key] = (lock, waiters - 1)
 
     @classmethod
     def set_active(cls, project_id: str) -> ProjectContext:
