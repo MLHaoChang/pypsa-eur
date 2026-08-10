@@ -154,12 +154,35 @@ def _filter_transient_names(component_class: str, names: list[str]) -> list[str]
     return [n for n in names if n not in transient]
 
 
+def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
+    """
+    Drop any key PyPSA does not recognise for this component class (spec D21).
+
+    Pydantic's `extra='allow'` lets an undeclared key survive
+    `model_dump(exclude_unset=True)` so a newly-exposed attribute can persist
+    instead of being silently ignored. Without a whitelist that same setting
+    would let an arbitrary key reach `n.add()`, so the two ship together.
+
+    A key passes if the catalog reports it as an Input attribute, OR it is
+    already a column on the frame. The second arm is what preserves today's
+    behaviour for fields a Create model declares but PyPSA marks Output —
+    narrowing to catalog-Input alone would be a silent behaviour change.
+    """
+    n = PyPSAService.get_network()
+    allowed = attribute_catalog.input_attributes(n, component_class)
+    if not allowed:
+        return kwargs
+    columns = set(getattr(n, attr).columns)
+    return {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+
+
 def _create_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
     # Dispatch invalidation lives in the undo middleware (main.py) — it runs
     # after every successful /api/network/* mutation, so cascade-delete,
     # /bulk writes, rename, and global-constraint mutations all benefit
     # without each having to call an invalidation helper here.
     n = PyPSAService.get_network()
+    kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name in df.index:
@@ -207,6 +230,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
     defaults via the destructive remove+add cycle.
     """
     n = PyPSAService.get_network()
+    kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name not in df.index:
@@ -414,6 +438,7 @@ class _RecomputeResult(NamedTuple):
     length WAS rewritten. A changelog that reports `len(previews)` undercounts
     whenever a zero-impedance line is among the ones touched.
     """
+
     updated: int
     previews: list[dict]
 

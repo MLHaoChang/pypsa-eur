@@ -99,3 +99,22 @@ def catalog_for(n: Any, component_class: str) -> list[dict[str, Any]]:
         entry["default_text"] = _default_text(row["default"])
         out.append(entry)
     return out
+
+
+def input_attributes(n: Any, component_class: str) -> set[str]:
+    """
+    Every attribute PyPSA marks as an Input for this class.
+
+    The whitelist D21 applies at the two generic CRUD helpers: an undeclared
+    key admitted by `extra='allow'` survives only if it is here (or is already
+    a column, which the helpers check separately so today's behaviour for
+    declared-but-Output fields is preserved). Returns an empty set for an
+    unknown class, which drops every extra — the safe direction.
+    """
+    try:
+        attr = _CATALOG_ATTRS[component_class]
+    except KeyError:
+        return set()
+    defaults = getattr(n.components, attr).defaults
+    mask = defaults["status"].astype(str).str.startswith("Input", na=False)
+    return {str(x) for x in defaults.index[mask]}
