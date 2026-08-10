@@ -180,3 +180,112 @@ def test_snapshots_endpoint_reports_freq_on_multi_period_network(client, install
 
     body = client.get("/api/network/snapshots").json()
     assert body["freq"] == "3h"
+
+
+def _period_blocks(n):
+    """{period: [iso, ...]} for the current MultiIndex snapshots."""
+    sns = n.snapshots
+    out: dict[int, list[str]] = {}
+    for p, ts in sns:
+        out.setdefault(int(p), []).append(ts.isoformat())
+    return out
+
+
+def _multi_index_per_period(pairs):
+    """pairs: [(period, DatetimeIndex), ...] — one distinct block per period."""
+    import numpy as np
+    period_level = np.concatenate([np.full(len(blk), p) for p, blk in pairs])
+    timestep_level = pd.DatetimeIndex(np.concatenate([blk.values for _, blk in pairs]))
+    mi = pd.MultiIndex.from_arrays(
+        [period_level, timestep_level], names=["period", "timestep"],
+    )
+    mi.name = "snapshot"
+    return mi
+
+
+def _distinct_range_network():
+    """3 periods, each on a DIFFERENT operational year — the multi-year
+    weather-data workflow the 'Different year per period' mode exists for."""
+    pairs = [
+        (2030, pd.date_range("2019-01-01", periods=4, freq="h")),
+        (2040, pd.date_range("2020-01-01", periods=4, freq="h")),
+        (2050, pd.date_range("2021-01-01", periods=4, freq="h")),
+    ]
+    n = pypsa.Network()
+    n.set_snapshots(_multi_index_per_period(pairs))
+    n.investment_periods = [2030, 2040, 2050]
+    n.add("Bus", "B1")
+    return n
+
+
+def test_adding_a_period_preserves_each_existing_periods_own_range(client, install_network, session_ctx):
+    live = install_network(_distinct_range_network())
+    before = _period_blocks(live)
+    assert before[2030][0].startswith("2019")
+    assert before[2040][0].startswith("2020")
+    assert before[2050][0].startswith("2021")
+
+    resp = client.post(
+        "/api/network/investment_periods",
+        json={"periods": [2030, 2040, 2050, 2060]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # `PyPSAService.get_network()` called from the test body (outside a
+    # request) resolves the process foreground, not this client's session — see
+    # the `session_ctx` fixture's docstring. `session_ctx(client).network` is
+    # the established way this suite reads back a session's post-request state
+    # (see test_activate.py).
+    after = _period_blocks(session_ctx(client).network)
+    # Each pre-existing period keeps ITS OWN operational year. Before this fix
+    # all three collapsed onto 2019 — period 0's range.
+    assert after[2030] == before[2030]
+    assert after[2040] == before[2040]
+    assert after[2050] == before[2050]
+
+
+def test_a_newly_added_period_inherits_the_first_periods_range_as_a_template(client, install_network, session_ctx):
+    install_network(_distinct_range_network())
+    resp = client.post(
+        "/api/network/investment_periods",
+        json={"periods": [2030, 2040, 2050, 2060]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = _period_blocks(session_ctx(client).network)
+    assert 2060 in after
+    assert after[2060][0].startswith("2019")
+    assert len(after[2060]) == 4
+
+
+def test_removing_a_period_drops_only_its_block(client, install_network, session_ctx):
+    live = install_network(_distinct_range_network())
+    before = _period_blocks(live)
+
+    resp = client.post(
+        "/api/network/investment_periods",
+        json={"periods": [2030, 2050]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = _period_blocks(session_ctx(client).network)
+    assert sorted(after) == [2030, 2050]
+    assert after[2030] == before[2030]
+    assert after[2050] == before[2050]
+
+
+def test_flat_to_multi_promotion_still_gives_every_period_the_flat_range(client, install_network, session_ctx):
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2024-01-01", periods=4, freq="h"))
+    n.add("Bus", "B1")
+    install_network(n)
+
+    resp = client.post(
+        "/api/network/investment_periods",
+        json={"periods": [2030, 2040]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = _period_blocks(session_ctx(client).network)
+    assert after[2030] == after[2040]
+    assert after[2030][0].startswith("2024")

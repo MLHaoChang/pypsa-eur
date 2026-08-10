@@ -1713,9 +1713,12 @@ def set_investment_periods(body: InvestmentPeriods):
 
       1) Flat snapshots → MultiIndex: promote by replicating the existing
          operational DatetimeIndex under each requested period.
-      2) MultiIndex → different MultiIndex (period added / removed): rebuild
-         by replicating the FIRST existing period's operational range under
-         every new period. User uploads survive via _user_ts.
+      2) MultiIndex → different MultiIndex (period added / removed): each
+         period that survives keeps ITS OWN operational range (needed for
+         "Different year per period" multi-year weather data — 2030→2019,
+         2040→2020, …); only a genuinely new period inherits the first
+         existing period's range as a template. User uploads survive via
+         _user_ts.
       3) Empty `periods` on a MultiIndex: demote back to flat using the first
          period's operational range.
     """
@@ -1741,23 +1744,36 @@ def set_investment_periods(body: InvestmentPeriods):
                 n.investment_periods = pd.Index([], dtype="int64")
             return {"count": 0}
 
-        # Determine base operational DatetimeIndex.
+        # Determine each period's operational block. A period that exists both
+        # before and after keeps ITS OWN timesteps — the previous code rebuilt
+        # every period from the FIRST period's range, which silently destroyed
+        # the "Different year per period" setup (2030→2019 weather, 2040→2020,
+        # …) the moment the user added or removed a year.
         if is_multi:
-            existing_periods = sorted(n.snapshots.get_level_values(0).unique().tolist())
-            first_p = existing_periods[0]
-            base_idx = pd.DatetimeIndex(
-                n.snapshots[n.snapshots.get_level_values(0) == first_p]
-                .get_level_values(1),
-            )
+            level0 = n.snapshots.get_level_values(0)
+            existing_periods = sorted(level0.unique().tolist())
+            existing_blocks = {
+                int(p): pd.DatetimeIndex(
+                    n.snapshots[level0 == p].get_level_values(1),
+                )
+                for p in existing_periods
+            }
+            base_idx = existing_blocks[int(existing_periods[0])]
         else:
             existing_periods = []
+            existing_blocks = {}
             base_idx = pd.DatetimeIndex(n.snapshots)
 
         # Only rebuild snapshots if the period set actually changed.
         if existing_periods != new_periods:
             _backup_network_ts_to_user_ts(n)
             captured_weights = _capture_snapshot_weights_per_timestep(n)
-            mi = _build_period_multiindex(new_periods, [base_idx] * len(new_periods))
+            # Surviving periods keep their own block; a genuinely new period
+            # inherits the first existing period's range as a template (on a
+            # flat→multi promotion there is only one range, so every period
+            # legitimately gets it).
+            blocks = [existing_blocks.get(int(p), base_idx) for p in new_periods]
+            mi = _build_period_multiindex(new_periods, blocks)
             n.set_snapshots(mi)
             _reapply_snapshot_weights(n, captured_weights)
             _reapply_user_ts_to_network(n)
@@ -1773,7 +1789,8 @@ def set_investment_periods(body: InvestmentPeriods):
     change_log_service.log(
         "update", "Network", "investment_periods",
         f"Set investment periods: {new_periods} "
-        f"(operational range × {len(base_idx)} steps)",
+        f"({len(n.snapshots)} snapshots total; existing periods kept their own "
+        f"operational range)",
     )
     return {"count": len(new_periods)}
 
