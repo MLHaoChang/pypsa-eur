@@ -111,3 +111,32 @@ export function resolutionLabel(freq: string | null | undefined): string {
   const hit = FREQ_OPTIONS.find(o => o.value.toLowerCase() === freq.toLowerCase())
   return hit ? hit.label : freq
 }
+
+/**
+ * The `investment_period_weightings.objective` value that auto-discount will
+ * write for one period at solve time.
+ *
+ * This MIRRORS `solver_service.py::_apply_modelling_assumptions` step 4 and
+ * must stay in step with it. It exists so the period table can show the user
+ * what the checkbox will do before they solve, rather than making them run a
+ * solve to find out.
+ *
+ * The real rate uses the exact Fisher relation, not nominal − inflation, and
+ * is clamped at -0.999 so `(1 + r)` stays positive under a pathological
+ * inflation > nominal.
+ */
+export function pvFactor(args: {
+  period: number
+  refPeriod: number
+  years: number
+  discountRate: number
+  inflationRate: number
+}): number {
+  const { period, refPeriod, years, discountRate, inflationRate } = args
+  const nominal = Number.isFinite(discountRate) ? discountRate : 0
+  const infl = Number.isFinite(inflationRate) ? inflationRate : 0
+  let r = 1 + infl > 0 ? (1 + nominal) / (1 + infl) - 1 : nominal
+  if (r <= -0.999) r = -0.999
+  const pv = Math.pow(1 + r, -(period - refPeriod))
+  return pv * (Number.isFinite(years) ? years : 1)
+}

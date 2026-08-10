@@ -9,7 +9,7 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
-import { buildWeightingRows, resolutionLabel, FREQ_OPTIONS, type WeightingRow } from './modelHorizonModel'
+import { buildWeightingRows, resolutionLabel, FREQ_OPTIONS, pvFactor, type WeightingRow } from './modelHorizonModel'
 
 // ── Load carrier canonicaliser ──────────────────────────────────────────────
 // Mirrors loadCarrierKey in Dispatch.tsx + _canonical_load_carrier_key on the
@@ -126,6 +126,14 @@ export default function ModelHorizon() {
     () => (ip?.weightings ?? []) as Array<Record<string, number | string>>,
     [ip],
   )
+
+  // Auto-discount anchors on the first ACTIVE period — same rule as
+  // solver_service's `ref_year = periods_active[0]`.
+  const refPeriod = useMemo(
+    () => (periods.length > 0 ? Math.min(...periods) : 0),
+    [periods],
+  )
+  const autoDiscountOn = Boolean(cfg?.auto_discount_periods)
 
   const isMultiPeriod = cfg?.multi_investment_periods ?? false
   // MultiIndex snapshots are signalled by the backend returning a parallel
@@ -370,48 +378,9 @@ export default function ModelHorizon() {
     applyPeriods.mutate(periods.filter(y => y !== year))
   }
 
-  // ── Period bulk-weight + discount calc inputs ──────────────────────────
+  // ── Period bulk-weight inputs ────────────────────────────────────────────
   const [bulkYears, setBulkYears] = useState('')
   const [bulkObjective, setBulkObjective] = useState('')
-
-  const [discRate, setDiscRate] = useState<string>('')
-  const [discBase, setDiscBase] = useState<string>('')
-  // Track whether the user has explicitly touched each input. Without this,
-  // the empty-string check `discRate === ''` re-seeds the value every time
-  // the user deliberately clears the field (type → backspace → empty), as
-  // soon as the next cfg refetch lands. Hydrate ONCE on mount, then leave
-  // it alone — the user's empty is intentional from that point on.
-  const discRateTouchedRef = useRef(false)
-  const discBaseTouchedRef = useRef(false)
-  useEffect(() => {
-    if (!discRateTouchedRef.current && discRate === '' && cfg?.discount_rate !== undefined) {
-      setDiscRate(((cfg.discount_rate ?? 0) * 100).toFixed(2))
-    }
-  }, [cfg?.discount_rate, discRate])
-  useEffect(() => {
-    if (!discBaseTouchedRef.current && discBase === '' && periods.length > 0) {
-      setDiscBase(String(periods[0]))
-    }
-  }, [periods, discBase])
-
-  const applyDiscountFactors = () => {
-    const r = parseFloat(discRate) / 100
-    const base = parseInt(discBase, 10)
-    if (!Number.isFinite(r) || r < 0) { toast.error('Bad discount rate'); return }
-    if (!Number.isFinite(base)) { toast.error('Bad base year'); return }
-    const updates: Record<string, { objective: number }> = {}
-    for (const p of periods) {
-      updates[String(p)] = { objective: (1 + r) ** -(p - base) }
-    }
-    networkApi
-      .updateInvestmentPeriodWeightings({ updates })
-      .then(() => {
-        qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'investmentPeriods') })
-        toast.success(`Applied discount factors (r=${(r * 100).toFixed(2)} %, base ${base})`)
-      })
-      .catch((e: { response?: { data?: { detail?: string } } }) =>
-        toast.error(e.response?.data?.detail ?? 'Failed to apply discount factors'))
-  }
 
   // ── Multi-period snapshot constructor scratch state ────────────────────
   const [mpMode, setMpMode] = useState<'same' | 'per_period'>('same')
@@ -807,46 +776,13 @@ export default function ModelHorizon() {
                   >Apply objective</button>
                 </div>
 
-                {/* Discount-factor calculator */}
-                <div className="flex items-center gap-2 mt-1 pt-2 border-t border-border/60">
-                  <span className="text-[10px] text-muted whitespace-nowrap">discount calc:</span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={0}
-                    value={discRate}
-                    onChange={e => {
-                      discRateTouchedRef.current = true
-                      setDiscRate(e.target.value)
-                    }}
-                    title="Discount rate %"
-                    className="w-16 px-2 py-1 border border-border rounded text-[11px] bg-bg font-mono"
-                  />
-                  <span className="text-[10px] text-muted">%</span>
-                  <input
-                    type="number"
-                    step={1}
-                    value={discBase}
-                    onChange={e => {
-                      discBaseTouchedRef.current = true
-                      setDiscBase(e.target.value)
-                    }}
-                    title="Base year (NPV anchor)"
-                    className="w-20 px-2 py-1 border border-border rounded text-[11px] bg-bg font-mono"
-                  />
-                  <span className="text-[10px] text-muted">base yr</span>
-                  <button
-                    disabled={!discRate || !discBase || periods.length === 0}
-                    onClick={applyDiscountFactors}
-                    className="ml-auto px-2 py-1 border border-border rounded text-[11px] text-accent hover:border-accent disabled:opacity-40"
-                    title="Set objective = (1+rate)^-(period-base) for every period"
-                  >Apply discounts</button>
-                </div>
-
-                {/* Auto-discount toggle: re-applies PV factors at every solve
-                    using the SolverConfig's discount_rate. Equivalent to
-                    clicking 'Apply discounts' every time before solving, but
-                    survives manual edits to ipw.objective. */}
+                {/* Auto-discount: the ONLY automated path to ipw.objective.
+                    Writes PV × years per period at LP build time using the
+                    solver settings' discount_rate and inflation_rate, and
+                    reverts in restore() so the on-disk network keeps whatever
+                    the user typed. The PV column in the table below previews
+                    exactly what it will write. Manual edits to the objective
+                    cell still work and are what to use for one-off factors. */}
                 <label className="flex items-center gap-2 mt-1 pt-2 border-t border-border/60 text-[10px] text-muted">
                   <input
                     type="checkbox"
@@ -869,6 +805,10 @@ export default function ModelHorizon() {
                         <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Period</th>
                         <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Years</th>
                         <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Objective</th>
+                        <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase"
+                            title="What Auto-discount will write into `objective` at solve time: (1+real rate)^-(period-first period) x years. Preview only — nothing is written until you solve.">
+                          PV ×<br />preview
+                        </th>
                         {networkLoadCarriers.map(carrier => (
                           <th key={`hdr-load-${carrier}`}
                               className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase"
@@ -947,6 +887,18 @@ export default function ModelHorizon() {
                                 }}
                                 className="w-24 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
                               />
+                            </td>
+                            <td className={`px-2 py-1 text-right font-mono text-[11px] ${autoDiscountOn ? 'text-text' : 'text-muted/40'}`}
+                                title={autoDiscountOn
+                                  ? `Auto-discount will set objective = ${pvFactor({ period, refPeriod, years, discountRate: cfg?.discount_rate ?? 0, inflationRate: cfg?.inflation_rate ?? 0 }).toFixed(4)} at solve time, overriding the value on the left.`
+                                  : 'Auto-discount is off — the objective value on the left is what the LP uses.'}>
+                              {pvFactor({
+                                period,
+                                refPeriod,
+                                years,
+                                discountRate: cfg?.discount_rate ?? 0,
+                                inflationRate: cfg?.inflation_rate ?? 0,
+                              }).toFixed(4)}
                             </td>
                             {networkLoadCarriers.map(carrier => {
                               const v = resolvedScaler(carrier)
@@ -1034,8 +986,12 @@ export default function ModelHorizon() {
                 <p className="text-[10px] text-muted leading-relaxed">
                   <code>years</code> = calendar years the period stands in for
                   (period 2030 with <code>years=10</code> → 2030–2039).
-                  <code> objective</code> = LP-objective weight (typically a
-                  present-value discount factor). <code>Load × · {'{carrier}'}</code> =
+                  <code> objective</code> = LP-objective weight. When
+                  Auto-discount is ON the <code>PV × preview</code> column is
+                  what actually reaches the LP; the value you type here is
+                  overridden at solve time and restored afterwards. With
+                  Auto-discount OFF, what you type is what the LP uses.
+                  <code>Load × · {'{carrier}'}</code> =
                   per-carrier load growth multiplier — loads of that carrier
                   are scaled independently per period at solve time
                   (<code>1.00</code> = unchanged, <code>1.10</code> = +10 %).

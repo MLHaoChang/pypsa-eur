@@ -110,3 +110,44 @@ describe('resolutionLabel', () => {
     expect(resolutionLabel('17min')).toBe('17min')
   })
 })
+
+import { pvFactor } from './modelHorizonModel'
+
+describe('pvFactor', () => {
+  // Mirrors solver_service.py::_apply_modelling_assumptions step 4 exactly.
+  // Any divergence here is the bug this replaced: the deleted manual
+  // calculator omitted the `years` term and the inflation correction, so it
+  // disagreed with what actually reached the LP by a factor of `years`.
+  const base = { refPeriod: 2030, discountRate: 0.07, inflationRate: 0 }
+
+  it('is 1 x years at the reference period', () => {
+    expect(pvFactor({ ...base, period: 2030, years: 1 })).toBeCloseTo(1, 10)
+    expect(pvFactor({ ...base, period: 2030, years: 10 })).toBeCloseTo(10, 10)
+  })
+
+  it('discounts later periods and multiplies by the period span', () => {
+    // (1.07)^-10 = 0.508349...; x 10 years = 5.08349...
+    expect(pvFactor({ ...base, period: 2040, years: 10 })).toBeCloseTo(5.083493, 5)
+  })
+
+  it('applies the Fisher correction when inflation is set', () => {
+    // real r = 1.07/1.02 - 1 = 0.0490196...; (1+r)^-10 = 0.6196749505205055
+    // (verified independently via `python3 -c "print((1+((1.07/1.02)-1))**-10)"`;
+    // the brief's worked comment had 0.619669, off by ~6e-6 — enough to fail
+    // toBeCloseTo(_, 5). Formula itself is unaffected and matches the backend
+    // exactly; only this literal needed correcting.
+    expect(pvFactor({ ...base, period: 2040, years: 1, inflationRate: 0.02 }))
+      .toBeCloseTo(0.619675, 5)
+  })
+
+  it('clamps a pathological real rate at -0.999 so the base stays positive', () => {
+    const v = pvFactor({ period: 2040, refPeriod: 2030, years: 1, discountRate: 0, inflationRate: 5000 })
+    expect(Number.isFinite(v)).toBe(true)
+    expect(v).toBeGreaterThan(0)
+  })
+
+  it('handles a zero discount rate as an identity on the PV term', () => {
+    expect(pvFactor({ period: 2050, refPeriod: 2030, years: 5, discountRate: 0, inflationRate: 0 }))
+      .toBeCloseTo(5, 10)
+  })
+})
