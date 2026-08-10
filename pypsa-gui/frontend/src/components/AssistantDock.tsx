@@ -1,4 +1,5 @@
-import { MessageSquare, PanelRightClose } from 'lucide-react'
+import { useCallback, useRef } from 'react'
+import { MessageSquare, Mic, PanelRightClose } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
 import ChatPanel from './ChatPanel'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -26,6 +27,35 @@ export default function AssistantDock() {
   // for updates it doesn't consume — now that it's always mounted, it does.
   const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
   const setAssistantDockOpen = useUIStore((s) => s.setAssistantDockOpen)
+  const assistantDockWidth = useUIStore((s) => s.assistantDockWidth)
+  const setAssistantDockWidth = useUIStore((s) => s.setAssistantDockWidth)
+  const dragRef = useRef<{ startX: number; startW: number } | null>(null)
+
+  // Drag to resize. The store keeps the width the user ASKED for and is
+  // written once, at release — not per mousemove, and never with a value the
+  // layout imposed. That separation is the compare rail's lesson: clamping
+  // by writing the smaller number back is what silently rewrote a 700px
+  // preference the first time something opened beside it.
+  const onResizeDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragRef.current = { startX: e.clientX, startW: assistantDockWidth }
+    const onMove = (ev: MouseEvent) => {
+      const d = dragRef.current
+      if (!d) return
+      // A mouseup released outside the window never arrives, so a button-less
+      // move is the only signal the gesture ended.
+      if (ev.buttons === 0) { onUp(); return }
+      // Dragging the LEFT edge of a right-hand dock: leftward widens.
+      setAssistantDockWidth(d.startW + (d.startX - ev.clientX))
+    }
+    const onUp = () => {
+      dragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [assistantDockWidth, setAssistantDockWidth])
 
   // `data-no-panel-close` below is load-bearing. App.tsx's
   // click-outside-to-close effect closes the active slide panel on any
@@ -40,9 +70,10 @@ export default function AssistantDock() {
   // guard on App.tsx's global Escape handler.
   return (
     <div
-      className={`flex flex-col min-h-0 border-l border-border bg-bg shrink-0 ${
-        assistantDockOpen ? 'w-[380px]' : 'w-10'
+      className={`relative flex flex-col min-h-0 border-l border-border bg-bg shrink-0 ${
+        assistantDockOpen ? '' : 'w-10'
       }`}
+      style={assistantDockOpen ? { width: `${assistantDockWidth}px` } : undefined}
       data-testid="assistant-dock"
       data-no-panel-close
     >
@@ -64,16 +95,49 @@ export default function AssistantDock() {
           </button>
         </div>
       ) : (
-        <button
-          onClick={() => setAssistantDockOpen(true)}
-          title="Open the assistant"
-          aria-label="Open the assistant"
-          aria-expanded={assistantDockOpen}
-          data-testid="assistant-dock-launcher"
-          className="flex items-center justify-center h-10 w-full text-muted hover:text-accent hover:bg-panel transition-colors"
-        >
-          <MessageSquare size={16} />
-        </button>
+        <div className="flex flex-col items-center gap-1 pt-2">
+          <button
+            onClick={() => setAssistantDockOpen(true)}
+            title="Open the assistant"
+            aria-label="Open the assistant"
+            aria-expanded={assistantDockOpen}
+            data-testid="assistant-dock-launcher"
+            className="flex flex-col items-center gap-2 w-full py-2 text-muted hover:text-accent hover:bg-panel transition-colors"
+          >
+            <MessageSquare size={18} />
+            {/* An unlabelled glyph in a 40px gutter reads as decoration. The
+                word is what makes it findable without hunting. */}
+            <span
+              className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent"
+              style={{ writingMode: 'vertical-rl' }}
+            >
+              Assistant
+            </span>
+          </button>
+          {/* The spec's collapsed strip carries "the launcher button and the
+              microphone" — voice is the affordance most devalued by being
+              buried, since it exists to save the trip to the keyboard. */}
+          <button
+            onClick={() => setAssistantDockOpen(true)}
+            title="Open the assistant and dictate"
+            aria-label="Open the assistant and dictate"
+            data-testid="assistant-dock-mic"
+            className="flex items-center justify-center w-full py-2 text-muted hover:text-accent hover:bg-panel transition-colors"
+          >
+            <Mic size={16} />
+          </button>
+        </div>
+      )}
+
+      {assistantDockOpen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the assistant"
+          data-testid="assistant-dock-resize"
+          onMouseDown={onResizeDown}
+          className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-accent/40 z-10"
+        />
       )}
 
       {/* Never unmounted — see the module docstring. */}

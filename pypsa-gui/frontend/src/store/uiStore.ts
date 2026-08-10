@@ -174,11 +174,28 @@ function storedCompareRailWidth(): number {
   return 560
 }
 
+// Default OPEN. The spec's headline is an assistant "present when the tool
+// launches", and a 40px muted icon is not presence — it is the opt-in panel
+// the dock exists to replace, in a different shape. Only an explicit
+// 'closed' collapses it, so a user who asked for the width back keeps it;
+// re-opening on every launch is how a feature gets switched off for good.
+const ASSISTANT_DOCK_WIDTH_KEY = 'network-diagram:assistant-dock-width'
+export const DOCK_MIN_W = 320
+export const DOCK_DEFAULT_W = 420
+
 function storedAssistantDockOpen(): boolean {
   try {
-    return localStorage.getItem(ASSISTANT_DOCK_KEY) === 'open'
+    return localStorage.getItem(ASSISTANT_DOCK_KEY) !== 'closed'
   } catch { /* noop */ }
-  return false
+  return true
+}
+
+function storedAssistantDockWidth(): number {
+  try {
+    const v = Number(localStorage.getItem(ASSISTANT_DOCK_WIDTH_KEY))
+    if (Number.isFinite(v) && v >= DOCK_MIN_W) return v
+  } catch { /* noop */ }
+  return DOCK_DEFAULT_W
 }
 
 function persistAssistantDockOpen(open: boolean) {
@@ -283,6 +300,7 @@ interface UIStore {
   // can stay on screen while it navigates you somewhere — see Task 3's
   // regression test and the 2026-08-05 presence spec.
   assistantDockOpen: boolean
+  assistantDockWidth: number
   // True while a project switch/load is mid-flight (between the moment the
   // backend starts swapping the in-memory network and the moment
   // currentProject is updated to the new project). Autosave checks this and
@@ -361,6 +379,9 @@ interface UIStore {
   setSlidePanel: (p: SlidePanel | null) => void
   setAssistantDockOpen: (open: boolean) => void
   toggleAssistantDock: () => void
+  setAssistantDockWidth: (px: number) => void
+  constrainDockWidth: (desired: number, available: number) => number
+  readStoredDockOpen: () => boolean
   setProjectSwitchInProgress: (v: boolean) => void
   setCompareRailOpen: (v: boolean) => void
   toggleCompareRail: () => void
@@ -420,6 +441,7 @@ export const useUIStore = create<UIStore>((set) => ({
   canvasView: storedCanvasView(),
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
+  assistantDockWidth: storedAssistantDockWidth(),
   projectSwitchInProgress: false,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
@@ -527,6 +549,20 @@ export const useUIStore = create<UIStore>((set) => ({
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
     set({ compareRailOpen: v })
   },
+  // The store holds the width the user ASKED for, written by exactly one
+  // thing — a real drag on the dock's handle — and persisted. Nothing else
+  // may touch it. What renders is that width constrained to what currently
+  // fits, recomputed from a measurement and never stored: writing the
+  // constraint back is what silently rewrote the compare rail's 700px
+  // preference to 461 the first time a panel opened beside it.
+  setAssistantDockWidth: (px: number) => {
+    const w = Math.max(DOCK_MIN_W, Math.round(px))
+    try { localStorage.setItem(ASSISTANT_DOCK_WIDTH_KEY, String(w)) } catch { /* noop */ }
+    set({ assistantDockWidth: w })
+  },
+  constrainDockWidth: (desired: number, available: number) =>
+    Math.max(DOCK_MIN_W, Math.min(desired, available - DOCK_MIN_W)),
+  readStoredDockOpen: () => storedAssistantDockOpen(),
   toggleCompareRail: () => set(s => {
     const next = !s.compareRailOpen
     try { localStorage.setItem(COMPARE_RAIL_KEY, next ? 'true' : 'false') } catch { /* noop */ }

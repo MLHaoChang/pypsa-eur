@@ -96,3 +96,46 @@ describe('AssistantDock', () => {
     expect(chatPanelMounts.current).toBe(1)
   })
 })
+
+// ── Prominence (reported from the built app) ────────────────────────────────
+//
+// "I do not see the prominent button for the assistant when the app is
+// launched." The dock shipped default-collapsed to a 40px strip holding a
+// single 16px muted icon — which is the opt-in panel the spec exists to
+// replace, wearing a different shape. The spec's collapsed state is "a slim
+// always-visible strip carrying the launcher button AND THE MICROPHONE".
+
+describe('assistant dock prominence', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useUIStore.setState({ assistantDockOpen: false })
+  })
+
+  it('labels the collapsed launcher rather than showing a bare icon', () => {
+    render(<AssistantDock />)
+    const launcher = screen.getByTestId('assistant-dock-launcher')
+    // An unlabelled glyph in a 40px gutter is indistinguishable from a
+    // decoration. The word is what makes it findable at a glance.
+    expect(launcher.textContent).toMatch(/assistant/i)
+  })
+
+  it('carries the microphone in the collapsed strip, as the spec requires', () => {
+    render(<AssistantDock />)
+    expect(screen.getByTestId('assistant-dock-mic')).toBeTruthy()
+  })
+
+  it('offers a resize handle when open', () => {
+    useUIStore.setState({ assistantDockOpen: true })
+    render(<AssistantDock />)
+    const handle = screen.getByTestId('assistant-dock-resize')
+    expect(handle.getAttribute('role')).toBe('separator')
+    expect(handle.getAttribute('aria-orientation')).toBe('vertical')
+  })
+
+  it('renders at the stored width, not a hardcoded one', () => {
+    useUIStore.setState({ assistantDockOpen: true, assistantDockWidth: 560 })
+    render(<AssistantDock />)
+    const dock = screen.getByTestId('assistant-dock')
+    expect(dock.style.width).toBe('560px')
+  })
+})
