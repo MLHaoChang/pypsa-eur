@@ -13,6 +13,7 @@ import { useUIStore } from '../store/uiStore'
 import { projectsApi } from '../api/projects'
 import { saveProjectQuietly, switchToProject } from '../utils/projectActions'
 import { confirmToast } from '../utils/toasts'
+import { READ_ONLY_MUTATION_MESSAGE, SOLVING_MUTATION_MESSAGE } from '../utils/mutationGuard'
 
 vi.mock('../api/projects')
 vi.mock('../api/network', () => ({ networkApi: { resetNetwork: vi.fn() } }))
@@ -788,5 +789,22 @@ describe('the edit lock covers the project it is held on', () => {
     const row = await rowFor('base')
     expect(within(row).getByTitle('Delete this scenario')).toHaveProperty('disabled', false)
     expect(within(row).getByTitle(/^Branch a child scenario/)).toHaveProperty('disabled', false)
+  })
+})
+
+describe('a solving project shows the solving reason, not the edit-lock one', () => {
+  it('names the SOLVING reason on locked row titles while a queue job solves the active project', async () => {
+    // Spec-review fix round 1: the row titles were keyed on a hardcoded
+    // "another user is editing" string regardless of WHY the row is locked.
+    // readOnlyReason='solving' is exactly the state AppHeader's effect
+    // produces while a queue job runs on the current project.
+    useUIStore.setState({ currentProject: 'loaded', readOnly: true, readOnlyReason: 'solving' })
+    renderPanel()
+    const row = await rowFor('loaded')
+    // Branch, edit, delete — 'loaded' is a leaf, so no subtree-queue button.
+    const blocked = within(row).getAllByTitle(SOLVING_MUTATION_MESSAGE)
+    expect(blocked).toHaveLength(3)
+    expect(blocked.every(b => (b as HTMLButtonElement).disabled)).toBe(true)
+    expect(within(row).queryAllByTitle(READ_ONLY_MUTATION_MESSAGE)).toHaveLength(0)
   })
 })

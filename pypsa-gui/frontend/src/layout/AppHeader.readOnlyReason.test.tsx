@@ -6,16 +6,24 @@
 // AppHeader — the one component that knows whether the CURRENT project has a
 // queue job running.
 //
-// Two behaviours, two describe blocks:
+// Three behaviours, three describe blocks:
 //   1. The mount/unmount effect that calls setSolvingReadOnly(jobRunning) and
 //      clears it on unmount (brief Step 3, AppHeader.tsx after `busy`).
 //   2. The rename guard (commitName) passing readOnlyReason into
 //      evaluateMutation, exercised via the realistic race it exists for: the
 //      user is mid-rename when a solve starts on the same project.
+//   3. Fix round 1 follow-up (spec review): `readOnly` had exactly ONE cause
+//      before this task, so every hardcoded "another user is editing this
+//      project" string in this file was always true. Introducing the second
+//      cause (a queue job solving the project) is what turns seven of those
+//      strings false — Ctrl+S's handler and three button tooltips. This
+//      block pins the Ctrl+S path (a real behavioural path, not merely a
+//      tooltip — the shortcut bypasses the disabled Save button) and the
+//      three affected tooltips.
 //
-// Revert either piece of wiring and the corresponding test below fails.
+// Revert any piece of this wiring and the corresponding test below fails.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -62,6 +70,11 @@ function renderHeader() {
 }
 
 beforeEach(() => {
+  // `vi.spyOn` on an already-spied method does not clear prior call history —
+  // without this, a toast.error call from an EARLIER test survives into a
+  // later test's `.not.toHaveBeenCalledWith(...)` check and fails it for the
+  // wrong reason.
+  vi.clearAllMocks()
   queueJobs = []
   useUIStore.setState({ currentProject: null, projectName: 'Unnamed Network' })
   useUIStore.getState().setLockState(WRITABLE)
@@ -150,5 +163,35 @@ describe('AppHeader\'s rename guard names the SOLVING reason, not the edit-lock 
 
     expect(vi.mocked(toast.error)).toHaveBeenCalledWith(SOLVING_MUTATION_MESSAGE)
     expect(vi.mocked(toast.error)).not.toHaveBeenCalledWith(READ_ONLY_MUTATION_MESSAGE)
+  })
+})
+
+describe("AppHeader's other read-only surfaces now name the solving reason too", () => {
+  it('Ctrl+S shows the solving message, not the edit-lock one, while the project solves', () => {
+    // handleQuickSave is reachable even though the Save button is disabled —
+    // its own comment says the keyboard shortcut bypasses the disabled
+    // button, and the effect below wires Ctrl/Cmd+S to it unconditionally.
+    queueJobs = [{ id: 1, project_id: 'demo', status: 'running', position: null }]
+    useUIStore.setState({ currentProject: 'demo', projectName: 'demo' })
+    renderHeader()
+    expect(useUIStore.getState().readOnlyReason).toBe('solving')
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith(SOLVING_MUTATION_MESSAGE)
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalledWith(READ_ONLY_MUTATION_MESSAGE)
+  })
+
+  it('the rename, Undo and Save button tooltips name the solving reason too', () => {
+    queueJobs = [{ id: 1, project_id: 'demo', status: 'running', position: null }]
+    useUIStore.setState({ currentProject: 'demo', projectName: 'demo' })
+    renderHeader()
+    expect(useUIStore.getState().readOnlyReason).toBe('solving')
+
+    // Rename (project name button), Undo, Save — all three read `readOnly`
+    // with no further gate, unlike the Run button (gated on `!amber`, which
+    // is true while jobRunning — see the brief's confirmed-correct site).
+    expect(screen.getAllByTitle(SOLVING_MUTATION_MESSAGE)).toHaveLength(3)
+    expect(screen.queryAllByTitle(READ_ONLY_MUTATION_MESSAGE)).toHaveLength(0)
   })
 })

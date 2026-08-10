@@ -47,3 +47,16 @@ export function evaluateMutation(
     blockedMessage: MESSAGE_BY_REASON[reason] ?? READ_ONLY_MUTATION_MESSAGE,
   }
 }
+
+// The same message table, exposed directly for surfaces that explain a
+// read-only reason WITHOUT attempting a mutation — a button/row `title`
+// attribute (hover hint) needs to say why it is disabled before the user ever
+// clicks it, so it cannot go through `evaluateMutation`, which only speaks
+// once a mutation is refused. Kept as a thin wrapper over `MESSAGE_BY_REASON`
+// rather than a second literal table, so there is exactly one place that maps
+// a reason to English — the module's whole reason for existing. null for
+// 'writable' (nothing to explain); callers gate on `readOnly` first, so in
+// practice they only ever see the non-null branch.
+export function readOnlyMessage(reason: ReadOnlyReason): string | null {
+  return MESSAGE_BY_REASON[reason]
+}
