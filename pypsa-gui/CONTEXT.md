@@ -61,3 +61,12 @@ One optimisation run over the network — `n.optimize()`, driven through
 `solver_service.run_simulation` and queued by `backend/routers/solve_queue.py`.
 Always off the request thread; it blocks.
 _Avoid_: simulation, optimisation run, job
+
+**Unavailable**:
+The state of a figure the backend could not resolve, as distinct from a figure
+that resolved to zero. Zero is a legitimate result in an energy-system model,
+so the two must never share a representation — see
+[ADR-0001](docs/adr/0001-unresolvable-figures-ship-as-null.md). A payload says
+which one it means by carrying an explicit flag beside the value; a bare `0.0`
+asserts a real zero.
+_Avoid_: missing, empty, N/A, no data, zero
