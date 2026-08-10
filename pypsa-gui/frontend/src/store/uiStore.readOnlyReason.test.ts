@@ -21,6 +21,15 @@ describe('uiStore read-only reason', () => {
     expect(useUIStore.getState().readOnlyReason).toBe('writable')
   })
 
+  it('reflects the edit-lock reason immediately after setLockState alone (no solve involved)', () => {
+    useUIStore.getState().setLockState({
+      readOnly: true, holderEmail: 'other@example.com', reason: 'locked-by-user',
+    })
+    expect(useUIStore.getState().readOnly).toBe(true)
+    expect(useUIStore.getState().readOnlyReason).toBe('locked-by-user')
+    expect(useUIStore.getState().lockHolderEmail).toBe('other@example.com')
+  })
+
   it('goes read-only with the solving reason while a queue job runs on it', () => {
     useUIStore.getState().setSolvingReadOnly(true)
     expect(useUIStore.getState().readOnly).toBe(true)
