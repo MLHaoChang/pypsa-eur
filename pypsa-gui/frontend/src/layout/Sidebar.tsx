@@ -736,7 +736,7 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly,
+    readOnly, readOnlyReason,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -775,12 +775,12 @@ function ProjectSectionContent({
   const networkHasBuses = (networkMeta?.bus_count ?? 0) > 0
 
   const guardProjectMutation = useCallback((opts?: { silent?: boolean }) => {
-    const verdict = evaluateMutation(readOnly)
+    const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (verdict.allowed) return true
     if (opts?.silent) appLog('INFO', `Autosave skipped — ${verdict.blockedMessage}`)
     else toast.error(verdict.blockedMessage!)
     return false
-  }, [readOnly])
+  }, [readOnly, readOnlyReason])
 
   // Save current network state to backend (under `name`), then offer the
   // resulting bundle as a download via the OS save-file picker (Chromium) or

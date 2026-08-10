@@ -308,8 +308,10 @@ export default function ScenariosPanel() {
   const setCompareRailOpen = useUIStore(s => s.setCompareRailOpen)
   const setProjectSwitchInProgress = useUIStore(s => s.setProjectSwitchInProgress)
   // Read-only when another user holds the active project's edit lock (auth
-  // mode). Mutating actions (branch a scenario, delete) are gated on it.
+  // mode), OR a queue job is solving it. Mutating actions (branch a
+  // scenario, delete) are gated on it; readOnlyReason picks the message.
   const readOnly = useUIStore(s => s.readOnly)
+  const readOnlyReason = useUIStore(s => s.readOnlyReason)
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -418,7 +420,7 @@ export default function ScenariosPanel() {
   // read-only on A blocked deleting a B nobody was editing at all.
   const guardMutation = (target: string): boolean => {
     if (target !== currentProject) return true
-    const verdict = evaluateMutation(readOnly)
+    const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (!verdict.allowed) toast.error(verdict.blockedMessage!)
     return verdict.allowed
   }

@@ -94,6 +94,7 @@ export default function AppHeader() {
     renameProject: renameProjectInStore,
     setPaletteMode,
     readOnly,
+    readOnlyReason,
   } = useUIStore()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -133,8 +134,9 @@ export default function AppHeader() {
     if (!trimmed || trimmed === projectName) return
     if (currentProject && currentProject === projectName) {
       // Read-only guard — renaming the active project is a mutation. Refuse
-      // (and keep the old name) while another user holds the edit lock.
-      const verdict = evaluateMutation(readOnly)
+      // (and keep the old name) while another user holds the edit lock, or
+      // while a queue job is solving this project.
+      const verdict = evaluateMutation(readOnly, readOnlyReason)
       if (!verdict.allowed) {
         toast.error(verdict.blockedMessage!)
         setNameInput(projectName)
@@ -165,7 +167,7 @@ export default function AppHeader() {
       // Draft / unsaved — legacy behaviour.
       setProjectName(trimmed)
     }
-  }, [nameInput, projectName, currentProject, readOnly, setProjectName, renameProjectInStore, queryClient])
+  }, [nameInput, projectName, currentProject, readOnly, readOnlyReason, setProjectName, renameProjectInStore, queryClient])
 
   const startEditName = useCallback(() => {
     // Don't open the inline editor for a locked (read-only) project — renaming
@@ -662,6 +664,19 @@ export default function AppHeader() {
   const jobRunning = myJob?.status === 'running'
   const jobQueued = myJob?.status === 'queued'
   const busy = jobRunning || jobQueued || isRunning
+
+  // R11 — the project on screen is READ-ONLY while its queue job solves it.
+  // The backend already refuses the writes (main.py's solver-in-flight gate
+  // covers /api/network/* and /api/io/* on the caller's context, which IS the
+  // solving context once activate resolves to it); this makes the UI say so
+  // instead of letting the user fill in a form whose save will 409.
+  const setSolvingReadOnly = useUIStore(s => s.setSolvingReadOnly)
+  useEffect(() => {
+    setSolvingReadOnly(jobRunning)
+    // Clear on unmount so a header that unmounts mid-solve cannot strand the
+    // whole workbench read-only.
+    return () => setSolvingReadOnly(false)
+  }, [jobRunning, setSolvingReadOnly])
 
   const handleRunButton = async () => {
     // 1. RUNNING (queue job or legacy /run) → abort.
