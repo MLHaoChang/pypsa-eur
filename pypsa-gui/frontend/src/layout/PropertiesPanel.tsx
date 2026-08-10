@@ -96,7 +96,9 @@ function showDeleteUndoToast(label: string, qc: QueryClient) {
 }
 
 // ── Generator card ─────────────────────────────────────────────────────────────
-function GeneratorCard({ gen, onRename, mode = 'card', title }: {
+// Exported so the card can be rendered in isolation by
+// PropertiesPanel.save.test.tsx. Props and behaviour are unchanged.
+export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   gen: Generator
   onRename?: (newName: string) => void
   mode?: 'card' | 'detail'
