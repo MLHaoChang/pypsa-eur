@@ -488,6 +488,58 @@ def _build_period_multiindex(periods, blocks) -> pd.MultiIndex:
     return mi
 
 
+def _infer_snapshot_freq(n) -> str | None:
+    """
+    The snapshot index's resolution, as a pandas offset alias ("h", "3h", "D").
+
+    The Model Horizon page used to render its own form state here, which was
+    seeded to "h" at mount and never read back from the network — so a
+    3-hourly MultiIndex and a Daily flat index both reported "Hourly (h)".
+
+    MultiIndex networks are measured over the FIRST period's slice only: the
+    flattened timestep level contains a discontinuity at each period seam
+    (period P's last hour → period P+1's first), which would read as irregular.
+
+    `pd.infer_freq` is tried first because it names calendar frequencies ("D",
+    "MS", "W") that a raw timedelta cannot. It returns None for a
+    representative-week index — contiguous 168-hour blocks separated by gaps —
+    whose resolution is nevertheless hourly, so fall back to the modal
+    successive delta. Returns None when neither resolves; the UI renders that
+    as "irregular" rather than guessing.
+    """
+    sns = n.snapshots
+    if isinstance(sns, pd.MultiIndex):
+        level0 = sns.get_level_values(0)
+        if len(level0) == 0:
+            return None
+        first = level0[0]
+        idx = pd.DatetimeIndex(sns[level0 == first].get_level_values(1))
+    else:
+        idx = pd.DatetimeIndex(sns)
+    if len(idx) < 2:
+        return None
+    try:
+        inferred = pd.infer_freq(idx)
+    except (ValueError, TypeError):
+        inferred = None
+    if inferred:
+        return inferred
+    deltas = idx.to_series().diff().dropna()
+    if deltas.empty:
+        return None
+    modal = deltas.mode()
+    if modal.empty:
+        return None
+    hours = modal.iloc[0].total_seconds() / 3600.0
+    if hours <= 0:
+        return None
+    if hours == 1.0:
+        return "h"
+    if float(hours).is_integer():
+        return f"{int(hours)}h"
+    return None
+
+
 # ── Buses ────────────────────────────────────────────────────────────────────
 
 @router.get("/buses")
@@ -1039,6 +1091,7 @@ def get_snapshots():
     # gates the representative-week sampler (needs a full-year hourly profile).
     ts_start, ts_end = _user_ts_extent()
     can_sample_weeks = _annual_hourly_reference()[0] is not None
+    freq = _infer_snapshot_freq(n)
     if isinstance(sns, pd.MultiIndex):
         try:
             periods = [int(p) for p in sns.get_level_values(0)]
@@ -1058,6 +1111,7 @@ def get_snapshots():
             "ts_start": ts_start,
             "ts_end": ts_end,
             "can_sample_weeks": can_sample_weeks,
+            "freq": freq,
         }
     snaps = [s.isoformat() if hasattr(s, "isoformat") else str(s) for s in sns]
     weightings = df_to_json(n.snapshot_weightings) if not n.snapshot_weightings.empty else []
@@ -1065,6 +1119,7 @@ def get_snapshots():
         "count": len(sns), "snapshots": snaps, "weightings": weightings,
         "ts_start": ts_start, "ts_end": ts_end,
         "can_sample_weeks": can_sample_weeks,
+        "freq": freq,
     }
 
 

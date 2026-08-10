@@ -82,3 +82,32 @@ export function buildWeightingRows(
     }
   })
 }
+
+/**
+ * The frequency options the snapshot constructor offers, and the labels the
+ * Resolution stat card renders. Kept here rather than in the page so both the
+ * card and the `<select>` read one list.
+ */
+export const FREQ_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'h',   label: 'Hourly (h)' },
+  { value: '3h',  label: '3-hourly' },
+  { value: '6h',  label: '6-hourly' },
+  { value: 'D',   label: 'Daily (D)' },
+  { value: 'W',   label: 'Weekly (W)' },
+  { value: 'MS',  label: 'Monthly (MS)' },
+]
+
+/**
+ * Human label for the resolution reported by `GET /snapshots`.
+ *
+ * Matching is case-insensitive because pandas has emitted both "h" and "H" for
+ * hourly across versions. An alias we don't recognise passes through verbatim —
+ * showing "17min" is honest; mapping it to "Hourly" is not. `null` means the
+ * backend could not infer one, which is a real state (a two-snapshot network,
+ * or a genuinely irregular index) and reads as "Irregular".
+ */
+export function resolutionLabel(freq: string | null | undefined): string {
+  if (!freq) return 'Irregular'
+  const hit = FREQ_OPTIONS.find(o => o.value.toLowerCase() === freq.toLowerCase())
+  return hit ? hit.label : freq
+}

@@ -9,7 +9,7 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
-import { buildWeightingRows, type WeightingRow } from './modelHorizonModel'
+import { buildWeightingRows, resolutionLabel, FREQ_OPTIONS, type WeightingRow } from './modelHorizonModel'
 
 // ── Load carrier canonicaliser ──────────────────────────────────────────────
 // Mirrors loadCarrierKey in Dispatch.tsx + _canonical_load_carrier_key on the
@@ -55,15 +55,6 @@ function loadCarrierSortKey(key: string): string {
 //      constructor) when ON, single-period snapshot range when OFF.
 //   4. Snapshot weightings — used in both modes. Inline pagination for hourly
 //      horizons + CSV download/upload for bulk edits at 8760-row scale.
-
-const FREQ_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'h',   label: 'Hourly (h)' },
-  { value: '3h',  label: '3-hourly' },
-  { value: '6h',  label: '6-hourly' },
-  { value: 'D',   label: 'Daily (D)' },
-  { value: 'W',   label: 'Weekly (W)' },
-  { value: 'MS',  label: 'Monthly (MS)' },
-]
 
 // PyPSA's snapshot index is full ISO; the HTML datetime-local input only
 // accepts "YYYY-MM-DDTHH:mm". This trims any seconds / fractional part the
@@ -634,7 +625,9 @@ export default function ModelHorizon() {
   // Layout
   // ─────────────────────────────────────────────────────────────────────────
   // ── Derived display values for the StatCard strip ──────────────────────
-  const freqLabel = FREQ_OPTIONS.find(o => o.value === freq)?.label ?? freq
+  // Resolution is a property of the network, not of the form below. `freq`
+  // state seeds a NEW index; it must never be read back as status.
+  const freqLabel = resolutionLabel(snap?.freq)
   const rangeStr = (() => {
     const ss = snap?.snapshots
     if (!ss || ss.length === 0) return isMultiPeriod ? 'multi-period horizon' : 'flat horizon'
@@ -669,7 +662,7 @@ export default function ModelHorizon() {
         <StatCard
           eyebrow="Resolution"
           value={freqLabel}
-          sub="snapshot weightings apply"
+          sub={isMultiPeriod ? 'per investment period' : 'timestep spacing'}
         />
         <StatCard
           eyebrow="Mode"

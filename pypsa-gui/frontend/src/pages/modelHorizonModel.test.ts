@@ -86,3 +86,27 @@ describe('buildWeightingRows', () => {
     expect(row.stores).toBe(1)
   })
 })
+
+import { resolutionLabel } from './modelHorizonModel'
+
+describe('resolutionLabel', () => {
+  it('names the known frequencies', () => {
+    expect(resolutionLabel('h')).toBe('Hourly (h)')
+    expect(resolutionLabel('3h')).toBe('3-hourly')
+    expect(resolutionLabel('D')).toBe('Daily (D)')
+    expect(resolutionLabel('MS')).toBe('Monthly (MS)')
+  })
+
+  it('matches case-insensitively — pandas may emit "H" rather than "h"', () => {
+    expect(resolutionLabel('H')).toBe('Hourly (h)')
+  })
+
+  it('says irregular rather than guessing when the backend could not infer', () => {
+    expect(resolutionLabel(null)).toBe('Irregular')
+    expect(resolutionLabel(undefined)).toBe('Irregular')
+  })
+
+  it('passes an unrecognised alias through verbatim', () => {
+    expect(resolutionLabel('17min')).toBe('17min')
+  })
+})

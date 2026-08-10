@@ -18,6 +18,7 @@ from __future__ import annotations
 import pandas as pd
 import pypsa
 
+from routers.network import _infer_snapshot_freq
 from tests.conftest import build_network
 
 
@@ -104,3 +105,62 @@ def test_period_qualified_key_on_multi_period_writes_that_period_with_no_warning
     assert new_entries, "expected a snapshot_weightings changelog entry"
     assert all("WARNING" not in e["description"] for e in new_entries), \
         f"period-qualified key must not trigger the ambiguous-bare-key warning, got: {new_entries}"
+
+
+def _multi_index(periods, block):
+    import numpy as np
+    period_level = np.concatenate([np.full(len(block), p) for p in periods])
+    timestep_level = pd.DatetimeIndex(np.concatenate([block.values for _ in periods]))
+    mi = pd.MultiIndex.from_arrays(
+        [period_level, timestep_level], names=["period", "timestep"],
+    )
+    mi.name = "snapshot"
+    return mi
+
+
+def test_infer_freq_flat_hourly():
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2024-01-01", periods=24, freq="h"))
+    assert _infer_snapshot_freq(n) == "h"
+
+
+def test_infer_freq_flat_daily():
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2024-01-01", periods=10, freq="D"))
+    assert _infer_snapshot_freq(n) == "D"
+
+
+def test_infer_freq_multi_period_reads_one_period_not_the_seam():
+    # Naively inferring over the flattened timestep level sees the jump from
+    # period 2030's last hour back to period 2040's first — an irregular index.
+    # Only period 0's slice is meaningful.
+    block = pd.date_range("2024-01-01", periods=8, freq="3h")
+    n = pypsa.Network()
+    n.set_snapshots(_multi_index([2030, 2040, 2050], block))
+    assert _infer_snapshot_freq(n) == "3h"
+
+
+def test_infer_freq_falls_back_to_modal_delta_for_representative_weeks():
+    # Two disjoint 168-hour blocks: pd.infer_freq gives None, but the resolution
+    # is hourly and the card should say so.
+    a = pd.date_range("2024-01-01", periods=168, freq="h")
+    b = pd.date_range("2024-03-04", periods=168, freq="h")
+    n = pypsa.Network()
+    n.set_snapshots(pd.DatetimeIndex(a.append(b)))
+    assert _infer_snapshot_freq(n) == "h"
+
+
+def test_infer_freq_returns_none_for_a_single_snapshot():
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2024-01-01", periods=1, freq="h"))
+    assert _infer_snapshot_freq(n) is None
+
+
+def test_snapshots_endpoint_reports_freq(client, install_network):
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2024-01-01", periods=12, freq="6h"))
+    n.add("Bus", "B1")
+    install_network(n)
+
+    body = client.get("/api/network/snapshots").json()
+    assert body["freq"] == "6h"

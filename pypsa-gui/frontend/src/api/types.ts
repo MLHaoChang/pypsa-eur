@@ -111,7 +111,11 @@ export interface TransformerType {
   x: number
 }
 export interface SnapshotInfo {
-  count: number; snapshots: string[]; weightings: Record<string, number>[]
+  count: number; snapshots: string[]
+  // Rows of `df_to_json(n.snapshot_weightings)`. Flat networks carry a
+  // `snapshot` ISO string; MultiIndex networks carry `period` (number) +
+  // `timestep` (ISO string) instead — hence the mixed value type.
+  weightings: Record<string, number | string>[]
   // Present only when n.snapshots is a MultiIndex (multi-period planning).
   // Parallel to `snapshots`: periods[i] is the investment period that
   // snapshots[i]'s timestep belongs to.
@@ -124,6 +128,12 @@ export interface SnapshotInfo {
   // True when a flat uploaded profile spans all 12 months of one year at
   // hourly resolution — gates the representative-week sampler.
   can_sample_weeks?: boolean
+  // Snapshot resolution as a pandas offset alias ("h", "3h", "D"), measured
+  // from the FIRST investment period on MultiIndex networks. null when the
+  // backend could not infer one. The Resolution stat card renders this —
+  // it used to render the page's own form state, which was never seeded
+  // from the network.
+  freq?: string | null
 }
 export interface NetworkMeta { name: string; snapshot_count: number; bus_count: number }
 export interface SolverConfig {
