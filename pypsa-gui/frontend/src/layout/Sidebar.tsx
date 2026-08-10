@@ -1258,10 +1258,7 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   onCloseModal?: () => void
   requestBottomTab: (tab: string) => void
 }) {
-  const {
-    setSlidePanel, activeSlidePanel, currentProject,
-    assistantDockOpen, toggleAssistantDock,
-  } = useUIStore()
+  const { setSlidePanel, activeSlidePanel, currentProject } = useUIStore()
   void requestBottomTab
   // Polls /preflight to surface the error+warning count as a badge on the
   // Issues row. 30 s feels right for an out-of-view indicator — long enough
@@ -1339,14 +1336,73 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
       />
-      {/* The assistant is not a slide panel — it has its own dock so it can
-          stay open while it navigates you somewhere. */}
-      <SItem icon={<MessageSquare size={15} />} label="Assistant"
-        title="Conversational assistant. Ask questions about the open network, drive tools, confirm destructive actions through a card."
-        active={assistantDockOpen}
-        onClick={() => { toggleAssistantDock(); onCloseModal?.() }}
-      />
+      {/* The Assistant row used to live here, as the last of seven. It is not
+          a simulation feature — it answers questions about the network and
+          opens panels from all three sections — and a row inside a collapsible
+          section is not the "always-visible" affordance the design spec asks
+          for. It is now `AssistantNavButton`, pinned above the sections in
+          both sidebar modes. See Sidebar.assistant.test.tsx. */}
     </div>
+  )
+}
+
+/**
+ * The Assistant's nav entry — top level in both sidebar modes, never inside a
+ * collapsible section.
+ *
+ * It toggles `assistantDockOpen` rather than `activeSlidePanel`: the assistant
+ * has its own dock precisely so it can stay on screen while it navigates you
+ * somewhere (see AssistantDock.tsx), and routing it back through the panel
+ * union would restore the self-eviction bug the dock exists to remove.
+ */
+function AssistantNavButton({ compact = false, onCloseModal }: {
+  compact?: boolean
+  onCloseModal?: () => void
+}) {
+  const assistantDockOpen = useUIStore(s => s.assistantDockOpen)
+  const toggleAssistantDock = useUIStore(s => s.toggleAssistantDock)
+  const title = 'Assistant — ask about the open network, drive any tool, and it opens the view it is talking about.'
+  const onClick = () => { toggleAssistantDock(); onCloseModal?.() }
+
+  if (compact) {
+    return (
+      <button
+        onClick={onClick}
+        title={title}
+        aria-label="Assistant"
+        aria-pressed={assistantDockOpen}
+        data-testid="sidebar-assistant"
+        className="flex flex-col items-center justify-center gap-0.5 w-full py-2 transition-colors"
+        style={{
+          color: assistantDockOpen ? 'var(--color-accent)' : 'var(--color-muted)',
+          background: assistantDockOpen ? 'rgba(47,129,247,0.14)' : undefined,
+        }}
+      >
+        <MessageSquare size={18} />
+        <span className="text-[8px] font-mono font-bold uppercase tracking-[0.06em]">Ask</span>
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={assistantDockOpen}
+      data-testid="sidebar-assistant"
+      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] font-semibold rounded-md transition-colors"
+      style={{
+        color: assistantDockOpen ? 'var(--color-accent)' : 'var(--color-text)',
+        background: assistantDockOpen ? 'rgba(47,129,247,0.14)' : 'rgba(47,129,247,0.07)',
+        border: `1px solid ${assistantDockOpen ? 'rgba(47,129,247,0.5)' : 'rgba(47,129,247,0.22)'}`,
+      }}
+    >
+      <MessageSquare size={15} className="shrink-0" />
+      <span className="flex-1 text-left">Assistant</span>
+      <span className="font-mono text-[9px] font-bold uppercase tracking-[0.12em] text-muted">
+        {assistantDockOpen ? 'Open' : 'Ask'}
+      </span>
+    </button>
   )
 }
 
@@ -1749,6 +1805,12 @@ export default function Sidebar() {
             </button>
           </div>
 
+          {/* Assistant first, and outside the section list — the three buttons
+              below open a flyout you then have to read; this one acts. */}
+          <div className="w-full border-b border-border shrink-0">
+            <AssistantNavButton compact onCloseModal={() => setActiveFlyout(null)} />
+          </div>
+
           {/* Section icons */}
           <div className="flex-1 flex flex-col w-full">
             <IconStripBtn icon={<FolderOpen size={18} />}  label="Project"    sectionId="project"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('project')} />
@@ -1810,6 +1872,13 @@ export default function Sidebar() {
           >
             <ChevronLeft size={14} />
           </button>
+        </div>
+
+        {/* Assistant — pinned ABOVE the scroll container, not inside it, so it
+            is on screen whatever the sections are doing and wherever the body
+            is scrolled to. */}
+        <div className="shrink-0 px-2 pt-2 pb-1">
+          <AssistantNavButton />
         </div>
 
         {/* Scrollable body */}
