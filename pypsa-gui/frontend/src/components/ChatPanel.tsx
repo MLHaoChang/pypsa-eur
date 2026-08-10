@@ -46,6 +46,7 @@ import {
 } from '../api/uploads'
 import { useChatStore, type UploadMetaUI } from '../store/chatStore'
 import ApiKeySetup from './ApiKeySetup'
+import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
@@ -718,52 +719,11 @@ function ToolProgressDetails({ toolUseId }: { toolUseId: string }) {
 
 const EMPTY_TOOL_PROGRESS: { kind: string; line: string }[] = []
 
-/**
- * Phase D polish #1 — empty-state primer shown when no project is loaded
- * AND no messages have been streamed yet. Two buttons dispatch
- * decoupled CustomEvents that Sidebar listens for to open the appropriate
- * existing modal (NewProjectWizard / Open-project dialog). The event
- * bridge means the chat panel doesn't reach across the layout tree.
- */
-function ChatEmptyState() {
-  const openNewProject = () => {
-    window.dispatchEvent(new CustomEvent('chat:open-new-project-wizard'))
-  }
-  const openProjectPicker = () => {
-    window.dispatchEvent(new CustomEvent('chat:open-project-picker'))
-  }
-  return (
-    <div
-      className="m-3 p-4 rounded-md border border-border bg-bg-2/40 text-center"
-      data-testid="chat-empty-state"
-    >
-      <div className="text-2xl mb-2">💬</div>
-      <div className="text-sm font-medium text-text mb-1">
-        No project loaded
-      </div>
-      <div className="text-[12px] text-muted leading-relaxed mb-3">
-        Ask me to open a saved project by name, or pick one below. Uploads
-        and chat history attach once a project is active.
-      </div>
-      <div className="flex items-center justify-center gap-2">
-        <button
-          className="px-3 py-1.5 text-xs rounded bg-accent text-bg hover:opacity-90"
-          onClick={openProjectPicker}
-          data-testid="chat-empty-open-project"
-        >
-          📁 Open project
-        </button>
-        <button
-          className="px-3 py-1.5 text-xs rounded bg-bg border border-border text-text hover:bg-bg-3/40"
-          onClick={openNewProject}
-          data-testid="chat-empty-new-project"
-        >
-          ➕ New project
-        </button>
-      </div>
-    </div>
-  )
-}
+// `ChatEmptyState` used to live here — the no-project primer, with the two
+// CustomEvent buttons Sidebar listens for. It is now the no-project BRANCH of
+// ChatLaunchGreeting, which carries both its copy and its testids, so the
+// event bridge (`chat:open-project-picker` / `chat:open-new-project-wizard`)
+// is unchanged and Sidebar needed no edit.
 
 /** Starter prompts when no project is loaded. */
 const CHAT_STARTER_PROMPTS_UNBOUND: { label: string; text: string }[] = [
@@ -1927,10 +1887,18 @@ export default function ChatPanel() {
           data-testid="chat-messages"
           onScroll={onMessagesScroll}
         >
-        {/* Phase D polish #1 — empty-state primer. Renders only when no
-            project is active AND there are no messages yet so a returning
-            user with stale chat replay isn't double-primed. */}
-        {!currentProject && messages.length === 0 && <ChatEmptyState />}
+        {/* The launch orientation (spec: "The launch orientation"). This was
+            `ChatEmptyState`, gated on `!currentProject` — so it was invisible
+            in exactly the case the spec cares most about, a project already
+            open whose name, size and solve status the assistant should be
+            able to state without being asked. The no-project variant is now
+            one branch of it rather than the whole thing.
+
+            Still gated on an empty conversation: a returning user replaying
+            stale chat history is not being oriented, and a greeting pinned
+            above a live conversation is a header repeating what they have
+            moved past. */}
+        {messages.length === 0 && <ChatLaunchGreeting />}
         {/* Discoverability chips: unbound → open/browse; bound → compare /
             navigate / summarize. Click fills the composer for edit-before-send. */}
         {messages.length === 0 && (

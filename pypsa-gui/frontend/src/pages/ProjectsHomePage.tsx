@@ -337,6 +337,30 @@ export default function ProjectsHomePage() {
     queryClient.invalidateQueries({ queryKey: PROJECTS_KEY })
   }, [queryClient])
 
+  // The assistant's no-project greeting offers "Open project" and "New
+  // project" by dispatching CustomEvents rather than reaching across the
+  // layout tree. The listener for that bridge lives in Sidebar — which does
+  // NOT render here. So the moment the dock arrived on this page, both
+  // buttons became dead controls on the front door and nowhere else. This is
+  // the same bridge, terminated locally.
+  //
+  // The picker event has no picker to open here: this page IS the project
+  // list, so "show me my projects" resolves to bringing that list into view.
+  useEffect(() => {
+    const onNewProject = () => setWizardTab('blank')
+    const onOpenPicker = () => {
+      document.getElementById('projects-heading')?.scrollIntoView({
+        behavior: 'smooth', block: 'start',
+      })
+    }
+    window.addEventListener('chat:open-new-project-wizard', onNewProject)
+    window.addEventListener('chat:open-project-picker', onOpenPicker)
+    return () => {
+      window.removeEventListener('chat:open-new-project-wizard', onNewProject)
+      window.removeEventListener('chat:open-project-picker', onOpenPicker)
+    }
+  }, [])
+
   async function handleLogout() {
     await logout()
     redirectAfterLogout()
