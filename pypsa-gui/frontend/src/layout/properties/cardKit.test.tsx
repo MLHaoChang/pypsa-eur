@@ -87,3 +87,38 @@ describe('EditShell — the render seam D20 depends on', () => {
       .toBe(true)
   })
 })
+
+import { extrasPatch } from './cardKit'
+
+describe('extrasPatch — the save half of D20', () => {
+  it('returns only the requested keys', () => {
+    expect(extrasPatch({ a: '1', b: '2' }, ['a'])).toEqual({ a: 1 })
+  })
+
+  it('is empty when no extras are chosen', () => {
+    expect(extrasPatch({ a: '1' }, [])).toEqual({})
+  })
+
+  it('coerces a numeric string to a number', () => {
+    expect(extrasPatch({ a: '3.5' }, ['a'])).toEqual({ a: 3.5 })
+  })
+
+  it('coerces boolean strings, the form-state convention toFS emits', () => {
+    expect(extrasPatch({ a: 'true', b: 'false' }, ['a', 'b']))
+      .toEqual({ a: true, b: false })
+  })
+
+  it('sends a blank as null so a value can be cleared', () => {
+    // null routes through Pydantic's Optional aliases to PyPSA's sentinel —
+    // the same semantic the cards' own no() helper produces.
+    expect(extrasPatch({ a: '' }, ['a'])).toEqual({ a: null })
+  })
+
+  it('leaves a non-numeric string alone', () => {
+    expect(extrasPatch({ a: 'CCGT' }, ['a'])).toEqual({ a: 'CCGT' })
+  })
+
+  it('ignores a key with no form entry rather than sending undefined', () => {
+    expect(extrasPatch({}, ['missing'])).toEqual({})
+  })
+})
