@@ -308,6 +308,15 @@ export function no(fs: FS, k: string): number | null {
  * are the strings toFS emits for booleans, and a numeric-looking string
  * becomes a number so it does not upcast a numeric column to object dtype.
  */
+/**
+ * Widen a card's form seed with the current values of its chosen extras
+ * (spec D20's seed layer). Keeps the change at each card to one line instead
+ * of surgery on its curated key array.
+ */
+export function seedExtras<T extends object>(obj: T, base: FS, keys: string[]): FS {
+  return { ...base, ...toFS(obj, keys as (keyof T)[]) }
+}
+
 export function extrasPatch(fs: FS, keys: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const k of keys) {
