@@ -1,5 +1,10 @@
 import { create } from 'zustand'
 import type { LockState } from '../utils/lockState'
+// Floor for the docked comparison rail width — keeps both the rail and the
+// live Results pane usable when the splitter is dragged to an extreme. Single
+// definition, shared with the rail's own width arithmetic: this store and
+// Results.tsx enforcing the same number independently is how they can drift.
+import { RAIL_MIN_W } from '../pages/results/railWidth'
 
 interface SelectedComponent { type: string; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
@@ -24,10 +29,11 @@ export interface CreationRequest {
 // the new component appears in the React Query cache.
 export interface PendingNodePosition { name: string; position: { x: number; y: number } }
 export type CanvasMode = 'select' | 'connect'
-// `chat` is the chatbot integration v6 panel (Phase 3). It opens a
-// half-width slide-panel on the right with the conversation, confirmation
-// cards, and live tool-progress streams. Reset via chatStore on project switch.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'chat' | 'workspace' | 'settings'
+// The panels that can occupy the single slide-panel slot. The assistant is
+// deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
+// `'chat'` was a member the assistant was mutually exclusive with every view
+// it exists to explain. It lives in `assistantDockOpen` below instead.
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -65,11 +71,9 @@ const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
+const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
 
 const RECENTS_MAX = 5
-// Floor for the docked comparison rail width — keeps both the rail and the
-// live Results pane usable when the splitter is dragged to an extreme.
-const COMPARE_RAIL_MIN_W = 360
 
 function storedSidebarMode(): SidebarMode {
   try {
@@ -165,9 +169,20 @@ function storedCompareRailOpen(): boolean {
 function storedCompareRailWidth(): number {
   try {
     const v = Number(localStorage.getItem(COMPARE_RAIL_WIDTH_KEY))
-    if (Number.isFinite(v) && v >= COMPARE_RAIL_MIN_W) return v
+    if (Number.isFinite(v) && v >= RAIL_MIN_W) return v
   } catch { /* noop */ }
   return 560
+}
+
+function storedAssistantDockOpen(): boolean {
+  try {
+    return localStorage.getItem(ASSISTANT_DOCK_KEY) === 'open'
+  } catch { /* noop */ }
+  return false
+}
+
+function persistAssistantDockOpen(open: boolean) {
+  try { localStorage.setItem(ASSISTANT_DOCK_KEY, open ? 'open' : 'closed') } catch { /* noop */ }
 }
 
 function persistOpenTabs(tabs: OpenTab[]) {
@@ -264,6 +279,10 @@ interface UIStore {
   canvasMode: CanvasMode
   canvasView: CanvasView
   activeSlidePanel: SlidePanel | null
+  // The assistant is NOT a SlidePanel. It has its own open/closed state so it
+  // can stay on screen while it navigates you somewhere — see Task 3's
+  // regression test and the 2026-08-05 presence spec.
+  assistantDockOpen: boolean
   // True while a project switch/load is mid-flight (between the moment the
   // backend starts swapping the in-memory network and the moment
   // currentProject is updated to the new project). Autosave checks this and
@@ -340,6 +359,8 @@ interface UIStore {
   setCanvasMode: (mode: CanvasMode) => void
   setCanvasView: (view: CanvasView) => void
   setSlidePanel: (p: SlidePanel | null) => void
+  setAssistantDockOpen: (open: boolean) => void
+  toggleAssistantDock: () => void
   setProjectSwitchInProgress: (v: boolean) => void
   setCompareRailOpen: (v: boolean) => void
   toggleCompareRail: () => void
@@ -398,6 +419,7 @@ export const useUIStore = create<UIStore>((set) => ({
   canvasMode: 'select',
   canvasView: storedCanvasView(),
   activeSlidePanel: null,
+  assistantDockOpen: storedAssistantDockOpen(),
   projectSwitchInProgress: false,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
@@ -491,6 +513,15 @@ export const useUIStore = create<UIStore>((set) => ({
     set({ canvasView: view })
   },
   setSlidePanel: (p) => set({ activeSlidePanel: p }),
+  setAssistantDockOpen: (open) => {
+    persistAssistantDockOpen(open)
+    set({ assistantDockOpen: open })
+  },
+  toggleAssistantDock: () => set(s => {
+    const next = !s.assistantDockOpen
+    persistAssistantDockOpen(next)
+    return { assistantDockOpen: next }
+  }),
   setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
   setCompareRailOpen: (v) => {
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
@@ -502,7 +533,7 @@ export const useUIStore = create<UIStore>((set) => ({
     return { compareRailOpen: next }
   }),
   setCompareRailWidth: (px) => {
-    const w = Math.max(COMPARE_RAIL_MIN_W, Math.round(px))
+    const w = Math.max(RAIL_MIN_W, Math.round(px))
     try { localStorage.setItem(COMPARE_RAIL_WIDTH_KEY, String(w)) } catch { /* noop */ }
     set({ compareRailWidth: w })
   },

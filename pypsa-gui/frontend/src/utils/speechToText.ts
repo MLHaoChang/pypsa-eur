@@ -90,12 +90,27 @@ export function parseSpeechResults(
   return { finalText, interimText }
 }
 
+/**
+ * Is this error code a permission denial rather than a transient failure?
+ *
+ * Measured: in a cocoa WKWebView the `webkitSpeechRecognition` constructor
+ * exists and `.start()` fires `not-allowed`, because at the time of
+ * measurement the app bundle declared no NSMicrophoneUsageDescription (the
+ * bundle now declares it; the measurement has not been repeated since).
+ * Callers must distinguish this from `no-speech` or `network`, which are
+ * worth retrying.
+ */
+export function isPermissionError(errorCode: string): boolean {
+  return errorCode === 'not-allowed' || errorCode === 'service-not-allowed'
+}
+
 /** User-facing toast copy for SpeechRecognitionErrorEvent.error codes. */
 export function speechErrorMessage(errorCode: string): string {
   switch (errorCode) {
     case 'not-allowed':
     case 'service-not-allowed':
-      return 'Microphone permission denied — allow mic access to use voice input.'
+      return 'Microphone access was denied. Allow it in System Settings → '
+        + 'Privacy & Security → Microphone, then restart the app.'
     case 'no-speech':
       return 'No speech detected — try again.'
     case 'audio-capture':

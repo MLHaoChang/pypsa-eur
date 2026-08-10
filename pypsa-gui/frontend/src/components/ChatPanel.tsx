@@ -1,13 +1,19 @@
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
- * UI shell for the chat assistant. Lives in the SlidePanel slot (kind='chat')
- * mounted by App.tsx. The panel owns:
+ * UI shell for the chat assistant. Mounted unconditionally inside
+ * `AssistantDock` (its own column beside the main area, hidden with CSS when
+ * collapsed) — NOT in the SlidePanel slot it used to occupy as kind='chat'.
+ * That move is the fix for "it switches to the results panel, but the chat
+ * disappears": `activeSlidePanel` holds one value, so as a slide panel the
+ * assistant was mutually exclusive with every view it exists to explain. The
+ * panel owns:
  *   * message list (assistant token deltas accumulate into one assistant
  *     bubble until a tool_request / tool_result lands)
  *   * confirmation card (renders when chatStore.pending is set; carries a
  *     live countdown and approve/deny buttons that POST /confirm)
- *   * cost meter (M10 — derives EUR client-side from session usage_acc)
+ *   * usage meter (exact token counts from session usage_acc — no currency
+ *     estimate; see the note in chatStore.ts for why that was removed)
  *   * project_exists / descendants_exist UX paths (v4-MAJOR-1 / v4-MINOR-1)
  *   * connection-lost toast (M8)
  *
@@ -38,9 +44,7 @@ import {
   UploadError,
   type UploadMeta,
 } from '../api/uploads'
-import {
-  deriveCostEur, PRICING_VERSION, useChatStore, type UploadMetaUI,
-} from '../store/chatStore'
+import { useChatStore, type UploadMetaUI } from '../store/chatStore'
 import ApiKeySetup from './ApiKeySetup'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -97,7 +101,16 @@ function _frame_data<T = Record<string, unknown>>(f: ChatFrame): T {
   return f.data as T
 }
 
-/** Map chat tool panel_id → SlidePanel / special navigation targets. */
+/**
+ * Map chat tool panel_id → SlidePanel / special navigation targets.
+ *
+ * Not every value here is a `SlidePanel`. 'topology', 'map', 'properties',
+ * 'palette', 'bottom', 'import_export', 'project_picker', 'new_project' and
+ * 'chat' name surfaces that live outside `activeSlidePanel`; applyUiNavigate
+ * dispatches on each of them explicitly before falling through to the
+ * setSlidePanel branch. 'chat' in particular now resolves to the assistant
+ * dock, not to a slide panel.
+ */
 function _normalizePanelId(raw: string): string {
   const key = raw.trim()
   const aliases: Record<string, string> = {
@@ -193,11 +206,16 @@ function applyUiNavigate(d: {
   } else if (panel === 'compare') {
     ui.setSlidePanel('results')
     ui.setCompareRailOpen(true)
+  } else if (panel === 'chat') {
+    // 'chat' is no longer a SlidePanel member — it resolves to the dock. The
+    // agent can still be asked to open the assistant, and doing so no longer
+    // evicts whatever view is currently on screen.
+    ui.setAssistantDockOpen(true)
   } else if (
     panel === 'results' || panel === 'simparams' || panel === 'timeseries'
     || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
     || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
-    || panel === 'solveQueue' || panel === 'chat'
+    || panel === 'solveQueue'
   ) {
     ui.setSlidePanel(panel)
   }
@@ -278,40 +296,16 @@ interface TurnDoneFrame {
   }
 }
 
-function CostMeter() {
+function UsageMeter() {
   const usage = useChatStore((s) => s.usage)
-  const model = useChatStore((s) => s.model)
-  const eur = deriveCostEur(model, usage)
-  // Cached tokens are billed (reads at a tenth of input, writes at a 25%
-  // premium) and on a long session they dominate. Showing them is also the
-  // only way the meter's own number is checkable — an in/out pair that
-  // doesn't account for the euros beside it reads as a bug in the meter.
-  // Hidden until the cache has actually done something: a permanent
-  // "cache: 0" is noise in a header this narrow.
-  const cached = usage.cache_read_tokens + usage.cache_create_tokens
   return (
     <span
-      // `truncate` (overflow-hidden + ellipsis + nowrap) with `min-w-0`.
-      // Both are load-bearing: this sits in a fixed-height flex row with the
-      // model picker and the gear button, and nowrap content sets an
-      // element's min-content width to the entire string — so without
-      // min-w-0 the meter refuses to shrink and shoves the gear out of the
-      // panel on a long session. With them, it gives up width and ellipses.
       className="font-mono text-[10px] text-muted truncate min-w-0"
-      // Nothing is lost to the ellipsis — the full breakdown is one hover
-      // away, including cache writes, which the visible line omits.
-      title={
-        `${usage.input_tokens.toLocaleString()} input, `
-        + `${usage.output_tokens.toLocaleString()} output, `
-        + `${usage.cache_read_tokens.toLocaleString()} cache read, `
-        + `${usage.cache_create_tokens.toLocaleString()} cache write `
-        + `— €${eur.toFixed(4)} at ${PRICING_VERSION} prices`
-      }
-      data-testid="chat-cost-meter"
+      data-testid="chat-usage-meter"
+      title="Tokens this session: input / output / read from cache"
     >
       {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
-      {cached > 0 && ` · cache ${usage.cache_read_tokens.toLocaleString()} read`}
-      {' '}· €{eur.toFixed(4)}
+      {' · '}{usage.cache_read_tokens.toLocaleString()} cached
     </span>
   )
 }
@@ -891,6 +885,10 @@ export default function ChatPanel() {
   const closeStream = useChatStore((s) => s.closeStream)
 
   const currentProject = useUIStore((s) => s.currentProject)
+  // Read only for the autoscroll effect below — see the dependency-array
+  // comment there for why AssistantDock's collapsed state has to be visible
+  // here at all.
+  const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
   const prevProjectRef = useRef<string | null | undefined>(undefined)
 
@@ -913,15 +911,35 @@ export default function ChatPanel() {
   // also rehydrates `session.messages` so subsequent turns can thread prior
   // context into the Anthropic SDK AND benefit from prompt caching (the
   // cache is per-session, so reusing the session_id keeps the cache warm).
+  //
+  // BEHAVIOUR CHANGE, recorded deliberately: now that AssistantDock mounts
+  // ChatPanel for the app's lifetime, this fires at boot for EVERY user with a
+  // project open — including one who never opens the assistant — where it
+  // previously waited until the 'chat' slide panel was opened. Same for the
+  // uploads hydration further down. Both are one GET each, both swallow their
+  // errors, and the transcript they replay lands in chatStore rather than on
+  // screen, so the cost is a request and some memory, not a failure mode.
+  // Deliberately NOT made lazy here: gating hydration on first-open is a
+  // design change (it needs a "has the user ever opened the dock" concept and
+  // changes when the session_id becomes available for prompt caching), and
+  // this branch is a bug fix. Revisit if boot latency is ever measured to care.
   useEffect(() => {
     if (!currentProject) return
-    // Only seed an EMPTY conversation. This effect re-runs on every mount, and
-    // the panel remounts whenever the agent navigates the app to another tab
-    // and the user comes back — at which point replaying chat.jsonl over the
-    // store erases the turn they just watched arrive, because a turn is only
-    // persisted once it completes. The store is authoritative while it holds a
-    // conversation; disk is the seed for a fresh one. `resetForProjectSwitch`
-    // empties it on a real project change, which is what re-arms this.
+    // Only seed an EMPTY conversation. Replaying chat.jsonl over a store that
+    // already holds a conversation erases the turn the user just watched
+    // arrive, because a turn is only persisted once it completes. The store is
+    // authoritative while it holds a conversation; disk is the seed for a
+    // fresh one. `resetForProjectSwitch` empties it on a real project change,
+    // which is what re-arms this.
+    //
+    // The guard is still live even though the panel no longer remounts on
+    // navigation (it is mounted for the app's lifetime inside AssistantDock).
+    // This effect re-runs whenever `currentProject` changes AND on every
+    // mount, and the mounts that remain all reach it with a populated store:
+    // the dock's ErrorBoundary swapping back to its children after a Retry,
+    // HMR in dev, and a project switch whose reset has not landed yet. Do not
+    // conclude the early return is dead — ChatPanel.test.tsx's "does not wipe
+    // an in-flight turn when the panel is reopened" fails without it.
     if (useChatStore.getState().messages.length > 0) return
     let cancelled = false
     getChatHistory().then((h) => {
@@ -993,6 +1011,10 @@ export default function ChatPanel() {
   // strip mirrors what's on disk so a tab switch doesn't lose previously-
   // uploaded files. We don't auto-attach any of these; only freshly
   // uploaded files default to checked-ON.
+  //
+  // Also boot-time for every user now that the panel is always mounted — see
+  // the note on the chat.jsonl hydration above for why that is accepted here
+  // rather than made lazy.
   useEffect(() => {
     if (!currentProject) {
       setUploads([])
@@ -1298,6 +1320,29 @@ export default function ChatPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to project identity
   }, [currentProject])
 
+  // Stop dictation when the dock collapses.
+  //
+  // This replaces a guarantee the branch removed. While ChatPanel was the
+  // 'chat' SlidePanel, closing it unmounted the panel and useSpeechToText's
+  // `useEffect(() => () => stop(), [stop])` turned the microphone off. The
+  // panel is now deliberately never unmounted, so that cleanup no longer
+  // fires — and SpeechSession sets `continuous = true` with an `onend`
+  // auto-restart, so the session runs indefinitely once started.
+  //
+  // What made it serious rather than untidy: the mic button's active state
+  // and the interim-transcript line are both inside the dock's `hidden` body,
+  // so a user who starts dictating, collapses the dock and walks away gets no
+  // in-app signal at all that the microphone is still recording. The OS
+  // indicator is the only remaining cue, and it is weakest in the packaged
+  // WKWebView build.
+  //
+  // STOP, not disable. `enabled` stays `!streaming`, so expanding the dock
+  // again and clicking the mic works exactly as before — this ends the
+  // current session, it does not make dictation unavailable while collapsed.
+  useEffect(() => {
+    if (!assistantDockOpen) speech.stop()
+  }, [assistantDockOpen, speech.stop])
+
   useEffect(() => {
     if (!speech.listening) return
     const onKey = (e: KeyboardEvent) => {
@@ -1369,6 +1414,25 @@ export default function ChatPanel() {
     if (nearBottom) setShowJumpLatest(false)
   }, [])
 
+  // `assistantDockOpen` is a dependency, not just a read, because of
+  // AssistantDock: while the dock is collapsed this panel sits under a
+  // `display:none` ancestor (kept mounted so a streaming turn survives the
+  // collapse — see AssistantDock.tsx), and an element with no layout box
+  // cannot be scrolled. `scrollIntoView` calls that land while collapsed are
+  // silent no-ops in a real browser (not just jsdom), and none of the other
+  // deps here change on an expand-only click, so without this the effect
+  // would never re-run and the transcript could sit scrolled to wherever it
+  // last had layout — "ask a question, collapse, the answer streams in,
+  // expand" would land on stale scroll position instead of the latest token.
+  //
+  // This does not override a deliberate scroll-up: `stickToBottom` already
+  // gates the branch below, and nothing here touches it. Collapsing hides
+  // the scroll container, so the user cannot fire onMessagesScroll while
+  // it's hidden — whatever `stickToBottom` was at collapse time is exactly
+  // what it still is on expand, and the existing if/else already respects
+  // it (bottom-follow if they were following, only the "jump to latest"
+  // affordance if they'd scrolled up). Expanding just gives the same
+  // decision a chance to actually run once there's a box to scroll.
   useEffect(() => {
     if (stickToBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -1376,7 +1440,7 @@ export default function ChatPanel() {
     } else {
       setShowJumpLatest(true)
     }
-  }, [messages.length, pendingTokenForScroll, stickToBottom])
+  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen])
 
   // Frame handler — translates SSE frames into chatStore updates.
   const handleFrame = useCallback((frame: ChatFrame) => {
@@ -1542,7 +1606,7 @@ export default function ChatPanel() {
       case 'turn_done': {
         const d = _frame_data<TurnDoneFrame>(frame)
         if (d.usage) {
-          // M10: server reports token counts; client derives EUR.
+          // M10: server reports token counts; client renders them as-is.
           accrueUsage({
             input_tokens: d.usage.input_tokens ?? 0,
             output_tokens: d.usage.output_tokens ?? 0,
@@ -1659,12 +1723,19 @@ export default function ChatPanel() {
 
   // SSE cleanup on unmount (CLAUDE.md rule) — but NOT while a turn is running.
   //
-  // This panel is mounted only while `activeSlidePanel === 'chat'`, and it is
-  // itself what answers a `ui_event` by calling `setSlidePanel('results')`. So
-  // "the agent showed me the results" unmounted the panel mid-answer, and this
-  // handler then closed the connection: the backend went on generating into a
-  // socket nobody was reading, which is exactly the reported "still streaming,
-  // no tokens on screen".
+  // This panel is now mounted for the app's lifetime inside `AssistantDock`,
+  // which renders it unconditionally and hides it with CSS when collapsed. So
+  // the case that motivated this guard is gone: the panel answering a
+  // `ui_event` by calling `setSlidePanel('results')` no longer unmounts
+  // itself, because it does not live in the SlidePanel slot anymore, and
+  // collapsing the dock does not unmount it either.
+  //
+  // The guard stays because unmount paths that still exist are exactly the
+  // ones a mid-turn stream can hit: the dock's ErrorBoundary swapping in its
+  // fallback after a render crash, a project switch or route change that tears
+  // down the workbench tree, and HMR in dev. On any of those, closing a live
+  // connection would leave the backend generating into a socket nobody is
+  // reading — the reported "still streaming, no tokens on screen".
   //
   // Leaving it open is safe because `handleFrame` writes only to Zustand and
   // the query cache — never to this component's state — so the rest of the
@@ -1725,10 +1796,10 @@ export default function ChatPanel() {
           className="bg-bg border border-border rounded px-1 py-0.5 text-[10px]"
           data-testid="chat-model-select"
         >
-          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-          <option value="claude-opus-4-8">Opus 4.8</option>
+          <option value="claude-sonnet-5">Sonnet 5</option>
+          <option value="claude-opus-5">Opus 5</option>
         </select>
-        <CostMeter />
+        <UsageMeter />
         {/* Phase D polish #3 — ⚙ gear popover for chat-panel preferences.
             Currently holds one toggle (auto-uncheck after send); future
             settings live here too. */}
@@ -2000,16 +2071,18 @@ export default function ChatPanel() {
                 (speech.listening
                   ? 'bg-accent/15 border-accent text-accent'
                   : 'bg-bg-3/40 hover:bg-bg-3 border-border text-muted') +
-                (speech.supported && !streaming ? '' : ' opacity-50')
+                (speech.available && !streaming ? '' : ' opacity-50')
               }
               onClick={speech.toggle}
-              disabled={!speech.supported || streaming}
+              disabled={!speech.available || streaming}
               title={
                 !speech.supported
                   ? 'Voice input needs Chrome or Edge'
-                  : speech.listening
-                    ? 'Stop voice input (Esc)'
-                    : 'Start voice input (English)'
+                  : speech.permissionDenied
+                    ? 'Microphone access denied — allow it in System Settings → Privacy & Security → Microphone'
+                    : speech.listening
+                      ? 'Stop voice input (Esc)'
+                      : 'Start voice input (English)'
               }
               aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
               aria-pressed={speech.listening}
@@ -2027,7 +2100,16 @@ export default function ChatPanel() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Escape' && speech.listening) {
+                  // stopPropagation as well as preventDefault. App.tsx's
+                  // window-level keydown handler also acts on Escape (close
+                  // the compare rail, then the active slide panel), and
+                  // preventDefault does NOT stop propagation — so without
+                  // this the keystroke that stops the mic also closed the
+                  // panel the agent had just opened. App.tsx now skips
+                  // Escape for editable targets too; this is the near side of
+                  // the same fix and keeps the behaviour correct on its own.
                   e.preventDefault()
+                  e.stopPropagation()
                   speech.stop()
                   return
                 }

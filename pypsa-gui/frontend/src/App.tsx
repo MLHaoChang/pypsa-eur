@@ -30,7 +30,7 @@ import RescaleDialogHost from './components/RescaleDialogHost'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import ChatPanel from './components/ChatPanel'
+import AssistantDock from './components/AssistantDock'
 import { useUIStore, type SlidePanel } from './store/uiStore'
 import { authEnabled } from './auth/config'
 import AuthMismatchGate from './auth/AuthMismatchGate'
@@ -107,9 +107,6 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
   results:    { eyebrow: 'SIMULATION', title: 'Results' },
   solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
-  // Chatbot integration v6 (Phase 3). Half-width by default; the panel
-  // body handles its own layout (message list + composer + cost meter).
-  chat:       { eyebrow: 'ASSISTANT',  title: 'Chat assistant' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
 }
@@ -136,7 +133,6 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'compare':    return <CompareView />
     case 'capacityBounds': return <CapacityBoundsEditor />
     case 'solveQueue': return <SolveQueuePanel />
-    case 'chat':       return <ChatPanel />
     case 'settings':   return <LocalSettings />
     default:           return null
   }
@@ -473,11 +469,28 @@ export default function App() {
       // dismiss the comparison without also closing the Results view; a
       // second Esc then closes the panel as before.
       //
+      // Skipped entirely while the caret is in an editable element, using the
+      // same INPUT / TEXTAREA / contentEditable check as the '?' branch below.
+      // The assistant's composer is now permanently on screen (AssistantDock),
+      // and ChatPanel binds Escape in it to "stop dictation" — so without this
+      // guard the keystroke that stops the mic also closes the compare rail,
+      // and a second Escape closes the very panel the agent just opened. That
+      // is the keyboard twin of the `data-no-panel-close` exemption on the
+      // dock, and it was structurally impossible before this branch because
+      // the assistant WAS the slide panel. Every other editable surface in the
+      // app (Properties forms, the palette's search field, dialog inputs)
+      // benefits from the same guard.
+      //
       // ShortcutsHelp's own Escape (via Dialog) now owns closing it — no
       // special-case here anymore, so this branch never fires while it's open.
       if (e.key === 'Escape') {
-        if (compareRailOpen) { setCompareRailOpen(false); return }
-        if (activeSlidePanel) setSlidePanel(null)
+        const t = e.target as HTMLElement | null
+        const isEditableTarget =
+          t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || !!t?.isContentEditable
+        if (!isEditableTarget) {
+          if (compareRailOpen) { setCompareRailOpen(false); return }
+          if (activeSlidePanel) setSlidePanel(null)
+        }
       }
       // "?" opens the keyboard-shortcuts help (unless the user is typing).
       if (e.key === '?') {
@@ -605,6 +618,10 @@ export default function App() {
             {activeSlidePanel && (
               <div
                 ref={panelRef}
+                // Named so tests can assert what is and is not inside the
+                // slide-panel subtree — specifically that the assistant dock
+                // never is. See App.dock.test.tsx.
+                data-testid="panel-container"
                 className={`min-w-0 flex flex-col min-h-0 overflow-hidden ${
                   fullScreenTab ? 'flex-1' : 'w-1/2 border-l border-border'
                 }`}
@@ -623,6 +640,14 @@ export default function App() {
           {/* Zone 3 — Right properties panel. Only renders alongside the
               Topology Canvas — hidden while a tab panel occupies the right half. */}
           {!activeSlidePanel && <PropertiesPanel />}
+
+          {/* Zone 5 — The assistant. Outside the panel container on purpose:
+              it must stay on screen while a full-screen tab owns the main
+              area, because it is what put that tab there. A direct flex child
+              of this row (not nested inside the `flex-1` zone above) so its
+              fixed 380px / 40px width isn't fought over by the flex
+              algorithm. */}
+          <AssistantDock />
         </div>
 
         <StatusBar />
