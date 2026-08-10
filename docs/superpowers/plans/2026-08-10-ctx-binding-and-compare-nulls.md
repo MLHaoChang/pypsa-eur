@@ -49,13 +49,16 @@ Background: today `register` does a bare `cls._contexts[project_id] = ctx`. When
 
 - [ ] **Step 1: Write the failing test**
 
-Create `backend/tests/test_registry_displacement.py`:
+Create `backend/tests/test_registry_displacement.py`. This verifies the write-back **behaviourally** — mutate in memory, displace, reload `network.nc` from disk — exactly as `tests/test_eviction.py::test_save_before_drop_persists_victim` (line 169) verifies the eviction save. Do not assert that `_save_evicted_ctx` was called; that couples the test to the implementation and the repo already has the better pattern. Reuse `_bus_network`, `_bound_ctx` and the `cap2` / `tmp_projects_dir` fixtures from `test_eviction.py` by copying their definitions (they are module-local there), or import them if the module exposes them.
 
 ```python
 """Displacement write-back: registering over a resident context must not strand it.
 
-Mirrors the setup style of test_eviction.py — build a bound, non-empty ctx
-directly and drive the registry, rather than standing up a full request.
+`register` replaced a resident context with a bare dict assignment, so a second
+session opening the same Project left the first session's unsaved edits
+unreachable. Eviction already writes its victims back before dropping them
+(test_eviction.py::test_save_before_drop_persists_victim); a displaced context
+has the same fate and must get the same treatment.
 """
 from __future__ import annotations
 
@@ -63,6 +66,7 @@ import pandas as pd
 import pypsa
 import pytest
 
+from routers.projects import _save_context
 from services.project_context import ProjectContext
 from services.pypsa_service import PyPSAService
 
@@ -74,60 +78,63 @@ def _bus_network(bus_name: str) -> pypsa.Network:
     return n
 
 
-def _bound_ctx(name: str) -> ProjectContext:
-    ctx = PyPSAService.build_context()
-    n = _bus_network(f"{name}_BUS")
+def _bound_ctx(name: str, *, bus: str | None = None) -> ProjectContext:
+    n = _bus_network(bus or f"{name}_BUS")
     n.name = name
-    ctx.network = n
+    ctx = ProjectContext(network=n)
     ctx.loaded_project = name
     return ctx
 
 
-def test_register_saves_the_context_it_displaces(monkeypatch):
-    saved: list[tuple[str, str | None]] = []
-    monkeypatch.setattr(
-        PyPSAService,
-        "_save_evicted_ctx",
-        staticmethod(lambda vid, vctx: saved.append((vid, vctx.loaded_project))),
+def test_displaced_context_is_persisted_before_it_becomes_unreachable(tmp_projects_dir):
+    # A is resident with an unsaved in-memory edit. A second session builds its
+    # own context for the same Project and registers it. A is now unreachable —
+    # its edit must have reached disk first.
+    a = _bound_ctx("A", bus="A_BUS")
+    _save_context(a, "A", expect="A")          # baseline on disk
+    PyPSAService.register("org:A", a)
+    a.network.add("Bus", "DISPLACED_MARKER")   # unsaved edit
+
+    second = _bound_ctx("A", bus="A_BUS")
+    PyPSAService.register("org:A", second)
+
+    assert PyPSAService.get_context("org:A") is second
+    reloaded = pypsa.Network()
+    reloaded.import_from_netcdf(str(tmp_projects_dir / "A" / "network.nc"))
+    assert "DISPLACED_MARKER" in reloaded.buses.index, (
+        "the displaced context's unsaved edits must be written back before it "
+        "stops being reachable through the registry"
     )
 
-    first = _bound_ctx("alpha")
-    second = _bound_ctx("alpha")
-    PyPSAService.register("org:alpha", first)
-    PyPSAService.register("org:alpha", second)
 
-    assert saved == [("org:alpha", "alpha")], (
-        "displacing a resident context must write it back before it becomes unreachable"
-    )
-    assert PyPSAService.get_context("org:alpha") is second
+def test_reregistering_the_same_object_does_not_save(tmp_projects_dir):
+    # The common case: a path-scoped read re-registers the context already
+    # resident. Nothing is displaced, so nothing is written.
+    a = _bound_ctx("B", bus="B_BUS")
+    _save_context(a, "B", expect="B")
+    PyPSAService.register("org:B", a)
+    a.network.add("Bus", "NOT_SAVED_MARKER")
 
+    PyPSAService.register("org:B", a)
 
-def test_reregistering_the_same_object_saves_nothing(monkeypatch):
-    saved: list[str] = []
-    monkeypatch.setattr(
-        PyPSAService,
-        "_save_evicted_ctx",
-        staticmethod(lambda vid, vctx: saved.append(vid)),
-    )
-
-    ctx = _bound_ctx("beta")
-    PyPSAService.register("org:beta", ctx)
-    PyPSAService.register("org:beta", ctx)
-
-    assert saved == [], "re-registering the same object is not a displacement"
-
-
-def test_first_registration_saves_nothing(monkeypatch):
-    saved: list[str] = []
-    monkeypatch.setattr(
-        PyPSAService,
-        "_save_evicted_ctx",
-        staticmethod(lambda vid, vctx: saved.append(vid)),
+    reloaded = pypsa.Network()
+    reloaded.import_from_netcdf(str(tmp_projects_dir / "B" / "network.nc"))
+    assert "NOT_SAVED_MARKER" not in reloaded.buses.index, (
+        "re-registering the same object is not a displacement and must not "
+        "trigger a save"
     )
 
-    PyPSAService.register("org:gamma", _bound_ctx("gamma"))
 
-    assert saved == [], "nothing was displaced"
+def test_first_registration_of_a_key_does_not_save(tmp_projects_dir):
+    c = _bound_ctx("C", bus="C_BUS")
+    _save_context(c, "C", expect="C")
+    c.network.add("Bus", "FIRST_REG_MARKER")
+
+    PyPSAService.register("org:C", c)
+
+    reloaded = pypsa.Network()
+    reloaded.import_from_netcdf(str(tmp_projects_dir / "C" / "network.nc"))
+    assert "FIRST_REG_MARKER" not in reloaded.buses.index, "nothing was displaced"
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
