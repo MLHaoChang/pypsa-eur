@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, AlertTriangle } from 'lucide-react'
 import { networkApi } from '../api/network'
 import { useUIStore, type CreationRequest } from '../store/uiStore'
+import { isRevealed } from '../utils/attributeCatalog'
+import { useSolveMode } from './properties/cardKit'
 import { nk } from '../utils/queryKeys'
 import BusAutocomplete from '../components/BusAutocomplete'
 import toast from 'react-hot-toast'
@@ -362,6 +364,7 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
   const { setCreationItem, setSelectedComponent, setPendingNodePosition } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
+  const solveMode = useSolveMode()
 
   const fields = FIELD_MAP[item.id] ?? []
   const qKey = QUERY_KEY[item.id] ?? ''
@@ -494,7 +497,17 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       {/* Form body */}
       <div className="flex-1 overflow-y-auto px-3 py-3">
         <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
-          {fields.map(f => {
+          {/* D22 rule 1: p_nom_min / p_nom_max stay hidden until the asset is
+              extendable, so the create and edit forms stop disagreeing about
+              when they are shown (criterion 34). */}
+          {fields.filter(f => isRevealed(f.key, {
+            mode: solveMode,
+            extendable: form.p_nom_extendable === 'true'
+              || form.e_nom_extendable === 'true'
+              || form.s_nom_extendable === 'true',
+            committable: form.committable === 'true',
+            noSlackBus: false,   // the creation form makes no network-wide claim
+          })).map(f => {
             const colSpan = f.half ? '' : 'col-span-2'
             const error = errors[f.key]
 

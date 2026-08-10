@@ -9,6 +9,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useCatalog } from '../../hooks/useCatalog'
 import { editScope, loadExtras, saveExtras } from '../../utils/extrasStore'
+import type { SolveMode } from '../../utils/attributeCatalog'
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   X, Plus, Zap, Battery, Database, GitBranch,
@@ -362,6 +363,21 @@ export function useGlobalDiscountRate(): number | undefined {
     staleTime: 60_000,
   })
   return data?.discount_rate
+}
+
+/**
+ * The configured solve mode, for D22's four mode-gated rules. One data
+ * dependency for all four, read from the same solverConfig query the Solver
+ * Settings page already loads.
+ */
+export function useSolveMode(): SolveMode {
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data } = useQuery({
+    queryKey: nk(currentProject, 'solverConfig'),
+    queryFn: simulationApi.getSolverConfig,
+    staleTime: 60_000,
+  })
+  return data?.mode ?? 'lopf'
 }
 
 export function useGlobalDefaultLifetime(): number | undefined {

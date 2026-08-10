@@ -5,8 +5,8 @@ import type { CatalogAttribute } from '../api/types'
 // may it be edited (D13/D14), which editor does it open (D4), what does its
 // column header read (D15), and what does that header's tooltip say.
 //
-// Plan B appends D22's six reveal rules to this file. They are deliberately
-// absent here: Scope A has no consumer for them.
+// D22's six reveal rules live at the foot of this file, added by Scope B.
+//
 
 export type CatalogMap = Map<string, CatalogAttribute>
 
@@ -176,4 +176,76 @@ export function columnHeaderTooltip(
     return description ? `${description} — ${note}` : note
   }
   return description
+}
+
+// ── D22's reveal rules ───────────────────────────────────────────────────────
+// Reveal makes a field visible: it asserts nothing about the network, cannot
+// over-report, and is therefore never mode-gated. Require marks a field as
+// blocking, and carries exactly one meaning throughout — its absence produces
+// a backend _err, and _errs are what block a solve. A rule mirroring a _warn
+// is not a require rule, and none below is one.
+
+export type SolveMode = 'lopf' | 'pf' | string
+
+export interface RevealContext {
+  mode: SolveMode
+  extendable: boolean
+  committable: boolean
+  /** True when NO bus in the network has control === 'Slack'. */
+  noSlackBus: boolean
+}
+
+/** p_nom_min / e_nom_max / s_nom_min … — the extendable bound family. */
+const NOM_BOUND = /^(p|e|s)_nom_(min|max)$/
+/** p_nom / e_nom / s_nom — the capacity itself. */
+const NOM = /^(p|e|s)_nom$/
+
+/** Rule 5's unit-commitment fields (already shipped at PropertiesPanel.tsx:411-419). */
+const UNIT_COMMITMENT = new Set([
+  'start_up_cost', 'shut_down_cost', 'min_up_time', 'min_down_time',
+  'ramp_limit_up', 'ramp_limit_down', 'p_min_pu',
+])
+
+/** Rule 2's disjunction. Marked on BOTH members, reported only when both fail. */
+const COST_PAIR = new Set(['capital_cost', 'overnight_cost'])
+
+export function isRevealed(column: string, ctx: RevealContext): boolean {
+  // Rule 1: extendable reveals the bounds. Deliberately unconditional — it is
+  // existing shipped behaviour, it makes no claim, and gating it would hide
+  // fields the user is editing.
+  if (NOM_BOUND.test(column)) return ctx.extendable
+  // Rule 5: committable reveals the unit-commitment fields, likewise ungated.
+  if (UNIT_COMMITMENT.has(column)) return ctx.committable
+  return true
+}
+
+export function isRequired(column: string, ctx: RevealContext): boolean {
+  const lopf = ctx.mode === 'lopf'
+
+  // Rule 4: a non-extendable asset needs a capacity to dispatch.
+  if (NOM.test(column)) return lopf && !ctx.extendable
+
+  // Rule 3: an extendable asset needs finite bounds with min < max.
+  if (NOM_BOUND.test(column)) return lopf && ctx.extendable
+
+  // Rule 2: the cost disjunction. Both members carry the marker; the message
+  // states the OR so it cannot read as "capital_cost only".
+  if (COST_PAIR.has(column)) return lopf && ctx.extendable
+
+  // Rule 6: control, network-wide, pf only. NOT on the lopf → AC-PF chain:
+  // that path runs _check_stage2_ac_pf, which emits a _warn satisfied by a
+  // Slack generator OR a Slack bus OR an ac_pf_slack_bus override. A warning
+  // never blocks a launch, so `required` would be a lie there.
+  if (column === 'control') return ctx.mode === 'pf' && ctx.noSlackBus
+
+  return false
+}
+
+/**
+ * The message for rule 2's disjunction, or null when the rule does not apply.
+ * Stated once so no card can render half of it.
+ */
+export function requiredPairMessage(ctx: RevealContext): string | null {
+  if (ctx.mode !== 'lopf' || !ctx.extendable) return null
+  return 'An extendable asset needs capital_cost or overnight_cost above zero.'
 }
