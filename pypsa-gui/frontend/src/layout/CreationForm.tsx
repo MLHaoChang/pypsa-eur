@@ -4,7 +4,9 @@ import { X, AlertTriangle } from 'lucide-react'
 import { networkApi } from '../api/network'
 import { useUIStore, type CreationRequest } from '../store/uiStore'
 import { isRevealed } from '../utils/attributeCatalog'
-import { useSolveMode } from './properties/cardKit'
+import { extrasPatch, useSolveMode } from './properties/cardKit'
+import { useCatalog } from '../hooks/useCatalog'
+import { creationScope, loadExtras, saveExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import BusAutocomplete from '../components/BusAutocomplete'
 import toast from 'react-hot-toast'
@@ -365,6 +367,13 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const solveMode = useSolveMode()
+  // Attributes the user has added to THIS palette type (spec D23). The scope
+  // key is the palette id, not the component class: two palette items can map
+  // to one class (thermal and renewable are both Generators) and the choice
+  // belongs to the item the user clicked.
+  const [extraKeys, setExtraKeys] = useState<string[]>(() => loadExtras(creationScope(item.id)))
+  const [picking, setPicking] = useState(false)
+  const { data: catalog } = useCatalog(COMPONENT_TYPE[item.id] ?? null)
 
   const fields = FIELD_MAP[item.id] ?? []
   const qKey = QUERY_KEY[item.id] ?? ''
@@ -446,6 +455,10 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
         else if (f.type === 'checkbox') payload[f.key] = v === 'true'
         else payload[f.key] = v
       })
+      // The loop above enumerates `fields`, so an extras value would be
+      // rendered and never sent — the exact lie D20 names. extrasPatch closes
+      // it, after the loop so a curated key always wins.
+      Object.assign(payload, extrasPatch(form, extraKeys))
       const fn = CREATE_FN[item.id]
       if (!fn) throw new Error(`Unknown asset type: ${item.id}`)
       const transform = SUBMIT_TRANSFORM[item.id]
@@ -596,6 +609,64 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
               </div>
             )
           })}
+
+          {/* "+ Add parameter" (spec D23). Lists the component's Input
+              attributes the form does not already show; default_text stands in
+              whenever `default` is null, so an unbounded attribute reads `inf`
+              rather than blank (criterion 30). Adding one never seeds a value —
+              the field opens empty and PyPSA's default applies until the user
+              types one. */}
+          {catalog && (
+            <div className="col-span-2 mt-2 pt-2 border-t border-border">
+              {extraKeys.map(k => {
+                const attr = catalog.attributes.find(a => a.name === k)
+                return (
+                  <label key={k} className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] text-muted w-32 shrink-0 truncate"
+                          title={attr?.description ?? k}>
+                      {k}{attr?.unit ? ` (${attr.unit})` : ''}
+                    </span>
+                    <input
+                      value={form[k] ?? ''}
+                      onChange={e => set(k, e.target.value)}
+                      placeholder={attr?.default_text ?? ''}
+                      className="flex-1 bg-bg border border-border rounded px-1.5 py-0.5 text-xs"
+                    />
+                  </label>
+                )
+              })}
+              {picking ? (
+                <select
+                  autoFocus
+                  value=""
+                  onChange={e => {
+                    const v = e.target.value
+                    if (!v) return
+                    const next = [...extraKeys, v]
+                    setExtraKeys(next)
+                    saveExtras(creationScope(item.id), next)
+                    setPicking(false)
+                  }}
+                  onBlur={() => setPicking(false)}
+                  className="w-full bg-bg border border-accent rounded px-1.5 py-0.5 text-xs"
+                >
+                  <option value="">Choose a parameter…</option>
+                  {catalog.attributes
+                    .filter(a => a.status.startsWith('Input')
+                      && !fields.some(f => f.key === a.name)
+                      && !extraKeys.includes(a.name))
+                    .map(a => (
+                      <option key={a.name} value={a.name}>
+                        {a.name}{a.unit ? ` (${a.unit})` : ''} — {a.type}, default {a.default_text || '—'}
+                      </option>
+                    ))}
+                </select>
+              ) : (
+                <button type="button" onClick={() => setPicking(true)}
+                        className="text-[10px] text-accent hover:underline">+ Add parameter</button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
