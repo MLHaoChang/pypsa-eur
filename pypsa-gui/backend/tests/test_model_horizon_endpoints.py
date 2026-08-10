@@ -164,3 +164,19 @@ def test_snapshots_endpoint_reports_freq(client, install_network):
 
     body = client.get("/api/network/snapshots").json()
     assert body["freq"] == "6h"
+
+
+def test_snapshots_endpoint_reports_freq_on_multi_period_network(client, install_network):
+    # Both return branches of get_snapshots carry a "freq" line; the flat-network
+    # test above only exercises the non-MultiIndex branch. 3-hourly is chosen to be
+    # distinguishable from both the flat test's 6-hourly and the default "h".
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    block = pd.date_range("2024-01-01", periods=8, freq="3h")
+    periods = [2030, 2050]
+    n.set_snapshots(_multi_index(periods, block))
+    n.investment_periods = periods
+    install_network(n)
+
+    body = client.get("/api/network/snapshots").json()
+    assert body["freq"] == "3h"
