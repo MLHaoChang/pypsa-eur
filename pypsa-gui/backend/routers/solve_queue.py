@@ -46,8 +46,9 @@ def enqueue_solve(
     """
     Queue a project to solve. The dispatcher loads the SAVED version from disk,
     so the project must already exist on disk with a network — the caller (the
-    frontend) saves the foreground project before enqueuing it. Returns the
-    created job, including its queue position.
+    frontend) saves the foreground project before enqueuing it. Returns the job,
+    including its queue position and an `already_queued` flag that is true when
+    an existing job was returned instead of a new one.
 
     AUTHORIZATION (Step 0a): the project arrives in the BODY, not the path, so
     this route is invisible to a path-parameter inventory — it was not among
@@ -69,12 +70,17 @@ def enqueue_solve(
             f"Project '{project.name}' has no saved network on disk. Save the "
             "project before queuing it to solve.",
         )
-    job = solve_queue.enqueue(
+    # Idempotent by project: a second enqueue of a project that already has a
+    # queued or running job returns THAT job with `already_queued: true` and
+    # creates nothing. 200, not 409 — the caller's intent ("this project should
+    # be solving") is already satisfied, and an error would make every client
+    # re-implement the check it just handed to the server.
+    job, created = solve_queue.enqueue_unique(
         project.name,
         project_key=project_registry.registry_key(project),
         storage_dir=str(project_dir),
     )
-    return solve_queue.get_job(job.id)
+    return {**solve_queue.get_job(job.id), "already_queued": not created}
 
 
 # ── Authorization helpers (P-1) ─────────────────────────────────────────────
