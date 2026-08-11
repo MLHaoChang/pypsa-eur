@@ -631,6 +631,8 @@ function DispatchTab({ a, b }: { a: string; b: string }) {
           unit="M€"
           fmt={v => `${v.toFixed(2)} M€`}
           deltaIsImprovementWhenNegative
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -642,6 +644,8 @@ function DispatchTab({ a, b }: { a: string; b: string }) {
           bValue={readPV(loadB, period)}
           unit="GWh"
           fmt={v => `${v.toFixed(1)} GWh`}
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
     </div>
@@ -1239,7 +1243,10 @@ function PriceRowGroup({
 // different total demand can have very different kt yet identical intensity,
 // and vice versa.
 
-function EmissionsTab({ a, b }: { a: string; b: string }) {
+// Exported solely so CompareView.availability.test.tsx can render it in
+// isolation (Task 5 follow-up) — every other tab in this file stays
+// module-private. Same rationale as EconomicsTab's export above.
+export function EmissionsTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['results-summary', b], queryFn: () => projectsApi.resultsSummary(b), staleTime: 30_000 })
   const [period, setPeriod] = useState<PeriodChoice>('all')
@@ -1299,6 +1306,8 @@ function EmissionsTab({ a, b }: { a: string; b: string }) {
           unit="kt CO₂"
           fmt={fmtKt}
           deltaIsImprovementWhenNegative
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -1311,6 +1320,8 @@ function EmissionsTab({ a, b }: { a: string; b: string }) {
           unit="kg/MWh"
           fmt={fmtKgMwh}
           deltaIsImprovementWhenNegative
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -1851,6 +1862,8 @@ function CurtailmentTab({ a, b }: { a: string; b: string }) {
           unit="GWh"
           fmt={fmtGwh}
           deltaIsImprovementWhenNegative
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -1863,6 +1876,8 @@ function CurtailmentTab({ a, b }: { a: string; b: string }) {
           unit="%"
           fmt={fmtPct}
           deltaIsImprovementWhenNegative
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -2199,7 +2214,10 @@ function LostLoadBusTable({
 // p_nom, energy capacity, throughput, cycles) which is what the user needs
 // to see if a particular battery is being overworked across scenarios.
 
-function StorageCyclingTab({ a, b }: { a: string; b: string }) {
+// Exported solely so CompareView.availability.test.tsx can render it in
+// isolation (Task 5 follow-up) — every other tab in this file stays
+// module-private. Same rationale as EconomicsTab's export above.
+export function StorageCyclingTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['results-summary', b], queryFn: () => projectsApi.resultsSummary(b), staleTime: 30_000 })
   const [period, setPeriod] = useState<PeriodChoice>('all')
@@ -2292,6 +2310,8 @@ function StorageCyclingTab({ a, b }: { a: string; b: string }) {
           fmtMwh={fmtMwh}
           fmtCyc={fmtCyc}
           selectedCarrier={filter.selectedCarrier}
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
     </div>
@@ -2300,6 +2320,7 @@ function StorageCyclingTab({ a, b }: { a: string; b: string }) {
 
 function StorageUnitTable({
   aName, bName, unitsA, unitsB, period, fmtMw, fmtMwh, fmtCyc, selectedCarrier,
+  availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
@@ -2310,6 +2331,15 @@ function StorageUnitTable({
   fmtMwh: (n: number) => string
   fmtCyc: (n: number) => string
   selectedCarrier?: string | null
+  // Whether this side's storage-cycling block resolved at all — same third
+  // state as ABTable/ABKpiPair (Task 5; see ADR-0001). An unresolved side's
+  // `by_unit` is `[]`, so every unit only ever appears in the OTHER side's
+  // map — `r.a`/`r.b` below is already `undefined` for it. Without this
+  // guard `r.a?.p_nom_mw ?? 0` reads that absence as a real zero, plus a
+  // signed Δ against the resolved side's real cycle count (C2). Defaults
+  // to true so pre-existing call sites keep compiling.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   const byA = new Map(unitsA.map(u => [u.name, u]))
   const byB = new Map(unitsB.map(u => [u.name, u]))
@@ -2360,23 +2390,29 @@ function StorageUnitTable({
           const carrierLabel = carrierRaw
             ? carrierDisplayName(canonicaliseCarrier('StorageUnit', carrierRaw))
             : ''
-          const pa = r.a?.p_nom_mw ?? 0
-          const pb = r.b?.p_nom_mw ?? 0
-          const ea = r.a?.energy_mwh ?? 0
-          const eb = r.b?.energy_mwh ?? 0
           const ca = readPV(r.a?.cycles, period)
           const cb = readPV(r.b?.cycles, period)
+          const dash = <span className="text-muted" title="Unit not present in this scenario">—</span>
+          const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+          // Three-state ladder, same priority as ABTable: the side's whole
+          // block failing to resolve outranks "this unit isn't in that
+          // side's fleet," which in turn outranks the real value — mirrors
+          // AssetLCOHTable's r.A ? ... : dash pattern one rung further.
           return (
             <tr key={r.name} className="border-b border-border/40">
               <td className="py-1 text-text font-mono">{r.name}</td>
               <td className="py-1 text-right text-muted">{carrierLabel}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtMw(pa)}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtMw(pb)}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtMwh(ea)}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtMwh(eb)}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtCyc(ca)}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtCyc(cb)}</td>
-              <td className="py-1 text-right font-mono"><Delta v={cb - ca} fmt={fmtCyc} /></td>
+              <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.a ? fmtMw(r.a.p_nom_mw) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.b ? fmtMw(r.b.p_nom_mw) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.a ? fmtMwh(r.a.energy_mwh) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.b ? fmtMwh(r.b.energy_mwh) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.a ? fmtCyc(ca) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.b ? fmtCyc(cb) : dash}</td>
+              <td className="py-1 text-right font-mono">
+                {(availableA && availableB && r.a && r.b)
+                  ? <Delta v={cb - ca} fmt={fmtCyc} />
+                  : <span className="text-muted" title="Δ undefined — a scenario is unresolved or lacks this unit">—</span>}
+              </td>
             </tr>
           )
         })}
@@ -2401,10 +2437,10 @@ function ABBarChart({
   // CarrierFilter's selectedCarrier prop flows straight through.
   selectedCarrier?: string | null
   // Whether this side's block resolved at all — see ABTable's matching
-  // props for the full ADR-0001 rationale. Defaults to true so the nine
-  // pre-existing call sites (Task 5 wired six of them explicitly; the
-  // rest — LoadingTab/PricesTab/LostLoadTab/OverviewTab — are Task 6's
-  // bespoke tables) keep compiling untouched.
+  // props for the full ADR-0001 rationale. Defaults to true so the ten
+  // pre-existing call sites — all wired by Task 5, across its six tabs —
+  // keep compiling untouched. None of Task 6's bespoke tables
+  // (LoadingTab/PricesTab/LostLoadTab/OverviewTab) use ABBarChart at all.
   availableA?: boolean
   availableB?: boolean
 }) {
@@ -2550,6 +2586,7 @@ function ABTable({
 
 function ABKpiPair({
   aName, bName, aValue, bValue, unit, fmt, deltaIsImprovementWhenNegative = false,
+  availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
@@ -2558,14 +2595,34 @@ function ABKpiPair({
   unit: string
   fmt: (n: number) => string
   deltaIsImprovementWhenNegative?: boolean
+  // Whether this side's block resolved at all — same third state as
+  // ABTable/ABBarChart/EconomicsTable (Task 5; see ADR-0001). Unlike those,
+  // ABKpiPair takes a bare number rather than a map, so there is no
+  // present/absent ladder underneath it — only "unavailable" vs "real
+  // value" — but the priority is identical: an unavailable side's KPI
+  // reads COST_UNAVAILABLE regardless of what aValue/bValue happen to
+  // contain (an unresolved block's PVs default to 0, so without this guard
+  // a zero-CO2 scenario compared against a real one rendered a fabricated
+  // "0.0 kt" beside the other side's genuine figure). Defaults to true so
+  // pre-existing call sites keep compiling.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   return (
     <div className="grid grid-cols-3 gap-3 text-center">
-      <Kpi label={aName} value={fmt(aValue)} />
-      <Kpi label={bName} value={fmt(bValue)} />
+      <Kpi
+        label={aName}
+        value={availableA ? fmt(aValue) : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+      />
+      <Kpi
+        label={bName}
+        value={availableB ? fmt(bValue) : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+      />
       <Kpi
         label="Δ"
-        value={<Delta v={bValue - aValue} fmt={fmt} invert={deltaIsImprovementWhenNegative} />}
+        value={(availableA && availableB)
+          ? <Delta v={bValue - aValue} fmt={fmt} invert={deltaIsImprovementWhenNegative} />
+          : <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>}
       />
       {/* Trailing unit row keeps the columns coherent when long values wrap. */}
       <div className="col-span-3 text-[10px] text-muted">{unit}</div>
