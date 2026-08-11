@@ -435,9 +435,21 @@ def test_sample_weeks_reports_had_custom_weights_false_for_untouched_default_wei
 def _budget_network(periods, build_year, p_nom_max=1000.0):
     """
     One extendable generator with an explicit build_year, on a MultiIndex
-    network spanning `periods`. The generator is deliberately cheap and the
-    load large, so an UNCONSTRAINED solve builds up to p_nom_max — which makes
-    a binding budget observable as a smaller p_nom_opt.
+    network spanning `periods`. There is only ONE Load (fixed at 500 MW) and
+    ONE Generator on the bus, so an UNCONSTRAINED solve's optimum is set by
+    the LOAD, not by p_nom_max: nothing rewards building past what's needed
+    to serve 500 MW, so p_nom_opt settles at 500.0 regardless of p_nom_max
+    (here 1000.0 — a generous ceiling that never actually binds). A budget
+    BELOW 500 (in €, at coef=1 EUR/MW here) shows up as a smaller p_nom_opt
+    — but only because the caller also enables a high-VOLL slack generator
+    (see `_solve_and_get_p_nom_opt`). Without that slack, capping this
+    Generator below the fixed 500 MW load leaves nothing to cover the
+    shortfall — PyPSA's nodal balance is an equality with no lost-load path
+    by default — so the LP goes genuinely INFEASIBLE rather than settling at
+    a smaller optimum. In that failure mode `p_nom_opt` never gets assigned
+    and silently reads back its pre-solve default of 0.0, which would make a
+    `p_nom_opt <= budget` assertion pass for the wrong reason regardless of
+    whether the budget guard under test is even correct.
     """
     n = pypsa.Network()
     block = pd.date_range("2024-01-01", periods=2, freq="h")
