@@ -1739,7 +1739,15 @@ def import_project_bundle(bundle_bytes_b64: str, filename: str = "bundle.zip") -
     data = base64.b64decode(bundle_bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     with _acting() as (db, user):
-        return _sync(_h(upload, db=db, user=user))
+        # `import_bundle` now also declares `session: SessionRow | None =
+        # Depends(current_session)` (it moves the session's active-project
+        # pointer after a successful import). This call bypasses `_route`
+        # because `import_bundle` is async and `_route` calls its handler
+        # synchronously — so `session` must be injected by hand here the same
+        # way `_route` does it, or it arrives as the raw `Depends` sentinel and
+        # `set_active_project` blows up on it (see `_route`'s docstring on this
+        # exact failure mode).
+        return _sync(_h(upload, db=db, user=user, session=_acting_session(db)))
 
 
 def create_project_from_template(template_id: str, new_name: str) -> dict:
