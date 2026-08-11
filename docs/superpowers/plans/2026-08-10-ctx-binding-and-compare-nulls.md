@@ -30,7 +30,7 @@
 | `backend/models/schemas.py` | `available` on 8 Comparison blocks |
 | `backend/routers/compare.py` | set `available` at the early-return sites |
 | `backend/tests/test_compare_availability.py` | new — no block ships a bare zero |
-| `frontend/src/pages/CompareView.tsx` | 9 tabs branch on `available` |
+| `frontend/src/pages/CompareView.tsx` | per-side availability at cell level: shared primitives + 6 tabs (Task 5), bespoke tables + 4 tabs (Task 6) |
 | `frontend/src/pages/CompareView.availability.test.tsx` | new — renders unavailable, not 0.00 |
 
 ---
@@ -675,105 +675,136 @@ the same failure by flagging and nulling. Follows LostLoadComparison's shape."
 
 ---
 
-### Task 5: `CompareView` renders "unavailable" instead of a zero
+### Task 5: per-side availability in the shared Compare primitives
+
+> **Re-scoped 2026-08-11, after reading the code.** The original Task 5 said "CompareView branches on `available` across 9 tabs". That was wrong about where the branch lives, and it understated the work. It is replaced by Tasks 5 and 6 below. The reasoning is recorded here so the next reader does not re-derive it:
+>
+> When a block is unavailable its `by_carrier` (or equivalent) is `{}`. A tab whose **both** sides are unavailable therefore already falls into its own empty-data path — `EconomicsTab` prints *"No economic data — both projects have empty asset lists"*. Wrong message, but not a zero, so the headline defect is not there.
+>
+> The defect is the **mixed** case: one side resolved, the other not. Then the carrier union is non-empty, the tab renders its tables and charts normally, and the unresolved side's cells render `0.00` — a fabricated zero sitting next to a real figure. That is what ADR-0001 forbids, and it is what the committed RED test's third case pins.
+>
+> So the branch belongs at **cell level**, in the shared render primitives, not as a tab-level early return.
 
 **Files:**
-- Modify: `frontend/src/pages/CompareView.tsx`
-- Test: `frontend/src/pages/CompareView.availability.test.tsx`
+- Modify: `frontend/src/pages/CompareView.tsx` — `ABTable` (:2335), `ABBarChart` (:2288), `EconomicsTable` (:1512), and the six tabs listed below
+- Test: `frontend/src/pages/CompareView.availability.test.tsx` (already committed at `612f031f`, currently RED)
 
 **Interfaces:**
-- Consumes: `available: boolean` on every Comparison block from Task 4; `COST_UNAVAILABLE` exported from `frontend/src/pages/results/shared.tsx`
-- Produces: nothing consumed by later tasks.
+- Consumes: `available: boolean` on every Comparison block from Task 4; `COST_UNAVAILABLE` from `frontend/src/pages/results/shared.tsx:124` (its value is the string `'unavailable'`)
+- Produces: `availableA?: boolean` / `availableB?: boolean` on `ABTable`, `ABBarChart` and `EconomicsTable`, **defaulting to `true`**. Task 6 relies on that default holding, so every existing call site keeps working untouched.
 
-Background: `CompareView` has no unavailable branch today — its only `available` occurrences are `availableCarriers`, an unrelated carrier filter. So Task 4 alone changes nothing a user sees. `COST_UNAVAILABLE` already exists in `results/shared.tsx`, imported by `Economics.tsx` and `CapacityExpansion.tsx`; its own comment says it lives there so that "two tabs each spelling their own version of 'unavailable'" cannot drift. Compare is the third consumer it was built for.
+**The seam already exists — extend it, do not invent one.** `ABTable` (`:2372-2382`) already distinguishes *"carrier absent from this scenario"* from *"carrier present, value 0"*, rendering `—` for the first and `0 MW` for the second. Its comment reasons identically to ADR-0001: without the distinction, "project B with no heat sector shows `heat-dump: 0 MW` next to A's 500 MW — reads as 'B built nothing' when the carrier doesn't exist in B at all." You are adding a **third** state to that same ladder:
 
-- [ ] **Step 1: Write the failing test**
+| State | Renders |
+|---|---|
+| side's block did not resolve | `COST_UNAVAILABLE` |
+| carrier absent from this scenario | `—` (existing) |
+| carrier present, value 0 | `0.00` (existing) |
 
-The tabs are internal functions taking project **names**, not data — `function EconomicsTab({ a, b }: { a: string; b: string })` at `CompareView.tsx:1315` — and each fetches via `useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a) })`. So the test mocks `../api/projects` and wraps in a `QueryClientProvider`, following the recipe in `src/layout/PropertiesPanel.rescale.test.tsx:55-63`.
+Δ must render `—` whenever either side is unavailable — a delta against an unresolved figure is meaningless.
 
-Add one line to `CompareView.tsx` so the tab can be rendered in isolation — `export` on the existing `function EconomicsTab`. That is the whole change; do not restructure.
+`ABBarChart` needs the same treatment and is the easier one to get wrong: plotting a zero-height bar for an unavailable side IS the defect. Omit that side's `<Bar>` entirely rather than plotting zero, and if both sides are unavailable render the marker instead of the chart.
 
-Create `frontend/src/pages/CompareView.availability.test.tsx`:
+**Scope: 6 of the 10 tabs.** These consume only `ABTable` / `ABBarChart` / `EconomicsTable`, so wiring them is mechanical once the primitives take the props:
 
-```tsx
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { COST_UNAVAILABLE } from './results/shared'
+| Tab | Line | Block on `ResultsSummary` | Call sites |
+|---|---|---|---|
+| `CapacityTab` | 328 | `capacity` | 4 × ABBarChart, 4 × ABTable |
+| `DispatchTab` | 519 | `dispatch` | 1 + 1 |
+| `EmissionsTab` | 1211 | `emissions` | 1 + 1 |
+| `EconomicsTab` | 1315 | `economics` | 1 × ABBarChart, 1 × EconomicsTable |
+| `CurtailmentTab` | 1693 | `curtailment` | 2 + 2 |
+| `StorageCyclingTab` | 2108 | `storage_cycling` | 1 + 1 |
 
-vi.mock('../api/projects', () => ({
-  projectsApi: { resultsSummary: vi.fn() },
-}))
+`EconomicsTab` must be finished in this task, because the committed RED test renders it. Also add `export` to `function EconomicsTab` — that one line is the only structural change; do not restructure the file.
 
-import { projectsApi } from '../api/projects'
-import { EconomicsTab } from './CompareView'
+**Left for Task 6** (bespoke tables, each with its own row shape): `LoadingTab`, `PricesTab`, `LostLoadTab`, `OverviewTab`.
 
-const summary = (available: boolean) => ({
-  economics: {
-    available,
-    total_cost: { total: available ? 1234.5 : 0, by_period: {} },
-  },
-})
+- [ ] **Step 1: Confirm the committed test is RED for the right reason**
 
-function renderTab() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={client}>
-      <EconomicsTab a="alpha" b="beta" />
-    </QueryClientProvider>,
-  )
-}
-
-describe('Compare tabs distinguish unavailable from zero', () => {
-  beforeEach(() => vi.clearAllMocks())
-
-  it('renders the unavailable marker, never a zero, when the block did not resolve', async () => {
-    vi.mocked(projectsApi.resultsSummary).mockResolvedValue(summary(false) as never)
-    renderTab()
-    expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
-    expect(screen.queryByText(/0\.00/)).toBeNull()
-  })
-
-  it('renders the figure when the block resolved', async () => {
-    vi.mocked(projectsApi.resultsSummary).mockResolvedValue(summary(true) as never)
-    renderTab()
-    expect(await screen.findByText(/1,?234/)).toBeTruthy()
-    expect(screen.queryByText(COST_UNAVAILABLE)).toBeNull()
-  })
-})
-```
-
-**Verify before running:** the real field names on `EconomicsComparison` (the mock's `economics.total_cost` is a placeholder shape) and how `ResultsSummary` nests the economics block. Read `backend/models/schemas.py` and the `EconomicsTab` body, then correct the `summary()` factory. Keep both assertions unchanged: the marker appears, and no `0.00` appears.
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-Run from `pypsa-gui/frontend`:
+The test already exists at `frontend/src/pages/CompareView.availability.test.tsx`, committed at `612f031f`. Do not rewrite it. Run it first:
 
 ```bash
 npx vitest run src/pages/CompareView.availability.test.tsx
 ```
 
-Expected: FAIL — either the component is not exported, or it renders `0.00` with no marker.
+Expected: fails at import, because `EconomicsTab` is not exported. That is the RED state. Capture the output — it is your TDD evidence.
 
-- [ ] **Step 3: Branch on `available` in every tab**
+Read the test's header comment before implementing. It records two findings worth keeping: `EconomicsComparison` carries `by_carrier`, not the `total_cost` this plan originally invented; and `has_solve: true` is mandatory in the fixture, because otherwise `EconomicsTab` returns `UnsolvedBanner` and the available and unavailable cases render identical prose — the test would then pass whatever the branch did.
 
-For each of the nine tabs in `frontend/src/pages/CompareView.tsx`, render `COST_UNAVAILABLE` in place of the figure when the block's `available` is false. Import it alongside the existing imports:
+- [ ] **Step 2: Add the props to `ABTable`**
 
-```tsx
-import { COST_UNAVAILABLE } from './results/shared'
-```
-
-Apply the same shape at each site — the value cell renders the marker, not a number:
+`frontend/src/pages/CompareView.tsx:2335`. Add to the prop type, defaulting both to `true` so the nine existing call sites keep compiling:
 
 ```tsx
-{block.available ? formatEur(block.total_cost.total) : COST_UNAVAILABLE}
+  availableA = true, availableB = true,
+```
+```tsx
+  availableA?: boolean
+  availableB?: boolean
 ```
 
-Do not coalesce a missing `available` to `true`. A block from an older payload has no flag, and treating that as available reintroduces the defect.
+In the row body (`:2372-2382`), extend the existing present/absent ladder rather than replacing it. The side's own cell:
 
-- [ ] **Step 4: Run the test to verify it passes**
+```tsx
+<td className="py-1 text-right font-mono text-text">
+  {!availableA
+    ? <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+    : presentA ? fmt(va) : <span className="text-muted" title="Carrier not present in this scenario">—</span>}
+</td>
+```
+
+and the same for B. The Δ cell renders `—` when either side is unavailable:
+
+```tsx
+{(availableA && availableB && presentA && presentB)
+  ? <Delta v={vb - va} fmt={fmt} neutral />
+  : <span className="text-muted" title="Δ undefined — a scenario is unresolved or lacks this carrier">—</span>}
+```
+
+The totals row must not sum an unavailable side. Render `COST_UNAVAILABLE` in that side's total cell instead of `fmt(sumA)`.
+
+Import `COST_UNAVAILABLE` from `'./results/shared'` alongside the existing imports.
+
+- [ ] **Step 3: Add the props to `ABBarChart`**
+
+`frontend/src/pages/CompareView.tsx:2288`. Same two optional props, same defaults. An unavailable side must not plot — a zero-height bar reads as a measured zero, which is the defect:
+
+```tsx
+{availableA && <Bar dataKey={aName} fill="#3b82f6" />}
+{availableB && <Bar dataKey={bName} fill="#f59e0b" />}
+```
+
+and when neither side is available, return the marker instead of the chart:
+
+```tsx
+if (!availableA && !availableB) {
+  return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+}
+```
+
+Leave the existing `data.length === 0` branch alone — "no data for this period" is a different statement from "unresolved".
+
+- [ ] **Step 4: Add the props to `EconomicsTable` and export `EconomicsTab`**
+
+`EconomicsTable` (`:1512`) takes `ecA` / `ecB` rather than maps, but the cell rule is identical: an unavailable side's numeric cells render `COST_UNAVAILABLE`, and any Δ or derived column against it renders `—`.
+
+Add `export` to `function EconomicsTab` (`:1315`). That is the only structural change to the file.
+
+- [ ] **Step 5: Wire the six tabs**
+
+Each tab reads its own block's flag off both summaries and passes them down. `EconomicsTab` for example:
+
+```tsx
+availableA={sa.economics?.available ?? false}
+availableB={sb.economics?.available ?? false}
+```
+
+**`?? false`, never `?? true`.** A payload without the field must read as unavailable; coalescing absence to available reintroduces the whole defect.
+
+Apply to all call sites in `CapacityTab` (`capacity`), `DispatchTab` (`dispatch`), `EmissionsTab` (`emissions`), `EconomicsTab` (`economics`), `CurtailmentTab` (`curtailment`), `StorageCyclingTab` (`storage_cycling`) — 19 call sites in total. Confirm the block names against `backend/models/schemas.py`'s `ResultsSummary` rather than assuming them.
+
+- [ ] **Step 6: Run the test to verify it passes**
 
 ```bash
 npx vitest run src/pages/CompareView.availability.test.tsx
@@ -790,16 +821,85 @@ npx tsc --noEmit
 
 Expected: all pass, no type errors.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
+
+```bash
+git status --short
+git add frontend/src/pages/CompareView.tsx
+git commit -m "fix(compare): render unavailable per side instead of a fabricated zero
+
+The defect is the mixed case — one scenario resolved, the other not. Both
+unresolved already fell into the empty-data path; one-of-each rendered the
+unresolved side's cells as 0.00 next to the other's real figure, which is
+exactly what ADR-0001 forbids.
+
+The branch therefore lives at cell level in ABTable / ABBarChart /
+EconomicsTable, extending the ladder ABTable already had for absent-carrier
+vs present-but-zero. An unavailable side plots no bar at all: a zero-height
+bar reads as a measured zero."
+```
+
+Note the test file is already committed (`612f031f`) — only `CompareView.tsx` is staged here.
+
+---
+
+### Task 6: per-side availability in the bespoke Compare tables
+
+**Files:**
+- Modify: `frontend/src/pages/CompareView.tsx` — `LoadingTable` (:800), `PricesTable` (:1132), `PerCarrierPricesTable` (:927), the two LostLoad tables, and the Overview tables
+- Test: `frontend/src/pages/CompareView.availability.test.tsx` (extend)
+
+**Interfaces:**
+- Consumes: the `availableA` / `availableB` convention Task 5 establishes on `ABTable`, `ABBarChart` and `EconomicsTable`. Match it exactly — same prop names, same `true` defaults, same three-state ladder.
+- Produces: nothing consumed later.
+
+Background: four tabs render bespoke tables rather than the shared primitives, each with its own row shape, so they could not be wired mechanically in Task 5. They carry the same defect: a side whose block did not resolve renders `0.00`.
+
+| Tab | Line | Block | Renders |
+|---|---|---|---|
+| `LoadingTab` | 628 | `loading` | `LoadingTable` × 2 (lines, links) |
+| `PricesTab` | 856 | `prices` | `PricesTable`, `PerCarrierPricesTable` |
+| `LostLoadTab` | 1837 | `lost_load` | `LostLoadByCarrierTable`, `LostLoadBusTable` |
+| `OverviewTab` | 287 | several | `CountsTable`, `SolverTable`, `OverviewCapacityTable`, `OverviewStorageTable`, `OverviewLinksTable` |
+
+**Check `LostLoadTab` first, before assuming it needs anything.** `LostLoadComparison` is the one block that already carried `available` before Task 4 — it was the template the other eight copied. That tab may already branch on it correctly. If it does, say so in the report and change nothing there; do not add a second mechanism beside a working one.
+
+**`OverviewTab` needs a judgement call, so make it explicitly rather than silently.** It reads several blocks at once and its tables mix resolved and unresolved sources in one grid. Decide whether a per-cell marker or a per-table banner reads better there, state which you chose and why in the report, and keep it consistent across its five tables.
+
+- [ ] **Step 1: Extend the test first, one tab at a time**
+
+For each tab you touch, add the **pair** — the unavailable case AND the resolved case — following the shape of the three cases already in `CompareView.availability.test.tsx`. A test that only asserts "renders the marker when unavailable" passes against a component that always renders the marker; it proves nothing. This is not hypothetical: Task 4 shipped a Critical behind exactly that shape, and the test that caught it was the one asserting the opposite direction on the same fixture.
+
+Each tab needs its own `export` on its function to be renderable in isolation, same as `EconomicsTab`.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+npx vitest run src/pages/CompareView.availability.test.tsx
+```
+
+- [ ] **Step 3: Implement, one table at a time**
+
+Same three-state ladder as Task 5. `?? false` on every flag read, never `?? true`.
+
+- [ ] **Step 4: Verify**
+
+```bash
+npx vitest run src/pages/CompareView.availability.test.tsx
+npx vitest run
+npx tsc --noEmit
+```
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git status --short
 git add frontend/src/pages/CompareView.tsx frontend/src/pages/CompareView.availability.test.tsx
-git commit -m "fix(compare): render unavailable instead of a zero
+git commit -m "fix(compare): per-side availability in the bespoke tables
 
-CompareView had no unavailable branch, so Task 4's flags changed nothing a
-user saw. Reuses COST_UNAVAILABLE from results/shared, which exists so tabs
-cannot each spell their own version of unavailable."
+Completes the Compare half: Loading, Prices, LostLoad and Overview render
+their own tables rather than the shared primitives, so Task 5's wiring did
+not reach them."
 ```
 
 ---
