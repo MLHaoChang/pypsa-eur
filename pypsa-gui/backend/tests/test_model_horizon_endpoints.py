@@ -562,3 +562,89 @@ def test_a_budget_still_binds_on_a_flat_network(client, install_network, session
     assert p_nom <= 10.0 + 1e-6, (
         f"flat-network budgets must still apply by build_year; got p_nom_opt={p_nom}"
     )
+
+
+# ── Per-period snapshot weightings across a period edit ───────────────────
+# _capture_snapshot_weights_per_timestep captured ONLY period 0, keyed by
+# timestep; _reapply_snapshot_weights reindexed every period against it and
+# .fillna(1.0)'d the misses. Once periods carry DISTINCT calendars — which the
+# per-period range fix made survivable — periods 2+ matched nothing and their
+# weights were silently reset to 1.0, under-weighting their OPEX in the LP.
+
+
+def _weights_by_period(n) -> dict[int, list[float]]:
+    """{period: [objective weight per timestep]} for a MultiIndex network."""
+    sw = n.snapshot_weightings["objective"]
+    out: dict[int, list[float]] = {}
+    for (p, _ts), v in sw.items():
+        out.setdefault(int(p), []).append(float(v))
+    return out
+
+
+def test_each_period_keeps_its_own_weights_when_calendars_differ(
+    client, install_network, session_ctx,
+):
+    # 2030→2019, 2040→2020, 2050→2021 — three distinct operational years.
+    n = _distinct_range_network()
+    # Give every period a DIFFERENT, non-default weight so a reset to 1.0 and a
+    # broadcast from period 0 are both distinguishable from correct behaviour.
+    marks = {2030: 2.0, 2040: 3.0, 2050: 4.0}
+    for (p, ts) in n.snapshots:
+        n.snapshot_weightings.loc[(p, ts), "objective"] = marks[int(p)]
+    live = install_network(n)
+    before = _weights_by_period(live)
+
+    r = client.post("/api/network/investment_periods",
+                    json={"periods": [2030, 2040, 2050, 2060]})
+    assert r.status_code == 200, r.text
+
+    after = _weights_by_period(session_ctx(client).network)
+    assert after[2030] == before[2030]
+    assert after[2040] == before[2040], (
+        "period 2040 must keep its OWN weights, not period 2030's and not 1.0; "
+        f"got {after[2040]}, expected {before[2040]}"
+    )
+    assert after[2050] == before[2050]
+
+
+def test_a_new_period_inherits_the_template_rather_than_defaulting(
+    client, install_network, session_ctx,
+):
+    n = _distinct_range_network()
+    for (p, ts) in n.snapshots:
+        n.snapshot_weightings.loc[(p, ts), "objective"] = 2.0
+    install_network(n)
+
+    r = client.post("/api/network/investment_periods",
+                    json={"periods": [2030, 2040, 2050, 2060]})
+    assert r.status_code == 200, r.text
+
+    after = _weights_by_period(session_ctx(client).network)
+    assert 2060 in after
+    assert all(v == 2.0 for v in after[2060]), (
+        "a genuinely new period inherits the first captured period's weights as "
+        f"a template, since its range is templated from it too; got {after[2060]}"
+    )
+
+
+def test_same_calendar_broadcast_is_unchanged(client, install_network, session_ctx):
+    # The common workflow: one operational year replicated under every period.
+    # Behaviour here must not change.
+    block = pd.date_range("2024-01-01", periods=2, freq="h")
+    n = pypsa.Network()
+    n.set_snapshots(_multi_index([2030, 2040], block))
+    n.investment_periods = [2030, 2040]
+    n.add("Bus", "B1")
+    for (p, ts) in n.snapshots:
+        n.snapshot_weightings.loc[(p, ts), "objective"] = 7.0
+    install_network(n)
+
+    r = client.post("/api/network/investment_periods",
+                    json={"periods": [2030, 2040, 2050]})
+    assert r.status_code == 200, r.text
+
+    after = _weights_by_period(session_ctx(client).network)
+    for period in (2030, 2040, 2050):
+        assert all(v == 7.0 for v in after[period]), (
+            f"same-calendar broadcast regressed for {period}: {after[period]}"
+        )
