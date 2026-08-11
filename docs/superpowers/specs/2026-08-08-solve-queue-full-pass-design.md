@@ -126,6 +126,36 @@ There are **four** cold paths that build-and-register a context, not three:
 Path 3 is the highest-frequency of the four. Omitting it would leave the invariant
 false in the most common case.
 
+A fifth path can register a context without appearing in that table, because it
+does not build one: `load_project` (`routers/projects.py:2125-2320`) re-registers
+the CALLER's own already-built context under the target project's registry key,
+replacing whatever was resident there. That is why the original survey behind this
+table never named it — the survey looked for construction call sites
+(`build_context`, the hydrate-or-adopt entry point), and `load_project` reaches
+neither until after it has already reset the in-memory network and imported the
+target's netcdf into a context that already existed; there is no build call to find.
+Left unguarded, that re-registration can strand a queue job's context and let the
+freshly-loaded copy — read from the pre-solve file — take the registry slot and
+overwrite the solve's results on its next save (D-1's exact shape, reached through a
+route whose contract reads as "read this project off disk").
+
+`load_project` now refuses with 409 (`error_kind: solver_in_flight`) while a queue
+job owns the target registry key — checked once before `reset_network()` mutates
+anything, and re-checked under the key's hydrate lock at the registration step
+itself, closing the window between the two checks. When no queue job owns the key,
+`load_project` proceeds and replaces the registry entry for that key with the
+caller's context, under the same hydrate lock every other registration path uses.
+
+That replacement is why "One `ProjectContext` per project, always" above is not
+literally absolute: loading a *non-solving* resident project still swaps the
+registry entry out from under any request that is already mid-flight against the
+old context. For the duration of that one concurrent request, two `ProjectContext`
+objects exist for the same project — the in-flight request keeps running against
+the context it already holds, and the loser converges onto the winner at its own
+next request (whatever it resolves through R1's lock will be the replacement). The
+invariant holds at rest, between requests; this is the one instant it does not hold
+across.
+
 Lock ordering, which must not be violated: **hydrate → `_registry_lock` →
 `solve_queue._lock`**. No hydrate lock may be acquired while `_registry_lock` is
 held. The existing rule that `_registry_lock` never nests a per-context
@@ -201,6 +231,13 @@ automatically.
   documented with the ordering `hydrate → _registry_lock → solve_queue._lock`.
 - **R2.** All four cold paths in the Architecture table route their build-and-register
   through R1's lock, including both branches of `resolve_for_session`.
+- **R2a.** `load_project` (`routers/projects.py:2125-2320`) is a registration path
+  outside the Architecture table's four — it re-registers an already-built context
+  rather than building one, so R2 does not cover it. It refuses with 409
+  (`error_kind: solver_in_flight`) while a queue job owns the target registry key,
+  checked before `reset_network()` mutates anything and re-checked under the key's
+  hydrate lock at the registration step; otherwise it replaces the registry entry
+  for that key under the same lock.
 - **R3.** The dispatcher registers the context it builds for a non-resident project,
   under the same key `get_context` would resolve.
 - **R4.** The dispatcher sets `kind="queue"` on its context claim.
