@@ -422,3 +422,131 @@ def test_sample_weeks_reports_had_custom_weights_false_for_untouched_default_wei
     finally:
         with _user_ts_lock:
             _user_ts.clear()
+
+
+# ── CAPEX budget: stale investment periods must not constrain the LP ───────
+# `capex_budget_fn` iterated cfg.capex_budget_per_period (the CONFIG dict) and
+# constrained every extendable asset with build_year == period, without ever
+# checking the period still exists in n.investment_periods. Remove 2040 from the
+# horizon and its cap kept binding. Per-period load scaling already iterates the
+# NETWORK's periods, so the two config maps disagreed; this aligns them.
+
+
+def _budget_network(periods, build_year, p_nom_max=1000.0):
+    """
+    One extendable generator with an explicit build_year, on a MultiIndex
+    network spanning `periods`. The generator is deliberately cheap and the
+    load large, so an UNCONSTRAINED solve builds up to p_nom_max — which makes
+    a binding budget observable as a smaller p_nom_opt.
+    """
+    n = pypsa.Network()
+    block = pd.date_range("2024-01-01", periods=2, freq="h")
+    n.set_snapshots(_multi_index(periods, block))
+    n.investment_periods = periods
+    n.add("Bus", "B1")
+    n.add("Load", "L1", bus="B1", p_set=500.0)
+    n.add(
+        "Generator", "G1", bus="B1",
+        p_nom_extendable=True, p_nom_max=p_nom_max,
+        build_year=build_year, lifetime=100,
+        capital_cost=1.0, marginal_cost=1.0,
+    )
+    n.generators.loc["G1", "overnight_cost"] = 1.0
+    return n
+
+
+def _wait_for_solve(client, timeout_s: float = 120.0) -> None:
+    """
+    Block until `/api/simulation/status` leaves the running state.
+
+    The solve runs on a worker thread (`n.optimize()` is blocking, so the
+    backend never runs it inline). Poll rather than sleeping a fixed interval.
+    """
+    import time
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        st = client.get("/api/simulation/status").json()
+        if st.get("status") not in ("running", "queued"):
+            return
+        time.sleep(0.25)
+    raise AssertionError("solve did not finish within the timeout")
+
+
+def _solve_and_get_p_nom_opt(client, session_ctx, budgets):
+    """PUT the budget map, run a solve, return G1's optimised capacity.
+
+    `session_ctx` is a pytest fixture factory (see conftest.py), not a
+    module global — it has to be threaded through from the calling test
+    rather than referenced as a free variable, or this raises NameError
+    before the solve result can even be read.
+
+    `voll` (value of lost load) is set here too, and is load-bearing, not
+    cosmetic. The fixtures pin Load at 500 MW against a budget of only
+    EUR 10 (coef 1 EUR/MW => 10 MW cap). With NO other supply, capping G1
+    below the fixed load makes the LP genuinely INFEASIBLE rather than
+    "constrained to a smaller p_nom_opt" — confirmed empirically: without
+    voll, `p_nom_opt` silently stays at its pre-solve default of 0.0 (the
+    solve fails with condition="infeasible"), and a naive `<= 10.0` assertion
+    passes for the wrong reason regardless of whether the budget guard is
+    correct. A high voll adds a per-bus slack generator (build_year=0,
+    unbounded lifetime — active in every period, including 2030 for the
+    build_year=2040 fixture, which would otherwise raise PyPSA's "Empty LHS
+    with non-zero RHS" — the generator literally cannot supply demand in a
+    period before its own build_year) that absorbs any load G1's cap can't
+    cover, at a cost far above G1's marginal/capital cost — so the LP always
+    prefers building G1 up to whatever cap actually applies, and p_nom_opt
+    genuinely reports that cap instead of a stale zero.
+    """
+    r = client.put("/api/simulation/solver_config",
+                   json={"capex_budget_per_period": budgets, "voll": 10000.0})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/simulation/run")
+    assert r.status_code in (200, 202), r.text
+    _wait_for_solve(client)
+    return float(session_ctx(client).network.generators.at["G1", "p_nom_opt"])
+
+
+def test_a_budget_for_a_period_not_in_the_horizon_does_not_constrain(
+    client, install_network, session_ctx,
+):
+    # 2040 is NOT an investment period, but the generator still carries
+    # build_year=2040 and the config still holds 2040's budget.
+    install_network(_budget_network([2030, 2050], build_year=2040))
+    p_nom = _solve_and_get_p_nom_opt(client, session_ctx, {"2040": 10.0})
+    assert p_nom > 10.0, (
+        "a budget for a period outside n.investment_periods must not bind; "
+        f"got p_nom_opt={p_nom}"
+    )
+
+
+def test_a_budget_for_a_live_period_still_binds(client, install_network, session_ctx):
+    # The gate must not be over-broad: 2030 IS a period, so its cap applies.
+    install_network(_budget_network([2030, 2050], build_year=2030))
+    p_nom = _solve_and_get_p_nom_opt(client, session_ctx, {"2030": 10.0})
+    assert p_nom <= 10.0 + 1e-6, (
+        f"a live period's budget must still constrain; got p_nom_opt={p_nom}"
+    )
+
+
+def test_a_budget_still_binds_on_a_flat_network(client, install_network, session_ctx):
+    # REGRESSION GUARD. _wrap_with_capex_budget is not multi-period gated, and
+    # build_year is meaningful without investment periods. A naive membership
+    # check against an empty n.investment_periods would silently disable every
+    # budget on every flat network.
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2024-01-01", periods=2, freq="h"))
+    n.add("Bus", "B1")
+    n.add("Load", "L1", bus="B1", p_set=500.0)
+    n.add(
+        "Generator", "G1", bus="B1",
+        p_nom_extendable=True, p_nom_max=1000.0,
+        build_year=2030, lifetime=100,
+        capital_cost=1.0, marginal_cost=1.0,
+    )
+    n.generators.loc["G1", "overnight_cost"] = 1.0
+    install_network(n)
+
+    p_nom = _solve_and_get_p_nom_opt(client, session_ctx, {"2030": 10.0})
+    assert p_nom <= 10.0 + 1e-6, (
+        f"flat-network budgets must still apply by build_year; got p_nom_opt={p_nom}"
+    )
