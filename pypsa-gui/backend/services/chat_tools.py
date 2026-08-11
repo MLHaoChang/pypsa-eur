@@ -1962,8 +1962,17 @@ def list_project_snapshots(name: str) -> list[dict]:
 
 
 def restore_project_snapshot(name: str, snapshot_id: str) -> dict:
+    # `restore_snapshot` now also declares `db`/`user`/`session` (it moves the
+    # session's active-project pointer after a successful restore, same as
+    # load_project). Unlike `import_bundle`, this handler is plain `def` — not
+    # async — so `_route` (chat_tools.py:1494) can call it directly and inject
+    # all three the way it already does for `activate_project`/`load_project`,
+    # instead of hand-injecting them here. Calling it positionally with just
+    # `snapshot_id` and `project` — as this used to — would otherwise hand
+    # `db`, `user` and `session` their raw `Depends` sentinels and crash (see
+    # `_route`'s docstring on this exact failure mode).
     from routers.snapshots import restore_snapshot as _h
-    return _h(snapshot_id, _authorized_project(name))
+    return _route(_h, snapshot_id, _authorized_project(name))
 
 
 def delete_project_snapshot(name: str, snapshot_id: str) -> None:

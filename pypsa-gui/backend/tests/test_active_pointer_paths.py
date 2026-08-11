@@ -106,6 +106,66 @@ def test_import_bundle_moves_the_pointer(client, api_project, _auth_db, tmp_path
     )
 
 
+def test_restore_snapshot_moves_the_pointer(client, api_project, project_row, _auth_db):
+    _engine, session_local = _auth_db
+    a = api_project("alpha")
+    b = api_project("beta")
+    client.post(f"/api/projects/{b}/snapshots", json={"label": "before"})
+    client.post(f"/api/projects/{a}/activate")
+
+    snap_id = client.get(f"/api/projects/{b}/snapshots").json()[0]["id"]
+    client.post(f"/api/projects/{b}/snapshots/{snap_id}/restore")
+
+    assert _pointer(session_local, client) == str(project_row(b).id), (
+        "restoring a saved snapshot rebinds the active context to that Project; "
+        "the pointer must follow"
+    )
+
+
+def test_restore_project_snapshot_tool_call_moves_the_pointer(
+    client, api_project, project_row, _auth_db
+):
+    """
+    Regression for `services/chat_tools.py`'s `restore_project_snapshot` — it
+    calls the `restore_snapshot` handler POSITIONALLY, bypassing `_route()`.
+    Once `restore_snapshot` grew `db`/`user`/`session` dependencies (this task),
+    that positional call started handing all three the raw `Depends` sentinels
+    instead of resolved values, and the handler would crash — on
+    `project_registry.require_user()` getting a `Depends`, or on
+    `set_active_project` doing so — before it ever reached the pointer write.
+    The HTTP-level test above cannot see this: it never goes through
+    `chat_tools`, only through the route.
+    """
+    from services import chat_tools
+    from services.auth_service import resolve_session_row
+    from settings import get_settings
+
+    _engine, session_local = _auth_db
+    a = api_project("alpha")
+    b = api_project("beta")
+    client.post(f"/api/projects/{b}/snapshots", json={"label": "before"})
+    client.post(f"/api/projects/{a}/activate")
+
+    snap_id = client.get(f"/api/projects/{b}/snapshots").json()[0]["id"]
+
+    raw = client.cookies.get(get_settings().session_cookie_name)
+    with session_local() as db:
+        session_id = resolve_session_row(db, raw).id
+
+    chat_tools.set_acting_session(session_id)
+    try:
+        result = chat_tools.restore_project_snapshot(b, snap_id)
+    finally:
+        chat_tools.set_acting_session(None)
+
+    assert result["restored"] == snap_id
+    assert _pointer(session_local, client) == str(project_row(b).id), (
+        "the chat-tool call path must move the pointer exactly like the HTTP "
+        "route does; a positional call that silently drops db/user/session "
+        "must not reach this far without moving it"
+    )
+
+
 def test_path_scoped_read_does_not_move_the_pointer(client, api_project, _auth_db):
     _engine, session_local = _auth_db
     a = api_project("alpha")
