@@ -29,9 +29,14 @@ import shutil
 from datetime import datetime, timezone
 
 import pypsa
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from services import change_log_service
+from sqlalchemy.orm import Session as DBSession
+
+from db.models import Session as SessionRow, User
+from db.session import get_db
+from deps import current_session, optional_user
+from services import active_project, change_log_service
 from services.dispatch_status import (
     dispatch_status as _classify_dispatch,
     network_has_dispatch,
@@ -405,7 +410,11 @@ def list_snapshots(
 
 @router.post("/{name}/snapshots/{snapshot_id}/restore")
 def restore_snapshot(
-    snapshot_id: str, project: AuthorizedProject = ProjectAccessDep
+    snapshot_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ):
     """
     Restore a snapshot: overwrite the project files + reload in-memory.
@@ -516,6 +525,17 @@ def restore_snapshot(
         # use, so a snapshot taken by an older GUI version restores instead of
         # 500-ing on an unknown solver_config key.
         _state["solver_config"] = _solver_config_from_dict(json.loads(cfg_path.read_text()))
+
+    # Restoring a saved snapshot rebinds this session's active context to that
+    # Project, so the pointer follows — same rule as load_project. AuthorizedProject
+    # carries the identity but not the ORM row, and set_active_project needs the row.
+    if session is not None:
+        from services import project_registry
+        project_row = project_registry.find_project(
+            db, project_registry.require_user(user), project.name
+        )
+        if project_row is not None:
+            active_project.set_active_project(db, session, project_row)
 
     # Hydrate simulation state from the restored project's metadata. Without
     # this, restoring a previously-solved snapshot leaves the header status

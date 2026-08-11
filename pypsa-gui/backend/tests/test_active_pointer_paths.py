@@ -79,6 +79,26 @@ def test_import_bundle_moves_the_pointer(client, api_project, _auth_db):
     )
 
 
+def test_restore_snapshot_moves_the_pointer(client, api_project, project_row, _auth_db):
+    """A saved snapshot (state capture), not a time step — see CONTEXT.md."""
+    _engine, session_local = _auth_db
+    a = api_project("alpha")
+    b = api_project("beta")
+    client.post(f"/api/projects/{b}/snapshots", json={"label": "before"})
+    client.post(f"/api/projects/{a}/activate")
+
+    listing = client.get(f"/api/projects/{b}/snapshots").json()
+    assert listing, "no saved snapshot to restore"
+    snap_id = listing[0]["id"]
+    resp = client.post(f"/api/projects/{b}/snapshots/{snap_id}/restore")
+    assert resp.status_code < 400, f"restore failed: {resp.status_code} {resp.text[:200]}"
+
+    assert _pointer(session_local, client) == str(project_row(b).id), (
+        "restoring a saved snapshot rebinds the active context to that Project; "
+        "the pointer must follow"
+    )
+
+
 def test_path_scoped_read_does_not_move_the_pointer(client, api_project, _auth_db):
     _engine, session_local = _auth_db
     a = api_project("alpha")
