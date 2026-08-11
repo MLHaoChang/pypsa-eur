@@ -18,9 +18,12 @@ they use and why they differ.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
@@ -28,7 +31,7 @@ import local_mode
 from db.models import User
 from db.session import get_db
 from deps import optional_user
-from services.solve_queue import solve_queue
+from services.solve_queue import _TERMINAL, solve_queue
 
 router = APIRouter()
 
@@ -189,6 +192,136 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
     if f"{project.org_id}:" != prefix:
         return False  # the key's org half lied about the row's real owner
     return project_acl.can_access_project(db, user, project)
+
+
+def _visible_job_or_404(db: DBSession, user: User, job_id: int) -> dict:
+    """
+    The job, if the caller may SEE it; the genuine not-found 404 otherwise.
+
+    404, never 403, with the not-found message BYTE FOR BYTE — same reasoning as
+    `abort_job`: a 403 would confirm the id exists and hand back the enumeration
+    the redacted listing just took away.
+
+    `_may_see`, not `_may_abort`. The two deliberately disagree for a job
+    orphaned by a project delete: it stays ABORTABLE by its own org so a running
+    solve can still be stopped and the shared solver freed. That exception is
+    about stopping work, not about reading the deleted project's log, so the
+    listing predicate is the right one here.
+    """
+    from services import project_acl
+
+    not_found = HTTPException(404, f"No solve job with id {job_id}.")
+    job = solve_queue.get_job(job_id)
+    if job is None:
+        raise not_found
+    prefix = _org_prefix(db, user)
+    allowed = project_acl.accessible_project_ids(db, user, [_project_uuid(job, prefix)])
+    if not _may_see(job, prefix, allowed):
+        raise not_found
+    return job
+
+
+def _sse_line(text: object) -> str:
+    """One SSE `data:` frame. Newlines would terminate the frame early."""
+    safe = str(text).replace("\n", " ").replace("\r", "")
+    return f"data: {safe}\n\n"
+
+
+@router.get("/{job_id}/log_history")
+def job_log_history(
+    job_id: int,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    The lines this job emitted — live while it runs, retained once terminal.
+
+    Readable regardless of which project the caller is viewing and regardless
+    of whether the job's context is still resident, because the queue lives on
+    the JOB. `/api/simulation/log_history` answers a different question (what
+    the caller's ACTIVE context last logged) and is unchanged.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    job = _visible_job_or_404(db, user, job_id)
+    q = solve_queue.get_log_queue(job_id)
+    lines = q.history() if q is not None else []
+    return {"lines": lines, "status": job["status"]}
+
+
+@router.get("/{job_id}/log_stream")
+async def job_log_stream(
+    job_id: int,
+    request: Request,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Server-Sent Events for ONE job's log.
+
+    Reads through `BufferedLogQueue.subscribe()`, not `get()`. The legacy `get()`
+    consumer is DESTRUCTIVE — it pops — so draining the same queue here would
+    race `/api/simulation/log_stream` for the foreground's lines and each would
+    see half of them. The fanout deque is exactly the side channel that exists
+    for a second consumer, and it never observes the `None` close sentinel.
+
+    Termination is therefore the job's own status, not a sentinel: stop once the
+    job is terminal AND the deque has drained, then emit `done`.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    _visible_job_or_404(db, user, job_id)
+
+    async def generate():
+        q = solve_queue.get_log_queue(job_id)
+        if q is None:
+            yield "data: No log for this job\n\n"
+            return
+
+        for line in q.history():
+            if await request.is_disconnected():
+                return
+            yield _sse_line(line)
+
+        sub_id, dq = q.subscribe()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                drained = False
+                while dq:
+                    drained = True
+                    yield _sse_line(dq.popleft())
+                if drained:
+                    continue
+                snapshot = solve_queue.get_job(job_id) or {}
+                if snapshot.get("status") in _TERMINAL:
+                    break
+                await asyncio.sleep(0.25)
+        finally:
+            # A closed browser tab would otherwise leak the deque + dict entry.
+            q.unsubscribe(sub_id)
+
+        final = solve_queue.get_job(job_id) or {}
+        payload = json.dumps({
+            "status": final.get("status"),
+            "objective": final.get("objective"),
+            "solve_time": final.get("solve_time"),
+            "condition": final.get("condition"),
+        })
+        yield f"event: done\ndata: {payload}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("")
