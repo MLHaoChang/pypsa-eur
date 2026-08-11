@@ -38,20 +38,43 @@ def test_load_project_moves_the_pointer(client, api_project, project_row, _auth_
     )
 
 
-def test_create_from_template_moves_the_pointer(client, api_project, _auth_db):
+def test_create_from_template_moves_the_pointer(client, api_project, _auth_db, tmp_path, monkeypatch):
     # NOTE: the brief's route used `/from-template/blank`. The real decorator is
     # `@router.post("/from_template/{template_id}")` (underscore) and `"blank"`
     # is not a registered template id (`_TEMPLATE_DEFAULT_NAMES` only has
-    # "3bus"/"ieee14"/"belgium", built by project_templates/_build.py, which was
-    # run once in this worktree so `3bus/network.nc` exists on disk). Corrected
-    # to a real template id + the real path; the arrange step only, not the
-    # assertions.
+    # "3bus"/"ieee14"/"belgium"). Corrected the URL to the real one below.
+    #
+    # The real "3bus" template.nc is a gitignored build artifact
+    # (`project_templates/3bus/network.nc`) produced only by manually running
+    # `project_templates/_build.py`, which does a genuine LOPF solve. Nothing in
+    # `gui-tests`, conftest, or CI builds it — a fresh checkout does not have
+    # it, and the endpoint would 404 ("network.nc is missing") before ever
+    # reaching the code this test exists to cover. So this test fakes the
+    # template instead of depending on that artifact: `create_from_template`
+    # only copies `_PROJECT_TEMPLATES_DIR/<id>/network.nc` and netcdf-imports
+    # it — it never solves it — so a minimal unsolved network, written to a
+    # tmp dir that `_PROJECT_TEMPLATES_DIR` is monkeypatched to, is a faithful
+    # stand-in for everything the endpoint actually touches. This keeps the
+    # pointer assertion executing on every checkout instead of skipping.
+    import pandas as pd
+    import pypsa
+    from routers import projects as projects_router
+
+    template_dir = tmp_path / "3bus"
+    template_dir.mkdir()
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=2, freq="h"))
+    n.add("Bus", "B1")
+    n.export_to_netcdf(str(template_dir / "network.nc"))
+    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
+
     _engine, session_local = _auth_db
     a = api_project("alpha")
     client.post(f"/api/projects/{a}/activate")
     before = _pointer(session_local, client)
 
-    client.post("/api/projects/from_template/3bus", params={"name": "fromtpl"})
+    resp = client.post("/api/projects/from_template/3bus", params={"name": "fromtpl"})
+    assert resp.status_code == 200, resp.text
 
     after = _pointer(session_local, client)
     assert after is not None and after != before, (
