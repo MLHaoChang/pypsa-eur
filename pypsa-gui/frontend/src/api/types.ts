@@ -357,6 +357,11 @@ export interface CarrierPeriodValue {
 }
 
 export interface CapacityComparison {
+  // False means this block resolved nothing and every figure below is a
+  // default zero, not a measurement — see ADR-0001. True guarantees the
+  // figures were computed from a solved network. Mirrors the backend's
+  // `available` flag (backend/models/schemas.py: CapacityComparison).
+  available: boolean
   capacity_mw_by_carrier: Record<string, CarrierPeriodValue>
   // Total annuitised CAPEX (existing + new) per carrier — matches the
   // live /results/cost_breakdown numbers.
@@ -382,6 +387,8 @@ export interface CapacityComparison {
 }
 
 export interface DispatchComparison {
+  // See CapacityComparison.available — same ADR-0001 contract.
+  available: boolean
   dispatch_gwh_by_carrier: Record<string, CarrierPeriodValue>
   opex_meur: CarrierPeriodValue
   total_load_gwh: CarrierPeriodValue
@@ -433,6 +440,8 @@ export interface PricesComparison {
 }
 
 export interface EmissionsComparison {
+  // See CapacityComparison.available — same ADR-0001 contract.
+  available: boolean
   total_kt: CarrierPeriodValue
   by_carrier_kt: Record<string, CarrierPeriodValue>
   intensity_kg_per_mwh: CarrierPeriodValue
@@ -467,6 +476,8 @@ export interface AssetLCOHEntry {
 }
 
 export interface EconomicsComparison {
+  // See CapacityComparison.available — same ADR-0001 contract.
+  available: boolean
   by_carrier: Record<string, CarrierEconomics>
   // Per-Link LCOH rows (electrolysers, heat pumps, P2X, ...). Empty when
   // no extendable Link in either project has non-trivial dispatch.
@@ -474,6 +485,10 @@ export interface EconomicsComparison {
 }
 
 export interface CurtailmentComparison {
+  // True even for a genuine structural zero (a solved network with no
+  // curtailing generators) — only False means unresolved. See
+  // CapacityComparison.available and the backend docstring for the nuance.
+  available: boolean
   total_gwh: CarrierPeriodValue
   by_carrier_gwh: Record<string, CarrierPeriodValue>
   rate_pct_by_carrier: Record<string, CarrierPeriodValue>
@@ -515,6 +530,10 @@ export interface StorageUnitCycles {
 }
 
 export interface StorageCyclingComparison {
+  // True even for a genuine structural zero (a solved network with no
+  // StorageUnits) — only False means unresolved. See
+  // CapacityComparison.available and the backend docstring for the nuance.
+  available: boolean
   cycles_by_carrier: Record<string, CarrierPeriodValue>
   by_unit: StorageUnitCycles[]
 }
