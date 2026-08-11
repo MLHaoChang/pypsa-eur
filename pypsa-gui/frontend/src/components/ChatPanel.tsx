@@ -48,6 +48,7 @@ import { useChatStore, type UploadMetaUI } from '../store/chatStore'
 import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
+import * as speechOut from '../utils/speechOut'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
@@ -850,6 +851,8 @@ export default function ChatPanel() {
   // comment there for why AssistantDock's collapsed state has to be visible
   // here at all.
   const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
+  const assistantSpeakEnabled = useUIStore((s) => s.assistantSpeakEnabled)
+  const toggleAssistantSpeak = useUIStore((s) => s.toggleAssistantSpeak)
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
   const prevProjectRef = useRef<string | null | undefined>(undefined)
 
@@ -1261,6 +1264,10 @@ export default function ChatPanel() {
   // last, and is the safer default for a feature that decides whether the
   // machine talks out loud.
   const dictatedRef = useRef(false)
+  // Whether the turn currently in flight was dictated. Separate from
+  // `dictatedRef`, which describes the COMPOSER and is cleared by the send —
+  // by the time the answer lands, the composer has been empty for a while.
+  const voiceTurnRef = useRef(false)
 
   const onSpeechFinal = useCallback((text: string) => {
     dictatedRef.current = true
@@ -1575,6 +1582,16 @@ export default function ChatPanel() {
         break
       }
       case 'turn_done': {
+        // Modal reciprocity: a turn begun with the microphone is answered
+        // aloud. Decided by `voiceTurnRef`, captured at SEND — `dictatedRef`
+        // is cleared by the send itself, and the mute is read live so
+        // muting mid-turn takes effect on this answer rather than the next.
+        if (voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
+          const last = useChatStore.getState().messages
+            .filter((m) => m.role === 'assistant').slice(-1)[0]
+          if (last) speechOut.speak(speechOut.plainTextForSpeech(last.content))
+        }
+        voiceTurnRef.current = false
         const d = _frame_data<TurnDoneFrame>(frame)
         if (d.usage) {
           // M10: server reports token counts; client renders them as-is.
@@ -1621,6 +1638,12 @@ export default function ChatPanel() {
   const [pendingSendAttachIds, setPendingSendAttachIds] = useState<string[]>([])
 
   const dispatchSend = useCallback((text: string, attachIds: string[]) => {
+    // FIRST, before the composer reset four lines below clears `dictatedRef`.
+    // Reading it later — say, next to the createChatStream call that consumes
+    // `input_mode` — always yields false, and the bug is invisible: the
+    // request still carries the right mode, because that expression is
+    // evaluated before the reset too. Only the SPOKEN answer goes missing.
+    voiceTurnRef.current = dictatedRef.current
     appendMessage({
       role: 'user', content: text,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
@@ -1641,7 +1664,10 @@ export default function ChatPanel() {
         // before they went looking, which is worse than no context at all —
         // it is a confident wrong referent.
         ui_context: buildUiContext() ?? undefined,
-        input_mode: dictatedRef.current ? 'voice' : 'text',
+        // `voiceTurnRef`, not `dictatedRef`: this literal is evaluated
+        // after dispatchSend has already reset the composer, so reading
+        // the composer flag here always yields 'text'.
+        input_mode: voiceTurnRef.current ? 'voice' : 'text',
       },
       handleFrame,
       (err) => {
@@ -1693,6 +1719,12 @@ export default function ChatPanel() {
   }, [])
 
   const onAbort = useCallback(async () => {
+    // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
+    // reading an answer the user just cancelled is the single most alarming
+    // way this feature can fail — there is no visible progress bar to explain
+    // why the machine is still talking.
+    speechOut.cancelSpeech()
+    voiceTurnRef.current = false
     if (!sessionId) return
     try {
       await postChatAbort(sessionId)
@@ -1779,6 +1811,26 @@ export default function ChatPanel() {
           <option value="claude-opus-5">Opus 5</option>
         </select>
         <UsageMeter />
+        {/* Global mute for spoken answers. Beside the gear rather than inside
+            it: the spec pairs reciprocity with "a global mute", and a mute
+            you have to open a popover to reach is not one you can hit while
+            the machine is mid-sentence. Hidden entirely where the platform has
+            no speech synthesis — a dead toggle is worse than no toggle. */}
+        {speechOut.isSpeechOutAvailable() && (
+          <button
+            className="px-1.5 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+            style={{ color: assistantSpeakEnabled ? 'var(--color-accent)' : 'var(--color-muted)' }}
+            onClick={() => { if (assistantSpeakEnabled) speechOut.cancelSpeech(); toggleAssistantSpeak() }}
+            title={assistantSpeakEnabled
+              ? 'Spoken answers are on for dictated questions — click to mute'
+              : 'Spoken answers are muted — click to unmute'}
+            aria-label="Mute spoken answers"
+            aria-pressed={!assistantSpeakEnabled}
+            data-testid="chat-speak-toggle"
+          >
+            {assistantSpeakEnabled ? '🔊' : '🔇'}
+          </button>
+        )}
         {/* Phase D polish #3 — ⚙ gear popover for chat-panel preferences.
             Currently holds one toggle (auto-uncheck after send); future
             settings live here too. */}

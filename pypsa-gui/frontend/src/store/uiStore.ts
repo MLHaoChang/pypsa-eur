@@ -202,6 +202,20 @@ function persistAssistantDockOpen(open: boolean) {
   try { localStorage.setItem(ASSISTANT_DOCK_KEY, open ? 'open' : 'closed') } catch { /* noop */ }
 }
 
+// Whether the assistant may answer a DICTATED turn out loud. Default on: the
+// spoken mode is chosen by the act of using the microphone, so a user who
+// never dictates never hears it, and one who does expects an answer back —
+// defaulting it off would mean nobody discovers reciprocity exists. Persisted
+// because "does this machine talk out loud" is a preference people set once.
+const ASSISTANT_SPEAK_KEY = 'network-diagram:assistant-speak'
+
+function storedAssistantSpeak(): boolean {
+  try {
+    return localStorage.getItem(ASSISTANT_SPEAK_KEY) !== 'off'
+  } catch { /* noop */ }
+  return true
+}
+
 function persistOpenTabs(tabs: OpenTab[]) {
   try { localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(tabs)) } catch { /* noop */ }
 }
@@ -380,6 +394,8 @@ interface UIStore {
   setAssistantDockOpen: (open: boolean) => void
   toggleAssistantDock: () => void
   setAssistantDockWidth: (px: number) => void
+  assistantSpeakEnabled: boolean
+  toggleAssistantSpeak: () => void
   constrainDockWidth: (desired: number, available: number) => number
   readStoredDockOpen: () => boolean
   setProjectSwitchInProgress: (v: boolean) => void
@@ -442,6 +458,7 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockWidth: storedAssistantDockWidth(),
+  assistantSpeakEnabled: storedAssistantSpeak(),
   projectSwitchInProgress: false,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
@@ -563,6 +580,11 @@ export const useUIStore = create<UIStore>((set) => ({
   constrainDockWidth: (desired: number, available: number) =>
     Math.max(DOCK_MIN_W, Math.min(desired, available - DOCK_MIN_W)),
   readStoredDockOpen: () => storedAssistantDockOpen(),
+  toggleAssistantSpeak: () => set(s => {
+    const next = !s.assistantSpeakEnabled
+    try { localStorage.setItem(ASSISTANT_SPEAK_KEY, next ? 'on' : 'off') } catch { /* noop */ }
+    return { assistantSpeakEnabled: next }
+  }),
   toggleCompareRail: () => set(s => {
     const next = !s.compareRailOpen
     try { localStorage.setItem(COMPARE_RAIL_KEY, next ? 'true' : 'false') } catch { /* noop */ }
