@@ -18,7 +18,12 @@ from __future__ import annotations
 import pandas as pd
 import pypsa
 
-from routers.network import _infer_snapshot_freq, _user_ts, _user_ts_lock
+from routers.network import (
+    _infer_snapshot_freq,
+    _reapply_snapshot_weights,
+    _user_ts,
+    _user_ts_lock,
+)
 from tests.conftest import build_network
 
 
@@ -339,10 +344,21 @@ def test_removing_a_period_drops_only_its_block(client, install_network, session
     assert after[2050] == before[2050]
 
 
-def test_flat_to_multi_promotion_still_gives_every_period_the_flat_range(client, install_network, session_ctx):
+def test_flat_to_multi_promotion_preserves_the_flat_range_and_its_custom_weights(
+    client, install_network, session_ctx,
+):
+    # Was test_flat_to_multi_promotion_still_gives_every_period_the_flat_range.
+    # Widened: the original body used default (all-1.0) weights, so
+    # _capture_snapshot_weights_per_timestep hit its all-default early return
+    # and _reapply_snapshot_weights short-circuited at `if captured is None:
+    # return` — the promotion branch's dict-building/broadcast logic never
+    # ran. Giving the source non-default weights forces that branch to
+    # actually execute.
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2024-01-01", periods=4, freq="h"))
     n.add("Bus", "B1")
+    for ts in n.snapshots:
+        n.snapshot_weightings.loc[ts, "objective"] = 9.0
     install_network(n)
 
     resp = client.post(
@@ -351,9 +367,19 @@ def test_flat_to_multi_promotion_still_gives_every_period_the_flat_range(client,
     )
     assert resp.status_code == 200, resp.text
 
-    after = _period_blocks(session_ctx(client).network)
+    live = session_ctx(client).network
+    after = _period_blocks(live)
     assert after[2030] == after[2040]
     assert after[2030][0].startswith("2024")
+
+    after_weights = _weights_by_period(live)
+    assert after_weights[2030] == [9.0, 9.0, 9.0, 9.0], (
+        "promotion must broadcast the flat source's own custom weights to "
+        f"every period, not reset to the PyPSA default 1.0; got {after_weights[2030]}"
+    )
+    assert after_weights[2040] == [9.0, 9.0, 9.0, 9.0], (
+        f"got {after_weights[2040]}"
+    )
 
 
 # ── B10: had_custom_weights on POST /network/snapshots/sample_weeks ────────
@@ -648,3 +674,47 @@ def test_same_calendar_broadcast_is_unchanged(client, install_network, session_c
         assert all(v == 7.0 for v in after[period]), (
             f"same-calendar broadcast regressed for {period}: {after[period]}"
         )
+
+
+# ── _reapply_snapshot_weights: MultiIndex-source capture onto a flat target ──
+# No live endpoint reaches this branch today: set_multi_period_snapshots and
+# set_investment_periods' rebuild branch always target a MultiIndex, and
+# set_investment_periods' demotion branch (empty `periods`) collapses weights
+# via _flatten_snapshot_state's direct manipulation of n._snapshots_data
+# instead of calling _capture_snapshot_weights_per_timestep /
+# _reapply_snapshot_weights at all. The branch is still real, spec'd code —
+# a {period: frame} capture reapplied onto a flat n.snapshots must collapse
+# to the FIRST (sorted) captured period's weights. This is a direct unit
+# test of _reapply_snapshot_weights, not an HTTP test: driving a real network
+# through this transition via PyPSA's set_snapshots trips a pandas
+# MultiIndex→flat reindex bug ("cannot include dtype 'M' in a buffer") that
+# _flatten_snapshot_state's docstring documents and works around — unrelated
+# to this fix, and not worth reproducing just to exercise this assertion.
+
+
+def test_reapply_collapses_a_dict_capture_to_the_first_period_on_a_flat_target():
+    n = pypsa.Network()
+    flat_idx = pd.date_range("2019-01-01", periods=3, freq="h")
+    flat_idx.name = "snapshot"
+    n.set_snapshots(flat_idx)
+    n.add("Bus", "B1")
+
+    # Period 2030's own timesteps happen to equal the flat target — a
+    # deliberately unhelpful example would make dates differ, but the point
+    # here is WHICH period's frame gets picked, not date alignment.
+    p0_idx = flat_idx
+    p1_idx = pd.date_range("2020-01-01", periods=3, freq="h")
+    p1_idx.name = "snapshot"
+    captured = {
+        2030: pd.DataFrame({"objective": [11.0, 12.0, 13.0]}, index=p0_idx),
+        2040: pd.DataFrame({"objective": [21.0, 22.0, 23.0]}, index=p1_idx),
+    }
+
+    _reapply_snapshot_weights(n, captured)
+
+    got = n.snapshot_weightings["objective"].tolist()
+    assert got == [11.0, 12.0, 13.0], (
+        "a MultiIndex-source capture reapplied onto a flat target must "
+        "collapse to the FIRST (sorted) captured period's weights — "
+        f"period 2030's [11, 12, 13], not 2040's and not 1.0; got {got}"
+    )
