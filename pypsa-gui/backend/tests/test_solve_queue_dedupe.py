@@ -95,7 +95,9 @@ def test_a_terminal_job_does_not_block_a_new_one(
     first = client.post("/api/simulation/queue", json={"project_id": "Again"}).json()
     _wait_until(
         lambda: (solve_queue.get_job(first["id"]) or {}).get("status")
-        in ("completed", "failed", "aborted", "interrupted"),
+        # `_TERMINAL` in services/solve_queue.py — no "interrupted" status
+        # exists on `SolveJob` as of Increment 2 (that's Increment 3).
+        in ("completed", "failed", "aborted"),
         timeout=90, interval=0.2,
     )
     second = client.post("/api/simulation/queue", json={"project_id": "Again"}).json()
