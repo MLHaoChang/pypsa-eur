@@ -8,6 +8,7 @@ import {
 import toast from 'react-hot-toast'
 import type { ProjectInfo } from '../api/types'
 import { projectsApi } from '../api/projects'
+import { formatApiDetail } from '../api/client'
 import { useAuthMode } from '../auth/AuthModeProvider'
 import FromFolderTab from './FromFolderTab'
 import { ioApi } from '../api/io'
@@ -483,16 +484,37 @@ function CloneTab({ existingProjects, onClose }: {
       onClose()
     },
     onError: (e: Error) => {
+      // Same seam ScenariosPanel/`formatApiDetail` use to read a structured
+      // FastAPI detail off an axios error — `e.message` here is only ever
+      // axios's generic "Request failed with status code 409", never the
+      // server's typed message.
+      const detail = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail
+      const errorKind = detail && typeof detail === 'object'
+        ? (detail as { error_kind?: unknown }).error_kind
+        : undefined
+      const msg = formatApiDetail(detail, e.message)
+
+      if (errorKind === 'solver_in_flight') {
+        // `load(src)` was refused (409) BEFORE it touched anything — the
+        // queue still owns the source's context. There is no partial state
+        // to recover from, so the "reopen your original project" advice
+        // below would be actively wrong here: show the server's own
+        // actionable message instead.
+        toast.error(`Clone failed: ${msg}`, { duration: 8000 })
+        appLog('ERROR', `Clone failed: ${msg}`)
+        return
+      }
+
       // Partial-failure note: if load() succeeded but save() didn't, the
       // in-memory network is now the SOURCE, not the original project. The
       // user must open their original to recover. We don't auto-recover here
       // because we can't reliably distinguish "save failed" from "saved
       // partially". Tell the user explicitly.
       toast.error(
-        `Clone failed: ${e.message}. The in-memory network may now be '${sourceId}' — reopen your original project to recover.`,
+        `Clone failed: ${msg}. The in-memory network may now be '${sourceId}' — reopen your original project to recover.`,
         { duration: 8000 },
       )
-      appLog('ERROR', `Clone failed: ${e.message}`)
+      appLog('ERROR', `Clone failed: ${msg}`)
     },
   })
 

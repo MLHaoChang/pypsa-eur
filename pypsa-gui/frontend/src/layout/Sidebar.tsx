@@ -21,6 +21,7 @@ import { simulationApi } from '../api/simulation'
 import type { ImportSummary, ProjectInfo } from '../api/types'
 import { ImportZone } from '../pages/ImportExport'
 import { appLog, useSimulationStore } from '../store/simulationStore'
+import { formatApiDetail } from '../api/client'
 import toast from 'react-hot-toast'
 import {
   invalidateNetworkQueries, saveProjectQuietly,
@@ -1045,8 +1046,15 @@ function ProjectSectionContent({
           break
       }
     } catch (e) {
-      appLog('ERROR', `Open '${name}' failed: ${String((e as Error)?.message ?? e)}`)
-      toast.error(`Could not open '${name}'`, { id: tId })
+      // Same seam as the clone wizard: `name === currentProject` above calls
+      // `projectsApi.load`, which is `load_project` — the route that now
+      // refuses (409, error_kind `solver_in_flight`) while a queue job owns
+      // this project's context. A bare "Could not open" here would hide
+      // exactly the reason this whole fix exists to surface.
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = formatApiDetail(detail, (e as Error)?.message ?? String(e))
+      appLog('ERROR', `Open '${name}' failed: ${msg}`)
+      toast.error(`Could not open '${name}': ${msg}`, { id: tId })
     } finally {
       setProjectSwitchInProgress(false)
     }
