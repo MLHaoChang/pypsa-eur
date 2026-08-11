@@ -794,7 +794,7 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
     )
 
     return CapacityComparison(
-        available=True,
+        available=has_solve,
         capacity_mw_by_carrier=_to_pv_dict(cap_by_carrier),
         capex_meur_by_carrier=_to_pv_dict(total_capex_by_carrier),
         new_capex_meur_by_carrier=_to_pv_dict(capex_by_carrier),
@@ -2214,7 +2214,10 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
 
     gens = n.generators
     if gens.empty:
-        return CurtailmentComparison()
+        # The network resolved fine; it simply has no Generator component at
+        # all, so "zero curtailment" is the real, structurally-guaranteed
+        # answer, not an absence — see the `available` field's docstring.
+        return CurtailmentComparison(available=True)
     p_t = getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None
     p_max_pu_t = getattr(n.generators_t, "p_max_pu", None) if hasattr(n, "generators_t") else None
     if p_t is None or p_t.empty or p_max_pu_t is None or p_max_pu_t.empty:
@@ -2312,7 +2315,10 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
             ab["by_period"][p] = ab["by_period"].get(p, 0.0) + v / 1000.0
 
     if not curt_by_carrier:
-        return CurtailmentComparison()
+        # Solved fine, and every generator was walked — none of them carries
+        # a time-varying p_max_pu profile (e.g. an all-thermal network), so
+        # zero curtailment is the real answer, not an unresolved figure.
+        return CurtailmentComparison(available=True)
 
     # System totals.
     total_bucket = {"total": 0.0, "by_period": {}}
@@ -2549,7 +2555,10 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
         return StorageCyclingComparison()
     sus = n.storage_units
     if sus.empty:
-        return StorageCyclingComparison()
+        # The network resolved fine; it simply has no StorageUnit component,
+        # so "zero cycling" is the real, structurally-guaranteed answer, not
+        # an absence — see the `available` field's docstring.
+        return StorageCyclingComparison(available=True)
     p_storage = getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None
     if p_storage is None or p_storage.empty:
         return StorageCyclingComparison()

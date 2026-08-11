@@ -990,9 +990,14 @@ class CurtailmentComparison(BaseModel):
     different concept.
     """
 
-    # False means this block resolved nothing and every figure below is a
-    # default zero, not a measurement — see ADR-0001. True guarantees the
-    # figures were computed from a solved network.
+    # True means this block's figures are REAL, including when the real
+    # figure is a structural zero: a solved network with no Generator at all,
+    # or with generators but none carrying a time-varying `p_max_pu` (e.g.
+    # all-thermal), has genuinely zero curtailment — that is the answer, not
+    # an absence, so those early returns set `available=True` too. False
+    # means nothing was resolved (no solve, or the dispatch/p_max_pu tables
+    # are missing) and every figure below is a default zero, not a
+    # measurement — see ADR-0001.
     available: bool = False
     total_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     by_carrier_gwh: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
@@ -1084,9 +1089,13 @@ class StorageCyclingComparison(BaseModel):
     fleet specifically, with one row per unit.
     """
 
-    # False means this block resolved nothing and every figure below is a
-    # default zero, not a measurement — see ADR-0001. True guarantees the
-    # figures were computed from a solved network.
+    # True means this block's figures are REAL, including when the real
+    # figure is a structural zero: a solved network with no StorageUnit at
+    # all has genuinely zero cycling — that is the answer, not an absence, so
+    # that early return sets `available=True` too. False means nothing was
+    # resolved (no solve, or the storage dispatch table is missing) and
+    # every figure below is a default zero, not a measurement — see
+    # ADR-0001.
     available: bool = False
     cycles_by_carrier: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     by_unit: list[StorageUnitCycles] = Field(default_factory=list)
@@ -1108,10 +1117,14 @@ class ResultsSummary(BaseModel):
     # by_period keys (which are stringified ints).
     periods: list[int] = Field(default_factory=list)
     # True iff the loaded network has a fresh solve (dispatch_status == fresh).
-    # The capacity/dispatch fields are populated regardless, but if has_solve
-    # is False the capacity panel will fall back to installed p_nom (no
-    # p_nom_opt) and dispatch numbers will be all-zero — the frontend uses
-    # this flag to render a "scenario not solved" badge instead of charts.
+    # The capacity/dispatch fields are always PRESENT (non-None) regardless,
+    # but if has_solve is False both are EMPTY, not a fallback to installed
+    # p_nom: `p_nom_opt` is a PyPSA output column that defaults to 0. before
+    # a solve, so every asset is skipped by the p_nom_opt walk that populates
+    # CapacityComparison, and its `available` flag mirrors has_solve for
+    # exactly this reason — see CapacityComparison's field-level docstring.
+    # The frontend uses this top-level flag to render a "scenario not
+    # solved" badge instead of charts.
     has_solve: bool = False
     # Phase 1.
     capacity: CapacityComparison | None = None
