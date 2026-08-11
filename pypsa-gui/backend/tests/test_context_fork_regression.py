@@ -235,3 +235,94 @@ def test_activating_a_project_mid_queue_solve_does_not_fork_its_context(
     assert r.status_code == 200, r.text
     on_disk = pypsa.Network(str(project_storage_dir("X") / "network.nc"))
     assert not on_disk.generators_t.p.empty, "a foreground save wiped the solve results"
+
+
+def test_loading_a_project_mid_queue_solve_is_refused_and_does_not_fork_it(
+    client, install_network, tmp_projects_dir, project_storage_dir,
+    registry_key_for, session_ctx, monkeypatch,
+):
+    """
+    The FIFTH registration path — `GET /api/projects/{name}`.
+
+    `load_project` builds nothing, so it satisfies R2 as literally worded, but
+    it ends by re-registering the CALLER'S OWN context under the target's
+    registry key. Driven at a project the dispatcher is mid-solve on, that one
+    line reproduces D-1 exactly: the dispatcher keeps solving (and, at
+    completion, keeps SAVING) a context `get_context` can no longer resolve,
+    while the session's freshly-loaded copy — read from the PRE-solve file —
+    takes the registry slot and writes over the results on its next save.
+
+    It is reachable: `GET` is a read method, so the `/api/projects/`
+    solver-in-flight gate in `main.py` does not cover it, and the
+    `load_project` chat tool and the clone wizard both drive it at an
+    ARBITRARY project rather than the current one.
+
+    The route now refuses instead (409), which is also the only safe answer
+    for the clone flow — `load(src)` there is immediately followed by
+    `save(dest, rebind=true)`, so handing back the live solving context would
+    re-key it mid-solve.
+    """
+    from services import solver_service
+
+    install_network(build_network(), name="X")
+    _save_project(client, "X")
+    key = registry_key_for("X")
+
+    # Move the session off X and drop X from the registry so the dispatcher
+    # takes the COLD path (build + hydrate + register).
+    install_network(build_network(), name="Y")
+    _save_project(client, "Y")
+    with PyPSAService._registry_lock:
+        PyPSAService._contexts.pop(key, None)
+    assert PyPSAService.get_context(key) is None
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_run_simulation(config, n, lock, stop_event, log_queue, state_update=None):
+        log_queue.put("probe: dispatcher entered run_simulation")
+        entered.set()
+        assert release.wait(60), "the probe never released the dispatcher"
+        with lock:
+            n.optimize(solver_name="highs")
+        return "ok", "optimal"
+
+    monkeypatch.setattr(solver_service, "run_simulation", blocking_run_simulation)
+
+    job = client.post("/api/simulation/queue", json={"project_id": "X"}).json()
+    assert entered.wait(60), "the dispatcher never reached run_simulation"
+
+    during = PyPSAService.get_context(key)
+    assert during is not None, "the dispatcher's background context is not registered"
+    session_before = session_ctx(client)
+    bound_before = session_before.loaded_project
+
+    # THE PROBE. Before the fix this returned 200 and replaced `_contexts[key]`
+    # with the session's own context.
+    r = client.get("/api/projects/X")
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == "solver_in_flight", r.text
+
+    # The dispatcher still owns the project's ONE context…
+    assert PyPSAService.get_context(key) is during, "load forked a SECOND context for X"
+    # …and the refusal is not half a load: the caller's own context is neither
+    # reset nor re-bound, so a refused load costs the session nothing.
+    assert session_ctx(client) is session_before
+    assert session_before.loaded_project == bound_before
+
+    release.set()
+    done = _wait_for_terminal(job["id"])
+    assert done["status"] == "completed", done
+
+    # The results the refusal protected are on disk…
+    on_disk = pypsa.Network(str(project_storage_dir("X") / "network.nc"))
+    assert not on_disk.generators_t.p.empty, "the queue solve never reached disk"
+
+    # …and the gate is temporary: once the job is terminal the load succeeds
+    # again, registers ITS context under the same key, and reads back the
+    # solved network rather than the pre-solve file the refusal protected.
+    r = client.get("/api/projects/X")
+    assert r.status_code == 200, r.text
+    reloaded = PyPSAService.get_context(key)
+    assert reloaded is not None and reloaded.loaded_project == "X"
+    assert not reloaded.network.generators_t.p.empty

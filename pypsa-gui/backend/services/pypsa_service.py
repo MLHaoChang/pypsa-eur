@@ -108,12 +108,39 @@ class PyPSAService:
     # the second overwrote the first in `_contexts` while the first was already
     # bound into a live request.
     #
+    # A FIFTH path publishes without building: `routers.projects.load_project`
+    # resets the CALLER'S OWN context, imports the project into it, and
+    # republishes it under the project's key — a deliberate REPLACEMENT of the
+    # resident entry (that is what re-opening a project from disk means), not a
+    # fork. It takes this lock for the insert like everyone else, and it
+    # REFUSES with 409 while the solve queue is running a job for the key,
+    # because replacing the entry there would leave the dispatcher solving —
+    # and saving — a context nothing can resolve any more (defect D-1).
+    #
     # LOCK ORDER — hydrate -> `_registry_lock` -> `solve_queue._lock`. A hydrate
     # lock is NEVER acquired while `_registry_lock` is held. `_hydrate_guard` is a
     # leaf lock held only for the dict lookup that hands out the per-key lock, and
     # nothing is called while it is held. The pre-existing rule that
     # `_registry_lock` never nests a per-ctx `mutation_lock` (see
     # `_evict_if_over_cap`) is unchanged.
+    #
+    # The three named locks are not the whole order, and the tail is where a
+    # future contributor is most likely to invert it. Nested UNDER a held
+    # hydrate lock, on the slow path, are also:
+    #   * the ctx being built: its `mutation_lock` and then the process-global
+    #     `_netcdf_io_lock` — `_hydrate_context_from_disk` takes both to
+    #     `import_from_netcdf`;
+    #   * an ARBITRARY VICTIM context's `mutation_lock` and the same
+    #     `_netcdf_io_lock`, because `register` -> `_evict_if_over_cap` ->
+    #     `_save_evicted_ctx` -> `_save_context` saves whatever the cap
+    #     evicts, and the victim is chosen by LRU — it is not the caller's
+    #     context and not knowable from the call site.
+    # So the full order is: hydrate -> `_registry_lock` -> `solve_queue._lock`,
+    # and hydrate -> (any ctx) `mutation_lock` -> `_netcdf_io_lock`. Nothing
+    # today acquires a hydrate lock while holding a `mutation_lock` or the I/O
+    # lock, and nothing may start: that is the cycle this note exists to
+    # prevent. (`_evict_if_over_cap` deliberately runs its saves OUTSIDE
+    # `_registry_lock` for the same reason, one level down.)
     #
     # Refcounted: `hydrate_or_adopt` increments the waiter count on entry and
     # decrements (deleting the entry once it hits zero) in a `finally`, so the
@@ -757,7 +784,12 @@ class PyPSAService:
         Yield the resident ctx for `registry_key` if one exists, else yield None
         while holding this key's hydrate lock so the caller may build+hydrate+register
         exactly once. Fast path (registry hit) takes NO lock.
-        Lock order: hydrate -> _registry_lock -> solve_queue._lock.
+
+        Lock order: hydrate -> _registry_lock -> solve_queue._lock, and
+        hydrate -> (any ctx) mutation_lock -> _netcdf_io_lock. The second half
+        is not optional bookkeeping — the caller's body hydrates from disk
+        under this lock, and its `register` can evict and SAVE an unrelated
+        context. See the `_hydrate_locks` comment for the whole order.
         """
         resident = cls._contexts.get(registry_key)
         if resident is not None:

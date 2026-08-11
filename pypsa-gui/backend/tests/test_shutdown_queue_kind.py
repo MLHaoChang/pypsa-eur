@@ -14,8 +14,11 @@ one that also sees a job that is still `queued`.
 from __future__ import annotations
 
 import threading
+import time
 
 from services import shutdown as shutdown_service
+from services.solve_queue import solve_queue
+from tests.conftest import build_network
 
 
 def test_a_queue_owned_context_is_counted_once_by_the_job_table():
@@ -71,3 +74,41 @@ def test_a_foreground_solve_on_a_background_context_is_still_seen():
         running.set()
         worker.join(5)
         PyPSAService._contexts.pop("lopf-on-background", None)
+
+
+def test_a_finished_queue_job_leaves_no_queue_mark_on_its_context(
+    client, install_network, tmp_projects_dir, session_ctx,
+):
+    """
+    `kind` must be cleared with the worker handle it describes.
+
+    `_run_job` disowns its worker (`thread=None`) when the solve ends, but it
+    used to leave `kind="queue"` on what is a plain foreground context again.
+    Nothing is broken by that TODAY only because `/run` and `run_ac_pf`
+    overwrite `kind` on their own claim — while `_context_solves()` skips on
+    `kind` ALONE, so any future worker that claims `thread` without setting
+    `kind` would inherit an invisible solve from the last queue job that
+    touched the context.
+    """
+    install_network(build_network(), name="K1")
+    r = client.post("/api/projects/K1", params={"force": True, "rebind": True})
+    assert r.status_code == 200, r.text
+
+    # Enqueue the project the session is ON, so the dispatcher solves the
+    # RESIDENT context in place and this test can read the state it left.
+    ctx = session_ctx(client)
+    job = client.post("/api/simulation/queue", json={"project_id": "K1"}).json()
+
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        status = (solve_queue.get_job(job["id"]) or {}).get("status")
+        if status in ("completed", "failed", "aborted", "interrupted"):
+            break
+        time.sleep(0.2)
+    assert status == "completed", solve_queue.get_job(job["id"])
+
+    with ctx.solver_state_lock:
+        assert ctx.solver_state.get("thread") is None
+        assert ctx.solver_state.get("kind") is None, (
+            "the finished job left its queue-ownership mark on the context"
+        )

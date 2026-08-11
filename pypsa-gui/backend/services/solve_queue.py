@@ -399,10 +399,29 @@ class SolveQueue:
                         ctx = resident
                     else:
                         ctx = _hydrate_fresh()
-                        if job.storage_dir:
-                            org, _, uuid_part = key.partition(":")
-                            ctx.org_id, ctx.project_uuid = org, uuid_part
-                            ctx.storage_dir = job.storage_dir
+                        # Bind UNCONDITIONALLY, and as a unit. `register` below
+                        # is unconditional, so a context whose identity was
+                        # only half-applied would sit in `_contexts[key]` with
+                        # a `registry_key` that falls back to the DISPLAY NAME
+                        # (project_context.py:198-200) — the registry saying
+                        # one thing and the context another, which is the
+                        # re-keying trap CLAUDE.md records. `bind_project`
+                        # moves name + org_id + project_uuid + storage_dir
+                        # together, so `ctx.registry_key == key` holds for a
+                        # job with a storage_dir and for one without.
+                        org, sep, uuid_part = key.partition(":")
+                        keyed = bool(sep and org and uuid_part)
+                        PyPSAService.bind_project(
+                            project_id,
+                            # A key that is not `org:uuid` can only come from a
+                            # hand-made job; name-keying it back is what
+                            # `registry_key` does for an unbound context, so
+                            # the two still agree.
+                            org_id=org if keyed else None,
+                            project_uuid=uuid_part if keyed else None,
+                            storage_dir=job.storage_dir,
+                            ctx=ctx,
+                        )
                         PyPSAService.register(key, ctx)
 
             n = ctx.network
@@ -484,6 +503,15 @@ class SolveQueue:
                 ctx_state_update(
                     status=final_status, condition=condition,
                     objective=objective, solve_time=solve_time, thread=None,
+                    # Clear the OWNERSHIP mark with the worker handle it
+                    # describes. `kind` outlives `thread` otherwise, and the
+                    # context is a plain foreground one again the moment this
+                    # returns. `/run` and `run_ac_pf` happen to overwrite
+                    # `kind` on their own claim, but `shutdown._context_solves`
+                    # skips on `kind` ALONE — so any future worker that claims
+                    # `thread` without setting `kind` would inherit an
+                    # invisible solve from the last queue job.
+                    kind=None,
                 )
                 # 5. Persist only a clean, successful solve, via `_save_context`
                 #    bound to THIS ctx (NOT save_project — that saves the active
@@ -519,8 +547,12 @@ class SolveQueue:
             try:
                 if ctx is not None and ctx.solver_state.get("thread") is me:
                     with ctx.solver_state_lock:
+                        # `kind` goes with `thread` here for the same reason as
+                        # on the success path above: this context stops being
+                        # queue-owned the instant we disown the worker.
                         ctx.solver_state.update(
-                            status="failed", condition="queue_error", thread=None
+                            status="failed", condition="queue_error",
+                            thread=None, kind=None,
                         )
             except Exception:
                 pass

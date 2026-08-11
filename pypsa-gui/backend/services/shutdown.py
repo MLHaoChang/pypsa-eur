@@ -140,10 +140,17 @@ def _context_solves() -> list[tuple[Any, Any, str | None]]:
             # the only one that also sees a job that is still `queued`.
             #
             # Skipping here is also what keeps a background queue solve out of
-            # the `"active"` bucket, which claims `interruptible=True` via
-            # `/api/simulation/abort` — that endpoint reaches the FOREGROUND
-            # worker only. `solve_queue.abort` is what stops a queue job, and
-            # `desktop/gui.py:_abort_everything` already calls it separately.
+            # the `"active"` bucket below, whose label ("an open project") and
+            # remedy are written for a foreground `/run`. A queue solve is
+            # reported from the job table instead, under the `"queue"` kind,
+            # and `desktop/gui.py:_abort_everything` stops it with
+            # `solve_queue.abort`. NOTE it is no longer true that
+            # `/api/simulation/abort` cannot reach a queue job: now that the
+            # session resolves to the queue-owned context, `_state["stop_event"]`
+            # IS that job's stop event, so the endpoint does stop it. The
+            # double-counting above is the reason for this `continue`; the
+            # bucket is only about which name and channel the quit dialog
+            # reports.
             continue
         if thread is not None and thread.is_alive():
             found.append((ctx, thread, kind))
