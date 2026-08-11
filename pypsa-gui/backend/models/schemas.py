@@ -678,6 +678,11 @@ class CapacityComparison(BaseModel):
     so the user can see the chronological investment plan side-by-side.
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
+
     # Optimised p_nom_opt by carrier (MW). `by_period[P]` is the capacity IN
     # SERVICE during period P, not a per-period increment: pre-existing
     # (brownfield) capacity is replicated into EVERY period's bucket by
@@ -749,6 +754,11 @@ class DispatchComparison(BaseModel):
     dispatch) — matches what /results/cost_breakdown reports as OPEX(mc).
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
+
     # GWh dispatched per carrier (Σ p × snapshot_weight × period_weight, /1000).
     dispatch_gwh_by_carrier: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     # OPEX in M€ — Σ marginal_cost × p × snapshot_weight × period_weight, /1e6.
@@ -803,6 +813,11 @@ class LoadingComparison(BaseModel):
     visually (e.g. a small icon next to the name).
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
+
     # Ordered by peak loading (descending) on the SCENARIO-WIDE aggregate so
     # the worst-loaded branches surface first. Frontend renders top-N.
     lines: list[LineLoadingEntry] = Field(default_factory=list)
@@ -837,6 +852,11 @@ class PricesComparison(BaseModel):
     correctly contribute more density to the curve.
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
+
     # Sampled duration curve. Index 0 = highest price (0th percentile), index
     # 100 = lowest. Empty for unsolved networks.
     duration_curve: list[float] = Field(default_factory=list)
@@ -870,6 +890,11 @@ class EmissionsComparison(BaseModel):
     the carbon-content-per-delivered-MWh of the whole portfolio — a single
     headline number to compare scenarios beyond raw kt.
     """
+
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
 
     total_kt: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     by_carrier_kt: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
@@ -943,6 +968,11 @@ class AssetLCOHEntry(BaseModel):
 class EconomicsComparison(BaseModel):
     """Per-asset-group economic summary used by the Economics comparison tab."""
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
+
     by_carrier: dict[str, CarrierEconomics] = Field(default_factory=dict)
     # Per-Link levelised-cost rows (one per extendable Link with non-trivial
     # dispatch). Lets users compare H2 plant economics across scenarios.
@@ -965,6 +995,11 @@ class CurtailmentComparison(BaseModel):
     inflate the result with "unused dispatchable capacity," which is a
     different concept.
     """
+
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
 
     total_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     by_carrier_gwh: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
@@ -1055,6 +1090,11 @@ class StorageCyclingComparison(BaseModel):
     A standalone tab makes it easier to compare A/B for the storage
     fleet specifically, with one row per unit.
     """
+
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
 
     cycles_by_carrier: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     by_unit: list[StorageUnitCycles] = Field(default_factory=list)
