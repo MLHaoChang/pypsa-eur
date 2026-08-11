@@ -145,7 +145,7 @@ Run from `pypsa-gui/backend`:
 pixi run gui-tests tests/test_registry_displacement.py -v
 ```
 
-Expected: `test_register_saves_the_context_it_displaces` FAILS with `assert [] == [('org:alpha', 'alpha')]`. The other two PASS already (they assert absence).
+Expected: `F..` — `test_displaced_context_is_persisted_before_it_becomes_unreachable` FAILS on `assert "DISPLACED_MARKER" in reloaded.buses.index`, because the displaced context's edit never reached disk. The other two PASS already: they assert a save did *not* happen, which is true of the unfixed code too.
 
 - [ ] **Step 3: Write the minimal implementation**
 
