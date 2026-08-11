@@ -508,14 +508,22 @@ def _infer_snapshot_freq(n) -> str | None:
     as "irregular" rather than guessing.
     """
     sns = n.snapshots
-    if isinstance(sns, pd.MultiIndex):
-        level0 = sns.get_level_values(0)
-        if len(level0) == 0:
-            return None
-        first = level0[0]
-        idx = pd.DatetimeIndex(sns[level0 == first].get_level_values(1))
-    else:
-        idx = pd.DatetimeIndex(sns)
+    try:
+        if isinstance(sns, pd.MultiIndex):
+            level0 = sns.get_level_values(0)
+            if len(level0) == 0:
+                return None
+            first = level0[0]
+            idx = pd.DatetimeIndex(sns[level0 == first].get_level_values(1))
+        else:
+            idx = pd.DatetimeIndex(sns)
+    except (ValueError, TypeError):
+        # `pd.DatetimeIndex(...)` raises (e.g. `DateParseError`, a `ValueError`
+        # subclass) on a non-parseable object index. No current GUI path
+        # produces one, but this helper runs unconditionally at the top of
+        # `get_snapshots` — degrade to "irregular" rather than 500ing the
+        # page's primary endpoint.
+        return None
     if len(idx) < 2:
         return None
     try:
@@ -1234,11 +1242,21 @@ async def upload_snapshot_weightings_csv(file: UploadFile = File(...)):
     # to retry without manually undoing the partial state.
     pending: list[tuple[object, str, float]] = []
     skipped = 0
+    # A bare ISO `snapshot` key is ambiguous on a multi-period network — see
+    # the tolerant `iso_to_idx[iso] = idx` registration above, which is
+    # last-write-wins across periods and so always resolves to the LAST
+    # period. Same hazard as `update_snapshot_weightings`'s PATCH path;
+    # tracked here too so a CSV that lost its `period|` prefix (Excel, a
+    # hand-edited file) doesn't silently write every row into the wrong
+    # period with no trace in the response or audit log.
+    ambiguous_bare_keys = 0
     for row in reader:
         key = (row.get("snapshot") or "").strip()
         if not key or key not in iso_to_idx:
             skipped += 1
             continue
+        if is_multi and "|" not in key:
+            ambiguous_bare_keys += 1
         idx = iso_to_idx[key]
         for c in cols:
             v = row.get(c, "").strip()
@@ -1260,12 +1278,16 @@ async def upload_snapshot_weightings_csv(file: UploadFile = File(...)):
         change_log_service.log(
             "update", "Network", "snapshot_weightings",
             f"Uploaded snapshot_weightings.csv: {applied} cell(s) applied, "
-            f"{skipped} row(s) skipped (no match).",
+            f"{skipped} row(s) skipped (no match)."
+            + (f" — WARNING: {ambiguous_bare_keys} bare-ISO key(s) on a multi-period "
+               "network each resolved to the LAST period; send `period|iso` to target "
+               "a specific period." if ambiguous_bare_keys else ""),
         )
     return {
         "applied": applied,
         "skipped": skipped,
         "columns": cols,
+        "ambiguous_bare_keys": ambiguous_bare_keys,
     }
 
 
@@ -1791,11 +1813,30 @@ def set_investment_periods(body: InvestmentPeriods):
         if body.years_weightings:
             n.investment_period_weightings["years"] = body.years_weightings
 
+        # Read inside the lock — the rest of this handler holds it, and a
+        # concurrent request between lock-release and this read could change
+        # the snapshot count out from under the log line.
+        snapshot_count = len(n.snapshots)
+        # "existing periods kept their own operational range" is only true on
+        # the actual multi→multi rebuild branch above. It was previously
+        # logged unconditionally, which was wrong in two other reachable
+        # cases: a flat→multi promotion (nothing was "kept" — there were no
+        # existing periods, every period got the same templated range) and
+        # the no-rebuild path (the period set didn't change, so the rebuild
+        # was skipped entirely; nothing was rebuilt, let alone "kept").
+        promoted = not is_multi
+        rebuilt = existing_periods != new_periods
+        if promoted:
+            range_note = "promoted from flat snapshots; every period shares the previous operational range"
+        elif rebuilt:
+            range_note = "existing periods kept their own operational range; new periods inherited the first period's range as a template"
+        else:
+            range_note = "period set unchanged; snapshot rebuild skipped"
+
     change_log_service.log(
         "update", "Network", "investment_periods",
         f"Set investment periods: {new_periods} "
-        f"({len(n.snapshots)} snapshots total; existing periods kept their own "
-        f"operational range)",
+        f"({snapshot_count} snapshots total; {range_note})",
     )
     return {"count": len(new_periods)}
 

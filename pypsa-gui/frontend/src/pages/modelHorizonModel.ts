@@ -161,12 +161,25 @@ export function horizonRangeLabel(
   }
   const first = snapshots[0]
   const last = snapshots[snapshots.length - 1]
-  const nums = (periods ?? []).map(Number).filter(Number.isFinite)
-  if (nums.length === 0) {
+  // Single pass, no intermediate array and no spread — callers may hand this
+  // the small (2-3 element) investment-period list OR the full per-snapshot
+  // parallel array (periods[i] = the period snapshots[i] belongs to), which
+  // on a multi-decade hourly model can run into six figures. `Math.min(...x)`
+  // / `Math.max(...x)` on an array that size throws `RangeError: Maximum
+  // call stack size exceeded`; a loop has no such ceiling.
+  let lo = Infinity
+  let hi = -Infinity
+  let sawFinite = false
+  for (const p of periods ?? []) {
+    const num = Number(p)
+    if (!Number.isFinite(num)) continue
+    sawFinite = true
+    if (num < lo) lo = num
+    if (num > hi) hi = num
+  }
+  if (!sawFinite) {
     return `${first.slice(0, 10)} → ${last.slice(0, 10)}`
   }
-  const lo = Math.min(...nums)
-  const hi = Math.max(...nums)
   const span = lo === hi ? `${lo}` : `${lo}…${hi}`
   // MM-DD only — the operational year is a base year, not a planning year.
   return `${span} × op. ${first.slice(5, 10)}→${last.slice(5, 10)}`

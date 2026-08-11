@@ -107,6 +107,57 @@ def test_period_qualified_key_on_multi_period_writes_that_period_with_no_warning
         f"period-qualified key must not trigger the ambiguous-bare-key warning, got: {new_entries}"
 
 
+# ── Finding 2: the CSV upload path has the same bare-ISO ambiguity hazard as
+# the PATCH path above, but until now carried none of the counter/warning
+# instrumentation — a CSV round-trip on a multi-period network that lost its
+# `period|` prefix (Excel, a hand-edited file) would silently write every row
+# into the LAST period, and `applied`/`skipped` alone couldn't distinguish
+# that from a correct write. These two tests mirror the PATCH-path pair above,
+# over `POST /snapshots/weightings.csv`.
+
+def test_csv_upload_bare_iso_key_on_multi_period_warns_and_reports_count(client, install_network):
+    install_network(_multi_period_network())
+    baseline_id = max((e["id"] for e in client.get("/api/changelog/").json()), default=0)
+
+    bare_iso = "2024-01-01T00:00:00"
+    csv_bytes = f"snapshot,objective\n{bare_iso},7.0\n".encode()
+    r = client.post(
+        "/api/network/snapshots/weightings.csv",
+        files={"file": ("weights.csv", csv_bytes, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["applied"] == 1
+    assert body["ambiguous_bare_keys"] == 1
+
+    new_entries = _weightings_changelog_entries(client, baseline_id)
+    assert any(
+        "WARNING" in e["description"] and "1 bare-ISO key" in e["description"]
+        for e in new_entries
+    ), f"expected a bare-ISO WARNING changelog entry, got: {new_entries}"
+
+
+def test_csv_upload_period_qualified_key_on_multi_period_does_not_warn(client, install_network):
+    install_network(_multi_period_network())
+    baseline_id = max((e["id"] for e in client.get("/api/changelog/").json()), default=0)
+
+    iso = "2024-01-01T00:00:00"
+    csv_bytes = f"snapshot,objective\n2030|{iso},9.0\n".encode()
+    r = client.post(
+        "/api/network/snapshots/weightings.csv",
+        files={"file": ("weights.csv", csv_bytes, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["applied"] == 1
+    assert body["ambiguous_bare_keys"] == 0
+
+    new_entries = _weightings_changelog_entries(client, baseline_id)
+    assert new_entries, "expected a snapshot_weightings changelog entry"
+    assert all("WARNING" not in e["description"] for e in new_entries), \
+        f"period-qualified upload must not trigger the ambiguous-bare-key warning, got: {new_entries}"
+
+
 def _multi_index(periods, block):
     import numpy as np
     period_level = np.concatenate([np.full(len(block), p) for p in periods])
@@ -153,6 +204,20 @@ def test_infer_freq_falls_back_to_modal_delta_for_representative_weeks():
 def test_infer_freq_returns_none_for_a_single_snapshot():
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2024-01-01", periods=1, freq="h"))
+    assert _infer_snapshot_freq(n) is None
+
+
+def test_infer_freq_degrades_to_none_instead_of_raising_on_a_non_parseable_index():
+    # Finding 7: only `pd.infer_freq` was wrapped in try/except. But
+    # `pd.DatetimeIndex(sns)` itself raises (a `DateParseError`, a `ValueError`
+    # subclass) when the snapshot index holds strings pandas can't parse as
+    # dates — and `_infer_snapshot_freq` is called unconditionally at the top
+    # of `get_snapshots`, the page's primary endpoint. No current GUI path
+    # produces such an index, but the previous (pre-freq) code degraded
+    # gracefully here; this guards that the freq feature didn't regress it
+    # into a 500.
+    n = pypsa.Network()
+    n.set_snapshots(pd.Index(["alpha", "beta", "gamma"], name="snapshot"))
     assert _infer_snapshot_freq(n) is None
 
 

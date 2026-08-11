@@ -108,9 +108,10 @@ export default function ModelHorizon() {
       setEnd(toLocal(snap.ts_end))
       return
     }
-    // For MultiIndex snapshots the entries look like "(2030, Timestamp(...))"
-    // and aren't useful as datetime-local defaults — only seed from
-    // ISO-shaped flat entries.
+    // `snap.snapshots` is plain ISO in both modes (see the accurate note on
+    // `snapshotsAreMulti` below) — the `startsWith('(')` guard here is
+    // defensive only, kept in case a caller ever slips a raw tuple-repr
+    // string through.
     const ss = snap.snapshots
     if (ss && ss.length > 0) {
       const first = ss[0], last = ss[ss.length - 1]
@@ -133,8 +134,6 @@ export default function ModelHorizon() {
     () => (periods.length > 0 ? Math.min(...periods) : 0),
     [periods],
   )
-  const autoDiscountOn = Boolean(cfg?.auto_discount_periods)
-
   const isMultiPeriod = cfg?.multi_investment_periods ?? false
   // MultiIndex snapshots are signalled by the backend returning a parallel
   // `periods` array (one investment period per snapshot). The `snapshots`
@@ -145,6 +144,18 @@ export default function ModelHorizon() {
     () => (snap?.periods?.length ?? 0) > 0,
     [snap?.periods],
   )
+  // Whether auto-discount will ACTUALLY write anything at solve time — not
+  // just whether the checkbox is checked. Mirrors solver_service.py's gate
+  // exactly (see `_apply_modelling_assumptions` step 4b, ~:4374-4379):
+  // cfg.auto_discount_periods AND multi_investment_periods AND a MultiIndex
+  // snapshot index AND a non-empty n.investment_periods. Toggle ON with flat
+  // snapshots (or periods cleared) is inert on the backend; the PV preview
+  // column must grey out in that state rather than claiming a value that
+  // will never be written.
+  const autoDiscountOn = Boolean(cfg?.auto_discount_periods)
+    && isMultiPeriod
+    && snapshotsAreMulti
+    && periods.length > 0
 
   // ── Mutations ──────────────────────────────────────────────────────────
   // Snapshot reshape touches a defined set of query keys: the index itself
@@ -594,7 +605,26 @@ export default function ModelHorizon() {
   // Resolution is a property of the network, not of the form below. `freq`
   // state seeds a NEW index; it must never be read back as status.
   const freqLabel = resolutionLabel(snap?.freq)
-  const rangeStr = horizonRangeLabel(snap?.snapshots, snap?.periods, snapshotsAreMulti)
+  // Prefer the small investment-period list (`periods`, already in scope
+  // above) over `snap.periods` — the latter is the PER-SNAPSHOT parallel
+  // array (periods[i] = the period snapshots[i] belongs to), which on a
+  // multi-period hourly model is tens of thousands of entries long. Fall
+  // back to `snap.periods` only when `periods` is empty but the snapshot
+  // index is still MultiIndex: `n.investment_periods` can be unset on a
+  // MultiIndex network built without going through /investment_periods
+  // (e.g. constructed directly), which yields an empty `ip.periods` but a
+  // non-empty `snap.periods` — without the fallback the card would silently
+  // stop showing the period span the moment that happens. `horizonRangeLabel`
+  // is a single O(n) pass with no spread, so handing it the large array in
+  // this fallback case is safe.
+  const rangeStr = useMemo(
+    () => horizonRangeLabel(
+      snap?.snapshots,
+      periods.length > 0 ? periods : snap?.periods,
+      snapshotsAreMulti,
+    ),
+    [snap?.snapshots, snap?.periods, periods, snapshotsAreMulti],
+  )
   // Warn-banner text when the toggle and the actual snapshot index disagree.
   const modeMismatch = isMultiPeriod && !snapshotsAreMulti
     ? 'toggle ON · snapshots still flat — build MultiIndex below'
@@ -622,7 +652,13 @@ export default function ModelHorizon() {
         <StatCard
           eyebrow="Resolution"
           value={freqLabel}
-          sub={isMultiPeriod ? 'per investment period' : 'timestep spacing'}
+          // `freqLabel` is measured from the actual (possibly flat) snapshot
+          // index, not the toggle — so the sub-label must branch on
+          // `snapshotsAreMulti`, not `isMultiPeriod`. With the toggle ON but
+          // snapshots still flat (the state the mode-mismatch banner below
+          // warns about), `isMultiPeriod` would claim "per investment
+          // period" over a value that was measured across a flat index.
+          sub={snapshotsAreMulti ? 'per investment period' : 'timestep spacing'}
         />
         <StatCard
           eyebrow="Mode"
@@ -790,7 +826,10 @@ export default function ModelHorizon() {
 
                 {/* Per-period inline editor */}
                 <div className="border border-border rounded overflow-auto max-h-64 mt-1">
-                  <table className="w-full text-[11px] border-collapse" style={{ minWidth: 400 }}>
+                  {/* 400 → 480: gained the PV × preview column. Same +80
+                      bump the weightings table below took (480 → 560) for
+                      its new Period column. */}
+                  <table className="w-full text-[11px] border-collapse" style={{ minWidth: 480 }}>
                     <thead className="sticky top-0 bg-bg-2 z-10">
                       <tr className="border-b border-border">
                         <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Period</th>

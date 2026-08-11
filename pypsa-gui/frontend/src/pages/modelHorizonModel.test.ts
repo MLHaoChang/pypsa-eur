@@ -183,4 +183,45 @@ describe('horizonRangeLabel', () => {
     expect(horizonRangeLabel([], [], false)).toBe('flat horizon')
     expect(horizonRangeLabel(undefined, undefined, true)).toBe('multi-period horizon')
   })
+
+  it('handles a production-shaped PER-SNAPSHOT periods array without crashing or misreporting the span', () => {
+    // ModelHorizon.tsx used to pass `snap.periods` here directly — the
+    // PARALLEL per-snapshot array (`periods[i]` = the investment period of
+    // `snapshots[i]`'s timestep), not the small investment-period list. On a
+    // 3-period hourly model that's 3 × 8760 = 26,280 entries, not 3. The old
+    // implementation computed `Math.min(...nums)` / `Math.max(...nums)` on
+    // the full array via a spread — two full-array allocations plus a
+    // spread-argument call, which both regresses input latency and risks
+    // `RangeError: Maximum call stack size exceeded` as the array grows
+    // (reachable around 15 periods × 8760 snapshots). The helper must stay
+    // correct — and just as importantly, not need a smaller input to do so —
+    // regardless of what shape of array a caller passes it.
+    const periods: number[] = []
+    for (const p of [2030, 2040, 2050]) {
+      for (let i = 0; i < 8760; i++) periods.push(p)
+    }
+    expect(periods).toHaveLength(26280)
+    const snapshots = ['2024-01-01T00:00:00', '2024-12-31T23:00:00']
+    expect(horizonRangeLabel(snapshots, periods, true)).toBe('2030…2050 × op. 01-01→12-31')
+  })
+
+  it('does not throw RangeError: Maximum call stack size exceeded on a large per-snapshot periods array', () => {
+    // The spread form (`Math.min(...nums)`) blows V8's argument-spread limit
+    // once the array crosses roughly 100k-131k elements (verified directly:
+    // `Math.min(...arr)` throws at 131,400 elements but not at 100,000 in this
+    // Node build). 15 investment periods × 8760 hourly snapshots = 131,400 is
+    // the finding's own worked example of where this becomes reachable — a
+    // long but not outlandish multi-decade planning horizon. This must resolve
+    // via a single pass, not a spread, regardless of array length.
+    const periods: number[] = []
+    const years = Array.from({ length: 15 }, (_, i) => 2030 + i * 10)
+    for (const p of years) {
+      for (let i = 0; i < 8760; i++) periods.push(p)
+    }
+    expect(periods).toHaveLength(131400)
+    const snapshots = ['2024-01-01T00:00:00', '2024-12-31T23:00:00']
+    expect(() => horizonRangeLabel(snapshots, periods, true)).not.toThrow()
+    expect(horizonRangeLabel(snapshots, periods, true))
+      .toBe(`${years[0]}…${years[years.length - 1]} × op. 01-01→12-31`)
+  })
 })

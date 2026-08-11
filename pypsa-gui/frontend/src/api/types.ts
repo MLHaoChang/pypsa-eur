@@ -156,6 +156,12 @@ export interface SolverConfig {
   // back to the scalar `co2_price`. Ignored on flat (single-period) networks.
   co2_price_per_period?: Record<string, number>
   voll: number                       // €/MWh — when > 0, slack gens per bus
+  // BACKEND-ONLY: no frontend reader writes or reads this field any more
+  // (the Model Horizon page's period list is authoritative and lives on the
+  // network via GET/POST /api/network/investment_periods instead). Still
+  // consumed transiently by solver_service.py (~:4329) as a cfg-only,
+  // solve-time-only period override. Do not wire a control back to it —
+  // route new UI through the network endpoints.
   investment_periods: number[]       // list of years; honoured iff multi_investment_periods
   // Per-investment-period load multiplier, keyed by period year (string).
   // 1.0 = unchanged; 1.05 = +5% load growth. Applied transiently at solve
