@@ -609,7 +609,15 @@ Expected: 3 passed.
 
 - [ ] **Step 5: Set the flag on the success paths in `compare.py`**
 
-Every `_compute_*_summary` in `backend/routers/compare.py` has one or more early `return XComparison()` statements (21 in total) and one success path that populates the block. Leave every early return exactly as it is — the new default of `False` is already correct for them. On each **success** path, set `available=True` where the populated block is constructed or returned.
+Every `_compute_*_summary` in `backend/routers/compare.py` has early `return XComparison()` statements (23 in total, not 21 — this plan undercounted) and one success path that populates the block. On each **success** path, set `available=True`.
+
+Most early returns keep the `False` default, which is correct: they fire when nothing resolved. **Three do not**, and were corrected by ruling during Task 4 after a review found them — they fire on a *solved* network that simply contains nothing of that kind, so the zero is the real answer and the block is available:
+
+- `compare.py:2314` — no generator has a time-varying `p_max_pu`, so curtailment is genuinely 0 GWh
+- `compare.py:2216` — no generators
+- `compare.py:2551` — no storage units, so 0 cycles is the answer
+
+`CapacityComparison` is the one function that takes `has_solve` and never reads it; its success path must be `available=has_solve`, not an unconditional `True`. Pre-solve it computes nothing at all — `_walk_plain:710` skips every asset because `p_nom_opt` defaults to `0.` — so an unconditional `True` asserts a falsehood on every unsolved project.
 
 Find them with:
 
