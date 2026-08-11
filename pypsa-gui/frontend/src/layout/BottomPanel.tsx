@@ -170,7 +170,13 @@ function CellEditor({
   seed?: string
   busNames: string[]
   catalog: CatalogMap
-  onCommit: (raw: string, fill: boolean) => void
+  /**
+   * `advance` asks the grid to move the active cell down one row after a
+   * successful commit. Only a plain Enter sets it: D5 gives Ctrl/Cmd+Enter
+   * (fill) and a blur no move, and advancing off a blur would yank focus while
+   * the user is reaching for another cell.
+   */
+  onCommit: (raw: string, fill: boolean, advance?: boolean) => void
   onCancel: () => void
 }) {
   const [raw, setRaw] = useState(seed ?? initial)
@@ -182,7 +188,8 @@ function CellEditor({
     const modifier = e.ctrlKey || e.metaKey
     if (e.key === 'Enter') {
       e.preventDefault(); e.stopPropagation()
-      onCommit(raw, modifier)              // Ctrl/Cmd+Enter = fill gesture
+      // Ctrl/Cmd+Enter = fill gesture, and D5 gives it no downward move.
+      onCommit(raw, modifier, !modifier)
       return
     }
     if (e.key === 'Escape') {
@@ -205,14 +212,27 @@ function CellEditor({
   }
 
   if (kind === 'bus') {
+    // `onChange` fires on every keystroke, so it may only move the draft.
+    // Wiring it to onCommit made the first character commit a partial name —
+    // and since commitCell's first act is setEditing(null), that closed the
+    // editor and left the column unchangeable. Same hazard the colour editor
+    // below already avoids by committing on blur rather than on change.
+    //
+    // The wrapper carries onKeyDown so Escape still cancels and Enter with
+    // nothing highlighted commits a fully typed name; BusAutocomplete stops
+    // both keys itself whenever it consumes them.
     return (
-      <BusAutocomplete
-        value={raw}
-        onChange={v => { setRaw(v); onCommit(v, false) }}
-        buses={busNames}
-        allowUnknown={false}
-        placeholder="Bus…"
-      />
+      <span onKeyDown={onKey}>
+        <BusAutocomplete
+          autoFocus
+          value={raw}
+          onChange={setRaw}
+          onSelect={v => onCommit(v, false, true)}
+          buses={busNames}
+          allowUnknown={false}
+          placeholder="Bus…"
+        />
+      </span>
     )
   }
 
@@ -345,7 +365,9 @@ function AssetTable({
   // Exactly one cell is tabbable at a time; everything else carries -1. Focus
   // stays on a real element, so blur-commit and Escape work unchanged and no
   // ARIA grid roles are needed — the <table> already carries the right ones.
-  type CellRef = { name: string; col: string }
+  // `seed` carries the character that opened the editor, so type-over replaces
+  // the value instead of appending to it (D5). Only `editing` ever sets it.
+  type CellRef = { name: string; col: string; seed?: string }
   const [active, setActive] = useState<CellRef | null>(null)
   // Which cell has an OPEN editor. One at a time: the draft is a single
   // { name, col, raw }, not a flat draft map, because at the render cap a map
@@ -516,8 +538,11 @@ function AssetTable({
         return
       default:
         // A printable character opens the editor seeded with it (D5).
+        // preventDefault matters: without it the same keypress ALSO reaches the
+        // freshly-focused input, so typing 7 over 400 produced "4007".
         if (e.key.length === 1 && editabilityOf(rowName, col).editable) {
-          setEditing({ name: rowName, col })
+          e.preventDefault()
+          setEditing({ name: rowName, col, seed: e.key })
         }
     }
   }
@@ -667,21 +692,30 @@ function AssetTable({
    * applies to the whole paste target (Ctrl/Cmd+Enter, or Ctrl/Cmd+click on a
    * boolean), not just this row.
    */
-  const commitCell = (rowName: string, col: string, raw: string, fill: boolean) => {
+  const commitCell = (
+    rowName: string, col: string, raw: string, fill: boolean, advance = false,
+  ) => {
     setEditing(null)
     const row = sorted.find(r => r.name === rowName)
     const currentText = row?.[col] == null ? '' : String(row[col])
     // No round-trip when the committed text equals the cell's current display
-    // text — the same skip the old CarriersTable did (criterion 2).
-    if (!fill && raw === currentText) return
+    // text — the same skip the old CarriersTable did (criterion 2). The move
+    // still happens: Enter advanced the cursor whether or not anything changed.
+    if (!fill && raw === currentText) {
+      if (advance) moveActive(1, 0)
+      return
+    }
 
     const result = validateAndCoerce(col, raw, {
       componentClass, catalog, busNames: new Set(busNames),
     })
+    // Deliberately no advance on a rejection: the cell keeps focus so the user
+    // can correct the value they just typed.
     if (!result.ok) { toast.error(result.error); return }
 
     const targets = fill && selectedRows.size > 0 ? [...selectedRows] : [rowName]
     applyBulk(targets.map(n => ({ name: n, updates: { [col]: result.value } })))
+    if (advance) moveActive(1, 0)
   }
 
   /**
@@ -924,7 +958,8 @@ function AssetTable({
           </>
         ) : (
           <span className="text-muted">
-            ·  Click a cell to edit it. Select rows to paste or fill across many.
+            ·  Click a cell to select it, double-click or press Enter to edit.
+            Select rows to paste or fill across many.
           </span>
         )}
       </div>
@@ -999,6 +1034,15 @@ function AssetTable({
                       // No stopPropagation: the row's own onClick still opens
                       // the properties panel, which is existing behaviour.
                       onClick={() => setActive({ name, col })}
+                      // Double-click edits; a single click only selects. Both
+                      // halves are load-bearing: onCopy/onPaste bail while an
+                      // editor is open, so if a single click opened one the
+                      // multi-row paste flow would be unreachable by mouse.
+                      onDoubleClick={() => {
+                        if (editabilityOf(name, col).editable) {
+                          setEditing({ name, col })
+                        }
+                      }}
                       onKeyDown={e => onCellKeyDown(e, name, col)}
                       className={cellClass(name, col)}
                       style={{ paddingBlock: 'var(--row-padding-y)' }}
@@ -1011,9 +1055,11 @@ function AssetTable({
                           componentClass={componentClass}
                           column={col}
                           initial={row[col] == null ? '' : String(row[col])}
+                          seed={editing.seed}
                           busNames={busNames}
                           catalog={catalog}
-                          onCommit={(raw, fill) => commitCell(name, col, raw, fill)}
+                          onCommit={(raw, fill, advance) =>
+                            commitCell(name, col, raw, fill, advance)}
                           onCancel={() => setEditing(null)}
                         />
                       ) : isBooleanCell(col) ? (

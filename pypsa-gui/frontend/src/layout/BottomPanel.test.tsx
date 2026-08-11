@@ -624,3 +624,203 @@ describe('Carriers tab absorbed into the shared grid — D16', () => {
     expect(await screen.findByText(/output-MWh/)).toBeTruthy()
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Defects found by the 2026-08-11 UI walk with a seeded scratch account. Each
+// was invisible to the suite above because those tests drive the grid with the
+// gestures the implementation happens to support.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The Generator catalog — the only tab with a `bus` column to exercise. */
+const GEN_CATALOG: CatalogAttribute[] = [
+  catalogAttr({ name: 'name', dtype: 'object', status: 'Input (required)' }),
+  catalogAttr({ name: 'bus', dtype: 'object', type: 'string' }),
+  catalogAttr({ name: 'carrier', dtype: 'object', type: 'string' }),
+  catalogAttr({ name: 'p_nom', unit: 'MW' }),
+  catalogAttr({ name: 'p_nom_extendable', dtype: 'bool', type: 'boolean' }),
+  catalogAttr({ name: 'marginal_cost', unit: 'currency/MWh' }),
+  catalogAttr({ name: 'capital_cost', unit: 'currency/MW' }),
+]
+
+function generators() {
+  return [
+    { name: 'G0', bus: 'B0', carrier: 'AC', p_nom: 400, p_nom_extendable: false,
+      marginal_cost: 62, capital_cost: 0 },
+    { name: 'G1', bus: 'B1', carrier: 'AC', p_nom: 350, p_nom_extendable: false,
+      marginal_cost: 58, capital_cost: 0 },
+  ]
+}
+
+/** Re-mock the getters so the Generators tab has rows and a catalog. */
+function withGenerators() {
+  const api = vi.mocked(networkApi)
+  api.getGenerators.mockReset().mockResolvedValue(generators() as never)
+  api.getCatalog.mockReset().mockImplementation(async (component: string) => ({
+    component,
+    attributes: component === 'Bus' ? BUS_CATALOG
+      : component === 'Generator' ? GEN_CATALOG : [],
+  }) as never)
+}
+
+function cellAt(row: string, col: string): HTMLElement {
+  return document.querySelector(`td[data-row="${row}"][data-col="${col}"]`) as HTMLElement
+}
+
+describe('defect 1 — a double click opens the editor', () => {
+  it('double-clicking an editable cell opens its editor', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.dblClick(cell)
+    expect(cell.querySelector('input')).toBeTruthy()
+  })
+
+  it('a SINGLE click still only selects, so the grid keeps the clipboard', async () => {
+    // Load-bearing: onCopy/onPaste both bail with `if (editing) return`, so a
+    // click that opened an editor would hand Ctrl+C/Ctrl+V to the input and
+    // make the multi-row paste flow (criteria 4-9) unreachable by mouse.
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.click(cell)
+    expect(cell.querySelector('input')).toBeNull()
+  })
+
+  it('does not open an editor when double-clicking a read-only cell', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'sub_network')     // status: Output
+    await userEvent.dblClick(cell)
+    expect(cell.querySelector('input')).toBeNull()
+  })
+
+  it('tells the user which gesture actually edits', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    expect(screen.getByText(/double-click or press Enter to edit/i)).toBeTruthy()
+  })
+})
+
+describe('defect 2 — Enter commits and moves down one row', () => {
+  it('moves the active cell down after committing a change', async () => {
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue({ updated: 1 } as never)
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '111' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(cellAt('B1', 'v_nom')).toBe(document.activeElement))
+  })
+
+  it('still moves down when the commit was a no-op', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(cellAt('B1', 'v_nom')).toBe(document.activeElement))
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('stays put when the value was rejected, so the user can fix it', async () => {
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '' as never)
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '12o0' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(err).toHaveBeenCalled())
+    expect(cellAt('B1', 'v_nom')).not.toBe(document.activeElement)
+  })
+
+  it('does NOT advance on a Ctrl/Cmd+Enter fill — D5 gives it no move', async () => {
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue({ updated: 1 } as never)
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '222' } })
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalled())
+    expect(cellAt('B1', 'v_nom')).not.toBe(document.activeElement)
+  })
+})
+
+describe('defect 3 — a printable character seeds the editor with itself', () => {
+  it('replaces the value rather than appending to it', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'v_nom')          // shows 380
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: '7' })
+    const input = cell.querySelector('input') as HTMLInputElement
+    expect(input.value).toBe('7')
+  })
+
+  it('Enter still opens the editor on the existing value', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    expect((cell.querySelector('input') as HTMLInputElement).value).toBe('380')
+  })
+})
+
+describe('defect 4 — the bus cell is usable', () => {
+  it('does not commit on every keystroke', async () => {
+    // BusAutocomplete.onChange fires per keystroke; wiring it straight into
+    // onCommit made the first character commit a partial name, toast an error
+    // and close the editor — so the column could never be changed.
+    withGenerators()
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '' as never)
+    renderPanel()
+    await userEvent.click(screen.getByText(/^Generators/))
+    await screen.findByText('G0')
+    const cell = cellAt('G0', 'bus')
+    await userEvent.dblClick(cell)
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'B' } })
+    expect(err).not.toHaveBeenCalled()
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+    expect(cell.querySelector('input')).toBeTruthy()      // editor still open
+  })
+
+  it('focuses the input so the dropdown opens and arrows reach it', async () => {
+    withGenerators()
+    renderPanel()
+    await userEvent.click(screen.getByText(/^Generators/))
+    await screen.findByText('G0')
+    const cell = cellAt('G0', 'bus')
+    await userEvent.dblClick(cell)
+    expect(cell.querySelector('input')).toBe(document.activeElement)
+  })
+
+  it('commits once when a bus is chosen from the list', async () => {
+    withGenerators()
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue({ updated: 1 } as never)
+    renderPanel()
+    await userEvent.click(screen.getByText(/^Generators/))
+    await screen.findByText('G0')
+    const cell = cellAt('G0', 'bus')
+    await userEvent.dblClick(cell)
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'B2' } })
+    const option = await screen.findByText('B2')
+    fireEvent.mouseDown(option)
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ updates: { bus: 'B2' } }),
+    )
+  })
+})
