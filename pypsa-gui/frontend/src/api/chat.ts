@@ -143,6 +143,24 @@ export async function postChatAbort(sessionId: string): Promise<{ ok: boolean }>
   return r.data
 }
 
+/**
+ * Drop the last `turns` turns from the session's API history.
+ *
+ * What makes retry / edit-and-resend real rather than cosmetic: the array
+ * replayed to the model lives on the server, so clearing the browser alone
+ * leaves the answer being retried in context — and the model reads its own
+ * last answer and repeats it.
+ *
+ * `dropped: 0` with `ok: true` is a legitimate outcome (unknown session, or a
+ * turn in flight, which the server refuses to rewind under).
+ */
+export async function postChatRewind(
+  sessionId: string, turns = 1,
+): Promise<{ ok: boolean; dropped: number }> {
+  const r = await client.post(`/chat/${sessionId}/rewind`, { turns })
+  return r.data
+}
+
 export interface ChatHealth {
   ok: boolean
   anthropic_api_key_present: boolean

@@ -642,6 +642,34 @@ def chat_confirm(session_id: str, body: ConfirmRequest) -> dict[str, Any]:
     }
 
 
+class RewindRequest(BaseModel):
+    """How many complete turns to drop from the session's API history."""
+
+    turns: int = 1
+
+
+@router.post("/{session_id}/rewind")
+def chat_rewind(session_id: str, body: RewindRequest) -> dict[str, Any]:
+    """
+    Drop the last N turns so a retry / edit-and-resend is a real retry.
+
+    Without this the client can only clear the screen, while the array
+    replayed to the model still holds the answer being retried — so the model
+    reads its own last answer and repeats it, and retry looks broken.
+
+    Idempotent-ish and never 404s, matching /abort: an unknown session means
+    there is nothing to rewind, which is the caller's desired end state
+    anyway. `dropped: 0` with `ok: true` is also what a caller gets while a
+    turn is in flight — see rewind_session for why refusing is the only safe
+    answer there.
+    """
+    session = chat_service.get_session(session_id)
+    if session is None:
+        return {"ok": False, "reason": "unknown_session", "dropped": 0}
+    dropped = chat_service.rewind_session(session, turns=body.turns)
+    return {"ok": True, "dropped": dropped}
+
+
 @router.post("/{session_id}/abort")
 def chat_abort(session_id: str) -> dict[str, Any]:
     """

@@ -1910,6 +1910,67 @@ def _message_is_tool_results(msg: dict[str, Any]) -> bool:
     )
 
 
+def _is_turn_start(msg: dict[str, Any]) -> bool:
+    """
+    A user message that begins a turn, as opposed to one carrying tool
+    results back to the model.
+
+    Role alone is not enough and this is the whole subtlety of rewinding: in
+    the Messages API a tool_result travels as `role: "user"`, so "the last user
+    message" is usually the tail of a tool loop, not the question that started
+    it. The A11 turn summary is also a role=="user" text message, and it stands
+    in for many turns that are already gone — rewinding into it would delete
+    the only remaining trace of them.
+    """
+    if msg.get("role") != "user":
+        return False
+    if _message_is_tool_results(msg):
+        return False
+    return not is_turn_summary(msg)
+
+
+def rewind_session(session: "ChatSession", turns: int = 1) -> int:
+    """
+    Drop the last `turns` complete turns from the API history, and report how
+    many messages went.
+
+    This is what makes "retry" and "edit and resend" honest. `session.messages`
+    is the array replayed to the model every turn and it lives here, on the
+    server — so a retry that only clears the browser re-asks the question with
+    the previous answer still in context two messages above it, and the model
+    reads its own last answer and repeats it.
+
+    REFUSES while a turn is in flight. `_run_turn_body` appends to this deque
+    as the turn proceeds; truncating underneath that writer races it and can
+    strand a tool_use with no tool_result — the same 400 the pairing-aware
+    trim exists to avoid at the other end. Returning 0 lets the caller retry
+    after `turn_done` rather than corrupting the session.
+
+    The durable transcript (chat.jsonl) is deliberately NOT rewritten. It is a
+    record of what happened, and the discarded exchange did happen; the retry
+    appends to it as a new turn. So a reload shows both, which is the honest
+    reading of a log.
+    """
+    if turns <= 0:
+        return 0
+    with session._lock:
+        if session._turn_in_flight:
+            return 0
+        before = len(session.messages)
+        for _ in range(turns):
+            # Walk back to the most recent turn start and cut there.
+            cut: int | None = None
+            for i in range(len(session.messages) - 1, -1, -1):
+                if _is_turn_start(session.messages[i]):
+                    cut = i
+                    break
+            if cut is None:
+                break
+            while len(session.messages) > cut:
+                session.messages.pop()
+        return before - len(session.messages)
+
+
 def _drop_oldest_turn_group(messages: collections.deque) -> bool:
     """
     Remove the oldest complete turn group from the left.

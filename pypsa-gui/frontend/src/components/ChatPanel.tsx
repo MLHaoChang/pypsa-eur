@@ -44,10 +44,11 @@ import {
   UploadError,
   type UploadMeta,
 } from '../api/uploads'
-import { useChatStore, type UploadMetaUI } from '../store/chatStore'
+import { useChatStore, type ChatMessage, type UploadMetaUI } from '../store/chatStore'
 import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
+import { postChatRewind } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -726,6 +727,65 @@ const EMPTY_TOOL_PROGRESS: { kind: string; line: string }[] = []
 // ChatLaunchGreeting, which carries both its copy and its testids, so the
 // event bridge (`chat:open-project-picker` / `chat:open-new-project-wizard`)
 // is unchanged and Sidebar needed no edit.
+
+/**
+ * The three things people need from a message and could not do: take the
+ * answer with them, ask again, or fix the question.
+ *
+ * Hidden while a turn is streaming — but only retry and edit. Both rewind the
+ * SERVER history, and `rewind_session` refuses under `_turn_in_flight`, so
+ * offering them mid-turn would clear the screen and silently leave the model's
+ * context untouched: the worst outcome, because it looks like it worked. Copy
+ * touches nothing and stays.
+ *
+ * Tool rows get nothing. Their content is a synthetic one-line summary of a
+ * call, not something anyone wants on a clipboard or re-asked on its own.
+ */
+function MessageActions({ message, streaming, onCopy, onRetry, onEdit }: {
+  message: ChatMessage
+  streaming: boolean
+  onCopy: (m: ChatMessage) => void
+  onRetry: (m: ChatMessage) => void
+  onEdit: (m: ChatMessage) => void
+}) {
+  if (message.role === 'tool') return null
+  const btn = 'px-1 py-0.5 text-[10px] rounded text-muted hover:text-accent hover:bg-panel transition-colors'
+  return (
+    <div className="flex items-center gap-1 mt-1 opacity-60 hover:opacity-100 transition-opacity">
+      <button
+        className={btn}
+        onClick={() => onCopy(message)}
+        title="Copy this message"
+        aria-label="Copy this message"
+        data-testid={`chat-copy-${message.id}`}
+      >
+        Copy
+      </button>
+      {!streaming && message.role === 'assistant' && (
+        <button
+          className={btn}
+          onClick={() => onRetry(message)}
+          title="Discard this answer and ask again"
+          aria-label="Retry this answer"
+          data-testid={`chat-retry-${message.id}`}
+        >
+          Retry
+        </button>
+      )}
+      {!streaming && message.role === 'user' && (
+        <button
+          className={btn}
+          onClick={() => onEdit(message)}
+          title="Put this question back in the composer to change it"
+          aria-label="Edit this question"
+          data-testid={`chat-edit-${message.id}`}
+        >
+          Edit
+        </button>
+      )}
+    </div>
+  )
+}
 
 /** Starter prompts when no project is loaded. */
 const CHAT_STARTER_PROMPTS_UNBOUND: { label: string; text: string }[] = [
@@ -1762,6 +1822,74 @@ export default function ChatPanel() {
     }
   }, [])
 
+  // ── per-message actions ───────────────────────────────────────────────
+  //
+  // Retry and edit share one move: withdraw a turn from BOTH histories, then
+  // do something with the question. `postChatRewind` is the server half and
+  // is awaited first — re-sending before it lands would race the rewind
+  // against the turn it is clearing space for, and the model would answer with
+  // the discarded exchange still in context.
+  const withdrawTurn = useCallback(async (userIdx: number) => {
+    const sid = useChatStore.getState().sessionId
+    if (sid) {
+      try {
+        await postChatRewind(sid, 1)
+      } catch {
+        // A failed rewind means the model would still see the old exchange.
+        // Say so rather than proceeding into a retry that quietly repeats
+        // itself — the silent version is what makes retry look broken.
+        toast.error('Could not rewind the conversation — try again in a moment.')
+        return false
+      }
+    }
+    useChatStore.setState((st) => ({
+      messages: st.messages.slice(0, userIdx),
+      toolProgress: {},
+      error: null,
+    }))
+    return true
+  }, [])
+
+  const onCopyMessage = useCallback((m: ChatMessage) => {
+    // The raw markdown, not the rendered text: a copied answer is usually
+    // pasted somewhere that renders markdown (a PR, a doc, an issue), where
+    // the rendered form arrives as flattened prose with the table gone.
+    navigator.clipboard?.writeText(m.content)
+      .then(() => toast.success('Copied'))
+      .catch(() => toast.error('Could not copy'))
+  }, [])
+
+  /** The user turn an assistant message is answering. */
+  const precedingUserIndex = useCallback((id: string) => {
+    const msgs = useChatStore.getState().messages
+    const at = msgs.findIndex((x) => x.id === id)
+    if (at < 0) return -1
+    for (let i = at; i >= 0; i--) if (msgs[i].role === 'user') return i
+    return -1
+  }, [])
+
+  const onRetryMessage = useCallback(async (m: ChatMessage) => {
+    const idx = precedingUserIndex(m.id)
+    if (idx < 0) return
+    const question = useChatStore.getState().messages[idx]
+    const attachIds = question.attachment_file_ids ?? []
+    // Withdraw the ANSWER, keeping the question: it is being re-asked, not
+    // retracted. dispatchSend re-appends it, so cut at the question's index.
+    if (!await withdrawTurn(idx)) return
+    dispatchSend(question.content, attachIds)
+  }, [precedingUserIndex, withdrawTurn, dispatchSend])
+
+  const onEditMessage = useCallback(async (m: ChatMessage) => {
+    const idx = useChatStore.getState().messages.findIndex((x) => x.id === m.id)
+    if (idx < 0) return
+    const text = m.content
+    // The whole turn goes, question included — the user is replacing it, and
+    // leaving the old phrasing above the new one would show them asking twice.
+    if (!await withdrawTurn(idx)) return
+    setInput(text)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [withdrawTurn])
+
   const onClearHistory = useCallback(() => {
     // Clear UI state in-place (does NOT trigger the project-switch reset
     // path). To wipe the on-disk chat.jsonl too, the user invokes the
@@ -2007,6 +2135,8 @@ export default function ChatPanel() {
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />
             )}
+            <MessageActions message={m} streaming={streaming}
+              onCopy={onCopyMessage} onRetry={onRetryMessage} onEdit={onEditMessage} />
           </div>
         ))}
         <ConfirmationCard />
