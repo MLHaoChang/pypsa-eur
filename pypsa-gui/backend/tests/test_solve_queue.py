@@ -123,14 +123,24 @@ def test_abort_queued_job_is_skipped(client, install_network, tmp_projects_dir, 
     monkeypatch.setattr(pr, "_hydrate_context_from_disk", blocking_hydrate)
 
     a = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
-    b = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
+    # A second HTTP enqueue of the SAME project while one is active is now
+    # refused (idempotent enqueue, R15/R16: it returns job A again with
+    # `already_queued: true` instead of creating a job B). This test's subject
+    # is abort()'s queued-vs-running handling, not dedup, so build job B
+    # directly through the raw `enqueue()` — deliberately left unguarded for
+    # exactly this: the harness constructing a queue state directly
+    # (`services/solve_queue.py::enqueue_unique` docstring). Carry job A's
+    # `project_key` over so B is abortable through the HTTP route exactly like
+    # a router-enqueued job would be — an unkeyed job fails `_may_abort` closed
+    # outside local mode.
+    b_id = solve_queue.enqueue("P1", project_key=a["project_key"]).id
 
     # Job A is now running (blocked in hydrate); job B must be queued behind it.
     _wait_until(lambda: solve_queue.get_job(a["id"])["status"] == "running")
-    assert solve_queue.get_job(b["id"])["status"] == "queued"
+    assert solve_queue.get_job(b_id)["status"] == "queued"
 
     # Cancel the queued job B.
-    r = client.post(f"/api/simulation/queue/{b['id']}/abort")
+    r = client.post(f"/api/simulation/queue/{b_id}/abort")
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "aborted"
 
@@ -138,7 +148,7 @@ def test_abort_queued_job_is_skipped(client, install_network, tmp_projects_dir, 
     gate.set()
     da = _wait_for_terminal(a["id"])
     assert da["status"] == "completed", da
-    assert solve_queue.get_job(b["id"])["status"] == "aborted"
+    assert solve_queue.get_job(b_id)["status"] == "aborted"
 
     # clear_finished drops both terminal jobs — but the ROUTE is super-admin
     # only since P-1 (the queue is process-global, so a clear crosses every
