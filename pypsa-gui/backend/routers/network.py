@@ -1684,6 +1684,11 @@ def sample_representative_weeks(config: SampleWeeksConfig):
         "multi_period": is_multi,
         "timesteps_per_period": len(sampled_idx),
         "weeks": week_meta,
+        # True when the network carried non-default snapshot_weightings before
+        # sampling. Rep-week sampling necessarily replaces them (the prior
+        # weights have no mapping onto the new sparse index), and until now that
+        # was recorded only in the audit log — the user was never told.
+        "had_custom_weights": _had_custom_weights,
     }
 
 

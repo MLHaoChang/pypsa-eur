@@ -140,3 +140,34 @@ export function pvFactor(args: {
   const pv = Math.pow(1 + r, -(period - refPeriod))
   return pv * (Number.isFinite(years) ? years : 1)
 }
+
+/**
+ * The sub-label under the Snapshots stat card.
+ *
+ * Multi-period networks replicate ONE operational year under every investment
+ * period, so the raw first/last timestep carries the BASE year and says nothing
+ * about the horizon — a 2030/2040/2050 model read as "2024-01-01 → 2024-12-31".
+ * Lead with the period span and reduce the operational window to MM-DD, which
+ * is the part that actually varies. Same reasoning as the `toDisplay` remap in
+ * `pages/results/asset/HorizonFilter.tsx`.
+ */
+export function horizonRangeLabel(
+  snapshots: string[] | undefined,
+  periods: Array<number | string> | undefined,
+  isMultiPeriod: boolean,
+): string {
+  if (!snapshots || snapshots.length === 0) {
+    return isMultiPeriod ? 'multi-period horizon' : 'flat horizon'
+  }
+  const first = snapshots[0]
+  const last = snapshots[snapshots.length - 1]
+  const nums = (periods ?? []).map(Number).filter(Number.isFinite)
+  if (nums.length === 0) {
+    return `${first.slice(0, 10)} → ${last.slice(0, 10)}`
+  }
+  const lo = Math.min(...nums)
+  const hi = Math.max(...nums)
+  const span = lo === hi ? `${lo}` : `${lo}…${hi}`
+  // MM-DD only — the operational year is a base year, not a planning year.
+  return `${span} × op. ${first.slice(5, 10)}→${last.slice(5, 10)}`
+}

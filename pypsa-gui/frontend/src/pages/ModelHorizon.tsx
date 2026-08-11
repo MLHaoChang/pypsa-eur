@@ -9,7 +9,7 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
-import { buildWeightingRows, resolutionLabel, FREQ_OPTIONS, pvFactor, type WeightingRow } from './modelHorizonModel'
+import { buildWeightingRows, resolutionLabel, FREQ_OPTIONS, pvFactor, horizonRangeLabel, type WeightingRow } from './modelHorizonModel'
 
 // ── Load carrier canonicaliser ──────────────────────────────────────────────
 // Mirrors loadCarrierKey in Dispatch.tsx + _canonical_load_carrier_key on the
@@ -215,6 +215,10 @@ export default function ModelHorizon() {
       qc.invalidateQueries({ queryKey: nk(proj, 'investmentPeriods') })
       qc.invalidateQueries({ queryKey: nk(proj, 'snapshots') })
       qc.invalidateQueries({ queryKey: nk(proj, 'meta') })
+      // capex_budget_per_period and load_scalers_by_carrier are keyed by period
+      // year; a removed period leaves its entries behind, and the table renders
+      // from this cache.
+      qc.invalidateQueries({ queryKey: nk(proj, 'solverConfig') })
       toast.success('Investment periods saved')
     },
     onError: () => toast.error('Could not save investment periods'),
@@ -279,19 +283,6 @@ export default function ModelHorizon() {
     onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'investmentPeriods') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to update cell'),
-  })
-
-  // Per-period load scaler — lives in SolverConfig.load_scalers (keyed by
-  // period year as string). The PUT replaces the whole `load_scalers` object,
-  // so callers send the complete updated map, not a delta.
-  // LEGACY: kept for backwards-compat with projects that wrote scalers via
-  // the pre-per-carrier UI. New writes go through `updateLoadScalersByCarrier`.
-  const updateLoadScaler = useMutation({
-    mutationFn: (next: Record<string, number>) =>
-      simulationApi.updateSolverConfig({ load_scalers: next }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
-    onError: (e: { response?: { data?: { detail?: string } } }) =>
-      toast.error(e.response?.data?.detail ?? 'Failed to update load scaler'),
   })
 
   // Per-carrier per-period load scaler. Outer key = canonical carrier
@@ -470,6 +461,12 @@ export default function ModelHorizon() {
         `Sampled ${r.weeks.length} week(s) → ${r.count} snapshots` +
         (r.multi_period ? ` (${r.timesteps_per_period}/period × periods)` : ''),
       )
+      if (r.had_custom_weights) {
+        toast(
+          'Your previous snapshot weights were replaced by the representative-week scaling.',
+          { icon: '⚠️', duration: 6000 },
+        )
+      }
     },
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to sample representative weeks'),
@@ -597,13 +594,7 @@ export default function ModelHorizon() {
   // Resolution is a property of the network, not of the form below. `freq`
   // state seeds a NEW index; it must never be read back as status.
   const freqLabel = resolutionLabel(snap?.freq)
-  const rangeStr = (() => {
-    const ss = snap?.snapshots
-    if (!ss || ss.length === 0) return isMultiPeriod ? 'multi-period horizon' : 'flat horizon'
-    const f = (extractLocalFromSnapshot(ss[0]) || ss[0]).slice(0, 10)
-    const l = (extractLocalFromSnapshot(ss[ss.length - 1]) || ss[ss.length - 1]).slice(0, 10)
-    return `${f} → ${l}`
-  })()
+  const rangeStr = horizonRangeLabel(snap?.snapshots, snap?.periods, snapshotsAreMulti)
   // Warn-banner text when the toggle and the actual snapshot index disagree.
   const modeMismatch = isMultiPeriod && !snapshotsAreMulti
     ? 'toggle ON · snapshots still flat — build MultiIndex below'

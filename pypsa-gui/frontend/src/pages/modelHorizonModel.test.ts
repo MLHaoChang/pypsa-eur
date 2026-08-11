@@ -151,3 +151,36 @@ describe('pvFactor', () => {
       .toBeCloseTo(5, 10)
   })
 })
+
+import { horizonRangeLabel } from './modelHorizonModel'
+
+describe('horizonRangeLabel', () => {
+  it('shows the plain date span on a flat network', () => {
+    expect(horizonRangeLabel(
+      ['2024-01-01T00:00:00', '2024-06-01T00:00:00', '2024-12-31T23:00:00'],
+      undefined, false,
+    )).toBe('2024-01-01 → 2024-12-31')
+  })
+
+  it('leads with the investment periods on a multi-period network', () => {
+    // Snapshots replicate ONE operational year under every period, so printing
+    // the raw first/last timestep hides the horizon: a 2030/2040/2050 model
+    // read as "2024-01-01 → 2024-12-31".
+    expect(horizonRangeLabel(
+      ['2024-01-01T00:00:00', '2024-12-31T23:00:00'],
+      [2030, 2050], true,
+    )).toBe('2030…2050 × op. 01-01→12-31')
+  })
+
+  it('handles a single investment period without a range arrow', () => {
+    expect(horizonRangeLabel(
+      ['2024-01-01T00:00:00', '2024-01-02T00:00:00'],
+      [2030], true,
+    )).toBe('2030 × op. 01-01→01-02')
+  })
+
+  it('degrades to a mode word when there are no snapshots', () => {
+    expect(horizonRangeLabel([], [], false)).toBe('flat horizon')
+    expect(horizonRangeLabel(undefined, undefined, true)).toBe('multi-period horizon')
+  })
+})

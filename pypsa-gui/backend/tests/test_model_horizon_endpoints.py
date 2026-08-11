@@ -18,7 +18,7 @@ from __future__ import annotations
 import pandas as pd
 import pypsa
 
-from routers.network import _infer_snapshot_freq
+from routers.network import _infer_snapshot_freq, _user_ts, _user_ts_lock
 from tests.conftest import build_network
 
 
@@ -289,3 +289,71 @@ def test_flat_to_multi_promotion_still_gives_every_period_the_flat_range(client,
     after = _period_blocks(session_ctx(client).network)
     assert after[2030] == after[2040]
     assert after[2030][0].startswith("2024")
+
+
+# ── B10: had_custom_weights on POST /network/snapshots/sample_weeks ────────
+# Representative-week sampling replaces snapshot_weightings wholesale — the
+# prior weights have no mapping onto the new sparse index, so they are always
+# overwritten with the sampler-derived rep-week scaling. Until now, whether
+# that overwrite actually discarded something the user had configured was
+# recorded only in the audit-log changelog entry, never in the HTTP response,
+# so the frontend had no way to warn the user. These two tests pin both
+# directions of the `had_custom_weights` flag.
+
+HOURS_IN_2030 = 8760
+
+
+def _annual_hourly_network() -> pypsa.Network:
+    """
+    A full non-leap-year hourly flat network — the shape
+    `_annual_hourly_reference` (and therefore `can_sample_weeks`) requires
+    before `/snapshots/sample_weeks` will accept a request at all.
+    """
+    n = pypsa.Network()
+    idx = pd.date_range("2030-01-01", periods=HOURS_IN_2030, freq="h")
+    idx.name = "snapshot"
+    n.set_snapshots(idx)
+    n.add("Bus", "B")
+    n.add("Carrier", "gas")
+    n.add("Generator", "g", bus="B", carrier="gas", p_nom=100.0, marginal_cost=10.0)
+    n.add("Load", "L", bus="B", p_set=50.0)
+    return n
+
+
+def test_sample_weeks_reports_had_custom_weights_true_when_prior_weights_were_customized(
+    client, install_network,
+):
+    live = install_network(_annual_hourly_network())
+    # Non-default BEFORE sampling — this is what the flag must catch.
+    live.snapshot_weightings["objective"] = 2.0
+
+    with _user_ts_lock:
+        _user_ts[("loads", "p_set", "L")] = pd.Series(50.0, index=live.snapshots)
+    try:
+        r = client.post(
+            "/api/network/snapshots/sample_weeks", json={"n_weeks": 1, "seed": 42},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["had_custom_weights"] is True
+    finally:
+        with _user_ts_lock:
+            _user_ts.clear()
+
+
+def test_sample_weeks_reports_had_custom_weights_false_for_untouched_default_weights(
+    client, install_network,
+):
+    live = install_network(_annual_hourly_network())
+    # snapshot_weightings is left at the PyPSA default (1.0 everywhere).
+
+    with _user_ts_lock:
+        _user_ts[("loads", "p_set", "L")] = pd.Series(50.0, index=live.snapshots)
+    try:
+        r = client.post(
+            "/api/network/snapshots/sample_weeks", json={"n_weeks": 1, "seed": 42},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["had_custom_weights"] is False
+    finally:
+        with _user_ts_lock:
+            _user_ts.clear()
