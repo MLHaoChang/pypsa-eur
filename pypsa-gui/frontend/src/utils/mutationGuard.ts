@@ -60,3 +60,34 @@ export function evaluateMutation(
 export function readOnlyMessage(reason: ReadOnlyReason): string | null {
   return MESSAGE_BY_REASON[reason]
 }
+
+// Banner copy — the two DEDICATED read-only banners (LockBanner, and the lock
+// chip in WorkspacePanel) say why the project is read-only while it is
+// read-only, rather than answering for one refused click. Their job is
+// different from a toast's in two concrete ways, which is why they get their
+// own table rather than reusing the one above:
+//
+//   1. Both render their own "Read-only" label, so the clause must not repeat
+//      the "Read-only — " prefix every toast string carries.
+//   2. A banner is the only surface that can name the lock HOLDER, and a
+//      holder exists for 'locked-by-user' only — under 'solving' there is no
+//      email to put anywhere, which is exactly how LockBanner ended up
+//      printing "Another user is editing this project" during a queue solve.
+//
+// Still ONE place per surface-kind that maps a reason to English: the banners
+// call this, everything that speaks about a refused mutation calls the table
+// above. `holderEmail` is ignored for every reason but 'locked-by-user'.
+export function readOnlyBannerMessage(
+  reason: ReadOnlyReason,
+  holderEmail: string | null = null,
+): string | null {
+  if (reason === 'solving') {
+    return 'This project is solving in the queue — your changes are disabled until the solve finishes.'
+  }
+  if (reason === 'locked-by-user') {
+    return holderEmail
+      ? `${holderEmail} is currently editing this project — your changes are disabled until the lock is released.`
+      : 'Another user is editing this project — your changes are disabled until the lock is released.'
+  }
+  return null
+}
