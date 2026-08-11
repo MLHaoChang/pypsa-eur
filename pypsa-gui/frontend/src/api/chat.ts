@@ -18,6 +18,7 @@
  */
 import { client } from './client'
 import { rawFetchHeaders } from './csrf'
+import type { UiContext } from '../utils/uiContext'
 
 // Keep in sync with chat_service.DEFAULT_MODEL / OPUS_MODEL, which
 // tests/test_chat_models.py pins.
@@ -36,6 +37,16 @@ export interface ChatStreamRequest {
   // Word / CSV files are NOT valid here — agents go through the
   // read_excel_sheet tool instead.
   attachment_file_ids?: string[]
+  // Deixis — what the user is LOOKING AT when they hit send, so "why is this
+  // so high?" has a referent. Built by `utils/uiContext.ts`, which is also
+  // where the identifiers-only rule is written down; the server enforces the
+  // same allowlist, so attaching values here fails closed.
+  ui_context?: UiContext
+  // 'voice' when the turn was dictated. A field rather than something the
+  // server infers, because reconstructing it later from timing or content is
+  // guesswork — and speech reciprocity (a spoken turn gets a spoken answer)
+  // depends on getting it right.
+  input_mode?: 'voice' | 'text'
 }
 
 export interface ChatFrame {

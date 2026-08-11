@@ -61,6 +61,16 @@ class StreamRequest(BaseModel):
     script: list[dict[str, Any]] | None = None
     message: str | None = None
     attachment_file_ids: list[str] | None = None
+    # Deixis — what the user is LOOKING AT when they hit send, so "why is this
+    # so high?" has a referent. Identifiers only; the allowlist that enforces
+    # that lives in `chat_service._format_ui_context`, not here, so a client
+    # attaching values fails closed. Optional is load-bearing: the smoke
+    # harness and the existing test suite send neither field.
+    ui_context: dict[str, Any] | None = None
+    # 'voice' | 'text'. A field rather than an inference because speech
+    # reciprocity depends on it and reconstructing it later from timing or
+    # content is guesswork. Carried now; the spoken-reply half is not built.
+    input_mode: str | None = None
 
 
 class ConfirmRequest(BaseModel):
@@ -574,6 +584,7 @@ async def chat_stream(
                 events = chat_service.run_turn(
                     session, body.message or "",
                     attachment_file_ids=body.attachment_file_ids,
+                    ui_context=body.ui_context,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)

@@ -47,6 +47,7 @@ import {
 import { useChatStore, type UploadMetaUI } from '../store/chatStore'
 import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
+import { buildUiContext } from '../utils/uiContext'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
@@ -1252,7 +1253,17 @@ export default function ChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Whether the pending composer text arrived by voice. `speech.listening` is
+  // not a substitute: the mic is stopped before the send fires (Enter stops
+  // dictation), so by the time we build the request it always reads false.
+  // Cleared on a manual keystroke and after every send, so "I dictated, then
+  // rewrote it by hand" counts as typed — which matches what the user did
+  // last, and is the safer default for a feature that decides whether the
+  // machine talks out loud.
+  const dictatedRef = useRef(false)
+
   const onSpeechFinal = useCallback((text: string) => {
+    dictatedRef.current = true
     setInput((prev) => {
       const el = textareaRef.current
       const start = el?.selectionStart ?? prev.length
@@ -1615,6 +1626,7 @@ export default function ChatPanel() {
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
     })
     setInput('')
+    dictatedRef.current = false
     setStreaming(true)
     setError(null)
     const cleanup = createChatStream(
@@ -1623,6 +1635,13 @@ export default function ChatPanel() {
         message: text,
         model,
         attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
+        // Built HERE, at send, not captured at mount or on a store
+        // subscription: the user opens Results, selects a generator, and only
+        // then asks. A context frozen earlier describes the screen they had
+        // before they went looking, which is worse than no context at all —
+        // it is a confident wrong referent.
+        ui_context: buildUiContext() ?? undefined,
+        input_mode: dictatedRef.current ? 'voice' : 'text',
       },
       handleFrame,
       (err) => {
@@ -2065,7 +2084,7 @@ export default function ChatPanel() {
               className="flex-1 min-h-0 bg-bg border border-border rounded px-2 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] resize-none focus:outline-none focus:border-accent/60"
               placeholder={streaming ? 'streaming…' : 'message…   (Shift+Enter for newline)'}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => { dictatedRef.current = false; setInput(e.target.value) }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape' && speech.listening) {
                   // stopPropagation as well as preventDefault. App.tsx's
