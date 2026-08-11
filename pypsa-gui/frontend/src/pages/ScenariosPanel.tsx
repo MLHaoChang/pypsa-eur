@@ -9,7 +9,8 @@ import { networkApi } from '../api/network'
 import { formatApiDetail } from '../api/client'
 import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, saveProjectQuietly, switchToProject } from '../utils/projectActions'
-import { evaluateMutation } from '../utils/mutationGuard'
+import { evaluateMutation, readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
+import type { ReadOnlyReason } from '../utils/lockState'
 import { useSolveQueue, useEnqueueSolve } from '../hooks/useSolveQueue'
 import { isActive } from '../api/solveQueue'
 import { confirmToast } from '../utils/toasts'
@@ -308,8 +309,10 @@ export default function ScenariosPanel() {
   const setCompareRailOpen = useUIStore(s => s.setCompareRailOpen)
   const setProjectSwitchInProgress = useUIStore(s => s.setProjectSwitchInProgress)
   // Read-only when another user holds the active project's edit lock (auth
-  // mode). Mutating actions (branch a scenario, delete) are gated on it.
+  // mode), OR a queue job is solving it. Mutating actions (branch a
+  // scenario, delete) are gated on it; readOnlyReason picks the message.
   const readOnly = useUIStore(s => s.readOnly)
+  const readOnlyReason = useUIStore(s => s.readOnlyReason)
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -418,7 +421,7 @@ export default function ScenariosPanel() {
   // read-only on A blocked deleting a B nobody was editing at all.
   const guardMutation = (target: string): boolean => {
     if (target !== currentProject) return true
-    const verdict = evaluateMutation(readOnly)
+    const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (!verdict.allowed) toast.error(verdict.blockedMessage!)
     return verdict.allowed
   }
@@ -500,8 +503,13 @@ export default function ScenariosPanel() {
 
   // Names/ids with a queued or running job — enqueuing one twice is a
   // guaranteed backend refusal, so they are filtered out before we ask.
+  // A redacted row (R13) names no project and can't mark anything busy — drop
+  // nulls rather than let them sit in the set (mirrors SolveQueuePanel's
+  // activeProjects).
   const busy = useMemo(
-    () => new Set((queue?.jobs ?? []).filter(isActive).map(j => j.project_id)),
+    () => new Set(
+      (queue?.jobs ?? []).filter(isActive).map(j => j.project_id).filter((n): n is string => n != null),
+    ),
     [queue],
   )
 
@@ -777,6 +785,7 @@ export default function ScenariosPanel() {
                   node={root}
                   currentProject={currentProject}
                   readOnly={readOnly}
+                  readOnlyReason={readOnlyReason}
                   parent={null}
                   collapsed={collapsed}
                   onToggleCollapse={toggleCollapse}
@@ -837,9 +846,11 @@ export default function ScenariosPanel() {
 interface RowProps {
   node: ScenarioNode
   currentProject: string | null
-  // When true, another user holds the active project's edit lock — the
-  // mutating affordances (branch, delete) are disabled with a hint.
+  // When true, another user holds the active project's edit lock (or a queue
+  // job is solving it) — the mutating affordances (branch, delete) are
+  // disabled with a hint. readOnlyReason picks which hint.
   readOnly: boolean
+  readOnlyReason: ReadOnlyReason
   onSwitch: (name: string) => void
   onCreateChild: (base: string) => void
   onEdit: (project: ProjectInfo) => void
@@ -855,7 +866,7 @@ interface RowProps {
 }
 
 function ScenarioNodeRow({
-  node, currentProject, readOnly, onSwitch, onCreateChild, onEdit, onDelete,
+  node, currentProject, readOnly, readOnlyReason, onSwitch, onCreateChild, onEdit, onDelete,
   parent, collapsed, onToggleCollapse, selected, onToggleSelect, onSolveSubtree,
 }: RowProps) {
   const isCurrent = node.project.name === currentProject
@@ -868,6 +879,9 @@ function ScenarioNodeRow({
   // The lock is held on the ACTIVE project only; it has no bearing on a row
   // the holder never loaded. See `guardMutation` for the full reasoning.
   const lockedRow = readOnly && isCurrent
+  // Hint text for a locked row's disabled affordances — names the SOLVING
+  // reason during a queue job rather than always blaming another user.
+  const lockedHint = lockedRow ? (readOnlyMessage(readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE) : null
   const delta = scenarioDelta(node.project, parent)
   const parentName = parent?.name ?? null
   const hasChildren = node.children.length > 0
@@ -979,7 +993,7 @@ function ScenarioNodeRow({
             title={missing
               ? "This project's folder is no longer on disk — there is nothing to branch"
               : lockedRow
-              ? 'Read-only — another user is editing this project'
+              ? lockedHint!
               : isCurrent
               ? 'Branch a child scenario from this project (saves it first)'
               : 'Branch a child scenario from this project'}
@@ -997,7 +1011,7 @@ function ScenarioNodeRow({
                 lockedRow ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-accent'
               }`}
               title={lockedRow
-                ? 'Read-only — another user is editing this project'
+                ? lockedHint!
                 : `Queue this project and its ${node.children.length} branch(es) to solve`}
             >
               <Play size={13} />
@@ -1013,7 +1027,7 @@ function ScenarioNodeRow({
               lockedRow ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-accent'
             }`}
             title={lockedRow
-              ? 'Read-only — another user is editing this project'
+              ? lockedHint!
               : 'Edit this scenario\u2019s type and description'}
           >
             <Pencil size={13} />
@@ -1028,7 +1042,7 @@ function ScenarioNodeRow({
               lockedRow ? 'text-ink-300 cursor-not-allowed' : 'text-muted hover:text-danger'
             }`}
             title={lockedRow
-              ? 'Read-only — another user is editing this project'
+              ? lockedHint!
               : 'Delete this scenario'}
           >
             <Trash2 size={13} />
@@ -1041,6 +1055,7 @@ function ScenarioNodeRow({
           node={child}
           currentProject={currentProject}
           readOnly={readOnly}
+          readOnlyReason={readOnlyReason}
           onSwitch={onSwitch}
           onCreateChild={onCreateChild}
           onEdit={onEdit}

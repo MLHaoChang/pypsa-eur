@@ -106,10 +106,20 @@ function JobResultsPreview({ name }: { name: string }) {
   )
 }
 
+// The row is a job the caller may not see: the backend nulled its identifying
+// fields. Say so plainly rather than rendering an empty element — the row's id,
+// status, position and timings are legitimately visible and the queue depth is
+// the thing the caller actually needs from it.
+export const REDACTED_PROJECT_LABEL = 'Hidden — another organisation’s project'
+
 function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: number) => void }) {
   const [expanded, setExpanded] = useState(false)
   const canAbort = job.status === 'queued' || job.status === 'running'
-  const canPreview = job.status === 'completed'
+  // A redacted row names no project, so there is nothing to preview and no name
+  // to put in the URL — `/projects/null/results_bundle` is what the unguarded
+  // version would have requested.
+  const name = job.project_id
+  const canPreview = job.status === 'completed' && name != null
   return (
     <div className="rounded-lg border border-border bg-bg overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2">
@@ -117,13 +127,19 @@ function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: number) => void
           onClick={() => canPreview && setExpanded(v => !v)}
           disabled={!canPreview}
           className={`p-0.5 rounded ${canPreview ? 'text-muted hover:text-text' : 'opacity-0 pointer-events-none'}`}
-          title={canPreview ? 'Preview results' : ''}
+          title={canPreview ? 'Preview results' : 'Not available for this job'}
         >
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-[12px] font-medium text-text" title={job.project_id}>{job.project_id}</span>
+            {name != null ? (
+              <span className="truncate text-[12px] font-medium text-text" title={name}>{name}</span>
+            ) : (
+              <span className="truncate text-[12px] font-medium text-muted italic" title={REDACTED_PROJECT_LABEL}>
+                {REDACTED_PROJECT_LABEL}
+              </span>
+            )}
             {job.status === 'queued' && job.position != null && (
               <span className="text-[10px] text-muted">#{job.position} in line</span>
             )}
@@ -147,7 +163,7 @@ function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: number) => void
           </button>
         )}
       </div>
-      {expanded && canPreview && <JobResultsPreview name={job.project_id} />}
+      {expanded && canPreview && name != null && <JobResultsPreview name={name} />}
     </div>
   )
 }
@@ -172,7 +188,11 @@ export default function SolveQueuePanel() {
   const activeCount = jobs.filter(isActive).length
   const finishedCount = jobs.filter(isTerminal).length
   // Project names that already have a queued/running job — don't offer to re-add.
-  const activeProjects = new Set(jobs.filter(isActive).map(j => j.project_id))
+  // A redacted row names no project and can match nothing, so drop it rather
+  // than letting `null` sit in the set.
+  const activeProjects = new Set(
+    jobs.filter(isActive).map(j => j.project_id).filter((n): n is string => n != null),
+  )
 
   // Save (only when it's the active project — it may carry unsaved edits) then
   // enqueue. The dispatcher solves the SAVED version, so persistence first is
@@ -220,7 +240,11 @@ export default function SolveQueuePanel() {
         <p className="text-[11px] text-muted leading-snug">
           Queue saved projects to solve one after another, unattended. Results persist to
           disk — view a finished solve below without loading the project.
-          {activeCount > 0 && <span className="text-accent"> While the queue runs, the active editor is busy.</span>}
+          {activeCount > 0 && (
+            <span className="text-accent">
+              {' '}A project solving in the queue is read-only until it finishes; other projects stay editable.
+            </span>
+          )}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <button

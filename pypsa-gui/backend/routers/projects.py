@@ -1808,6 +1808,51 @@ def _access_denied(path: pathlib.Path) -> HTTPException:
     return HTTPException(503, detail)
 
 
+def _queue_solve_running(registry_id: str | None) -> bool:
+    """
+    True while the solve queue is RUNNING a job for `registry_id`.
+
+    Read from the job table rather than from the context, because the table is
+    authoritative from the instant `_run_job` flips a job to `running` —
+    including the few instructions before it has resolved a context at all, or
+    marked one `kind="queue"`. That window is precisely when a racing
+    registration would strand the solve, so the earlier signal is the useful
+    one. Unkeyed (legacy / hand-made) jobs match nothing here: they never
+    register a context either, so they cannot be stranded by one.
+    """
+    if registry_id is None:
+        return False
+    from services.solve_queue import solve_queue
+
+    return any(
+        j.get("project_key") == registry_id and j.get("status") == "running"
+        for j in solve_queue.list_jobs()
+    )
+
+
+def _queue_solve_conflict(name: str) -> HTTPException:
+    """
+    The 409 a load must raise while the queue owns the project's context.
+
+    Structured detail in the same shape `activate_project` and `_save_context`
+    use, so the chat agent surfaces one typed `solver_in_flight` frame for
+    every refusal-during-a-solve and the frontend's `formatApiDetail` prints
+    the message.
+    """
+    return HTTPException(
+        status_code=409,
+        detail={
+            "error_kind": "solver_in_flight",
+            "message": (
+                f"'{name}' is being solved by the queue right now. Opening it "
+                f"would replace the context that solve is writing into, and "
+                f"its results would be lost. Wait for the job to finish, or "
+                f"abort it, then reopen the project."
+            ),
+        },
+    )
+
+
 def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
     """
     Populate a (typically OFF-TO-THE-SIDE, background) ProjectContext from the
@@ -1983,19 +2028,25 @@ def activate_project(
             )
 
     evicted: list[str] = []
-    if PyPSAService.get_context(registry_id) is not None:
-        # Resident → instant pointer swap. Already in the registry, so no new
-        # registration and no eviction can fire.
-        PyPSAService.set_active(registry_id)
-    else:
-        # Cold: build, hydrate from disk, then publish + register atomically.
-        # activate_context(register=True) runs the B9 cap check and returns any
-        # projects evicted to make room — the freshly-activated project is
-        # protected (it's the new active id) so it's never its own victim.
-        ctx = PyPSAService.build_context()
-        _hydrate_context_from_disk(ctx, src, project.name)
-        project_registry.bind_context(ctx, project)
-        evicted = PyPSAService.activate_context(ctx, register=True)
+    # Hold this key's hydrate lock across the MISS so a concurrent cold path
+    # (a path-scoped read, the session resolver, the solve dispatcher) cannot
+    # build a SECOND context for the same project. A resident hit takes no
+    # lock at all, so the instant tab switch is unchanged.
+    # Lock order: hydrate -> _registry_lock -> solve_queue._lock.
+    with PyPSAService.hydrate_or_adopt(registry_id) as resident:
+        if resident is not None:
+            # Resident → instant pointer swap. Already in the registry, so no
+            # new registration and no eviction can fire.
+            PyPSAService.set_active(registry_id)
+        else:
+            # Cold: build, hydrate from disk, then publish + register atomically.
+            # activate_context(register=True) runs the B9 cap check and returns any
+            # projects evicted to make room — the freshly-activated project is
+            # protected (it's the new active id) so it's never its own victim.
+            ctx = PyPSAService.build_context()
+            _hydrate_context_from_disk(ctx, src, project.name)
+            project_registry.bind_context(ctx, project)
+            evicted = PyPSAService.activate_context(ctx, register=True)
 
     # Persist the pointer (Step 0b). Until this, "which project am I looking
     # at" lived only in process memory, so it was shared by every user on the
@@ -2083,9 +2134,37 @@ def load_project(
     src = project_registry.project_dir(project)
     lock_info = _serialize_project_lock(db, project.id, user)
     name = project.name
+    registry_id = project_registry.registry_key(project)
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
+
+    # ONE ProjectContext per project, always — and this route is the fifth path
+    # that can break it. It builds nothing (so it satisfies R2 as worded), but
+    # it ends by RE-REGISTERING the caller's own context under this project's
+    # key. Do that while the queue is solving the project and the dispatcher's
+    # context becomes an orphan that still solves and still saves at
+    # completion, while this freshly-loaded copy — read from the PRE-solve file
+    # — takes the registry slot and writes over the results on its next save.
+    # That is defect D-1's exact shape, reached through a READ method, which
+    # `main.py`'s `/api/projects/` solver gate does not cover.
+    #
+    # REFUSE rather than adopt the solving context. Adoption would keep the
+    # invariant literally true, but this path does not build a context — it
+    # RE-BINDS one, and its callers treat what comes back as theirs to
+    # re-key: the clone wizard does `load(src)` then `save(dest, rebind=true)`,
+    # which would move the live solving context's identity onto another
+    # project mid-solve and make the dispatcher's own save 409 against its
+    # `expect=`. A refusal is also the only honest answer for a route whose
+    # contract is "read this project off disk": the file is about to be
+    # rewritten by the solve.
+    #
+    # Checked HERE, before `undo_service.clear()` and the `reset_network()`
+    # below, so a refusal costs the caller nothing — no half-load, no lost
+    # undo stack. Re-checked at the registration itself (the disk read is the
+    # widest part of the window between the two).
+    if _queue_solve_running(registry_id):
+        raise _queue_solve_conflict(name)
 
     # Crash-recovery surface. `_atomic_write_with` renames `.tmp → final` as
     # the last step; a `.tmp` sibling means a prior save was killed mid-write.
@@ -2213,9 +2292,32 @@ def load_project(
     # tab switch back to this project finds it resident and does an INSTANT
     # in-memory pointer swap instead of re-loading from disk. Opening a project
     # the old (foreground) way therefore makes it switchable instantly next time.
-    PyPSAService.register(
-        project_registry.registry_key(project), PyPSAService.get_active_context()
-    )
+    #
+    # Under the key's hydrate lock, like every other path that publishes a
+    # context for a project: on a registry MISS the lock is held here, so a
+    # cold dispatcher cannot build and register a second context for the same
+    # project underneath this insert; on a HIT it is not taken (the fast path
+    # is deliberately lock-free), but a hit means the dispatcher can only ADOPT
+    # what is already resident, never build. Lock order: hydrate ->
+    # _registry_lock (inside `register`) -> solve_queue._lock (inside
+    # `_queue_solve_running`), which is the documented order.
+    with PyPSAService.hydrate_or_adopt(registry_id) as resident:
+        ctx = PyPSAService.get_active_context()
+        # The entry check happened before the disk read; a job can have started
+        # since. Registering now would strand it, so refuse — but leave nothing
+        # behind that could reach the project's directory on its own. The
+        # context is bound to the project and NOT registered at this point,
+        # which is exactly what an eviction write-back (`_save_evicted_ctx`)
+        # persists; and merely unbinding it is worse, because `_save_context`
+        # treats an unbound context as a first-save claim under ANY name. A
+        # fresh empty context is the one state neither can misuse — and it
+        # costs nothing extra, since this request's `reset_network()` already
+        # replaced whatever the caller had open.
+        if resident is not ctx and _queue_solve_running(registry_id):
+            with PyPSAService.get_lock():
+                PyPSAService.reset_network()
+            raise _queue_solve_conflict(name)
+        PyPSAService.register(registry_id, ctx)
     change_log_service.log(
         "load", "Project", name,
         f"Loaded project '{name}' ({len(n.buses)} buses, {len(n.generators)} generators, {len(n.snapshots)} snapshots)",

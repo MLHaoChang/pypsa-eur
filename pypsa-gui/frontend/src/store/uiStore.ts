@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { LockState } from '../utils/lockState'
+import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
 
 interface SelectedComponent { type: string; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
@@ -295,6 +295,13 @@ interface UIStore {
   // workbench is always writable.
   readOnly: boolean
   lockHolderEmail: string | null
+  // Why `readOnly` is set. 'writable' whenever it is false.
+  readOnlyReason: ReadOnlyReason
+  // The two independent inputs `readOnly` is folded from. Kept separately
+  // because they clear independently — releasing the edit lock must not make a
+  // solving project editable, and vice versa.
+  lockReadOnly: boolean
+  solvingReadOnly: boolean
   currentProject: string | null
   // Resume target for auth / projects-home flows. Prefer a stable UUID when a
   // caller knows it, but keep the project name as a compatible fallback so
@@ -359,6 +366,8 @@ interface UIStore {
   clearIoModalRequest: () => void
   // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
   setLockState: (s: LockState) => void
+  // A queue job is (or is no longer) solving the project the user is viewing.
+  setSolvingReadOnly: (solving: boolean) => void
   setCurrentProject: (name: string | null, preferredId?: string | null) => void
   setLastProjectId: (id: string | null) => void
   setAutosaveEnabled: (v: boolean) => void
@@ -408,6 +417,9 @@ export const useUIStore = create<UIStore>((set) => ({
   ioModalRequest: null,
   readOnly: false,
   lockHolderEmail: null,
+  readOnlyReason: 'writable',
+  lockReadOnly: false,
+  solvingReadOnly: false,
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(),
@@ -521,7 +533,19 @@ export const useUIStore = create<UIStore>((set) => ({
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab) => set({ ioModalRequest: tab }),
   clearIoModalRequest: () => set({ ioModalRequest: null }),
-  setLockState: (s) => set({ readOnly: s.readOnly, lockHolderEmail: s.holderEmail }),
+  setLockState: (s) => set((state) => {
+    const { readOnly, reason } = effectiveLockState(s.readOnly, state.solvingReadOnly)
+    return {
+      lockReadOnly: s.readOnly,
+      lockHolderEmail: s.holderEmail,
+      readOnly,
+      readOnlyReason: reason,
+    }
+  }),
+  setSolvingReadOnly: (solving) => set((state) => {
+    const { readOnly, reason } = effectiveLockState(state.lockReadOnly, solving)
+    return { solvingReadOnly: solving, readOnly, readOnlyReason: reason }
+  }),
   setCurrentProject: (name, preferredId) => {
     try {
       if (name) {

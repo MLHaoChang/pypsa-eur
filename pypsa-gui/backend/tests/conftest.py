@@ -148,19 +148,60 @@ _SEED = {"password": "test-password-123"}
 @pytest.fixture(scope="session")
 def _auth_db():
     """
-    One in-memory SQLite database shared by every test in the session.
+    One FILE-BACKED SQLite database shared by every test in the session.
 
-    StaticPool is load-bearing: `:memory:` gives each *connection* its own
-    database, and the app opens connections from several places (the auth
-    middleware, `get_db`, the solve dispatcher). Without a single pooled
-    connection the seeded user would be invisible to the request that needs it.
+    Was `:memory:` + `StaticPool`. The old justification ("`:memory:` gives
+    each *connection* its own database, so every caller must be routed
+    through ONE shared pooled connection or the seeded user is invisible to
+    it") stops applying the moment the database is a real file: every
+    connection then opens the SAME file, so there is no longer a reason to
+    funnel every thread through a single DBAPI connection object.
+
+    That funnelling was a latent thread-safety hazard, not just an
+    optimisation. `test_hydrate_or_adopt_cold_paths.py` races real OS
+    threads — a `threading.Barrier`-synchronised `Session` per thread — and
+    multiple `Session`s issuing overlapping, uncoordinated statements through
+    ONE physical `sqlite3.Connection` produced genuine corruption:
+    `ValueError: badly formed hexadecimal UUID string` reading back a UUID
+    column, and a `User` row committed session-scopes earlier intermittently
+    reading back as absent (`404 Project not found` / `401 Authentication
+    required` from inside the race). Neither was a bug in the code under
+    test. `:memory:` + `StaticPool` is the textbook-safe pattern for a shared
+    engine used SEQUENTIALLY across threads (one request at a time, even if
+    served on different threadpool threads over the life of the process); it
+    was never safe for the genuinely CONCURRENT access this suite's cold-path
+    lock tests deliberately drive.
+
+    `poolclass=NullPool` + `connect_args={"check_same_thread": False,
+    "timeout": 30}` are not copied over by reflex — they're the SAME choice
+    `db/session.py::get_engine` already makes for file-backed sqlite in
+    production, for the same reason ("NullPool for a file-backed database:
+    one local user, one file. QueuePool's 5 + 10 connections buy nothing here
+    and widen the window in which a writer holds the file."). Matching it
+    means every checkout here is a brand-new DBAPI connection — never pooled,
+    never reused across threads, never shared by two threads at once — same
+    as what ships. `enable_sqlite_foreign_keys` (called below, unchanged)
+    now meaningfully enables WAL journalling per connection on a real file,
+    giving genuine reader/writer concurrency arbitrated by SQLite's own file
+    locking instead of by one shared Python object.
+
+    Lives in a session-scoped temp directory, removed on teardown alongside
+    `engine.dispose()`.
     """
+    import shutil
+    import tempfile
+
+    from sqlalchemy.pool import NullPool
+
     from db import session as db_session_module
 
+    tmp_dir = tempfile.mkdtemp(prefix="pypsa-gui-test-authdb-")
+    db_path = pathlib.Path(tmp_dir) / "auth.db"
+
     engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        f"sqlite+pysqlite:///{db_path}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+        poolclass=NullPool,
     )
     db_session_module.enable_sqlite_foreign_keys(engine)
     Base.metadata.create_all(engine)
@@ -172,6 +213,7 @@ def _auth_db():
     finally:
         db_session_module.SessionLocal = original
         engine.dispose()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _seed_org_and_user(session_local, *, email: str, org_name: str):
