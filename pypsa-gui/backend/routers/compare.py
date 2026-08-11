@@ -794,6 +794,7 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
     )
 
     return CapacityComparison(
+        available=True,
         capacity_mw_by_carrier=_to_pv_dict(cap_by_carrier),
         capex_meur_by_carrier=_to_pv_dict(total_capex_by_carrier),
         new_capex_meur_by_carrier=_to_pv_dict(capex_by_carrier),
@@ -1107,6 +1108,7 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchCompar
             load_bucket["total"] = static_total * float(weights.sum()) / 1000.0
 
     return DispatchComparison(
+        available=True,
         dispatch_gwh_by_carrier=_to_pv_dict(dispatch_by_carrier),
         opex_meur=_to_pv(opex_bucket),
         total_load_gwh=_to_pv(load_bucket),
@@ -1260,7 +1262,7 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
     _walk_branches(n.links,        getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None,        False, is_link=True, nom_field="p_nom")
     # Worst-first ordering across all branch types.
     out.sort(key=lambda e: e.peak_loading.total, reverse=True)
-    return LoadingComparison(lines=out)
+    return LoadingComparison(available=True, lines=out)
 
 
 def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison:
@@ -1452,6 +1454,7 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
     else:
         max_price, min_price = 0.0, 0.0
     return PricesComparison(
+        available=True,
         duration_curve=duration_curve,
         mean_price=CarrierPeriodValue(total=mean_total, by_period=mean_pp),
         median_price=CarrierPeriodValue(total=median_total, by_period=median_pp),
@@ -1560,6 +1563,7 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         intensity_pp[p] = _intensity(mwh, total_bucket["by_period"].get(p, 0.0))
 
     return EmissionsComparison(
+        available=True,
         total_kt=_to_pv(total_bucket),
         by_carrier_kt=_to_pv_dict(by_carrier_kt),
         intensity_kg_per_mwh=CarrierPeriodValue(total=intensity_total, by_period=intensity_pp),
@@ -2167,7 +2171,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         # Cheapest LCOH first — surface the most competitive Link on top.
         per_asset_lcoh.sort(key=lambda e: e.lcoh_eur_per_mwh.total)
 
-    return EconomicsComparison(by_carrier=out, per_asset_lcoh=per_asset_lcoh)
+    return EconomicsComparison(available=True, by_carrier=out, per_asset_lcoh=per_asset_lcoh)
 
 
 def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> CurtailmentComparison:
@@ -2341,6 +2345,7 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         sys_rate_pp[p] = 100.0 * v / ap if ap > 1e-9 else 0.0
 
     return CurtailmentComparison(
+        available=True,
         total_gwh=_to_pv(total_bucket),
         by_carrier_gwh=_to_pv_dict(curt_by_carrier),
         rate_pct_by_carrier=_to_pv_dict(rate_by_carrier),
@@ -2690,6 +2695,7 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
     by_unit.sort(key=lambda u: -(u.cycles.total or 0))
 
     return StorageCyclingComparison(
+        available=True,
         cycles_by_carrier=_to_pv_dict(cycles_by_carrier),
         by_unit=by_unit,
     )
