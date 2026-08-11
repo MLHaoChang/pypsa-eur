@@ -103,6 +103,10 @@ export const networkApi = {
         month: number; iso_year: number; iso_week: number
         start: string; end: string; weight: number
       }>
+      // True when the network carried non-default snapshot_weightings before
+      // sampling — rep-week sampling always replaces them, and until now that
+      // was recorded only in the audit log.
+      had_custom_weights?: boolean
     }>('/network/snapshots/sample_weeks', body).then(r => r.data),
   // Per-row snapshot weighting editor. `all` sets every row uniformly
   // (representative-day pattern: 24 hours × weight=30 = 1 month). `updates`

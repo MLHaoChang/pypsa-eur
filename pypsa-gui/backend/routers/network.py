@@ -488,6 +488,66 @@ def _build_period_multiindex(periods, blocks) -> pd.MultiIndex:
     return mi
 
 
+def _infer_snapshot_freq(n) -> str | None:
+    """
+    The snapshot index's resolution, as a pandas offset alias ("h", "3h", "D").
+
+    The Model Horizon page used to render its own form state here, which was
+    seeded to "h" at mount and never read back from the network — so a
+    3-hourly MultiIndex and a Daily flat index both reported "Hourly (h)".
+
+    MultiIndex networks are measured over the FIRST period's slice only: the
+    flattened timestep level contains a discontinuity at each period seam
+    (period P's last hour → period P+1's first), which would read as irregular.
+
+    `pd.infer_freq` is tried first because it names calendar frequencies ("D",
+    "MS", "W") that a raw timedelta cannot. It returns None for a
+    representative-week index — contiguous 168-hour blocks separated by gaps —
+    whose resolution is nevertheless hourly, so fall back to the modal
+    successive delta. Returns None when neither resolves; the UI renders that
+    as "irregular" rather than guessing.
+    """
+    sns = n.snapshots
+    try:
+        if isinstance(sns, pd.MultiIndex):
+            level0 = sns.get_level_values(0)
+            if len(level0) == 0:
+                return None
+            first = level0[0]
+            idx = pd.DatetimeIndex(sns[level0 == first].get_level_values(1))
+        else:
+            idx = pd.DatetimeIndex(sns)
+    except (ValueError, TypeError):
+        # `pd.DatetimeIndex(...)` raises (e.g. `DateParseError`, a `ValueError`
+        # subclass) on a non-parseable object index. No current GUI path
+        # produces one, but this helper runs unconditionally at the top of
+        # `get_snapshots` — degrade to "irregular" rather than 500ing the
+        # page's primary endpoint.
+        return None
+    if len(idx) < 2:
+        return None
+    try:
+        inferred = pd.infer_freq(idx)
+    except (ValueError, TypeError):
+        inferred = None
+    if inferred:
+        return inferred
+    deltas = idx.to_series().diff().dropna()
+    if deltas.empty:
+        return None
+    modal = deltas.mode()
+    if modal.empty:
+        return None
+    hours = modal.iloc[0].total_seconds() / 3600.0
+    if hours <= 0:
+        return None
+    if hours == 1.0:
+        return "h"
+    if float(hours).is_integer():
+        return f"{int(hours)}h"
+    return None
+
+
 # ── Buses ────────────────────────────────────────────────────────────────────
 
 @router.get("/buses")
@@ -1039,6 +1099,7 @@ def get_snapshots():
     # gates the representative-week sampler (needs a full-year hourly profile).
     ts_start, ts_end = _user_ts_extent()
     can_sample_weeks = _annual_hourly_reference()[0] is not None
+    freq = _infer_snapshot_freq(n)
     if isinstance(sns, pd.MultiIndex):
         try:
             periods = [int(p) for p in sns.get_level_values(0)]
@@ -1058,6 +1119,7 @@ def get_snapshots():
             "ts_start": ts_start,
             "ts_end": ts_end,
             "can_sample_weeks": can_sample_weeks,
+            "freq": freq,
         }
     snaps = [s.isoformat() if hasattr(s, "isoformat") else str(s) for s in sns]
     weightings = df_to_json(n.snapshot_weightings) if not n.snapshot_weightings.empty else []
@@ -1065,6 +1127,7 @@ def get_snapshots():
         "count": len(sns), "snapshots": snaps, "weightings": weightings,
         "ts_start": ts_start, "ts_end": ts_end,
         "can_sample_weeks": can_sample_weeks,
+        "freq": freq,
     }
 
 
@@ -1179,11 +1242,21 @@ async def upload_snapshot_weightings_csv(file: UploadFile = File(...)):
     # to retry without manually undoing the partial state.
     pending: list[tuple[object, str, float]] = []
     skipped = 0
+    # A bare ISO `snapshot` key is ambiguous on a multi-period network — see
+    # the tolerant `iso_to_idx[iso] = idx` registration above, which is
+    # last-write-wins across periods and so always resolves to the LAST
+    # period. Same hazard as `update_snapshot_weightings`'s PATCH path;
+    # tracked here too so a CSV that lost its `period|` prefix (Excel, a
+    # hand-edited file) doesn't silently write every row into the wrong
+    # period with no trace in the response or audit log.
+    ambiguous_bare_keys = 0
     for row in reader:
         key = (row.get("snapshot") or "").strip()
         if not key or key not in iso_to_idx:
             skipped += 1
             continue
+        if is_multi and "|" not in key:
+            ambiguous_bare_keys += 1
         idx = iso_to_idx[key]
         for c in cols:
             v = row.get(c, "").strip()
@@ -1205,12 +1278,16 @@ async def upload_snapshot_weightings_csv(file: UploadFile = File(...)):
         change_log_service.log(
             "update", "Network", "snapshot_weightings",
             f"Uploaded snapshot_weightings.csv: {applied} cell(s) applied, "
-            f"{skipped} row(s) skipped (no match).",
+            f"{skipped} row(s) skipped (no match)."
+            + (f" — WARNING: {ambiguous_bare_keys} bare-ISO key(s) on a multi-period "
+               "network each resolved to the LAST period; send `period|iso` to target "
+               "a specific period." if ambiguous_bare_keys else ""),
         )
     return {
         "applied": applied,
         "skipped": skipped,
         "columns": cols,
+        "ambiguous_bare_keys": ambiguous_bare_keys,
     }
 
 
@@ -1285,11 +1362,19 @@ def update_snapshot_weightings(body: dict):
         # Pass 1 — resolve + parse every cell into `pending`, raising before
         # any write.
         pending: list[tuple[object, str, float]] = []
+        # A bare ISO key on a MultiIndex network is ambiguous — it is
+        # registered once per period and last-write-wins, so it silently
+        # resolves to the LAST period. The GUI now sends `period|iso`; anything
+        # still sending bare keys (older clients, chat tools) gets recorded in
+        # the audit log rather than writing to a surprising row in silence.
+        ambiguous_bare_keys = 0
         for key, vals in updates.items():
             if not isinstance(vals, dict):
                 continue
             if key in iso_to_idx:
                 idx = iso_to_idx[key]
+                if is_multi and "|" not in str(key):
+                    ambiguous_bare_keys += 1
             else:
                 try:
                     pos = int(key)
@@ -1313,7 +1398,10 @@ def update_snapshot_weightings(body: dict):
         applied = len(pending)
         change_log_service.log(
             "update", "Network", "snapshot_weightings",
-            f"Updated snapshot weightings: all={all_val}, per-row updates={applied}",
+            f"Updated snapshot weightings: all={all_val}, per-row updates={applied}"
+            + (f" — WARNING: {ambiguous_bare_keys} bare-ISO key(s) on a multi-period "
+               "network each resolved to the LAST period; send `period|iso` to target "
+               "a specific period." if ambiguous_bare_keys else ""),
         )
     return {
         "count": len(n.snapshot_weightings),
@@ -1618,6 +1706,11 @@ def sample_representative_weeks(config: SampleWeeksConfig):
         "multi_period": is_multi,
         "timesteps_per_period": len(sampled_idx),
         "weeks": week_meta,
+        # True when the network carried non-default snapshot_weightings before
+        # sampling. Rep-week sampling necessarily replaces them (the prior
+        # weights have no mapping onto the new sparse index), and until now that
+        # was recorded only in the audit log — the user was never told.
+        "had_custom_weights": _had_custom_weights,
     }
 
 
@@ -1647,9 +1740,12 @@ def set_investment_periods(body: InvestmentPeriods):
 
       1) Flat snapshots → MultiIndex: promote by replicating the existing
          operational DatetimeIndex under each requested period.
-      2) MultiIndex → different MultiIndex (period added / removed): rebuild
-         by replicating the FIRST existing period's operational range under
-         every new period. User uploads survive via _user_ts.
+      2) MultiIndex → different MultiIndex (period added / removed): each
+         period that survives keeps ITS OWN operational range (needed for
+         "Different year per period" multi-year weather data — 2030→2019,
+         2040→2020, …); only a genuinely new period inherits the first
+         existing period's range as a template. User uploads survive via
+         _user_ts.
       3) Empty `periods` on a MultiIndex: demote back to flat using the first
          period's operational range.
     """
@@ -1675,23 +1771,36 @@ def set_investment_periods(body: InvestmentPeriods):
                 n.investment_periods = pd.Index([], dtype="int64")
             return {"count": 0}
 
-        # Determine base operational DatetimeIndex.
+        # Determine each period's operational block. A period that exists both
+        # before and after keeps ITS OWN timesteps — the previous code rebuilt
+        # every period from the FIRST period's range, which silently destroyed
+        # the "Different year per period" setup (2030→2019 weather, 2040→2020,
+        # …) the moment the user added or removed a year.
         if is_multi:
-            existing_periods = sorted(n.snapshots.get_level_values(0).unique().tolist())
-            first_p = existing_periods[0]
-            base_idx = pd.DatetimeIndex(
-                n.snapshots[n.snapshots.get_level_values(0) == first_p]
-                .get_level_values(1),
-            )
+            level0 = n.snapshots.get_level_values(0)
+            existing_periods = sorted(level0.unique().tolist())
+            existing_blocks = {
+                int(p): pd.DatetimeIndex(
+                    n.snapshots[level0 == p].get_level_values(1),
+                )
+                for p in existing_periods
+            }
+            base_idx = existing_blocks[int(existing_periods[0])]
         else:
             existing_periods = []
+            existing_blocks = {}
             base_idx = pd.DatetimeIndex(n.snapshots)
 
         # Only rebuild snapshots if the period set actually changed.
         if existing_periods != new_periods:
             _backup_network_ts_to_user_ts(n)
             captured_weights = _capture_snapshot_weights_per_timestep(n)
-            mi = _build_period_multiindex(new_periods, [base_idx] * len(new_periods))
+            # Surviving periods keep their own block; a genuinely new period
+            # inherits the first existing period's range as a template (on a
+            # flat→multi promotion there is only one range, so every period
+            # legitimately gets it).
+            blocks = [existing_blocks.get(int(p), base_idx) for p in new_periods]
+            mi = _build_period_multiindex(new_periods, blocks)
             n.set_snapshots(mi)
             _reapply_snapshot_weights(n, captured_weights)
             _reapply_user_ts_to_network(n)
@@ -1704,10 +1813,30 @@ def set_investment_periods(body: InvestmentPeriods):
         if body.years_weightings:
             n.investment_period_weightings["years"] = body.years_weightings
 
+        # Read inside the lock — the rest of this handler holds it, and a
+        # concurrent request between lock-release and this read could change
+        # the snapshot count out from under the log line.
+        snapshot_count = len(n.snapshots)
+        # "existing periods kept their own operational range" is only true on
+        # the actual multi→multi rebuild branch above. It was previously
+        # logged unconditionally, which was wrong in two other reachable
+        # cases: a flat→multi promotion (nothing was "kept" — there were no
+        # existing periods, every period got the same templated range) and
+        # the no-rebuild path (the period set didn't change, so the rebuild
+        # was skipped entirely; nothing was rebuilt, let alone "kept").
+        promoted = not is_multi
+        rebuilt = existing_periods != new_periods
+        if promoted:
+            range_note = "promoted from flat snapshots; every period shares the previous operational range"
+        elif rebuilt:
+            range_note = "existing periods kept their own operational range; new periods inherited the first period's range as a template"
+        else:
+            range_note = "period set unchanged; snapshot rebuild skipped"
+
     change_log_service.log(
         "update", "Network", "investment_periods",
         f"Set investment periods: {new_periods} "
-        f"(operational range × {len(base_idx)} steps)",
+        f"({snapshot_count} snapshots total; {range_note})",
     )
     return {"count": len(new_periods)}
 

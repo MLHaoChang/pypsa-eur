@@ -9,6 +9,7 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
+import { buildWeightingRows, resolutionLabel, FREQ_OPTIONS, pvFactor, horizonRangeLabel, type WeightingRow } from './modelHorizonModel'
 
 // ── Load carrier canonicaliser ──────────────────────────────────────────────
 // Mirrors loadCarrierKey in Dispatch.tsx + _canonical_load_carrier_key on the
@@ -54,15 +55,6 @@ function loadCarrierSortKey(key: string): string {
 //      constructor) when ON, single-period snapshot range when OFF.
 //   4. Snapshot weightings — used in both modes. Inline pagination for hourly
 //      horizons + CSV download/upload for bulk edits at 8760-row scale.
-
-const FREQ_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'h',   label: 'Hourly (h)' },
-  { value: '3h',  label: '3-hourly' },
-  { value: '6h',  label: '6-hourly' },
-  { value: 'D',   label: 'Daily (D)' },
-  { value: 'W',   label: 'Weekly (W)' },
-  { value: 'MS',  label: 'Monthly (MS)' },
-]
 
 // PyPSA's snapshot index is full ISO; the HTML datetime-local input only
 // accepts "YYYY-MM-DDTHH:mm". This trims any seconds / fractional part the
@@ -116,9 +108,10 @@ export default function ModelHorizon() {
       setEnd(toLocal(snap.ts_end))
       return
     }
-    // For MultiIndex snapshots the entries look like "(2030, Timestamp(...))"
-    // and aren't useful as datetime-local defaults — only seed from
-    // ISO-shaped flat entries.
+    // `snap.snapshots` is plain ISO in both modes (see the accurate note on
+    // `snapshotsAreMulti` below) — the `startsWith('(')` guard here is
+    // defensive only, kept in case a caller ever slips a raw tuple-repr
+    // string through.
     const ss = snap.snapshots
     if (ss && ss.length > 0) {
       const first = ss[0], last = ss[ss.length - 1]
@@ -135,6 +128,12 @@ export default function ModelHorizon() {
     [ip],
   )
 
+  // Auto-discount anchors on the first ACTIVE period — same rule as
+  // solver_service's `ref_year = periods_active[0]`.
+  const refPeriod = useMemo(
+    () => (periods.length > 0 ? Math.min(...periods) : 0),
+    [periods],
+  )
   const isMultiPeriod = cfg?.multi_investment_periods ?? false
   // MultiIndex snapshots are signalled by the backend returning a parallel
   // `periods` array (one investment period per snapshot). The `snapshots`
@@ -145,6 +144,18 @@ export default function ModelHorizon() {
     () => (snap?.periods?.length ?? 0) > 0,
     [snap?.periods],
   )
+  // Whether auto-discount will ACTUALLY write anything at solve time — not
+  // just whether the checkbox is checked. Mirrors solver_service.py's gate
+  // exactly (see `_apply_modelling_assumptions` step 4b, ~:4374-4379):
+  // cfg.auto_discount_periods AND multi_investment_periods AND a MultiIndex
+  // snapshot index AND a non-empty n.investment_periods. Toggle ON with flat
+  // snapshots (or periods cleared) is inert on the backend; the PV preview
+  // column must grey out in that state rather than claiming a value that
+  // will never be written.
+  const autoDiscountOn = Boolean(cfg?.auto_discount_periods)
+    && isMultiPeriod
+    && snapshotsAreMulti
+    && periods.length > 0
 
   // ── Mutations ──────────────────────────────────────────────────────────
   // Snapshot reshape touches a defined set of query keys: the index itself
@@ -215,6 +226,10 @@ export default function ModelHorizon() {
       qc.invalidateQueries({ queryKey: nk(proj, 'investmentPeriods') })
       qc.invalidateQueries({ queryKey: nk(proj, 'snapshots') })
       qc.invalidateQueries({ queryKey: nk(proj, 'meta') })
+      // capex_budget_per_period and load_scalers_by_carrier are keyed by period
+      // year; a removed period leaves its entries behind, and the table renders
+      // from this cache.
+      qc.invalidateQueries({ queryKey: nk(proj, 'solverConfig') })
       toast.success('Investment periods saved')
     },
     onError: () => toast.error('Could not save investment periods'),
@@ -281,19 +296,6 @@ export default function ModelHorizon() {
       toast.error(e.response?.data?.detail ?? 'Failed to update cell'),
   })
 
-  // Per-period load scaler — lives in SolverConfig.load_scalers (keyed by
-  // period year as string). The PUT replaces the whole `load_scalers` object,
-  // so callers send the complete updated map, not a delta.
-  // LEGACY: kept for backwards-compat with projects that wrote scalers via
-  // the pre-per-carrier UI. New writes go through `updateLoadScalersByCarrier`.
-  const updateLoadScaler = useMutation({
-    mutationFn: (next: Record<string, number>) =>
-      simulationApi.updateSolverConfig({ load_scalers: next }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
-    onError: (e: { response?: { data?: { detail?: string } } }) =>
-      toast.error(e.response?.data?.detail ?? 'Failed to update load scaler'),
-  })
-
   // Per-carrier per-period load scaler. Outer key = canonical carrier
   // ('electrical' / 'hydrogen' / 'heat' / passthrough), inner key = period
   // year (str). Wholesale PUT — caller sends the full nested map.
@@ -355,8 +357,8 @@ export default function ModelHorizon() {
       toast.error(e.response?.data?.detail ?? 'Failed to update weights'),
   })
   const updateOneWeight = useMutation({
-    mutationFn: (args: { iso: string; objective: number }) =>
-      networkApi.updateSnapshotWeightings({ updates: { [args.iso]: { objective: args.objective } } }),
+    mutationFn: (args: { key: string; objective: number }) =>
+      networkApi.updateSnapshotWeightings({ updates: { [args.key]: { objective: args.objective } } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'snapshots') }),
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to update weight'),
@@ -378,48 +380,9 @@ export default function ModelHorizon() {
     applyPeriods.mutate(periods.filter(y => y !== year))
   }
 
-  // ── Period bulk-weight + discount calc inputs ──────────────────────────
+  // ── Period bulk-weight inputs ────────────────────────────────────────────
   const [bulkYears, setBulkYears] = useState('')
   const [bulkObjective, setBulkObjective] = useState('')
-
-  const [discRate, setDiscRate] = useState<string>('')
-  const [discBase, setDiscBase] = useState<string>('')
-  // Track whether the user has explicitly touched each input. Without this,
-  // the empty-string check `discRate === ''` re-seeds the value every time
-  // the user deliberately clears the field (type → backspace → empty), as
-  // soon as the next cfg refetch lands. Hydrate ONCE on mount, then leave
-  // it alone — the user's empty is intentional from that point on.
-  const discRateTouchedRef = useRef(false)
-  const discBaseTouchedRef = useRef(false)
-  useEffect(() => {
-    if (!discRateTouchedRef.current && discRate === '' && cfg?.discount_rate !== undefined) {
-      setDiscRate(((cfg.discount_rate ?? 0) * 100).toFixed(2))
-    }
-  }, [cfg?.discount_rate, discRate])
-  useEffect(() => {
-    if (!discBaseTouchedRef.current && discBase === '' && periods.length > 0) {
-      setDiscBase(String(periods[0]))
-    }
-  }, [periods, discBase])
-
-  const applyDiscountFactors = () => {
-    const r = parseFloat(discRate) / 100
-    const base = parseInt(discBase, 10)
-    if (!Number.isFinite(r) || r < 0) { toast.error('Bad discount rate'); return }
-    if (!Number.isFinite(base)) { toast.error('Bad base year'); return }
-    const updates: Record<string, { objective: number }> = {}
-    for (const p of periods) {
-      updates[String(p)] = { objective: (1 + r) ** -(p - base) }
-    }
-    networkApi
-      .updateInvestmentPeriodWeightings({ updates })
-      .then(() => {
-        qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'investmentPeriods') })
-        toast.success(`Applied discount factors (r=${(r * 100).toFixed(2)} %, base ${base})`)
-      })
-      .catch((e: { response?: { data?: { detail?: string } } }) =>
-        toast.error(e.response?.data?.detail ?? 'Failed to apply discount factors'))
-  }
 
   // ── Multi-period snapshot constructor scratch state ────────────────────
   const [mpMode, setMpMode] = useState<'same' | 'per_period'>('same')
@@ -509,6 +472,12 @@ export default function ModelHorizon() {
         `Sampled ${r.weeks.length} week(s) → ${r.count} snapshots` +
         (r.multi_period ? ` (${r.timesteps_per_period}/period × periods)` : ''),
       )
+      if (r.had_custom_weights) {
+        toast(
+          'Your previous snapshot weights were replaced by the representative-week scaling.',
+          { icon: '⚠️', duration: 6000 },
+        )
+      }
     },
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e.response?.data?.detail ?? 'Failed to sample representative weeks'),
@@ -581,6 +550,15 @@ export default function ModelHorizon() {
     () => snap?.weightings?.slice(pageStart, pageEnd) ?? [],
     [snap?.weightings, pageStart, pageEnd],
   )
+  const weightingRows = useMemo(
+    () => buildWeightingRows(
+      pageRows as WeightingRow[],
+      snap?.snapshots ?? [],
+      snapshotsAreMulti,
+      pageStart,
+    ),
+    [pageRows, snap?.snapshots, snapshotsAreMulti, pageStart],
+  )
 
   const csvUploadRef = useRef<HTMLInputElement>(null)
   const onDownloadCsv = async () => {
@@ -624,14 +602,29 @@ export default function ModelHorizon() {
   // Layout
   // ─────────────────────────────────────────────────────────────────────────
   // ── Derived display values for the StatCard strip ──────────────────────
-  const freqLabel = FREQ_OPTIONS.find(o => o.value === freq)?.label ?? freq
-  const rangeStr = (() => {
-    const ss = snap?.snapshots
-    if (!ss || ss.length === 0) return isMultiPeriod ? 'multi-period horizon' : 'flat horizon'
-    const f = (extractLocalFromSnapshot(ss[0]) || ss[0]).slice(0, 10)
-    const l = (extractLocalFromSnapshot(ss[ss.length - 1]) || ss[ss.length - 1]).slice(0, 10)
-    return `${f} → ${l}`
-  })()
+  // Resolution is a property of the network, not of the form below. `freq`
+  // state seeds a NEW index; it must never be read back as status.
+  const freqLabel = resolutionLabel(snap?.freq)
+  // Prefer the small investment-period list (`periods`, already in scope
+  // above) over `snap.periods` — the latter is the PER-SNAPSHOT parallel
+  // array (periods[i] = the period snapshots[i] belongs to), which on a
+  // multi-period hourly model is tens of thousands of entries long. Fall
+  // back to `snap.periods` only when `periods` is empty but the snapshot
+  // index is still MultiIndex: `n.investment_periods` can be unset on a
+  // MultiIndex network built without going through /investment_periods
+  // (e.g. constructed directly), which yields an empty `ip.periods` but a
+  // non-empty `snap.periods` — without the fallback the card would silently
+  // stop showing the period span the moment that happens. `horizonRangeLabel`
+  // is a single O(n) pass with no spread, so handing it the large array in
+  // this fallback case is safe.
+  const rangeStr = useMemo(
+    () => horizonRangeLabel(
+      snap?.snapshots,
+      periods.length > 0 ? periods : snap?.periods,
+      snapshotsAreMulti,
+    ),
+    [snap?.snapshots, snap?.periods, periods, snapshotsAreMulti],
+  )
   // Warn-banner text when the toggle and the actual snapshot index disagree.
   const modeMismatch = isMultiPeriod && !snapshotsAreMulti
     ? 'toggle ON · snapshots still flat — build MultiIndex below'
@@ -659,7 +652,13 @@ export default function ModelHorizon() {
         <StatCard
           eyebrow="Resolution"
           value={freqLabel}
-          sub="snapshot weightings apply"
+          // `freqLabel` is measured from the actual (possibly flat) snapshot
+          // index, not the toggle — so the sub-label must branch on
+          // `snapshotsAreMulti`, not `isMultiPeriod`. With the toggle ON but
+          // snapshots still flat (the state the mode-mismatch banner below
+          // warns about), `isMultiPeriod` would claim "per investment
+          // period" over a value that was measured across a flat index.
+          sub={snapshotsAreMulti ? 'per investment period' : 'timestep spacing'}
         />
         <StatCard
           eyebrow="Mode"
@@ -804,46 +803,13 @@ export default function ModelHorizon() {
                   >Apply objective</button>
                 </div>
 
-                {/* Discount-factor calculator */}
-                <div className="flex items-center gap-2 mt-1 pt-2 border-t border-border/60">
-                  <span className="text-[10px] text-muted whitespace-nowrap">discount calc:</span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={0}
-                    value={discRate}
-                    onChange={e => {
-                      discRateTouchedRef.current = true
-                      setDiscRate(e.target.value)
-                    }}
-                    title="Discount rate %"
-                    className="w-16 px-2 py-1 border border-border rounded text-[11px] bg-bg font-mono"
-                  />
-                  <span className="text-[10px] text-muted">%</span>
-                  <input
-                    type="number"
-                    step={1}
-                    value={discBase}
-                    onChange={e => {
-                      discBaseTouchedRef.current = true
-                      setDiscBase(e.target.value)
-                    }}
-                    title="Base year (NPV anchor)"
-                    className="w-20 px-2 py-1 border border-border rounded text-[11px] bg-bg font-mono"
-                  />
-                  <span className="text-[10px] text-muted">base yr</span>
-                  <button
-                    disabled={!discRate || !discBase || periods.length === 0}
-                    onClick={applyDiscountFactors}
-                    className="ml-auto px-2 py-1 border border-border rounded text-[11px] text-accent hover:border-accent disabled:opacity-40"
-                    title="Set objective = (1+rate)^-(period-base) for every period"
-                  >Apply discounts</button>
-                </div>
-
-                {/* Auto-discount toggle: re-applies PV factors at every solve
-                    using the SolverConfig's discount_rate. Equivalent to
-                    clicking 'Apply discounts' every time before solving, but
-                    survives manual edits to ipw.objective. */}
+                {/* Auto-discount: the ONLY automated path to ipw.objective.
+                    Writes PV × years per period at LP build time using the
+                    solver settings' discount_rate and inflation_rate, and
+                    reverts in restore() so the on-disk network keeps whatever
+                    the user typed. The PV column in the table below previews
+                    exactly what it will write. Manual edits to the objective
+                    cell still work and are what to use for one-off factors. */}
                 <label className="flex items-center gap-2 mt-1 pt-2 border-t border-border/60 text-[10px] text-muted">
                   <input
                     type="checkbox"
@@ -860,12 +826,19 @@ export default function ModelHorizon() {
 
                 {/* Per-period inline editor */}
                 <div className="border border-border rounded overflow-auto max-h-64 mt-1">
-                  <table className="w-full text-[11px] border-collapse" style={{ minWidth: 400 }}>
+                  {/* 400 → 480: gained the PV × preview column. Same +80
+                      bump the weightings table below took (480 → 560) for
+                      its new Period column. */}
+                  <table className="w-full text-[11px] border-collapse" style={{ minWidth: 480 }}>
                     <thead className="sticky top-0 bg-bg-2 z-10">
                       <tr className="border-b border-border">
                         <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Period</th>
                         <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Years</th>
                         <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Objective</th>
+                        <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase"
+                            title="What Auto-discount will write into `objective` at solve time: (1+real rate)^-(period-first period) x years. Preview only — nothing is written until you solve.">
+                          PV ×<br />preview
+                        </th>
                         {networkLoadCarriers.map(carrier => (
                           <th key={`hdr-load-${carrier}`}
                               className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase"
@@ -944,6 +917,18 @@ export default function ModelHorizon() {
                                 }}
                                 className="w-24 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
                               />
+                            </td>
+                            <td className={`px-2 py-1 text-right font-mono text-[11px] ${autoDiscountOn ? 'text-text' : 'text-muted/40'}`}
+                                title={autoDiscountOn
+                                  ? `Auto-discount will set objective = ${pvFactor({ period, refPeriod, years, discountRate: cfg?.discount_rate ?? 0, inflationRate: cfg?.inflation_rate ?? 0 }).toFixed(4)} at solve time, overriding the value on the left.`
+                                  : 'Auto-discount is off — the objective value on the left is what the LP uses.'}>
+                              {pvFactor({
+                                period,
+                                refPeriod,
+                                years,
+                                discountRate: cfg?.discount_rate ?? 0,
+                                inflationRate: cfg?.inflation_rate ?? 0,
+                              }).toFixed(4)}
                             </td>
                             {networkLoadCarriers.map(carrier => {
                               const v = resolvedScaler(carrier)
@@ -1031,8 +1016,12 @@ export default function ModelHorizon() {
                 <p className="text-[10px] text-muted leading-relaxed">
                   <code>years</code> = calendar years the period stands in for
                   (period 2030 with <code>years=10</code> → 2030–2039).
-                  <code> objective</code> = LP-objective weight (typically a
-                  present-value discount factor). <code>Load × · {'{carrier}'}</code> =
+                  <code> objective</code> = LP-objective weight. When
+                  Auto-discount is ON the <code>PV × preview</code> column is
+                  what actually reaches the LP; the value you type here is
+                  overridden at solve time and restored afterwards. With
+                  Auto-discount OFF, what you type is what the LP uses.
+                  <code>Load × · {'{carrier}'}</code> =
                   per-carrier load growth multiplier — loads of that carrier
                   are scaled independently per period at solve time
                   (<code>1.00</code> = unchanged, <code>1.10</code> = +10 %).
@@ -1403,9 +1392,12 @@ export default function ModelHorizon() {
 
           {/* Per-row table — paginated so 8760-hour horizons are reachable */}
           <div className="border border-border rounded overflow-auto max-h-64">
-            <table className="w-full text-xs border-collapse" style={{ minWidth: 480 }}>
+            <table className="w-full text-xs border-collapse" style={{ minWidth: snapshotsAreMulti ? 560 : 480 }}>
               <thead className="sticky top-0 bg-bg-2 z-10">
                 <tr className="border-b border-border">
+                  {snapshotsAreMulti && (
+                    <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Period</th>
+                  )}
                   <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Snapshot</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Objective</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Generators</th>
@@ -1413,48 +1405,44 @@ export default function ModelHorizon() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((w, i) => {
-                  const wm = w as Record<string, unknown>
-                  const iso = String(wm.snapshot ?? wm.name ?? snap.snapshots[pageStart + i])
-                  return (
-                    <tr key={iso} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
-                      <td className="px-2 py-1 font-mono text-[11px] whitespace-nowrap">{iso}</td>
-                      <td className="px-2 py-1 text-right">
-                        <input
-                          key={`sw-${iso}-${wm.objective ?? 1}`}
-                          type="number"
-                          step="0.1"
-                          min={0}
-                          defaultValue={Number(wm.objective ?? 1).toFixed(2)}
-                          // Disable while the per-snapshot weight mutation is
-                          // in flight — same double-blur race protection as
-                          // the per-period table above. updateOneWeight is a
-                          // single mutation shared across every row in this
-                          // pageRows table, so disable cascades to other
-                          // rows during the PUT. Cosmetic only.
-                          disabled={updateOneWeight.isPending}
-                          onBlur={e => {
-                            const v = parseFloat(e.target.value)
-                            if (!Number.isFinite(v) || v < 0) {
-                              e.target.value = String(wm.objective ?? 1)
-                              return
-                            }
-                            if (v !== Number(wm.objective ?? 1)) {
-                              updateOneWeight.mutate({ iso, objective: v })
-                            }
-                          }}
-                          className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
-                        />
-                      </td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
-                        {Number(wm.generators ?? 1).toFixed(2)}
-                      </td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
-                        {Number(wm.stores ?? 1).toFixed(2)}
-                      </td>
-                    </tr>
-                  )
-                })}
+                {weightingRows.map((row, i) => (
+                  <tr key={row.key} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
+                    {snapshotsAreMulti && (
+                      <td className="px-2 py-1 font-mono text-[11px]">{row.period}</td>
+                    )}
+                    <td className="px-2 py-1 font-mono text-[11px] whitespace-nowrap">{row.iso}</td>
+                    <td className="px-2 py-1 text-right">
+                      <input
+                        key={`sw-${row.key}-${row.objective}`}
+                        type="number"
+                        step="0.1"
+                        min={0}
+                        defaultValue={row.objective.toFixed(2)}
+                        // Disabled while the shared per-snapshot mutation is
+                        // in flight — same double-blur race protection as
+                        // the per-period table above. Cosmetic only.
+                        disabled={updateOneWeight.isPending}
+                        onBlur={e => {
+                          const v = parseFloat(e.target.value)
+                          if (!Number.isFinite(v) || v < 0) {
+                            e.target.value = row.objective.toFixed(2)
+                            return
+                          }
+                          if (v !== row.objective) {
+                            updateOneWeight.mutate({ key: row.key, objective: v })
+                          }
+                        }}
+                        className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
+                      />
+                    </td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
+                      {row.generators.toFixed(2)}
+                    </td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
+                      {row.stores.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
