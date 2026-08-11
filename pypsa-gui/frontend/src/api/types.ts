@@ -373,6 +373,9 @@ export interface CarrierPeriodValue {
 }
 
 export interface CapacityComparison {
+  /** False means the block resolved nothing: every figure below is a
+   *  default zero, not a measurement. See ADR-0001. */
+  available: boolean
   capacity_mw_by_carrier: Record<string, CarrierPeriodValue>
   // Total annuitised CAPEX (existing + new) per carrier — matches the
   // live /results/cost_breakdown numbers.
@@ -398,6 +401,9 @@ export interface CapacityComparison {
 }
 
 export interface DispatchComparison {
+  /** False means the block resolved nothing: every figure below is a
+   *  default zero, not a measurement. See ADR-0001. */
+  available: boolean
   dispatch_gwh_by_carrier: Record<string, CarrierPeriodValue>
   opex_meur: CarrierPeriodValue
   total_load_gwh: CarrierPeriodValue
@@ -420,6 +426,9 @@ export interface LineLoadingEntry {
 }
 
 export interface LoadingComparison {
+  /** False means the block resolved nothing: every figure below is a
+   *  default zero, not a measurement. See ADR-0001. */
+  available: boolean
   lines: LineLoadingEntry[]              // sorted by peak loading desc
 }
 
@@ -431,6 +440,9 @@ export interface CarrierPriceStats {
 }
 
 export interface PricesComparison {
+  /** False means the block resolved nothing: every figure below is a
+   *  default zero, not a measurement. See ADR-0001. */
+  available: boolean
   duration_curve: number[]               // 101 samples, index 0 = peak price
   mean_price: CarrierPeriodValue         // €/MWh
   median_price: CarrierPeriodValue
@@ -449,6 +461,9 @@ export interface PricesComparison {
 }
 
 export interface EmissionsComparison {
+  /** False means the block resolved nothing: every figure below is a
+   *  default zero, not a measurement. See ADR-0001. */
+  available: boolean
   total_kt: CarrierPeriodValue
   by_carrier_kt: Record<string, CarrierPeriodValue>
   intensity_kg_per_mwh: CarrierPeriodValue
@@ -483,6 +498,9 @@ export interface AssetLCOHEntry {
 }
 
 export interface EconomicsComparison {
+  /** False means the block resolved nothing: every figure below is a
+   *  default zero, not a measurement. See ADR-0001. */
+  available: boolean
   by_carrier: Record<string, CarrierEconomics>
   // Per-Link LCOH rows (electrolysers, heat pumps, P2X, ...). Empty when
   // no extendable Link in either project has non-trivial dispatch.
@@ -490,6 +508,9 @@ export interface EconomicsComparison {
 }
 
 export interface CurtailmentComparison {
+  /** False means the block resolved nothing: every figure below is a
+   *  default zero, not a measurement. See ADR-0001. */
+  available: boolean
   total_gwh: CarrierPeriodValue
   by_carrier_gwh: Record<string, CarrierPeriodValue>
   rate_pct_by_carrier: Record<string, CarrierPeriodValue>
@@ -531,6 +552,9 @@ export interface StorageUnitCycles {
 }
 
 export interface StorageCyclingComparison {
+  /** False means the block resolved nothing: every figure below is a
+   *  default zero, not a measurement. See ADR-0001. */
+  available: boolean
   cycles_by_carrier: Record<string, CarrierPeriodValue>
   by_unit: StorageUnitCycles[]
 }

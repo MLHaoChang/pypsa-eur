@@ -8,6 +8,9 @@ import { ArrowRight, Loader, AlertTriangle, Layers } from 'lucide-react'
 import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
 import { ErrorBoundary } from '../components/ErrorBoundary'
+// One spelling of "unavailable" across Results and Compare — see its comment
+// in results/shared.tsx. Compare is the third consumer it was built for.
+import { COST_UNAVAILABLE } from './results/shared'
 import type {
   CompareState, ProjectInfo, ResultsSummary, CarrierPeriodValue,
   LineLoadingEntry, CarrierEconomics, StorageUnitCycles, LostLoadBus,
@@ -400,6 +403,16 @@ function CapacityTab({ a, b }: { a: string; b: string }) {
       />
     )
   }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.capacity && sa.capacity.available !== true) || (sb.capacity && sb.capacity.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.capacity && sa.capacity.available !== true && sa.project,
+                    !!sb.capacity && sb.capacity.available !== true && sb.project].filter(Boolean) as string[]} />
+  }
 
   return (
     <div className="space-y-4">
@@ -555,6 +568,16 @@ function DispatchTab({ a, b }: { a: string; b: string }) {
       />
     )
   }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.dispatch && sa.dispatch.available !== true) || (sb.dispatch && sb.dispatch.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.dispatch && sa.dispatch.available !== true && sa.project,
+                    !!sb.dispatch && sb.dispatch.available !== true && sb.project].filter(Boolean) as string[]} />
+  }
 
   const opexA = sa.dispatch?.opex_meur ?? { total: 0, by_period: {} }
   const opexB = sb.dispatch?.opex_meur ?? { total: 0, by_period: {} }
@@ -652,6 +675,16 @@ function LoadingTab({ a, b }: { a: string; b: string }) {
   const sb = qB.data!
   if (!sa.has_solve || !sb.has_solve) {
     return <UnsolvedBanner unsolved={[!sa.has_solve && sa.project, !sb.has_solve && sb.project].filter(Boolean) as string[]} />
+  }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.loading && sa.loading.available !== true) || (sb.loading && sb.loading.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.loading && sa.loading.available !== true && sa.project,
+                    !!sb.loading && sb.loading.available !== true && sb.project].filter(Boolean) as string[]} />
   }
 
   if (merged.length === 0) {
@@ -868,6 +901,16 @@ function PricesTab({ a, b }: { a: string; b: string }) {
   const sb = qB.data!
   if (!sa.has_solve || !sb.has_solve) {
     return <UnsolvedBanner unsolved={[!sa.has_solve && sa.project, !sb.has_solve && sb.project].filter(Boolean) as string[]} />
+  }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.prices && sa.prices.available !== true) || (sb.prices && sb.prices.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.prices && sa.prices.available !== true && sa.project,
+                    !!sb.prices && sb.prices.available !== true && sb.project].filter(Boolean) as string[]} />
   }
 
   const pa = sa.prices
@@ -1238,6 +1281,16 @@ function EmissionsTab({ a, b }: { a: string; b: string }) {
   if (!sa.has_solve || !sb.has_solve) {
     return <UnsolvedBanner unsolved={[!sa.has_solve && sa.project, !sb.has_solve && sb.project].filter(Boolean) as string[]} />
   }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.emissions && sa.emissions.available !== true) || (sb.emissions && sb.emissions.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.emissions && sa.emissions.available !== true && sa.project,
+                    !!sb.emissions && sb.emissions.available !== true && sb.project].filter(Boolean) as string[]} />
+  }
 
   const emA = sa.emissions
   const emB = sb.emissions
@@ -1312,7 +1365,7 @@ function EmissionsTab({ a, b }: { a: string; b: string }) {
 // across carriers tops the section so the user can scan the cost-effective
 // ones at a glance.
 
-function EconomicsTab({ a, b }: { a: string; b: string }) {
+export function EconomicsTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['results-summary', b], queryFn: () => projectsApi.resultsSummary(b), staleTime: 30_000 })
   const [period, setPeriod] = useState<PeriodChoice>('all')
@@ -1422,6 +1475,16 @@ function EconomicsTab({ a, b }: { a: string; b: string }) {
   const sb = qB.data!
   if (!sa.has_solve || !sb.has_solve) {
     return <UnsolvedBanner unsolved={[!sa.has_solve && sa.project, !sb.has_solve && sb.project].filter(Boolean) as string[]} />
+  }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.economics && sa.economics.available !== true) || (sb.economics && sb.economics.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.economics && sa.economics.available !== true && sa.project,
+                    !!sb.economics && sb.economics.available !== true && sb.project].filter(Boolean) as string[]} />
   }
   const ecA = ecMaps.A
   const ecB = ecMaps.B
@@ -1722,6 +1785,16 @@ function CurtailmentTab({ a, b }: { a: string; b: string }) {
   if (!sa.has_solve || !sb.has_solve) {
     return <UnsolvedBanner unsolved={[!sa.has_solve && sa.project, !sb.has_solve && sb.project].filter(Boolean) as string[]} />
   }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.curtailment && sa.curtailment.available !== true) || (sb.curtailment && sb.curtailment.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.curtailment && sa.curtailment.available !== true && sa.project,
+                    !!sb.curtailment && sb.curtailment.available !== true && sb.project].filter(Boolean) as string[]} />
+  }
 
   const cA = sa.curtailment
   const cB = sb.curtailment
@@ -1850,6 +1923,16 @@ function LostLoadTab({ a, b }: { a: string; b: string }) {
   const sb = qB.data!
   if (!sa.has_solve || !sb.has_solve) {
     return <UnsolvedBanner unsolved={[!sa.has_solve && sa.project, !sb.has_solve && sb.project].filter(Boolean) as string[]} />
+  }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.lost_load && sa.lost_load.available !== true) || (sb.lost_load && sb.lost_load.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.lost_load && sa.lost_load.available !== true && sa.project,
+                    !!sb.lost_load && sb.lost_load.available !== true && sb.project].filter(Boolean) as string[]} />
   }
 
   const llA = sa.lost_load
@@ -2134,6 +2217,16 @@ function StorageCyclingTab({ a, b }: { a: string; b: string }) {
   const sb = qB.data!
   if (!sa.has_solve || !sb.has_solve) {
     return <UnsolvedBanner unsolved={[!sa.has_solve && sa.project, !sb.has_solve && sb.project].filter(Boolean) as string[]} />
+  }
+  // ADR-0001: a block that resolved nothing ships default zeros, which are
+  // indistinguishable from real ones. `!== true` deliberately, NOT `=== false`
+  // — a payload from an older backend carries no flag at all, and treating
+  // that as available would reintroduce the very defect this guards. A block
+  // that is absent entirely (null) keeps its existing empty-state handling.
+  if ((sa.storage_cycling && sa.storage_cycling.available !== true) || (sb.storage_cycling && sb.storage_cycling.available !== true)) {
+    return <UnavailableNotice
+      unavailable={[!!sa.storage_cycling && sa.storage_cycling.available !== true && sa.project,
+                    !!sb.storage_cycling && sb.storage_cycling.available !== true && sb.project].filter(Boolean) as string[]} />
   }
 
   const scA = sa.storage_cycling
@@ -2869,6 +2962,32 @@ function ErrorBanner({ which }: { which: string }) {
   return (
     <div className="flex items-center gap-2 text-xs text-danger py-8 justify-center">
       <AlertTriangle size={14} /> Failed to load '{which}'. It may be corrupted or missing.
+    </div>
+  )
+}
+
+/**
+ * A block that resolved nothing, named as such.
+ *
+ * Distinct from `UnsolvedBanner`: that one means "no fresh solve exists".
+ * This one means the solve exists but THIS view could not be computed from
+ * it — so its figures would be default zeros, and per ADR-0001 a zero is a
+ * legitimate result in an energy-system model and must never stand in for
+ * an unresolvable one. Uses `COST_UNAVAILABLE` rather than spelling its own
+ * word, which is why that constant lives in `results/shared`.
+ */
+function UnavailableNotice({ unavailable }: { unavailable: string[] }) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-muted border border-border rounded p-3">
+      <AlertTriangle size={14} />
+      <span>
+        {/* The marker is its own element so it reads as a value, not prose —
+            the figures are withheld, and this is what stands in their place. */}
+        <span className="font-mono">{COST_UNAVAILABLE}</span>
+        {unavailable.length === 1
+          ? ` for scenario '${unavailable[0]}' — these figures could not be resolved, so none are shown rather than showing zeros.`
+          : ` for both scenarios — these figures could not be resolved, so none are shown rather than showing zeros.`}
+      </span>
     </div>
   )
 }
