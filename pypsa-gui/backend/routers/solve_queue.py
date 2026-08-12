@@ -196,7 +196,22 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
     return project_acl.can_access_project(db, user, project)
 
 
-def _visible_job_or_404(db: DBSession, user: User, job_id: int) -> dict:
+def _parse_job_id(job_id: str) -> uuid.UUID | None:
+    """
+    The path parameter as a UUID, or None if it is not one.
+
+    Declared `str` in the signature rather than `uuid.UUID` deliberately: FastAPI
+    would answer 422 for a malformed id, which is a different answer from the 404
+    an unknown id gets — and telling a caller "that is not even a valid id"
+    re-opens the oracle the byte-identical 404 exists to close.
+    """
+    try:
+        return uuid.UUID(job_id)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _visible_job_or_404(db: DBSession, user: User, job_id: str) -> dict:
     """
     The job, if the caller may SEE it; the genuine not-found 404 otherwise.
 
@@ -213,7 +228,10 @@ def _visible_job_or_404(db: DBSession, user: User, job_id: int) -> dict:
     from services import project_acl
 
     not_found = HTTPException(404, f"No solve job with id {job_id}.")
-    job = solve_queue.get_job(job_id)
+    parsed = _parse_job_id(job_id)
+    if parsed is None:
+        raise not_found
+    job = solve_queue.get_job(parsed)
     if job is None:
         raise not_found
     prefix = _org_prefix(db, user)
@@ -229,7 +247,7 @@ def _sse_line(text: object) -> str:
     return f"data: {safe}\n\n"
 
 
-def _done_event(job_id: int) -> str:
+def _done_event(job_id: uuid.UUID) -> str:
     """The `event: done` SSE frame carrying a job's current/terminal snapshot."""
     job = solve_queue.get_job(job_id) or {}
     payload = json.dumps({
@@ -243,7 +261,7 @@ def _done_event(job_id: int) -> str:
 
 @router.get("/{job_id}/log_history")
 def job_log_history(
-    job_id: int,
+    job_id: str,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
@@ -259,14 +277,15 @@ def job_log_history(
 
     project_registry.require_user(user)
     job = _visible_job_or_404(db, user, job_id)
-    q = solve_queue.get_log_queue(job_id)
+    parsed = _parse_job_id(job_id)
+    q = solve_queue.get_log_queue(parsed)
     lines = q.history() if q is not None else []
     return {"lines": lines, "status": job["status"]}
 
 
 @router.get("/{job_id}/log_stream")
 async def job_log_stream(
-    job_id: int,
+    job_id: str,
     request: Request,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
@@ -308,9 +327,10 @@ async def job_log_stream(
 
     project_registry.require_user(user)
     _visible_job_or_404(db, user, job_id)
+    parsed = _parse_job_id(job_id)
 
     async def generate():
-        q = solve_queue.get_log_queue(job_id)
+        q = solve_queue.get_log_queue(parsed)
         if q is None:
             # No queue was ever published for this job — most commonly a
             # caller attaching in the `queued` window, before the dispatcher's
@@ -319,7 +339,7 @@ async def job_log_stream(
             # on this frame-then-close, looping every few seconds until the
             # job starts, and any consumer awaiting `done` waits forever.
             yield "data: No log for this job\n\n"
-            yield _done_event(job_id)
+            yield _done_event(parsed)
             return
 
         sub_id, dq = q.subscribe()
@@ -338,7 +358,7 @@ async def job_log_stream(
                     yield _sse_line(dq.popleft())
                 if drained:
                     continue
-                snapshot = solve_queue.get_job(job_id) or {}
+                snapshot = solve_queue.get_job(parsed) or {}
                 if not snapshot or snapshot.get("status") in _TERMINAL:
                     # The producer's guarantee is "put lines, then flip status":
                     # by the time `status` reads as terminal, every line the
@@ -356,7 +376,7 @@ async def job_log_stream(
             # A closed browser tab would otherwise leak the deque + dict entry.
             q.unsubscribe(sub_id)
 
-        yield _done_event(job_id)
+        yield _done_event(parsed)
 
     return StreamingResponse(
         generate(),
@@ -417,7 +437,7 @@ def list_queue(
 
 @router.post("/{job_id}/abort")
 def abort_job(
-    job_id: int,
+    job_id: str,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
@@ -425,10 +445,12 @@ def abort_job(
     Abort a running job (signals its stop_event) or cancel a queued one.
 
     AUTHORIZATION (P-1): 404, never 403, when the caller may not touch this
-    job, with the message the genuine not-found case uses BYTE FOR BYTE. Job
-    ids are small sequential integers, so a 403 would confirm that id 7 exists
-    and hand back the enumeration the redacted listing just took away — the
-    same reasoning `project_registry.find_project` documents for projects.
+    job, with the message the genuine not-found case uses BYTE FOR BYTE. A 403
+    would confirm that a job with this id exists and hand back the enumeration
+    the redacted listing just took away — the same reasoning
+    `project_registry.find_project` documents for projects. A malformed id gets
+    the SAME 404, for the same reason `_parse_job_id` declares `job_id: str`
+    rather than `uuid.UUID`.
 
     The job is fetched and authorized BEFORE `abort()`, which is destructive:
     it flips a queued job to cancelled or sets a running job's stop_event.
@@ -437,10 +459,13 @@ def abort_job(
 
     project_registry.require_user(user)
     not_found = HTTPException(404, f"No solve job with id {job_id}.")
-    job = solve_queue.get_job(job_id)
+    parsed = _parse_job_id(job_id)
+    if parsed is None:
+        raise not_found
+    job = solve_queue.get_job(parsed)
     if job is None or not _may_abort(db, user, job):
         raise not_found
-    res = solve_queue.abort(job_id)
+    res = solve_queue.abort(parsed)
     if res is None:
         # Cleared by a concurrent clear_finished between the two lookups.
         raise not_found

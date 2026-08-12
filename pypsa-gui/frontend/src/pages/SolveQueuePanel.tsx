@@ -137,7 +137,7 @@ export function canExpandJob(job: SolveJob): boolean {
   return job.status !== 'queued'
 }
 
-function JobLogPanel({ jobId, live }: { jobId: number; live: boolean }) {
+function JobLogPanel({ jobId, live }: { jobId: string; live: boolean }) {
   const [lines, setLines] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -249,7 +249,7 @@ function JobLogPanel({ jobId, live }: { jobId: number; live: boolean }) {
   )
 }
 
-function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: number) => void }) {
+function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const canAbort = job.status === 'queued' || job.status === 'running'
   // A redacted row names no project, so there is nothing to preview and no name
@@ -366,7 +366,7 @@ export default function SolveQueuePanel() {
     }
   }
 
-  const onAbort = (id: number) => {
+  const onAbort = (id: string) => {
     abortJob.mutate(id, {
       onError: (e) => toast.error(`Abort failed: ${(e as Error)?.message ?? e}`),
     })

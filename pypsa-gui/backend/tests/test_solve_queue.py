@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 
 import pypsa
 
@@ -33,7 +34,10 @@ def _wait_until(pred, timeout: float = 60.0, interval: float = 0.05):
     raise AssertionError(f"condition not met within {timeout}s")
 
 
-def _wait_for_terminal(job_id: int, timeout: float = 90.0) -> dict:
+def _wait_for_terminal(job_id, timeout: float = 90.0) -> dict:
+    # `job_id` is usually a JSON-echoed string (`some_job["id"]`); `_jobs` is
+    # UUID-keyed, so it must be parsed before it can find anything.
+    job_id = uuid.UUID(str(job_id))
     _wait_until(
         lambda: (solve_queue.get_job(job_id) or {}).get("status")
         in ("completed", "failed", "aborted"),
@@ -159,7 +163,7 @@ def test_abort_queued_job_is_skipped(client, install_network, tmp_projects_dir, 
     b_id = solve_queue.enqueue("P1", project_key=a["project_key"]).id
 
     # Job A is now running (blocked in hydrate); job B must be queued behind it.
-    _wait_until(lambda: solve_queue.get_job(a["id"])["status"] == "running")
+    _wait_until(lambda: solve_queue.get_job(uuid.UUID(str(a["id"])))["status"] == "running")
     assert solve_queue.get_job(b_id)["status"] == "queued"
 
     # Cancel the queued job B.
@@ -235,8 +239,11 @@ def test_abort_running_solve_is_fast_and_next_job_starts(
 
     # Wait until P_SLOW is actually running AND has progressed past hydration +
     # modelling-assumptions into the native solve (so the abort lands mid-LP).
-    _wait_until(lambda: solve_queue.get_job(a["id"])["status"] == "running", timeout=30)
-    assert solve_queue.get_job(b["id"])["status"] == "queued"
+    _wait_until(
+        lambda: solve_queue.get_job(uuid.UUID(str(a["id"])))["status"] == "running",
+        timeout=30,
+    )
+    assert solve_queue.get_job(uuid.UUID(str(b["id"])))["status"] == "queued"
     time.sleep(3.0)  # let HiGHS get into the native solve window
 
     # Abort the RUNNING job. Must end `aborted` quickly (interrupt, not wait-out).

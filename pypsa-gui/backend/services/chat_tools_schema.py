@@ -679,7 +679,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "solve_queue_abort",
-        "Abort a running OR cancel a queued job. Safety: destructive.",
+        "Abort a running OR cancel a queued job. `job_id` is the job's UUID, "
+        "exactly as returned by solve_queue_list / solve_queue_enqueue — not an "
+        "index and not a project name. Safety: destructive.",
         {"job_id": {"type": "string"}},
         ["job_id"],
     ),

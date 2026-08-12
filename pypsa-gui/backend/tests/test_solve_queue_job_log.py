@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import uuid
 
 from services.solve_queue import solve_queue
 from tests.conftest import build_network
@@ -26,6 +27,7 @@ def _save_project(client, name: str) -> None:
 
 
 def _wait_for_terminal(job_id, timeout: float = 90.0) -> dict:
+    job_id = uuid.UUID(str(job_id))
     deadline = time.time() + timeout
     while time.time() < deadline:
         job = solve_queue.get_job(job_id) or {}
@@ -107,14 +109,15 @@ def test_an_interrupted_jobs_log_is_served_like_any_other_terminal_jobs():
     try:
         q = BufferedLogQueue()
         q.put("job log: died under it")
+        jid = uuid.uuid4()
         with solve_queue._lock:
-            job = SolveJob(id=941, project_id="Ghost", enqueued_at=0.0)
+            job = SolveJob(id=jid, project_id="Ghost", enqueued_at=0.0)
             job.status = "interrupted"
             job.log_queue = q
-            solve_queue._jobs[941] = job
-            solve_queue._order.append(941)
+            solve_queue._jobs[jid] = job
+            solve_queue._order.append(jid)
 
-        assert solve_queue.get_log_queue(941) is q
+        assert solve_queue.get_log_queue(jid) is q
         assert q.history() == ["job log: died under it"]
     finally:
         solve_queue.reset_for_tests()
@@ -218,6 +221,6 @@ def test_the_log_stream_serves_history_then_done_and_leaves_no_subscriber(
     assert done_payload is not None, "SSE stream ended without a `done` event"
     assert done_payload["status"] == "completed", done_payload
 
-    q = solve_queue.get_log_queue(job["id"])
+    q = solve_queue.get_log_queue(uuid.UUID(str(job["id"])))
     assert q is not None
     assert q._subscribers == {}

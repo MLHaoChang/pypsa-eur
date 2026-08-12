@@ -42,12 +42,12 @@ solve — acceptable for the walk-away batch model.
 """
 from __future__ import annotations
 
-import itertools
 import logging
 import pathlib
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -61,7 +61,10 @@ _TERMINAL = ("completed", "failed", "aborted")
 class SolveJob:
     """One queued solve of a single saved project."""
 
-    id: int
+    # UUID, matching every model in `db/models.py`. Per-process integers from
+    # `itertools.count(1)` made two replicas both issue id 1 — harmless while
+    # ids died with the process, and not harmless once `solve_jobs` outlives it.
+    id: uuid.UUID
     # Human-readable project NAME. What the UI shows and what the API has
     # always called `project_id`; kept under that key in `to_public` so the
     # frontend contract is unchanged.
@@ -102,7 +105,7 @@ class SolveJob:
         1-based place in the queue for a still-queued job, else None.
         """
         return {
-            "id": self.id,
+            "id": str(self.id),
             "project_id": self.project_id,
             "project_key": self.project_key,
             "status": self.status,
@@ -125,11 +128,10 @@ class SolveQueue:
         # bookkeeping — never across a solve (that would serialise the status
         # endpoints behind a multi-minute LP).
         self._lock = threading.Lock()
-        self._jobs: dict[int, SolveJob] = {}
-        self._order: list[int] = []                 # insertion order, stable listing
-        self._q: queue.Queue[int] = queue.Queue()
-        self._counter = itertools.count(1)
-        self._current_id: int | None = None
+        self._jobs: dict[uuid.UUID, SolveJob] = {}
+        self._order: list[uuid.UUID] = []            # insertion order, stable listing
+        self._q: queue.Queue[uuid.UUID] = queue.Queue()
+        self._current_id: uuid.UUID | None = None
         self._dispatcher: threading.Thread | None = None
 
     # ── public API ──────────────────────────────────────────────────────────
@@ -142,7 +144,7 @@ class SolveQueue:
     ) -> SolveJob:
         """Append a job for `project_id` and ensure the dispatcher is running."""
         with self._lock:
-            jid = next(self._counter)
+            jid = uuid.uuid4()
             job = SolveJob(
                 id=jid,
                 project_id=project_id,
@@ -193,7 +195,7 @@ class SolveQueue:
                     project_id, existing.id, existing.status,
                 )
                 return existing, False
-            jid = next(self._counter)
+            jid = uuid.uuid4()
             job = SolveJob(
                 id=jid,
                 project_id=project_id,
@@ -234,12 +236,12 @@ class SolveQueue:
             return [self._jobs[jid].to_public(self._position_locked(jid))
                     for jid in self._order if jid in self._jobs]
 
-    def get_job(self, job_id: int) -> dict | None:
+    def get_job(self, job_id: uuid.UUID) -> dict | None:
         with self._lock:
             job = self._jobs.get(job_id)
             return job.to_public(self._position_locked(job_id)) if job else None
 
-    def get_log_queue(self, job_id) -> Any | None:
+    def get_log_queue(self, job_id: uuid.UUID) -> Any | None:
         """
         The BufferedLogQueue this job's solve wrote to, or None.
 
@@ -252,7 +254,7 @@ class SolveQueue:
             job = self._jobs.get(job_id)
             return job.log_queue if job is not None else None
 
-    def abort(self, job_id: int) -> dict | None:
+    def abort(self, job_id: uuid.UUID) -> dict | None:
         """
         Abort a RUNNING job (signal its stop_event) or cancel a QUEUED one
         (skip on pop). No-op on an already-terminal job. Returns the job view,
@@ -338,7 +340,7 @@ class SolveQueue:
             self._dispatcher = t
             t.start()
 
-    def _position_locked(self, job_id: int) -> int | None:
+    def _position_locked(self, job_id: uuid.UUID) -> int | None:
         """
         1-based position among not-yet-finished jobs in FIFO order. None for
         a running/terminal job (only queued jobs have a meaningful position).

@@ -22,7 +22,7 @@ import SolveQueuePanel from './SolveQueuePanel'
 // One terminal job, so `finishedCount === 0` can never be the reason the button
 // is disabled — otherwise these tests would pass for the wrong reason.
 const finishedJob: SolveJob = {
-  id: 1,
+  id: '11111111-1111-4111-8111-111111111111',
   project_id: 'demo',
   project_key: 'org:demo',
   status: 'completed',
