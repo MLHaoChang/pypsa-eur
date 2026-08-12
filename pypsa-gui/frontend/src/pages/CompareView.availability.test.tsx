@@ -351,11 +351,22 @@ describe('StorageCyclingTab distinguishes unavailable from zero (C2)', () => {
 // whether it says zero (`available=false`, a REAL measured zero — render
 // `0.0 MWh`) or nonzero (`available=true`, real shedding).
 //
-// The three tests below pin exactly those three states, all against the
-// SAME fixture shape (alpha always resolved with real, non-zero shedding
-// so the tab's own "neither project shed load" banner — gated on
-// `available`, unaffected by this task — never fires and both ABKpiPair
-// sections plus both LostLoad tables render).
+// The first three tests below pin exactly those three states, all against
+// the SAME fixture shape (alpha always resolved with real, non-zero
+// shedding so the tab's own "neither project shed load" banner never fires
+// and both ABKpiPair sections plus both LostLoad tables render).
+//
+// Review round 1 (C1/C2) found the tab-level gate ITSELF still keyed on
+// `available`: `if (!llA?.available && !llB?.available)` fired the
+// "Neither project shed load ... the LP found a feasible dispatch without
+// unserved demand" prose whenever BOTH sides were unavailable — which,
+// after this task's own fix, includes every unread-capture state, not just
+// genuine zeros. Worse, that gate returns BEFORE the KPI section, so the
+// `captured`-keyed wiring above never even ran for those cases. Fixed by
+// keying the gate on `captured` too (both uncaptured -> plain marker; both
+// captured AND both genuine zero -> the prose; anything mixed -> fall
+// through to the KPI section). The three tests after the first three below
+// pin that gate directly, plus the ungated VOLL-price panel (C2).
 
 function lostLoadSummary(project: string, ll: Record<string, unknown>) {
   return {
@@ -477,6 +488,89 @@ describe('LostLoadTab distinguishes a measured zero from an unread capture (Task
     expect(await screen.findAllByText('123.4 MWh')).not.toHaveLength(0)
     expect(await screen.findAllByText('55.5 MWh')).not.toHaveLength(0)
     expect(screen.queryByText(COST_UNAVAILABLE)).toBeNull()
+  })
+
+  // ── Review round 1 — C1 ────────────────────────────────────────────────
+  // The three tests above all use an alpha with `available: true`, so the
+  // OLD `!llA?.available && !llB?.available` gate never fired for any of
+  // them regardless of whether it keyed on `available` or `captured` — none
+  // of them exercised the gate itself. These three do: they hold `available`
+  // false on BOTH sides (the only way to reach the gate at all) and vary
+  // `captured` to walk its three branches.
+
+  const uncapturedLostLoad = {
+    available: false, captured: false, voll_eur_per_mwh: 0,
+    total_mwh: { total: 0, by_period: {} },
+    total_cost_meur: { total: 0, by_period: {} },
+    by_bus: [], by_carrier: [],
+  }
+  const genuineZeroLostLoad = {
+    available: false, captured: true, voll_eur_per_mwh: 3000,
+    total_mwh: { total: 0, by_period: {} },
+    total_cost_meur: { total: 0, by_period: {} },
+    by_bus: [], by_carrier: [],
+  }
+
+  it('renders the plain unavailable marker — never the "neither shed load" claim — when NEITHER capture was ever read (captured: false on both sides)', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(lostLoadSummary(project, uncapturedLostLoad) as never),
+    )
+    renderLostLoadTab()
+    expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
+    // Two solved-but-uncaptured projects must NOT get the "neither shed
+    // load" prose — that claims a feasible dispatch was found on both
+    // sides, which is unknown for both. This is the "likelier in the
+    // field" case review finding C1 called out by name.
+    expect(screen.queryByText(/Neither project shed load/)).toBeNull()
+    expect(screen.queryByText(/feasible dispatch/)).toBeNull()
+  })
+
+  it('shows the resolved side\'s real zero — never the "neither shed load" claim — when the OTHER side\'s capture was never read (mixed captured/uncaptured, both available: false)', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(lostLoadSummary(
+        project, project === 'alpha' ? uncapturedLostLoad : genuineZeroLostLoad,
+      ) as never),
+    )
+    renderLostLoadTab()
+    // Both sides' `available` are false here — exactly what the OLD gate
+    // keyed on, which would have shown "Neither project shed load" and
+    // asserted alpha found a feasible dispatch despite alpha's capture
+    // never being opened. Must fall through to the KPI section instead.
+    expect(screen.queryByText(/Neither project shed load/)).toBeNull()
+    expect(screen.queryByText(/feasible dispatch/)).toBeNull()
+    // alpha's marker AND beta's real, rendered zero both reach the screen.
+    expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
+    expect(await screen.findAllByText('0.0 MWh')).not.toHaveLength(0)
+  })
+
+  it('keeps the "neither shed load" claim when BOTH captures were read and BOTH are confirmed zero', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(lostLoadSummary(project, genuineZeroLostLoad) as never),
+    )
+    renderLostLoadTab()
+    expect(await screen.findByText('Neither project shed load.')).toBeTruthy()
+    expect(screen.queryByText(COST_UNAVAILABLE)).toBeNull()
+  })
+
+  // ── Review round 1 — C2 ────────────────────────────────────────────────
+  // The VOLL-price panel is a fifth figure on this tab, rendered directly
+  // from `llA?.voll_eur_per_mwh ?? 0` / `llB?.voll_eur_per_mwh ?? 0` with no
+  // availability guard at all. `voll_eur_per_mwh` defaults to 0.0 on every
+  // unread-capture return, so an unread side rendered a confident "0 €/MWh"
+  // directly beside the marker its own KPI cells showed two rows up — the
+  // review's `queryByText(/0\.0 MWh/)` check in the first test above could
+  // never catch this: the VOLL panel formats with `.toFixed(0)` (no
+  // decimal point at all), not `.toFixed(1)`.
+  it('marks the VOLL price panel unavailable for an unread capture instead of a fabricated 0 €/MWh (C2)', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(lostLoadSummary(
+        project, project === 'alpha' ? resolvedAlphaLostLoad : uncapturedLostLoad,
+      ) as never),
+    )
+    renderLostLoadTab()
+    expect(await screen.findByText('3000 €/MWh')).toBeTruthy()
+    expect(screen.queryByText('0 €/MWh')).toBeNull()
+    expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
   })
 })
 

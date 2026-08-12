@@ -2371,14 +2371,16 @@ def _compute_lost_load_summary(
       ``{lost_load_t: DataFrame(snapshot × bus), lost_load_total_mwh: float,
          lost_load_cost_eur: float}``
     Returns ``available=False`` when the pickle is absent, the capture key
-    is missing, the DataFrame is empty, or the reindex/weighting step raises
-    — none of these are "no shedding": they mean the capture was never
-    read, so the project's actual shedding is unknown. ``captured``
-    (LostLoadComparison) is what tells that apart from the one genuine
-    zero (total energy below the 1e-9 threshold after reindex/weighting):
-    ``captured=False`` on every unread-capture return, ``captured=True`` on
-    that zero and on the success path. Multi-period split uses the snapshot
-    weight matrix the rest of the comparison view shares.
+    is missing, the DataFrame is empty, the reindex/weighting step raises,
+    or the reindexed total is non-finite (NaN/inf) — none of these are "no
+    shedding": they mean the capture was never usefully read, so the
+    project's actual shedding is unknown. ``captured`` (LostLoadComparison)
+    is what tells that apart from the one genuine zero (a FINITE total
+    energy at or below the 1e-9 threshold after reindex/weighting):
+    ``captured=False`` on every unread/unusable-capture return,
+    ``captured=True`` on that zero and on the success path. Multi-period
+    split uses the snapshot weight matrix the rest of the comparison view
+    shares.
     """
     from models.schemas import LostLoadBus, LostLoadByCarrier, LostLoadComparison
 
@@ -2421,12 +2423,22 @@ def _compute_lost_load_summary(
         return LostLoadComparison()
 
     total_e = float(weighted.values.sum())
-    if not _math.isfinite(total_e) or total_e <= 1e-9:
-        # The capture exists but produced zero after reindex — a genuine
-        # measured zero, not "unavailable." `available` stays False (the
-        # frontend's total_mwh.total > 0 invariant for available=True would
-        # otherwise break), but `captured=True` says the capture WAS read
-        # and this zero is real — see ADR-0001 / LostLoadComparison.
+    if not _math.isfinite(total_e):
+        # NaN/inf after reindex/weighting (e.g. an inf in the capture, or a
+        # NaN snapshot weight surviving the `.astype(float)` in
+        # `_build_snapshot_weights`) is NOT a measured zero — the capture
+        # was read but produced garbage, so this is exactly as "unread" as
+        # the reindex/mul exception branch above. Falls through to the
+        # all-default `captured=False` return, distinct from the genuine
+        # zero below.
+        return LostLoadComparison()
+    if total_e <= 1e-9:
+        # The capture exists, is finite, and produced zero after reindex —
+        # a genuine measured zero, not "unavailable." `available` stays
+        # False (the frontend's total_mwh.total > 0 invariant for
+        # available=True would otherwise break), but `captured=True` says
+        # the capture WAS read and this zero is real — see ADR-0001 /
+        # LostLoadComparison.
         return LostLoadComparison(available=False, captured=True, voll_eur_per_mwh=voll)
 
     total_e_bucket = {"total": total_e, "by_period": {}}

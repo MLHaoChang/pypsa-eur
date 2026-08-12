@@ -2130,14 +2130,31 @@ export function LostLoadTab({ a, b }: { a: string; b: string }) {
 
   const llA = sa.lost_load
   const llB = sb.lost_load
-  // `available=false` does NOT mean "never shed load" — see LostLoadComparison
-  // in api/types.ts and ADR-0001. Within has_solve=True, most available=false
-  // returns mean the capture was never READ (missing results_state.pkl, an
-  // unpickle error, a malformed capture); only one is a confirmed zero. This
-  // banner is the coarse "nothing to report on either side" case; below,
-  // ABKpiPair/the tables key on `captured` (not `available`) so a genuine
-  // zero on either side still renders `0.0 MWh` rather than the marker.
-  if (!llA?.available && !llB?.available) {
+  // Deliberately keyed on `captured`, NOT `available` — a solver that ran
+  // and shed nothing (captured=true, available=false) has a REAL measured
+  // zero and must render `0.0 MWh`; only an unread capture (captured=false)
+  // is truly unavailable. Wiring `available` here would relabel that happy
+  // path as broken (see task-7-brief.md / ADR-0001).
+  const availableA = llA?.captured ?? false
+  const availableB = llB?.captured ?? false
+
+  // Three-state gate, keyed on `captured` (NOT `available`, which no longer
+  // means "no shedding" post Task 7 — see LostLoadComparison in api/types.ts).
+  //   1. Neither side's capture was read — we know nothing about either;
+  //      render the plain unavailable marker, never a prose claim about
+  //      what the LP found (review finding C1: the old `!available &&
+  //      !available` gate fired this exact banner, asserting "the LP found
+  //      a feasible dispatch" for a side whose capture was never opened).
+  //   2. Both captures WERE read and both are confirmed zero — the genuine
+  //      "neither shed load" happy path; safe to make the prose claim.
+  //   3. Anything else (mixed captured/uncaptured, or at least one side has
+  //      real shedding) falls through to the KPI section below, whose
+  //      captured-keyed availableA/availableB already render the correct
+  //      per-side state for each half independently.
+  if (!availableA && !availableB) {
+    return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+  }
+  if (availableA && availableB && !llA?.available && !llB?.available) {
     return (
       <div className="space-y-2 py-4">
         <p className="text-[11px] text-text">Neither project shed load.</p>
@@ -2150,13 +2167,6 @@ export function LostLoadTab({ a, b }: { a: string; b: string }) {
 
   const fmtMwh = (v: number) => `${v.toFixed(1)} MWh`
   const fmtMEur = (v: number) => `${v.toFixed(2)} M€`
-  // Deliberately keyed on `captured`, NOT `available` — a solver that ran
-  // and shed nothing (captured=true, available=false) has a REAL measured
-  // zero and must render `0.0 MWh`; only an unread capture (captured=false)
-  // is truly unavailable. Wiring `available` here would relabel that happy
-  // path as broken (see task-7-brief.md).
-  const availableA = llA?.captured ?? false
-  const availableB = llB?.captured ?? false
 
   return (
     <div className="space-y-4">
@@ -2191,14 +2201,29 @@ export function LostLoadTab({ a, b }: { a: string; b: string }) {
       </Section>
 
       <Section title="VOLL price" subtitle="€/MWh — penalty rate the LP paid for unserved demand">
+        {/* Review finding C2: this panel was ungated — an unread capture's
+            `voll_eur_per_mwh` defaults to 0.0, which rendered `0 €/MWh`
+            beside the marker the KPIs above already show for the same
+            side, self-contradicting it (asserting a real zero-VOLL solve
+            for a project whose capture couldn't even be opened). Gated on
+            the same captured-keyed availableA/availableB as everything
+            else on this tab. */}
         <div className="grid grid-cols-2 gap-3">
           <div className="border border-border rounded p-2">
             <div className="text-[10px] text-muted">{sa.project}</div>
-            <div className="text-sm font-mono text-text">{(llA?.voll_eur_per_mwh ?? 0).toFixed(0)} €/MWh</div>
+            <div className="text-sm font-mono text-text">
+              {availableA
+                ? `${(llA?.voll_eur_per_mwh ?? 0).toFixed(0)} €/MWh`
+                : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+            </div>
           </div>
           <div className="border border-border rounded p-2">
             <div className="text-[10px] text-muted">{sb.project}</div>
-            <div className="text-sm font-mono text-text">{(llB?.voll_eur_per_mwh ?? 0).toFixed(0)} €/MWh</div>
+            <div className="text-sm font-mono text-text">
+              {availableB
+                ? `${(llB?.voll_eur_per_mwh ?? 0).toFixed(0)} €/MWh`
+                : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+            </div>
           </div>
         </div>
       </Section>

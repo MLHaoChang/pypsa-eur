@@ -280,3 +280,29 @@ def test_lost_load_reports_captured_on_a_genuine_zero(tmp_path):
     block = CMP._compute_lost_load_summary(tmp_path, n, [], False, True)
     assert block.available is False
     assert block.captured is True, "zero shedding is a real, measured result"
+
+
+def test_lost_load_reports_uncaptured_when_the_reindexed_total_is_non_finite(tmp_path):
+    """
+    Review finding I3: the original `not isfinite(total_e) or total_e <=
+    1e-9` guard returned `captured=True` for BOTH disjuncts, but only the
+    second is a measured zero. A non-finite total (an inf here — the same
+    branch a NaN `snapshot_weightings` column would reach, since
+    `_build_snapshot_weights` passes NaN through `.astype(float)`) means the
+    capture was read but produced garbage, not a real result.
+    """
+    import routers.compare as CMP
+    from tests import compare_local_networks as cln
+
+    n = cln.build_lost_load_network()
+    cln.write_lost_load_capture(
+        tmp_path, n,
+        per_bus_mwh={"bus_elec": [float("inf"), 0.0, 0.0, 0.0], "bus_h2": [0.0, 0.0, 0.0, 0.0]},
+        voll=3000.0,
+    )
+    block = CMP._compute_lost_load_summary(tmp_path, n, [], False, True)
+    assert block.available is False
+    assert block.captured is False, (
+        "a non-finite reindexed total is not a measured zero — the capture "
+        "was read but produced garbage, so nothing usable was measured"
+    )
