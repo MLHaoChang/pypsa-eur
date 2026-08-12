@@ -359,14 +359,14 @@ describe('stepSummary', () => {
   })
 
   describe('sampling', () => {
-    it('names availability when the backend reports a full hourly year is present', () => {
+    it('reports the observable count and weights state, plus availability, on a multi-period project', () => {
       expect(stepSummary('sampling', multiCtx))
-        .toBe('Not sampled — representative weeks available')
+        .toBe('26,280 snapshots · default weights · representative weeks available')
     })
 
     it('names the reason sampling is unavailable rather than repeating the available text', () => {
       expect(stepSummary('sampling', singleCtx))
-        .toBe('Not sampled — upload an hourly profile to enable sampling')
+        .toBe('8,760 snapshots · custom weights · upload an hourly profile to enable sampling')
     })
 
     it('does not claim a full year for a sub-year snapshot count', () => {
@@ -378,6 +378,19 @@ describe('stepSummary', () => {
       expect(stepSummary('sampling', subYear)).not.toMatch(/full year/i)
       const subYearUnavailable: HorizonSummaryContext = { ...singleCtx, snapshotCount: 168 }
       expect(stepSummary('sampling', subYearUnavailable)).not.toMatch(/full year/i)
+    })
+
+    it('makes no claim that sampling did not happen, for a network that WAS sampled', () => {
+      // Small snapshot count + non-default weights is exactly the shape a sampled
+      // network has (representative weeks replace the full index and each sampled
+      // hour is reweighted) — but `ctx` cannot prove causation, only report the
+      // two facts. The sentence must not assert the negative either.
+      const sampled: HorizonSummaryContext = {
+        ...multiCtx, snapshotCount: 2016, weightsAreDefault: false,
+      }
+      expect(stepSummary('sampling', sampled)).not.toMatch(/not sampled/i)
+      expect(stepSummary('sampling', sampled))
+        .toBe('2,016 snapshots · custom weights · representative weeks available')
     })
   })
 

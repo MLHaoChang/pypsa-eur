@@ -265,6 +265,12 @@ function periodList(periods: number[]): string {
   return periods.join('…')
 }
 
+/** `"26,280 snapshots"`, or a pending-load phrasing when the count hasn't arrived yet. */
+function snapshotCountLabel(count: number | undefined): string {
+  if (count === undefined) return 'snapshot count pending'
+  return `${count.toLocaleString()} snapshot${count === 1 ? '' : 's'}`
+}
+
 /**
  * One-sentence summary of a step's current configuration, for the
  * summary-first landing view. A returning user reads this instead of
@@ -293,21 +299,33 @@ export function stepSummary(step: HorizonStepId, ctx: HorizonSummaryContext): st
     case 'window':
       return `${ctx.rangeLabel}, ${resolutionLabel(ctx.freq)}`
 
-    case 'sampling':
+    case 'sampling': {
       // `ctx` carries no signal for "representative weeks were actually
       // sampled" — the backend's SnapshotInfo has no such field, and the
       // page only learns it transiently from a mutation response, which is
       // not plain persisted data this module is allowed to depend on. So
-      // this sentence deliberately does not claim a sampling state or a
-      // "full year" shape it cannot verify (a single-period network can
-      // carry a custom sub-year window with no relation to sampling) — it
-      // says only what `canSampleWeeks` supports: whether sampling is
-      // available right now. A post-sampling network and a pristine one
-      // with the same `canSampleWeeks` are indistinguishable here; that is
-      // the honest ceiling of this interface, not an oversight.
-      return ctx.canSampleWeeks
-        ? 'Not sampled — representative weeks available'
-        : 'Not sampled — upload an hourly profile to enable sampling'
+      // this sentence must not assert a sampling state in EITHER direction:
+      // not "sampled", not "not sampled" — both would be an unconditional
+      // claim from data that cannot support one. (An earlier version of
+      // this code said "Not sampled" unconditionally, which is simply false
+      // for a network that was sampled — the exact defect this comment now
+      // warns against repeating.)
+      //
+      // Instead it reports what IS knowable: the snapshot count and whether
+      // weights are still default — both already in `ctx`, and together the
+      // observable shape a sampled network actually has (a small count with
+      // non-default weights). It never claims that shape was CAUSED by
+      // sampling, only states the two facts, plus the separate and fully
+      // supportable fact of whether sampling is available going forward.
+      // A post-sampling network and a pristine one with the same count and
+      // weights state are indistinguishable here; that is the honest
+      // ceiling of this interface, not an oversight.
+      const weights = ctx.weightsAreDefault ? 'default weights' : 'custom weights'
+      const capability = ctx.canSampleWeeks
+        ? 'representative weeks available'
+        : 'upload an hourly profile to enable sampling'
+      return `${snapshotCountLabel(ctx.snapshotCount)} · ${weights} · ${capability}`
+    }
 
     case 'weights':
       return ctx.weightsAreDefault
