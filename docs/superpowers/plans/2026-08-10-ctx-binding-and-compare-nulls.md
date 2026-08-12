@@ -904,6 +904,125 @@ not reach them."
 
 ---
 
+### Task 7: separate "measured zero" from "could not read the capture" on lost load
+
+> **Added 2026-08-12 by ruling**, after Task 6's review found a fabricated zero reachable on `LostLoadTab` that no frontend-only change can fix. Task 6 was told not to touch the backend; this task is that backend change.
+
+**Files:**
+- Modify: `backend/models/schemas.py` — `LostLoadComparison` (:1040)
+- Modify: `backend/routers/compare.py` — `_compute_lost_load_summary`, its docstring and its eight return sites
+- Modify: `frontend/src/api/types.ts`, `frontend/src/pages/CompareView.tsx` — `LostLoadTab`
+- Test: `backend/tests/test_compare_availability.py`, `frontend/src/pages/CompareView.availability.test.tsx`
+
+**Interfaces:**
+- Produces: `captured: bool = False` on `LostLoadComparison`, beside the existing `available`. `available` keeps its current meaning exactly — do not redefine it, several tests and the frontend depend on it.
+
+Background: `LostLoadComparison.available` is the one block whose `False` is overloaded. Its docstring says `False` covers "voll was zero, the project hasn't been solved, or no shedding occurred (happy path)", and `_compute_lost_load_summary`'s own docstring claims "all three are 'no shedding' states from the user's perspective". That is false. Within the `has_solve=True` path there are six `available=False` returns and only one is a measured zero:
+
+| Line | Cause | Measured? |
+|---|---|---|
+| 2381 | `not has_solve` | no |
+| 2384 | `results_state.pkl` absent | no |
+| 2388 | `_safe_unpickle_results` raises | no |
+| 2393 | `last_lost_load` absent / `lost_load_t` None | ambiguous |
+| 2396 | capture DataFrame empty | ambiguous |
+| 2416 | `reindex`/`mul` raises | no |
+| 2422 | `total_e <= 1e-9` | **yes — a real zero** |
+| 2515 | success path | **yes** |
+
+So a project that solved but whose `results_state.pkl` is missing renders `0.0 MWh` and `0.00 M€` on the lost-load KPIs, with a signed Δ against those zeros, beside a scenario that genuinely shed load. That is the defect ADR-0001 exists to prevent, on the figure where a false zero matters most — unserved energy.
+
+The two ambiguous rows take `captured=False`. Erring toward "we don't know" matches the rule the rest of this plan follows: absence reads as unavailable, never as a measured value.
+
+- [ ] **Step 1: Write the failing backend test**
+
+Add to `backend/tests/test_compare_availability.py`. Build a solved network, then drive `_compute_lost_load_summary` down the "capture unreadable" path — the simplest is a `project_dir` with no `results_state.pkl` — and assert:
+
+```python
+def test_lost_load_reports_uncaptured_when_the_capture_is_unreadable(tmp_path):
+    block = _compute_lost_load_summary(n, periods, is_multi, has_solve=True, project_dir=tmp_path)
+    assert block.available is False
+    assert block.captured is False, (
+        "a solved project whose capture cannot be read has not measured zero "
+        "shedding — it has measured nothing"
+    )
+
+
+def test_lost_load_reports_captured_on_a_genuine_zero(...):
+    # solved, capture present, total energy below the 1e-9 threshold
+    assert block.available is False
+    assert block.captured is True, "zero shedding is a real, measured result"
+```
+
+Read the real signature of `_compute_lost_load_summary` and its fixtures in `tests/compare_support.py` before writing; adapt the call, not the assertions.
+
+- [ ] **Step 2: Run it and watch it fail**
+
+```bash
+pixi run gui-tests tests/test_compare_availability.py -v
+```
+
+Expected: `AttributeError` — `LostLoadComparison` has no `captured`.
+
+- [ ] **Step 3: Add the field**
+
+`backend/models/schemas.py`, in `LostLoadComparison`, beside `available`:
+
+```python
+    # Whether the lost-load capture was READ AT ALL, independent of what it
+    # said. `available=False, captured=True` is a real measured zero — the
+    # solver ran with voll > 0 and the LP shed nothing. `captured=False` means
+    # we could not read the capture (no results_state.pkl, an unpickle error,
+    # a mid-solve state) and therefore know nothing; the frontend must render
+    # "unavailable" there, never 0.0. See ADR-0001.
+    captured: bool = False
+```
+
+Correct the class docstring: `available=False` no longer implies a happy path on its own.
+
+- [ ] **Step 4: Set it at the eight return sites**
+
+Per the table above: `captured=True` at `:2422` and `:2515`; leave the default `False` at the other six. Also correct `_compute_lost_load_summary`'s docstring, which currently asserts all three early states are "no shedding" from the user's perspective — they are not.
+
+- [ ] **Step 5: Verify the backend**
+
+```bash
+pixi run gui-tests tests/test_compare_availability.py -v
+pixi run gui-tests -k "compare or lost_load" -v
+```
+
+- [ ] **Step 6: Wire the frontend**
+
+Add `captured: boolean` to `LostLoadComparison` in `frontend/src/api/types.ts`. In `LostLoadTab`, pass `availableA={llA?.captured ?? false}` / `availableB={llB?.captured ?? false}` to both `ABKpiPair` sites and to the two LostLoad tables.
+
+Note the inversion deliberately: the availability props key on **`captured`**, not on `available`. A measured zero (`captured: true, available: false`) must render `0.0 MWh` — it is a real result. Only an unread capture renders the marker.
+
+- [ ] **Step 7: Frontend test, both directions plus the third rung**
+
+Three cases, on the same fixture shape: `captured: false` renders the marker and no `0.0 MWh`; `captured: true, available: false` renders `0.0 MWh` and NOT the marker; `captured: true, available: true` renders the real shedding figure. The middle case is the one that distinguishes this task from a naive wiring — get it wrong and you relabel the happy path as broken, which is exactly why Task 6 refused to wire this tab.
+
+Prove non-vacuity by hardcoding `availableB = true` and confirming RED, then revert.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git status --short
+git add backend/models/schemas.py backend/routers/compare.py backend/tests/test_compare_availability.py frontend/src/api/types.ts frontend/src/pages/CompareView.tsx frontend/src/pages/CompareView.availability.test.tsx
+git commit -m "fix(compare): distinguish a measured zero from an unread lost-load capture
+
+LostLoadComparison.available was overloaded: its False covered a genuine
+zero AND five states where nothing was read. A project that solved but whose
+results_state.pkl is missing therefore rendered 0.0 MWh with a signed delta
+beside a scenario that really shed load — on the one figure where a false
+zero matters most.
+
+captured says whether the capture was read at all. available keeps its
+meaning. The frontend keys the unavailable marker on captured, so a measured
+zero still renders 0.0 MWh."
+```
+
+---
+
 ## Out of scope — deliberately parked
 
 Recorded so a reviewer does not read these as omissions:
