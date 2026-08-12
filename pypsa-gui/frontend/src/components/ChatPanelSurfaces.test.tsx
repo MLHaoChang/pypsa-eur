@@ -6,8 +6,7 @@ import { useChatStore } from '../store/chatStore'
 import { getChatHistory } from '../api/chat'
 import ChatPanel from './ChatPanel'
 
-// The surfaces a user reads when something has gone wrong, plus the meter
-// they read to decide what a conversation is costing.
+// The surfaces a user reads when something has gone wrong.
 //
 //   * #21 — the confirmation card and the error banner were plain <div>s. A
 //     screen reader user got no announcement that a destructive action was
@@ -17,7 +16,11 @@ import ChatPanel from './ChatPanel'
 //   * #20 — the backend recovers an interrupted turn and reports damaged
 //     history records; nothing rendered either, so both were detected,
 //     reported, and thrown away by the client.
-//   * #12 — cached tokens are billed but were invisible in the meter.
+//
+// The meter's own content is covered by ChatPanel.usage.test.tsx; what is
+// left here is the layout invariant, which survived the cost-meter removal
+// because it was never about the price — a nowrap element in a fixed flex
+// row cannot shrink, whatever string it holds.
 
 vi.mock('../api/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/chat')>()
@@ -173,7 +176,7 @@ it('tells the user their previous message was never answered', async () => {
     history_gap: 0,
     pending_turn: {
       ts: 1_754_000_000, session_id: 'sess-old',
-      model: 'claude-sonnet-4-6', user: 'size the battery',
+      model: 'claude-sonnet-5', user: 'size the battery',
     },
   } as never)
 
@@ -188,7 +191,7 @@ it('tells the user their previous message was never answered', async () => {
 it('says so when part of the transcript could not be read', async () => {
   vi.mocked(getChatHistory).mockResolvedValue({
     turns: [{
-      ts: 1_754_000_000, session_id: 's1', model: 'claude-sonnet-4-6',
+      ts: 1_754_000_000, session_id: 's1', model: 'claude-sonnet-5',
       user: 'hello', assistant: [{ type: 'text', text: 'hi' }],
       usage: {
         input_tokens: 1, output_tokens: 1,
@@ -215,21 +218,6 @@ it('shows no damage notices on a clean reload', async () => {
 
 // ── #12 — cache tokens in the meter ─────────────────────────────────────────
 
-it('shows what the cache is doing once it has done something', async () => {
-  renderPanel()
-  act(() => {
-    useChatStore.setState({
-      usage: {
-        input_tokens: 1_200, output_tokens: 340,
-        cache_read_tokens: 48_000, cache_create_tokens: 2_000,
-      },
-    })
-  })
-
-  const meter = await screen.findByTestId('chat-cost-meter')
-  expect(meter.textContent).toMatch(/cache/i)
-  expect(meter.textContent).toContain('48,000')
-})
 
 it('can give up meter width without pushing the header controls out', async () => {
   renderPanel()
@@ -242,7 +230,7 @@ it('can give up meter width without pushing the header controls out', async () =
     })
   })
 
-  const meter = await screen.findByTestId('chat-cost-meter')
+  const meter = await screen.findByTestId('chat-usage-meter')
 
   // The meter sits in a fixed-height flex row with the model picker and the
   // gear button, and its content is `whitespace-nowrap`. That combination
@@ -255,24 +243,5 @@ it('can give up meter width without pushing the header controls out', async () =
   expect(meter.className).toMatch(/\bmin-w-0\b/)
   expect(meter.className).toMatch(/\btruncate\b/)
 
-  // Truncation must not lose the numbers — hovering has to give them back.
-  const title = meter.getAttribute('title')
-  expect(title).toBeTruthy()
-  expect(title).toContain('12,345,678')
-  expect(title).toContain('98,765')
 })
 
-it('keeps the meter uncluttered before anything is cached', async () => {
-  renderPanel()
-  act(() => {
-    useChatStore.setState({
-      usage: {
-        input_tokens: 10, output_tokens: 5,
-        cache_read_tokens: 0, cache_create_tokens: 0,
-      },
-    })
-  })
-
-  const meter = await screen.findByTestId('chat-cost-meter')
-  expect(meter.textContent).not.toMatch(/cache/i)
-})

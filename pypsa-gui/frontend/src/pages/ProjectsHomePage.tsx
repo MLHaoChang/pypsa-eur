@@ -10,6 +10,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { useAuthMode } from '../auth/AuthModeProvider'
 import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { getPostLoginPath } from '../auth/resume'
+import AssistantDock from '../components/AssistantDock'
 import NewProjectWizard, { type NewProjectTab } from '../layout/NewProjectWizard'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
@@ -336,6 +337,30 @@ export default function ProjectsHomePage() {
     queryClient.invalidateQueries({ queryKey: PROJECTS_KEY })
   }, [queryClient])
 
+  // The assistant's no-project greeting offers "Open project" and "New
+  // project" by dispatching CustomEvents rather than reaching across the
+  // layout tree. The listener for that bridge lives in Sidebar — which does
+  // NOT render here. So the moment the dock arrived on this page, both
+  // buttons became dead controls on the front door and nowhere else. This is
+  // the same bridge, terminated locally.
+  //
+  // The picker event has no picker to open here: this page IS the project
+  // list, so "show me my projects" resolves to bringing that list into view.
+  useEffect(() => {
+    const onNewProject = () => setWizardTab('blank')
+    const onOpenPicker = () => {
+      document.getElementById('projects-heading')?.scrollIntoView({
+        behavior: 'smooth', block: 'start',
+      })
+    }
+    window.addEventListener('chat:open-new-project-wizard', onNewProject)
+    window.addEventListener('chat:open-project-picker', onOpenPicker)
+    return () => {
+      window.removeEventListener('chat:open-new-project-wizard', onNewProject)
+      window.removeEventListener('chat:open-project-picker', onOpenPicker)
+    }
+  }, [])
+
   async function handleLogout() {
     await logout()
     redirectAfterLogout()
@@ -346,10 +371,18 @@ export default function ProjectsHomePage() {
     // subtree (see index.css). The projects home is always the dark front door
     // — token-driven children like NewProjectWizard must follow it rather than
     // the user's workbench light/dark preference.
+    // The assistant is a COLUMN here, not an overlay: `/` redirects to this
+    // page, so it is the first screen of every session and was the one screen
+    // with no assistant at all (the dock is mounted by App.tsx, which only
+    // renders at `/app`). It sits inside the `brand-dark` subtree on purpose —
+    // the dock is token-driven, so mounting it outside would render a
+    // light-themed panel against the dark front door for anyone whose
+    // workbench preference is light. See ProjectsHomePage.assistant.test.tsx.
     <div
-      className="relative h-dvh overflow-y-auto bg-[var(--brand-black)] text-[var(--brand-ink)] [color-scheme:dark]"
+      className="flex h-dvh overflow-hidden bg-[var(--brand-black)] text-[var(--brand-ink)] [color-scheme:dark]"
       data-pypsa-surface="brand-dark"
     >
+    <div className="relative flex-1 min-w-0 overflow-y-auto">
       <style>{`
         @keyframes pypsaFadeIn { from { opacity: 0 } to { opacity: 1 } }
         @keyframes pypsaRise { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
@@ -731,6 +764,9 @@ export default function ProjectsHomePage() {
           onConfirm={name => createBlank.mutate(name)}
         />
       )}
+    </div>
+
+      <AssistantDock />
     </div>
   )
 }

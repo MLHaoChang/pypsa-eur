@@ -34,9 +34,10 @@ EXIT CODES
 
 COST
 ----
-   ~$0.05-0.30 per full run (5-8 prompts at Sonnet pricing). Cheap enough
-   to run before each phase-end /qa-phase, or once per day during heavy
-   chatbot iteration. Each prompt is ~30-90s wall-clock.
+   No verified per-model pricing is published in this app, so no dollar
+   estimate is given here. Cheap enough to run before each phase-end
+   /qa-phase, or once per day during heavy chatbot iteration. Each prompt is
+   ~30-90s wall-clock.
 """
 from __future__ import annotations
 
@@ -65,7 +66,7 @@ except ImportError:
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_MODEL = None  # Use whatever /api/chat/health reports as default.
-# Per-turn wall-clock cap. Sonnet 4.6 with 1-2 tool calls is typically 15-30s;
+# Per-turn wall-clock cap. Sonnet 5 with 1-2 tool calls is typically 15-30s;
 # a multi-step "create scenario + N components" turn can be 90-150s. Set to
 # 240s so a complex prompt (6+ tool calls) finishes without flapping.
 TURN_TIMEOUT_SECONDS = 240

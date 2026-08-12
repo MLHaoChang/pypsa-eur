@@ -18,10 +18,11 @@
  */
 import { client } from './client'
 import { rawFetchHeaders } from './csrf'
+import type { UiContext } from '../utils/uiContext'
 
-// Latest Sonnet + Opus. Keep in sync with the backend DEFAULT_MODEL/OPUS_MODEL
-// (chat_service.py) and PRICING_USD_PER_MTOK (chatStore.ts).
-export type ChatModel = 'claude-sonnet-4-6' | 'claude-opus-4-8'
+// Keep in sync with chat_service.DEFAULT_MODEL / OPUS_MODEL, which
+// tests/test_chat_models.py pins.
+export type ChatModel = 'claude-sonnet-5' | 'claude-opus-5'
 
 export interface ChatStreamRequest {
   session_id?: string
@@ -36,6 +37,16 @@ export interface ChatStreamRequest {
   // Word / CSV files are NOT valid here — agents go through the
   // read_excel_sheet tool instead.
   attachment_file_ids?: string[]
+  // Deixis — what the user is LOOKING AT when they hit send, so "why is this
+  // so high?" has a referent. Built by `utils/uiContext.ts`, which is also
+  // where the identifiers-only rule is written down; the server enforces the
+  // same allowlist, so attaching values here fails closed.
+  ui_context?: UiContext
+  // 'voice' when the turn was dictated. A field rather than something the
+  // server infers, because reconstructing it later from timing or content is
+  // guesswork — and speech reciprocity (a spoken turn gets a spoken answer)
+  // depends on getting it right.
+  input_mode?: 'voice' | 'text'
 }
 
 export interface ChatFrame {
@@ -129,6 +140,24 @@ export async function postChatConfirm(
 
 export async function postChatAbort(sessionId: string): Promise<{ ok: boolean }> {
   const r = await client.post(`/chat/${sessionId}/abort`)
+  return r.data
+}
+
+/**
+ * Drop the last `turns` turns from the session's API history.
+ *
+ * What makes retry / edit-and-resend real rather than cosmetic: the array
+ * replayed to the model lives on the server, so clearing the browser alone
+ * leaves the answer being retried in context — and the model reads its own
+ * last answer and repeats it.
+ *
+ * `dropped: 0` with `ok: true` is a legitimate outcome (unknown session, or a
+ * turn in flight, which the server refuses to rewind under).
+ */
+export async function postChatRewind(
+  sessionId: string, turns = 1,
+): Promise<{ ok: boolean; dropped: number }> {
+  const r = await client.post(`/chat/${sessionId}/rewind`, { turns })
   return r.data
 }
 

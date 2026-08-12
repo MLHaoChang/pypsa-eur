@@ -27,6 +27,7 @@ import { tip as docTip } from '../../utils/propertyDocs'
 import { CARRIER_CATALOG_NAMES } from '../../utils/carrierCatalog'
 import { vintageCloneToast } from '../../utils/toasts'
 import VintagePeriodBoundsModal from '../../components/VintagePeriodBoundsModal'
+import { buildYearOptions } from './buildYearOptions'
 
 
 // ── Hover tooltip primitive ────────────────────────────────────────────────────
@@ -335,35 +336,26 @@ export function useGlobalDefaultLifetime(): number | undefined {
   return data?.default_lifetime
 }
 
-// Options for the build-year dropdown. Prefer the user's configured
-// investment_periods so multi-period runs only let users pick years the LP
-// actually models; otherwise generate a sensible 35-year span around the
-// current year in 5-year steps so single-period overnight runs still have
-// reasonable choices. Always merges the asset's current value in so an
-// asset that was created with a non-standard year (e.g. 2027) doesn't
-// silently lose it when the form opens.
+// Options for the build-year dropdown. Reads the NETWORK's investment periods
+// (`/network/investment_periods`) — the store Model Horizon writes and the LP
+// reads. This used to read `cfg.investment_periods` from SolverConfig, which no
+// frontend code ever writes, so it always fell through to the generic grid and
+// a user with periods 2026/2027/2028 was offered 2025/2030/2035/…
 export function useBuildYearOptions(currentValue: number | null | undefined): number[] {
   const currentProject = useUIStore(s => s.currentProject)
-  const { data: cfg } = useQuery({
-    queryKey: nk(currentProject, 'solverConfig'),
-    queryFn: simulationApi.getSolverConfig,
+  const { data: ip } = useQuery({
+    queryKey: nk(currentProject, 'investmentPeriods'),
+    queryFn: networkApi.getInvestmentPeriods,
     staleTime: 60_000,
   })
-  return useMemo(() => {
-    const periods = cfg?.investment_periods ?? []
-    let opts: number[]
-    if (periods.length > 0) {
-      opts = periods.slice().sort((a, b) => a - b)
-    } else {
-      const now = new Date().getFullYear()
-      const start = Math.floor(now / 5) * 5
-      opts = Array.from({ length: 8 }, (_, i) => start + i * 5)  // 35-year span
-    }
-    if (currentValue != null && Number.isFinite(currentValue) && currentValue > 0 && !opts.includes(currentValue)) {
-      opts = [...opts, currentValue].sort((a, b) => a - b)
-    }
-    return opts
-  }, [cfg?.investment_periods, currentValue])
+  const periods = useMemo(
+    () => (ip?.periods ?? []).map(Number).filter(Number.isFinite),
+    [ip?.periods],
+  )
+  return useMemo(
+    () => buildYearOptions(periods, currentValue, new Date().getFullYear()),
+    [periods, currentValue],
+  )
 }
 
 export function BuildYearSelect({ fs, set, tip }: { fs: FS; set: SetFS; tip?: string }) {

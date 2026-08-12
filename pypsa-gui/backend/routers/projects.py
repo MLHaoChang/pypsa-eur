@@ -1040,6 +1040,12 @@ async def import_bundle(
             solve_time=None,
         )
 
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed import does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _imported_project)
     change_log_service.log(
         "import", "Project", target_name,
         f"Imported project bundle '{file.filename}' as '{target_name}' "
@@ -1220,6 +1226,12 @@ def create_from_template(
         "scenario_description": None,
     })
 
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed create does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _created_project)
     change_log_service.log(
         "import", "Project", target_name,
         f"Created project '{target_name}' from template '{template_id}' "
