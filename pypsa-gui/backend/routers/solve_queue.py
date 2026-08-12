@@ -227,6 +227,18 @@ def _sse_line(text: object) -> str:
     return f"data: {safe}\n\n"
 
 
+def _done_event(job_id: int) -> str:
+    """The `event: done` SSE frame carrying a job's current/terminal snapshot."""
+    job = solve_queue.get_job(job_id) or {}
+    payload = json.dumps({
+        "status": job.get("status"),
+        "objective": job.get("objective"),
+        "solve_time": job.get("solve_time"),
+        "condition": job.get("condition"),
+    })
+    return f"event: done\ndata: {payload}\n\n"
+
+
 @router.get("/{job_id}/log_history")
 def job_log_history(
     job_id: int,
@@ -266,8 +278,25 @@ async def job_log_stream(
     see half of them. The fanout deque is exactly the side channel that exists
     for a second consumer, and it never observes the `None` close sentinel.
 
-    Termination is therefore the job's own status, not a sentinel: stop once the
-    job is terminal AND the deque has drained, then emit `done`.
+    SUBSCRIBE BEFORE REPLAY. `history()` snapshots under a lock and returns a
+    copy; `subscribe()` only sees lines `put()` AFTER it runs. A line landing
+    in the gap between the two belongs to neither and is silently lost — and
+    that gap is not microseconds: every `yield` in the replay loop suspends
+    this generator while Starlette writes the frame to the socket, so with a
+    full 5000-line history and a slow consumer the gap is the wall-clock time
+    to write 5000 frames. Subscribing first trades that gap for an occasional
+    DUPLICATE at the seam (a line already in `history()` may also arrive again
+    via the live deque) — the correct direction: the legacy
+    `/api/simulation/log_stream` documents the same choice already
+    (`routers/simulation.py:912-914`, duplicate-prone rather than gap-prone),
+    and the frontend's history/live de-dupe (tracking the last-seen tail)
+    already absorbs it.
+
+    Termination is therefore the job's own status, not a sentinel: stop once
+    the job is terminal AND the deque has drained, then emit `done`. A job
+    cleared out of the queue entirely (`clear_finished` ran mid-stream) reads
+    back as `get_job() is None` — also treated as terminal, or the loop would
+    poll forever for a status that can no longer arrive.
     """
     from services import project_registry
 
@@ -277,16 +306,23 @@ async def job_log_stream(
     async def generate():
         q = solve_queue.get_log_queue(job_id)
         if q is None:
+            # No queue was ever published for this job — most commonly a
+            # caller attaching in the `queued` window, before the dispatcher's
+            # claim block sets `log_queue` at the `running` flip. Emit `done`
+            # immediately: without it, a browser EventSource auto-reconnects
+            # on this frame-then-close, looping every few seconds until the
+            # job starts, and any consumer awaiting `done` waits forever.
             yield "data: No log for this job\n\n"
+            yield _done_event(job_id)
             return
-
-        for line in q.history():
-            if await request.is_disconnected():
-                return
-            yield _sse_line(line)
 
         sub_id, dq = q.subscribe()
         try:
+            for line in q.history():
+                if await request.is_disconnected():
+                    return
+                yield _sse_line(line)
+
             while True:
                 if await request.is_disconnected():
                     return
@@ -297,21 +333,14 @@ async def job_log_stream(
                 if drained:
                     continue
                 snapshot = solve_queue.get_job(job_id) or {}
-                if snapshot.get("status") in _TERMINAL:
+                if not snapshot or snapshot.get("status") in _TERMINAL:
                     break
                 await asyncio.sleep(0.25)
         finally:
             # A closed browser tab would otherwise leak the deque + dict entry.
             q.unsubscribe(sub_id)
 
-        final = solve_queue.get_job(job_id) or {}
-        payload = json.dumps({
-            "status": final.get("status"),
-            "objective": final.get("objective"),
-            "solve_time": final.get("solve_time"),
-            "condition": final.get("condition"),
-        })
-        yield f"event: done\ndata: {payload}\n\n"
+        yield _done_event(job_id)
 
     return StreamingResponse(
         generate(),

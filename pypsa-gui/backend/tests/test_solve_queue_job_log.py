@@ -12,6 +12,7 @@ when the caller may not see the job, for the same reason `abort_job` does.
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
 
@@ -147,3 +148,60 @@ def test_the_log_endpoints_404_for_a_caller_who_may_not_see_the_job(
     assert theirs.json()["detail"] == missing.json()["detail"].replace(
         "99999", str(job["id"])
     )
+
+
+def test_the_log_stream_serves_history_then_done_and_leaves_no_subscriber(
+    client, install_network, tmp_projects_dir, monkeypatch,
+):
+    """
+    R17/R19 happy path over the wire, added after code review: the route is
+    reachable, history lines arrive, `event: done` fires carrying the terminal
+    payload, and — cheaply and most valuably — the BufferedLogQueue has NO
+    subscriber left once the stream closes. That last assertion is what turns
+    a by-reading "the subscription cannot leak" verdict into an executed one.
+
+    Deliberately not a suite: interleaving-dependent defects (the
+    history/subscribe race, a mid-stream `clear_finished`) need a controlled
+    interleaving to reproduce and are covered by the fix itself, not by a
+    happy-path exercise of the route.
+    """
+    from services import solver_service
+
+    install_network(build_network(), name="Streamed")
+    _save_project(client, "Streamed")
+
+    def quick(config, n, lock, stop_event, log_queue, state_update=None):
+        log_queue.put("job log: streamed line")
+        return "ok", "optimal"
+
+    monkeypatch.setattr(solver_service, "run_simulation", quick)
+
+    job = client.post("/api/simulation/queue", json={"project_id": "Streamed"}).json()
+    done_job = _wait_for_terminal(job["id"])
+    assert done_job["status"] == "completed", done_job
+
+    data_lines: list[str] = []
+    done_payload: dict | None = None
+    event = None
+    with client.stream(
+        "GET", f"/api/simulation/queue/{job['id']}/log_stream"
+    ) as resp:
+        assert resp.status_code == 200, resp.text
+        for raw in resp.iter_lines():
+            line = raw if isinstance(raw, str) else raw.decode()
+            if line.startswith("event:"):
+                event = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                text = line.split(":", 1)[1].strip()
+                if event == "done":
+                    done_payload = json.loads(text)
+                    break
+                data_lines.append(text)
+
+    assert any("job log: streamed line" in line for line in data_lines), data_lines
+    assert done_payload is not None, "SSE stream ended without a `done` event"
+    assert done_payload["status"] == "completed", done_payload
+
+    q = solve_queue.get_log_queue(job["id"])
+    assert q is not None
+    assert q._subscribers == {}
