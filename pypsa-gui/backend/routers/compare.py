@@ -794,7 +794,12 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
     )
 
     return CapacityComparison(
-        available=True,
+        # `has_solve`, not a bare True: this is the ONE compute function with no
+        # `if not has_solve` early return, so it reaches here on an unsolved
+        # network too — where `p_nom_opt` is still 0 and the capacity walk has
+        # skipped every asset. A bare True would label those empty figures as
+        # resolved, which is the fabricated zero ADR-0001 exists to prevent.
+        available=has_solve,
         capacity_mw_by_carrier=_to_pv_dict(cap_by_carrier),
         capex_meur_by_carrier=_to_pv_dict(total_capex_by_carrier),
         new_capex_meur_by_carrier=_to_pv_dict(capex_by_carrier),

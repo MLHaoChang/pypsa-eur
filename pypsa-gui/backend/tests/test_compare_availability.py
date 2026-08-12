@@ -51,6 +51,49 @@ def test_at_least_nine_blocks_are_covered():
     )
 
 
+def _unsolved_network():
+    """Assets present, never optimised — `p_nom_opt` is still 0 everywhere."""
+    import pandas as pd
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Bus", "B")
+    n.add("Carrier", "gas")
+    n.add("Generator", "g", bus="B", carrier="gas", p_nom=100.0, capital_cost=1000.0)
+    n.add("Load", "L", bus="B", p_set=50.0)
+    return n
+
+
+def test_capacity_on_an_unsolved_network_is_not_available():
+    """
+    The negative direction, which the golden-fixture test cannot reach.
+
+    `_compute_capacity_summary` is the ONE compute function with no
+    `if not has_solve` early return — it takes the flag and never reads it.
+    Setting a bare `available=True` on its success path therefore claims the
+    figures resolved on a network that was never optimised, where `p_nom_opt`
+    defaults to 0 so the capacity walk skips every asset: all-empty figures,
+    labelled available. Exactly the fabricated-zero ADR-0001 forbids, in the
+    code meant to prevent it.
+    """
+    import routers.compare as CMP
+
+    block = CMP._compute_capacity_summary(_unsolved_network(), [], False, False)
+    assert block.available is False, (
+        "capacity reports available=True on an unsolved network — `available` "
+        "must track has_solve, not be a bare True"
+    )
+
+
+def test_capacity_on_a_solved_network_is_available(golden):
+    """The other direction, so the fix cannot be a blanket False."""
+    import routers.compare as CMP
+
+    block = CMP._compute_capacity_summary(golden, list(golden.investment_periods), True, True)
+    assert block.available is True
+
+
 @pytest.fixture()
 def golden(reset_backend):
     n = gf.solve_golden_network()
