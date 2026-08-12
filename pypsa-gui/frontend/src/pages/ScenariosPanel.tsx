@@ -537,11 +537,14 @@ export default function ScenariosPanel() {
         // directions: a second confirmation finds every name taken and
         // enqueues nothing, and a dismissed prompt claims nothing at all.
         //
-        // It matters because the backend does NOT refuse a duplicate —
-        // `solve_queue.enqueue` appends unconditionally — so a double click
-        // really does run every project in the branch twice, and on these
-        // models that is minutes of wasted solve with the second run
-        // overwriting the first's results.
+        // The backend is idempotent per project now — `enqueue_unique`
+        // returns the EXISTING job with `already_queued: true` instead of
+        // creating a second one, so a double click can no longer double-solve
+        // anything. The ref stays as a local UX guard, not the correctness
+        // backstop: without it, a second click before the batch's requests
+        // land re-fires one HTTP call per target that each comes back a
+        // no-op `already_queued` response — wasted round trips and, with
+        // enough targets, a visible stutter, not incorrect behavior.
         const claimed = targets.filter(p => !inFlight.current.has(p.name))
         if (claimed.length === 0) {
           toast('Already queueing that branch', { icon: '·' })

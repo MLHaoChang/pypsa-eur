@@ -77,7 +77,7 @@ export const solveQueueApi = {
   // when the caller may not see the job.
   jobLogHistory: (jobId: number) =>
     client.get<{ lines: string[]; status: SolveJobStatus }>(
-      `/simulation/queue/${jobId}/log_stream`.replace('/log_stream', '/log_history'),
+      `/simulation/queue/${jobId}/log_history`,
     ).then(r => r.data),
   // EventSource takes an absolute app path, not the axios base, so this is a
   // URL builder rather than a request.
