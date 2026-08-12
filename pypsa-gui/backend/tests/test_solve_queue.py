@@ -280,7 +280,10 @@ def test_enqueue_unsafe_name_is_404(client, tmp_projects_dir, session_ctx):
 
 
 def test_abort_unknown_job_is_404(client, session_ctx):
-    r = client.post("/api/simulation/queue/99999/abort")
+    # A well-formed but never-issued id, not a malformed string — this
+    # exercises the "parsed, not in `_jobs`" branch. The malformed-id branch
+    # is covered separately by test_solve_queue_uuid_ids.py.
+    r = client.post(f"/api/simulation/queue/{uuid.uuid4()}/abort")
     assert r.status_code == 404, r.text
 
 

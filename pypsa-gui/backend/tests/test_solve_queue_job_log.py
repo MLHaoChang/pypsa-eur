@@ -145,11 +145,15 @@ def test_the_log_endpoints_404_for_a_caller_who_may_not_see_the_job(
     theirs = other_org_client.get(f"/api/simulation/queue/{job['id']}/log_history")
     assert theirs.status_code == 404, theirs.text
     # Byte-identical to the genuine not-found message, so a 404 is not an
-    # existence oracle.
-    missing = other_org_client.get("/api/simulation/queue/99999/log_history")
+    # existence oracle. A well-formed but never-issued UUID — NOT a malformed
+    # string — so this exercises the "parsed, not in `_jobs`" 404 branch
+    # rather than `_parse_job_id`'s malformed-id short-circuit (that one's
+    # covered by test_solve_queue_uuid_ids.py).
+    missing_id = str(uuid.uuid4())
+    missing = other_org_client.get(f"/api/simulation/queue/{missing_id}/log_history")
     assert missing.status_code == 404
     assert theirs.json()["detail"] == missing.json()["detail"].replace(
-        "99999", str(job["id"])
+        missing_id, str(job["id"])
     )
 
     # `/log_stream`'s half of R18: the authorization check
@@ -162,10 +166,10 @@ def test_the_log_endpoints_404_for_a_caller_who_may_not_see_the_job(
     # catch it.
     theirs_stream = other_org_client.get(f"/api/simulation/queue/{job['id']}/log_stream")
     assert theirs_stream.status_code == 404, theirs_stream.text
-    missing_stream = other_org_client.get("/api/simulation/queue/99999/log_stream")
+    missing_stream = other_org_client.get(f"/api/simulation/queue/{missing_id}/log_stream")
     assert missing_stream.status_code == 404
     assert theirs_stream.json()["detail"] == missing_stream.json()["detail"].replace(
-        "99999", str(job["id"])
+        missing_id, str(job["id"])
     )
 
 

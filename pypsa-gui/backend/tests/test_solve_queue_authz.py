@@ -473,7 +473,11 @@ def test_unauthorized_abort_is_indistinguishable_from_not_found(
     client, other_org_client, install_network, tmp_projects_dir
 ):
     theirs = _enqueue(other_org_client, install_network, "Bravo")
-    absent_id = 10_000_000
+    # A well-formed id that was never issued — distinct from a MALFORMED one
+    # (covered by test_solve_queue_uuid_ids.py). `uuid.UUID(str(...))` still
+    # parses this, so the request reaches the real "not in `_jobs`" branch
+    # rather than `_parse_job_id` short-circuiting to 404 on a garbage string.
+    absent_id = uuid.uuid4()
 
     denied = client.post(f"/api/simulation/queue/{theirs['id']}/abort")
     missing = client.post(f"/api/simulation/queue/{absent_id}/abort")
