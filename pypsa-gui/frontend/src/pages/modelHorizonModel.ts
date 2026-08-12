@@ -184,3 +184,113 @@ export function horizonRangeLabel(
   // MM-DD only — the operational year is a base year, not a planning year.
   return `${span} × op. ${first.slice(5, 10)}→${last.slice(5, 10)}`
 }
+
+/**
+ * Steps of the guided Model Horizon flow, split along PyPSA's two-level
+ * `(period, timestep)` snapshot MultiIndex: `mode` / `years` / `economics`
+ * are period-level and disappear entirely in single-period mode (there is no
+ * investment period to configure); `window` / `sampling` / `weights` are
+ * timestep-level and are always present.
+ */
+export type HorizonStepId = 'mode' | 'years' | 'economics' | 'window' | 'sampling' | 'weights'
+
+/**
+ * Which steps a project shows, in rail order. Multi-period gets all six;
+ * single-period drops the three period-level steps and keeps the four
+ * timestep-level ones.
+ */
+export function visibleSteps(isMultiPeriod: boolean): HorizonStepId[] {
+  const timestepSteps: HorizonStepId[] = ['window', 'sampling', 'weights']
+  return isMultiPeriod
+    ? ['mode', 'years', 'economics', ...timestepSteps]
+    : ['mode', ...timestepSteps]
+}
+
+/**
+ * Whether the horizon is still PyPSA's default — a single "now" snapshot —
+ * rather than something a user actually configured. Decides whether a
+ * returning user meets the guided flow at step 1 or lands on the summary.
+ *
+ * A count of exactly 1 is unset, not a one-snapshot horizon: this mirrors
+ * the heuristic `ModelHorizon.tsx` already uses (`snap.count <= 1`) to decide
+ * whether to hydrate its constructor defaults. `undefined` (data not loaded
+ * yet) also reads as unset, so the summary never flashes before data arrives.
+ */
+export function isHorizonUnset(snapshotCount: number | undefined): boolean {
+  return snapshotCount === undefined || snapshotCount <= 1
+}
+
+/**
+ * Plain data `stepSummary` needs to write its sentences, all of it already
+ * computed by the page. Deliberately NOT the raw `SnapshotInfo` /
+ * `SolverConfig` API payloads — that would couple this pure module to
+ * response shapes and force every test to build a full fake payload just to
+ * exercise a string. `rangeLabel` is `horizonRangeLabel`'s output, composed
+ * here rather than re-derived.
+ */
+export interface HorizonSummaryContext {
+  isMultiPeriod: boolean
+  /** Investment period years, e.g. `[2030, 2040, 2050]`. Empty outside multi-period. */
+  periods: number[]
+  snapshotCount: number | undefined
+  freq: string | null | undefined
+  /** Pre-computed by `horizonRangeLabel` — compose it, don't re-derive it. */
+  rangeLabel: string
+  canSampleWeeks: boolean
+  weightsAreDefault: boolean
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
+/** `2030` for a single period, `2030–2050` for a span. Caller guarantees non-empty. */
+function periodSpan(periods: number[]): string {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const p of periods) {
+    if (p < lo) lo = p
+    if (p > hi) hi = p
+  }
+  return lo === hi ? `${lo}` : `${lo}–${hi}`
+}
+
+/**
+ * One-sentence summary of a step's current configuration, for the
+ * summary-first landing view. A returning user reads this instead of
+ * opening the step, so it must name the actual configured value (a count, a
+ * year, a resolution) — never a placeholder or a bare label.
+ */
+export function stepSummary(step: HorizonStepId, ctx: HorizonSummaryContext): string {
+  switch (step) {
+    case 'mode':
+      return ctx.isMultiPeriod
+        ? `Multi-period, ${plural(ctx.periods.length, 'investment year')}`
+        : 'Single-period'
+
+    case 'years':
+      return ctx.periods.length === 0
+        ? 'No investment years set'
+        : `${plural(ctx.periods.length, 'investment year')}: ${ctx.periods.join(', ')}`
+
+    case 'economics':
+      if (ctx.periods.length === 0) return 'No investment years to weight yet'
+      if (ctx.periods.length === 1) {
+        return `Single period (${ctx.periods[0]}) — no discounting between periods`
+      }
+      return `Objective weighting set across ${plural(ctx.periods.length, 'year')} (${periodSpan(ctx.periods)})`
+
+    case 'window':
+      return `${ctx.rangeLabel}, ${resolutionLabel(ctx.freq)}`
+
+    case 'sampling':
+      return ctx.canSampleWeeks
+        ? 'Not sampled (full year) — representative weeks available'
+        : 'Not sampled (full year) — upload an hourly profile to enable sampling'
+
+    case 'weights':
+      return ctx.weightsAreDefault
+        ? 'Default weights (every snapshot weighted 1)'
+        : 'Custom weights applied'
+  }
+}
