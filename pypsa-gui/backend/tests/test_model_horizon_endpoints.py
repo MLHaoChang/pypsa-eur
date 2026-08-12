@@ -15,6 +15,9 @@ add further Model Horizon endpoint coverage here rather than in a new file.
 """
 from __future__ import annotations
 
+import queue
+import threading
+
 import pandas as pd
 import pypsa
 
@@ -24,6 +27,8 @@ from routers.network import (
     _user_ts,
     _user_ts_lock,
 )
+from services.pypsa_service import PyPSAService
+from services.solver_service import SolverConfig, run_simulation
 from tests.conftest import build_network
 
 
@@ -590,6 +595,55 @@ def test_a_budget_still_binds_on_a_flat_network(client, install_network, session
     )
 
 
+def _drain(q: "queue.SimpleQueue") -> list[str]:
+    """Same drain helper test_myopic_summary_log.py uses to read a solve's
+    log_queue after run_simulation returns — the established mechanism this
+    suite uses to observe bracketed solver log markers ([PHASE], [BUDGET],
+    …) that no HTTP endpoint surfaces."""
+    out: list[str] = []
+    while True:
+        try:
+            out.append(str(q.get_nowait()))
+        except queue.Empty:
+            return out
+
+
+def test_a_budget_for_a_period_not_in_the_horizon_logs_the_skip():
+    """
+    M1 (design test table): "CAPEX, removed period — its budget does not
+    constrain, and the skip reaches the log." The p_nom_opt assertion above
+    (test_a_budget_for_a_period_not_in_the_horizon_does_not_constrain) only
+    covers the first half; nothing pinned that capex_budget_fn's `_emit`
+    call in the skip branch actually reaches the log_queue. Deleting that
+    `_emit` call passes the rest of the suite today.
+
+    Drives `run_simulation` directly with a local `queue.SimpleQueue()`
+    rather than going through the HTTP solve endpoint — the same capture
+    mechanism `test_myopic_summary_log.py` already uses to pin its own
+    `[PHASE] Summary` line, since no HTTP endpoint exposes the raw solve
+    log for a completed run.
+    """
+    n = _budget_network([2030, 2050], build_year=2040)
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(
+        multi_investment_periods=True,
+        investment_periods=[2030, 2050],
+        capex_budget_per_period={"2040": 10.0},
+        voll=10000.0,
+    )
+    log_q: queue.SimpleQueue = queue.SimpleQueue()
+    status, condition = run_simulation(
+        cfg, n, PyPSAService.get_lock(), threading.Event(), log_q,
+    )
+    assert status in ("ok", "optimal"), f"{status}/{condition}"
+
+    lines = _drain(log_q)
+    budget_lines = [ln for ln in lines if "[BUDGET]" in ln]
+    assert any(
+        "2040" in ln and "ignored" in ln for ln in budget_lines
+    ), f"expected a [BUDGET] skip line naming period 2040, got: {budget_lines}"
+
+
 # ── Per-period snapshot weightings across a period edit ───────────────────
 # _capture_snapshot_weights_per_timestep captured ONLY period 0, keyed by
 # timestep; _reapply_snapshot_weights reindexed every period against it and
@@ -674,6 +728,42 @@ def test_same_calendar_broadcast_is_unchanged(client, install_network, session_c
         assert all(v == 7.0 for v in after[period]), (
             f"same-calendar broadcast regressed for {period}: {after[period]}"
         )
+
+
+def test_period_0_custom_period_1_default_is_not_broadcast(client, install_network, session_ctx):
+    # M3: test_same_calendar_broadcast_is_unchanged above only pins the
+    # UNIFORM case (every period given the same non-default weight). The
+    # sub-case that actually changed is mixed: period 0 custom, period 1 left
+    # at the PyPSA default 1.0. The OLD code captured only period 0's frame
+    # and broadcast it onto every period on reapply, so period 1's real 1.0
+    # was overwritten with period 0's custom value. The fixed code captures
+    # each period's own frame, so period 1 must survive at 1.0.
+    block = pd.date_range("2024-01-01", periods=2, freq="h")
+    n = pypsa.Network()
+    n.set_snapshots(_multi_index([2030, 2040], block))
+    n.investment_periods = [2030, 2040]
+    n.add("Bus", "B1")
+    for ts in block:
+        n.snapshot_weightings.loc[(2030, ts), "objective"] = 5.0
+    # Period 2040 deliberately left untouched at the PyPSA default (1.0).
+    install_network(n)
+
+    r = client.post("/api/network/investment_periods",
+                    json={"periods": [2030, 2040, 2050]})
+    assert r.status_code == 200, r.text
+
+    after = _weights_by_period(session_ctx(client).network)
+    assert all(v == 5.0 for v in after[2030]), (
+        f"period 2030 must keep its own custom weight; got {after[2030]}"
+    )
+    assert all(v == 1.0 for v in after[2040]), (
+        "period 2040's real default 1.0 must survive, not be overwritten by "
+        f"period 2030's 5.0 broadcast; got {after[2040]}"
+    )
+    # The genuinely new period templates from the FIRST captured period (2030).
+    assert all(v == 5.0 for v in after[2050]), (
+        f"a genuinely new period templates from period 2030; got {after[2050]}"
+    )
 
 
 # ── _reapply_snapshot_weights: MultiIndex-source capture onto a flat target ──

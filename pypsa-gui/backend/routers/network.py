@@ -3023,11 +3023,11 @@ def _reapply_snapshot_weights(n, captured) -> None:
     """
     if captured is None:
         return
+    if isinstance(captured, dict) and not captured:
+        return
     idx = n.snapshots
     if isinstance(idx, pd.MultiIndex):
         if isinstance(captured, dict):
-            if not captured:
-                return
             template = captured[sorted(captured)[0]]
         else:
             # Flat source promoted to MultiIndex: one frame for every period.
