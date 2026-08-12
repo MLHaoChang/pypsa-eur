@@ -107,6 +107,7 @@ function summary(project: string, scale = 1): ResultsSummary {
       storage_cycles_by_carrier: {},
     },
     loading: {
+      available: true,
       lines: [{
         name: 'Line1', s_nom_opt: 500, is_transformer: false, is_link: false, carrier: null,
         peak_loading: pv(0.8 * s, 0.6 * s, 0.9 * s),
@@ -115,6 +116,7 @@ function summary(project: string, scale = 1): ResultsSummary {
       }],
     },
     prices: {
+      available: true,
       duration_curve: Array.from({ length: 101 }, (_, i) => (100 - i) * s),
       mean_price: pv(45 * s, 40 * s, 50 * s),
       median_price: pv(44 * s, 39 * s, 49 * s),

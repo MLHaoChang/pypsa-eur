@@ -285,7 +285,9 @@ function PeriodBtn({ label, active, onClick }: { label: string; active: boolean;
 
 // ── Overview tab (existing high-level tables) ────────────────────────────────
 
-function OverviewTab({ a, b }: { a: string; b: string }) {
+// Exported solely so CompareView.availability.test.tsx can render it in
+// isolation (Task 6 follow-up to Task 5) — see LoadingTab's matching note.
+export function OverviewTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['compare-state', a], queryFn: () => projectsApi.compareState(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['compare-state', b], queryFn: () => projectsApi.compareState(b), staleTime: 30_000 })
   // Pull results-summary for the storage breakdown — compare-state only
@@ -303,22 +305,46 @@ function OverviewTab({ a, b }: { a: string; b: string }) {
   if (qSumA.isError || qSumB.isError) return <ErrorBanner which={qSumA.isError ? a : b} />
   const sa = qA.data!
   const sb = qB.data!
+  const summaryA = qSumA.data!
+  const summaryB = qSumB.data!
+  // This tab mixes TWO different sources per row: CountsTable/SolverTable
+  // and OverviewCapacityTable's main total columns read compare-state
+  // (structural network properties — bus/line counts, installed/optimised
+  // MW — always meaningful even pre-solve, never "unresolved" in the
+  // ADR-0001 sense, so they carry no `available` flag at all). The "built"
+  // columns of OverviewCapacityTable and ALL of OverviewStorageTable /
+  // OverviewLinksTable instead read the results-summary `capacity` block,
+  // which DOES carry `available` — false whenever that side has no fresh
+  // solve. Per-cell marking (rather than one tab-wide banner) is the right
+  // call here specifically because of that split: a banner would either
+  // hide CountsTable/SolverTable's always-valid figures unnecessarily, or
+  // fail to flag OverviewStorageTable/OverviewLinksTable's figures when
+  // only the results-summary side is unresolved. `?? false` so an absent
+  // flag reads as unavailable, never as available.
+  const capAvailableA = summaryA.capacity?.available ?? false
+  const capAvailableB = summaryB.capacity?.available ?? false
   return (
     <div className="space-y-4">
       <CountsTable a={sa} b={sb} />
       <SolverTable a={sa} b={sb} />
       <OverviewCapacityTable
         a={sa} b={sb}
-        newCapA={qSumA.data?.capacity?.new_capacity_mw_by_carrier}
-        newCapB={qSumB.data?.capacity?.new_capacity_mw_by_carrier}
+        newCapA={summaryA.capacity?.new_capacity_mw_by_carrier}
+        newCapB={summaryB.capacity?.new_capacity_mw_by_carrier}
+        availableA={capAvailableA}
+        availableB={capAvailableB}
       />
       <OverviewStorageTable
         aName={sa.name} bName={sb.name}
-        summaryA={qSumA.data!} summaryB={qSumB.data!}
+        summaryA={summaryA} summaryB={summaryB}
+        availableA={capAvailableA}
+        availableB={capAvailableB}
       />
       <OverviewLinksTable
         aName={sa.name} bName={sb.name}
-        summaryA={qSumA.data!} summaryB={qSumB.data!}
+        summaryA={summaryA} summaryB={summaryB}
+        availableA={capAvailableA}
+        availableB={capAvailableB}
       />
     </div>
   )
@@ -660,7 +686,11 @@ function DispatchTab({ a, b }: { a: string; b: string }) {
 
 const LOADING_TOP_N = 10
 
-function LoadingTab({ a, b }: { a: string; b: string }) {
+// Exported solely so CompareView.availability.test.tsx can render it in
+// isolation (Task 6 follow-up to Task 5) — every other tab in this file
+// stays module-private except EmissionsTab/EconomicsTab/StorageCyclingTab
+// (Task 5) for the same reason.
+export function LoadingTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['results-summary', b], queryFn: () => projectsApi.resultsSummary(b), staleTime: 30_000 })
   const [period, setPeriod] = useState<PeriodChoice>('all')
@@ -688,8 +718,27 @@ function LoadingTab({ a, b }: { a: string; b: string }) {
   if (!sa.has_solve || !sb.has_solve) {
     return <UnsolvedBanner unsolved={[!sa.has_solve && sa.project, !sb.has_solve && sb.project].filter(Boolean) as string[]} />
   }
+  // Whether this side's loading block resolved at all — `?? false` so an
+  // absent flag (an older cached payload) reads as unavailable, never as
+  // available (see ADR-0001 / EconomicsTab's matching note). Both projects
+  // are guaranteed has_solve here, so this can only be "the branch loading
+  // walk itself failed," not "not solved yet."
+  const availableA = sa.loading?.available ?? false
+  const availableB = sb.loading?.available ?? false
 
   if (merged.length === 0) {
+    // Neither side has ANY branch row — could genuinely mean "no branches
+    // with a populated p0 timeseries," but if either side's block never
+    // resolved we can't back up that claim for it, so say so instead of
+    // guessing (same reasoning as EconomicsTab's availableCarriers===0 gate).
+    if (!availableA || !availableB) {
+      return (
+        <div className="space-y-3">
+          <PeriodSelector periods={periods} value={period} onChange={setPeriod} />
+          <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+        </div>
+      )
+    }
     return (
       <div className="space-y-3">
         <PeriodSelector periods={periods} value={period} onChange={setPeriod} />
@@ -717,7 +766,7 @@ function LoadingTab({ a, b }: { a: string; b: string }) {
             subtitle={periodLabel(period) + ' — bars at 100 % indicate the line is hitting its s_nom limit'}
           >
             <LoadingBarChart aName={sa.project} bName={sb.project} rows={topLines} kind="peak" />
-            <LoadingTable aName={sa.project} bName={sb.project} rows={lineRows} />
+            <LoadingTable aName={sa.project} bName={sb.project} rows={lineRows} availableA={availableA} availableB={availableB} />
           </Section>
 
           <Section
@@ -735,7 +784,7 @@ function LoadingTab({ a, b }: { a: string; b: string }) {
           subtitle={periodLabel(period) + ' — Links report |p0| ÷ p_nom_opt; 100 % means the link is dispatching at its full sized capacity. Carrier shown alongside name.'}
         >
           <LoadingBarChart aName={sa.project} bName={sb.project} rows={topLinks} kind="peak" />
-          <LoadingTable aName={sa.project} bName={sb.project} rows={linkRows} />
+          <LoadingTable aName={sa.project} bName={sb.project} rows={linkRows} availableA={availableA} availableB={availableB} />
         </Section>
       )}
     </div>
@@ -752,6 +801,15 @@ interface MergedLoadingRow {
   // 'heat-pump', ...), shown alongside the loading number.
   is_link: boolean
   carrier: string | null
+  // Whether this branch actually appears in each side's `lines` list — as
+  // opposed to peak_a/peak_b etc. defaulting to 0 via readPV's `!pv` guard.
+  // Both a genuinely-zero-loading branch AND a branch entirely absent from
+  // one side's fleet produce the same defaulted numeric fields below, so
+  // LoadingTable needs this to tell "not built on this side" (em-dash) apart
+  // from "built with 0 % loading" (a real value) — same ladder rung as
+  // StorageUnitTable's r.a/r.b presence check.
+  hasA: boolean
+  hasB: boolean
   s_nom_a: number
   s_nom_b: number
   peak_a: number
@@ -779,6 +837,8 @@ function mergeLoadingByName(
       is_transformer: !!(A?.is_transformer || B?.is_transformer),
       is_link: !!(A?.is_link || B?.is_link),
       carrier: A?.carrier ?? B?.carrier ?? null,
+      hasA: A !== undefined,
+      hasB: B !== undefined,
       s_nom_a: A?.s_nom_opt ?? 0,
       s_nom_b: B?.s_nom_opt ?? 0,
       peak_a: readPV(A?.peak_loading, period),
@@ -833,15 +893,26 @@ function LoadingBarChart({
 }
 
 function LoadingTable({
-  aName, bName, rows,
+  aName, bName, rows, availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
   rows: MergedLoadingRow[]
+  // Whether this side's loading block resolved at all — same third state as
+  // ABTable/StorageUnitTable (Task 5; see ADR-0001). A branch absent from
+  // this side's `lines` array is already ambiguous between "not built here"
+  // and "the block never resolved" (both leave r.hasA/r.hasB false) — this
+  // flag disambiguates and takes priority. Defaults to true so this
+  // continues to render standalone in tests that don't care about
+  // availability. `?? false` at the call site, never `?? true`.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   if (rows.length === 0) return null
   const fmtPct = (v: number) => `${(v * 100).toFixed(1)} %`
   const fmtHr  = (v: number) => v >= 1 ? `${v.toFixed(0)} h` : (v > 0 ? `${v.toFixed(1)} h` : '—')
+  const dash = <span className="text-muted" title="Branch not present in this scenario">—</span>
+  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
   return (
     <table className="w-full text-xs mt-2">
       <thead>
@@ -867,13 +938,17 @@ function LoadingTable({
                 <span className="text-[10px] text-muted ml-1">· {carrierDisplayName(canonicaliseCarrier('Link', r.carrier))}</span>
               )}
             </td>
-            <td className="py-1 text-right font-mono text-text">{fmtPct(r.peak_a)}</td>
-            <td className="py-1 text-right font-mono text-text">{fmtPct(r.peak_b)}</td>
-            <td className="py-1 text-right font-mono"><Delta v={(r.peak_b - r.peak_a) * 100} fmt={v => `${v.toFixed(1)} pp`} invert /></td>
-            <td className="py-1 text-right font-mono text-text">{fmtPct(r.mean_a)}</td>
-            <td className="py-1 text-right font-mono text-text">{fmtPct(r.mean_b)}</td>
-            <td className="py-1 text-right font-mono text-text">{fmtHr(r.binding_a)}</td>
-            <td className="py-1 text-right font-mono text-text">{fmtHr(r.binding_b)}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? fmtPct(r.peak_a) : dash}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? fmtPct(r.peak_b) : dash}</td>
+            <td className="py-1 text-right font-mono">
+              {(availableA && availableB && r.hasA && r.hasB)
+                ? <Delta v={(r.peak_b - r.peak_a) * 100} fmt={v => `${v.toFixed(1)} pp`} invert />
+                : <span className="text-muted" title="Δ undefined — a scenario is unresolved or lacks this branch">—</span>}
+            </td>
+            <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? fmtPct(r.mean_a) : dash}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? fmtPct(r.mean_b) : dash}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? fmtHr(r.binding_a) : dash}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? fmtHr(r.binding_b) : dash}</td>
           </tr>
         ))}
       </tbody>
@@ -888,7 +963,9 @@ function LoadingTable({
 // constant percentile points so A/B are directly comparable regardless of
 // network size or snapshot count.
 
-function PricesTab({ a, b }: { a: string; b: string }) {
+// Exported solely so CompareView.availability.test.tsx can render it in
+// isolation (Task 6 follow-up to Task 5) — see LoadingTab's matching note.
+export function PricesTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['results-summary', b], queryFn: () => projectsApi.resultsSummary(b), staleTime: 30_000 })
   const periods = useMemo(() => {
@@ -907,7 +984,19 @@ function PricesTab({ a, b }: { a: string; b: string }) {
 
   const pa = sa.prices
   const pb = sb.prices
-  if (!pa || !pb || (pa.duration_curve.length === 0 && pb.duration_curve.length === 0)) {
+  if (!pa || !pb) {
+    return <p className="text-[11px] text-muted py-2">No marginal-price data in either project (buses_t.marginal_price empty).</p>
+  }
+  // Whether this side's prices block resolved at all — `?? false` so an
+  // absent flag reads as unavailable, never as available (see ADR-0001 /
+  // EconomicsTab's matching note). Both projects are guaranteed has_solve
+  // here, so this can only mean the price-duration walk itself failed.
+  const availableA = pa.available ?? false
+  const availableB = pb.available ?? false
+  if (!availableA && !availableB) {
+    return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+  }
+  if (pa.duration_curve.length === 0 && pb.duration_curve.length === 0) {
     return <p className="text-[11px] text-muted py-2">No marginal-price data in either project (buses_t.marginal_price empty).</p>
   }
 
@@ -933,6 +1022,8 @@ function PricesTab({ a, b }: { a: string; b: string }) {
           meanA={pa.mean_price}     meanB={pb.mean_price}
           medianA={pa.median_price} medianB={pb.median_price}
           p90A={pa.p90_price}       p90B={pb.p90_price}
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -947,6 +1038,8 @@ function PricesTab({ a, b }: { a: string; b: string }) {
             bName={sb.project}
             statsA={pa.by_carrier_stats ?? {}}
             statsB={pb.by_carrier_stats ?? {}}
+            availableA={availableA}
+            availableB={availableB}
           />
         </Section>
       )}
@@ -960,12 +1053,17 @@ function PricesTab({ a, b }: { a: string; b: string }) {
 // different bus counts per carrier — typically many electrical, a handful
 // of H2 / heat buses).
 function PerCarrierPricesTable({
-  aName, bName, statsA, statsB,
+  aName, bName, statsA, statsB, availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
   statsA: Record<string, CarrierPriceStats>
   statsB: Record<string, CarrierPriceStats>
+  // Whether this side's prices block resolved at all — same third state as
+  // ABTable (Task 5; see ADR-0001). Defaults to true so this continues to
+  // render standalone in tests/callers that don't care about availability.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   // Canonicalise carrier keys so 'AC' and 'electricity' collapse into one
   // row. Backend already canonicalises bus carriers but a paranoid second
@@ -980,6 +1078,8 @@ function PerCarrierPricesTable({
     return <p className="text-[11px] text-muted">No per-carrier price data — backend payload empty.</p>
   }
   const fmt = (v: number) => `${v.toFixed(2)} €/MWh`
+  const dash = <span className="text-muted" title="Carrier not present in this scenario">—</span>
+  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
   return (
     <table className="w-full text-xs">
       <thead>
@@ -1003,12 +1103,12 @@ function PerCarrierPricesTable({
             <tr key={c} className="border-b border-border/40">
               <td className="py-1 text-text">{carrierDisplayName(c)}</td>
               <td className="py-1 text-right font-mono text-muted">{busCount || '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{A ? fmt(A.mean_price.total) : '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{B ? fmt(B.mean_price.total) : '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{A ? fmt(A.median_price.total) : '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{B ? fmt(B.median_price.total) : '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{A ? fmt(A.p90_price.total) : '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{B ? fmt(B.p90_price.total) : '—'}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : A ? fmt(A.mean_price.total) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : B ? fmt(B.mean_price.total) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : A ? fmt(A.median_price.total) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : B ? fmt(B.median_price.total) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : A ? fmt(A.p90_price.total) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : B ? fmt(B.p90_price.total) : dash}</td>
             </tr>
           )
         })}
@@ -1167,6 +1267,7 @@ function DurationCurveChart({
 function PricesTable({
   aName, bName, periods,
   meanA, meanB, medianA, medianB, p90A, p90B,
+  availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
@@ -1174,6 +1275,13 @@ function PricesTable({
   meanA: CarrierPeriodValue;   meanB: CarrierPeriodValue
   medianA: CarrierPeriodValue; medianB: CarrierPeriodValue
   p90A: CarrierPeriodValue;    p90B: CarrierPeriodValue
+  // Whether this side's prices block resolved at all — same third state as
+  // ABKpiPair (Task 5; see ADR-0001). No present/absent ladder underneath
+  // (these are period-scalar KPIs, not a carrier map) — just "unavailable"
+  // vs "real value," same as ABKpiPair. Defaults to true so this continues
+  // to render standalone in tests/callers that don't care about availability.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   const fmt = (v: number) => `${v.toFixed(2)} €/MWh`
   return (
@@ -1196,6 +1304,8 @@ function PricesTable({
             medianA={readPV(medianA, p)} medianB={readPV(medianB, p)}
             p90A={readPV(p90A, p)} p90B={readPV(p90B, p)}
             fmt={fmt}
+            availableA={availableA}
+            availableB={availableB}
           />
         ))}
       </tbody>
@@ -1205,33 +1315,42 @@ function PricesTable({
 
 function PriceRowGroup({
   label, meanA, meanB, medianA, medianB, p90A, p90B, fmt,
+  availableA = true, availableB = true,
 }: {
   label: string
   meanA: number; meanB: number
   medianA: number; medianB: number
   p90A: number; p90B: number
   fmt: (n: number) => string
+  availableA?: boolean
+  availableB?: boolean
 }) {
+  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+  const cellA = (v: number) => availableA ? fmt(v) : unavailable
+  const cellB = (v: number) => availableB ? fmt(v) : unavailable
+  const delta = (aVal: number, bVal: number) => (availableA && availableB)
+    ? <Delta v={bVal - aVal} fmt={fmt} invert />
+    : <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>
   return (
     <>
       <tr className="border-b border-border/40">
         <td rowSpan={3} className="py-1 text-text align-top">{label}</td>
         <td className="py-1 text-right text-muted">mean</td>
-        <td className="py-1 text-right font-mono text-text">{fmt(meanA)}</td>
-        <td className="py-1 text-right font-mono text-text">{fmt(meanB)}</td>
-        <td className="py-1 text-right font-mono"><Delta v={meanB - meanA} fmt={fmt} invert /></td>
+        <td className="py-1 text-right font-mono text-text">{cellA(meanA)}</td>
+        <td className="py-1 text-right font-mono text-text">{cellB(meanB)}</td>
+        <td className="py-1 text-right font-mono">{delta(meanA, meanB)}</td>
       </tr>
       <tr className="border-b border-border/40">
         <td className="py-1 text-right text-muted">median</td>
-        <td className="py-1 text-right font-mono text-text">{fmt(medianA)}</td>
-        <td className="py-1 text-right font-mono text-text">{fmt(medianB)}</td>
-        <td className="py-1 text-right font-mono"><Delta v={medianB - medianA} fmt={fmt} invert /></td>
+        <td className="py-1 text-right font-mono text-text">{cellA(medianA)}</td>
+        <td className="py-1 text-right font-mono text-text">{cellB(medianB)}</td>
+        <td className="py-1 text-right font-mono">{delta(medianA, medianB)}</td>
       </tr>
       <tr className="border-b border-border/40">
         <td className="py-1 text-right text-muted">p90</td>
-        <td className="py-1 text-right font-mono text-text">{fmt(p90A)}</td>
-        <td className="py-1 text-right font-mono text-text">{fmt(p90B)}</td>
-        <td className="py-1 text-right font-mono"><Delta v={p90B - p90A} fmt={fmt} invert /></td>
+        <td className="py-1 text-right font-mono text-text">{cellA(p90A)}</td>
+        <td className="py-1 text-right font-mono text-text">{cellB(p90B)}</td>
+        <td className="py-1 text-right font-mono">{delta(p90A, p90B)}</td>
       </tr>
     </>
   )
@@ -2735,12 +2854,21 @@ function SolverTable({ a, b }: { a: CompareState; b: CompareState }) {
 }
 
 function OverviewStorageTable({
-  aName, bName, summaryA, summaryB,
+  aName, bName, summaryA, summaryB, availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
   summaryA: ResultsSummary
   summaryB: ResultsSummary
+  // Whether this side's capacity block resolved at all — same third state
+  // as ABTable (Task 5; see ADR-0001). Every column in this table (total MW,
+  // total MWh, built MW) reads the SAME results-summary `capacity` block, so
+  // a side's unavailability applies uniformly across the whole row, unlike
+  // OverviewCapacityTable where only the "built" columns are capacity-block
+  // sourced. Defaults to true so this continues to render standalone in
+  // tests/callers that don't care about availability.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   // Power capacity: storage_units' p_nom_opt summed by carrier — already
   // built into the results-summary endpoint via storage_mw_by_carrier.
@@ -2768,6 +2896,10 @@ function OverviewStorageTable({
     return [...set].sort()
   }, [mwA, mwB, mwhA, mwhB])
   if (carriers.length === 0) return null
+  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+  const deltaOrDash = (v: number, fmt: (n: number) => string) => (availableA && availableB)
+    ? <Delta v={v} fmt={fmt} neutral />
+    : <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>
   return (
     <Section title="Storage capacity by carrier" subtitle="Optimised — power (p_nom_opt) and energy (p_nom_opt × max_hours, plus stores' e_nom_opt). 'built' = increment over brownfield p_nom / e_nom.">
       <table className="w-full text-xs">
@@ -2799,16 +2931,16 @@ function OverviewStorageTable({
             return (
               <tr key={c} className="border-b border-border/40">
                 <td className="py-1 text-text">{c}</td>
-                <td className="py-1 text-right font-mono text-text">{suA ? fmtMW(suA) : '—'}</td>
-                <td className="py-1 text-right font-mono text-text">{suB ? fmtMW(suB) : '—'}</td>
-                <td className="py-1 text-right font-mono"><Delta v={suB - suA} fmt={fmtMW} neutral /></td>
-                <td className="py-1 text-right font-mono text-text">{stA ? fmtMWh(stA) : '—'}</td>
-                <td className="py-1 text-right font-mono text-text">{stB ? fmtMWh(stB) : '—'}</td>
-                <td className="py-1 text-right font-mono"><Delta v={stB - stA} fmt={fmtMWh} neutral /></td>
+                <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : suA ? fmtMW(suA) : '—'}</td>
+                <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : suB ? fmtMW(suB) : '—'}</td>
+                <td className="py-1 text-right font-mono">{deltaOrDash(suB - suA, fmtMW)}</td>
+                <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : stA ? fmtMWh(stA) : '—'}</td>
+                <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : stB ? fmtMWh(stB) : '—'}</td>
+                <td className="py-1 text-right font-mono">{deltaOrDash(stB - stA, fmtMWh)}</td>
                 {hasBuilt && (
                   <>
-                    <td className="py-1 text-right font-mono text-text">{bMwA > 1e-6 ? fmtMW(bMwA) : '—'}</td>
-                    <td className="py-1 text-right font-mono text-text">{bMwB > 1e-6 ? fmtMW(bMwB) : '—'}</td>
+                    <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : bMwA > 1e-6 ? fmtMW(bMwA) : '—'}</td>
+                    <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : bMwB > 1e-6 ? fmtMW(bMwB) : '—'}</td>
                   </>
                 )}
               </tr>
@@ -2826,12 +2958,21 @@ function OverviewStorageTable({
 // Total = brownfield + built p_nom_opt; built = max(0, p_nom_opt − p_nom) +
 // vintage builds. Renders nothing when neither project has links.
 function OverviewLinksTable({
-  aName, bName, summaryA, summaryB,
+  aName, bName, summaryA, summaryB, availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
   summaryA: ResultsSummary
   summaryB: ResultsSummary
+  // Whether this side's capacity block resolved at all — same third state
+  // as ABTable (Task 5; see ADR-0001). Unlike OverviewCapacityTable, Links
+  // aren't tracked in compare-state at all — BOTH the total and built
+  // columns here read the results-summary `capacity` block, so a side's
+  // unavailability applies to the whole row. Defaults to true so this
+  // continues to render standalone in tests/callers that don't care about
+  // availability.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   const totA = summaryA.capacity?.link_capacity_mw_by_carrier ?? {}
   const totB = summaryB.capacity?.link_capacity_mw_by_carrier ?? {}
@@ -2846,6 +2987,7 @@ function OverviewLinksTable({
     return [...set].sort()
   }, [totA, totB, newA, newB])
   if (carriers.length === 0) return null
+  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
   return (
     <Section title="Link capacity by carrier (total p_nom_opt = brownfield + built)" subtitle="Heat-pumps / electrolyzers / datacenters / P2X — MW on the link's p0 (input) side.">
       <table className="w-full text-xs">
@@ -2872,13 +3014,17 @@ function OverviewLinksTable({
             return (
               <tr key={c} className="border-b border-border/40">
                 <td className="py-1 text-text">{c}</td>
-                <td className="py-1 text-right font-mono text-text">{va ? fmtMW(va) : '—'}</td>
-                <td className="py-1 text-right font-mono text-text">{vb ? fmtMW(vb) : '—'}</td>
-                <td className="py-1 text-right font-mono"><Delta v={vb - va} fmt={fmtMW} neutral /></td>
+                <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : va ? fmtMW(va) : '—'}</td>
+                <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : vb ? fmtMW(vb) : '—'}</td>
+                <td className="py-1 text-right font-mono">
+                  {(availableA && availableB)
+                    ? <Delta v={vb - va} fmt={fmtMW} neutral />
+                    : <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>}
+                </td>
                 {hasBuilt && (
                   <>
-                    <td className="py-1 text-right font-mono text-text">{bA > 1e-6 ? fmtMW(bA) : '—'}</td>
-                    <td className="py-1 text-right font-mono text-text">{bB > 1e-6 ? fmtMW(bB) : '—'}</td>
+                    <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : bA > 1e-6 ? fmtMW(bA) : '—'}</td>
+                    <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : bB > 1e-6 ? fmtMW(bB) : '—'}</td>
                   </>
                 )}
               </tr>
@@ -2891,12 +3037,22 @@ function OverviewLinksTable({
 }
 
 function OverviewCapacityTable({
-  a, b, newCapA, newCapB,
+  a, b, newCapA, newCapB, availableA = true, availableB = true,
 }: {
   a: CompareState
   b: CompareState
   newCapA?: Record<string, CarrierPeriodValue>
   newCapB?: Record<string, CarrierPeriodValue>
+  // Whether this side's capacity block resolved at all — same third state as
+  // ABTable (Task 5; see ADR-0001). Deliberately applied ONLY to the "built"
+  // columns below (bA/bB, sourced from the results-summary capacity block),
+  // NOT to the main total columns (va/vb, sourced from compare-state's
+  // installed/optimised_capacity_by_carrier — structural network data that's
+  // always meaningful, solved or not, and carries no `available` flag of its
+  // own). Defaults to true so this continues to render standalone in
+  // tests/callers that don't care about availability.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   const useOpt = a.optimised_capacity_by_carrier != null && b.optimised_capacity_by_carrier != null
   const capA = (useOpt ? a.optimised_capacity_by_carrier : a.installed_capacity_by_carrier) ?? {}
@@ -2931,6 +3087,7 @@ function OverviewCapacityTable({
   const title = `Generator capacity by carrier ${
     useOpt ? '(total p_nom_opt = brownfield + built)' : '(installed p_nom — brownfield only)'
   }`
+  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
   return (
     <Section title={title}>
       <table className="w-full text-xs">
@@ -2962,8 +3119,8 @@ function OverviewCapacityTable({
                 <td className="py-1 text-right font-mono"><Delta v={vb - va} fmt={fmtMW} neutral /></td>
                 {hasBuilt && (
                   <>
-                    <td className="py-1 text-right font-mono text-text">{bA > 1e-6 ? fmtMW(bA) : '—'}</td>
-                    <td className="py-1 text-right font-mono text-text">{bB > 1e-6 ? fmtMW(bB) : '—'}</td>
+                    <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : bA > 1e-6 ? fmtMW(bA) : '—'}</td>
+                    <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : bB > 1e-6 ? fmtMW(bB) : '—'}</td>
                   </>
                 )}
               </tr>

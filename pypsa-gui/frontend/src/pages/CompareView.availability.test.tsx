@@ -40,11 +40,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { COST_UNAVAILABLE } from './results/shared'
 
 vi.mock('../api/projects', () => ({
-  projectsApi: { resultsSummary: vi.fn() },
+  projectsApi: { resultsSummary: vi.fn(), compareState: vi.fn() },
 }))
 
 import { projectsApi } from '../api/projects'
-import { EconomicsTab, EmissionsTab, StorageCyclingTab } from './CompareView'
+import {
+  EconomicsTab, EmissionsTab, StorageCyclingTab,
+  LoadingTab, PricesTab, OverviewTab,
+} from './CompareView'
 
 const summary = (available: boolean, project: string) => ({
   project,
@@ -325,5 +328,236 @@ describe('StorageCyclingTab distinguishes unavailable from zero (C2)', () => {
     // number computed against beta's fabricated 0 cycles.
     const row = (await screen.findByText('battery1')).closest('tr')
     expect(row?.textContent).not.toMatch(/[+-]\d/)
+  })
+})
+
+// ── Task 6 ────────────────────────────────────────────────────────────────
+// Loading, Prices, and Overview render bespoke tables rather than the
+// shared ABTable/StorageUnitTable primitives Task 5 wired, so they carried
+// the same C1/C2-shaped defect independently. `LoadingComparison` and
+// `PricesComparison` also turned out to be MISSING `available` from
+// api/types.ts entirely (verified against backend/models/schemas.py:806-876
+// — the backend has always sent it) even though every other Comparison
+// block had it; that gap is fixed alongside the frontend wiring here.
+//
+// LostLoadTab is deliberately NOT touched or tested here. Its `available`
+// flag has different semantics than every other block: per
+// backend/models/schemas.py:1040-1050, `available=False` means "voll was
+// zero", "not solved", OR "no shedding occurred (the happy path)" — not
+// "could not be computed". LostLoadTab already gates on `has_solve` for
+// BOTH sides before any lost-load-specific rendering
+// (CompareView.tsx ~1975), so by the time its tables render, the "not
+// solved" arm is impossible; the only two REACHABLE causes of
+// `available=False` are both genuine, resolved, real-zero outcomes (see
+// compare.py:_compute_lost_load_summary — the ONLY path that sets
+// `available=True` requires `total_e > 1e-9`, so `available=False` in a
+// has_solve=True context always accompanies a genuinely-zero total_mwh,
+// never a fabricated placeholder). Wiring `available` into that tab's
+// ABKpiPair the way the other tabs do would flag "neither project shed
+// load" — a GOOD outcome — as unresolved, which is a new defect, not a fix.
+// See task-6-report.md for the full writeup.
+
+function renderLoadingTab() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <LoadingTab a="alpha" b="beta" />
+    </QueryClientProvider>,
+  )
+}
+
+// LineLoadingEntry verified against api/types.ts — peak_loading/mean_loading
+// are FRACTIONS (0..1), rendered ×100 by LoadingTable's fmtPct.
+const loadingSummary = (available: boolean, project: string) => ({
+  project,
+  has_solve: true,
+  periods: [],
+  loading: {
+    available,
+    lines: available
+      ? [{
+          name: 'Line1', s_nom_opt: 500, is_transformer: false, is_link: false, carrier: null,
+          peak_loading: { total: 0.654, by_period: {} },
+          mean_loading: { total: 0.321, by_period: {} },
+          binding_hours: { total: 42, by_period: {} },
+        }]
+      : [],
+  },
+})
+
+describe('LoadingTab distinguishes unavailable from zero', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders alpha\'s real branch row beside beta\'s marker — never a fabricated 0.0 % or a signed Δ', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(loadingSummary(project === 'alpha', project) as never),
+    )
+    renderLoadingTab()
+    // alpha's real peak loading renders (0.654 -> "65.4 %").
+    expect(await screen.findByText('65.4 %')).toBeTruthy()
+    // beta's loading block never resolved (lines: []) — Line1 only exists
+    // in alpha's array, so without the availability guard beta's cells
+    // would default through readPV's `!pv` branch to a fabricated 0 %.
+    expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
+    expect(screen.queryByText('0.0 %')).toBeNull()
+    // The Δ peak cell for Line1's row must be a dash, never a signed number
+    // computed against beta's fabricated 0 % loading.
+    const row = (await screen.findByText('Line1')).closest('tr')
+    expect(row?.textContent).not.toMatch(/[+-]\d/)
+  })
+})
+
+function renderPricesTab() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <PricesTab a="alpha" b="beta" />
+    </QueryClientProvider>,
+  )
+}
+
+const pricesSummary = (available: boolean, project: string) => ({
+  project,
+  has_solve: true,
+  periods: [],
+  prices: {
+    available,
+    duration_curve: available ? Array.from({ length: 101 }, (_, i) => 100 - i) : [],
+    mean_price: { total: available ? 456.7 : 0, by_period: {} },
+    median_price: { total: available ? 111.1 : 0, by_period: {} },
+    p90_price: { total: available ? 222.2 : 0, by_period: {} },
+    max_price: available ? 999 : 0,
+    min_price: available ? -5 : 0,
+    bus_count: available ? 3 : 0,
+    by_carrier_stats: available
+      ? {
+          electricity: {
+            bus_count: 3,
+            mean_price: { total: 456.7, by_period: {} },
+            median_price: { total: 111.1, by_period: {} },
+            p90_price: { total: 222.2, by_period: {} },
+          },
+        }
+      : {},
+  },
+})
+
+describe('PricesTab distinguishes unavailable from zero', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders alpha\'s real price stats beside beta\'s marker — never a fabricated 0.00 €/MWh or a signed Δ', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(pricesSummary(project === 'alpha', project) as never),
+    )
+    renderPricesTab()
+    // alpha's real mean price renders — legitimately twice (PricesTable's
+    // "All periods" row AND PerCarrierPricesTable's electricity row), so
+    // assert plural/non-empty rather than a single match.
+    expect(await screen.findAllByText(/456\.70 €\/MWh/)).not.toHaveLength(0)
+    // beta's prices block never resolved — its cells read the marker.
+    expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
+    expect(screen.queryByText(/0\.00 €\/MWh/)).toBeNull()
+    // The Δ mean-price cell must be a dash, never a signed number computed
+    // against beta's fabricated €0.00.
+    const meanRow = (await screen.findByText('All periods')).closest('tr')
+    expect(meanRow?.textContent).not.toMatch(/[+-]\d/)
+  })
+})
+
+function renderOverviewTab() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <OverviewTab a="alpha" b="beta" />
+    </QueryClientProvider>,
+  )
+}
+
+// CompareState verified against api/types.ts — every field is REQUIRED
+// (no `?`), unlike the ResultsSummary blocks above. Identical for alpha and
+// beta on purpose: `optimised_capacity_by_carrier` is structural network
+// data (compare-state, not the results-summary `capacity` block) and
+// carries no `available` flag of its own — it must render as a real number
+// on BOTH sides regardless of the results-summary capacity block's
+// availability, proving the per-cell marker below is scoped correctly
+// rather than blanket-applied across the whole tab.
+const overviewCompareState = (project: string) => ({
+  name: project,
+  bus_count: 5, generator_count: 3, line_count: 4, load_count: 2,
+  link_count: 1, storage_unit_count: 1, store_count: 0, snapshot_count: 10,
+  snapshot_start: null, snapshot_end: null,
+  installed_capacity_by_carrier: { solar: 150 },
+  optimised_capacity_by_carrier: { solar: 200 },
+  storage_capacity_by_carrier: { battery: 30 },
+  store_capacity_by_carrier: {},
+  peak_demand_mw: 120,
+  total_energy_mwh: 300_000,
+  objective: 1000,
+  solve_time: 5,
+  dispatch_status: 'fresh',
+  parent_project: null,
+  scenario_description: null,
+  created_at: null,
+  last_saved: null,
+})
+
+const overviewSummary = (available: boolean, project: string) => ({
+  project,
+  has_solve: true,
+  periods: [],
+  capacity: {
+    available,
+    capacity_mw_by_carrier: {},
+    capex_meur_by_carrier: {},
+    new_capex_meur_by_carrier: {},
+    // "Built" generator capacity — OverviewCapacityTable's built column.
+    new_capacity_mw_by_carrier: available ? { solar: { total: 987.6, by_period: {} } } : {},
+    // OverviewStorageTable reads ALL its columns from this same block.
+    storage_mw_by_carrier: available ? { battery: { total: 234.5, by_period: {} } } : {},
+    storage_mwh_by_carrier: available ? { battery: { total: 345.6, by_period: {} } } : {},
+    new_storage_mw_by_carrier: {},
+    new_storage_mwh_by_carrier: {},
+    // OverviewLinksTable reads ALL its columns from this same block — links
+    // have no compare-state equivalent at all (unlike generator capacity).
+    link_capacity_mw_by_carrier: available ? { electrolysis: { total: 456.7, by_period: {} } } : {},
+    new_link_capacity_mw_by_carrier: {},
+  },
+})
+
+describe('OverviewTab distinguishes unavailable from zero', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders alpha\'s real capacity/storage/link figures beside beta\'s marker — never a fabricated 0.0 MW, while structural compare-state totals stay unmarked on both sides', async () => {
+    vi.mocked(projectsApi.compareState).mockImplementation(
+      (project: string) => Promise.resolve(overviewCompareState(project) as never),
+    )
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(overviewSummary(project === 'alpha', project) as never),
+    )
+    renderOverviewTab()
+    // alpha's real "built" generator capacity, storage MW/MWh, and link
+    // capacity all render as real numbers.
+    expect(await screen.findByText('987.6 MW')).toBeTruthy()
+    expect(await screen.findByText('234.5 MW')).toBeTruthy()
+    expect(await screen.findByText('345.6 MWh')).toBeTruthy()
+    expect(await screen.findByText('456.7 MW')).toBeTruthy()
+    // beta's capacity block never resolved — several cells (built generator
+    // capacity, all of storage, all of links) read the marker.
+    expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
+    expect(screen.queryByText('0.0 MW')).toBeNull()
+    expect(screen.queryByText('0.0 MWh')).toBeNull()
+    // Both sides' structural compare-state total (200 MW, identical fixture
+    // for alpha and beta) render as real numbers — NOT gated by the
+    // results-summary capacity block's availability. This is the Overview
+    // judgement call: per-cell marking, scoped to the capacity-block-sourced
+    // columns only, not a whole-tab banner that would incorrectly blank out
+    // always-valid structural data.
+    expect(await screen.findAllByText('200.0 MW')).toHaveLength(2)
   })
 })

@@ -411,6 +411,11 @@ export interface LineLoadingEntry {
 }
 
 export interface LoadingComparison {
+  // See CapacityComparison.available — same ADR-0001 contract. Was missing
+  // from this interface even though the backend has carried it since Phase
+  // 2 (backend/models/schemas.py: LoadingComparison) — CompareView's bespoke
+  // LoadingTable had no way to read it until Task 6 wired it through.
+  available: boolean
   lines: LineLoadingEntry[]              // sorted by peak loading desc
 }
 
@@ -422,6 +427,11 @@ export interface CarrierPriceStats {
 }
 
 export interface PricesComparison {
+  // See CapacityComparison.available — same ADR-0001 contract. Was missing
+  // from this interface even though the backend has carried it since Phase
+  // 2 (backend/models/schemas.py: PricesComparison) — see LoadingComparison's
+  // matching note above.
+  available: boolean
   duration_curve: number[]               // 101 samples, index 0 = peak price
   mean_price: CarrierPeriodValue         // €/MWh
   median_price: CarrierPeriodValue
