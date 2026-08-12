@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -139,4 +139,55 @@ class Session(Base):
     # dangling (which needs `PRAGMA foreign_keys=ON`, added in Step 0a).
     active_project_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
+class SolveJobRow(Base):
+    """
+    One queued solve, persisted.
+
+    The queue used to be purely in-process: ids from `itertools.count(1)`, a
+    dict, and nothing on disk. A restart lost every queued job with no trace,
+    two replicas both issued id 1, and a shared instance could not say who
+    queued a solve.
+
+    `status` is a plain string, not a DB enum, following `Project.scenario_type`:
+    the set is presentational and grows (`interrupted` is added in this same
+    increment), an unknown value must degrade rather than break the row, and a
+    new member should not need a migration on two backends.
+
+    `solver_config` is the JSON snapshot the job was ENQUEUED with. The
+    dispatcher used to read `ctx.solver_state["solver_config"]` at RUN time, so
+    a `PUT /api/simulation/solver_config` after enqueue silently changed what a
+    queued job solved — and durability widens that window to overnight.
+
+    `dismissed_by_user_id` is per-user hiding. Only the enqueuer may dismiss, so
+    the column can hold one id and still mean "hidden from that user's listing
+    only" without affecting anyone else's.
+    """
+
+    __tablename__ = "solve_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # The human-readable project NAME, matching `SolveJob.project_id` and the
+    # width of `projects.name`.
+    project_id: Mapped[str] = mapped_column(String(64))
+    # `org_uuid:project_uuid` — the registry identity, and the only tenancy
+    # information a job carries.
+    project_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    storage_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    enqueued_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    solver_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    objective: Mapped[float | None] = mapped_column(Float, nullable=True)
+    solve_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    condition: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dismissed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )

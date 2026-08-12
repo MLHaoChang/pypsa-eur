@@ -451,6 +451,16 @@ class SolveQueue:
                 # carries a bounded retry for.
                 job.log_queue = log_queue
 
+            # Persist `running` before the solve starts. A process that dies
+            # mid-solve leaves the row here, which is precisely what boot
+            # reconciliation reads to mark the job `interrupted`.
+            try:
+                from services import solve_job_store
+
+                solve_job_store.record_status(job)
+            except Exception:  # noqa: BLE001
+                logger.exception("solve_queue: could not persist job %s", job.id)
+
             # 1. Resolve the context to solve. If the queued project IS the
             #    foreground, solve the resident instance in place (unsaved edits
             #    included). Otherwise build a fresh background ctx and hydrate it
@@ -664,6 +674,15 @@ class SolveQueue:
                 job.solve_time = solve_time
                 job.error = error
                 job.finished_at = time.time()
+            # Mirror the terminal record to the job table, OUTSIDE `_lock`:
+            # the store opens a database session and `_lock` is documented as
+            # short bookkeeping only, never held across I/O.
+            try:
+                from services import solve_job_store
+
+                solve_job_store.record_status(job)
+            except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
+                logger.exception("solve_queue: could not persist job %s", job.id)
             # Close the SSE log stream for this job so the foreground consumer's
             # `done` event fires (run_simulation pushes None on its own success
             # path, but the abort/error paths above may not have).

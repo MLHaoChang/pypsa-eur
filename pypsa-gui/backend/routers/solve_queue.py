@@ -85,6 +85,16 @@ def enqueue_solve(
         project_key=project_registry.registry_key(project),
         storage_dir=str(project_dir),
     )
+    if created:
+        # Stamp the ACTING user alongside the org-scoped directory this route
+        # already resolved. Keying per-user dismiss on project access instead
+        # would let two users sharing a project dismiss each other's rows —
+        # the exact thing per-user dismiss exists to prevent.
+        from services import solve_job_store
+
+        solve_job_store.record_enqueued(
+            job, enqueued_by_user_id=user.id, solver_config_json=None,
+        )
     return {**solve_queue.get_job(job.id), "already_queued": not created}
 
 
