@@ -2705,7 +2705,29 @@ def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=No
         _safe_log(log_queue, f"[BUDGET] {msg}")
 
     def capex_budget_fn(n, snapshots):
+        # Budgets are keyed by period year. On a MULTI-PERIOD network a key
+        # that is no longer in n.investment_periods is stale — the user removed
+        # that year from the horizon — and must not constrain the LP. Per-period
+        # load scaling already ignores stale keys (it iterates the network's
+        # periods, not the config's); this makes the budget agree.
+        #
+        # `active is None` on a FLAT network, where every budget still applies:
+        # _wrap_with_capex_budget is not multi-period gated, and `build_year` is
+        # a per-asset attribute that does not need investment periods to exist.
+        # A flat membership check here would silently disable every flat-network
+        # budget — a regression, not a fix.
+        active = (
+            {int(p) for p in n.investment_periods}
+            if len(n.investment_periods) > 0
+            else None
+        )
         for period, budget in normalized.items():
+            if active is not None and period not in active:
+                _emit(
+                    f"period {period}: budget EUR {budget:,.0f} ignored — not in "
+                    f"the model's investment periods {sorted(active)}"
+                )
+                continue
             # Find every extendable asset whose build_year matches this
             # period AND whose capacity variable lives in the LP.
             terms: list = []  # list of (name, coef, p_nom_var, p_nom_existing)

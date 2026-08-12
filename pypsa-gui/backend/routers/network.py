@@ -2965,84 +2965,98 @@ def _reapply_user_ts_to_network(n=None) -> None:
             ts_store[attr] = pd.concat([base, new_block], axis=1)
 
 
-def _capture_snapshot_weights_per_timestep(n) -> pd.DataFrame | None:
+def _capture_snapshot_weights_per_timestep(n):
     """
-    Snapshot ``n.snapshot_weightings`` keyed by timestep so it survives a
-    subsequent ``n.set_snapshots(mi)`` reset.
+    Snapshot ``n.snapshot_weightings`` so it survives a subsequent
+    ``n.set_snapshots(mi)`` reset.
 
-    PyPSA's ``set_snapshots`` calls ``_snapshots_data.reindex(new_idx,
-    fill_value=default_snapshot_weightings)`` — for a MultiIndex transition,
-    the old DatetimeIndex tuples have no match in the new MultiIndex, so every
-    cell falls back to 1.0. Any custom weights the user set on the flat
-    snapshots (representative-week scaling factor 52.14, half-hour resolution
-    0.5, etc.) are silently lost, and the LP's ``n.nyears`` collapses to
-    ``n_timesteps / 8760`` — heavily undervaluing CAPEX and producing
-    renewable over-build.
+    PyPSA's ``set_snapshots`` reindexes ``_snapshots_data`` with
+    ``fill_value=default_snapshot_weightings``, so custom weights (a
+    representative-week factor of 52.14, half-hour resolution 0.5, …) are
+    silently lost across a reshape and the LP's ``n.nyears`` collapses.
 
-    Returned frame is indexed by *timestep only* (the timezone-naive datetime),
-    not by snapshot — the reapply helper aligns it against the NEW
-    ``n.snapshots``. Returns ``None`` when weights are at PyPSA defaults
-    (all 1.0) since there's nothing meaningful to preserve.
+    Returns:
+      • MultiIndex network → ``{period: frame}``, each frame indexed by that
+        period's own timesteps. Capturing only period 0 and broadcasting it was
+        correct only while a now-fixed bug forced every period onto period 0's
+        calendar; with distinct calendars survivable, a broadcast wipes every
+        period whose dates differ.
+      • Flat network → a single frame indexed by timestep.
+      • ``None`` when every weight is the PyPSA default 1.0 — nothing to
+        preserve, and skipping saves a needless write.
     """
     sw = n.snapshot_weightings.copy()
     if sw.empty:
         return None
-    if isinstance(sw.index, pd.MultiIndex):
-        first_p = sw.index.get_level_values(0)[0]
-        sw_per_ts = sw.loc[first_p].copy()
-        # `.loc[first_p]` collapses the level — sw_per_ts has a flat
-        # DatetimeIndex named "timestep". Normalise to "snapshot" so the
-        # reapply path's `.reindex(timestep_idx)` works regardless of origin.
-        sw_per_ts.index.name = "snapshot"
-    else:
-        sw_per_ts = sw.copy()
-    # No point preserving the all-1.0 default — saves a needless write.
-    if (sw_per_ts == 1.0).all().all():
+    if (sw == 1.0).all().all():
         return None
-    return sw_per_ts
+    if isinstance(sw.index, pd.MultiIndex):
+        captured: dict[int, pd.DataFrame] = {}
+        level0 = sw.index.get_level_values(0)
+        for p in level0.unique():
+            block = sw[level0 == p].copy()
+            # Drop the period level so the frame is keyed by timestep alone —
+            # the reapply path reindexes it against the NEW index's timesteps.
+            block.index = pd.DatetimeIndex(block.index.get_level_values(1))
+            block.index.name = "snapshot"
+            captured[int(p)] = block
+        return captured
+    sw.index.name = "snapshot"
+    return sw
 
 
 def _reapply_snapshot_weights(n, captured) -> None:
     """
-    Write the captured per-timestep weights back onto ``n.snapshot_weightings``
-    after ``set_snapshots`` has rebuilt the index. Aligns by timestep value:
+    Write captured weights back onto ``n.snapshot_weightings`` after
+    ``set_snapshots`` has rebuilt the index. Must run AFTER the reshape. Holds
+    no lock — caller's responsibility.
 
-      • Flat target  → reindex by ``n.snapshots`` directly.
-      • Multi target → for each period, reindex the timestep slice; replicate
-        the same per-timestep weights under every period (the canonical
-        multi-period workflow uses the same operational year per period, so
-        broadcasting weights matches user intent).
+    Per period, in order:
+      1. that period survived the reshape → reindex ITS OWN captured frame
+      2. genuinely new period → reindex the FIRST captured period's frame as a
+         template, matching how ``set_investment_periods`` templates a new
+         period's operational range from the first existing one
+      3. anything still unmatched → 1.0
 
-    Missing timesteps (e.g. user changed operational range) fall back to 1.0.
-    Must run AFTER ``n.set_snapshots(...)`` so ``n.snapshots`` reflects the
-    new index. Holds no lock — caller responsibility.
+    Accepts either capture shape: ``{period: frame}`` from a MultiIndex source
+    or a single frame from a flat one.
     """
     if captured is None:
         return
+    if isinstance(captured, dict) and not captured:
+        return
     idx = n.snapshots
     if isinstance(idx, pd.MultiIndex):
-        # Build the new frame period-by-period.
+        if isinstance(captured, dict):
+            template = captured[sorted(captured)[0]]
+        else:
+            # Flat source promoted to MultiIndex: one frame for every period.
+            template = captured
+            captured = {}
         chunks = []
         for p in idx.get_level_values(0).unique():
             mask = idx.get_level_values(0) == p
             ts_slice = idx[mask].get_level_values(1)
-            aligned = captured.reindex(ts_slice).fillna(1.0)
+            source = captured.get(int(p), template)
+            aligned = source.reindex(ts_slice).fillna(1.0)
             aligned.index = idx[mask]
             chunks.append(aligned)
         new_sw = pd.concat(chunks)
     else:
-        new_sw = captured.reindex(idx).fillna(1.0)
+        # MultiIndex source demoted to flat: use the first captured period.
+        flat_source = captured[sorted(captured)[0]] if isinstance(captured, dict) else captured
+        new_sw = flat_source.reindex(idx).fillna(1.0)
         new_sw.index = idx
-    # Setter validates df.index.equals(n.snapshots); we built new_sw against
-    # n.snapshots so it should pass. If the columns mismatch (PyPSA added new
-    # weight columns in a future version), assign per-column to be safe.
+    # The setter validates df.index.equals(n.snapshots); we built new_sw against
+    # n.snapshots so it passes. Assign per column in case a future PyPSA adds a
+    # weight column we did not capture.
     for col in new_sw.columns:
         if col in n.snapshot_weightings.columns:
             try:
                 n.snapshot_weightings[col] = new_sw[col].values
             except Exception:
-                # Defensive — column-level assignment failure shouldn't break
-                # the whole solve. Default 1.0 is acceptable as fallback.
+                # Column-level failure must not break the whole solve; the 1.0
+                # default is an acceptable fallback for that column.
                 pass
 
 
