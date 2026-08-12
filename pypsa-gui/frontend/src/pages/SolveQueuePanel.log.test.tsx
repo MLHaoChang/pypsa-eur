@@ -202,4 +202,86 @@ describe('SolveQueuePanel live log stream', () => {
     expect(screen.getByText('Log stream lost before the job finished.')).toBeTruthy()
     expect(jobLogHistory).not.toHaveBeenCalled()
   })
+
+  it('closes the stream when the verification check itself is unreachable, without a request storm', async () => {
+    // Review round 2 Important — the original `.catch` set an error but never
+    // closed `es`. A real browser keeps auto-reconnecting a connection that
+    // isn't closed, re-firing `onerror` roughly every ~3s; since no message
+    // ever arrives to advance `lastEventAt`, every retry re-entered this same
+    // stale branch and fired ANOTHER jobLogHistory request — unbounded, for
+    // as long as the row stayed expanded, against a backend that had just
+    // reported itself unreachable. `toHaveBeenCalledTimes(1)` pins that this
+    // can no longer happen: once closed, no further verification call fires.
+    jobs = [job('running')]
+    jobLogHistory.mockRejectedValue(new Error('network down'))
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+    const es = FakeEventSource.instances[0]
+
+    act(() => { es.emitMessage('solver: iteration 1') })
+    now.mockReturnValue(1_000 + 31_000)
+    act(() => { es.emitError() })
+
+    await waitFor(() => expect(screen.getByText('Log stream silent and unreachable — connection lost.')).toBeTruthy())
+    expect(es.readyState).toBe(FakeEventSource.CLOSED)
+    expect(jobLogHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears a stale error banner once the stream recovers on its own', async () => {
+    // Pins the `setError(null)` added to `onmessage` — without it, a
+    // connection that heals on its own (browser's own auto-reconnect
+    // succeeds) leaves a stale "connection lost" banner permanently masking
+    // live data that is actually accumulating fine behind it, since the
+    // render branch shows the error INSTEAD of the lines whenever `error` is
+    // set.
+    jobs = [job('running')]
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+    const es = FakeEventSource.instances[0]
+
+    act(() => { es.emitMessage('solver: iteration 1') })
+    es.readyState = FakeEventSource.CLOSED
+    act(() => { es.emitError() })
+    expect(screen.getByText('Log stream lost before the job finished.')).toBeTruthy()
+
+    // The browser reconnected on its own and a line arrives again.
+    es.readyState = FakeEventSource.OPEN
+    act(() => { es.emitMessage('solver: iteration 2') })
+    expect(screen.queryByText(/Log stream lost/)).toBeNull()
+    expect(screen.getByText(/solver: iteration 2/)).toBeTruthy()
+  })
+
+  it('does not let a delayed stale-check resolution overwrite a `done` that arrived in the meantime', async () => {
+    // Minor from round 2 — a `done` arriving while the stale-branch
+    // `jobLogHistory` call is still in flight must win. Without the
+    // `doneReceived` guard added to the `.then()`, the delayed resolution
+    // could overwrite a cleanly-finished view with a spurious
+    // "Log stream lost" error.
+    jobs = [job('running')]
+    let resolveHistory: (v: { lines: string[]; status: SolveJobStatus }) => void = () => {}
+    jobLogHistory.mockImplementation(() => new Promise(resolve => { resolveHistory = resolve }))
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+    const es = FakeEventSource.instances[0]
+
+    act(() => { es.emitMessage('solver: iteration 1') })
+    now.mockReturnValue(1_000 + 31_000)
+    act(() => { es.emitError() }) // stale check fires; jobLogHistory left pending
+    await waitFor(() => expect(jobLogHistory).toHaveBeenCalledWith(5))
+
+    // `done` arrives before the stale check's REST call resolves.
+    act(() => { es.emitDone({ status: 'completed' }) })
+    expect(es.readyState).toBe(FakeEventSource.CLOSED)
+
+    // The delayed history resolution must not resurrect an error over the
+    // now-cleanly-finished view.
+    await act(async () => {
+      resolveHistory({ lines: [], status: 'completed' })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.queryByText(/Log stream lost/)).toBeNull()
+  })
 })

@@ -187,6 +187,11 @@ function JobLogPanel({ jobId, live }: { jobId: number; live: boolean }) {
     es.onmessage = (e) => {
       if (cancelled) return
       lastEventAt = Date.now()
+      // A line arriving is the recovery signal for a prior stale/error banner
+      // — without clearing it here, a connection that heals on its own leaves
+      // a stale "connection lost" message sitting on top of live data that is
+      // actually accumulating fine behind it.
+      setError(null)
       setLines(prev => [...prev, e.data])
     }
     es.addEventListener('done', () => { doneReceived = true; es.close() })
@@ -201,7 +206,7 @@ function JobLogPanel({ jobId, live }: { jobId: number; live: boolean }) {
       if (Date.now() - lastEventAt > STALE_MS) {
         solveQueueApi.jobLogHistory(jobId)
           .then(r => {
-            if (cancelled) return
+            if (cancelled || doneReceived) return
             if (r.status === 'running') {
               // Still running — the quiet spell was a real solver phase, not
               // a dead connection. Let the browser keep retrying.
@@ -216,7 +221,17 @@ function JobLogPanel({ jobId, live }: { jobId: number; live: boolean }) {
             }
           })
           .catch(() => {
-            if (!cancelled) setError('Log stream silent and unreachable — connection lost.')
+            if (cancelled || doneReceived) return
+            // The verification request itself is unreachable — plausibly the
+            // SAME outage that broke the stream (backend down, network gone).
+            // MUST close: leaving `es` open lets the browser's own ~3s
+            // auto-reconnect keep re-firing `onerror`, and since no message
+            // ever arrives to advance `lastEventAt`, every retry re-enters
+            // this stale branch and fires ANOTHER jobLogHistory request —
+            // unbounded, for as long as the row stays expanded, hammering a
+            // backend that just said it was unreachable.
+            es.close()
+            setError('Log stream silent and unreachable — connection lost.')
           })
       }
     }
