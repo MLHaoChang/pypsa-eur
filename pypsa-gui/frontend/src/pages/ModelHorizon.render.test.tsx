@@ -1,0 +1,307 @@
+// Render-level characterisation coverage for ModelHorizon.tsx — the page had
+// six defect fixes land on its JSX across two branches with zero render
+// coverage (every prior test exercised the extracted pure functions in
+// modelHorizonModel.ts instead). This file exists to pin the CURRENT,
+// already-correct behaviour before the guided-step restructure rewrites the
+// JSX, so a silent regression during that rewrite fails a test instead of
+// shipping. Harness follows PropertiesPanel.rescale.test.tsx (module mock
+// via importOriginal + per-test overrides, one QueryClient per render) and
+// ChatPanelSurfaces.test.tsx (store reset in beforeEach/afterEach, assert on
+// rendered text / mock call args, class-name assertion only where the thing
+// under test IS a visual/style state with no textual equivalent).
+//
+// Three behaviours, each named for the defect it pins:
+//   1. Multi-period weight edit sends a period-qualified PATCH key
+//      ("2030|2024-01-01T00:00:00"), never a bare ISO — a bare key on a
+//      MultiIndex network resolves last-write-wins to the LAST period, so
+//      editing 2030's row silently overwrote 2050's weight.
+//   2. The Resolution stat card reads snap.freq from the network, never a
+//      locally-seeded form default — the original defect rendered a form
+//      field seeded to 'h' that was never updated from the network.
+//   3. The PV × preview column greys out when auto-discount would not
+//      actually write anything at solve time (mirrors solver_service's
+//      gate), rather than showing a value the LP will never use.
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { render, screen, cleanup, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { networkApi } from '../api/network'
+import { simulationApi } from '../api/simulation'
+import { useUIStore } from '../store/uiStore'
+import type { SnapshotInfo, SolverConfig } from '../api/types'
+import ModelHorizon from './ModelHorizon'
+
+vi.mock('../api/network', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/network')>()
+  return {
+    ...actual,
+    networkApi: {
+      ...actual.networkApi,
+      getSnapshots: vi.fn(),
+      getInvestmentPeriods: vi.fn(),
+      getLoads: vi.fn(),
+      updateSnapshotWeightings: vi.fn(),
+    },
+  }
+})
+
+vi.mock('../api/simulation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/simulation')>()
+  return {
+    ...actual,
+    simulationApi: {
+      ...actual.simulationApi,
+      getSolverConfig: vi.fn(),
+    },
+  }
+})
+
+// ── Fixtures ─────────────────────────────────────────────────────────────
+
+/** Full SolverConfig — the interface has ~35 required fields; this mirrors
+ * the app's own defaults (store/simulationStore.ts's `defaultConfig`) so
+ * tests only need to override the 2-3 fields the behaviour under test cares
+ * about. */
+function baseSolverConfig(over: Partial<SolverConfig> = {}): SolverConfig {
+  return {
+    solver_name: 'highs',
+    mode: 'lopf',
+    transmission_losses: false,
+    multi_investment_periods: false,
+    solver_options: {},
+    extra_functionality_code: '',
+    discount_rate: 0.07,
+    inflation_rate: 0,
+    default_lifetime: 25,
+    co2_price: 0,
+    co2_price_per_period: {},
+    voll: 0,
+    investment_periods: [],
+    sclopf: false,
+    sclopf_include_all_lines: false,
+    sclopf_include_all_transformers: false,
+    sclopf_voltage_threshold_kv: 0,
+    sclopf_extra_lines: [],
+    sclopf_extra_transformers: [],
+    sclopf_scope: 'horizon',
+    run_ac_pf_after_lopf: false,
+    ac_pf_slack_bus: '',
+    ac_pf_x_tol: 1e-6,
+    presolve_enabled: true,
+    user_objective_scale: 1,
+    auto_objective_scale: false,
+    solve_strategy: 'full',
+    rolling_horizon: 168,
+    rolling_overlap: 24,
+    lf_aggregate_future: false,
+    lf_k_periods: 8,
+    lf_period_length_h: 168,
+    lf_cluster_method: 'hierarchical',
+    lf_include_extreme: true,
+    mip_gap: 0.01,
+    mip_time_limit_s: 0,
+    ...over,
+  }
+}
+
+/** A MultiIndex (period × timestep) network: two investment periods, one
+ * shared operational timestep each — the exact shape `df_to_json` emits for
+ * a MultiIndex `n.snapshot_weightings` (rows carry `period` + `timestep`,
+ * never `snapshot`). */
+function multiPeriodSnapshots(over: Partial<SnapshotInfo> = {}): SnapshotInfo {
+  return {
+    count: 2,
+    snapshots: ['2024-01-01T00:00:00', '2024-01-01T00:00:00'],
+    periods: [2030, 2050],
+    weightings: [
+      { period: 2030, timestep: '2024-01-01T00:00:00', objective: 1, generators: 1, stores: 1 },
+      { period: 2050, timestep: '2024-01-01T00:00:00', objective: 1, generators: 1, stores: 1 },
+    ],
+    ts_start: null,
+    ts_end: null,
+    can_sample_weeks: false,
+    freq: 'h',
+    ...over,
+  }
+}
+
+/** A flat (single-period) network — index is plain ISO under `snapshot`. */
+function flatSnapshots(over: Partial<SnapshotInfo> = {}): SnapshotInfo {
+  return {
+    count: 3,
+    snapshots: ['2024-01-01T00:00:00', '2024-01-01T01:00:00', '2024-01-01T02:00:00'],
+    weightings: [
+      { snapshot: '2024-01-01T00:00:00', objective: 1, generators: 1, stores: 1 },
+      { snapshot: '2024-01-01T01:00:00', objective: 1, generators: 1, stores: 1 },
+      { snapshot: '2024-01-01T02:00:00', objective: 1, generators: 1, stores: 1 },
+    ],
+    ts_start: null,
+    ts_end: null,
+    can_sample_weeks: false,
+    freq: 'h',
+    ...over,
+  }
+}
+
+function renderPage() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <ModelHorizon />
+    </QueryClientProvider>,
+  )
+}
+
+beforeEach(() => {
+  useUIStore.setState({ currentProject: 'Demo' })
+  vi.mocked(networkApi.getSnapshots).mockReset()
+  vi.mocked(networkApi.getInvestmentPeriods).mockReset().mockResolvedValue({ periods: [], weightings: [] })
+  vi.mocked(networkApi.getLoads).mockReset().mockResolvedValue([])
+  vi.mocked(networkApi.updateSnapshotWeightings).mockReset()
+    .mockResolvedValue({ count: 0, weightings: [] })
+  vi.mocked(simulationApi.getSolverConfig).mockReset().mockResolvedValue(baseSolverConfig())
+})
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  useUIStore.setState({ currentProject: null })
+})
+
+// ── 1. Multi-period weight edit sends a period-qualified key (defect B1) ──
+
+it('PATCHes a multi-period weight edit with a period-qualified key, not a bare ISO', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2050],
+    weightings: [
+      { period: 2030, years: 1, objective: 1 },
+      { period: 2050, years: 1, objective: 1 },
+    ],
+  })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true }),
+  )
+
+  renderPage()
+
+  const heading = await screen.findByRole('heading', { name: 'Snapshot weightings' })
+  const section = heading.closest('section')
+  if (!section) throw new Error('Snapshot weightings section not found')
+
+  // Scoped to this section only — the multi-period config section above ALSO
+  // renders a "2030" period label (investment-year chip + its own weightings
+  // table), so an unscoped text query would be ambiguous.
+  const rows = within(section).getAllByRole('row')
+  const row2030 = rows.find(r => within(r).queryByText('2030'))
+  if (!row2030) throw new Error('row for period 2030 not found in Snapshot weightings table')
+
+  const objectiveInput = within(row2030).getByRole('spinbutton')
+  await userEvent.clear(objectiveInput)
+  await userEvent.type(objectiveInput, '5')
+  await userEvent.tab() // blur — the edit only commits onBlur
+
+  expect(networkApi.updateSnapshotWeightings).toHaveBeenCalledWith({
+    updates: { '2030|2024-01-01T00:00:00': { objective: 5 } },
+  })
+})
+
+// ── 2. Resolution comes from the network, never a local form default (B3) ─
+
+// "Resolution" is ambiguous on this page: the StatCard eyebrow (a <div>) AND
+// the single-period constructor's field label (a <span>, "seed a NEW index")
+// both carry the literal text. Only the StatCard is the status card under
+// test — it's the one <div> among the matches.
+function findResolutionCard(): HTMLElement {
+  const matches = screen.getAllByText('Resolution').filter(el => el.tagName === 'DIV')
+  if (matches.length !== 1) throw new Error(`expected exactly one Resolution stat-card eyebrow, found ${matches.length}`)
+  const card = matches[0].parentElement
+  if (!card) throw new Error('Resolution stat card not found')
+  return card
+}
+
+it('reads the Resolution stat card from network freq, never a local form default', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(flatSnapshots({ freq: '3h' }))
+
+  renderPage()
+
+  // The single-period snapshot-constructor <select> further down the page
+  // renders a "3-hourly" <option> from the SAME static FREQ_OPTIONS list —
+  // an unscoped `screen.findByText('3-hourly')` would resolve against that
+  // static option instantly, before the mocked query even settles, and
+  // silently prove nothing. Locate the StatCard first (its "Resolution"
+  // eyebrow is static and present immediately) and wait for the value
+  // WITHIN it, which only reads "3-hourly" once `snap.freq` has loaded.
+  const card1 = findResolutionCard()
+  await within(card1).findByText('3-hourly')
+
+  cleanup()
+
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(flatSnapshots({ freq: null }))
+  renderPage()
+
+  const card2 = findResolutionCard()
+  await within(card2).findByText('Irregular')
+  // The page's OWN "seed a new index" form defaults `freq` state to 'h' and
+  // renders a "Hourly (h)" <option> in the constructor <select> further down
+  // the page — that is expected and lives outside this card. What must never
+  // happen is that local default leaking INTO the stat card in place of the
+  // network's real (here: unset) resolution.
+  expect(within(card2).queryByText(/Hourly/)).toBeNull()
+})
+
+// ── 3. PV × preview column greys when auto-discount is inert ──────────────
+
+it('greys the PV x preview column when auto-discount would not actually write anything', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2050],
+    weightings: [
+      { period: 2030, years: 1, objective: 1 },
+      { period: 2050, years: 1, objective: 1 },
+    ],
+  })
+
+  function pvCellForPeriod2030(): HTMLElement {
+    const header = screen.getByText('Period weightings')
+    const card = header.parentElement?.parentElement
+    if (!card) throw new Error('Period weightings card not found')
+    const rows = within(card).getAllByRole('row')
+    const row2030 = rows.find(r => within(r).queryByText('2030'))
+    if (!row2030) throw new Error('row for period 2030 not found in Period weightings table')
+    // The PV preview cell is identified by its tooltip text rather than
+    // column position — both the active and inert copy are unique on the
+    // page and don't depend on column order (which the guided-step
+    // restructure this test protects against is free to change).
+    const cell = within(row2030).getByTitle(/Auto-discount/)
+    return cell
+  }
+
+  // Properly configured multi-period network with auto-discount ON: active.
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true, auto_discount_periods: true }),
+  )
+  renderPage()
+  await screen.findByRole('heading', { name: 'Snapshot weightings' }) // wait for full render
+  const activeCell = pvCellForPeriod2030()
+  expect(activeCell.title).toMatch(/Auto-discount will set objective/)
+  // jsdom has no paint/layout engine, so the "grey" visual state is only
+  // observable through the class that drives it — same rationale as the
+  // min-w-0/truncate check in ChatPanelSurfaces.test.tsx.
+  expect(activeCell.className).toContain('text-text')
+  expect(activeCell.className).not.toContain('text-muted/40')
+
+  cleanup()
+
+  // Same network, auto-discount OFF: inert — must grey out.
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true, auto_discount_periods: false }),
+  )
+  renderPage()
+  await screen.findByRole('heading', { name: 'Snapshot weightings' })
+  const inertCell = pvCellForPeriod2030()
+  expect(inertCell.title).toMatch(/Auto-discount is off/)
+  expect(inertCell.className).toContain('text-muted/40')
+})
