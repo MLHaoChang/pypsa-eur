@@ -765,7 +765,7 @@ export function LoadingTab({ a, b }: { a: string; b: string }) {
             title={`Peak loading — top ${topLines.length} most congested AC branches`}
             subtitle={periodLabel(period) + ' — bars at 100 % indicate the line is hitting its s_nom limit'}
           >
-            <LoadingBarChart aName={sa.project} bName={sb.project} rows={topLines} kind="peak" />
+            <LoadingBarChart aName={sa.project} bName={sb.project} rows={topLines} kind="peak" availableA={availableA} availableB={availableB} />
             <LoadingTable aName={sa.project} bName={sb.project} rows={lineRows} availableA={availableA} availableB={availableB} />
           </Section>
 
@@ -773,7 +773,7 @@ export function LoadingTab({ a, b }: { a: string; b: string }) {
             title="Mean loading — AC branches"
             subtitle={periodLabel(period) + ' — snapshot-weighted average over the selected horizon'}
           >
-            <LoadingBarChart aName={sa.project} bName={sb.project} rows={topLines} kind="mean" />
+            <LoadingBarChart aName={sa.project} bName={sb.project} rows={topLines} kind="mean" availableA={availableA} availableB={availableB} />
           </Section>
         </>
       )}
@@ -783,7 +783,7 @@ export function LoadingTab({ a, b }: { a: string; b: string }) {
           title={`Link loading — top ${topLinks.length} (electrolysers / heat pumps / H₂ pipelines / DC links)`}
           subtitle={periodLabel(period) + ' — Links report |p0| ÷ p_nom_opt; 100 % means the link is dispatching at its full sized capacity. Carrier shown alongside name.'}
         >
-          <LoadingBarChart aName={sa.project} bName={sb.project} rows={topLinks} kind="peak" />
+          <LoadingBarChart aName={sa.project} bName={sb.project} rows={topLinks} kind="peak" availableA={availableA} availableB={availableB} />
           <LoadingTable aName={sa.project} bName={sb.project} rows={linkRows} availableA={availableA} availableB={availableB} />
         </Section>
       )}
@@ -855,12 +855,22 @@ function mergeLoadingByName(
 }
 
 function LoadingBarChart({
-  aName, bName, rows, kind,
+  aName, bName, rows, kind, availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
   rows: MergedLoadingRow[]
   kind: 'peak' | 'mean'
+  // Whether this side's loading block resolved at all — same guard as
+  // ABBarChart (Task 5; see ADR-0001 / ABBarChart's "a zero-height bar
+  // reads as a measured zero" comment). Without this, an unavailable
+  // side's rows default peak_x/mean_x to 0 via readPV, and this chart
+  // plotted a confident 0 % bar right next to the other side's real one —
+  // the same defect ABTable/ABBarChart were fixed for one file away.
+  // Defaults to true so this continues to render standalone in
+  // tests/callers that don't care about availability.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   // Glyph prefix surfaces what kind of branch this is:
   //   ⚡ = transformer (carries no current outside of LP unless solved)
@@ -871,6 +881,11 @@ function LoadingBarChart({
     [aName]: (kind === 'peak' ? r.peak_a : r.mean_a) * 100,  // → percent
     [bName]: (kind === 'peak' ? r.peak_b : r.mean_b) * 100,
   }))
+  // Neither side resolved — there is nothing to plot, not even an empty
+  // chart frame (mirrors ABBarChart's matching guard exactly).
+  if (!availableA && !availableB) {
+    return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+  }
   return (
     <div className="w-full h-72 mb-2">
       <ResponsiveContainer width="100%" height="100%">
@@ -884,8 +899,11 @@ function LoadingBarChart({
           <Legend verticalAlign="top" align="right" height={20} wrapperStyle={{ fontSize: 11, paddingBottom: 4 }} />
           {/* Reference line at the s_nom limit so 100 % bars visually pop. */}
           {kind === 'peak' && <ReferenceLine x={100} stroke="#dc2626" strokeDasharray="4 4" />}
-          <Bar dataKey={aName} fill="#3b82f6" />
-          <Bar dataKey={bName} fill="#f59e0b" />
+          {/* An unavailable side plots NO bar at all — a zero-height bar
+              reads as a measured zero, which is exactly the defect
+              ADR-0001 forbids (same comment as ABBarChart). */}
+          {availableA && <Bar dataKey={aName} fill="#3b82f6" />}
+          {availableB && <Bar dataKey={bName} fill="#f59e0b" />}
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -1004,13 +1022,22 @@ export function PricesTab({ a, b }: { a: string; b: string }) {
     <div className="space-y-4">
       <Section
         title="Price duration curve (€/MWh)"
-        subtitle={`Sorted bus-marginal prices across all snapshots × ${pa.bus_count || pb.bus_count} bus(es). 0 % = highest-price hour, 100 % = lowest. Y-axis clipped to the [min, p99] band when a single-hour scarcity spike (LP dual at a binding constraint) dominates the visual scale — the absolute extremes are shown beside the chart.`}
+        // bus_count defaults to 0 on an unresolved side (same `available`
+        // gate as everything else in this block — see
+        // _compute_prices_summary's `if not has_solve: return
+        // PricesComparison()`), so a plain `pa.bus_count || pb.bus_count`
+        // would silently pass through the OTHER side's real count as if it
+        // meant something for the unresolved side too. Only count sides
+        // that actually resolved.
+        subtitle={`Sorted bus-marginal prices across all snapshots × ${Math.max(availableA ? pa.bus_count : 0, availableB ? pb.bus_count : 0)} bus(es). 0 % = highest-price hour, 100 % = lowest. Y-axis clipped to the [min, p99] band when a single-hour scarcity spike (LP dual at a binding constraint) dominates the visual scale — the absolute extremes are shown beside the chart.`}
       >
         <DurationCurveChart
           aName={sa.project} bName={sb.project}
           a={pa.duration_curve} b={pb.duration_curve}
           maxA={pa.max_price} minA={pa.min_price}
           maxB={pb.max_price} minB={pb.min_price}
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -1137,6 +1164,7 @@ function canonicaliseCarrierStats(
 function DurationCurveChart({
   aName, bName, a, b,
   maxA, minA, maxB, minB,
+  availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
@@ -1150,6 +1178,18 @@ function DurationCurveChart({
   minA?: number
   maxB?: number
   minB?: number
+  // Whether this side's prices block resolved at all — same third state as
+  // ABTable (Task 5; see ADR-0001). The curve line itself is already safe
+  // without this (an unresolved side's `duration_curve` is `[]`, so
+  // `a[i] ?? null` produces a gap Recharts never draws — not a fabricated
+  // zero-line), but max_price/min_price default to `0.0` on the backend
+  // (schemas.py: `max_price: float = 0.0`) and are ALWAYS serialised, so
+  // without this guard the extreme-badge strip below read a confident
+  // "max 0.0 €/MWh · min 0.0 €/MWh" for an unresolved side right beside the
+  // other side's real extremes. Defaults to true so this continues to
+  // render standalone in tests/callers that don't care about availability.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   const data = useMemo(() => {
     const n = Math.max(a.length, b.length)
@@ -1210,6 +1250,12 @@ function DurationCurveChart({
     typeof v === 'number' && Number.isFinite(v)
       ? `${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v.toFixed(1)} €/MWh`
       : '—'
+  // Side-aware formatter: an unavailable side's max/min is a `0.0` DEFAULT,
+  // not a measurement (see the `availableA`/`availableB` prop comment
+  // above) — `fmt` alone can't tell that apart from a genuine `0.0 €/MWh`
+  // extreme, so gate on availability first.
+  const fmtSide = (v: number | undefined, available: boolean) =>
+    available ? fmt(v) : COST_UNAVAILABLE
   return (
     <div className="w-full">
       <div className="w-full h-72">
@@ -1252,11 +1298,11 @@ function DurationCurveChart({
           )}
           <span>
             <span className="text-[#3b82f6] font-medium">{aName}</span>:
-            {' '}max {fmt(maxA)} · min {fmt(minA)}
+            {' '}max {fmtSide(maxA, availableA)} · min {fmtSide(minA, availableA)}
           </span>
           <span>
             <span className="text-[#f59e0b] font-medium">{bName}</span>:
-            {' '}max {fmt(maxB)} · min {fmt(minB)}
+            {' '}max {fmtSide(maxB, availableB)} · min {fmtSide(minB, availableB)}
           </span>
         </div>
       )}

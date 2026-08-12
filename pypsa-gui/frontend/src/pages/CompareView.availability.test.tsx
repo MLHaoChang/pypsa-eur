@@ -340,22 +340,41 @@ describe('StorageCyclingTab distinguishes unavailable from zero (C2)', () => {
 // — the backend has always sent it) even though every other Comparison
 // block had it; that gap is fixed alongside the frontend wiring here.
 //
-// LostLoadTab is deliberately NOT touched or tested here. Its `available`
-// flag has different semantics than every other block: per
-// backend/models/schemas.py:1040-1050, `available=False` means "voll was
-// zero", "not solved", OR "no shedding occurred (the happy path)" — not
-// "could not be computed". LostLoadTab already gates on `has_solve` for
-// BOTH sides before any lost-load-specific rendering
-// (CompareView.tsx ~1975), so by the time its tables render, the "not
-// solved" arm is impossible; the only two REACHABLE causes of
-// `available=False` are both genuine, resolved, real-zero outcomes (see
-// compare.py:_compute_lost_load_summary — the ONLY path that sets
-// `available=True` requires `total_e > 1e-9`, so `available=False` in a
-// has_solve=True context always accompanies a genuinely-zero total_mwh,
-// never a fabricated placeholder). Wiring `available` into that tab's
-// ABKpiPair the way the other tabs do would flag "neither project shed
-// load" — a GOOD outcome — as unresolved, which is a new defect, not a fix.
-// See task-6-report.md for the full writeup.
+// LostLoadTab is deliberately NOT touched or tested here — but NOT because
+// `available=False` only ever means a confirmed real zero once has_solve is
+// true. An earlier version of this comment claimed exactly that and was
+// wrong; corrected after review traced every return in
+// compare.py:_compute_lost_load_summary (lines 2380-2422). Within the
+// has_solve=True path LostLoadTab actually reaches (it gates on has_solve
+// for BOTH sides before any lost-load-specific rendering — CompareView.tsx
+// ~1975), there are SIX `available=False` returns, not one:
+//   :2382-2384  results_state.pkl absent                    -> UNRESOLVED
+//   :2385-2388  _safe_unpickle_results raises                -> UNRESOLVED
+//   :2391-2393  `last_lost_load`/`lost_load_t` key missing   -> ambiguous
+//   :2395-2396  capture DataFrame present but empty          -> ambiguous
+//   :2412-2416  reindex/weighting raises                     -> UNRESOLVED
+//   :2418-2422  total_e <= 1e-9 after reindex                -> confirmed zero
+// Only the last is a genuine "no shedding, happy path" outcome (it's also
+// the ONLY path that sets `available=True`, requiring `total_e > 1e-9` —
+// that half of the original claim was correct). The other five are real
+// ADR-0001 unresolved states wearing the same flag: a solved project whose
+// results_state.pkl is missing/unreadable/misshapen renders `0.0 MWh` /
+// `0.00 M€` via ABKpiPair exactly like a confirmed-zero project would — a
+// mixed pair (alpha sheds load, beta solved-but-uncaptured) DOES fabricate
+// a zero today.
+//
+// The conclusion is still "leave the tab's wiring alone," for a narrower
+// reason than originally stated: `available` here cannot be turned into a
+// correct three-state signal on the frontend at all — it conflates one
+// legitimate zero with five different failure states, and no other field on
+// `LostLoadComparison` (voll_eur_per_mwh, by_bus, by_carrier — all equally
+// defaulted on every one of those six returns) discriminates them either.
+// Wiring `available` into ABKpiPair the way the other tabs do would relabel
+// the happy path as broken; leaving it unwired accepts the fabricated-zero
+// gap on the five unresolved returns instead. Neither frontend-only choice
+// is fully correct — the real fix needs a new backend signal (e.g. a
+// `captured: bool` distinct from `available`) and is out of scope for this
+// task; not attempted here. See task-6-report.md for the full writeup.
 
 function renderLoadingTab() {
   const client = new QueryClient({
@@ -394,7 +413,7 @@ describe('LoadingTab distinguishes unavailable from zero', () => {
     vi.mocked(projectsApi.resultsSummary).mockImplementation(
       (project: string) => Promise.resolve(loadingSummary(project === 'alpha', project) as never),
     )
-    renderLoadingTab()
+    const { container } = renderLoadingTab()
     // alpha's real peak loading renders (0.654 -> "65.4 %").
     expect(await screen.findByText('65.4 %')).toBeTruthy()
     // beta's loading block never resolved (lines: []) — Line1 only exists
@@ -406,6 +425,51 @@ describe('LoadingTab distinguishes unavailable from zero', () => {
     // computed against beta's fabricated 0 % loading.
     const row = (await screen.findByText('Line1')).closest('tr')
     expect(row?.textContent).not.toMatch(/[+-]\d/)
+    // LoadingBarChart (peak-lines + mean-lines sections both render for
+    // this fixture — one branch, no Links) must not plot beta's fabricated
+    // 0 % as a bar. Text assertions can't reach recharts' SVG output, so
+    // this counts mounted `<Bar>` series directly: verified empirically
+    // (see task-6-report.md) that WITHOUT the availableA/availableB guard
+    // on LoadingBarChart this fixture renders 4 `.recharts-bar` elements —
+    // 2 chart sections × 2 series (alpha AND a fabricated beta bar in
+    // each). With the guard, beta's series is never mounted at all, so
+    // only 2 remain (2 sections × alpha's 1 real series).
+    expect(container.querySelectorAll('.recharts-bar').length).toBe(2)
+  })
+
+  // Task 4 established `available: true` + a zero field as a LEGITIMATE
+  // state — it must still render the real value, not the unavailable
+  // marker AND not the "absent from this scenario" dash. LoadingTable's
+  // hasA/hasB ladder is the most intricate of the three tabs fixed in this
+  // task (per-branch presence AND per-side availability both gate the same
+  // cell), so this is the one place that ladder rung is exercised at all.
+  it('renders a genuine resolved 0 % as 0.0 %, never as the unavailable marker (available: true on both sides)', async () => {
+    const bothResolvedZero = (project: string) => ({
+      project,
+      has_solve: true,
+      periods: [],
+      loading: {
+        available: true,
+        lines: [{
+          // A fully-idle branch on a solved network genuinely has 0 %
+          // loading — not an absence and not an unresolved figure.
+          name: 'Line1', s_nom_opt: 500, is_transformer: false, is_link: false, carrier: null,
+          peak_loading: { total: 0, by_period: {} },
+          mean_loading: { total: 0, by_period: {} },
+          binding_hours: { total: 0, by_period: {} },
+        }],
+      },
+    })
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(bothResolvedZero(project) as never),
+    )
+    renderLoadingTab()
+    // Both sides resolve with the SAME real-zero fixture (A/A identity), so
+    // "0.0 %" legitimately renders more than once (peak + mean columns,
+    // both sides) — assert plural/non-empty, same idiom as this file's
+    // other A/A-identity checks.
+    expect(await screen.findAllByText('0.0 %')).not.toHaveLength(0)
+    expect(screen.queryByText(COST_UNAVAILABLE)).toBeNull()
   })
 })
 
@@ -449,7 +513,7 @@ const pricesSummary = (available: boolean, project: string) => ({
 describe('PricesTab distinguishes unavailable from zero', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('renders alpha\'s real price stats beside beta\'s marker — never a fabricated 0.00 €/MWh or a signed Δ', async () => {
+  it('renders alpha\'s real price stats beside beta\'s marker — never a fabricated 0.0 €/MWh or a signed Δ', async () => {
     vi.mocked(projectsApi.resultsSummary).mockImplementation(
       (project: string) => Promise.resolve(pricesSummary(project === 'alpha', project) as never),
     )
@@ -460,11 +524,28 @@ describe('PricesTab distinguishes unavailable from zero', () => {
     expect(await screen.findAllByText(/456\.70 €\/MWh/)).not.toHaveLength(0)
     // beta's prices block never resolved — its cells read the marker.
     expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
-    expect(screen.queryByText(/0\.00 €\/MWh/)).toBeNull()
+    // PricesTable/PerCarrierPricesTable format with TWO decimals
+    // (`v.toFixed(2)`), but DurationCurveChart's extreme-badge strip
+    // formats with ONE (`v.toFixed(1)`) — a `/0\.00/`-only check would
+    // silently miss a fabricated badge value, which is exactly what
+    // happened before this was caught on review. `0\.0+` catches both.
+    expect(screen.queryByText(/0\.0+ €\/MWh/)).toBeNull()
     // The Δ mean-price cell must be a dash, never a signed number computed
     // against beta's fabricated €0.00.
     const meanRow = (await screen.findByText('All periods')).closest('tr')
     expect(meanRow?.textContent).not.toMatch(/[+-]\d/)
+    // The duration-curve badge strip itself: beta's max_price/min_price
+    // default to 0.0 on the backend and are ALWAYS serialised (unlike the
+    // curve array, which is genuinely empty and safe), so without
+    // DurationCurveChart's own availableA/availableB guard this specific
+    // spot would read "beta: max 0.0 €/MWh · min 0.0 €/MWh" — a fabricated
+    // number the two checks above don't reach (mean/median/p90 are a
+    // different data path). getByText's default matcher concatenates only
+    // an element's OWN direct text-node children (see this file's sibling
+    // CompareView.test.tsx:238-243 for the same idiom applied to <Delta>),
+    // so this matches the badge <span>'s own text specifically, not the
+    // nested name <span> inside it.
+    expect(await screen.findByText(/max unavailable · min unavailable/)).toBeTruthy()
   })
 })
 
