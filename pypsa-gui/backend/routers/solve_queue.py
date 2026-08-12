@@ -42,6 +42,36 @@ class EnqueueRequest(BaseModel):
     project_id: str
 
 
+def _config_snapshot_for(project_key: str, project_dir) -> str | None:
+    """
+    The solver config this enqueue should freeze onto the job, as JSON.
+
+    Resolution mirrors what the dispatcher used to do at run time, but ONCE and
+    HERE, where the request exists: the resident context's live config when the
+    project is resident (so the user's unsaved solver edits are honoured, which
+    is what they expect from the Run button), else the `solver_config.json` the
+    project has on disk. Returns None only if neither can be read, which leaves
+    the dispatcher on its pre-snapshot fallback.
+    """
+    import json as _json
+    from dataclasses import asdict
+
+    from services.pypsa_service import PyPSAService
+
+    try:
+        resident = PyPSAService.get_context(project_key)
+        if resident is not None:
+            cfg = resident.solver_state.get("solver_config")
+            if cfg is not None:
+                return _json.dumps(asdict(cfg))
+        on_disk = project_dir / "solver_config.json"
+        if on_disk.exists():
+            return on_disk.read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001 — never fail an enqueue over bookkeeping
+        pass
+    return None
+
+
 @router.post("")
 def enqueue_solve(
     req: EnqueueRequest,
@@ -80,12 +110,20 @@ def enqueue_solve(
     # creates nothing. 200, not 409 — the caller's intent ("this project should
     # be solving") is already satisfied, and an error would make every client
     # re-implement the check it just handed to the server.
+    #
+    # The snapshot is resolved BEFORE `enqueue_unique`, here, where the request
+    # and the authorized directory both still exist — the dispatcher runs on a
+    # worker thread with neither (R24). Resolving it even when `created` turns
+    # out False is wasted work but not wrong: the snapshot for an idempotent
+    # re-enqueue is simply discarded below.
+    snapshot = _config_snapshot_for(project_registry.registry_key(project), project_dir)
     job, created = solve_queue.enqueue_unique(
         project.name,
         project_key=project_registry.registry_key(project),
         storage_dir=str(project_dir),
     )
     if created:
+        job.solver_config_json = snapshot
         # Stamp the ACTING user alongside the org-scoped directory this route
         # already resolved. Keying per-user dismiss on project access instead
         # would let two users sharing a project dismiss each other's rows —
@@ -93,7 +131,7 @@ def enqueue_solve(
         from services import solve_job_store
 
         solve_job_store.record_enqueued(
-            job, enqueued_by_user_id=user.id, solver_config_json=None,
+            job, enqueued_by_user_id=user.id, solver_config_json=snapshot,
         )
     return {**solve_queue.get_job(job.id), "already_queued": not created}
 

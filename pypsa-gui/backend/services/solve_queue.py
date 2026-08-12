@@ -42,6 +42,7 @@ solve — acceptable for the walk-away batch model.
 """
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import queue
@@ -79,6 +80,15 @@ class SolveJob:
     # path from the name — it runs on a worker thread with no request, no user,
     # and no way to authorize anything.
     storage_dir: str | None = None
+    # JSON snapshot of the SolverConfig this job was ENQUEUED with. The
+    # dispatcher used to read `ctx.solver_state["solver_config"]` at RUN time,
+    # so a `PUT /api/simulation/solver_config` after enqueue silently changed
+    # what a queued job solved, and which config a job got depended on whether
+    # the project happened to be resident. Resolved once, by the route that has
+    # the request and the authorized directory. None means "fall back to the
+    # context's config", which is the pre-snapshot behaviour and what a
+    # hand-made job gets.
+    solver_config_json: str | None = None
     status: str = "queued"          # queued | running | completed | failed | aborted
     objective: Any = None
     solve_time: Any = None
@@ -554,7 +564,20 @@ class SolveQueue:
 
             n = ctx.network
             lock = ctx.mutation_lock
+            # THIS job's config, snapshotted at enqueue — not whatever the
+            # context holds now. Falling back to the context's config keeps
+            # hand-made jobs (and any row written before 0005) working.
             config = ctx.solver_state["solver_config"]
+            if job.solver_config_json:
+                try:
+                    from routers.projects import _solver_config_from_dict
+
+                    config = _solver_config_from_dict(json.loads(job.solver_config_json))
+                except Exception:  # noqa: BLE001 — a bad snapshot must not fail the solve
+                    logger.exception(
+                        "solve_queue: job %s has an unreadable config snapshot; "
+                        "falling back to the context's config", job.id,
+                    )
 
             # `_state`-style writer scoped to THIS ctx (the per-context analogue
             # of sim._state_update). run_simulation pushes its side-results
