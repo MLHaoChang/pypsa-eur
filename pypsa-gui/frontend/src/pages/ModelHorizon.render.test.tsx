@@ -422,6 +422,50 @@ it('collapses the weights Advanced disclosure by default, mounting the per-row t
   expect(await screen.findByRole('table')).not.toBeNull()
 })
 
+// ── 7. Window step: Advanced disclosure stays native, unlike weights' ─────
+// (Task 4 review fix.) The per-period range table is at most a handful of
+// rows (one per investment period) — no size argument for unmounting it, so
+// unlike the weights table it should behave like every other <details> in
+// this codebase (SolverSettings.tsx, results/Economics.tsx): always mounted,
+// collapsed via native disclosure semantics. Collapsed-by-default is still
+// required, but it's asserted through the `open` attribute, not DOM absence
+// — DOM absence is specifically the wrong assertion for a consumer that
+// isn't supposed to unmount.
+
+it('collapses the window Advanced disclosure by default without unmounting its per-period table', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2050],
+    weightings: [
+      { period: 2030, years: 1, objective: 1 },
+      { period: 2050, years: 1, objective: 1 },
+    ],
+  })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true }),
+  )
+
+  renderPage()
+  await openStep(/Snapshot window/)
+
+  // The per-period table is only Advanced content in "Different year per
+  // period" mode — switch to it first.
+  await userEvent.click(screen.getByRole('radio', { name: /Different year per period/ }))
+
+  const summary = await screen.findByText('Advanced')
+  const details = summary.closest('details')
+  if (!details) throw new Error('Advanced disclosure not found')
+
+  // Collapsed by default...
+  expect(details.hasAttribute('open')).toBe(false)
+  // ...but, unlike the weights table, still mounted — native <details>
+  // hides it visually/from the accessibility tree, not by removing it.
+  expect(screen.getByRole('table')).not.toBeNull()
+
+  await userEvent.click(summary)
+  expect(details.hasAttribute('open')).toBe(true)
+})
+
 it('gives Economics and Window an actionable way out at zero investment years, not a blank frame', async () => {
   vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots()) // count: 2, configured
   vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(

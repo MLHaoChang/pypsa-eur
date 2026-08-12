@@ -706,7 +706,15 @@ export default function ModelHorizon() {
   // per-row table) have anything to hide behind Advanced — every other step
   // gets `undefined`, which is exactly what StepShell already treats as "no
   // disclosure at all" (unchanged from Task 3).
+  //
+  // Only 'weights' unmounts while collapsed. Its table can be 8,760 rows on
+  // an hourly model — always mounting it would defeat the point of hiding
+  // it. The window per-period table is at most a handful of rows (one per
+  // investment period), so it uses StepShell's default: a native,
+  // always-mounted <details> that stays reachable by in-page find, same as
+  // SolverSettings.tsx / results/Economics.tsx.
   let advancedContent: ReactNode
+  let unmountAdvancedWhenCollapsed = false
   if (view === 'window' && isMultiPeriod && mpMode === 'per_period' && periods.length > 0) {
     advancedContent = (
       <StepWindowAdvanced
@@ -727,6 +735,7 @@ export default function ModelHorizon() {
         onUploadCsv={onUploadCsv}
       />
     )
+    unmountAdvancedWhenCollapsed = true
   }
 
   return (
@@ -784,6 +793,7 @@ export default function ModelHorizon() {
             onSelect={setView}
             title={`Step ${steps.indexOf(view) + 1} of ${steps.length} — ${STEP_LABELS[view]}`}
             advanced={advancedContent}
+            unmountAdvancedWhenCollapsed={unmountAdvancedWhenCollapsed}
           >
 
       {/* ── 2a. Mode toggle (the single decision point) ───────── */}

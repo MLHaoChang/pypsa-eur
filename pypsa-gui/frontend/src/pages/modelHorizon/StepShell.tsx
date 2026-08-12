@@ -4,27 +4,42 @@
 // stepper, not a tablist, so it marks the current entry with
 // `aria-current="step"` rather than ProjectTabs' `role="tab"`/`aria-selected`)
 // plus a title for whichever step is current, plus a slot
-// for step-specific "advanced" content collapsed behind a native <details>
-// disclosure (the pattern already used by SolverSettings.tsx and
-// results/Economics.tsx's methodology notes).
+// for step-specific "advanced" content behind a <details> disclosure.
 //
 // This component owns ONLY the frame. It renders whatever `children` the
 // caller hands it for the current step — Task 3 hands it the page's existing
 // section JSX unchanged; Tasks 4/5 will hand it step-specific extracted
-// components instead. `advanced` is unused as of Task 3 (no caller passes it
-// yet) — it exists so Tasks 4/5 don't have to touch this file to use it.
+// components instead.
 //
-// Task 4 note: the disclosure is a CONTROLLED <details> (`open`/`onToggle`
-// wired to local state), not a bare uncontrolled one, and `advanced` is only
-// spliced into the tree while that state is true. A plain uncontrolled
-// <details> only hides its content visually/from the accessibility tree in a
-// real layout engine — jsdom has none, so `advanced`'s content (e.g. an
-// 8,760-row table) would sit in the DOM, and be findable by
-// `getByRole`, even while collapsed. The advanced slot exists specifically
-// to keep large content OUT of the tree until asked for, so that has to be
-// true under test as well as in a browser. Local state also resets to
-// closed on every step change, so a step never inherits another step's
-// disclosure state.
+// The disclosure is a CONTROLLED <details> (`open`/`onToggle` wired to local
+// state) for every consumer, closed by default and reset to closed on every
+// step change — a step must never inherit another step's disclosure state,
+// and this same StepShell instance persists across step switches (it never
+// unmounts between them).
+//
+// By DEFAULT (`unmountAdvancedWhenCollapsed` unset/false), `advanced`'s
+// content stays mounted in the DOM the whole time — the exact pattern
+// SolverSettings.tsx and results/Economics.tsx's methodology notes already
+// use: a plain, always-mounted <details> that the browser hides natively
+// while closed. That keeps the content reachable by in-page find (Chrome's
+// find-in-page searches inside closed <details> and auto-expands on a
+// match — something an unmounted subtree cannot support) and matches the
+// existing convention exactly.
+//
+// `unmountAdvancedWhenCollapsed={true}` is opt-in for a consumer whose
+// advanced content is large enough that always mounting it defeats the
+// point of hiding it — Task 4's per-row snapshot-weightings table can be
+// 8,760 rows on an hourly model, so StepWeights.tsx passes true and
+// genuinely unmounts. Task 4's per-period window table (at most a handful
+// of rows, one per investment period) has no such size argument and uses
+// the default, staying mounted like every other <details> in this codebase.
+//
+// (Note for anyone reading jsdom-based tests against this file: a closed
+// native <details> is NOT hidden from `getByRole` under jsdom — jsdom's
+// default stylesheet has no rule for it, unlike a real layout engine. Tests
+// against the default (mounted) mode must assert on the `open` attribute,
+// not on DOM absence; DOM absence is only a valid assertion for the
+// `unmountAdvancedWhenCollapsed={true}` case.)
 import { useEffect, useState, type ReactNode } from 'react'
 import type { HorizonStepId } from '../modelHorizonModel'
 
@@ -57,9 +72,17 @@ export interface StepShellProps {
   /** Optional advanced content for the current step, rendered inside a
    * collapsed disclosure below the step body. */
   advanced?: ReactNode
+  /** Opt-in: don't mount `advanced` into the DOM until the disclosure is
+   * opened (and remove it again on close). Default false — see the file
+   * header for when to reach for this instead of the native always-mounted
+   * behaviour. */
+  unmountAdvancedWhenCollapsed?: boolean
 }
 
-export function StepShell({ steps, current, onSelect, title, children, advanced }: StepShellProps) {
+export function StepShell({
+  steps, current, onSelect, title, children, advanced,
+  unmountAdvancedWhenCollapsed = false,
+}: StepShellProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   // A step switch (e.g. clicking a rail entry) reuses this same StepShell
   // instance — it never unmounts between steps — so without this, opening
@@ -103,7 +126,9 @@ export function StepShell({ steps, current, onSelect, title, children, advanced 
             onToggle={e => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
           >
             <summary className="px-3 py-2 cursor-pointer text-muted hover:text-text select-none">Advanced</summary>
-            {advancedOpen && <div className="px-3 py-2">{advanced}</div>}
+            {(!unmountAdvancedWhenCollapsed || advancedOpen) && (
+              <div className="px-3 py-2">{advanced}</div>
+            )}
           </details>
         )}
       </section>
