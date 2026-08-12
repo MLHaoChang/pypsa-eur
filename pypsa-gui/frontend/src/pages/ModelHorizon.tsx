@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Download, Plus, Upload, X } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import { confirmToast } from '../utils/toasts'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
@@ -10,12 +10,15 @@ import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
 import {
-  buildWeightingRows, resolutionLabel, FREQ_OPTIONS, pvFactor, horizonRangeLabel,
+  resolutionLabel, pvFactor, horizonRangeLabel,
   visibleSteps, isHorizonUnset, stepSummary,
   type WeightingRow, type HorizonStepId, type HorizonSummaryContext,
 } from './modelHorizonModel'
 import { StepShell, STEP_LABELS } from './modelHorizon/StepShell'
 import { HorizonSummary } from './modelHorizon/HorizonSummary'
+import { StepWindow, StepWindowAdvanced } from './modelHorizon/StepWindow'
+import { StepSampling } from './modelHorizon/StepSampling'
+import { StepWeights, StepWeightsAdvanced } from './modelHorizon/StepWeights'
 
 // ── Load carrier canonicaliser ──────────────────────────────────────────────
 // Mirrors loadCarrierKey in Dispatch.tsx + _canonical_load_carrier_key on the
@@ -105,8 +108,6 @@ function NoPeriodsFallback({ message, onGoToYears }: { message: string; onGoToYe
     </div>
   )
 }
-
-const PAGE_SIZE = 100
 
 export default function ModelHorizon() {
   const qc = useQueryClient()
@@ -566,31 +567,10 @@ export default function ModelHorizon() {
     }
   }
 
-  // ── Weightings table: pagination + CSV import/export ────────────────────
-  const totalWeightings = snap?.weightings?.length ?? 0
-  const totalPages = Math.max(1, Math.ceil(totalWeightings / PAGE_SIZE))
-  const [page, setPage] = useState(0)
-  useEffect(() => {
-    // Clamp when the underlying snapshot set shrinks (e.g. after re-indexing).
-    if (page > 0 && page >= totalPages) setPage(0)
-  }, [totalPages, page])
-  const pageStart = page * PAGE_SIZE
-  const pageEnd = Math.min(pageStart + PAGE_SIZE, totalWeightings)
-  const pageRows = useMemo(
-    () => snap?.weightings?.slice(pageStart, pageEnd) ?? [],
-    [snap?.weightings, pageStart, pageEnd],
-  )
-  const weightingRows = useMemo(
-    () => buildWeightingRows(
-      pageRows as WeightingRow[],
-      snap?.snapshots ?? [],
-      snapshotsAreMulti,
-      pageStart,
-    ),
-    [pageRows, snap?.snapshots, snapshotsAreMulti, pageStart],
-  )
-
-  const csvUploadRef = useRef<HTMLInputElement>(null)
+  // ── Weightings CSV import/export ─────────────────────────────────────────
+  // Pagination + row-level rendering now live in StepWeightsAdvanced
+  // (modelHorizon/StepWeights.tsx) — it takes the full `snap.weightings` and
+  // slices its own page, so nothing about that derivation needs to live here.
   const onDownloadCsv = async () => {
     try {
       const blob = await networkApi.downloadSnapshotWeightingsCsv()
@@ -720,6 +700,35 @@ export default function ModelHorizon() {
     weightsAreDefault,
   }
 
+  // Content for StepShell's `advanced` disclosure, per current step. Only
+  // 'window' (the per-period range table, and only in its 'per_period' mode
+  // with at least one period) and 'weights' (CSV controls + the paginated
+  // per-row table) have anything to hide behind Advanced — every other step
+  // gets `undefined`, which is exactly what StepShell already treats as "no
+  // disclosure at all" (unchanged from Task 3).
+  let advancedContent: ReactNode
+  if (view === 'window' && isMultiPeriod && mpMode === 'per_period' && periods.length > 0) {
+    advancedContent = (
+      <StepWindowAdvanced
+        periods={periods}
+        mpPerPeriod={mpPerPeriod}
+        onMpPerPeriodChange={(i, patch) => setMpPerPeriod(prev => prev.map((r, j) => j === i ? { ...r, ...patch } : r))}
+      />
+    )
+  } else if (view === 'weights' && snap && snap.weightings && snap.weightings.length > 0) {
+    advancedContent = (
+      <StepWeightsAdvanced
+        weightings={snap.weightings as WeightingRow[]}
+        snapshots={snap.snapshots ?? []}
+        snapshotsAreMulti={snapshotsAreMulti}
+        onWeightChange={(key, objective) => updateOneWeight.mutate({ key, objective })}
+        updateOneWeightPending={updateOneWeight.isPending}
+        onDownloadCsv={onDownloadCsv}
+        onUploadCsv={onUploadCsv}
+      />
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
       <PageHeader
@@ -774,6 +783,7 @@ export default function ModelHorizon() {
             current={view}
             onSelect={setView}
             title={`Step ${steps.indexOf(view) + 1} of ${steps.length} — ${STEP_LABELS[view]}`}
+            advanced={advancedContent}
           >
 
       {/* ── 2a. Mode toggle (the single decision point) ───────── */}
@@ -800,11 +810,12 @@ export default function ModelHorizon() {
       </section>
       )}
 
-      {/* ── 3a. Multi-period config (only when toggle ON) ────── */}
-      {/* years / economics / window(multi) are three distinct steps that
-          this file still bundles into ONE physical section — see the Task 3
-          report for why, and what Tasks 4/5 need to do about it. */}
-      {isMultiPeriod && (view === 'years' || view === 'economics' || view === 'window') && (
+      {/* ── 3a. Multi-period config: years + economics (only when toggle ON) */}
+      {/* years / economics are two distinct steps that this file still
+          bundles into ONE physical section — window was the third and was
+          split out to StepWindow.tsx in Task 4 (see the Task 4 report for
+          how). Task 5 needs to finish splitting these last two. */}
+      {isMultiPeriod && (view === 'years' || view === 'economics') && (
         <section>
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Multi-period planning</h3>
 
@@ -1151,215 +1162,51 @@ export default function ModelHorizon() {
               </div>
             </div>
           ))}
+        </section>
+      )}
 
-          {/* Snapshot constructor (MultiIndex) */}
-          {view === 'window' && (periods.length === 0 ? (
+      {/* ── 3b. Snapshot window — both single- and multi-period forms
+          (Task 4: moved to modelHorizon/StepWindow.tsx) ──────────────── */}
+      {view === 'window' && (
+        <StepWindow
+          isMultiPeriod={isMultiPeriod}
+          periods={periods}
+          noPeriodsFallback={
             <NoPeriodsFallback
               message="Add investment years first — the MultiIndex snapshot constructor needs at least one period to build a (period × timestep) index."
               onGoToYears={() => setView('years')}
             />
-          ) : (
-            <div className="border border-border rounded">
-              <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center justify-between">
-                <span>Snapshot constructor (MultiIndex)</span>
-                <span className="text-[10px] text-muted/70 normal-case">builds (period × timestep) snapshots</span>
-              </div>
-              <div className="p-2.5 flex flex-col gap-2.5">
-                <div className="flex items-center gap-3 text-[11px]">
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="mp-mode"
-                      checked={mpMode === 'same'}
-                      onChange={() => setMpMode('same')}
-                      className="accent-accent"
-                    />
-                    Same year per period
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="mp-mode"
-                      checked={mpMode === 'per_period'}
-                      onChange={() => setMpMode('per_period')}
-                      className="accent-accent"
-                    />
-                    Different year per period
-                  </label>
-                </div>
-
-                {mpMode === 'same' ? (
-                  <div className="flex flex-col gap-2">
-                    <p className="text-[10px] text-muted leading-relaxed">
-                      One operational (start, end, freq) range replicated under
-                      every investment period. Canonical workflow when you have
-                      one year of weather/load data and want to use it as a
-                      representative profile for every decade.
-                    </p>
-                    <div className="grid grid-cols-3 gap-2">
-                      <label className="flex flex-col gap-0.5">
-                        <span className="text-[10px] text-muted">Start</span>
-                        <input
-                          type="datetime-local" lang="en-US"
-                          value={mpStart}
-                          onChange={e => setMpStart(e.target.value)}
-                          className="px-2 py-1 border border-border rounded text-[11px] bg-bg"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-0.5">
-                        <span className="text-[10px] text-muted">End</span>
-                        <input
-                          type="datetime-local" lang="en-US"
-                          value={mpEnd}
-                          onChange={e => setMpEnd(e.target.value)}
-                          className="px-2 py-1 border border-border rounded text-[11px] bg-bg"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-0.5">
-                        <span className="text-[10px] text-muted">Resolution</span>
-                        <select
-                          value={mpFreq}
-                          onChange={e => setMpFreq(e.target.value)}
-                          className="px-2 py-1 border border-border rounded text-[11px] bg-bg"
-                        >
-                          {FREQ_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
-                      </label>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    <p className="text-[10px] text-muted leading-relaxed">
-                      One (start, end, freq) per investment period. Use when you
-                      have multi-year weather data and want each decade to see a
-                      different operational year.
-                    </p>
-                    <div className="border border-border rounded overflow-auto max-h-64">
-                      <table className="w-full text-[11px] border-collapse" style={{ minWidth: 480 }}>
-                        <thead className="sticky top-0 bg-bg-2 z-10">
-                          <tr className="border-b border-border">
-                            <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Period</th>
-                            <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Start</th>
-                            <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">End</th>
-                            <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Freq</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {periods.map((p, i) => {
-                            const row = mpPerPeriod[i] ?? { start: '', end: '', freq: 'h' }
-                            const updateRow = (patch: Partial<typeof row>) => {
-                              setMpPerPeriod(prev => prev.map((r, j) => j === i ? { ...r, ...patch } : r))
-                            }
-                            return (
-                              <tr key={p} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
-                                <td className="px-2 py-1 font-mono text-[11px]">{p}</td>
-                                <td className="px-2 py-1">
-                                  <input
-                                    type="datetime-local" lang="en-US"
-                                    value={row.start}
-                                    onChange={e => updateRow({ start: e.target.value })}
-                                    className="w-full px-1 py-0.5 border border-border rounded text-[11px] bg-bg"
-                                  />
-                                </td>
-                                <td className="px-2 py-1">
-                                  <input
-                                    type="datetime-local" lang="en-US"
-                                    value={row.end}
-                                    onChange={e => updateRow({ end: e.target.value })}
-                                    className="w-full px-1 py-0.5 border border-border rounded text-[11px] bg-bg"
-                                  />
-                                </td>
-                                <td className="px-2 py-1">
-                                  <select
-                                    value={row.freq}
-                                    onChange={e => updateRow({ freq: e.target.value })}
-                                    className="w-full px-1 py-0.5 border border-border rounded text-[11px] bg-bg"
-                                  >
-                                    {FREQ_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.value}</option>)}
-                                  </select>
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  onClick={onApplyMultiPeriod}
-                  disabled={applyMultiPeriodSnapshots.isPending}
-                  className="w-full px-3 py-1.5 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
-                >
-                  {applyMultiPeriodSnapshots.isPending ? 'Building…' : 'Build MultiIndex snapshots'}
-                </button>
-                <p className="text-[10px] text-muted leading-relaxed">
-                  This replaces the snapshot index with a 2-level
-                  (period, timestep) MultiIndex. Uploaded time-series profiles
-                  are re-aligned by their operational timestamp — a 1-year upload
-                  becomes the profile under every period.
-                </p>
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
-
-      {/* ── 3b. Single-period config (only when toggle OFF) ──── */}
-      {!isMultiPeriod && view === 'window' && (
-        <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Snapshot range</h3>
-          <p className="text-[11px] text-muted mb-2 leading-relaxed">
-            Defines the single operational window the LP spans. The index is
-            built as <code>pd.date_range(start, end, freq)</code>. Time-series
-            uploads are re-aligned by datetime intersection.
-          </p>
-          <div className="flex flex-col gap-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted">Start</span>
-              <input
-                type="datetime-local" lang="en-US" value={start}
-                onChange={e => { rangeTouchedRef.current = true; setStart(e.target.value) }}
-                className="px-2 py-1 border border-border rounded text-xs bg-bg"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted">End</span>
-              <input
-                type="datetime-local" lang="en-US" value={end}
-                onChange={e => { rangeTouchedRef.current = true; setEnd(e.target.value) }}
-                className="px-2 py-1 border border-border rounded text-xs bg-bg"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted">Resolution</span>
-              <select
-                value={freq} onChange={e => setFreq(e.target.value)}
-                className="px-2 py-1 border border-border rounded text-xs bg-bg"
-              >
-                {FREQ_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </label>
-          </div>
-          {/* Snap back to the uploaded time-series extent — the data range the
-              user actually uploaded. Only shown when flat profiles exist. */}
-          {snap?.ts_start && snap?.ts_end && (
-            <button
-              onClick={() => {
-                setStart(toLocal(snap.ts_start!))
-                setEnd(toLocal(snap.ts_end!))
-                rangeTouchedRef.current = false
-              }}
-              className="mt-2 text-[10.5px] text-accent hover:underline"
-            >↻ Reset to uploaded data range ({toLocal(snap.ts_start).slice(0, 10)} → {toLocal(snap.ts_end).slice(0, 10)})</button>
-          )}
-          <button
-            onClick={onApplySnapshots}
-            disabled={applySnapshots.isPending}
-            className="mt-3 w-full px-3 py-1.5 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
-          >{applySnapshots.isPending ? 'Applying…' : 'Apply snapshots'}</button>
-        </section>
+          }
+          start={start}
+          end={end}
+          freq={freq}
+          onStartChange={v => { rangeTouchedRef.current = true; setStart(v) }}
+          onEndChange={v => { rangeTouchedRef.current = true; setEnd(v) }}
+          onFreqChange={setFreq}
+          resetRangeLabel={
+            snap?.ts_start && snap?.ts_end
+              ? `${toLocal(snap.ts_start).slice(0, 10)} → ${toLocal(snap.ts_end).slice(0, 10)}`
+              : null
+          }
+          onResetToUploadedRange={() => {
+            if (!snap?.ts_start || !snap?.ts_end) return
+            setStart(toLocal(snap.ts_start))
+            setEnd(toLocal(snap.ts_end))
+            rangeTouchedRef.current = false
+          }}
+          onApplySnapshots={onApplySnapshots}
+          applySnapshotsPending={applySnapshots.isPending}
+          mpMode={mpMode}
+          onMpModeChange={setMpMode}
+          mpStart={mpStart}
+          mpEnd={mpEnd}
+          mpFreq={mpFreq}
+          onMpStartChange={setMpStart}
+          onMpEndChange={setMpEnd}
+          onMpFreqChange={setMpFreq}
+          onApplyMultiPeriod={onApplyMultiPeriod}
+          applyMultiPeriodPending={applyMultiPeriodSnapshots.isPending}
+        />
       )}
 
       {/* ── 3c. Representative weeks (works in both modes) ───── */}
@@ -1367,232 +1214,34 @@ export default function ModelHorizon() {
           Adapts automatically: flat networks get a flat sampled index,
           multi-period networks get the sample replicated under every period.
           Gated on snap.can_sample_weeks — the backend reports whether a
-          full-year hourly profile is actually available. */}
+          full-year hourly profile is actually available.
+          Task 4: moved to modelHorizon/StepSampling.tsx. */}
       {view === 'sampling' && (
-      <section>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Representative weeks</h3>
-        <p className="text-[11px] text-muted mb-2 leading-relaxed">
-          Sample <code>N</code> random ISO calendar weeks (Mon–Sun) per month
-          from an uploaded full-year hourly profile — e.g. 1 week/month →
-          12 × 168 = <span className="font-mono">2016</span> snapshots instead
-          of 8760. Each sampled hour is weighted by{' '}
-          <code>days-in-month / (weeks × 7)</code> so dispatch, cost and
-          emissions still aggregate to a full year.{' '}
-          {!snap?.can_sample_weeks && (
-            <span className="text-warn">
-              Disabled — upload a full-year hourly profile on the Time Series
-              page first.
-            </span>
-          )}
-        </p>
-        <div className="flex items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted">Weeks / month</span>
-            <input
-              type="number" min={1} max={5} step={1} value={sampleNWeeks}
-              onChange={e => setSampleNWeeks(e.target.value)}
-              className="w-24 px-2 py-1 border border-border rounded text-xs bg-bg font-mono"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted">Seed (optional)</span>
-            <input
-              type="number" placeholder="random" value={sampleSeed}
-              onChange={e => setSampleSeed(e.target.value)}
-              title="Fix the RNG seed for reproducible sampling — leave blank for a fresh random draw"
-              className="w-28 px-2 py-1 border border-border rounded text-xs bg-bg font-mono"
-            />
-          </label>
-          <button
-            onClick={onSampleWeeks}
-            disabled={!snap?.can_sample_weeks || sampleWeeks.isPending}
-            className="px-3 py-1.5 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
-          >
-            {sampleWeeks.isPending
-              ? 'Sampling…'
-              : sampledWeeks.length > 0 ? 'Re-sample' : 'Sample weeks'}
-          </button>
-        </div>
-        {sampledWeeks.length > 0 && (
-          <div className="border border-border rounded overflow-auto max-h-48 mt-2">
-            <table className="w-full text-[11px] border-collapse" style={{ minWidth: 340 }}>
-              <thead className="sticky top-0 bg-bg-2 z-10">
-                <tr className="border-b border-border">
-                  <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Month</th>
-                  <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">ISO week</th>
-                  <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Range</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Weight</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sampledWeeks.map((w, i) => (
-                  <tr key={`${w.month}-${w.iso_week}-${i}`} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
-                    <td className="px-2 py-1 font-mono">
-                      {new Date(2000, w.month - 1, 1).toLocaleString('en-US', { month: 'short' })}
-                    </td>
-                    <td className="px-2 py-1 font-mono">W{w.iso_week}</td>
-                    <td className="px-2 py-1 font-mono text-muted">
-                      {w.start.slice(0, 10)} → {w.end.slice(0, 10)}
-                    </td>
-                    <td className="px-2 py-1 font-mono text-right">{w.weight.toFixed(2)}×</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+        <StepSampling
+          canSampleWeeks={Boolean(snap?.can_sample_weeks)}
+          sampleNWeeks={sampleNWeeks}
+          onSampleNWeeksChange={setSampleNWeeks}
+          sampleSeed={sampleSeed}
+          onSampleSeedChange={setSampleSeed}
+          onSampleWeeks={onSampleWeeks}
+          sampleWeeksPending={sampleWeeks.isPending}
+          sampledWeeks={sampledWeeks}
+        />
       )}
 
       {/* ── 4. Snapshot weightings (always shown) ────────────── */}
+      {/* Task 4: moved to modelHorizon/StepWeights.tsx. The bulk apply-to-all
+          control stays in the main step body; the CSV controls and the
+          paginated per-row table (unusable as an always-visible element at
+          8,760-row scale) render behind StepShell's `advanced` slot — see
+          the `advanced` prop on <StepShell> below for the composition. */}
       {view === 'weights' && snap && snap.weightings && snap.weightings.length > 0 && (
-        <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Snapshot weightings</h3>
-          <p className="text-[11px] text-muted mb-2 leading-relaxed">
-            Per-snapshot weight in the LP objective and storage SoC equations.
-            Default <code>1</code>. For representative-day workflows set
-            <code> all</code> to the number of days each snapshot represents
-            (e.g. <code>30</code> for one typical day × 30 days). Use CSV for
-            hourly horizons where row-by-row editing isn't practical.
-          </p>
-
-          {/* Apply-to-all row */}
-          <div className="flex items-center gap-2 mb-2">
-            <input
-              type="number"
-              step="0.1"
-              min={0}
-              placeholder="Apply to all (e.g. 30)"
-              value={bulkWeight}
-              onChange={e => setBulkWeight(e.target.value)}
-              className="flex-1 px-2 py-1 border border-border rounded text-xs bg-bg font-mono"
-            />
-            <button
-              disabled={!bulkWeight || applyBulkWeight.isPending}
-              onClick={() => {
-                const v = parseFloat(bulkWeight)
-                if (!Number.isFinite(v) || v < 0) {
-                  toast.error('Enter a non-negative number')
-                  return
-                }
-                confirmToast(
-                  `Set every snapshot weight to ${v}? This overwrites all per-row edits.`,
-                  () => applyBulkWeight.mutate(v),
-                  { confirmLabel: 'Apply' },
-                )
-              }}
-              className="px-2 py-1 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
-            >
-              {applyBulkWeight.isPending ? 'Applying…' : 'Apply to all'}
-            </button>
-          </div>
-
-          {/* CSV import/export row */}
-          <div className="flex items-center gap-2 mb-2">
-            <button
-              onClick={onDownloadCsv}
-              className="flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] hover:border-accent hover:text-accent"
-              title="Download all snapshot weightings as CSV"
-            ><Download size={11} /> Download CSV</button>
-            <button
-              onClick={() => csvUploadRef.current?.click()}
-              className="flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] hover:border-accent hover:text-accent"
-              title="Upload edited CSV to overwrite weights"
-            ><Upload size={11} /> Upload CSV</button>
-            <input
-              ref={csvUploadRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={e => {
-                onUploadCsv(e.target.files?.[0])
-                if (csvUploadRef.current) csvUploadRef.current.value = ''
-              }}
-            />
-            <span className="text-[10px] text-muted">
-              Columns: <code>snapshot</code>, <code>objective</code>, <code>generators</code>, <code>stores</code>
-            </span>
-          </div>
-
-          {/* Per-row table — paginated so 8760-hour horizons are reachable */}
-          <div className="border border-border rounded overflow-auto max-h-64">
-            <table className="w-full text-xs border-collapse" style={{ minWidth: snapshotsAreMulti ? 560 : 480 }}>
-              <thead className="sticky top-0 bg-bg-2 z-10">
-                <tr className="border-b border-border">
-                  {snapshotsAreMulti && (
-                    <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Period</th>
-                  )}
-                  <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Snapshot</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Objective</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Generators</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Stores</th>
-                </tr>
-              </thead>
-              <tbody>
-                {weightingRows.map((row, i) => (
-                  <tr key={row.key} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
-                    {snapshotsAreMulti && (
-                      <td className="px-2 py-1 font-mono text-[11px]">{row.period}</td>
-                    )}
-                    <td className="px-2 py-1 font-mono text-[11px] whitespace-nowrap">{row.iso}</td>
-                    <td className="px-2 py-1 text-right">
-                      <input
-                        key={`sw-${row.key}-${row.objective}`}
-                        type="number"
-                        step="0.1"
-                        min={0}
-                        defaultValue={row.objective.toFixed(2)}
-                        // Disabled while the shared per-snapshot mutation is
-                        // in flight — same double-blur race protection as
-                        // the per-period table above. Cosmetic only.
-                        disabled={updateOneWeight.isPending}
-                        onBlur={e => {
-                          const v = parseFloat(e.target.value)
-                          if (!Number.isFinite(v) || v < 0) {
-                            e.target.value = row.objective.toFixed(2)
-                            return
-                          }
-                          if (v !== row.objective) {
-                            updateOneWeight.mutate({ key: row.key, objective: v })
-                          }
-                        }}
-                        className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
-                      />
-                    </td>
-                    <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
-                      {row.generators.toFixed(2)}
-                    </td>
-                    <td className="px-2 py-1 font-mono text-[11px] text-right text-muted">
-                      {row.stores.toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination footer — only shown when there's more than one page */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-1.5 text-[10px] text-muted">
-              <span>
-                Rows {pageStart + 1}–{pageEnd} of {totalWeightings}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  disabled={page === 0}
-                  onClick={() => setPage(p => Math.max(0, p - 1))}
-                  className="px-1.5 py-0.5 border border-border rounded hover:border-accent hover:text-accent disabled:opacity-30"
-                >← Prev</button>
-                <span>Page {page + 1} / {totalPages}</span>
-                <button
-                  disabled={page >= totalPages - 1}
-                  onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
-                  className="px-1.5 py-0.5 border border-border rounded hover:border-accent hover:text-accent disabled:opacity-30"
-                >Next →</button>
-              </div>
-            </div>
-          )}
-        </section>
+        <StepWeights
+          bulkWeight={bulkWeight}
+          onBulkWeightChange={setBulkWeight}
+          onApplyBulkWeight={v => applyBulkWeight.mutate(v)}
+          applyBulkWeightPending={applyBulkWeight.isPending}
+        />
       )}
           </StepShell>
         </div>

@@ -206,15 +206,18 @@ it('PATCHes a multi-period weight edit with a period-qualified key, not a bare I
   // (guided-step restructure, Task 3) — open the "Snapshot weightings" step
   // to mount the section this test exercises.
   await openStep(/Snapshot weightings/)
+  await screen.findByRole('heading', { name: 'Snapshot weightings' })
 
-  const heading = await screen.findByRole('heading', { name: 'Snapshot weightings' })
-  const section = heading.closest('section')
-  if (!section) throw new Error('Snapshot weightings section not found')
+  // Task 4: the per-row table moved behind StepShell's Advanced disclosure
+  // (collapsed by default — see the "collapses the weights Advanced
+  // disclosure" test below), so it must be opened before the table exists.
+  await userEvent.click(screen.getByText('Advanced'))
 
-  // Scoped to this section only — the multi-period config section above ALSO
-  // renders a "2030" period label (investment-year chip + its own weightings
-  // table), so an unscoped text query would be ambiguous.
-  const rows = within(section).getAllByRole('row')
+  // Scoped to the table itself — the StatCard strip above also renders the
+  // literal text "2030" (in the Mode card's "2 investment periods · 2030,
+  // 2050" sub-label), so an unscoped row/text query would be ambiguous.
+  const table = await screen.findByRole('table')
+  const rows = within(table).getAllByRole('row')
   const row2030 = rows.find(r => within(r).queryByText('2030'))
   if (!row2030) throw new Error('row for period 2030 not found in Snapshot weightings table')
 
@@ -396,6 +399,28 @@ it('shows four rail entries in single-period mode, six in multi-period', async (
 // physically could not land on an empty screen. The rail now lists
 // Economics and Snapshot window as clickable regardless of period count,
 // so both steps must give the user a way out rather than rendering blank.
+
+// ── 6. Weights step: Advanced disclosure gates the per-row table (Task 4) ─
+// The per-row table is unusable at 8,760-row scale, so Task 4 moves it (plus
+// the CSV controls) behind StepShell's `advanced` disclosure. It must be
+// collapsed on arrival — the table must not even be mounted, not just
+// visually hidden — and only mount once the user opens "Advanced".
+
+it('collapses the weights Advanced disclosure by default, mounting the per-row table only once opened', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(flatSnapshots()) // count: 3, configured
+
+  renderPage()
+  await openStep(/Snapshot weightings/)
+
+  await screen.findByRole('heading', { name: 'Snapshot weightings' })
+  // Collapsed by default: the per-row table must not be in the document yet.
+  expect(screen.queryByRole('table')).toBeNull()
+  expect(screen.getByText('Advanced')).not.toBeNull()
+
+  await userEvent.click(screen.getByText('Advanced'))
+
+  expect(await screen.findByRole('table')).not.toBeNull()
+})
 
 it('gives Economics and Window an actionable way out at zero investment years, not a blank frame', async () => {
   vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots()) // count: 2, configured

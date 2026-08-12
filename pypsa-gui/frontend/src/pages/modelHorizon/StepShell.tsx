@@ -13,7 +13,19 @@
 // section JSX unchanged; Tasks 4/5 will hand it step-specific extracted
 // components instead. `advanced` is unused as of Task 3 (no caller passes it
 // yet) — it exists so Tasks 4/5 don't have to touch this file to use it.
-import type { ReactNode } from 'react'
+//
+// Task 4 note: the disclosure is a CONTROLLED <details> (`open`/`onToggle`
+// wired to local state), not a bare uncontrolled one, and `advanced` is only
+// spliced into the tree while that state is true. A plain uncontrolled
+// <details> only hides its content visually/from the accessibility tree in a
+// real layout engine — jsdom has none, so `advanced`'s content (e.g. an
+// 8,760-row table) would sit in the DOM, and be findable by
+// `getByRole`, even while collapsed. The advanced slot exists specifically
+// to keep large content OUT of the tree until asked for, so that has to be
+// true under test as well as in a browser. Local state also resets to
+// closed on every step change, so a step never inherits another step's
+// disclosure state.
+import { useEffect, useState, type ReactNode } from 'react'
 import type { HorizonStepId } from '../modelHorizonModel'
 
 /** Rail label for each step id. The single source of truth for step wording —
@@ -48,6 +60,15 @@ export interface StepShellProps {
 }
 
 export function StepShell({ steps, current, onSelect, title, children, advanced }: StepShellProps) {
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  // A step switch (e.g. clicking a rail entry) reuses this same StepShell
+  // instance — it never unmounts between steps — so without this, opening
+  // Advanced on one step would leave it open when the user navigates to a
+  // different step that also has advanced content.
+  useEffect(() => {
+    setAdvancedOpen(false)
+  }, [current])
+
   return (
     <div className="flex flex-col gap-3.5">
       <nav
@@ -76,9 +97,13 @@ export function StepShell({ steps, current, onSelect, title, children, advanced 
         <h2 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">{title}</h2>
         {children}
         {advanced && (
-          <details className="mt-3 border border-border rounded text-[11px]">
+          <details
+            className="mt-3 border border-border rounded text-[11px]"
+            open={advancedOpen}
+            onToggle={e => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
+          >
             <summary className="px-3 py-2 cursor-pointer text-muted hover:text-text select-none">Advanced</summary>
-            <div className="px-3 py-2">{advanced}</div>
+            {advancedOpen && <div className="px-3 py-2">{advanced}</div>}
           </details>
         )}
       </section>
