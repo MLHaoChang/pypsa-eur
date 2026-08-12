@@ -133,3 +133,66 @@ def test_enqueuing_through_the_route_persists_the_row(
     assert row is not None, "the enqueue route did not persist the job"
     assert row.project_id == "Durable"
     assert row.enqueued_by_user_id is not None, "the acting user was not stamped"
+
+
+def test_record_enqueued_refuses_a_non_uuid_actor_loudly():
+    """
+    Review round 1, Important 1: `enqueued_by_user_id` binds into the SAME
+    `Uuid(as_uuid=True)` column type as `job.id`, but was left un-annotated and
+    unguarded — a `str` or `int` actor hits the identical `value.hex` ->
+    `AttributeError` -> `StatementError` -> `except SQLAlchemyError` ->
+    logged-and-swallowed path the `job.id` guard exists to close, one column
+    over. Demonstrated here the same way the reviewer demonstrated the hole:
+    a dashed-string actor id (the shape a value takes arriving off a
+    serialized payload, not a typed parameter — the exact shape Task 12's
+    review flagged) and a bare int both must raise loudly, and neither may
+    reach the table.
+    """
+    import pytest
+
+    for bad_actor in (str(uuid.uuid4()), 7):
+        job = SolveJob(id=uuid.uuid4(), project_id="BadActor", enqueued_at=time.time())
+        with pytest.raises(TypeError, match="UUID"):
+            solve_job_store.record_enqueued(
+                job, enqueued_by_user_id=bad_actor, solver_config_json=None,
+            )
+        assert _row(job.id) is None, (
+            f"a row was written for actor={bad_actor!r} despite the raised TypeError"
+        )
+
+
+def test_aborting_a_queued_job_persists_as_aborted():
+    """
+    Review round 1, Important 2: cancelling a still-QUEUED job never enters
+    `_run_job` — the dispatcher pops it, sees `cancelled`, and `continue`s
+    straight past both `record_status` call sites there. `abort()` was the
+    ONLY code path that flips a queued job to `aborted`, and it never mirrored
+    that transition to the table — so the row stayed `status="queued"`
+    forever. That matters because boot reconciliation (a later task in this
+    increment) re-enqueues everything the table still shows as `queued`:
+    without this mirror, restarting the process would resurrect a job the
+    user explicitly cancelled.
+
+    Exercises `SolveQueue.abort()` directly on a job seeded straight into
+    `_jobs`/`_order`, without ever touching the dispatcher thread or `_q` —
+    deterministic by construction, not by timing a real background solve.
+    """
+    from services.solve_queue import SolveQueue
+
+    sq = SolveQueue()
+    jid = uuid.uuid4()
+    job = SolveJob(id=jid, project_id="CancelMe", enqueued_at=time.time())
+    sq._jobs[jid] = job
+    sq._order.append(jid)
+    solve_job_store.record_enqueued(job, enqueued_by_user_id=None, solver_config_json=None)
+    assert _row(jid).status == "queued"
+
+    result = sq.abort(jid)
+
+    assert result["status"] == "aborted"
+    row = _row(jid)
+    assert row is not None
+    assert row.status == "aborted", (
+        "abort() of a queued job never reached the table — a restart would "
+        "resurrect a job the user explicitly cancelled"
+    )

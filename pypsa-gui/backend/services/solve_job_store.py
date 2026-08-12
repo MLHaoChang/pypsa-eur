@@ -31,7 +31,9 @@ def _dt(epoch: float | None) -> datetime | None:
     return None if epoch is None else datetime.fromtimestamp(epoch, tz=timezone.utc)
 
 
-def record_enqueued(job: Any, *, enqueued_by_user_id, solver_config_json: str | None) -> None:
+def record_enqueued(
+    job: Any, *, enqueued_by_user_id: uuid.UUID | None, solver_config_json: str | None
+) -> None:
     """
     Insert the row for a freshly created job.
 
@@ -49,14 +51,25 @@ def record_enqueued(job: Any, *, enqueued_by_user_id, solver_config_json: str | 
     `value.hex`, and the resulting `AttributeError` would be logged as an
     operational blip while every row silently went unwritten — a silent
     data-loss mode wearing a log line. So the catch is narrowed to
-    `SQLAlchemyError`, and the id is type-checked UP FRONT, before SQLAlchemy
+    `SQLAlchemyError`, and BOTH uuid columns this function writes — `job.id`
+    AND `enqueued_by_user_id` — are type-checked UP FRONT, before SQLAlchemy
     can wrap the mistake in a `StatementError` that the narrowed catch would
-    then swallow anyway.
+    then swallow anyway. `enqueued_by_user_id` binds into the same
+    `Uuid(as_uuid=True)` processor as `job.id`; a caller passing a `str` or an
+    `int` here (a dashed-string user id off a serialized payload, say) hits
+    the exact `value.hex` -> `AttributeError` -> swallowed-and-logged path
+    this module exists to close, one column over from the one already guarded.
     """
     if not isinstance(job.id, uuid.UUID):
         raise TypeError(
             f"solve_jobs.id is a UUID column; got {type(job.id).__name__} "
             f"({job.id!r}). A SolveJob must carry a uuid.UUID id."
+        )
+    if enqueued_by_user_id is not None and not isinstance(enqueued_by_user_id, uuid.UUID):
+        raise TypeError(
+            "solve_jobs.enqueued_by_user_id is a UUID column; got "
+            f"{type(enqueued_by_user_id).__name__} ({enqueued_by_user_id!r}). "
+            "Pass a uuid.UUID or None."
         )
     try:
         from db.models import SolveJobRow

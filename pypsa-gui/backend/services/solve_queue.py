@@ -272,6 +272,24 @@ class SolveQueue:
                 job.status = "aborted"
                 job.finished_at = time.time()
             pub = job.to_public(self._position_locked(job_id))
+        # Mirror to the table OUTSIDE `_lock`, same discipline as `_run_job`.
+        # A QUEUED job cancelled here never reaches `_run_job` at all — the
+        # dispatcher pops it, sees `cancelled`, and `continue`s straight past
+        # both `record_status` call sites in `_run_job` — so this is the ONLY
+        # place that terminal transition is ever persisted. Without it the row
+        # stays `status="queued"` forever, and boot reconciliation (which
+        # re-enqueues everything still `queued`) would resurrect a job the
+        # user explicitly cancelled. Unconditional, not gated on which branch
+        # fired above: for a RUNNING job this just re-mirrors the still-current
+        # `running` status (idempotent, and cheap insurance against drift);
+        # for a job with no row yet (never went through the router) it is a
+        # harmless no-op (`record_status` returns early on a missing row).
+        try:
+            from services import solve_job_store
+
+            solve_job_store.record_status(job)
+        except Exception:  # noqa: BLE001 — bookkeeping must not fail an abort
+            logger.exception("solve_queue: could not persist job %s", job.id)
         # Signal outside the lock — stop_event.set() never blocks, but keep the
         # discipline that no external call happens while holding _lock.
         if ev is not None:
