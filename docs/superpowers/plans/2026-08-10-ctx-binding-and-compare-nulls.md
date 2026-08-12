@@ -1023,6 +1023,143 @@ zero still renders 0.0 MWh."
 
 ---
 
+### Task 8: a failed curtailment computation must not report as a measured zero
+
+> **Added 2026-08-12 by ruling**, from the whole-branch review's parked Minor 2. Scope ruled: the empty-result case only — no schema change, no frontend wiring.
+
+**Files:**
+- Modify: `backend/routers/compare.py` — `_compute_curtailment_summary` (:2183), its per-generator loop and its `if not curt_by_carrier` return
+- Test: `backend/tests/test_compare_availability.py`
+
+**Interfaces:**
+- Produces: nothing new. `CurtailmentComparison`'s shape is unchanged; only the value of `available` on one branch changes.
+
+Background: six `continue` paths in the per-generator loop converge on `if not curt_by_carrier: return CurtailmentComparison(available=True)`. Three of them are failures rather than legitimate skips, so a computation that never succeeded is reported as a measured zero — the same conflation Task 7 fixed for lost load.
+
+| Path | Condition | Nature |
+|---|---|---|
+| 1 | `g not in gens.index` | legitimate |
+| 2 | `g not in p_max_pu_t.columns` | legitimate — thermal, no profile |
+| 3 | `not isfinite(eff_cap.max())` | **failure** |
+| 3b | `eff_cap.max() <= 1e-9` | legitimate — no capacity |
+| 4 | `except Exception` around the reindex | **failure** |
+| 5 | `not isfinite(total_c) or not isfinite(total_a)` | **failure** |
+| 6 | `total_a <= 1e-9` | legitimate — no available energy |
+
+Note paths 3 and 3b are currently ONE condition joined by `or`, and the existing in-code comment names only 4 and 5 — the `isfinite` half of 3 is a third failure path nobody has listed. Splitting it is part of this task.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `backend/tests/test_compare_availability.py`. Both directions, on the same shape — a test asserting only the failure direction would pass against code that always reports `False`:
+
+```python
+def test_curtailment_is_unavailable_when_every_generator_failed_to_compute():
+    # A solved network whose only profiled generator raises inside the loop:
+    # the result is empty because nothing COULD be computed, not because
+    # there was nothing to curtail.
+    ...
+    assert block.available is False, (
+        "an empty result caused by a computation failure is not a measured "
+        "zero — see ADR-0001"
+    )
+
+
+def test_curtailment_is_a_real_zero_when_every_skip_was_legitimate():
+    # A solved network whose generators are all thermal (no p_max_pu column
+    # of their own), so every skip is path 2. Nothing failed; zero is the
+    # real answer.
+    ...
+    assert block.available is True
+```
+
+For the failure case, prefer forcing a genuine non-finite total (path 5) over monkeypatching an exception — inject a NaN into the dispatch or `p_max_pu` frame for the one profiled generator. That exercises real arithmetic rather than a mock, and it is the path most likely to occur in the field. Read the existing curtailment tests in this file (`test_curtailment_is_a_real_zero_on_a_solved_network_with_no_generators_at_all`, and the two structurally-empty ones) and follow their fixture style.
+
+- [ ] **Step 2: Run them and watch the first fail**
+
+```bash
+pixi run gui-tests tests/test_compare_availability.py -v
+```
+
+Expected: `test_curtailment_is_unavailable_when_every_generator_failed_to_compute` FAILS — the block currently returns `available=True`. The legitimate-skip test should already PASS.
+
+- [ ] **Step 3: Count the failures, and split path 3**
+
+In `_compute_curtailment_summary`, before the `for g in p_t.columns:` loop:
+
+```python
+    # Distinguishes "nothing to curtail" from "nothing could be computed".
+    # Both leave curt_by_carrier empty; only the first is a measured zero.
+    failed = 0
+```
+
+Split the effective-capacity guard so only the non-finite half counts as a failure, and mark the other two failure paths:
+
+```python
+        eff_cap = _effective_capacity_series(g)
+        eff_max = float(eff_cap.max())
+        if not _math.isfinite(eff_max):
+            failed += 1          # a computed capacity that is NaN/inf is a failure
+            continue
+        if eff_max <= 1e-9:
+            continue             # genuinely no capacity — a legitimate skip
+        try:
+            disp = p_t[g].reindex(sns).fillna(0.0).astype(float)
+            pmu = p_max_pu_t[g].reindex(sns).fillna(0.0).astype(float)
+        except Exception:
+            failed += 1
+            continue
+```
+
+and at the weighted totals:
+
+```python
+        if not _math.isfinite(total_c) or not _math.isfinite(total_a):
+            failed += 1
+            continue
+        if total_a <= 1e-9:
+            continue             # no available energy — a legitimate skip
+```
+
+Leave paths 1, 2 and 6 exactly as they are.
+
+- [ ] **Step 4: Make the empty return tell the truth**
+
+```python
+    if not curt_by_carrier:
+        return CurtailmentComparison(available=(failed == 0))
+```
+
+Rewrite the comment above it: it currently claims only the bare `except` and the non-finite-total check are failures, and it says the case "needs a ruling". Both are now out of date. State the six paths, which three are failures, and that `available` follows `failed == 0`.
+
+- [ ] **Step 5: Verify**
+
+```bash
+pixi run gui-tests tests/test_compare_availability.py -v
+pixi run gui-tests -k "compare or curtailment" -v
+```
+
+Prove the new test is not vacuous: hardcode `available=True` on that return, confirm the failure test goes RED, revert, confirm GREEN.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git status --short
+git add backend/routers/compare.py backend/tests/test_compare_availability.py
+git commit -m "fix(compare): a failed curtailment computation is not a measured zero
+
+Six continue paths converge on the empty-result return and three are
+failures, not legitimate skips: a non-finite effective capacity, the bare
+except around the reindex, and a non-finite weighted total. All three left
+available=True, so a computation that never succeeded reported as a real
+zero — the same conflation Task 7 fixed for lost load.
+
+available now follows failed == 0. The effective-capacity guard is split so
+only its non-finite half counts; a genuinely zero capacity stays a
+legitimate skip. Paths 1, 2 and 6 are unchanged."
+```
+
+---
+
 ## Out of scope — deliberately parked
 
 Recorded so a reviewer does not read these as omissions:
