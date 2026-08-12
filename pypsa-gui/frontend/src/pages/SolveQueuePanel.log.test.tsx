@@ -5,7 +5,7 @@
 // results bundle: a failed job's output was unreachable from the panel, and a
 // running job's log could only be read by being on the project that owned it.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { act, render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { SolveJob, SolveJobStatus } from '../api/solveQueue'
@@ -82,5 +82,124 @@ describe('SolveQueuePanel log expansion', () => {
     await userEvent.click(screen.getByTitle('Show this job’s log'))
     await waitFor(() => expect(screen.getByText('solver: infeasible')).toBeTruthy())
     expect(jobLogHistory).toHaveBeenCalledWith(5)
+  })
+})
+
+// ── Live stream (running row) ───────────────────────────────────────────────
+// jsdom has no EventSource. This repo's own idiom for that gap (vitest.setup.ts
+// — ResizeObserver, window.matchMedia, Element.scrollIntoView) is to stub the
+// missing browser API rather than leave the dependent code path untested, so a
+// FakeEventSource is used here the same way.
+class FakeEventSource {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSED = 2
+  static instances: FakeEventSource[] = []
+  url: string
+  readyState: number = FakeEventSource.OPEN
+  onmessage: ((e: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  private listeners: Record<string, Array<(e: { data: string }) => void>> = {}
+
+  constructor(url: string) {
+    this.url = url
+    FakeEventSource.instances.push(this)
+  }
+  addEventListener(type: string, cb: (e: { data: string }) => void) {
+    (this.listeners[type] ??= []).push(cb)
+  }
+  close() { this.readyState = FakeEventSource.CLOSED }
+  emitMessage(data: string) { this.onmessage?.({ data }) }
+  emitDone(data: unknown) {
+    const ev = { data: JSON.stringify(data) }
+    this.listeners.done?.forEach(cb => cb(ev))
+  }
+  emitError() { this.onerror?.() }
+}
+
+describe('SolveQueuePanel live log stream', () => {
+  beforeEach(() => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('opens the job’s own stream for a running row, appends live lines, and closes on done', async () => {
+    jobs = [job('running')]
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+
+    const es = FakeEventSource.instances[0]
+    expect(es?.url).toBe('/api/simulation/queue/5/log_stream')
+
+    act(() => { es.emitMessage('solver: iteration 1') })
+    act(() => { es.emitMessage('solver: iteration 2') })
+    expect(screen.getByText(/solver: iteration 1/)).toBeTruthy()
+    expect(screen.getByText(/solver: iteration 2/)).toBeTruthy()
+    // The stream is the ONLY history source while live (Deviation 2 in the
+    // task report) — a running row must never also hit the REST endpoint.
+    expect(jobLogHistory).not.toHaveBeenCalled()
+
+    act(() => { es.emitDone({ status: 'completed' }) })
+    expect(es.readyState).toBe(FakeEventSource.CLOSED)
+  })
+
+  it('tolerates a transient error while the job is confirmed still running', async () => {
+    // Review Important 1 — a naive `onerror = () => es.close()` froze the log
+    // permanently on the first blip. This pins the fix's tolerant branch: a
+    // stale gap that the job's own status says is still `running` must NOT
+    // surface an error or close the connection.
+    jobs = [job('running')]
+    jobLogHistory.mockResolvedValue({ lines: [], status: 'running' })
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+    const es = FakeEventSource.instances[0]
+
+    act(() => { es.emitMessage('solver: iteration 1') })
+    now.mockReturnValue(1_000 + 31_000) // past STALE_MS since the last event
+    act(() => { es.emitError() })
+
+    await waitFor(() => expect(jobLogHistory).toHaveBeenCalledWith(5))
+    expect(screen.queryByText(/Log stream lost/)).toBeNull()
+    expect(es.readyState).not.toBe(FakeEventSource.CLOSED)
+  })
+
+  it('gives up once the job is confirmed no longer running, closing the stream', async () => {
+    // The other half of the same branch: once the authoritative check says
+    // the job has actually finished, the panel must stop silently freezing
+    // and instead say so — `live` flipping false on the next queue poll then
+    // re-fetches the authoritative retained log via the other branch.
+    jobs = [job('running')]
+    jobLogHistory.mockResolvedValue({ lines: [], status: 'completed' })
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+    const es = FakeEventSource.instances[0]
+
+    act(() => { es.emitMessage('solver: iteration 1') })
+    now.mockReturnValue(1_000 + 31_000)
+    act(() => { es.emitError() })
+
+    await waitFor(() => expect(screen.getByText('Log stream lost — the job has since finished.')).toBeTruthy())
+    expect(es.readyState).toBe(FakeEventSource.CLOSED)
+  })
+
+  it('reports an immediate loss once the browser’s own reconnect budget is exhausted', async () => {
+    // readyState CLOSED means the browser has already given up retrying —
+    // unlike a transient error, nothing further can arrive, so this must NOT
+    // wait for STALE_MS or consult jobLogHistory before saying so.
+    jobs = [job('running')]
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+    const es = FakeEventSource.instances[0]
+    es.readyState = FakeEventSource.CLOSED
+
+    act(() => { es.emitError() })
+    expect(screen.getByText('Log stream lost before the job finished.')).toBeTruthy()
+    expect(jobLogHistory).not.toHaveBeenCalled()
   })
 })

@@ -171,9 +171,55 @@ function JobLogPanel({ jobId, live }: { jobId: number; live: boolean }) {
     // since lines are plain strings joined into a `<pre>`, not React-keyed.
     setLines([])
     const es = new EventSource(solveQueueApi.jobLogStreamUrl(jobId))
-    es.onmessage = (e) => { if (!cancelled) setLines(prev => [...prev, e.data]) }
-    es.addEventListener('done', () => es.close())
-    es.onerror = () => es.close()
+    let doneReceived = false
+    let lastEventAt = Date.now()
+    // Mirrors `createLogStream` (api/simulation.ts:567-621) — EventSource
+    // auto-reconnects on a transient error (browser sleep, a network blip, a
+    // server hiccup) unless the app closes it. Closing on the FIRST error, as
+    // this branch originally did, silently freezes the log at whatever had
+    // arrived so far: no more lines, no indication anything is wrong, and the
+    // row keeps reading as "live". That is the exact anti-pattern this file's
+    // sibling documents fixing once already — only declare the stream dead
+    // once no event has arrived for STALE_MS, and even then verify with the
+    // job's own status before giving up: a long native-solver phase can be
+    // silent for a while and looks identical to a lost connection.
+    const STALE_MS = 30_000
+    es.onmessage = (e) => {
+      if (cancelled) return
+      lastEventAt = Date.now()
+      setLines(prev => [...prev, e.data])
+    }
+    es.addEventListener('done', () => { doneReceived = true; es.close() })
+    es.onerror = () => {
+      if (cancelled || doneReceived) return
+      if (es.readyState === EventSource.CLOSED) {
+        // The browser's own reconnect budget is already exhausted — nothing
+        // further will arrive on this connection, unlike a transient error.
+        setError('Log stream lost before the job finished.')
+        return
+      }
+      if (Date.now() - lastEventAt > STALE_MS) {
+        solveQueueApi.jobLogHistory(jobId)
+          .then(r => {
+            if (cancelled) return
+            if (r.status === 'running') {
+              // Still running — the quiet spell was a real solver phase, not
+              // a dead connection. Let the browser keep retrying.
+              lastEventAt = Date.now()
+            } else {
+              // The job finished while the stream was stuck. `live` will flip
+              // to false on the next queue poll and re-fetch the authoritative
+              // retained log via the branch above; surface the gap in the
+              // meantime rather than leaving a frozen "live" view.
+              es.close()
+              setError('Log stream lost — the job has since finished.')
+            }
+          })
+          .catch(() => {
+            if (!cancelled) setError('Log stream silent and unreachable — connection lost.')
+          })
+      }
+    }
     return () => { cancelled = true; es.close() }
   }, [jobId, live])
 
