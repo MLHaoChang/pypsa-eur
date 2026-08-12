@@ -5,16 +5,18 @@ Thin layer over `services.solve_queue.solve_queue` — the dispatcher singleton
 owns all state and threading. Mounted under `/api/simulation/queue` in main.py.
 
 Endpoints:
-    POST   /api/simulation/queue                 enqueue a saved project
-    GET    /api/simulation/queue                  list all jobs (FIFO order)
-    POST   /api/simulation/queue/{job_id}/abort   abort running / cancel queued
-    POST   /api/simulation/queue/clear_finished   drop terminal jobs from listing
+    POST   /api/simulation/queue                        enqueue a saved project
+    GET    /api/simulation/queue                        list all jobs (FIFO order)
+    GET    /api/simulation/queue/{job_id}/log_history   a job's log lines so far
+    GET    /api/simulation/queue/{job_id}/log_stream    SSE live tail of a job's log
+    POST   /api/simulation/queue/{job_id}/abort         abort running / cancel queued
+    POST   /api/simulation/queue/clear_finished         drop terminal jobs from listing
 
-AUTHORIZATION. All four routes take `db`/`user` and authorize against the
-caller. Three of them did not until P-1, and the queue is a PROCESS-GLOBAL
-singleton shared by every org — see the per-route docstrings for what each one
-now refuses, and `_may_see` / `_may_abort` for the two different boundaries
-they use and why they differ.
+AUTHORIZATION. All six routes take `db`/`user` and authorize against the
+caller. Three of the original four did not until P-1, and the queue is a
+PROCESS-GLOBAL singleton shared by every org — see the per-route docstrings
+for what each one now refuses, and `_may_see` / `_may_abort` for the two
+different boundaries they use and why they differ.
 """
 from __future__ import annotations
 
@@ -288,9 +290,13 @@ async def job_log_stream(
     DUPLICATE at the seam (a line already in `history()` may also arrive again
     via the live deque) — the correct direction: the legacy
     `/api/simulation/log_stream` documents the same choice already
-    (`routers/simulation.py:912-914`, duplicate-prone rather than gap-prone),
-    and the frontend's history/live de-dupe (tracking the last-seen tail)
-    already absorbs it.
+    (`routers/simulation.py:912-914`, duplicate-prone rather than gap-prone).
+    That duplicate window is tiny by comparison — `subscribe()` and
+    `history()` are adjacent statements with no I/O between them, so at most
+    one line can land in it — and harmless regardless of size: every consumer
+    (`SolveQueuePanel.tsx`'s `JobLogPanel`) renders lines as plain strings
+    into a `<pre>`, not React-keyed and not de-duplicated, so a repeated line
+    is just a repeated row.
 
     Termination is therefore the job's own status, not a sentinel: stop once
     the job is terminal AND the deque has drained, then emit `done`. A job
@@ -334,6 +340,16 @@ async def job_log_stream(
                     continue
                 snapshot = solve_queue.get_job(job_id) or {}
                 if not snapshot or snapshot.get("status") in _TERMINAL:
+                    # The producer's guarantee is "put lines, then flip status":
+                    # by the time `status` reads as terminal, every line the
+                    # solve emitted has already been queued. But there is a GIL
+                    # switch point between the `while dq` drain above and this
+                    # status read, wide enough for that final `put()` to land
+                    # in it — so drain once more before stopping, or the tail
+                    # (often the `[PHASE] Failed: ...` / `TRACEBACK: ...` lines)
+                    # is silently dropped.
+                    while dq:
+                        yield _sse_line(dq.popleft())
                     break
                 await asyncio.sleep(0.25)
         finally:

@@ -149,6 +149,22 @@ def test_the_log_endpoints_404_for_a_caller_who_may_not_see_the_job(
         "99999", str(job["id"])
     )
 
+    # `/log_stream`'s half of R18: the authorization check
+    # (`_visible_job_or_404`) runs in the endpoint body BEFORE
+    # `StreamingResponse` is constructed, so a caller who may not see the job
+    # gets a genuine 404 here too — never a 200 whose stream errors instead.
+    # A plain (non-streaming) GET is enough to prove this: if the check ever
+    # moved inside `generate()`, this request would come back 200 with an
+    # `event: done` / error frame rather than 404, and this assertion would
+    # catch it.
+    theirs_stream = other_org_client.get(f"/api/simulation/queue/{job['id']}/log_stream")
+    assert theirs_stream.status_code == 404, theirs_stream.text
+    missing_stream = other_org_client.get("/api/simulation/queue/99999/log_stream")
+    assert missing_stream.status_code == 404
+    assert theirs_stream.json()["detail"] == missing_stream.json()["detail"].replace(
+        "99999", str(job["id"])
+    )
+
 
 def test_the_log_stream_serves_history_then_done_and_leaves_no_subscriber(
     client, install_network, tmp_projects_dir, monkeypatch,
