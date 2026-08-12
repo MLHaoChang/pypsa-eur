@@ -72,6 +72,16 @@ export const solveQueueApi = {
       `/projects/${encodeURIComponent(name)}/results_bundle`,
       source ? { params: { source } } : undefined,
     ).then(r => (r.status === 204 ? null : r.data)),
+  // One job's log, by job id — live while it runs, retained once terminal.
+  // Authorized by the same predicate as the listing, and 404s (never 403s)
+  // when the caller may not see the job.
+  jobLogHistory: (jobId: number) =>
+    client.get<{ lines: string[]; status: SolveJobStatus }>(
+      `/simulation/queue/${jobId}/log_stream`.replace('/log_stream', '/log_history'),
+    ).then(r => r.data),
+  // EventSource takes an absolute app path, not the axios base, so this is a
+  // URL builder rather than a request.
+  jobLogStreamUrl: (jobId: number) => `/api/simulation/queue/${jobId}/log_stream`,
 }
 
 export const TERMINAL_STATUSES: ReadonlySet<SolveJobStatus> = new Set(['completed', 'failed', 'aborted'])
