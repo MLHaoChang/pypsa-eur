@@ -337,3 +337,137 @@ def test_lost_load_reports_uncaptured_when_the_reindexed_total_is_non_finite(tmp
         "a non-finite reindexed total is not a measured zero — the capture "
         "was read but produced garbage, so nothing usable was measured"
     )
+
+
+# ── Task 8: curtailment — a failed computation vs. a real zero ──────────────
+#
+# `_compute_curtailment_summary`'s per-generator loop has six `continue`
+# paths that all converge on the same `if not curt_by_carrier` empty-result
+# return. Paths 1 (`g not in gens.index`), 2 (`g not in p_max_pu_t.columns`,
+# thermal generators with no profile of their own) and 6 (`total_a <=
+# 1e-9`, no available energy) are legitimate "nothing to curtail" skips.
+# Paths 3 (non-finite effective capacity), 4 (the bare `except` around the
+# reindex) and 5 (non-finite weighted total) are failures: the computation
+# never produced a usable number for that generator, which is not the same
+# as it producing zero. Before this task all six converged on
+# `available=True`, so a computation that never succeeded reported as a
+# measured zero — the same conflation Task 7 fixed for lost load.
+#
+# Both tests below share a fixture SHAPE: one solved network with a thermal
+# generator (no profile, always a legitimate path-2 skip) plus one
+# renewable generator with an explicit `p_max_pu` time series so
+# `generators_t.p_max_pu` stays non-empty and the walk reaches the loop body
+# instead of exiting at the earlier "missing tables" check (a DIFFERENT
+# site this task leaves alone — same convention the existing
+# `_build_network_with_no_curtailable_capacity` fixture above uses). The
+# only difference between the two tests is whether the renewable's own
+# figure comes out finite (a real, if zero-ish, answer) or is corrupted
+# into a non-finite total (a failure) — so neither assertion is satisfiable
+# by a flag that ignores which of those happened.
+
+def test_curtailment_is_unavailable_when_every_generator_failed_to_compute():
+    """
+    Path 5: the one profiled generator's weighted total goes non-finite.
+
+    Forced with a genuine `inf`, not a mock — injected into
+    `generators_t.p_max_pu` for the profiled generator AFTER the solve, so
+    the LP itself is untouched and only the post-solve arithmetic sees the
+    bad value. A literal NaN would not survive: both `disp` and `pmu` are
+    piped through `.fillna(0.0)` before use, which sanitises NaN back to a
+    normal (if wrong) number and never reaches the `isfinite` guard. `inf`
+    survives `fillna` and multiplies through `available = pmu * eff_cap`
+    into both `total_c` and `total_a`, so this exercises the real arithmetic
+    path most likely to occur in the field — a corrupted or misaligned
+    profile column — rather than a mocked exception.
+
+    The thermal "gas" generator in the same network has no `p_max_pu_t`
+    column of its own, so it takes the legitimate path-2 skip; "wind" is
+    the only generator that could have contributed, and it failed. The
+    result is empty because nothing COULD be computed, not because there
+    was nothing to curtail.
+    """
+    import pandas as pd
+    import pypsa
+
+    import routers.compare as CMP
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "b1", carrier="AC")
+    n.add("Carrier", "AC")
+    n.add("Carrier", "gas")
+    n.add("Carrier", "wind")
+    n.add(
+        "Generator", "gas",
+        bus="b1", carrier="gas",
+        p_nom=100.0, marginal_cost=50.0,
+    )
+    n.add(
+        "Generator", "wind",
+        bus="b1", carrier="wind",
+        p_nom=50.0, p_nom_extendable=False, marginal_cost=0.0,
+        p_max_pu=[0.5, 0.6, 0.4, 0.7],
+    )
+    n.add("Load", "load1", bus="b1", p_set=40.0)
+    n.optimize(solver_name="highs")
+
+    # Corrupt the one profiled generator's availability AFTER the solve —
+    # the LP already ran cleanly; only the curtailment arithmetic sees this.
+    n.generators_t.p_max_pu.loc[n.snapshots[0], "wind"] = float("inf")
+
+    block = CMP._compute_curtailment_summary(n, [], False, True)
+    assert block.available is False, (
+        "an empty result caused by a computation failure is not a measured "
+        "zero — see ADR-0001"
+    )
+
+
+def test_curtailment_is_a_real_zero_when_every_skip_was_legitimate():
+    """
+    Path 2 only: every generator that reaches the loop is skipped because it
+    has no `p_max_pu` column of its own — nothing failed.
+
+    `generators_t.p_max_pu` must stay non-empty for the walk to reach the
+    per-generator loop at all (an empty table exits earlier, at the
+    "missing tables" check this task leaves alone), but a REAL renewable
+    generator with its own profile would itself land in the loop and either
+    contribute (curt_by_carrier non-empty — a different branch entirely) or
+    hit path 6 (zero available energy) rather than path 2 — that shape is
+    exactly what `test_curtailment_and_storage_cycling_are_real_zeros_when_
+    structurally_empty_on_a_solved_network` above already covers, so
+    reusing it here would not isolate path 2.
+
+    So the profile column belongs to a name that never reaches the loop:
+    the loop walks `p_t.columns` (dispatch results), and `generators_t.p`
+    always has a column for every real Generator post-solve, so a
+    `p_max_pu_t` column under a name that ISN'T a generator in the network
+    is never looked up by its own name and can never do anything but keep
+    the table non-empty. The one real generator, "gas", reaches the loop,
+    finds itself absent from `p_max_pu_t.columns`, and takes the legitimate
+    path-2 skip. Nothing failed; zero is the real answer.
+    """
+    import pandas as pd
+    import pypsa
+
+    import routers.compare as CMP
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "b1", carrier="AC")
+    n.add("Carrier", "AC")
+    n.add("Carrier", "gas")
+    n.add(
+        "Generator", "gas",
+        bus="b1", carrier="gas",
+        p_nom=100.0, marginal_cost=50.0,
+    )
+    n.add("Load", "load1", bus="b1", p_set=20.0)
+    n.optimize(solver_name="highs")
+
+    # Keeps generators_t.p_max_pu non-empty without giving "gas" (the only
+    # real generator) a profile column of its own — see docstring.
+    n.generators_t.p_max_pu["not_a_real_generator"] = [0.5, 0.5, 0.5, 0.5]
+
+    block = CMP._compute_curtailment_summary(n, [], False, True)
+    assert block.available is True
+    assert block.total_gwh.total == 0.0
