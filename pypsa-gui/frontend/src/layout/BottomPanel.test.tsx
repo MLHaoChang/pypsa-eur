@@ -26,7 +26,12 @@ vi.mock('../api/network', async (importOriginal) => {
   }
 })
 
+// `<Toaster/>` lives in App.tsx, so a confirmToast never renders under this
+// harness — the assertion has to be on the call, not on the DOM.
+vi.mock('../utils/toasts', () => ({ confirmToast: vi.fn() }))
+
 import { networkApi } from '../api/network'
+import { confirmToast } from '../utils/toasts'
 import type { CatalogAttribute } from '../api/types'
 import BottomPanel from './BottomPanel'
 
@@ -822,5 +827,86 @@ describe('defect 4 — the bus cell is usable', () => {
     expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ updates: { bus: 'B2' } }),
     )
+  })
+})
+
+describe('defect 7 — the >200 confirmation guards every bulk write', () => {
+  /** 250 buses, so any "select all" target is over the threshold. */
+  function withManyBuses() {
+    vi.mocked(networkApi).getBuses.mockReset().mockResolvedValue(buses(250) as never)
+  }
+
+  /** Open v_nom on B0 and commit `value` as a FILL over the whole target. */
+  async function fillFromEditor(value: string, meta = true) {
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.click(cell)
+    fireEvent.keyDown(cell, { key: 'Enter' })
+    const input = cell.querySelector('input') as HTMLInputElement
+    fireEvent.change(input, { target: { value } })
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: meta })
+  }
+
+  beforeEach(() => { vi.mocked(confirmToast).mockReset() })
+
+  it('asks before a Ctrl/Cmd+Enter fill over more than 200 rows', async () => {
+    // The confirmation used to live only in onPaste, so this route rewrote
+    // every selected row with no prompt — same blast radius, unguarded.
+    withManyBuses()
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    await fillFromEditor('123')
+    await waitFor(() => expect(confirmToast).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(confirmToast).mock.calls[0][0]).toMatch(/250 rows/)
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('writes nothing while that confirmation is unanswered', async () => {
+    withManyBuses()
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    await fillFromEditor('123')
+    await waitFor(() => expect(confirmToast).toHaveBeenCalled())
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+
+  it('issues exactly one request once confirmed', async () => {
+    withManyBuses()
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue({ updated: 250 } as never)
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    await fillFromEditor('123')
+    await waitFor(() => expect(confirmToast).toHaveBeenCalled())
+    // Run the confirm callback the toast would have wired to its button.
+    await act(async () => { vi.mocked(confirmToast).mock.calls[0][1]() })
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledTimes(1))
+  })
+
+  it('does not ask for a small selection', async () => {
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue({ updated: 5 } as never)
+    renderPanel()                                  // the default 5-bus fixture
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    await fillFromEditor('321')
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledTimes(1))
+    expect(confirmToast).not.toHaveBeenCalled()
+  })
+
+  it('still asks exactly ONCE for a paste, not twice', async () => {
+    withManyBuses()
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue({ updated: 250 } as never)
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    const cell = cellAt('B0', 'v_nom')
+    await userEvent.click(cell)
+    // jsdom implements no DataTransfer; the handler only ever calls getData.
+    fireEvent.paste(cell, { clipboardData: { getData: () => '404' } })
+    await waitFor(() => expect(confirmToast).toHaveBeenCalledTimes(1))
+    await act(async () => { vi.mocked(confirmToast).mock.calls[0][1]() })
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledTimes(1))
+    expect(confirmToast).toHaveBeenCalledTimes(1)
   })
 })

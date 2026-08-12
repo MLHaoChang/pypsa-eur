@@ -37,6 +37,9 @@ function storedH() {
 const TABS = ['Log', 'History', 'Buses', 'Lines', 'Transformers', 'Generators', 'Storage', 'Stores', 'Loads', 'Links', 'Carriers'] as const
 type Tab = typeof TABS[number]
 
+/** Row count above which any bulk write asks first (spec D18, criterion 27). */
+const BULK_CONFIRM_ROWS = 200
+
 const TAB_COLUMNS: Record<Tab, string[]> = {
   Log:          [],
   History:      [],
@@ -667,7 +670,29 @@ function AssetTable({
    * window is a client-side timing concern, deliberately not a server flag.
    * Single-cell commits pass false and are allowed to coalesce (ruling 16).
    */
+  /**
+   * Ask before any bulk write this large. Lives HERE, at the single chokepoint,
+   * rather than in `onPaste`: the guard used to cover the paste route only, so
+   * a Ctrl/Cmd+Enter fill — or a Ctrl/Cmd+click on a boolean — rewrote exactly
+   * the same rows with no prompt. Same blast radius, same question.
+   */
   const applyBulk = async (rows: BulkRow[], spaceUndo = false) => {
+    if (rows.length === 0) return
+    if (rows.length > BULK_CONFIRM_ROWS) {
+      // D18: a confirmToast, never a Dialog — Dialog.tsx:148 is capture-phase
+      // AND calls stopPropagation, so while one is open it swallows the grid's
+      // Escape.
+      confirmToast(
+        `Apply this change to ${rows.length} rows?`,
+        () => { void runBulk(rows, spaceUndo) },
+        { confirmLabel: 'Apply' },
+      )
+      return
+    }
+    return runBulk(rows, spaceUndo)
+  }
+
+  const runBulk = async (rows: BulkRow[], spaceUndo = false) => {
     if (rows.length === 0) return
     const first = JSON.stringify(rows[0].updates)
     const sameEverywhere = rows.every(r => JSON.stringify(r.updates) === first)
@@ -811,16 +836,8 @@ function AssetTable({
     }
     const rows = [...byRow].map(([name, updates]) => ({ name, updates }))
 
-    // D18: a confirmToast, never a Dialog — Dialog.tsx:148 is capture-phase AND
-    // calls stopPropagation, so while one is open it swallows the grid's Escape.
-    if (targets.length > 200) {
-      confirmToast(
-        `Apply this paste to ${targets.length} rows?`,
-        () => { applyBulk(rows, true) },
-        { confirmLabel: 'Paste' },
-      )
-      return
-    }
+    // The >200 confirmation now lives in applyBulk, so every route to a bulk
+    // write is guarded by one check instead of this one path.
     applyBulk(rows, true)                                  // true → D11 spacing
   }
 

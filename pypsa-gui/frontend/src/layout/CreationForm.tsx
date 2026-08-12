@@ -51,6 +51,13 @@ const genFields = (carrier: string): FieldSpec[] => [
   { key: 'carrier',          label: 'Carrier',        type: 'text',     defaultValue: carrier },
   { key: 'p_nom',            label: 'P nom',          type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
   { key: 'p_nom_extendable', label: 'Extendable',     type: 'checkbox', defaultValue: 'false',               half: true },
+  // Revealed by `p_nom_extendable` (D22 rule 1), so the create and edit forms
+  // agree about when a bound is shown — criterion 34. Deliberately NO
+  // defaultValue on p_nom_max: blank must reach the backend as "unset" so
+  // PyPSA's own `inf` applies. A default of '0' here would cap every
+  // extendable generator at zero.
+  { key: 'p_nom_min',        label: 'P nom min',      type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
+  { key: 'p_nom_max',        label: 'P nom max',      type: 'number',                         unit: 'MW',     half: true },
   { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '$/MWh',  half: true },
   { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '$/MW',   half: true },
 ]
@@ -69,6 +76,15 @@ const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
 // Used by Power-to-Heat / CHP / Demand variants to ensure (e.g.) a heating
 // load only attaches to a heat-carrier bus.
 interface BusFieldSpec extends FieldSpec { busCarrierFilter?: BusCarrier }
+
+/** Cut to `n` characters on a word boundary, with an ellipsis when cut. */
+function truncate(text: string, n: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  if (flat.length <= n) return flat
+  const cut = flat.slice(0, n)
+  const lastSpace = cut.lastIndexOf(' ')
+  return `${(lastSpace > n * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
+}
 
 const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
   bus: [
@@ -445,13 +461,39 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
     return Object.keys(errs).length === 0
   }
 
+  /**
+   * The fields D22 says to show for the form's current state — the single
+   * source for BOTH the render and the submit payload.
+   *
+   * Keeping them in step is load-bearing, not tidiness: the payload loop used
+   * to enumerate every field, so the moment a field became hideable it would
+   * post a value the user never saw. With `p_nom_max` in the list that means
+   * `p_nom_max: 0` on every non-extendable generator — a silent capacity cap
+   * of zero.
+   */
+  const visibleFields = fields.filter(f => isRevealed(f.key, {
+    mode: solveMode,
+    extendable: form.p_nom_extendable === 'true'
+      || form.e_nom_extendable === 'true'
+      || form.s_nom_extendable === 'true',
+    committable: form.committable === 'true',
+    noSlackBus: false,   // the creation form makes no network-wide claim
+  }))
+
   const createMut = useMutation({
     mutationFn: async () => {
       if (!validate()) throw new Error('validation')
       const payload: Record<string, unknown> = {}
-      fields.forEach(f => {
+      visibleFields.forEach(f => {
         const v = form[f.key] ?? ''
-        if (f.type === 'number') payload[f.key] = v !== '' ? parseFloat(v) : 0
+        if (f.type === 'number') {
+          // A blank number falls back to 0 only where the field declares a
+          // default — that is the long-standing behaviour and every existing
+          // field declares one. A field with NO default (p_nom_max) is omitted
+          // instead, so the model's own sentinel applies rather than a zero.
+          if (v !== '') payload[f.key] = parseFloat(v)
+          else if (f.defaultValue !== undefined) payload[f.key] = 0
+        }
         else if (f.type === 'checkbox') payload[f.key] = v === 'true'
         else payload[f.key] = v
       })
@@ -513,14 +555,7 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
           {/* D22 rule 1: p_nom_min / p_nom_max stay hidden until the asset is
               extendable, so the create and edit forms stop disagreeing about
               when they are shown (criterion 34). */}
-          {fields.filter(f => isRevealed(f.key, {
-            mode: solveMode,
-            extendable: form.p_nom_extendable === 'true'
-              || form.e_nom_extendable === 'true'
-              || form.s_nom_extendable === 'true',
-            committable: form.committable === 'true',
-            noSlackBus: false,   // the creation form makes no network-wide claim
-          })).map(f => {
+          {visibleFields.map(f => {
             const colSpan = f.half ? '' : 'col-span-2'
             const error = errors[f.key]
 
@@ -656,8 +691,14 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
                       && !fields.some(f => f.key === a.name)
                       && !extraKeys.includes(a.name))
                     .map(a => (
-                      <option key={a.name} value={a.name}>
+                      // Criterion 30 wants type, unit, description AND default.
+                      // The description is truncated inline because a native
+                      // <option> cannot wrap, and carried whole in `title` —
+                      // a tooltip alone would not be "shown".
+                      <option key={a.name} value={a.name}
+                              title={a.description ?? undefined}>
                         {a.name}{a.unit ? ` (${a.unit})` : ''} — {a.type}, default {a.default_text || '—'}
+                        {a.description ? ` — ${truncate(a.description, 70)}` : ''}
                       </option>
                     ))}
                 </select>
