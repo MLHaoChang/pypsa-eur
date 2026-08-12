@@ -5,22 +5,27 @@ Thin layer over `services.solve_queue.solve_queue` — the dispatcher singleton
 owns all state and threading. Mounted under `/api/simulation/queue` in main.py.
 
 Endpoints:
-    POST   /api/simulation/queue                 enqueue a saved project
-    GET    /api/simulation/queue                  list all jobs (FIFO order)
-    POST   /api/simulation/queue/{job_id}/abort   abort running / cancel queued
-    POST   /api/simulation/queue/clear_finished   drop terminal jobs from listing
+    POST   /api/simulation/queue                        enqueue a saved project
+    GET    /api/simulation/queue                        list all jobs (FIFO order)
+    GET    /api/simulation/queue/{job_id}/log_history   a job's log lines so far
+    GET    /api/simulation/queue/{job_id}/log_stream    SSE live tail of a job's log
+    POST   /api/simulation/queue/{job_id}/abort         abort running / cancel queued
+    POST   /api/simulation/queue/clear_finished         drop terminal jobs from listing
 
-AUTHORIZATION. All four routes take `db`/`user` and authorize against the
-caller. Three of them did not until P-1, and the queue is a PROCESS-GLOBAL
-singleton shared by every org — see the per-route docstrings for what each one
-now refuses, and `_may_see` / `_may_abort` for the two different boundaries
-they use and why they differ.
+AUTHORIZATION. All six routes take `db`/`user` and authorize against the
+caller. Three of the original four did not until P-1, and the queue is a
+PROCESS-GLOBAL singleton shared by every org — see the per-route docstrings
+for what each one now refuses, and `_may_see` / `_may_abort` for the two
+different boundaries they use and why they differ.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
@@ -28,7 +33,7 @@ import local_mode
 from db.models import User
 from db.session import get_db
 from deps import optional_user
-from services.solve_queue import solve_queue
+from services.solve_queue import _TERMINAL, solve_queue
 
 router = APIRouter()
 
@@ -46,8 +51,9 @@ def enqueue_solve(
     """
     Queue a project to solve. The dispatcher loads the SAVED version from disk,
     so the project must already exist on disk with a network — the caller (the
-    frontend) saves the foreground project before enqueuing it. Returns the
-    created job, including its queue position.
+    frontend) saves the foreground project before enqueuing it. Returns the job,
+    including its queue position and an `already_queued` flag that is true when
+    an existing job was returned instead of a new one.
 
     AUTHORIZATION (Step 0a): the project arrives in the BODY, not the path, so
     this route is invisible to a path-parameter inventory — it was not among
@@ -69,12 +75,17 @@ def enqueue_solve(
             f"Project '{project.name}' has no saved network on disk. Save the "
             "project before queuing it to solve.",
         )
-    job = solve_queue.enqueue(
+    # Idempotent by project: a second enqueue of a project that already has a
+    # queued or running job returns THAT job with `already_queued: true` and
+    # creates nothing. 200, not 409 — the caller's intent ("this project should
+    # be solving") is already satisfied, and an error would make every client
+    # re-implement the check it just handed to the server.
+    job, created = solve_queue.enqueue_unique(
         project.name,
         project_key=project_registry.registry_key(project),
         storage_dir=str(project_dir),
     )
-    return solve_queue.get_job(job.id)
+    return {**solve_queue.get_job(job.id), "already_queued": not created}
 
 
 # ── Authorization helpers (P-1) ─────────────────────────────────────────────
@@ -183,6 +194,179 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
     if f"{project.org_id}:" != prefix:
         return False  # the key's org half lied about the row's real owner
     return project_acl.can_access_project(db, user, project)
+
+
+def _visible_job_or_404(db: DBSession, user: User, job_id: int) -> dict:
+    """
+    The job, if the caller may SEE it; the genuine not-found 404 otherwise.
+
+    404, never 403, with the not-found message BYTE FOR BYTE — same reasoning as
+    `abort_job`: a 403 would confirm the id exists and hand back the enumeration
+    the redacted listing just took away.
+
+    `_may_see`, not `_may_abort`. The two deliberately disagree for a job
+    orphaned by a project delete: it stays ABORTABLE by its own org so a running
+    solve can still be stopped and the shared solver freed. That exception is
+    about stopping work, not about reading the deleted project's log, so the
+    listing predicate is the right one here.
+    """
+    from services import project_acl
+
+    not_found = HTTPException(404, f"No solve job with id {job_id}.")
+    job = solve_queue.get_job(job_id)
+    if job is None:
+        raise not_found
+    prefix = _org_prefix(db, user)
+    allowed = project_acl.accessible_project_ids(db, user, [_project_uuid(job, prefix)])
+    if not _may_see(job, prefix, allowed):
+        raise not_found
+    return job
+
+
+def _sse_line(text: object) -> str:
+    """One SSE `data:` frame. Newlines would terminate the frame early."""
+    safe = str(text).replace("\n", " ").replace("\r", "")
+    return f"data: {safe}\n\n"
+
+
+def _done_event(job_id: int) -> str:
+    """The `event: done` SSE frame carrying a job's current/terminal snapshot."""
+    job = solve_queue.get_job(job_id) or {}
+    payload = json.dumps({
+        "status": job.get("status"),
+        "objective": job.get("objective"),
+        "solve_time": job.get("solve_time"),
+        "condition": job.get("condition"),
+    })
+    return f"event: done\ndata: {payload}\n\n"
+
+
+@router.get("/{job_id}/log_history")
+def job_log_history(
+    job_id: int,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    The lines this job emitted — live while it runs, retained once terminal.
+
+    Readable regardless of which project the caller is viewing and regardless
+    of whether the job's context is still resident, because the queue lives on
+    the JOB. `/api/simulation/log_history` answers a different question (what
+    the caller's ACTIVE context last logged) and is unchanged.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    job = _visible_job_or_404(db, user, job_id)
+    q = solve_queue.get_log_queue(job_id)
+    lines = q.history() if q is not None else []
+    return {"lines": lines, "status": job["status"]}
+
+
+@router.get("/{job_id}/log_stream")
+async def job_log_stream(
+    job_id: int,
+    request: Request,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Server-Sent Events for ONE job's log.
+
+    Reads through `BufferedLogQueue.subscribe()`, not `get()`. The legacy `get()`
+    consumer is DESTRUCTIVE — it pops — so draining the same queue here would
+    race `/api/simulation/log_stream` for the foreground's lines and each would
+    see half of them. The fanout deque is exactly the side channel that exists
+    for a second consumer, and it never observes the `None` close sentinel.
+
+    SUBSCRIBE BEFORE REPLAY. `history()` snapshots under a lock and returns a
+    copy; `subscribe()` only sees lines `put()` AFTER it runs. A line landing
+    in the gap between the two belongs to neither and is silently lost — and
+    that gap is not microseconds: every `yield` in the replay loop suspends
+    this generator while Starlette writes the frame to the socket, so with a
+    full 5000-line history and a slow consumer the gap is the wall-clock time
+    to write 5000 frames. Subscribing first trades that gap for an occasional
+    DUPLICATE at the seam (a line already in `history()` may also arrive again
+    via the live deque) — the correct direction: the legacy
+    `/api/simulation/log_stream` documents the same choice already
+    (`routers/simulation.py:912-914`, duplicate-prone rather than gap-prone).
+    That duplicate window is tiny by comparison — `subscribe()` and
+    `history()` are adjacent statements with no I/O between them, so at most
+    one line can land in it — and harmless regardless of size: every consumer
+    (`SolveQueuePanel.tsx`'s `JobLogPanel`) renders lines as plain strings
+    into a `<pre>`, not React-keyed and not de-duplicated, so a repeated line
+    is just a repeated row.
+
+    Termination is therefore the job's own status, not a sentinel: stop once
+    the job is terminal AND the deque has drained, then emit `done`. A job
+    cleared out of the queue entirely (`clear_finished` ran mid-stream) reads
+    back as `get_job() is None` — also treated as terminal, or the loop would
+    poll forever for a status that can no longer arrive.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    _visible_job_or_404(db, user, job_id)
+
+    async def generate():
+        q = solve_queue.get_log_queue(job_id)
+        if q is None:
+            # No queue was ever published for this job — most commonly a
+            # caller attaching in the `queued` window, before the dispatcher's
+            # claim block sets `log_queue` at the `running` flip. Emit `done`
+            # immediately: without it, a browser EventSource auto-reconnects
+            # on this frame-then-close, looping every few seconds until the
+            # job starts, and any consumer awaiting `done` waits forever.
+            yield "data: No log for this job\n\n"
+            yield _done_event(job_id)
+            return
+
+        sub_id, dq = q.subscribe()
+        try:
+            for line in q.history():
+                if await request.is_disconnected():
+                    return
+                yield _sse_line(line)
+
+            while True:
+                if await request.is_disconnected():
+                    return
+                drained = False
+                while dq:
+                    drained = True
+                    yield _sse_line(dq.popleft())
+                if drained:
+                    continue
+                snapshot = solve_queue.get_job(job_id) or {}
+                if not snapshot or snapshot.get("status") in _TERMINAL:
+                    # The producer's guarantee is "put lines, then flip status":
+                    # by the time `status` reads as terminal, every line the
+                    # solve emitted has already been queued. But there is a GIL
+                    # switch point between the `while dq` drain above and this
+                    # status read, wide enough for that final `put()` to land
+                    # in it — so drain once more before stopping, or the tail
+                    # (often the `[PHASE] Failed: ...` / `TRACEBACK: ...` lines)
+                    # is silently dropped.
+                    while dq:
+                        yield _sse_line(dq.popleft())
+                    break
+                await asyncio.sleep(0.25)
+        finally:
+            # A closed browser tab would otherwise leak the deque + dict entry.
+            q.unsubscribe(sub_id)
+
+        yield _done_event(job_id)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("")

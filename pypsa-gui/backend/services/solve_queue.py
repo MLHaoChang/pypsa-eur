@@ -88,6 +88,13 @@ class SolveJob:
     stop_event: Any = None
     # True when abort() cancelled a job that was still QUEUED (skipped on pop).
     cancelled: bool = False
+    # The BufferedLogQueue this job's solve wrote to. Lives for the LIFE OF THE
+    # JOB, not the life of the context: the log used to be stored only on the
+    # ctx (`ctx_state_update(log_queue=…)`), so it was unreachable by job id,
+    # unreachable once the ctx was evicted, and overwritten by the next solve of
+    # the same project. Deliberately NOT in `to_public` — it is an object, not
+    # JSON, and the two log endpoints reach it through `get_log_queue`.
+    log_queue: Any = None
 
     def to_public(self, position: int | None) -> dict:
         """
@@ -150,6 +157,78 @@ class SolveQueue:
         logger.info("solve_queue: enqueued job %s for project %r", jid, project_id)
         return job
 
+    def enqueue_unique(
+        self,
+        project_id: str,
+        *,
+        project_key: str | None = None,
+        storage_dir: str | None = None,
+    ) -> tuple[SolveJob, bool]:
+        """
+        Enqueue `project_id` UNLESS it already has a queued or running job.
+
+        Returns `(job, created)`. When `created` is False the returned job is
+        the existing one, untouched, and nothing was appended.
+
+        This is the enforcement point. `enqueue` appended unconditionally and
+        the one-active-job-per-project invariant lived in three separate client
+        guards, each racing its own 1.5 s poll, with none at all on the
+        `solve_queue_enqueue` chat tool. On these models a double click is
+        minutes of wasted solve, and the second run overwrites the first's
+        results.
+
+        Identity is `project_key` (`org:uuid`) whenever the caller supplied one
+        — the same identity the registry and the eviction protected-set key on,
+        and the only one that survives a rename. The display name is the
+        fallback, which is all a legacy unkeyed job carries.
+
+        `enqueue` is deliberately left in place and unchanged: it is the raw
+        append the test harness uses to build queue states directly.
+        """
+        with self._lock:
+            existing = self._active_job_locked(project_id, project_key)
+            if existing is not None:
+                logger.info(
+                    "solve_queue: %r already has active job %s (%s) — not queuing a second",
+                    project_id, existing.id, existing.status,
+                )
+                return existing, False
+            jid = next(self._counter)
+            job = SolveJob(
+                id=jid,
+                project_id=project_id,
+                project_key=project_key,
+                storage_dir=storage_dir,
+                enqueued_at=time.time(),
+            )
+            self._jobs[jid] = job
+            self._order.append(jid)
+            self._q.put(jid)
+            self._ensure_dispatcher_locked()
+        logger.info("solve_queue: enqueued job %s for project %r", jid, project_id)
+        return job, True
+
+    def _active_job_locked(
+        self, project_id: str, project_key: str | None
+    ) -> SolveJob | None:
+        """
+        The queued-or-running job for this project, if any. Caller holds _lock.
+
+        The check and the append must be ONE critical section or two concurrent
+        enqueues both find nothing and both append — which is the exact race the
+        client-side latches were trying and failing to close from outside.
+        """
+        for jid in self._order:
+            job = self._jobs.get(jid)
+            if job is None or job.status not in ("queued", "running"):
+                continue
+            if project_key is not None:
+                if job.project_key == project_key:
+                    return job
+            elif job.project_key is None and job.project_id == project_id:
+                return job
+        return None
+
     def list_jobs(self) -> list[dict]:
         with self._lock:
             return [self._jobs[jid].to_public(self._position_locked(jid))
@@ -159,6 +238,19 @@ class SolveQueue:
         with self._lock:
             job = self._jobs.get(job_id)
             return job.to_public(self._position_locked(job_id)) if job else None
+
+    def get_log_queue(self, job_id) -> Any | None:
+        """
+        The BufferedLogQueue this job's solve wrote to, or None.
+
+        Retained after the job goes terminal — the queue's 5000-line ring
+        buffer IS the retained log, and serving it is what makes a finished
+        job's output readable at all. Retention is uniform across every
+        terminal status, `interrupted` included.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return job.log_queue if job is not None else None
 
     def abort(self, job_id: int) -> dict | None:
         """
@@ -350,6 +442,12 @@ class SolveQueue:
                 job.status = "running"
                 job.started_at = time.time()
                 job.stop_event = stop_event
+                # Publish the log queue with the status flip, in the SAME
+                # critical section. A consumer that sees `running` can then
+                # always reach the queue — the microsecond gap between the flip
+                # and `ctx_state_update(log_queue=…)` is the race the AppHeader
+                # carries a bounded retry for.
+                job.log_queue = log_queue
 
             # 1. Resolve the context to solve. If the queued project IS the
             #    foreground, solve the resident instance in place (unsaved edits
