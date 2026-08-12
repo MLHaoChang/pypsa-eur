@@ -46,7 +46,7 @@ vi.mock('../api/projects', () => ({
 import { projectsApi } from '../api/projects'
 import {
   EconomicsTab, EmissionsTab, StorageCyclingTab,
-  LoadingTab, PricesTab, OverviewTab,
+  LoadingTab, PricesTab, OverviewTab, LostLoadTab,
 } from './CompareView'
 
 const summary = (available: boolean, project: string) => ({
@@ -340,41 +340,145 @@ describe('StorageCyclingTab distinguishes unavailable from zero (C2)', () => {
 // — the backend has always sent it) even though every other Comparison
 // block had it; that gap is fixed alongside the frontend wiring here.
 //
-// LostLoadTab is deliberately NOT touched or tested here — but NOT because
-// `available=False` only ever means a confirmed real zero once has_solve is
-// true. An earlier version of this comment claimed exactly that and was
-// wrong; corrected after review traced every return in
-// compare.py:_compute_lost_load_summary (lines 2380-2422). Within the
-// has_solve=True path LostLoadTab actually reaches (it gates on has_solve
-// for BOTH sides before any lost-load-specific rendering — CompareView.tsx
-// ~1975), there are SIX `available=False` returns, not one:
-//   :2382-2384  results_state.pkl absent                    -> UNRESOLVED
-//   :2385-2388  _safe_unpickle_results raises                -> UNRESOLVED
-//   :2391-2393  `last_lost_load`/`lost_load_t` key missing   -> ambiguous
-//   :2395-2396  capture DataFrame present but empty          -> ambiguous
-//   :2412-2416  reindex/weighting raises                     -> UNRESOLVED
-//   :2418-2422  total_e <= 1e-9 after reindex                -> confirmed zero
-// Only the last is a genuine "no shedding, happy path" outcome (it's also
-// the ONLY path that sets `available=True`, requiring `total_e > 1e-9` —
-// that half of the original claim was correct). The other five are real
-// ADR-0001 unresolved states wearing the same flag: a solved project whose
-// results_state.pkl is missing/unreadable/misshapen renders `0.0 MWh` /
-// `0.00 M€` via ABKpiPair exactly like a confirmed-zero project would — a
-// mixed pair (alpha sheds load, beta solved-but-uncaptured) DOES fabricate
-// a zero today.
+// ── Task 7 ────────────────────────────────────────────────────────────────
+// LostLoadTab was left unwired by Task 6 (see task-6-report.md) because
+// `available` conflates one genuine "no shedding" zero with five different
+// "the capture was never read" states — no frontend-only choice could turn
+// it into a correct three-state signal. Task 7 adds `captured` to
+// `LostLoadComparison` (backend/models/schemas.py) specifically so the
+// frontend has something to key on: `captured=false` means nothing was
+// read (render the marker); `captured=true` means the capture WAS read,
+// whether it says zero (`available=false`, a REAL measured zero — render
+// `0.0 MWh`) or nonzero (`available=true`, real shedding).
 //
-// The conclusion is still "leave the tab's wiring alone," for a narrower
-// reason than originally stated: `available` here cannot be turned into a
-// correct three-state signal on the frontend at all — it conflates one
-// legitimate zero with five different failure states, and no other field on
-// `LostLoadComparison` (voll_eur_per_mwh, by_bus, by_carrier — all equally
-// defaulted on every one of those six returns) discriminates them either.
-// Wiring `available` into ABKpiPair the way the other tabs do would relabel
-// the happy path as broken; leaving it unwired accepts the fabricated-zero
-// gap on the five unresolved returns instead. Neither frontend-only choice
-// is fully correct — the real fix needs a new backend signal (e.g. a
-// `captured: bool` distinct from `available`) and is out of scope for this
-// task; not attempted here. See task-6-report.md for the full writeup.
+// The three tests below pin exactly those three states, all against the
+// SAME fixture shape (alpha always resolved with real, non-zero shedding
+// so the tab's own "neither project shed load" banner — gated on
+// `available`, unaffected by this task — never fires and both ABKpiPair
+// sections plus both LostLoad tables render).
+
+function lostLoadSummary(project: string, ll: Record<string, unknown>) {
+  return {
+    project,
+    has_solve: true,
+    periods: [],
+    lost_load: ll,
+  }
+}
+
+// alpha: real, non-zero shedding on both sections (KPI + per-bus/per-carrier
+// tables) — the fixed reference side every case below compares beta against.
+const resolvedAlphaLostLoad = {
+  available: true,
+  captured: true,
+  voll_eur_per_mwh: 3000,
+  total_mwh: { total: 123.4, by_period: {} },
+  total_cost_meur: { total: 0.37, by_period: {} },
+  by_bus: [{ bus: 'BusA', energy_mwh: { total: 123.4, by_period: {} }, cost_meur: { total: 0.37, by_period: {} } }],
+  by_carrier: [{
+    carrier: 'electricity', bus_count: 1,
+    energy_mwh: { total: 123.4, by_period: {} }, cost_meur: { total: 0.37, by_period: {} },
+  }],
+}
+
+function renderLostLoadTab() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <LostLoadTab a="alpha" b="beta" />
+    </QueryClientProvider>,
+  )
+}
+
+describe('LostLoadTab distinguishes a measured zero from an unread capture (Task 7)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders the unavailable marker, never 0.0 MWh, when the capture was never read (captured: false)', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(lostLoadSummary(
+        project,
+        project === 'alpha'
+          ? resolvedAlphaLostLoad
+          : {
+              // Unread capture: `available` defaults to false alongside it
+              // (see the six default-constructed backend return sites),
+              // but the distinguishing field for THIS case is `captured`.
+              available: false, captured: false, voll_eur_per_mwh: 0,
+              total_mwh: { total: 0, by_period: {} },
+              total_cost_meur: { total: 0, by_period: {} },
+              by_bus: [], by_carrier: [],
+            },
+      ) as never),
+    )
+    renderLostLoadTab()
+    // alpha's real figure renders — legitimately twice (the KPI AND the
+    // per-bus table's BusA row, both 123.4), so assert plural/non-empty
+    // rather than a single match — same idiom as this file's other
+    // A/A-identity checks.
+    expect(await screen.findAllByText('123.4 MWh')).not.toHaveLength(0)
+    // beta's KPI cells (total MWh + VOLL cost) AND its per-bus table cell
+    // all read the marker.
+    expect(await screen.findAllByText(COST_UNAVAILABLE)).not.toHaveLength(0)
+    // No fabricated "0.0 MWh" anywhere — an unread capture is NOT a
+    // measured zero, so it must never render as one.
+    expect(screen.queryByText(/0\.0 MWh/)).toBeNull()
+  })
+
+  it('renders 0.0 MWh, never the unavailable marker, on a genuine measured zero (captured: true, available: false)', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(lostLoadSummary(
+        project,
+        project === 'alpha'
+          ? resolvedAlphaLostLoad
+          : {
+              // The solver ran, the capture WAS read, and it says zero —
+              // a REAL measured result, not an absence. This is the case
+              // that distinguishes Task 7 from a naive `available`-keyed
+              // wiring (see task-7-brief.md's "middle rung").
+              available: false, captured: true, voll_eur_per_mwh: 3000,
+              total_mwh: { total: 0, by_period: {} },
+              total_cost_meur: { total: 0, by_period: {} },
+              by_bus: [], by_carrier: [],
+            },
+      ) as never),
+    )
+    renderLostLoadTab()
+    expect(await screen.findAllByText('123.4 MWh')).not.toHaveLength(0)
+    // beta's real zero — rendered as a genuine figure, not a marker.
+    // Appears twice: the "Total lost load" KPI AND the per-bus table's
+    // BusA row (beta's column, defaulting to 0 since BusA never reaches
+    // the >1e-6 per-bus threshold — see LostLoadBus's docstring).
+    expect(await screen.findAllByText('0.0 MWh')).not.toHaveLength(0)
+    expect(await screen.findAllByText('0.00 M€')).not.toHaveLength(0)
+    expect(screen.queryByText(COST_UNAVAILABLE)).toBeNull()
+  })
+
+  it('renders both sides\' real shedding figures when both captured genuine, non-zero results (captured: true, available: true)', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(lostLoadSummary(
+        project,
+        project === 'alpha'
+          ? resolvedAlphaLostLoad
+          : {
+              available: true, captured: true, voll_eur_per_mwh: 2500,
+              total_mwh: { total: 55.5, by_period: {} },
+              total_cost_meur: { total: 0.14, by_period: {} },
+              by_bus: [{ bus: 'BusB', energy_mwh: { total: 55.5, by_period: {} }, cost_meur: { total: 0.14, by_period: {} } }],
+              by_carrier: [{
+                carrier: 'electricity', bus_count: 1,
+                energy_mwh: { total: 55.5, by_period: {} }, cost_meur: { total: 0.14, by_period: {} },
+              }],
+            },
+      ) as never),
+    )
+    renderLostLoadTab()
+    expect(await screen.findAllByText('123.4 MWh')).not.toHaveLength(0)
+    expect(await screen.findAllByText('55.5 MWh')).not.toHaveLength(0)
+    expect(screen.queryByText(COST_UNAVAILABLE)).toBeNull()
+  })
+})
 
 function renderLoadingTab() {
   const client = new QueryClient({

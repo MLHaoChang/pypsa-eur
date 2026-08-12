@@ -2108,7 +2108,9 @@ function CurtailmentTab({ a, b }: { a: string; b: string }) {
 // `_state["last_lost_load"]` at solve time and persisted into
 // results_state.pkl on save. Per-bus table shows the worst-affected nodes.
 
-function LostLoadTab({ a, b }: { a: string; b: string }) {
+// Exported solely so CompareView.availability.test.tsx can render it in
+// isolation (Task 7 follow-up) — same rationale as EconomicsTab's export.
+export function LostLoadTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['results-summary', b], queryFn: () => projectsApi.resultsSummary(b), staleTime: 30_000 })
   const [period, setPeriod] = useState<PeriodChoice>('all')
@@ -2128,9 +2130,13 @@ function LostLoadTab({ a, b }: { a: string; b: string }) {
 
   const llA = sa.lost_load
   const llB = sb.lost_load
-  // "available" is false when the project never sheds load — that's the
-  // happy path. Surface it explicitly rather than 'no data' so the user
-  // doesn't think the feature is broken.
+  // `available=false` does NOT mean "never shed load" — see LostLoadComparison
+  // in api/types.ts and ADR-0001. Within has_solve=True, most available=false
+  // returns mean the capture was never READ (missing results_state.pkl, an
+  // unpickle error, a malformed capture); only one is a confirmed zero. This
+  // banner is the coarse "nothing to report on either side" case; below,
+  // ABKpiPair/the tables key on `captured` (not `available`) so a genuine
+  // zero on either side still renders `0.0 MWh` rather than the marker.
   if (!llA?.available && !llB?.available) {
     return (
       <div className="space-y-2 py-4">
@@ -2144,6 +2150,13 @@ function LostLoadTab({ a, b }: { a: string; b: string }) {
 
   const fmtMwh = (v: number) => `${v.toFixed(1)} MWh`
   const fmtMEur = (v: number) => `${v.toFixed(2)} M€`
+  // Deliberately keyed on `captured`, NOT `available` — a solver that ran
+  // and shed nothing (captured=true, available=false) has a REAL measured
+  // zero and must render `0.0 MWh`; only an unread capture (captured=false)
+  // is truly unavailable. Wiring `available` here would relabel that happy
+  // path as broken (see task-7-brief.md).
+  const availableA = llA?.captured ?? false
+  const availableB = llB?.captured ?? false
 
   return (
     <div className="space-y-4">
@@ -2158,6 +2171,8 @@ function LostLoadTab({ a, b }: { a: string; b: string }) {
           unit="MWh"
           fmt={fmtMwh}
           deltaIsImprovementWhenNegative
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -2170,6 +2185,8 @@ function LostLoadTab({ a, b }: { a: string; b: string }) {
           unit="M€"
           fmt={fmtMEur}
           deltaIsImprovementWhenNegative
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
 
@@ -2199,6 +2216,8 @@ function LostLoadTab({ a, b }: { a: string; b: string }) {
             period={period}
             fmtMwh={fmtMwh}
             fmtMEur={fmtMEur}
+            availableA={availableA}
+            availableB={availableB}
           />
         </Section>
       )}
@@ -2212,6 +2231,8 @@ function LostLoadTab({ a, b }: { a: string; b: string }) {
           period={period}
           fmtMwh={fmtMwh}
           fmtMEur={fmtMEur}
+          availableA={availableA}
+          availableB={availableB}
         />
       </Section>
     </div>
@@ -2224,6 +2245,7 @@ function LostLoadTab({ a, b }: { a: string; b: string }) {
 // are canonicalised so 'AC' / 'electricity' / 'electrical' all merge.
 function LostLoadByCarrierTable({
   aName, bName, byCarrierA, byCarrierB, period, fmtMwh, fmtMEur,
+  availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
@@ -2232,6 +2254,13 @@ function LostLoadByCarrierTable({
   period: PeriodChoice
   fmtMwh: (n: number) => string
   fmtMEur: (n: number) => string
+  // Whether this side's capture was READ AT ALL — keyed on `captured`, not
+  // `available`, by the caller (see LostLoadTab / ADR-0001). Same priority
+  // as ABTable/StorageUnitTable: an unread side outranks "carrier absent
+  // from this scenario," which outranks the real value. Defaults to true so
+  // any other future call site keeps compiling.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   // Defensive canonicalisation in case backend emits raw carrier spellings
   // from a legacy save file. Merge happens by canonical key so duplicate
@@ -2295,15 +2324,21 @@ function LostLoadByCarrierTable({
           const be = readPV(B?.energy_mwh, period)
           const ac = readPV(A?.cost_meur, period)
           const bc = readPV(B?.cost_meur, period)
+          const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+          const dash = <span className="text-muted" title="Carrier not present in this scenario">—</span>
           return (
             <tr key={c} className="border-b border-border/40">
               <td className="py-1 text-text">{carrierDisplayName(c)}</td>
               <td className="py-1 text-right font-mono text-muted">{buses || '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{A ? fmtMwh(ae) : '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{B ? fmtMwh(be) : '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{A ? fmtMEur(ac) : '—'}</td>
-              <td className="py-1 text-right font-mono text-text">{B ? fmtMEur(bc) : '—'}</td>
-              <td className="py-1 text-right font-mono"><Delta v={be - ae} fmt={fmtMwh} invert /></td>
+              <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : A ? fmtMwh(ae) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : B ? fmtMwh(be) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : A ? fmtMEur(ac) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : B ? fmtMEur(bc) : dash}</td>
+              <td className="py-1 text-right font-mono">
+                {(availableA && availableB)
+                  ? <Delta v={be - ae} fmt={fmtMwh} invert />
+                  : <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>}
+              </td>
             </tr>
           )
         })}
@@ -2314,6 +2349,7 @@ function LostLoadByCarrierTable({
 
 function LostLoadBusTable({
   aName, bName, busA, busB, period, fmtMwh, fmtMEur,
+  availableA = true, availableB = true,
 }: {
   aName: string
   bName: string
@@ -2322,6 +2358,11 @@ function LostLoadBusTable({
   period: PeriodChoice
   fmtMwh: (n: number) => string
   fmtMEur: (n: number) => string
+  // Same third state as LostLoadByCarrierTable above — keyed on `captured`
+  // by the caller. Defaults to true so any other future call site keeps
+  // compiling.
+  availableA?: boolean
+  availableB?: boolean
 }) {
   // Union the bus lists from both sides so we can show a row per bus that
   // appears in either scenario. Order by max(A, B) energy desc.
@@ -2357,14 +2398,19 @@ function LostLoadBusTable({
           const be = readPV(r.b?.energy_mwh, period)
           const ac = readPV(r.a?.cost_meur,  period)
           const bc = readPV(r.b?.cost_meur,  period)
+          const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
           return (
             <tr key={r.name} className="border-b border-border/40">
               <td className="py-1 text-text font-mono">{r.name}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtMwh(ae)}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtMwh(be)}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtMEur(ac)}</td>
-              <td className="py-1 text-right font-mono text-text">{fmtMEur(bc)}</td>
-              <td className="py-1 text-right font-mono"><Delta v={be - ae} fmt={fmtMwh} invert /></td>
+              <td className="py-1 text-right font-mono text-text">{availableA ? fmtMwh(ae) : unavailable}</td>
+              <td className="py-1 text-right font-mono text-text">{availableB ? fmtMwh(be) : unavailable}</td>
+              <td className="py-1 text-right font-mono text-text">{availableA ? fmtMEur(ac) : unavailable}</td>
+              <td className="py-1 text-right font-mono text-text">{availableB ? fmtMEur(bc) : unavailable}</td>
+              <td className="py-1 text-right font-mono">
+                {(availableA && availableB)
+                  ? <Delta v={be - ae} fmt={fmtMwh} invert />
+                  : <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>}
+              </td>
             </tr>
           )
         })}

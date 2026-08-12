@@ -225,3 +225,58 @@ def test_curtailment_is_a_real_zero_on_a_solved_network_with_no_generators_at_al
 
     unsolved = CMP._compute_curtailment_summary(n, [], False, False)
     assert unsolved.available is False
+
+
+# ── Task 7: lost load — a measured zero vs. an unread capture ───────────────
+#
+# LostLoadComparison.available is overloaded in a way none of the checks
+# above can see: within the has_solve=True path, `_compute_lost_load_
+# summary` has six `available=False` returns and only ONE of them (a real
+# zero after reindex/weighting) is a genuine "no shedding" result — the
+# other five mean the capture was never read at all (missing pickle, an
+# unpickle error, a malformed/empty capture, a reindex failure). Before this
+# task, a solved project whose results_state.pkl was simply missing rendered
+# `0.0 MWh` on the Compare view's lost-load KPIs, indistinguishable from a
+# project that genuinely shed nothing. `captured` is the new field that
+# tells the two apart; the two tests below pin one case each, both driven
+# directly through `_compute_lost_load_summary` (same convention `test_
+# compare_invariants.py`'s `_solved_lost_load` and this file's curtailment
+# test above use — has_solve passed explicitly, bypassing the
+# dispatch-freshness classifier, since no LP runs for either fixture).
+
+def test_lost_load_reports_uncaptured_when_the_capture_is_unreadable(tmp_path):
+    """
+    A solved project whose `results_state.pkl` is simply absent (the
+    simplest of the five unread-capture branches — see the table in
+    task-7-brief.md) has measured NOTHING, not a zero.
+    """
+    import routers.compare as CMP
+    from tests import compare_local_networks as cln
+
+    n = cln.build_lost_load_network()  # tmp_path has no results_state.pkl
+    block = CMP._compute_lost_load_summary(tmp_path, n, [], False, True)
+    assert block.available is False
+    assert block.captured is False, (
+        "a solved project whose capture cannot be read has not measured zero "
+        "shedding — it has measured nothing"
+    )
+
+
+def test_lost_load_reports_captured_on_a_genuine_zero(tmp_path):
+    """
+    A solved project whose capture exists and sums to zero after
+    reindex/weighting (routers/compare.py's `total_e <= 1e-9` branch) has
+    measured a REAL zero — `captured=True` even though `available=False`.
+    """
+    import routers.compare as CMP
+    from tests import compare_local_networks as cln
+
+    n = cln.build_lost_load_network()
+    cln.write_lost_load_capture(
+        tmp_path, n,
+        per_bus_mwh={"bus_elec": [0.0, 0.0, 0.0, 0.0], "bus_h2": [0.0, 0.0, 0.0, 0.0]},
+        voll=3000.0,
+    )
+    block = CMP._compute_lost_load_summary(tmp_path, n, [], False, True)
+    assert block.available is False
+    assert block.captured is True, "zero shedding is a real, measured result"

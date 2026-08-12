@@ -1043,13 +1043,24 @@ class LostLoadComparison(BaseModel):
 
     Populated only when the project's ``results_state.pkl`` carries a
     lost-load capture — i.e. the solver ran with ``voll > 0`` AND the LP
-    shed at least one MW. ``available=False`` covers three states the
-    frontend distinguishes: ``voll`` was zero, the project hasn't been
-    solved, or no shedding occurred (happy path). When ``available=True``,
+    shed at least one MW. ``available=False`` no longer implies a happy
+    path on its own: within the ``has_solve=True`` path, most
+    ``available=False`` returns mean the capture was never READ (missing
+    pickle, an unpickle error, a malformed/empty capture) and the project's
+    actual shedding is unknown; only one — a real zero after
+    reindex/weighting — is a confirmed "no shedding" result. ``captured``
+    (below) is what tells them apart. When ``available=True``,
     ``total_mwh.total`` is guaranteed > 0.
     """
 
     available: bool = False
+    # Whether the lost-load capture was READ AT ALL, independent of what it
+    # said. `available=False, captured=True` is a real measured zero — the
+    # solver ran with voll > 0 and the LP shed nothing. `captured=False` means
+    # we could not read the capture (no results_state.pkl, an unpickle error,
+    # a mid-solve state) and therefore know nothing; the frontend must render
+    # "unavailable" there, never 0.0. See ADR-0001.
+    captured: bool = False
     # VOLL price the solver used (€/MWh). Recovered from
     # ``lost_load_cost_eur / lost_load_total_mwh`` so the frontend doesn't
     # divide-by-zero on the edge case.

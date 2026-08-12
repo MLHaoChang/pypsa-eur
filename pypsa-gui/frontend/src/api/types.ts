@@ -520,6 +520,14 @@ export interface LostLoadByCarrier {
 
 export interface LostLoadComparison {
   available: boolean
+  // Whether the lost-load capture was READ AT ALL, independent of what it
+  // said. `available=false, captured=true` is a real measured zero — the
+  // solver ran with voll > 0 and the LP shed nothing; render `0.0 MWh`, not
+  // the unavailable marker. `captured=false` means the capture could not be
+  // read (no results_state.pkl, an unpickle error, a mid-solve state) —
+  // render the marker, never 0.0. See ADR-0001 and LostLoadComparison in
+  // backend/models/schemas.py.
+  captured: boolean
   voll_eur_per_mwh: number
   total_mwh: CarrierPeriodValue
   total_cost_meur: CarrierPeriodValue

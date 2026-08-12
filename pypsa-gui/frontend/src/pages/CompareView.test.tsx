@@ -172,6 +172,7 @@ function summary(project: string, scale = 1): ResultsSummary {
     },
     lost_load: {
       available: true,
+      captured: true,
       voll_eur_per_mwh: 3000,
       total_mwh: pv(10 * s, 4 * s, 6 * s),
       total_cost_meur: pv(0.03 * s, 0.012 * s, 0.018 * s),

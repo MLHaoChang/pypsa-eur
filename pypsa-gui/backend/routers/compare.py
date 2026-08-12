@@ -2371,8 +2371,13 @@ def _compute_lost_load_summary(
       ``{lost_load_t: DataFrame(snapshot × bus), lost_load_total_mwh: float,
          lost_load_cost_eur: float}``
     Returns ``available=False`` when the pickle is absent, the capture key
-    is missing, or the DataFrame is empty — all three are "no shedding"
-    states from the user's perspective. Multi-period split uses the snapshot
+    is missing, the DataFrame is empty, or the reindex/weighting step raises
+    — none of these are "no shedding": they mean the capture was never
+    read, so the project's actual shedding is unknown. ``captured``
+    (LostLoadComparison) is what tells that apart from the one genuine
+    zero (total energy below the 1e-9 threshold after reindex/weighting):
+    ``captured=False`` on every unread-capture return, ``captured=True`` on
+    that zero and on the success path. Multi-period split uses the snapshot
     weight matrix the rest of the comparison view shares.
     """
     from models.schemas import LostLoadBus, LostLoadByCarrier, LostLoadComparison
@@ -2417,9 +2422,12 @@ def _compute_lost_load_summary(
 
     total_e = float(weighted.values.sum())
     if not _math.isfinite(total_e) or total_e <= 1e-9:
-        # The capture exists but produced zero after reindex — treat as
-        # "no shedding" rather than "available but zero."
-        return LostLoadComparison(available=False, voll_eur_per_mwh=voll)
+        # The capture exists but produced zero after reindex — a genuine
+        # measured zero, not "unavailable." `available` stays False (the
+        # frontend's total_mwh.total > 0 invariant for available=True would
+        # otherwise break), but `captured=True` says the capture WAS read
+        # and this zero is real — see ADR-0001 / LostLoadComparison.
+        return LostLoadComparison(available=False, captured=True, voll_eur_per_mwh=voll)
 
     total_e_bucket = {"total": total_e, "by_period": {}}
     total_c_bucket = {"total": total_e * voll / 1e6, "by_period": {}}
@@ -2514,6 +2522,7 @@ def _compute_lost_load_summary(
 
     return LostLoadComparison(
         available=True,
+        captured=True,
         voll_eur_per_mwh=voll,
         total_mwh=_to_pv(total_e_bucket),
         total_cost_meur=_to_pv(total_c_bucket),
