@@ -227,6 +227,37 @@ def test_curtailment_is_a_real_zero_on_a_solved_network_with_no_generators_at_al
     assert unsolved.available is False
 
 
+# ── Whole-branch review, Minor 1: emissions on a carrier-less network ───────
+#
+# `_compute_emissions_summary`'s `if not co2_map` branch fires whenever the
+# network has no `carriers` frame (or no `co2_emissions` column) — see
+# `services/economics.co2_intensity_map`'s docstring. That is the same
+# "solved network, structurally nothing of that kind" shape Finding 4 ruled
+# `available=True` for above (curtailment's `gens.empty`, storage cycling's
+# `sus.empty`): every carrier is zero-emitting by definition, so 0 kt is the
+# real answer, not an unresolved one. This site was missed by that ruling.
+
+def test_emissions_is_a_real_zero_on_a_solved_network_with_no_carriers_frame():
+    """
+    Same convention as the curtailment test above — `has_solve` passed
+    directly, since what's under test is `_compute_emissions_summary`'s own
+    branch logic once told the network resolved, not how `has_solve` is
+    derived.
+    """
+    import pypsa
+
+    import routers.compare as CMP
+
+    n = pypsa.Network()  # no carriers frame at all — co2_map is trivially empty
+
+    solved = CMP._compute_emissions_summary(n, [], False, True)
+    assert solved.available is True, "solved network with a real zero must not read as unavailable"
+    assert solved.total_kt.total == 0.0
+
+    unsolved = CMP._compute_emissions_summary(n, [], False, False)
+    assert unsolved.available is False
+
+
 # ── Task 7: lost load — a measured zero vs. an unread capture ───────────────
 #
 # LostLoadComparison.available is overloaded in a way none of the checks

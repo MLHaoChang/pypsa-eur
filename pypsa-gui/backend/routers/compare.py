@@ -1497,7 +1497,13 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
     sns = n.snapshots
     co2_map = _co2_intensity_map(n)
     if not co2_map:
-        return EmissionsComparison()
+        # The network resolved fine; it simply has no `carriers` frame (or no
+        # `co2_emissions` column), so every carrier is zero-emitting by
+        # definition — "zero kt" is the real, structurally-guaranteed answer,
+        # not an absence — see the `available` field's docstring. Same
+        # ruling as curtailment's `gens.empty` / storage cycling's
+        # `sus.empty` above.
+        return EmissionsComparison(available=True)
 
     total_bucket = {"total": 0.0, "by_period": {}}
     by_carrier_kt: dict = {}
@@ -2315,9 +2321,18 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
             ab["by_period"][p] = ab["by_period"].get(p, 0.0) + v / 1000.0
 
     if not curt_by_carrier:
-        # Solved fine, and every generator was walked — none of them carries
-        # a time-varying p_max_pu profile (e.g. an all-thermal network), so
-        # zero curtailment is the real answer, not an unresolved figure.
+        # Solved fine, and `p_max_pu_t` is non-empty — the "no generator has
+        # a time-varying p_max_pu at all" case already exited above at the
+        # `p_max_pu_t.empty` check. This branch instead fires when every
+        # generator that reached the loop was skipped by one of its
+        # `continue`s: not in `gens.index`, no `p_max_pu` column of its own,
+        # a non-finite/~0 effective capacity, a reindex exception, a
+        # non-finite weighted total, or negligible available energy
+        # (<=1e-9). Most of those are legitimate "nothing to curtail"
+        # outcomes, but the bare `except Exception` and the non-finite-total
+        # check are failures, not measured zeros — the resulting
+        # `available=True` folds a failure path into "real zero" and needs a
+        # ruling (whole-branch review, Minor 2), not silently changed here.
         return CurtailmentComparison(available=True)
 
     # System totals.

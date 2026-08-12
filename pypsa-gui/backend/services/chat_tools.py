@@ -1826,6 +1826,22 @@ def _sum_cpv_map(mapping: Any) -> float:
     return total
 
 
+def _sum_cpv_map_if_available(mapping: Any, has_solve: bool) -> float | None:
+    """`_sum_cpv_map`, gated on the block having resolved.
+
+    `capacity.available` and `dispatch.available` are both exactly
+    `has_solve` (routers/compare.py's `_compute_capacity_summary` /
+    `_compute_dispatch_summary` early-return their all-default block
+    whenever `not has_solve` and set `available=True` on every success
+    path) — so `has_solve` is the correcting signal for these by-carrier
+    sums, matching `_cpv_total`'s existing None-on-unresolved behaviour
+    instead of defaulting to a confident 0.0 (ADR-0001).
+    """
+    if not has_solve:
+        return None
+    return _sum_cpv_map(mapping)
+
+
 def _scenario_headlines(summary: dict) -> dict:
     cap = summary.get("capacity") or {}
     disp = summary.get("dispatch") or {}
@@ -1833,14 +1849,15 @@ def _scenario_headlines(summary: dict) -> dict:
         cap = _model_to_dict(cap) or {}
     if not isinstance(disp, dict):
         disp = _model_to_dict(disp) or {}
+    has_solve = bool(summary.get("has_solve"))
     return {
-        "has_solve": bool(summary.get("has_solve")),
+        "has_solve": has_solve,
         "is_multi_period": bool(summary.get("is_multi_period")),
         "periods": list(summary.get("periods") or []),
-        "capacity_mw_total": _sum_cpv_map(cap.get("capacity_mw_by_carrier")),
-        "capex_meur_total": _sum_cpv_map(cap.get("capex_meur_by_carrier")),
-        "new_capex_meur_total": _sum_cpv_map(cap.get("new_capex_meur_by_carrier")),
-        "dispatch_gwh_total": _sum_cpv_map(disp.get("dispatch_gwh_by_carrier")),
+        "capacity_mw_total": _sum_cpv_map_if_available(cap.get("capacity_mw_by_carrier"), has_solve),
+        "capex_meur_total": _sum_cpv_map_if_available(cap.get("capex_meur_by_carrier"), has_solve),
+        "new_capex_meur_total": _sum_cpv_map_if_available(cap.get("new_capex_meur_by_carrier"), has_solve),
+        "dispatch_gwh_total": _sum_cpv_map_if_available(disp.get("dispatch_gwh_by_carrier"), has_solve),
         "opex_meur": _cpv_total(disp.get("opex_meur")),
         "total_load_gwh": _cpv_total(disp.get("total_load_gwh")),
     }

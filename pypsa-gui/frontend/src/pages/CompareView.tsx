@@ -1994,7 +1994,8 @@ function CurtailmentTab({ a, b }: { a: string; b: string }) {
     return (
       <p className="text-[11px] text-muted py-2">
         No curtailment data for {missing.join(' and ')} — nothing to compare against.
-        An absent value is not the same as zero curtailment, so no rate or delta is shown.
+        This side may be unresolved, or may genuinely curtail nothing; either way there
+        is no matching entry to pair it with, so no rate or delta is shown.
       </p>
     )
   }
