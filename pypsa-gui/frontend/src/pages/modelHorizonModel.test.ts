@@ -317,9 +317,9 @@ describe('stepSummary', () => {
   })
 
   describe('economics (multi-period only)', () => {
-    it('names the year span when more than one period is configured', () => {
+    it('names every configured year, not just the endpoints', () => {
       expect(stepSummary('economics', multiCtx))
-        .toBe('Objective weighting set across 3 years (2030–2050)')
+        .toBe('Objective weighting set across 3 years (2030…2040…2050)')
     })
 
     it('calls out that a single period needs no discounting', () => {
@@ -330,6 +330,16 @@ describe('stepSummary', () => {
     it('has nothing to weight when no years are configured yet', () => {
       expect(stepSummary('economics', { ...multiCtx, periods: [] }))
         .toBe('No investment years to weight yet')
+    })
+
+    it('distinguishes two period sets with the same count and span but different spacing', () => {
+      // [2030,2035,2050] and [2030,2040,2050] share count (3) and span (2030-2050) —
+      // a summary keyed only on lo/hi would render both identically, hiding a real
+      // difference: PyPSA's discount weighting is sensitive to inter-period spacing.
+      const evenlySpaced = stepSummary('economics', { ...multiCtx, periods: [2030, 2040, 2050] })
+      const unevenlySpaced = stepSummary('economics', { ...multiCtx, periods: [2030, 2035, 2050] })
+      expect(evenlySpaced).not.toBe(unevenlySpaced)
+      expect(unevenlySpaced).toBe('Objective weighting set across 3 years (2030…2035…2050)')
     })
   })
 
@@ -351,12 +361,23 @@ describe('stepSummary', () => {
   describe('sampling', () => {
     it('names availability when the backend reports a full hourly year is present', () => {
       expect(stepSummary('sampling', multiCtx))
-        .toBe('Not sampled (full year) — representative weeks available')
+        .toBe('Not sampled — representative weeks available')
     })
 
     it('names the reason sampling is unavailable rather than repeating the available text', () => {
       expect(stepSummary('sampling', singleCtx))
-        .toBe('Not sampled (full year) — upload an hourly profile to enable sampling')
+        .toBe('Not sampled — upload an hourly profile to enable sampling')
+    })
+
+    it('does not claim a full year for a sub-year snapshot count', () => {
+      // A single-period network can carry a custom sub-year window via the ordinary
+      // Apply-snapshots path — entirely unrelated to representative-week sampling.
+      // `ctx` has no field that supports a "this is a full year" claim, so the
+      // sentence must not make one regardless of `canSampleWeeks`.
+      const subYear: HorizonSummaryContext = { ...singleCtx, snapshotCount: 168, canSampleWeeks: true }
+      expect(stepSummary('sampling', subYear)).not.toMatch(/full year/i)
+      const subYearUnavailable: HorizonSummaryContext = { ...singleCtx, snapshotCount: 168 }
+      expect(stepSummary('sampling', subYearUnavailable)).not.toMatch(/full year/i)
     })
   })
 

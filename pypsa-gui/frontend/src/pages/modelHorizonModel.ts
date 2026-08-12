@@ -244,15 +244,25 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
-/** `2030` for a single period, `2030–2050` for a span. Caller guarantees non-empty. */
-function periodSpan(periods: number[]): string {
-  let lo = Infinity
-  let hi = -Infinity
-  for (const p of periods) {
-    if (p < lo) lo = p
-    if (p > hi) hi = p
-  }
-  return lo === hi ? `${lo}` : `${lo}–${hi}`
+/**
+ * `2030…2040…2050` — every configured year, not just the endpoints.
+ *
+ * A lo/hi span (`2030–2050`) would render `[2030,2035,2050]` and
+ * `[2030,2040,2050]` identically despite them being genuinely different
+ * configurations — PyPSA's discount weighting is sensitive to inter-period
+ * spacing, not just count and range. Listing every year is the only
+ * representation that can't alias two different period sets together.
+ *
+ * `periods` is an investment-period list (single/low-double-digit years),
+ * never the large per-snapshot array `horizonRangeLabel` guards against, so
+ * there is no call-stack-size concern here — a plain join is fine.
+ *
+ * Uses the same `…` separator as `horizonRangeLabel`'s span notation rather
+ * than an en dash, so the two step summaries that both describe a range of
+ * years read as one convention, not two.
+ */
+function periodList(periods: number[]): string {
+  return periods.join('…')
 }
 
 /**
@@ -278,15 +288,26 @@ export function stepSummary(step: HorizonStepId, ctx: HorizonSummaryContext): st
       if (ctx.periods.length === 1) {
         return `Single period (${ctx.periods[0]}) — no discounting between periods`
       }
-      return `Objective weighting set across ${plural(ctx.periods.length, 'year')} (${periodSpan(ctx.periods)})`
+      return `Objective weighting set across ${plural(ctx.periods.length, 'year')} (${periodList(ctx.periods)})`
 
     case 'window':
       return `${ctx.rangeLabel}, ${resolutionLabel(ctx.freq)}`
 
     case 'sampling':
+      // `ctx` carries no signal for "representative weeks were actually
+      // sampled" — the backend's SnapshotInfo has no such field, and the
+      // page only learns it transiently from a mutation response, which is
+      // not plain persisted data this module is allowed to depend on. So
+      // this sentence deliberately does not claim a sampling state or a
+      // "full year" shape it cannot verify (a single-period network can
+      // carry a custom sub-year window with no relation to sampling) — it
+      // says only what `canSampleWeeks` supports: whether sampling is
+      // available right now. A post-sampling network and a pristine one
+      // with the same `canSampleWeeks` are indistinguishable here; that is
+      // the honest ceiling of this interface, not an oversight.
       return ctx.canSampleWeeks
-        ? 'Not sampled (full year) — representative weeks available'
-        : 'Not sampled (full year) — upload an hourly profile to enable sampling'
+        ? 'Not sampled — representative weeks available'
+        : 'Not sampled — upload an hourly profile to enable sampling'
 
     case 'weights':
       return ctx.weightsAreDefault
