@@ -9,7 +9,13 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
-import { buildWeightingRows, resolutionLabel, FREQ_OPTIONS, pvFactor, horizonRangeLabel, type WeightingRow } from './modelHorizonModel'
+import {
+  buildWeightingRows, resolutionLabel, FREQ_OPTIONS, pvFactor, horizonRangeLabel,
+  visibleSteps, isHorizonUnset,
+  type WeightingRow, type HorizonStepId, type HorizonSummaryContext,
+} from './modelHorizonModel'
+import { StepShell, STEP_LABELS } from './modelHorizon/StepShell'
+import { HorizonSummary } from './modelHorizon/HorizonSummary'
 
 // ── Load carrier canonicaliser ──────────────────────────────────────────────
 // Mirrors loadCarrierKey in Dispatch.tsx + _canonical_load_carrier_key on the
@@ -632,6 +638,65 @@ export default function ModelHorizon() {
     ? 'toggle OFF · snapshots are MultiIndex — re-index below'
     : null
 
+  // ── Guided-step routing ─────────────────────────────────────────────────
+  // Which steps this project's mode shows, in rail order.
+  const steps = useMemo(() => visibleSteps(isMultiPeriod), [isMultiPeriod])
+
+  const [view, setView] = useState<HorizonStepId | 'summary'>('mode')
+  // Decide the LANDING view exactly once per mount, from the network
+  // (isHorizonUnset(snap?.count)) rather than any stored UI state — a user
+  // who navigates away and back gets the same answer for the same project,
+  // because this effect re-runs from scratch on the next mount. Waits for
+  // the first successful `snap` load so an already-configured project never
+  // flashes step 1 before settling on the summary (isHorizonUnset(undefined)
+  // reads as unset, which is why the check below only fires once `snap` is
+  // no longer undefined). Deliberately does NOT re-fire on later snapshot
+  // refetches — an in-progress edit on some step must not get yanked to a
+  // different view just because that edit changed snap.count.
+  const enteredRef = useRef(false)
+  useEffect(() => {
+    if (enteredRef.current || snap === undefined) return
+    enteredRef.current = true
+    setView(isHorizonUnset(snap.count) ? 'mode' : 'summary')
+  }, [snap])
+  // Guards the multi-period toggle's cascade: turning "Multi-investment
+  // periods" off while parked on 'years' / 'economics' (both multi-only)
+  // removes those ids from `steps`, which would otherwise strand `view` on a
+  // step the rail no longer lists and render an empty frame. Falls back to
+  // 'mode' — always present — rather than to the summary, so the toggle
+  // stays in view for whoever just changed it.
+  useEffect(() => {
+    if (view !== 'summary' && !steps.includes(view)) setView('mode')
+  }, [steps, view])
+
+  // Whether every snapshot weighting is still at its default (objective 1).
+  // Read straight off `snap.weightings` — the FULL set, not the paginated
+  // `weightingRows` slice — so the summary sentence is correct even when a
+  // custom weight lives on a page the user hasn't scrolled to.
+  const weightsAreDefault = useMemo(() => {
+    const rows = (snap?.weightings ?? []) as WeightingRow[]
+    return rows.every(r => {
+      const raw = r.objective
+      const n = typeof raw === 'number' ? raw : Number(raw)
+      return !Number.isFinite(n) || n === 1
+    })
+  }, [snap?.weightings])
+
+  // Feeds BOTH the StatCard strip above and the summary/rail below — same
+  // `isMultiPeriod` / `periods` / `snap?.count` / `snap?.freq` / `rangeStr`
+  // values already used for the strip, never re-derived, so the two can't
+  // drift apart.
+  const summaryCtx: HorizonSummaryContext = {
+    isMultiPeriod,
+    periods,
+    snapshotCount: snap?.count,
+    freq: snap?.freq,
+    rangeLabel: rangeStr,
+    canSampleWeeks: Boolean(snap?.can_sample_weeks),
+    weightsAreDefault,
+  }
+  const stepTitle = view === 'summary' ? '' : `Step ${steps.indexOf(view) + 1} of ${steps.length} — ${STEP_LABELS[view]}`
+
   return (
     <div className="flex flex-col h-full">
       <PageHeader
@@ -671,7 +736,20 @@ export default function ModelHorizon() {
         />
       </RowGrid>
 
-      {/* ── 2. Mode toggle (the single decision point) ───────── */}
+      {/* ── 2+. Guided steps, routed off `view` (Task 3 shell) ── */}
+      {view === 'summary' ? (
+        <HorizonSummary steps={steps} ctx={summaryCtx} onOpen={setView} />
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          <button
+            type="button"
+            onClick={() => setView('summary')}
+            className="self-start text-[11px] text-accent hover:underline"
+          >← Back to summary</button>
+          <StepShell steps={steps} current={view} onSelect={setView} title={stepTitle}>
+
+      {/* ── 2a. Mode toggle (the single decision point) ───────── */}
+      {view === 'mode' && (
       <section className="border border-border rounded-[10px] bg-bg p-3.5 shadow-[0_1px_0_rgba(10,14,20,0.04)]">
         <label className="flex items-start gap-2 cursor-pointer">
           <input
@@ -692,13 +770,18 @@ export default function ModelHorizon() {
           </div>
         </label>
       </section>
+      )}
 
       {/* ── 3a. Multi-period config (only when toggle ON) ────── */}
-      {isMultiPeriod && (
+      {/* years / economics / window(multi) are three distinct steps that
+          this file still bundles into ONE physical section — see the Task 3
+          report for why, and what Tasks 4/5 need to do about it. */}
+      {isMultiPeriod && (view === 'years' || view === 'economics' || view === 'window') && (
         <section>
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Multi-period planning</h3>
 
           {/* Investment years */}
+          {view === 'years' && (
           <div className="border border-border rounded mb-3">
             <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted">
               Investment years
@@ -745,9 +828,10 @@ export default function ModelHorizon() {
               )}
             </div>
           </div>
+          )}
 
           {/* Period weightings (years + objective per period) */}
-          {periods.length > 0 && (
+          {view === 'economics' && periods.length > 0 && (
             <div className="border border-border rounded mb-3">
               <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center justify-between">
                 <span>Period weightings</span>
@@ -1036,7 +1120,7 @@ export default function ModelHorizon() {
           )}
 
           {/* Snapshot constructor (MultiIndex) */}
-          {periods.length > 0 && (
+          {view === 'window' && periods.length > 0 && (
             <div className="border border-border rounded">
               <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center justify-between">
                 <span>Snapshot constructor (MultiIndex)</span>
@@ -1185,7 +1269,7 @@ export default function ModelHorizon() {
       )}
 
       {/* ── 3b. Single-period config (only when toggle OFF) ──── */}
-      {!isMultiPeriod && (
+      {!isMultiPeriod && view === 'window' && (
         <section>
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Snapshot range</h3>
           <p className="text-[11px] text-muted mb-2 leading-relaxed">
@@ -1246,6 +1330,7 @@ export default function ModelHorizon() {
           multi-period networks get the sample replicated under every period.
           Gated on snap.can_sample_weeks — the backend reports whether a
           full-year hourly profile is actually available. */}
+      {view === 'sampling' && (
       <section>
         <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Representative weeks</h3>
         <p className="text-[11px] text-muted mb-2 leading-relaxed">
@@ -1319,9 +1404,10 @@ export default function ModelHorizon() {
           </div>
         )}
       </section>
+      )}
 
       {/* ── 4. Snapshot weightings (always shown) ────────────── */}
-      {snap && snap.weightings && snap.weightings.length > 0 && (
+      {view === 'weights' && snap && snap.weightings && snap.weightings.length > 0 && (
         <section>
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Snapshot weightings</h3>
           <p className="text-[11px] text-muted mb-2 leading-relaxed">
@@ -1469,6 +1555,9 @@ export default function ModelHorizon() {
             </div>
           )}
         </section>
+      )}
+          </StepShell>
+        </div>
       )}
       </div>
     </div>

@@ -154,6 +154,21 @@ function renderPage() {
   )
 }
 
+/** Post-restructure helper: a configured project lands on the summary, so any
+ * test that needs a specific step's content mounted must click its summary
+ * line first. Scoped to the "Model horizon summary" region specifically
+ * (not a bare `screen` query) for two reasons: (1) while `snap` is still
+ * loading, the page shows step 1's rail as a placeholder — which also has a
+ * button whose name can match the same regex — so an unscoped query can grab
+ * the wrong (rail) button mid-flight; waiting for the summary region first
+ * guarantees the entry-routing decision has already landed; (2) once inside
+ * a step, the rail re-introduces the same possible name collision. */
+async function openStep(name: RegExp) {
+  const summary = await screen.findByRole('region', { name: 'Model horizon summary' })
+  const btn = within(summary).getByRole('button', { name })
+  await userEvent.click(btn)
+}
+
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
   vi.mocked(networkApi.getSnapshots).mockReset()
@@ -186,6 +201,11 @@ it('PATCHes a multi-period weight edit with a period-qualified key, not a bare I
   )
 
   renderPage()
+
+  // This project is configured (count: 2), so the page lands on the summary
+  // (guided-step restructure, Task 3) — open the "Snapshot weightings" step
+  // to mount the section this test exercises.
+  await openStep(/Snapshot weightings/)
 
   const heading = await screen.findByRole('heading', { name: 'Snapshot weightings' })
   const section = heading.closest('section')
@@ -284,7 +304,10 @@ it('greys the PV x preview column when auto-discount would not actually write an
     baseSolverConfig({ multi_investment_periods: true, auto_discount_periods: true }),
   )
   renderPage()
-  await screen.findByRole('heading', { name: 'Snapshot weightings' }) // wait for full render
+  // Configured project (count: 2) lands on the summary — open "Economics",
+  // which is where the Period weightings / PV preview table now lives.
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings') // wait for full render
   const activeCell = pvCellForPeriod2030()
   expect(activeCell.title).toMatch(/Auto-discount will set objective/)
   // jsdom has no paint/layout engine, so the "grey" visual state is only
@@ -300,8 +323,67 @@ it('greys the PV x preview column when auto-discount would not actually write an
     baseSolverConfig({ multi_investment_periods: true, auto_discount_periods: false }),
   )
   renderPage()
-  await screen.findByRole('heading', { name: 'Snapshot weightings' })
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings')
   const inertCell = pvCellForPeriod2030()
   expect(inertCell.title).toMatch(/Auto-discount is off/)
   expect(inertCell.className).toContain('text-muted/40')
+})
+
+// ── 4. Guided-step shell: routing between summary and steps (Task 3) ──────
+
+it('opens on step 1, not the summary, when the horizon is unset (count <= 1)', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(flatSnapshots({ count: 1 }))
+
+  renderPage()
+
+  const nav = await screen.findByRole('navigation', { name: 'Model horizon steps' })
+  expect(within(nav).getByRole('button', { name: /Mode/ }).getAttribute('aria-current')).toBe('step')
+  expect(screen.queryByRole('region', { name: 'Model horizon summary' })).toBeNull()
+})
+
+it('opens on the summary, not step 1, when the horizon is already configured', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(flatSnapshots()) // count: 3
+
+  renderPage()
+
+  const summary = await screen.findByRole('region', { name: 'Model horizon summary' })
+  expect(summary).not.toBeNull()
+  expect(screen.queryByRole('navigation', { name: 'Model horizon steps' })).toBeNull()
+})
+
+it('opens the corresponding step when a summary line is clicked', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(flatSnapshots()) // count: 3, configured
+
+  renderPage()
+  await openStep(/Snapshot weightings/)
+
+  const nav = await screen.findByRole('navigation', { name: 'Model horizon steps' })
+  expect(within(nav).getByRole('button', { name: /Snapshot weightings/ }).getAttribute('aria-current')).toBe('step')
+  expect(await screen.findByRole('heading', { name: 'Snapshot weightings' })).not.toBeNull()
+})
+
+it('shows four rail entries in single-period mode, six in multi-period', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(flatSnapshots({ count: 1 }))
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: false }),
+  )
+  renderPage()
+  const singleNav = await screen.findByRole('navigation', { name: 'Model horizon steps' })
+  expect(within(singleNav).getAllByRole('button')).toHaveLength(4)
+
+  cleanup()
+
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots({ count: 1 }))
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true }),
+  )
+  renderPage()
+  // The rail renders immediately off the placeholder single-period default
+  // (isMultiPeriod defaults false until solverConfig resolves), so wait for
+  // a multi-only rail entry before counting — otherwise this can observe the
+  // pre-solverConfig 4-button paint instead of the settled 6-button one.
+  await screen.findByRole('button', { name: /Investment years/ })
+  const multiNav = screen.getByRole('navigation', { name: 'Model horizon steps' })
+  expect(within(multiNav).getAllByRole('button')).toHaveLength(6)
 })
