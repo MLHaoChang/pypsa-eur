@@ -62,6 +62,7 @@ import static_gate
 from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
 from services import active_project
+from services import fs_permission
 from services import shutdown as shutdown_service
 from routers import (
     admin,
@@ -329,6 +330,25 @@ async def lifespan(app: FastAPI):
         # desktop splash reasonably read it as the first.
         run_first_run_import()
     PyPSAService.initialize()
+    # Ask macOS for the projects root NOW, on a thread, rather than letting
+    # the first data request discover it is gated. On a granted machine this
+    # costs microseconds; on a fresh build it is what turns an unbounded hang
+    # into a 503 that names the dialog. See services/fs_permission.py — the
+    # behaviour is measured, not theorised.
+    #
+    # Deliberately AFTER the yield-blocking work above and never awaited:
+    # lifespan startup must not itself park on the consent dialog, or uvicorn
+    # accepts no connection at all and even /api/chat/health goes dark.
+    try:
+        _projects_root = get_settings().projects_root
+
+        def _touch_projects_root() -> None:
+            _projects_root.mkdir(parents=True, exist_ok=True)
+            next(os.scandir(_projects_root), None)
+
+        fs_permission.start_probe(_touch_projects_root)
+    except Exception:  # noqa: BLE001 — a probe must never break startup
+        logger.exception("could not start the projects-root access probe")
     yield
 
 
@@ -780,7 +800,14 @@ app.include_router(project_network.router, prefix="/api/projects", tags=["projec
 # `/{name}/results-summary` paths) — registered before projects.router for
 # clarity; the extra path segment means the `/{name}` catch-all never shadows it.
 app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
-app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
+# `require_file_access` guards the whole projects router because every route
+# on it resolves a path under the projects root. It is a no-op wherever the
+# grant is held; where it is not, it is the difference between a 503 that
+# says "click Allow" and a request that never returns.
+app.include_router(
+    projects.router, prefix="/api/projects", tags=["projects"],
+    dependencies=[Depends(fs_permission.require_file_access)],
+)
 app.include_router(snapshots.router, prefix="/api/projects", tags=["snapshots"])
 # Chatbot file uploads (Phase A) — per-project file storage at
 # `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
