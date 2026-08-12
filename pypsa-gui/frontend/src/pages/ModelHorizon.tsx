@@ -11,7 +11,7 @@ import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
 import {
   buildWeightingRows, resolutionLabel, FREQ_OPTIONS, pvFactor, horizonRangeLabel,
-  visibleSteps, isHorizonUnset,
+  visibleSteps, isHorizonUnset, stepSummary,
   type WeightingRow, type HorizonStepId, type HorizonSummaryContext,
 } from './modelHorizonModel'
 import { StepShell, STEP_LABELS } from './modelHorizon/StepShell'
@@ -80,6 +80,30 @@ function extractLocalFromSnapshot(s: string | undefined): string {
     return m[1].replace(' ', 'T').slice(0, 16)
   }
   return toLocal(s)
+}
+
+// Shown by the 'economics' and multi-period 'window' steps when there are
+// zero investment years — both need at least one period before they have
+// anything to show. Before this task's routing existed, that state was
+// unreachable: `isMultiPeriod` gated the whole "Multi-period planning"
+// section and the always-visible "Investment years" add-UI sat directly
+// above these blocks in the old scroll, so a user could never land on an
+// empty screen. The guided rail now lists Economics/Snapshot window as
+// clickable regardless of period count, so the step itself has to say why
+// it's empty and offer the one-click way out — a route to the Years step.
+function NoPeriodsFallback({ message, onGoToYears }: { message: string; onGoToYears: () => void }) {
+  return (
+    <div className="border border-dashed border-border rounded p-4 flex flex-col items-start gap-2.5 text-[11px] text-muted">
+      <p className="leading-relaxed">{message}</p>
+      <button
+        type="button"
+        onClick={onGoToYears}
+        className="px-2.5 py-1 border border-border rounded text-accent hover:border-accent hover:bg-accent/5 transition-colors"
+      >
+        Go to Investment years →
+      </button>
+    </div>
+  )
 }
 
 const PAGE_SIZE = 100
@@ -695,7 +719,6 @@ export default function ModelHorizon() {
     canSampleWeeks: Boolean(snap?.can_sample_weeks),
     weightsAreDefault,
   }
-  const stepTitle = view === 'summary' ? '' : `Step ${steps.indexOf(view) + 1} of ${steps.length} — ${STEP_LABELS[view]}`
 
   return (
     <div className="flex flex-col h-full">
@@ -746,7 +769,12 @@ export default function ModelHorizon() {
             onClick={() => setView('summary')}
             className="self-start text-[11px] text-accent hover:underline"
           >← Back to summary</button>
-          <StepShell steps={steps} current={view} onSelect={setView} title={stepTitle}>
+          <StepShell
+            steps={steps}
+            current={view}
+            onSelect={setView}
+            title={`Step ${steps.indexOf(view) + 1} of ${steps.length} — ${STEP_LABELS[view]}`}
+          >
 
       {/* ── 2a. Mode toggle (the single decision point) ───────── */}
       {view === 'mode' && (
@@ -831,7 +859,12 @@ export default function ModelHorizon() {
           )}
 
           {/* Period weightings (years + objective per period) */}
-          {view === 'economics' && periods.length > 0 && (
+          {view === 'economics' && (periods.length === 0 ? (
+            <NoPeriodsFallback
+              message={stepSummary('economics', summaryCtx)}
+              onGoToYears={() => setView('years')}
+            />
+          ) : (
             <div className="border border-border rounded mb-3">
               <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center justify-between">
                 <span>Period weightings</span>
@@ -1117,10 +1150,15 @@ export default function ModelHorizon() {
                 </p>
               </div>
             </div>
-          )}
+          ))}
 
           {/* Snapshot constructor (MultiIndex) */}
-          {view === 'window' && periods.length > 0 && (
+          {view === 'window' && (periods.length === 0 ? (
+            <NoPeriodsFallback
+              message="Add investment years first — the MultiIndex snapshot constructor needs at least one period to build a (period × timestep) index."
+              onGoToYears={() => setView('years')}
+            />
+          ) : (
             <div className="border border-border rounded">
               <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center justify-between">
                 <span>Snapshot constructor (MultiIndex)</span>
@@ -1264,7 +1302,7 @@ export default function ModelHorizon() {
                 </p>
               </div>
             </div>
-          )}
+          ))}
         </section>
       )}
 

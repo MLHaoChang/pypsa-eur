@@ -1,8 +1,9 @@
 // Summary-first landing view for Model Horizon: one clickable line per
 // visible step, each showing `stepSummary`'s sentence for the step's CURRENT
 // configuration. A returning user reads this instead of re-opening every
-// step. Real <button> rows (same interaction model as ProjectTabs' tab strip
-// and PageKit's Seg) so the whole thing is keyboard-reachable.
+// step. Real <button> rows — same "real <button>, not a clickable div"
+// interaction model as ProjectTabs' tab strip and PageKit's Seg — so the
+// whole thing is keyboard-reachable.
 import { stepSummary, type HorizonStepId, type HorizonSummaryContext } from '../modelHorizonModel'
 import { STEP_LABELS } from './StepShell'
 

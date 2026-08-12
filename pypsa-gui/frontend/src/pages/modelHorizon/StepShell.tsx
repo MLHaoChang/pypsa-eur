@@ -1,6 +1,9 @@
 // The guided-step chrome for Model Horizon: a numbered rail (real buttons —
-// keyboard reachable, same interaction model as ProjectTabs' role="tab" strip
-// and PageKit's Seg) plus a title for whichever step is current, plus a slot
+// keyboard reachable, same "real <button>, not a clickable div" interaction
+// model as ProjectTabs' tab strip and PageKit's Seg — though this is a
+// stepper, not a tablist, so it marks the current entry with
+// `aria-current="step"` rather than ProjectTabs' `role="tab"`/`aria-selected`)
+// plus a title for whichever step is current, plus a slot
 // for step-specific "advanced" content collapsed behind a native <details>
 // disclosure (the pattern already used by SolverSettings.tsx and
 // results/Economics.tsx's methodology notes).

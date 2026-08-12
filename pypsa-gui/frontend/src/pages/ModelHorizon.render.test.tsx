@@ -387,3 +387,47 @@ it('shows four rail entries in single-period mode, six in multi-period', async (
   const multiNav = screen.getByRole('navigation', { name: 'Model horizon steps' })
   expect(within(multiNav).getAllByRole('button')).toHaveLength(6)
 })
+
+// ── 5. Economics / Window must not dead-end at zero investment years ──────
+// Before the guided-step rail existed, this state was unreachable: the old
+// scroll gated the whole "Multi-period planning" section on isMultiPeriod
+// alone, and the always-visible "Investment years" add-UI sat directly
+// above the Period-weightings / MultiIndex-constructor blocks — a user
+// physically could not land on an empty screen. The rail now lists
+// Economics and Snapshot window as clickable regardless of period count,
+// so both steps must give the user a way out rather than rendering blank.
+
+it('gives Economics and Window an actionable way out at zero investment years, not a blank frame', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots()) // count: 2, configured
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true }),
+  )
+  // getInvestmentPeriods defaults (beforeEach) to { periods: [], weightings: [] } — zero years.
+
+  renderPage()
+  await openStep(/Economics/)
+
+  // Scope to the step's own body section (excludes the rail, which also has
+  // an "Investment years" entry) — same `heading.closest('section')` pattern
+  // the multi-period-weight-edit test above uses.
+  const economicsHeading = await screen.findByRole('heading', { name: /Economics/ })
+  const economicsBody = economicsHeading.closest('section')
+  if (!economicsBody) throw new Error('Economics step body section not found')
+
+  // Must NOT silently render nothing: no Period weightings table...
+  expect(within(economicsBody).queryByText('Period weightings')).toBeNull()
+  // ...but a real, actionable way to reach the step that creates a year.
+  const goToYearsFromEconomics = within(economicsBody).getByRole('button', { name: /Go to Investment years/ })
+  await userEvent.click(goToYearsFromEconomics)
+
+  const nav = screen.getByRole('navigation', { name: 'Model horizon steps' })
+  expect(within(nav).getByRole('button', { name: /Investment years/ }).getAttribute('aria-current')).toBe('step')
+
+  // Same fallback path must cover the multi-period Window step too.
+  await userEvent.click(within(nav).getByRole('button', { name: /Snapshot window/ }))
+  const windowHeading = await screen.findByRole('heading', { name: /Snapshot window/ })
+  const windowBody = windowHeading.closest('section')
+  if (!windowBody) throw new Error('Window step body section not found')
+  expect(within(windowBody).queryByText('Snapshot constructor (MultiIndex)')).toBeNull()
+  expect(within(windowBody).getByRole('button', { name: /Go to Investment years/ })).not.toBeNull()
+})
