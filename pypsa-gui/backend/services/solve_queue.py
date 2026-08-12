@@ -151,6 +151,7 @@ class SolveQueue:
         *,
         project_key: str | None = None,
         storage_dir: str | None = None,
+        solver_config_json: str | None = None,
     ) -> SolveJob:
         """Append a job for `project_id` and ensure the dispatcher is running."""
         with self._lock:
@@ -160,6 +161,7 @@ class SolveQueue:
                 project_id=project_id,
                 project_key=project_key,
                 storage_dir=storage_dir,
+                solver_config_json=solver_config_json,
                 enqueued_at=time.time(),
             )
             self._jobs[jid] = job
@@ -175,12 +177,15 @@ class SolveQueue:
         *,
         project_key: str | None = None,
         storage_dir: str | None = None,
+        solver_config_json: str | None = None,
     ) -> tuple[SolveJob, bool]:
         """
         Enqueue `project_id` UNLESS it already has a queued or running job.
 
         Returns `(job, created)`. When `created` is False the returned job is
-        the existing one, untouched, and nothing was appended.
+        the existing one, untouched, and nothing was appended — `solver_config_json`
+        is silently discarded in that case, so a re-enqueue of an already-active
+        project can never overwrite the config the FIRST enqueue snapshotted.
 
         This is the enforcement point. `enqueue` appended unconditionally and
         the one-active-job-per-project invariant lived in three separate client
@@ -194,8 +199,19 @@ class SolveQueue:
         and the only one that survives a rename. The display name is the
         fallback, which is all a legacy unkeyed job carries.
 
-        `enqueue` is deliberately left in place and unchanged: it is the raw
-        append the test harness uses to build queue states directly.
+        `solver_config_json` is a CONSTRUCTOR argument, not a post-construction
+        assignment (R24). The job becomes visible to the dispatcher the moment
+        `self._q.put(jid)` runs, on a background thread that is woken by that
+        same call — so a caller that built the job with `SolveJob(...)` and
+        only assigned `.solver_config_json` afterwards leaves a window where an
+        idle dispatcher can win the race, read `solver_config_json is None`,
+        and fall back to the live context — the exact defect this snapshot
+        exists to close, just for one job in one narrow window. Taking it as a
+        constructor argument means the job is never in `self._jobs` / `self._q`
+        in a state where the snapshot is missing but was supplied.
+
+        `enqueue` is deliberately left in place and unchanged in shape: it is
+        the raw append the test harness uses to build queue states directly.
         """
         with self._lock:
             existing = self._active_job_locked(project_id, project_key)
@@ -211,6 +227,7 @@ class SolveQueue:
                 project_id=project_id,
                 project_key=project_key,
                 storage_dir=storage_dir,
+                solver_config_json=solver_config_json,
                 enqueued_at=time.time(),
             )
             self._jobs[jid] = job

@@ -113,17 +113,25 @@ def enqueue_solve(
     #
     # The snapshot is resolved BEFORE `enqueue_unique`, here, where the request
     # and the authorized directory both still exist — the dispatcher runs on a
-    # worker thread with neither (R24). Resolving it even when `created` turns
-    # out False is wasted work but not wrong: the snapshot for an idempotent
-    # re-enqueue is simply discarded below.
+    # worker thread with neither (R24). It is passed INTO `enqueue_unique` as a
+    # constructor argument, not assigned onto `job` afterward: `enqueue_unique`
+    # publishes the job to the dispatcher's queue (`self._q.put(jid)`, which
+    # wakes a possibly-idle dispatcher thread) before returning, so an
+    # assign-after-return has a real TOCTOU window where the dispatcher reads
+    # the job's config before this route gets back to setting it — the
+    # pre-fix bug, reintroduced for one job in one race. Passing it in means
+    # the job is never visible to the dispatcher with a missing snapshot.
+    # Resolving it even when `created` turns out False is wasted work but not
+    # wrong: `enqueue_unique` discards it for an idempotent re-enqueue and the
+    # existing job keeps the config IT was created with.
     snapshot = _config_snapshot_for(project_registry.registry_key(project), project_dir)
     job, created = solve_queue.enqueue_unique(
         project.name,
         project_key=project_registry.registry_key(project),
         storage_dir=str(project_dir),
+        solver_config_json=snapshot,
     )
     if created:
-        job.solver_config_json = snapshot
         # Stamp the ACTING user alongside the org-scoped directory this route
         # already resolved. Keying per-user dismiss on project access instead
         # would let two users sharing a project dismiss each other's rows —

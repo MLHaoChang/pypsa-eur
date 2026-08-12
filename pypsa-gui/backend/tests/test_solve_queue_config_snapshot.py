@@ -111,3 +111,128 @@ def test_the_snapshot_is_persisted_on_the_row(client, install_network, tmp_proje
     assert row is not None
     assert row.solver_config is not None, "no config snapshot was stored"
     assert json.loads(row.solver_config)["co2_price"] == 42.0
+
+
+# ── Fix round 1: the TOCTOU between publish and stamp ───────────────────────
+#
+# `enqueue_solve` used to call `solve_queue.enqueue_unique(...)` (which
+# publishes the job to the dispatcher's `queue.Queue` and can wake an idle
+# dispatcher thread) and only assign `job.solver_config_json = snapshot` on
+# the NEXT line. That is a real window: if the dispatcher wins the race, it
+# reads the job's config while `solver_config_json` is still `None` and falls
+# back to the live context — the exact defect R24 exists to close, for one
+# job, in one narrow window.
+#
+# Reproducing that window with real thread timing is not a reliable test —
+# the dispatcher does a lock cycle plus a `record_status` DB write before it
+# reaches the read, while the remaining router work is a single attribute
+# assignment, so the race is (per review) "practically hard to hit" even
+# though it is real. The deterministic, honest check is structural: does
+# `SolveQueue.enqueue_unique` / `.enqueue` ever make a job visible to the
+# dispatcher (`self._jobs` / `self._q`) in a state where a caller-supplied
+# `solver_config_json` has not yet been applied? Both now take it as a
+# CONSTRUCTOR argument specifically so the answer is "never, by construction"
+# — the job object does not exist until the snapshot is already baked into
+# it, so there is no intermediate state left to observe.
+#
+# These hook the exact publish point (`Queue.put`, called under `self._lock`
+# immediately before the job becomes poppable by the dispatcher thread) and
+# assert the invariant AT THAT MOMENT — no sleep, no thread, no flakiness.
+# Verified (see task-14-report.md) that with `solve_queue.py` reverted to the
+# pre-round-1 commit, `enqueue_unique` does not even accept
+# `solver_config_json` — these tests fail with a `TypeError`, an honest
+# demonstration that the atomicity guarantee did not exist yet.
+
+
+def test_enqueue_unique_never_publishes_a_job_before_its_snapshot_is_set():
+    from services.solve_queue import SolveQueue
+
+    sq = SolveQueue()
+    # Prevent a real dispatcher thread from starting: this test asserts a
+    # constructor-time invariant, not dispatch behaviour, and a live thread
+    # would immediately try (and fail) to hydrate a nonexistent project.
+    sq._ensure_dispatcher_locked = lambda: None
+
+    seen_at_publish: list = []
+    real_put = sq._q.put
+
+    def spying_put(item, *a, **kw):
+        # The job must already carry ITS config by the time it is handed to
+        # the queue the dispatcher thread blocks on — this is the earliest
+        # point a concurrently-running dispatcher could observe it.
+        job = sq._jobs.get(item)
+        seen_at_publish.append(None if job is None else job.solver_config_json)
+        return real_put(item, *a, **kw)
+
+    sq._q.put = spying_put
+
+    job, created = sq.enqueue_unique(
+        "StructGuard", project_key="org:struct-guard", storage_dir="/tmp/struct-guard",
+        solver_config_json='{"co2_price": 7.0}',
+    )
+    assert created
+    assert seen_at_publish == ['{"co2_price": 7.0}'], (
+        "the job was visible to the dispatcher's queue before its "
+        f"solver_config_json snapshot was set: saw {seen_at_publish!r}"
+    )
+    assert job.solver_config_json == '{"co2_price": 7.0}'
+
+
+def test_enqueue_also_never_publishes_a_job_before_its_snapshot_is_set():
+    """
+    `enqueue` (the raw, unconditional append the test harness uses directly)
+    got the same constructor-argument treatment as `enqueue_unique`, kept
+    symmetric on review — same seam, same guarantee.
+    """
+    from services.solve_queue import SolveQueue
+
+    sq = SolveQueue()
+    sq._ensure_dispatcher_locked = lambda: None
+
+    seen_at_publish: list = []
+    real_put = sq._q.put
+
+    def spying_put(item, *a, **kw):
+        job = sq._jobs.get(item)
+        seen_at_publish.append(None if job is None else job.solver_config_json)
+        return real_put(item, *a, **kw)
+
+    sq._q.put = spying_put
+
+    job = sq.enqueue(
+        "RawAppend", project_key="org:raw-append", storage_dir="/tmp/raw-append",
+        solver_config_json='{"co2_price": 3.0}',
+    )
+    assert seen_at_publish == ['{"co2_price": 3.0}']
+    assert job.solver_config_json == '{"co2_price": 3.0}'
+
+
+def test_reenqueuing_an_already_active_project_keeps_its_original_snapshot():
+    """
+    The idempotent path (R15/R16): re-enqueuing a project that already has a
+    queued/running job returns the EXISTING job untouched and discards the
+    freshly-resolved snapshot the caller passed in. Review called this out as
+    correct and correctly commented in fix round 1 — regression guard so
+    threading `solver_config_json` through the constructor doesn't
+    accidentally start overwriting it on the idempotent branch.
+    """
+    from services.solve_queue import SolveQueue
+
+    sq = SolveQueue()
+    sq._ensure_dispatcher_locked = lambda: None
+
+    first, created1 = sq.enqueue_unique(
+        "Dup", project_key="org:dup", storage_dir="/tmp/dup",
+        solver_config_json='{"co2_price": 1.0}',
+    )
+    assert created1
+    second, created2 = sq.enqueue_unique(
+        "Dup", project_key="org:dup", storage_dir="/tmp/dup",
+        solver_config_json='{"co2_price": 999.0}',
+    )
+    assert not created2
+    assert second is first
+    assert second.solver_config_json == '{"co2_price": 1.0}', (
+        "the idempotent re-enqueue must not overwrite the original job's "
+        "config snapshot with the freshly (and pointlessly) resolved one"
+    )
