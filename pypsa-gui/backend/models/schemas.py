@@ -1053,6 +1053,14 @@ class CurtailmentComparison(BaseModel):
     # are missing) and every figure below is a default zero, not a
     # measurement — see ADR-0001.
     available: bool = False
+    # True means SOME generator's figure could not be computed while others
+    # succeeded, so every number below is a real measurement that UNDERSTATES
+    # the true total. `available` cannot carry this: a real measurement IS
+    # present, so `available` is correctly True and a consumer checking only
+    # that flag sees a complete answer. Total failure is still signalled by
+    # `available=False` alone, where `partial` stays False because there is no
+    # partial figure left to qualify. See ADR-0001.
+    partial: bool = False
     total_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     by_carrier_gwh: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     # Curtailment rate per carrier (%). Equals ``curtailed / (curtailed +

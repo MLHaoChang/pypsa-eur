@@ -123,6 +123,27 @@ export function isTruncatedPayload(
 // version of "unavailable" is exactly the drift this module exists to stop.
 export const COST_UNAVAILABLE = 'unavailable'
 
+// The inline cell rendering of the above. The word was already centralised;
+// its PRESENTATION was not — CompareView carried 19 verbatim copies of this
+// exact span, so the tooltip copy could drift on an edit to any one of them
+// and nothing would catch it. Same argument that put COST_UNAVAILABLE here,
+// one layer out.
+//
+// Deliberately NOT covering two other shapes, which are different renderings
+// rather than copies of this one:
+//   * the whole-tab fallback `<p className="text-[11px] text-muted py-2">`,
+//     a block-level message where a cell would be wrong;
+//   * bare `COST_UNAVAILABLE` interpolated into a text run
+//     ("max unavailable · min unavailable"), where a nested span would add
+//     markup to a sentence.
+export function UnavailableCell() {
+  return (
+    <span className="text-muted" title="This scenario's figures could not be resolved">
+      {COST_UNAVAILABLE}
+    </span>
+  )
+}
+
 // Drop-in warning banner for the six windowing tabs — renders nothing unless
 // `isTruncatedPayload(payloads)` is true (i.e. some payload was `capped`).
 // Centralised alongside the predicate so the banner copy (and its tone)

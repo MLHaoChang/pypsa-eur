@@ -515,6 +515,12 @@ export interface CurtailmentComparison {
   // curtailing generators) — only False means unresolved. See
   // CapacityComparison.available and the backend docstring for the nuance.
   available: boolean
+  // True means some generators' figures could not be computed while others
+  // succeeded — the numbers below are real but UNDERSTATE the truth. Distinct
+  // from `available: false`, which means nothing resolved at all. Optional so
+  // a response from an older backend reads as "not partial" rather than
+  // undefined-y truthy.
+  partial?: boolean
   total_gwh: CarrierPeriodValue
   by_carrier_gwh: Record<string, CarrierPeriodValue>
   rate_pct_by_carrier: Record<string, CarrierPeriodValue>

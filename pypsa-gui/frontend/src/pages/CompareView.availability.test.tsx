@@ -46,7 +46,7 @@ vi.mock('../api/projects', () => ({
 import { projectsApi } from '../api/projects'
 import {
   EconomicsTab, EmissionsTab, StorageCyclingTab,
-  LoadingTab, PricesTab, OverviewTab, LostLoadTab,
+  LoadingTab, PricesTab, OverviewTab, LostLoadTab, CurtailmentTab,
 } from './CompareView'
 
 const summary = (available: boolean, project: string) => ({
@@ -838,5 +838,102 @@ describe('OverviewTab distinguishes unavailable from zero', () => {
     // columns only, not a whole-tab banner that would incorrectly blank out
     // always-valid structural data.
     expect(await screen.findAllByText('200.0 MW')).toHaveLength(2)
+  })
+})
+
+// The marker's PRESENTATION, pinned so collapsing CompareView's 19 verbatim
+// copies of the cell span into `<UnavailableCell />` is provably
+// behaviour-preserving. This is a characterisation test, not a RED one:
+// the refactor changes no behaviour, so there is no failing state to
+// capture first — its job is to fail if the collapse drops the muted
+// styling or the tooltip that tells the user WHY the cell is empty.
+describe('the unavailable marker carries its explanation', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders every marker cell with the muted class and the explanatory title', async () => {
+    vi.mocked(projectsApi.compareState).mockImplementation(
+      (project: string) => Promise.resolve(overviewCompareState(project) as never),
+    )
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(overviewSummary(project === 'alpha', project) as never),
+    )
+    renderOverviewTab()
+
+    const markers = await screen.findAllByText(COST_UNAVAILABLE)
+    expect(markers.length).toBeGreaterThan(0)
+
+    // Every marker rendered as a CELL (a <span>) must explain itself. The
+    // block-level whole-tab fallback is a <p> and carries its meaning in
+    // surrounding prose, so it is excluded rather than asserted against.
+    const cells = markers.filter(el => el.tagName === 'SPAN')
+    expect(cells.length).toBeGreaterThan(0)
+    for (const cell of cells) {
+      expect(cell.getAttribute('title')).toBe(
+        "This scenario's figures could not be resolved",
+      )
+      expect(cell.className).toContain('text-muted')
+    }
+  })
+})
+
+// The curtailment PARTIAL case. `available` is correctly true — a real
+// measurement IS present — so it cannot carry this, and every existing
+// availability guard on this tab passes. The block ships a number that
+// silently understates by however much the failed generators would have
+// contributed. Nothing on screen said so, which makes it the ADR-0001
+// failure mode wearing a plausible figure instead of a zero.
+function renderCurtailmentTab() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <CurtailmentTab a="alpha" b="beta" />
+    </QueryClientProvider>,
+  )
+}
+
+const curtailmentSummary = (partial: boolean, project: string) => ({
+  project,
+  has_solve: true,
+  periods: [],
+  curtailment: {
+    available: true,
+    partial,
+    total_gwh: { total: 12.5, by_period: {} },
+    by_carrier_gwh: { wind: { total: 12.5, by_period: {} } },
+    rate_pct_by_carrier: { wind: { total: 8.25, by_period: {} } },
+    system_rate_pct: { total: 8.25, by_period: {} },
+  },
+})
+
+describe('CurtailmentTab surfaces the partial case', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('warns that one side understates when its block is partial', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) =>
+        Promise.resolve(curtailmentSummary(project === 'beta', project) as never),
+    )
+    renderCurtailmentTab()
+
+    // beta's figures are real but incomplete — the user must be told before
+    // reading 12.5 GWh as beta's whole curtailment.
+    const warning = await screen.findByText(/understate/i)
+    expect(warning).toBeTruthy()
+    expect(warning.textContent).toContain('beta')
+    expect(warning.textContent).not.toContain('alpha')
+  })
+
+  it('says nothing when both sides are complete', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(curtailmentSummary(false, project) as never),
+    )
+    renderCurtailmentTab()
+
+    // The real figure must still render — the guard must not fire on a
+    // complete answer and blank out a perfectly good comparison.
+    expect(await screen.findAllByText(/12\.5 GWh/)).not.toHaveLength(0)
+    expect(screen.queryByText(/understate/i)).toBeNull()
   })
 })

@@ -812,88 +812,28 @@ def _compute_total_annuitised_capex(
     n, periods, is_multi, years_map, pcc,
 ) -> dict:
     """
-    Walk every cost-bearing component, accumulate ``p_nom_opt × cc_per_MW``
-    per carrier as M€/yr, then expand into per-period values via
-    ``ipw.years[P]``. Mirrors the per-period aggregation in
-    ``cost_breakdown`` so the two views show the same gas / solar / battery
-    CAPEX numbers. ``pcc`` is ``_periodized_lookup(n)``'s output, built once
-    by the caller (``_compute_capacity_summary``) and passed through here
-    rather than recomputed.
+    Thin adapter over ``services.economics.annuitised_capex_by_carrier``.
+
+    The walk itself — and the reasoning about which components it covers,
+    including the two measured CAPEX divergences that settled the link
+    question — moved to the leaf module so the Results side can reach it
+    without importing a router. That coupling is why a second aggregation
+    grew in ``get_cost_breakdown`` and why two parity suites exist to keep
+    the answers agreeing.
+
+    This wrapper survives because every call site here passes ``n`` and
+    ``pcc``; the leaf takes plain DataFrames and a cost callable so it stays
+    free of PyPSA-object and router coupling. ``pcc`` is
+    ``_periodized_lookup(n)``'s output, built once by the caller
+    (``_compute_capacity_summary``) and passed through rather than recomputed.
     """
-    import math as _math
+    from services.economics import annuitised_capex_by_carrier
 
-    out: dict = {}
-
-    def _walk(df, nom_col: str, comp_attr: str, *, extendable_only: bool = False) -> None:
-        if df is None or df.empty:
-            return
-        if extendable_only:
-            ext_col = f"{nom_col}_extendable"
-            if ext_col not in df.columns:
-                return
-            df = df[df[ext_col].astype(bool)]
-            if df.empty:
-                return
-        opt_col = f"{nom_col}_opt"
-        capacity_col = opt_col if opt_col in df.columns else (nom_col if nom_col in df.columns else None)
-        if capacity_col is None:
-            return
-        for asset in df.index:
-            row = df.loc[asset]
-            try:
-                opt = float(row[capacity_col])
-            except (TypeError, ValueError, KeyError):
-                continue
-            if not _math.isfinite(opt) or opt <= 1e-9:
-                continue
-            cc_per_mw = _safe_capital_cost(row, pcc, comp_attr)
-            if cc_per_mw <= 0:
-                continue
-            per_year_meur = (opt * cc_per_mw) / 1e6  # M€/yr annuitised
-            carrier = str(row.get("carrier", "unknown") or "unknown").lower()
-            b = out.setdefault(carrier, {"total": 0.0, "by_period": {}})
-            if is_multi and periods:
-                # Each period contributes annuitised_per_yr × ipw.years[P].
-                # We assume the asset is active in every period — which is
-                # what PyPSA's `n.statistics()` does for capex by default
-                # (period-aware costing happens at LP time, not at stats
-                # time). The horizon total is the sum across periods.
-                for p in periods:
-                    years = period_utils.years_for_period(years_map, p)
-                    contrib = per_year_meur * years
-                    b["by_period"][str(p)] = b["by_period"].get(str(p), 0.0) + contrib
-                b["total"] = sum(b["by_period"].values())
-            else:
-                b["total"] += per_year_meur
-
-    # Generation / storage / stores unconditionally, plus links.
-    #
-    # Lines and transformers stay omitted: a passive branch that the LP
-    # cannot resize contributes nothing to the objective, and reporting its
-    # notional CAPEX here produced a "line CAPEX" carrier value nobody could
-    # reconcile with the Results panel. Branch expansion is visible in the
-    # Line loading tab; that is where it belongs.
-    #
-    # An EXTENDABLE link is a different animal, and excluding it was a defect:
-    # the LP does size it, its capital_cost does enter the objective, and
-    # `_compute_economics_summary` has always counted it. So the two tabs of
-    # one comparison reported different CAPEX for one network — MEASURED at
-    # 25.154535 vs 25.320785 M€ on the golden fixture (exactly the
-    # electrolyzer's CAPEX) and at a 56.192453 M€ gap on a real three-period
-    # project. See docs/superpowers/findings/
-    # 2026-08-03-compare-tab-correctness.md §S1.
-    #
-    # Every link that carries a capital_cost, not only the extendable ones.
-    # `cost_breakdown` is built from `n.statistics()`, which charges
-    # capital_cost x p_nom_opt for EVERY asset — so restricting this walk to
-    # extendables made a fixed link with a capital_cost show up in Economics
-    # and vanish from the Capacity tab, contradicting this function's
-    # documented contract of mirroring cost_breakdown.
-    _walk(n.generators,    "p_nom", "generators")
-    _walk(n.storage_units, "p_nom", "storage_units")
-    _walk(n.stores,        "e_nom", "stores")
-    _walk(n.links,         "p_nom", "links")
-    return out
+    return annuitised_capex_by_carrier(
+        n.generators, n.storage_units, n.stores, n.links,
+        periods=periods, is_multi=is_multi, years_map=years_map,
+        capital_cost_of=lambda row, comp_attr: _safe_capital_cost(row, pcc, comp_attr),
+    )
 
 
 def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchComparison:
@@ -2376,8 +2316,15 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         ap = total_avail["by_period"].get(p, 0.0)
         sys_rate_pp[p] = 100.0 * v / ap if ap > 1e-9 else 0.0
 
+    # At least one generator produced a real figure, so `available` is True —
+    # but `failed > 0` means the others did NOT, and their contribution is
+    # missing from every number below. Task 8 fixed the all-failed case (the
+    # empty return above); this is the partial case it recorded and deferred,
+    # which is the more dangerous of the two because the response looks
+    # complete. See ADR-0001.
     return CurtailmentComparison(
         available=True,
+        partial=(failed > 0),
         total_gwh=_to_pv(total_bucket),
         by_carrier_gwh=_to_pv_dict(curt_by_carrier),
         rate_pct_by_carrier=_to_pv_dict(rate_by_carrier),

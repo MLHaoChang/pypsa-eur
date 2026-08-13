@@ -15,7 +15,7 @@ import type {
 } from '../api/types'
 import { canonicaliseCarrier, carrierDisplayName, type ComponentClass } from './results/carrierAliases'
 import { useCarrierFilter, CarrierFilter, bindCarrierFilter } from './results/CarrierFilter'
-import { COST_UNAVAILABLE } from './results/shared'
+import { COST_UNAVAILABLE, UnavailableCell } from './results/shared'
 
 // ── Compare view ─────────────────────────────────────────────────────────────
 // Tabbed A/B comparison across two saved projects. Each tab loads its own
@@ -930,7 +930,7 @@ function LoadingTable({
   const fmtPct = (v: number) => `${(v * 100).toFixed(1)} %`
   const fmtHr  = (v: number) => v >= 1 ? `${v.toFixed(0)} h` : (v > 0 ? `${v.toFixed(1)} h` : '—')
   const dash = <span className="text-muted" title="Branch not present in this scenario">—</span>
-  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+  const unavailable = <UnavailableCell />
   return (
     <table className="w-full text-xs mt-2">
       <thead>
@@ -1106,7 +1106,7 @@ function PerCarrierPricesTable({
   }
   const fmt = (v: number) => `${v.toFixed(2)} €/MWh`
   const dash = <span className="text-muted" title="Carrier not present in this scenario">—</span>
-  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+  const unavailable = <UnavailableCell />
   return (
     <table className="w-full text-xs">
       <thead>
@@ -1371,7 +1371,7 @@ function PriceRowGroup({
   availableA?: boolean
   availableB?: boolean
 }) {
-  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+  const unavailable = <UnavailableCell />
   const cellA = (v: number) => availableA ? fmt(v) : unavailable
   const cellB = (v: number) => availableB ? fmt(v) : unavailable
   const delta = (aVal: number, bVal: number) => (availableA && availableB)
@@ -1814,10 +1814,10 @@ function EconomicsTable({
               )}
               <td className={`py-1 text-right ${r.sub ? 'text-muted/70 pr-1 pl-3 italic' : 'text-muted'}`}>{r.label}</td>
               <td className={`py-1 text-right font-mono ${r.sub ? 'text-text/80' : 'text-text'}`}>
-                {availableA ? r.fmt(r.va) : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+                {availableA ? r.fmt(r.va) : <UnavailableCell />}
               </td>
               <td className={`py-1 text-right font-mono ${r.sub ? 'text-text/80' : 'text-text'}`}>
-                {availableB ? r.fmt(r.vb) : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+                {availableB ? r.fmt(r.vb) : <UnavailableCell />}
               </td>
               <td className="py-1 text-right font-mono">
                 {(availableA && availableB)
@@ -1943,7 +1943,7 @@ function AssetLCOHTable({
 // already filters generators with a non-trivial p_max_pu profile so the
 // numbers stay meaningful.
 
-function CurtailmentTab({ a, b }: { a: string; b: string }) {
+export function CurtailmentTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['results-summary', b], queryFn: () => projectsApi.resultsSummary(b), staleTime: 30_000 })
   const [period, setPeriod] = useState<PeriodChoice>('all')
@@ -2012,12 +2012,32 @@ function CurtailmentTab({ a, b }: { a: string; b: string }) {
   const availableA = cA?.available ?? false
   const availableB = cB?.available ?? false
 
+  // PARTIAL is a third state, and neither of the two above can express it.
+  // Some generators' figures failed while others succeeded, so `available`
+  // is correctly true — a real measurement IS present — and every guard on
+  // this tab passes. The number is real and UNDERSTATES, by however much
+  // the failed generators would have contributed. Without this banner the
+  // tab is the ADR-0001 failure mode wearing a plausible figure instead of
+  // a zero: nothing on screen looks wrong.
+  const partialSides = [
+    cA?.partial && sa.project,
+    cB?.partial && sb.project,
+  ].filter(Boolean) as string[]
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-4 flex-wrap">
         <PeriodSelector periods={periods} value={period} onChange={setPeriod} />
         <CarrierFilter {...bindCarrierFilter(filter, availableCarriers)} label="Carrier" />
       </div>
+
+      {partialSides.length > 0 && (
+        <p className="text-[11px] text-warn py-2">
+          ⚠ Curtailment for {partialSides.join(' and ')} could not be computed for every
+          generator. The figures below are real measurements but understate the true
+          total — treat them as a lower bound, and the deltas as indicative only.
+        </p>
+      )}
 
       <Section title="Total curtailed energy" subtitle={periodLabel(period) + ' — renewable output the LP rejected (cost-feasible but not dispatched)'}>
         <ABKpiPair
@@ -2215,7 +2235,7 @@ export function LostLoadTab({ a, b }: { a: string; b: string }) {
             <div className="text-sm font-mono text-text">
               {availableA
                 ? `${(llA?.voll_eur_per_mwh ?? 0).toFixed(0)} €/MWh`
-                : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+                : <UnavailableCell />}
             </div>
           </div>
           <div className="border border-border rounded p-2">
@@ -2223,7 +2243,7 @@ export function LostLoadTab({ a, b }: { a: string; b: string }) {
             <div className="text-sm font-mono text-text">
               {availableB
                 ? `${(llB?.voll_eur_per_mwh ?? 0).toFixed(0)} €/MWh`
-                : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+                : <UnavailableCell />}
             </div>
           </div>
         </div>
@@ -2350,7 +2370,7 @@ function LostLoadByCarrierTable({
           const be = readPV(B?.energy_mwh, period)
           const ac = readPV(A?.cost_meur, period)
           const bc = readPV(B?.cost_meur, period)
-          const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+          const unavailable = <UnavailableCell />
           const dash = <span className="text-muted" title="Carrier not present in this scenario">—</span>
           return (
             <tr key={c} className="border-b border-border/40">
@@ -2424,7 +2444,7 @@ function LostLoadBusTable({
           const be = readPV(r.b?.energy_mwh, period)
           const ac = readPV(r.a?.cost_meur,  period)
           const bc = readPV(r.b?.cost_meur,  period)
-          const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+          const unavailable = <UnavailableCell />
           return (
             <tr key={r.name} className="border-b border-border/40">
               <td className="py-1 text-text font-mono">{r.name}</td>
@@ -2630,7 +2650,7 @@ function StorageUnitTable({
           const ca = readPV(r.a?.cycles, period)
           const cb = readPV(r.b?.cycles, period)
           const dash = <span className="text-muted" title="Unit not present in this scenario">—</span>
-          const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+          const unavailable = <UnavailableCell />
           // Three-state ladder, same priority as ABTable: the side's whole
           // block failing to resolve outranks "this unit isn't in that
           // side's fleet," which in turn outranks the real value — mirrors
@@ -2782,12 +2802,12 @@ function ABTable({
               <td className="py-1 text-text">{carrierDisplayName(c)}</td>
               <td className="py-1 text-right font-mono text-text">
                 {!availableA
-                  ? <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+                  ? <UnavailableCell />
                   : presentA ? fmt(va) : <span className="text-muted" title="Carrier not present in this scenario">—</span>}
               </td>
               <td className="py-1 text-right font-mono text-text">
                 {!availableB
-                  ? <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+                  ? <UnavailableCell />
                   : presentB ? fmt(vb) : <span className="text-muted" title="Carrier not present in this scenario">—</span>}
               </td>
               <td className="py-1 text-right font-mono">
@@ -2802,10 +2822,10 @@ function ABTable({
           <tr className="border-t border-border font-medium">
             <td className="py-1 text-text">Total</td>
             <td className="py-1 text-right font-mono text-text">
-              {availableA ? fmt(sumA) : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+              {availableA ? fmt(sumA) : <UnavailableCell />}
             </td>
             <td className="py-1 text-right font-mono text-text">
-              {availableB ? fmt(sumB) : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+              {availableB ? fmt(sumB) : <UnavailableCell />}
             </td>
             <td className="py-1 text-right font-mono">
               {(availableA && availableB)
@@ -2849,11 +2869,11 @@ function ABKpiPair({
     <div className="grid grid-cols-3 gap-3 text-center">
       <Kpi
         label={aName}
-        value={availableA ? fmt(aValue) : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+        value={availableA ? fmt(aValue) : <UnavailableCell />}
       />
       <Kpi
         label={bName}
-        value={availableB ? fmt(bValue) : <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>}
+        value={availableB ? fmt(bValue) : <UnavailableCell />}
       />
       <Kpi
         label="Δ"
@@ -3014,7 +3034,7 @@ function OverviewStorageTable({
     return [...set].sort()
   }, [mwA, mwB, mwhA, mwhB])
   if (carriers.length === 0) return null
-  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+  const unavailable = <UnavailableCell />
   const deltaOrDash = (v: number, fmt: (n: number) => string) => (availableA && availableB)
     ? <Delta v={v} fmt={fmt} neutral />
     : <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>
@@ -3105,7 +3125,7 @@ function OverviewLinksTable({
     return [...set].sort()
   }, [totA, totB, newA, newB])
   if (carriers.length === 0) return null
-  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+  const unavailable = <UnavailableCell />
   return (
     <Section title="Link capacity by carrier (total p_nom_opt = brownfield + built)" subtitle="Heat-pumps / electrolyzers / datacenters / P2X — MW on the link's p0 (input) side.">
       <table className="w-full text-xs">
@@ -3205,7 +3225,7 @@ function OverviewCapacityTable({
   const title = `Generator capacity by carrier ${
     useOpt ? '(total p_nom_opt = brownfield + built)' : '(installed p_nom — brownfield only)'
   }`
-  const unavailable = <span className="text-muted" title="This scenario's figures could not be resolved">{COST_UNAVAILABLE}</span>
+  const unavailable = <UnavailableCell />
   return (
     <Section title={title}>
       <table className="w-full text-xs">

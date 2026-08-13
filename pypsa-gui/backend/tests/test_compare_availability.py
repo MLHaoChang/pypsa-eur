@@ -471,3 +471,69 @@ def test_curtailment_is_a_real_zero_when_every_skip_was_legitimate():
     block = CMP._compute_curtailment_summary(n, [], False, True)
     assert block.available is True
     assert block.total_gwh.total == 0.0
+
+
+def test_curtailment_flags_the_partial_case_when_some_generators_failed():
+    """
+    The NON-empty return: "wind" computes a real figure, "solar" fails on
+    path 5, and the block ships wind's number alone.
+
+    `available` is correctly True here — a real measurement IS present — so
+    it cannot carry this. Without a second signal the block is
+    indistinguishable from a complete answer while understating by exactly
+    solar's contribution. Arguably worse than the empty-result case Task 8
+    fixed, because nothing about the response looks wrong. Recorded then as
+    out of scope; this is that follow-up.
+
+    Same `inf`-after-solve technique as the two tests above, and for the
+    same reason: a literal NaN is sanitised by `.fillna(0.0)` before any
+    `isfinite` guard sees it, so a NaN fixture would exercise nothing.
+    """
+    import pandas as pd
+    import pypsa
+
+    import routers.compare as CMP
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "b1", carrier="AC")
+    n.add("Carrier", "AC")
+    n.add("Carrier", "gas")
+    n.add("Carrier", "wind")
+    n.add("Carrier", "solar")
+    n.add(
+        "Generator", "gas",
+        bus="b1", carrier="gas",
+        p_nom=100.0, marginal_cost=50.0,
+    )
+    n.add(
+        "Generator", "wind",
+        bus="b1", carrier="wind",
+        p_nom=50.0, p_nom_extendable=False, marginal_cost=0.0,
+        p_max_pu=[0.5, 0.6, 0.4, 0.7],
+    )
+    n.add(
+        "Generator", "solar",
+        bus="b1", carrier="solar",
+        p_nom=50.0, p_nom_extendable=False, marginal_cost=0.0,
+        p_max_pu=[0.3, 0.8, 0.2, 0.9],
+    )
+    n.add("Load", "load1", bus="b1", p_set=20.0)
+    n.optimize(solver_name="highs")
+
+    # Corrupt ONLY solar, after the solve. wind still produces a real figure,
+    # so curt_by_carrier is non-empty and the walk takes the non-empty return.
+    n.generators_t.p_max_pu.loc[n.snapshots[0], "solar"] = float("inf")
+
+    block = CMP._compute_curtailment_summary(n, [], False, True)
+
+    assert block.available is True, (
+        "wind produced a real measurement — the block is not unavailable"
+    )
+    assert block.partial is True, (
+        "solar's figure could not be computed, so the shipped total "
+        "understates the truth; a complete-looking answer here is the "
+        "ADR-0001 failure mode wearing a plausible number instead of a zero"
+    )
+    assert "wind" in block.by_carrier_gwh
+    assert "solar" not in block.by_carrier_gwh
