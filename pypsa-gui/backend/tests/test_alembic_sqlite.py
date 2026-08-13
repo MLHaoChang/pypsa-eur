@@ -211,6 +211,15 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     migration-specific knowledge — so it is a documented module-local
     constant per the plan's fallback allowance, to be updated alongside any
     migration that changes what's seeded here.
+
+    Sessions are seeded in THREE distinct states (live / expired / revoked),
+    not one uniform row. A uniform fixture inherits the `sessions` COLUMNS
+    but not their PROPERTIES: a migration that mishandles `revoked_at` /
+    `expires_at` null-ness, or that only mangles rows matching some WHERE
+    clause, can preserve one clean live row perfectly and still corrupt the
+    other two — a single-row fixture would never see that. This mirrors the
+    real 0004-era database this test replaces, which had five sessions in
+    mixed states from actual logins over a couple of days.
     """
     import uuid
     from datetime import datetime, timedelta, timezone
@@ -297,16 +306,40 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
             ),
         ])
         db.flush()
-        db.add(
-            # `active_project_id` is the column CLAUDE.md flags as the one
-            # test harnesses forget: it's the field most likely to be
-            # disturbed by a migration that rewrites or reindexes.
+        session_live_id, session_expired_id, session_revoked_id = (
+            uuid.uuid4(), uuid.uuid4(), uuid.uuid4(),
+        )
+        db.add_all([
+            # Live: not revoked, expiry in the future. `active_project_id` is
+            # the column CLAUDE.md flags as the one test harnesses forget —
+            # populated here (pointed at a real project, so the FK is real)
+            # precisely because it's `None` on every row in the real 0004-era
+            # fixture this test replaces; the generated version now covers a
+            # case that database never did.
             SessionRow(
-                id=uuid.uuid4(), user_id=user_id, token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
+                id=session_live_id, user_id=user_id,
+                token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
                 expires_at=now + timedelta(hours=8), revoked_at=None,
                 active_project_id=project1_id,
-            )
-        )
+            ),
+            # Expired: not revoked, expiry already in the past. Distinct
+            # `expires_at` null-ness/value from the live row.
+            SessionRow(
+                id=session_expired_id, user_id=user_id,
+                token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
+                expires_at=now - timedelta(hours=2), revoked_at=None,
+                active_project_id=None,
+            ),
+            # Revoked: `revoked_at` set (before its natural expiry), the one
+            # nullable column with genuinely different content across all
+            # three rows.
+            SessionRow(
+                id=session_revoked_id, user_id=user_id,
+                token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
+                expires_at=now + timedelta(hours=8), revoked_at=now - timedelta(hours=1),
+                active_project_id=None,
+            ),
+        ])
         db.commit()
 
     with engine.connect() as conn:
@@ -314,7 +347,7 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     assert version_before == predecessor
 
     before = _dump_rows(engine, PRE_EXISTING_TABLES)
-    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 1], (
+    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 3], (
         "seeding produced the wrong row counts — the byte-identical comparison below "
         "would be vacuous against an empty or partially-seeded table"
     )
@@ -348,12 +381,21 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     # The load-bearing assertion: full row content, not counts. A migration
     # that dropped and silently recreated a table (e.g. an errant
     # `batch_alter_table` touching the wrong table) would still pass a count
-    # check — new PKs, defaulted columns — and fail this one.
+    # check — new PKs, defaulted columns — and fail this one. With three
+    # sessions in different states, this also catches a migration that
+    # preserves the clean live row but mangles the expired or revoked one —
+    # a uniform single-row fixture could not.
     assert before == after, "0005 did not preserve pre-existing rows byte-for-byte across the upgrade"
 
-    [session_after] = after["sessions"]
-    assert session_after["active_project_id"] == project1_id.hex, (
-        "sessions.active_project_id was disturbed by the upgrade"
+    sessions_after = {row["id"]: row for row in after["sessions"]}
+    assert sessions_after[session_live_id.hex]["active_project_id"] == project1_id.hex, (
+        "the live session's active_project_id was disturbed by the upgrade"
+    )
+    assert sessions_after[session_expired_id.hex]["revoked_at"] is None, (
+        "the expired session's revoked_at was disturbed by the upgrade"
+    )
+    assert sessions_after[session_revoked_id.hex]["revoked_at"] is not None, (
+        "the revoked session's revoked_at was disturbed by the upgrade"
     )
 
 
