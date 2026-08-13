@@ -66,3 +66,121 @@ def test_fake_provider_scripts_and_records():
     with pytest.raises(ProviderError) as ei:
         list(p.stream(req))
     assert ei.value.kind == "rate_limited"
+
+
+class _SeamFakeStream:
+    def __init__(self, events, final):
+        self._events, self._final = events, final
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def __iter__(self):
+        return iter(self._events)
+    def get_final_message(self):
+        return self._final
+
+
+class _SeamFakeClient:
+    def __init__(self, events, final):
+        self.calls = []
+        outer = self
+        class _M:
+            def stream(self, **kwargs):
+                outer.calls.append(kwargs)
+                return _SeamFakeStream(events, final)
+        self.messages = _M()
+
+
+class _Ev:
+    def __init__(self, type, **kw):
+        self.type = type
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class _Final:
+    def __init__(self, content, usage=None):
+        self.content = content
+        self.usage = usage
+
+
+def _seam_request(messages=None, anchor=None):
+    from services.llm_provider import LLMRequest
+    return LLMRequest(
+        model="claude-sonnet-5", max_tokens=64,
+        system_blocks=[{"type": "text", "text": "SYS", "stable": True}],
+        tools=[{"name": "a", "description": "d", "input_schema": {"type": "object"}},
+               {"name": "b", "description": "d", "input_schema": {"type": "object"}}],
+        tools_stable=True,
+        messages=messages if messages is not None else [
+            {"role": "user", "content": "earlier"},
+            {"role": "assistant", "content": [{"type": "text", "text": "prior"}]},
+        ],
+        history_stable_anchor=anchor,
+    )
+
+
+def test_anthropic_provider_translates_events_and_cache_markers():
+    from services.llm_anthropic import AnthropicProvider
+
+    block = _Ev("content_block_start",
+                content_block=_Ev("tool_use", id="tu1", name="a"))
+    fake = _SeamFakeClient(
+        events=[_Ev("text", text="hi"), _Ev("thinking", thinking="hm"),
+                block, _Ev("content_block_delta")],
+        final=_Final(content=[{"type": "text", "text": "hi"}],
+                     usage=_Ev("u", input_tokens=7, output_tokens=3,
+                               cache_read_input_tokens=5,
+                               cache_creation_input_tokens=1)),
+    )
+    events = list(AnthropicProvider(fake).stream(_seam_request(anchor=1)))
+    kinds = [e.type for e in events]
+    # unhandled SDK events surface as ping (abort latency preserved)
+    assert kinds == ["text_delta", "thinking_delta", "tool_use_start",
+                     "ping", "message_done"]
+    assert events[0].text == "hi"
+    assert events[2].tool_use_id == "tu1" and events[2].tool_name == "a"
+    done = events[-1]
+    assert done.blocks == [{"type": "text", "text": "hi"}]
+    assert done.usage == {"input_tokens": 7, "output_tokens": 3,
+                          "cache_read_tokens": 5, "cache_create_tokens": 1}
+
+    kw = fake.calls[0]
+    # stable → cache_control at the three sites, and NOWHERE in the request
+    # does the word "stable" survive (the SDK would 400 on it).
+    assert kw["system"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "stable" not in kw["system"][-1]
+    assert kw["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in kw["tools"][0]
+    marked = kw["messages"][1]["content"][-1]
+    assert marked["cache_control"] == {"type": "ephemeral"}
+    assert kw["model"] == "claude-sonnet-5" and kw["max_tokens"] == 64
+
+
+def test_anthropic_provider_maps_exceptions_to_provider_error():
+    import pytest
+    from services.llm_anthropic import AnthropicProvider
+    from services.llm_provider import ProviderError
+
+    class _Boom:
+        def __init__(self):
+            class _M:
+                def stream(self, **kwargs):
+                    raise RuntimeError("kaput sk-ant-secret123")
+            self.messages = _M()
+
+    with pytest.raises(ProviderError) as ei:
+        list(AnthropicProvider(_Boom()).stream(_seam_request()))
+    # no real `anthropic` classes matched → internal_error, message redacted
+    assert ei.value.kind == "internal_error"
+    assert "sk-ant-secret123" not in ei.value.message
+
+
+def test_chat_service_seam_aliases_point_at_llm_anthropic():
+    from services import chat_service, llm_anthropic
+    assert chat_service._build_anthropic_client is llm_anthropic.build_client
+    assert chat_service._map_sdk_exception is llm_anthropic.map_sdk_exception
+    assert chat_service._serialise_for_anthropic is llm_anthropic.serialise_block
+    assert (chat_service._with_history_cache_breakpoint
+            is llm_anthropic.with_history_cache_breakpoint)
