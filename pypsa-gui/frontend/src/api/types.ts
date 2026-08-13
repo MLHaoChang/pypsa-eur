@@ -111,7 +111,11 @@ export interface TransformerType {
   x: number
 }
 export interface SnapshotInfo {
-  count: number; snapshots: string[]; weightings: Record<string, number>[]
+  count: number; snapshots: string[]
+  // Rows of `df_to_json(n.snapshot_weightings)`. Flat networks carry a
+  // `snapshot` ISO string; MultiIndex networks carry `period` (number) +
+  // `timestep` (ISO string) instead — hence the mixed value type.
+  weightings: Record<string, number | string>[]
   // Present only when n.snapshots is a MultiIndex (multi-period planning).
   // Parallel to `snapshots`: periods[i] is the investment period that
   // snapshots[i]'s timestep belongs to.
@@ -124,6 +128,12 @@ export interface SnapshotInfo {
   // True when a flat uploaded profile spans all 12 months of one year at
   // hourly resolution — gates the representative-week sampler.
   can_sample_weeks?: boolean
+  // Snapshot resolution as a pandas offset alias ("h", "3h", "D"), measured
+  // from the FIRST investment period on MultiIndex networks. null when the
+  // backend could not infer one. The Resolution stat card renders this —
+  // it used to render the page's own form state, which was never seeded
+  // from the network.
+  freq?: string | null
 }
 export interface NetworkMeta { name: string; snapshot_count: number; bus_count: number }
 export interface SolverConfig {
@@ -146,6 +156,12 @@ export interface SolverConfig {
   // back to the scalar `co2_price`. Ignored on flat (single-period) networks.
   co2_price_per_period?: Record<string, number>
   voll: number                       // €/MWh — when > 0, slack gens per bus
+  // BACKEND-ONLY: no frontend reader writes or reads this field any more
+  // (the Model Horizon page's period list is authoritative and lives on the
+  // network via GET/POST /api/network/investment_periods instead). Still
+  // consumed transiently by solver_service.py (~:4329) as a cfg-only,
+  // solve-time-only period override. Do not wire a control back to it —
+  // route new UI through the network endpoints.
   investment_periods: number[]       // list of years; honoured iff multi_investment_periods
   // Per-investment-period load multiplier, keyed by period year (string).
   // 1.0 = unchanged; 1.05 = +5% load growth. Applied transiently at solve
@@ -357,6 +373,11 @@ export interface CarrierPeriodValue {
 }
 
 export interface CapacityComparison {
+  // False means this block resolved nothing and every figure below is a
+  // default zero, not a measurement — see ADR-0001. True guarantees the
+  // figures were computed from a solved network. Mirrors the backend's
+  // `available` flag (backend/models/schemas.py: CapacityComparison).
+  available: boolean
   capacity_mw_by_carrier: Record<string, CarrierPeriodValue>
   // Total annuitised CAPEX (existing + new) per carrier — matches the
   // live /results/cost_breakdown numbers.
@@ -382,6 +403,8 @@ export interface CapacityComparison {
 }
 
 export interface DispatchComparison {
+  // See CapacityComparison.available — same ADR-0001 contract.
+  available: boolean
   dispatch_gwh_by_carrier: Record<string, CarrierPeriodValue>
   opex_meur: CarrierPeriodValue
   total_load_gwh: CarrierPeriodValue
@@ -404,6 +427,11 @@ export interface LineLoadingEntry {
 }
 
 export interface LoadingComparison {
+  // See CapacityComparison.available — same ADR-0001 contract. Was missing
+  // from this interface even though the backend has carried it since Phase
+  // 2 (backend/models/schemas.py: LoadingComparison) — CompareView's bespoke
+  // LoadingTable had no way to read it until Task 6 wired it through.
+  available: boolean
   lines: LineLoadingEntry[]              // sorted by peak loading desc
 }
 
@@ -415,6 +443,11 @@ export interface CarrierPriceStats {
 }
 
 export interface PricesComparison {
+  // See CapacityComparison.available — same ADR-0001 contract. Was missing
+  // from this interface even though the backend has carried it since Phase
+  // 2 (backend/models/schemas.py: PricesComparison) — see LoadingComparison's
+  // matching note above.
+  available: boolean
   duration_curve: number[]               // 101 samples, index 0 = peak price
   mean_price: CarrierPeriodValue         // €/MWh
   median_price: CarrierPeriodValue
@@ -433,6 +466,8 @@ export interface PricesComparison {
 }
 
 export interface EmissionsComparison {
+  // See CapacityComparison.available — same ADR-0001 contract.
+  available: boolean
   total_kt: CarrierPeriodValue
   by_carrier_kt: Record<string, CarrierPeriodValue>
   intensity_kg_per_mwh: CarrierPeriodValue
@@ -467,6 +502,8 @@ export interface AssetLCOHEntry {
 }
 
 export interface EconomicsComparison {
+  // See CapacityComparison.available — same ADR-0001 contract.
+  available: boolean
   by_carrier: Record<string, CarrierEconomics>
   // Per-Link LCOH rows (electrolysers, heat pumps, P2X, ...). Empty when
   // no extendable Link in either project has non-trivial dispatch.
@@ -474,6 +511,10 @@ export interface EconomicsComparison {
 }
 
 export interface CurtailmentComparison {
+  // True even for a genuine structural zero (a solved network with no
+  // curtailing generators) — only False means unresolved. See
+  // CapacityComparison.available and the backend docstring for the nuance.
+  available: boolean
   total_gwh: CarrierPeriodValue
   by_carrier_gwh: Record<string, CarrierPeriodValue>
   rate_pct_by_carrier: Record<string, CarrierPeriodValue>
@@ -495,6 +536,14 @@ export interface LostLoadByCarrier {
 
 export interface LostLoadComparison {
   available: boolean
+  // Whether the lost-load capture was READ AT ALL, independent of what it
+  // said. `available=false, captured=true` is a real measured zero — the
+  // solver ran with voll > 0 and the LP shed nothing; render `0.0 MWh`, not
+  // the unavailable marker. `captured=false` means the capture could not be
+  // read (no results_state.pkl, an unpickle error, a mid-solve state) —
+  // render the marker, never 0.0. See ADR-0001 and LostLoadComparison in
+  // backend/models/schemas.py.
+  captured: boolean
   voll_eur_per_mwh: number
   total_mwh: CarrierPeriodValue
   total_cost_meur: CarrierPeriodValue
@@ -515,6 +564,10 @@ export interface StorageUnitCycles {
 }
 
 export interface StorageCyclingComparison {
+  // True even for a genuine structural zero (a solved network with no
+  // StorageUnits) — only False means unresolved. See
+  // CapacityComparison.available and the backend docstring for the nuance.
+  available: boolean
   cycles_by_carrier: Record<string, CarrierPeriodValue>
   by_unit: StorageUnitCycles[]
 }
@@ -596,3 +649,30 @@ export type LinkProfileMeta =
       p_min_pu?: GeneratorProfileAttrMeta
       marginal_cost?: GeneratorProfileAttrMeta
     }
+
+/**
+ * One row of PyPSA's attribute catalog (spec D24). Class-level metadata,
+ * identical across projects — see hooks/useCatalog.ts for why the query key is
+ * deliberately unscoped.
+ */
+export interface CatalogAttribute {
+  name: string
+  /** 'Input (required)' | 'Input (optional)' | 'Output' — D13's default. */
+  status: string
+  /** True when a time series may shadow the static value — D14. */
+  varying: boolean
+  /** numpy dtype name: 'float64', 'bool', 'object', … — D4's editor pick. */
+  dtype: string
+  unit: string | null
+  description: string | null
+  type: string
+  /** Non-finite defaults are scrubbed to null by clean_scalar. */
+  default: unknown
+  /** The text PyPSA's default reads as — 'inf' where `default` is null. */
+  default_text: string
+}
+
+export interface CatalogPayload {
+  component: string
+  attributes: CatalogAttribute[]
+}

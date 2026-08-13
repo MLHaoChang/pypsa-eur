@@ -609,3 +609,41 @@ def install_network():
             pass
         return n
     return _install
+
+
+# ── Mid-run source-change watcher (Improvement #10) ─────────────────────────
+#
+# The suite's real flake is not parallel-worker contamination — pytest-xdist
+# is not installed and there are no workers. It is a run racing an EDITOR:
+# `inspect.getsource` (nine call sites across five files) reads from disk at
+# the line numbers recorded at import, so a mid-run edit makes it return text
+# that was never in the function and the assertion fails as though the code
+# were wrong. In this repo the editor is a second agent session on the same
+# worktree, which CLAUDE.md documents as normal.
+#
+# This cannot prevent that. It stops the failure from lying about its cause.
+from tests import _source_watch as _sw  # noqa: E402
+
+_SOURCE_SNAPSHOT: dict[str, float] = {}
+_WATCH_ROOTS = [pathlib.Path(__file__).resolve().parent.parent / r
+                for r in _sw.WATCHED_ROOTS]
+
+
+def pytest_sessionstart(session):  # noqa: ARG001
+    global _SOURCE_SNAPSHOT
+    try:
+        _SOURCE_SNAPSHOT = _sw.snapshot_mtimes(_WATCH_ROOTS)
+    except Exception:  # noqa: BLE001 — never let the watcher break a run
+        _SOURCE_SNAPSHOT = {}
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
+    if not _SOURCE_SNAPSHOT:
+        return
+    try:
+        msg = _sw.format_warning(_sw.changed_since(_SOURCE_SNAPSHOT, _WATCH_ROOTS))
+    except Exception:  # noqa: BLE001
+        return
+    if msg:
+        terminalreporter.write_sep("=", "source changed mid-run", yellow=True)
+        terminalreporter.write_line(msg)

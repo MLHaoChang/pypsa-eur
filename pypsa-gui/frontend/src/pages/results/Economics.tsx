@@ -15,7 +15,7 @@ import {
 import {
   KPI, ChartCard, ChartActions, Seg, fmtCurrency, fmtEnergy, downloadCSV,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
-  isRenewableCarrier, colourForCarrier,
+  isRenewableCarrier, colourForCarrier, COST_UNAVAILABLE,
 } from './shared'
 import { useResultsFilter } from './filterContext'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
@@ -56,11 +56,18 @@ interface AggregatedAssetRow {
   revenue_eur: number            // for storage: discharge_revenue
   charge_cost_eur: number        // 0 for generators
   vom_cost_eur: number
-  fixed_cost_eur: number
-  fom_cost_eur: number
-  net_profit_eur: number
+  // The four capital-cost-derived figures. `null` means the backend's
+  // capital-cost resolver raised, so the value could not be computed — see
+  // COST_UNAVAILABLE below. Never coalesce these to 0.
+  fixed_cost_eur: number | null
+  fom_cost_eur: number | null
+  net_profit_eur: number | null
   lcoe_or_lcos: number | null    // €/MWh; LCOE for generators, LCOS for storage,
-                                 // all-in cost of output for converters
+                                 // all-in cost of output for converters.
+                                 // Null for TWO reasons — zero energy (a real
+                                 // "not applicable") or unavailable capital
+                                 // costs — which is why the renderers need the
+                                 // `costsAvailable` flag to tell them apart.
   spread_or_avg_price: number | null  // discharge−charge spread for storage; avg price for generators
   by_period: Array<{
     period: number | string
@@ -69,11 +76,47 @@ interface AggregatedAssetRow {
     revenue_eur: number          // discharge revenue for storage
     charge_cost_eur: number
     vom_cost_eur: number
-    fixed_cost_eur: number
-    fom_cost_eur: number
-    net_profit_eur: number
+    fixed_cost_eur: number | null
+    fom_cost_eur: number | null
+    net_profit_eur: number | null
     lcoe_or_lcos: number | null
   }>
+}
+
+// ── "Unavailable", never a number ─────────────────────────────────────────
+// When `/results/asset_economics` reports `capital_costs_available: false`,
+// every capital-cost-derived field arrives as `null`, and this tab prints
+// `COST_UNAVAILABLE` rather than formatting it. The word — and the two
+// renderings it exists to rule out, `€0.00` and `—` — now live in `shared.tsx`
+// because the Capacity Expansion tab needs exactly the same thing for
+// `cost_breakdown.capex_lifetime`. Re-exported here so this module's surface
+// is unchanged.
+//
+// The tab also says why once at the top rather than leaving the reader to
+// infer it from blank cells. That mirrors AggregatedOverview's
+// `isPartialPayload` guard: refuse to print a number the tab cannot stand
+// behind, and explain the refusal in one place.
+export { COST_UNAVAILABLE }
+
+const UNAVAILABLE_TITLE =
+  'The capital-cost resolver failed for this run, so this figure could not be '
+  + 'computed. It is not zero.'
+
+function Unavailable() {
+  return (
+    <span className="font-mono text-[11px] text-warn" title={UNAVAILABLE_TITLE}>
+      {COST_UNAVAILABLE}
+    </span>
+  )
+}
+
+// Null propagates through every total. One asset whose capital cost could not
+// be resolved makes the group's fixed cost — and therefore its net profit and
+// its LCOE — unknowable too. Treating the missing term as 0 would produce a
+// confident total wrong by exactly the amount that went missing, which is the
+// defect this whole path exists to prevent.
+function addOrNull(acc: number | null, v: number | null): number | null {
+  return acc == null || v == null ? null : acc + v
 }
 
 // Map an asset row from the API into the row shape used by the table — the
@@ -223,8 +266,9 @@ function sumGroup(rows: AggregatedAssetRow[], group: GroupKey, period?: number |
   // When `period` is non-null we sum the matching by_period entry instead of
   // the row's top-level totals. The capacity label / LCOE come from a
   // weighted aggregation since per-asset capacities differ.
-  let energy = 0, charge = 0, revenue = 0, charge_cost = 0, vom = 0, fixed = 0, fom = 0, net = 0
-  let lcoe_num = 0, lcoe_denom = 0
+  let energy = 0, charge = 0, revenue = 0, charge_cost = 0, vom = 0, lcoe_denom = 0
+  let fixed: number | null = 0, fom: number | null = 0, net: number | null = 0
+  let lcoe_num: number | null = 0
   for (const r of rows) {
     if (period != null) {
       const pe = r.by_period.find(p => p.period === period)
@@ -235,10 +279,10 @@ function sumGroup(rows: AggregatedAssetRow[], group: GroupKey, period?: number |
       // Exact per-period charge MWh from the backend payload.
       charge += pe.charge_mwh ?? 0
       vom += pe.vom_cost_eur
-      fixed += pe.fixed_cost_eur
-      fom += pe.fom_cost_eur
-      net += pe.net_profit_eur
-      lcoe_num += pe.fixed_cost_eur + pe.vom_cost_eur + pe.charge_cost_eur
+      fixed = addOrNull(fixed, pe.fixed_cost_eur)
+      fom = addOrNull(fom, pe.fom_cost_eur)
+      net = addOrNull(net, pe.net_profit_eur)
+      lcoe_num = addOrNull(lcoe_num, addOrNull(pe.fixed_cost_eur, pe.vom_cost_eur + pe.charge_cost_eur))
       lcoe_denom += pe.energy_mwh
     } else {
       energy += r.energy_mwh
@@ -246,10 +290,10 @@ function sumGroup(rows: AggregatedAssetRow[], group: GroupKey, period?: number |
       revenue += r.revenue_eur
       charge_cost += r.charge_cost_eur
       vom += r.vom_cost_eur
-      fixed += r.fixed_cost_eur
-      fom += r.fom_cost_eur
-      net += r.net_profit_eur
-      lcoe_num += r.fixed_cost_eur + r.vom_cost_eur + r.charge_cost_eur
+      fixed = addOrNull(fixed, r.fixed_cost_eur)
+      fom = addOrNull(fom, r.fom_cost_eur)
+      net = addOrNull(net, r.net_profit_eur)
+      lcoe_num = addOrNull(lcoe_num, addOrNull(r.fixed_cost_eur, r.vom_cost_eur + r.charge_cost_eur))
       lcoe_denom += r.energy_mwh
     }
   }
@@ -282,16 +326,21 @@ function sumGroup(rows: AggregatedAssetRow[], group: GroupKey, period?: number |
     fixed_cost_eur: fixed,
     fom_cost_eur: fom,
     net_profit_eur: net,
-    lcoe_or_lcos: lcoe_denom > 1e-6 ? lcoe_num / lcoe_denom : null,
+    lcoe_or_lcos: lcoe_num != null && lcoe_denom > 1e-6 ? lcoe_num / lcoe_denom : null,
     spread_or_avg_price: spread,
     by_period: [],
   }
 }
 
-function ProfitChip({ value }: { value: number }) {
+function ProfitChip({ value }: { value: number | null }) {
   // Coloured chip used in net-profit cells: green for positive, red for
   // negative, neutral for ~zero. The colour makes scanning a table of
   // dozens of generators much faster than reading every number.
+  //
+  // Net profit subtracts fixed cost, so an unresolvable capital cost makes it
+  // unknowable — and the old zero-fallback made it read as a PROFIT equal to
+  // the whole revenue, chipped green. Refuse rather than colour a fiction.
+  if (value == null) return <Unavailable />
   if (Math.abs(value) < 1) {
     return <span className="font-mono text-[11px] text-muted">{fmtCurrency(value)}</span>
   }
@@ -329,6 +378,11 @@ export default function Economics() {
   const [openAssets, setOpenAssets] = useState<Set<string>>(new Set())
   // Layout toggle between "group-level summary" and "every individual asset".
   const [view, setView] = useState<'groups' | 'assets'>('groups')
+
+  // `!== false`, not `=== true`: a response cached from a backend older than
+  // this field has no opinion on it, and the rows it carries do hold real
+  // numbers. Only an explicit `false` means the resolver failed.
+  const costsAvailable = payload?.capital_costs_available !== false
 
   // Unfiltered list of every asset row. Used to derive the carrier filter's
   // option list AND as the source for `allRows` below (which applies the
@@ -403,11 +457,17 @@ export default function Economics() {
       if (!pe) {
         // Asset has no entry for this period — return a zeroed row so
         // visibility is preserved (don't silently drop assets).
+        // The cost fields keep their nullability: an asset whose capital cost
+        // is unavailable is still unavailable in a period it did not run in,
+        // and zeroing it here would let the "no entry" case launder the
+        // unavailable state back into a printable 0.
         return {
           ...r,
           energy_mwh: 0, charge_mwh: 0, revenue_eur: 0, charge_cost_eur: 0,
-          vom_cost_eur: 0, fixed_cost_eur: 0, fom_cost_eur: 0,
-          net_profit_eur: 0,
+          vom_cost_eur: 0,
+          fixed_cost_eur: r.fixed_cost_eur == null ? null : 0,
+          fom_cost_eur: r.fom_cost_eur == null ? null : 0,
+          net_profit_eur: r.net_profit_eur == null ? null : 0,
           lcoe_or_lcos: null, spread_or_avg_price: null,
         }
       }
@@ -434,11 +494,13 @@ export default function Economics() {
     const arr = [...projectedRows]
     const getKey = (r: AggregatedAssetRow): number => {
       switch (sortKey) {
-        case 'net_profit': return r.net_profit_eur
+        // `?? -Infinity` sinks unknowable values to one end of the sort rather
+        // than mixing them in as zeros — same treatment `lcoe` already had.
+        case 'net_profit': return r.net_profit_eur ?? Number.NEGATIVE_INFINITY
         case 'revenue':    return r.revenue_eur
         case 'energy':     return r.energy_mwh
         case 'lcoe':       return r.lcoe_or_lcos ?? Number.NEGATIVE_INFINITY
-        case 'fixed_cost': return r.fixed_cost_eur
+        case 'fixed_cost': return r.fixed_cost_eur ?? Number.NEGATIVE_INFINITY
         case 'capacity':   return r.energy_mwh    // proxy — capacity_label is a string
         default:           return 0
       }
@@ -452,26 +514,35 @@ export default function Economics() {
 
   // Top KPIs — horizon-wide totals (or selected-period totals when filtered).
   const kpis = useMemo(() => {
-    let revenue = 0, charge_cost = 0, vom = 0, fixed = 0, energy = 0
+    let revenue = 0, charge_cost = 0, vom = 0, energy = 0
+    // `fixed` is the portfolio CAPEX headline. It goes null the moment ANY
+    // asset's capital cost is unknowable — a partial sum under a whole-
+    // portfolio label is the same lie as a zero, just harder to spot.
+    let fixed: number | null = 0
     let profitable = 0, unprofitable = 0
     for (const r of projectedRows) {
       revenue += r.revenue_eur
       charge_cost += r.charge_cost_eur
       vom += r.vom_cost_eur
-      fixed += r.fixed_cost_eur
+      fixed = addOrNull(fixed, r.fixed_cost_eur)
       energy += r.energy_mwh
+      if (r.net_profit_eur == null) continue
       if (r.net_profit_eur > 1) profitable += 1
       else if (r.net_profit_eur < -1) unprofitable += 1
     }
-    const net = revenue - charge_cost - vom - fixed
+    const net = fixed == null ? null : revenue - charge_cost - vom - fixed
     // System-level LCOE = (Σ fixed + Σ vom + Σ charge_cost) / Σ energy.
     // For generators charge_cost is 0; for storage it's the discharged-MWh
     // weighted purchase cost. Useful for comparing whole-portfolio €/MWh.
-    const sysLcoe = energy > 1e-6 ? (fixed + vom + charge_cost) / energy : null
+    const sysLcoe = fixed != null && energy > 1e-6
+      ? (fixed + vom + charge_cost) / energy
+      : null
     // Volume-weighted avg capture price — pair with sysLcoe (price vs cost).
     const avgCapture = energy > 1e-6 ? revenue / energy : null
     // Margin on revenue; undefined when no revenue (avoid ÷0).
-    const profitMarginPct = Math.abs(revenue) > 1e-6 ? (net / revenue) * 100 : null
+    const profitMarginPct = net != null && Math.abs(revenue) > 1e-6
+      ? (net / revenue) * 100
+      : null
     return {
       revenue, charge_cost, vom, fixed, energy, net,
       profitable, unprofitable, sysLcoe, avgCapture, profitMarginPct,
@@ -492,11 +563,19 @@ export default function Economics() {
   // bars), combined into one chart. Gives the user instant visibility into
   // who's earning and who's bleeding.
   const profitChartData = useMemo(() => {
-    const top = sortedAssets
+    // Assets whose net profit is unknowable are excluded rather than plotted
+    // at zero — a zero-height bar in a "top profitable / loss-making" chart
+    // reads as "breaks even", which is a claim the data does not support.
+    // With capital costs unavailable this leaves the chart empty, and the
+    // section below hides itself, which is the honest outcome.
+    const known = sortedAssets.filter(
+      (r): r is AggregatedAssetRow & { net_profit_eur: number } => r.net_profit_eur != null,
+    )
+    const top = known
       .filter(r => r.net_profit_eur > 0)
       .slice(0, 10)
       .map(r => ({ name: r.name, value: r.net_profit_eur, carrier: r.carrier, group: r.group }))
-    const bottom = [...sortedAssets]
+    const bottom = [...known]
       .filter(r => r.net_profit_eur < 0)
       .sort((a, b) => a.net_profit_eur - b.net_profit_eur)  // most-negative first
       .slice(0, 10)
@@ -533,8 +612,10 @@ export default function Economics() {
         r.revenue_eur.toFixed(2),
         r.charge_cost_eur.toFixed(2),
         r.vom_cost_eur.toFixed(2),
-        r.fixed_cost_eur.toFixed(2),
-        r.net_profit_eur.toFixed(2),
+        // Empty cell, never "0.00": a spreadsheet SUM over this column must
+        // not silently absorb an unavailable capital cost as a zero.
+        r.fixed_cost_eur != null ? r.fixed_cost_eur.toFixed(2) : '',
+        r.net_profit_eur != null ? r.net_profit_eur.toFixed(2) : '',
         r.lcoe_or_lcos != null ? r.lcoe_or_lcos.toFixed(4) : '',
         r.spread_or_avg_price != null ? r.spread_or_avg_price.toFixed(4) : '',
       ])
@@ -546,8 +627,8 @@ export default function Economics() {
           pe.revenue_eur.toFixed(2),
           pe.charge_cost_eur.toFixed(2),
           pe.vom_cost_eur.toFixed(2),
-          pe.fixed_cost_eur.toFixed(2),
-          pe.net_profit_eur.toFixed(2),
+          pe.fixed_cost_eur != null ? pe.fixed_cost_eur.toFixed(2) : '',
+          pe.net_profit_eur != null ? pe.net_profit_eur.toFixed(2) : '',
           pe.lcoe_or_lcos != null ? pe.lcoe_or_lcos.toFixed(4) : '',
           '',
         ])
@@ -589,6 +670,25 @@ export default function Economics() {
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
 
+      {/* ── Capital costs unavailable ─────────────────────────────────── */}
+      {/* Deliberately a banner and not an early return: the resolver's failure
+          says nothing about revenue, energy or variable costs, and blanking a
+          working half of the tab would trade one wrong impression for another.
+          Copy follows AggregatedOverview's partial-payload guard and
+          shared.tsx's WindowCapBanner — a plain statement of what happened and
+          what it means for the numbers on screen, not an alarm. */}
+      {!costsAvailable && (
+        <div className="rounded border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+          <span className="font-semibold">Capital costs are unavailable.</span>{' '}
+          The capital-cost resolver failed for this run, so fixed cost, FOM, net
+          profit and LCOE / LCOS could not be computed — they are shown as
+          “{COST_UNAVAILABLE}” rather than as zero. Revenue, energy delivered
+          and variable costs are unaffected and remain accurate. Re-run the
+          solve; if this persists it is a bug rather than a setting, and the
+          reason is in <span className="font-mono">pypsa-gui.log</span>.
+        </div>
+      )}
+
       {/* ── KPI strip ──────────────────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
@@ -603,7 +703,12 @@ export default function Economics() {
           <div className="flex items-center gap-3 flex-wrap">
             <CarrierFilter {...bindCarrierFilter(carrierFilter, availableCarriers)} label="Carrier" />
             <span className="text-[10px] text-muted">
-              {kpis.profitable} profitable · {kpis.unprofitable} loss-making · {allRows.length} total
+              {/* "0 profitable · 0 loss-making" is exactly the reading a
+                  null-summing count would produce, and it looks like a
+                  finding rather than a gap. Say what is actually known. */}
+              {costsAvailable
+                ? `${kpis.profitable} profitable · ${kpis.unprofitable} loss-making · ${allRows.length} total`
+                : `${allRows.length} assets · profitability ${COST_UNAVAILABLE}`}
             </span>
           </div>
         </div>
@@ -613,9 +718,11 @@ export default function Economics() {
                sub="Σ dispatch × bus marginal price"
                hint="Annualised market revenue across every generator, storage unit and store. Storage uses discharge revenue only (charge cost is booked separately)." />
           <KPI label="Fixed cost"
-               value={fmtCurrency(kpis.fixed)}
-               sub="annualised CAPEX (gens + storage)"
-               hint="Σ (overnight × annuity, or capital_cost) × p_nom_opt over generators, storage units, stores and converters (electrolysers / heat pumps / P2X). Same basis as Dispatch CAPEX (annuitised). Excludes line / transformer CAPEX (see Capacity Expansion)." />
+               value={kpis.fixed != null ? fmtCurrency(kpis.fixed) : COST_UNAVAILABLE}
+               sub={kpis.fixed != null
+                 ? 'annualised CAPEX (gens + storage)'
+                 : 'capital-cost resolver failed — see the note above'}
+               hint="Σ (overnight × annuity, or capital_cost) × p_nom_opt over generators, storage units, stores and converters (electrolysers / heat pumps / P2X). Reconciles EXACTLY with the Dispatch tab's CAPEX (annuitised) KPI — measured Δ 0.00. It does NOT match Capacity Expansion's cost_breakdown.capex, which also includes line and transformer CAPEX and is several times larger. Shown as 'unavailable' rather than 0 when the capital-cost resolver fails." />
           <KPI label="Variable cost"
                value={fmtCurrency(kpis.vom + kpis.charge_cost)}
                sub={kpis.charge_cost > 0
@@ -623,11 +730,13 @@ export default function Economics() {
                  : 'Σ dispatch × marginal_cost'}
                hint="Σ |p| × marginal_cost. For storage assets this also includes the cost of charging energy (charge_mwh × bus price) — the market price paid to fill the reservoir." />
           <KPI label="Net profit"
-               value={fmtCurrency(kpis.net)}
-               sub={kpis.profitMarginPct != null
+               value={kpis.net != null ? fmtCurrency(kpis.net) : COST_UNAVAILABLE}
+               sub={kpis.net == null
+                 ? 'needs fixed cost, which could not be computed'
+                 : kpis.profitMarginPct != null
                  ? `margin ${kpis.profitMarginPct >= 0 ? '' : '−'}${Math.abs(kpis.profitMarginPct).toFixed(1)}% · = revenue − ${kpis.charge_cost > 0 ? 'charge − ' : ''}vom − fixed`
                  : `= revenue − ${kpis.charge_cost > 0 ? 'charge − ' : ''}vom − fixed`}
-               deltaState={kpis.net > 0 ? 'ok' : kpis.net < 0 ? 'err' : undefined}
+               deltaState={kpis.net == null ? 'warn' : kpis.net > 0 ? 'ok' : kpis.net < 0 ? 'err' : undefined}
                hint="Sum of per-asset net profits (revenue − charge − VOM − fixed). Margin = net ÷ revenue. Negative means the portfolio doesn't recover its annualised costs at market prices." />
         </div>
         <div className="mt-3 grid gap-3 grid-cols-2 md:grid-cols-4">
@@ -640,7 +749,9 @@ export default function Economics() {
                sub="market price paid to fill"
                hint="Σ charge_mwh × bus price across every storage asset. Zero on networks without storage. Subtracts directly from storage revenue in the net-profit roll-up." />
           <KPI label="System LCOE / LCOS"
-               value={kpis.sysLcoe != null ? `${kpis.sysLcoe.toFixed(2)} €/MWh` : '—'}
+               value={kpis.sysLcoe != null
+                 ? `${kpis.sysLcoe.toFixed(2)} €/MWh`
+                 : costsAvailable ? '—' : COST_UNAVAILABLE}
                sub="(Σ fixed + vom + charge) / Σ energy"
                hint="Portfolio-wide €/MWh — what every MWh delivered into the market costs the system to produce, on average. Useful as a yardstick: the avg capture price needs to exceed this for the portfolio to recover costs." />
           <KPI label="Avg capture price"
@@ -796,6 +907,7 @@ export default function Economics() {
                       setOpenAssets={setOpenAssets}
                       isMultiPeriod={payload.is_multi_period}
                       selectedPeriod={filter.selectedPeriod}
+                      costsAvailable={costsAvailable}
                     />
                   )
                 })
@@ -816,6 +928,7 @@ export default function Economics() {
                       // When period is selected, hide the period-rollout
                       // since we're already viewing one period.
                       showByPeriod={filter.selectedPeriod == null}
+                      costsAvailable={costsAvailable}
                     />
                   )
                 })
@@ -850,6 +963,14 @@ export default function Economics() {
           <p>
             <span className="font-mono">fixed_cost</span> = capital_cost × p_nom_opt. PyPSA's capital_cost is already annualised
             (overnight × annuity if you typed overnight_cost), so this equals the LP-objective contribution.
+            Σ fixed_cost across this table reconciles exactly with the Dispatch tab's <span className="font-mono">CAPEX (annuitised)</span> KPI.
+            It is deliberately smaller than Capacity Expansion's <span className="font-mono">cost_breakdown.capex</span>, which also
+            counts line and transformer CAPEX — this tab covers only generators, storage units, stores and converters.
+          </p>
+          <p>
+            When the capital-cost resolver fails, every figure derived from it — fixed_cost, FOM, net_profit, LCOE / LCOS — is
+            reported as “{COST_UNAVAILABLE}” rather than as zero, here and in the CSV export. A zero would be indistinguishable
+            from a genuinely free asset.
           </p>
           <p>
             <span className="font-mono">net_profit</span> = revenue − charge_cost − vom_cost − fixed_cost. Negative means the
@@ -875,7 +996,7 @@ export default function Economics() {
 // ── Group section ────────────────────────────────────────────────────────
 function GroupSection({
   groupKey, open, onToggle, total, assets, openAssets, setOpenAssets,
-  isMultiPeriod, selectedPeriod,
+  isMultiPeriod, selectedPeriod, costsAvailable,
 }: {
   groupKey: GroupKey
   open: boolean
@@ -886,6 +1007,10 @@ function GroupSection({
   setOpenAssets: (updater: (prev: Set<string>) => Set<string>) => void
   isMultiPeriod: boolean
   selectedPeriod: number | string | null
+  // Needed because a null LCOE has TWO meanings — "zero energy, ratio
+  // undefined" (render `—`) and "capital costs unavailable" (render the
+  // marker). The value alone cannot tell them apart.
+  costsAvailable: boolean
 }) {
   return (
     <>
@@ -906,10 +1031,13 @@ function GroupSection({
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(total.revenue_eur)}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{total.charge_cost_eur > 0 ? fmtCurrency(total.charge_cost_eur) : '—'}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(total.vom_cost_eur)}</td>
-        <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(total.fixed_cost_eur)}</td>
+        <td className="px-2 py-1 text-right font-mono text-[11px]">
+          {total.fixed_cost_eur != null ? fmtCurrency(total.fixed_cost_eur) : <Unavailable />}
+        </td>
         <td className="px-2 py-1 text-right"><ProfitChip value={total.net_profit_eur} /></td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
-          {total.lcoe_or_lcos != null ? `${total.lcoe_or_lcos.toFixed(2)} €/MWh` : '—'}
+          {total.lcoe_or_lcos != null ? `${total.lcoe_or_lcos.toFixed(2)} €/MWh`
+            : costsAvailable ? '—' : <Unavailable />}
         </td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
           {total.spread_or_avg_price != null ? `${total.spread_or_avg_price.toFixed(2)} €/MWh` : '—'}
@@ -929,6 +1057,7 @@ function GroupSection({
             })}
             isMultiPeriod={isMultiPeriod}
             showByPeriod={selectedPeriod == null}
+            costsAvailable={costsAvailable}
           />
         )
       })}
@@ -939,6 +1068,7 @@ function GroupSection({
 // ── Asset row + (optional) per-period sub-table ───────────────────────────
 function AssetRow({
   row, indent = false, zebra = false, open, onToggle, isMultiPeriod, showByPeriod,
+  costsAvailable,
 }: {
   row: AggregatedAssetRow
   indent?: boolean
@@ -947,6 +1077,7 @@ function AssetRow({
   onToggle: () => void
   isMultiPeriod: boolean
   showByPeriod: boolean
+  costsAvailable: boolean
 }) {
   const expandable = isMultiPeriod && showByPeriod && row.by_period.length > 0
   return (
@@ -971,10 +1102,13 @@ function AssetRow({
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(row.revenue_eur)}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{row.charge_cost_eur > 0 ? fmtCurrency(row.charge_cost_eur) : '—'}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(row.vom_cost_eur)}</td>
-        <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(row.fixed_cost_eur)}</td>
+        <td className="px-2 py-1 text-right font-mono text-[11px]">
+          {row.fixed_cost_eur != null ? fmtCurrency(row.fixed_cost_eur) : <Unavailable />}
+        </td>
         <td className="px-2 py-1 text-right"><ProfitChip value={row.net_profit_eur} /></td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
-          {row.lcoe_or_lcos != null ? `${row.lcoe_or_lcos.toFixed(2)} €/MWh` : '—'}
+          {row.lcoe_or_lcos != null ? `${row.lcoe_or_lcos.toFixed(2)} €/MWh`
+            : costsAvailable ? '—' : <Unavailable />}
         </td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
           {row.spread_or_avg_price != null ? `${row.spread_or_avg_price.toFixed(2)} €/MWh` : '—'}
@@ -1007,10 +1141,13 @@ function AssetRow({
                     <td className="px-2 py-0.5 text-right font-mono">{fmtCurrency(pe.revenue_eur)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{pe.charge_cost_eur > 0 ? fmtCurrency(pe.charge_cost_eur) : '—'}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{fmtCurrency(pe.vom_cost_eur)}</td>
-                    <td className="px-2 py-0.5 text-right font-mono">{fmtCurrency(pe.fixed_cost_eur)}</td>
+                    <td className="px-2 py-0.5 text-right font-mono">
+                      {pe.fixed_cost_eur != null ? fmtCurrency(pe.fixed_cost_eur) : <Unavailable />}
+                    </td>
                     <td className="px-2 py-0.5 text-right"><ProfitChip value={pe.net_profit_eur} /></td>
                     <td className="px-2 py-0.5 text-right font-mono">
-                      {pe.lcoe_or_lcos != null ? `${pe.lcoe_or_lcos.toFixed(2)} €/MWh` : '—'}
+                      {pe.lcoe_or_lcos != null ? `${pe.lcoe_or_lcos.toFixed(2)} €/MWh`
+                        : costsAvailable ? '—' : <Unavailable />}
                     </td>
                   </tr>
                 ))}

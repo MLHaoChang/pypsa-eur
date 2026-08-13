@@ -1,5 +1,10 @@
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
+// Floor for the docked comparison rail width — keeps both the rail and the
+// live Results pane usable when the splitter is dragged to an extreme. Single
+// definition, shared with the rail's own width arithmetic: this store and
+// Results.tsx enforcing the same number independently is how they can drift.
+import { RAIL_MIN_W } from '../pages/results/railWidth'
 
 interface SelectedComponent { type: string; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
@@ -15,6 +20,12 @@ export interface CreationRequest {
   id: string
   label: string
   dropPosition?: { x: number; y: number }
+  // Bus the palette item was released over, from the [data-bus-name]
+  // attribute both canvases publish. CreationForm uses it to prefill the
+  // asset's terminal field (spec D27). Absent when the drop landed on empty
+  // canvas — dropping onto nothing must stay exactly as permissive as it is
+  // today, so this is optional and never validated here.
+  dropBusName?: string
 }
 // pendingNodePosition is a one-shot handoff used by the drag-drop flow.
 // CreationForm sets it after a successful create; TopologyCanvas reads it
@@ -24,10 +35,11 @@ export interface CreationRequest {
 // the new component appears in the React Query cache.
 export interface PendingNodePosition { name: string; position: { x: number; y: number } }
 export type CanvasMode = 'select' | 'connect'
-// `chat` is the chatbot integration v6 panel (Phase 3). It opens a
-// half-width slide-panel on the right with the conversation, confirmation
-// cards, and live tool-progress streams. Reset via chatStore on project switch.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'chat' | 'workspace' | 'settings'
+// The panels that can occupy the single slide-panel slot. The assistant is
+// deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
+// `'chat'` was a member the assistant was mutually exclusive with every view
+// it exists to explain. It lives in `assistantDockOpen` below instead.
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -65,11 +77,9 @@ const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
+const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
 
 const RECENTS_MAX = 5
-// Floor for the docked comparison rail width — keeps both the rail and the
-// live Results pane usable when the splitter is dragged to an extreme.
-const COMPARE_RAIL_MIN_W = 360
 
 function storedSidebarMode(): SidebarMode {
   try {
@@ -165,9 +175,51 @@ function storedCompareRailOpen(): boolean {
 function storedCompareRailWidth(): number {
   try {
     const v = Number(localStorage.getItem(COMPARE_RAIL_WIDTH_KEY))
-    if (Number.isFinite(v) && v >= COMPARE_RAIL_MIN_W) return v
+    if (Number.isFinite(v) && v >= RAIL_MIN_W) return v
   } catch { /* noop */ }
   return 560
+}
+
+// Default OPEN. The spec's headline is an assistant "present when the tool
+// launches", and a 40px muted icon is not presence — it is the opt-in panel
+// the dock exists to replace, in a different shape. Only an explicit
+// 'closed' collapses it, so a user who asked for the width back keeps it;
+// re-opening on every launch is how a feature gets switched off for good.
+const ASSISTANT_DOCK_WIDTH_KEY = 'network-diagram:assistant-dock-width'
+export const DOCK_MIN_W = 320
+export const DOCK_DEFAULT_W = 420
+
+function storedAssistantDockOpen(): boolean {
+  try {
+    return localStorage.getItem(ASSISTANT_DOCK_KEY) !== 'closed'
+  } catch { /* noop */ }
+  return true
+}
+
+function storedAssistantDockWidth(): number {
+  try {
+    const v = Number(localStorage.getItem(ASSISTANT_DOCK_WIDTH_KEY))
+    if (Number.isFinite(v) && v >= DOCK_MIN_W) return v
+  } catch { /* noop */ }
+  return DOCK_DEFAULT_W
+}
+
+function persistAssistantDockOpen(open: boolean) {
+  try { localStorage.setItem(ASSISTANT_DOCK_KEY, open ? 'open' : 'closed') } catch { /* noop */ }
+}
+
+// Whether the assistant may answer a DICTATED turn out loud. Default on: the
+// spoken mode is chosen by the act of using the microphone, so a user who
+// never dictates never hears it, and one who does expects an answer back —
+// defaulting it off would mean nobody discovers reciprocity exists. Persisted
+// because "does this machine talk out loud" is a preference people set once.
+const ASSISTANT_SPEAK_KEY = 'network-diagram:assistant-speak'
+
+function storedAssistantSpeak(): boolean {
+  try {
+    return localStorage.getItem(ASSISTANT_SPEAK_KEY) !== 'off'
+  } catch { /* noop */ }
+  return true
 }
 
 function persistOpenTabs(tabs: OpenTab[]) {
@@ -264,6 +316,11 @@ interface UIStore {
   canvasMode: CanvasMode
   canvasView: CanvasView
   activeSlidePanel: SlidePanel | null
+  // The assistant is NOT a SlidePanel. It has its own open/closed state so it
+  // can stay on screen while it navigates you somewhere — see Task 3's
+  // regression test and the 2026-08-05 presence spec.
+  assistantDockOpen: boolean
+  assistantDockWidth: number
   // True while a project switch/load is mid-flight (between the moment the
   // backend starts swapping the in-memory network and the moment
   // currentProject is updated to the new project). Autosave checks this and
@@ -347,6 +404,13 @@ interface UIStore {
   setCanvasMode: (mode: CanvasMode) => void
   setCanvasView: (view: CanvasView) => void
   setSlidePanel: (p: SlidePanel | null) => void
+  setAssistantDockOpen: (open: boolean) => void
+  toggleAssistantDock: () => void
+  setAssistantDockWidth: (px: number) => void
+  assistantSpeakEnabled: boolean
+  toggleAssistantSpeak: () => void
+  constrainDockWidth: (desired: number, available: number) => number
+  readStoredDockOpen: () => boolean
   setProjectSwitchInProgress: (v: boolean) => void
   setCompareRailOpen: (v: boolean) => void
   toggleCompareRail: () => void
@@ -407,6 +471,9 @@ export const useUIStore = create<UIStore>((set) => ({
   canvasMode: 'select',
   canvasView: storedCanvasView(),
   activeSlidePanel: null,
+  assistantDockOpen: storedAssistantDockOpen(),
+  assistantDockWidth: storedAssistantDockWidth(),
+  assistantSpeakEnabled: storedAssistantSpeak(),
   projectSwitchInProgress: false,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
@@ -503,18 +570,46 @@ export const useUIStore = create<UIStore>((set) => ({
     set({ canvasView: view })
   },
   setSlidePanel: (p) => set({ activeSlidePanel: p }),
+  setAssistantDockOpen: (open) => {
+    persistAssistantDockOpen(open)
+    set({ assistantDockOpen: open })
+  },
+  toggleAssistantDock: () => set(s => {
+    const next = !s.assistantDockOpen
+    persistAssistantDockOpen(next)
+    return { assistantDockOpen: next }
+  }),
   setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
   setCompareRailOpen: (v) => {
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
     set({ compareRailOpen: v })
   },
+  // The store holds the width the user ASKED for, written by exactly one
+  // thing — a real drag on the dock's handle — and persisted. Nothing else
+  // may touch it. What renders is that width constrained to what currently
+  // fits, recomputed from a measurement and never stored: writing the
+  // constraint back is what silently rewrote the compare rail's 700px
+  // preference to 461 the first time a panel opened beside it.
+  setAssistantDockWidth: (px: number) => {
+    const w = Math.max(DOCK_MIN_W, Math.round(px))
+    try { localStorage.setItem(ASSISTANT_DOCK_WIDTH_KEY, String(w)) } catch { /* noop */ }
+    set({ assistantDockWidth: w })
+  },
+  constrainDockWidth: (desired: number, available: number) =>
+    Math.max(DOCK_MIN_W, Math.min(desired, available - DOCK_MIN_W)),
+  readStoredDockOpen: () => storedAssistantDockOpen(),
+  toggleAssistantSpeak: () => set(s => {
+    const next = !s.assistantSpeakEnabled
+    try { localStorage.setItem(ASSISTANT_SPEAK_KEY, next ? 'on' : 'off') } catch { /* noop */ }
+    return { assistantSpeakEnabled: next }
+  }),
   toggleCompareRail: () => set(s => {
     const next = !s.compareRailOpen
     try { localStorage.setItem(COMPARE_RAIL_KEY, next ? 'true' : 'false') } catch { /* noop */ }
     return { compareRailOpen: next }
   }),
   setCompareRailWidth: (px) => {
-    const w = Math.max(COMPARE_RAIL_MIN_W, Math.round(px))
+    const w = Math.max(RAIL_MIN_W, Math.round(px))
     try { localStorage.setItem(COMPARE_RAIL_WIDTH_KEY, String(w)) } catch { /* noop */ }
     set({ compareRailWidth: w })
   },

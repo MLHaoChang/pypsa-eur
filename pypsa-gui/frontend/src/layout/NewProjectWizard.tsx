@@ -71,8 +71,13 @@ export default function NewProjectWizard({
       aria-labelledby={titleId}
       panelClassName="bg-bg rounded-xl shadow-2xl w-[640px] max-w-[95vw] max-h-[88vh] overflow-hidden flex flex-col"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+      {/* Header. Carries the wizard's testid because Dialog renders the panel
+          itself and takes no testid — the header is the wizard's first own
+          element, so its presence and the wizard's are the same fact. */}
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0"
+        data-testid="new-project-wizard"
+      >
         <div className="flex items-center gap-2">
           <FilePlus size={15} className="text-accent" />
           <span id={titleId} className="text-sm font-semibold text-text">New project</span>

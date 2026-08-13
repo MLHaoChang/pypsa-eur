@@ -18,6 +18,7 @@
  */
 import { client } from './client'
 import { rawFetchHeaders } from './csrf'
+import type { UiContext } from '../utils/uiContext'
 
 // Keep in sync with chat_service.DEFAULT_MODEL / OPUS_MODEL, which
 // tests/test_chat_models.py pins.
@@ -36,6 +37,16 @@ export interface ChatStreamRequest {
   // Word / CSV files are NOT valid here — agents go through the
   // read_excel_sheet tool instead.
   attachment_file_ids?: string[]
+  // Deixis — what the user is LOOKING AT when they hit send, so "why is this
+  // so high?" has a referent. Built by `utils/uiContext.ts`, which is also
+  // where the identifiers-only rule is written down; the server enforces the
+  // same allowlist, so attaching values here fails closed.
+  ui_context?: UiContext
+  // 'voice' when the turn was dictated. A field rather than something the
+  // server infers, because reconstructing it later from timing or content is
+  // guesswork — and speech reciprocity (a spoken turn gets a spoken answer)
+  // depends on getting it right.
+  input_mode?: 'voice' | 'text'
 }
 
 export interface ChatFrame {
@@ -132,6 +143,24 @@ export async function postChatAbort(sessionId: string): Promise<{ ok: boolean }>
   return r.data
 }
 
+/**
+ * Drop the last `turns` turns from the session's API history.
+ *
+ * What makes retry / edit-and-resend real rather than cosmetic: the array
+ * replayed to the model lives on the server, so clearing the browser alone
+ * leaves the answer being retried in context — and the model reads its own
+ * last answer and repeats it.
+ *
+ * `dropped: 0` with `ok: true` is a legitimate outcome (unknown session, or a
+ * turn in flight, which the server refuses to rewind under).
+ */
+export async function postChatRewind(
+  sessionId: string, turns = 1,
+): Promise<{ ok: boolean; dropped: number }> {
+  const r = await client.post(`/chat/${sessionId}/rewind`, { turns })
+  return r.data
+}
+
 export interface ChatHealth {
   ok: boolean
   anthropic_api_key_present: boolean
@@ -197,10 +226,25 @@ export interface ChatTurn {
   attachment_file_ids?: string[]
 }
 
+// A turn that started and never finished, recovered from the server's
+// pending-turn WAL. Carries the user's message only — there is no assistant
+// half, which is precisely what makes it worth reporting.
+export interface InterruptedTurn {
+  ts: number
+  session_id: string
+  model: ChatModel
+  user: string
+}
+
 export interface ChatHistory {
   turns: ChatTurn[]
   last_session_id: string | null
   bound_project: string | null
+  // How many on-disk records were unreadable. Non-zero means `turns` is
+  // INCOMPLETE — say so rather than rendering a quietly shorter conversation.
+  history_gap: number
+  // Reported once, then cleared server-side; null on a clean reload.
+  pending_turn: InterruptedTurn | null
 }
 
 export async function getChatHistory(limit = 200): Promise<ChatHistory> {

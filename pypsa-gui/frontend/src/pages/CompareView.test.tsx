@@ -87,6 +87,7 @@ function summary(project: string, scale = 1): ResultsSummary {
   return {
     project, is_multi_period: true, periods: [2030, 2035], has_solve: true,
     capacity: {
+      available: true,
       capacity_mw_by_carrier: { solar: pv(200 * s, 200 * s, 0) },
       capex_meur_by_carrier: { solar: pv(82.5 * s, 27.5 * s, 55 * s) },
       new_capex_meur_by_carrier: { solar: pv(10 * s, 4 * s, 6 * s) },
@@ -99,12 +100,14 @@ function summary(project: string, scale = 1): ResultsSummary {
       new_link_capacity_mw_by_carrier: {},
     },
     dispatch: {
+      available: true,
       dispatch_gwh_by_carrier: { solar: pv(300 * s, 100 * s, 200 * s) },
       opex_meur: pv(12 * s, 4 * s, 8 * s),
       total_load_gwh: pv(300 * s, 100 * s, 200 * s),
       storage_cycles_by_carrier: {},
     },
     loading: {
+      available: true,
       lines: [{
         name: 'Line1', s_nom_opt: 500, is_transformer: false, is_link: false, carrier: null,
         peak_loading: pv(0.8 * s, 0.6 * s, 0.9 * s),
@@ -113,6 +116,7 @@ function summary(project: string, scale = 1): ResultsSummary {
       }],
     },
     prices: {
+      available: true,
       duration_curve: Array.from({ length: 101 }, (_, i) => (100 - i) * s),
       mean_price: pv(45 * s, 40 * s, 50 * s),
       median_price: pv(44 * s, 39 * s, 49 * s),
@@ -130,11 +134,13 @@ function summary(project: string, scale = 1): ResultsSummary {
       },
     },
     emissions: {
+      available: true,
       total_kt: pv(500 * s, 200 * s, 300 * s),
       by_carrier_kt: { gas: pv(500 * s, 200 * s, 300 * s) },
       intensity_kg_per_mwh: pv(250 * s, 200 * s, 270 * s),
     },
     economics: {
+      available: true,
       by_carrier: {
         solar: {
           revenue_meur: pv(60 * s, 20 * s, 40 * s),
@@ -158,6 +164,7 @@ function summary(project: string, scale = 1): ResultsSummary {
       }],
     },
     curtailment: {
+      available: true,
       total_gwh: pv(20 * s, 8 * s, 12 * s),
       by_carrier_gwh: { solar: pv(20 * s, 8 * s, 12 * s) },
       rate_pct_by_carrier: { solar: pv(6.25 * s, 7.4 * s, 5.7 * s) },
@@ -165,6 +172,7 @@ function summary(project: string, scale = 1): ResultsSummary {
     },
     lost_load: {
       available: true,
+      captured: true,
       voll_eur_per_mwh: 3000,
       total_mwh: pv(10 * s, 4 * s, 6 * s),
       total_cost_meur: pv(0.03 * s, 0.012 * s, 0.018 * s),
@@ -175,6 +183,7 @@ function summary(project: string, scale = 1): ResultsSummary {
       }],
     },
     storage_cycling: {
+      available: true,
       cycles_by_carrier: { battery: pv(150 * s, 60 * s, 90 * s) },
       by_unit: [{
         name: 'Battery1', carrier: 'battery', p_nom_mw: 30 * s, energy_mwh: 120 * s,

@@ -14,6 +14,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
+import { useAssetDrag } from '../hooks/useAssetDrag'
 import { networkApi } from '../api/network'
 import { ioApi } from '../api/io'
 import { projectsApi } from '../api/projects'
@@ -235,74 +236,14 @@ function SubHdr({ title }: { title: string }) {
 // ── AssetPaletteInline ─────────────────────────────────────────────────────────
 function AssetPaletteInline() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const { setCreationItem } = useUIStore()
-  // Drag ghost — rendered as a fixed-position chip that follows the cursor
-  // during a drag. Pointer-events:none so pointerup passes through to the
-  // actual drop target underneath.
-  const [ghost, setGhost] = useState<{ label: string; x: number; y: number } | null>(null)
+  // The pointer-drag gesture and its drop hit-test live in the hook — it is
+  // the single owner of "what is under the cursor", shared by the schematic
+  // and map canvases (spec D25). setCreationItem is still needed directly
+  // for the keyboard path below (Enter/Space), which is not a drag.
+  const { ghost, beginDrag } = useAssetDrag()
+  const setCreationItem = useUIStore(s => s.setCreationItem)
   const toggle = (id: string) =>
     setCollapsed(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-
-  // Manual pointer-event drag (NOT HTML5 drag-and-drop). The HTML5 API was
-  // unreliable in the user's environment — drops didn't land. Pointer events
-  // are bulletproof: we track mousedown→move→up ourselves, render our own
-  // ghost, and detect the drop target via document.elementFromPoint.
-  //
-  // Threshold: 3px of movement promotes "click" → "drag". Below ⇒ pointerup
-  // fires the click handler (opens slide-in panel without dropPosition). At
-  // or above ⇒ pointerup checks if the cursor is over the React Flow canvas
-  // and opens the panel WITH dropPosition.
-  function beginDrag(e: React.PointerEvent, item: { id: string; label: string }) {
-    if (e.button !== 0) return  // left button only
-    e.preventDefault()
-    const startX = e.clientX
-    const startY = e.clientY
-    let moved = false
-
-    const onMove = (ev: PointerEvent) => {
-      const dx = Math.abs(ev.clientX - startX)
-      const dy = Math.abs(ev.clientY - startY)
-      if (!moved && (dx > 3 || dy > 3)) {
-        moved = true
-        document.body.style.cursor = 'grabbing'
-      }
-      if (moved) setGhost({ label: item.label, x: ev.clientX, y: ev.clientY })
-    }
-
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      document.body.style.cursor = ''
-      setGhost(null)
-
-      if (!moved) {
-        // Click — open the right-side slide-in panel with no drop position.
-        setCreationItem({ id: item.id, label: item.label })
-        return
-      }
-
-      // Drop detection. document.elementFromPoint walks the actual DOM hit
-      // test under the release coordinates; we check if that element (or
-      // any ancestor) is the React Flow canvas (.react-flow wrapper).
-      const target = document.elementFromPoint(ev.clientX, ev.clientY)
-      const rfEl = target?.closest('.react-flow') as HTMLElement | null
-      if (!rfEl) return  // released outside the canvas — cancel silently
-
-      // Convert screen → React Flow coords via the global instance handle
-      // TopologyCanvas pins to window in onInit. Without it, the new node
-      // would land at (0, 0) on the canvas regardless of where you dropped.
-      const rf = (window as unknown as {
-        rfInstance?: { screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } }
-      }).rfInstance
-      const pos = rf?.screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
-      if (!pos) return
-
-      setCreationItem({ id: item.id, label: item.label, dropPosition: pos })
-    }
-
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
 
   return (
     <div>
@@ -1344,13 +1285,73 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
       />
-      {/* Chatbot integration v6 (Phase 3) — toggle the ChatPanel slide. */}
-      <SItem icon={<MessageSquare size={15} />} label="Chat"
-        title="Conversational assistant. Ask questions about the open network, drive tools, confirm destructive actions through a card."
-        active={activeSlidePanel === 'chat'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'chat' ? null : 'chat'); onCloseModal?.() }}
-      />
+      {/* The Assistant row used to live here, as the last of seven. It is not
+          a simulation feature — it answers questions about the network and
+          opens panels from all three sections — and a row inside a collapsible
+          section is not the "always-visible" affordance the design spec asks
+          for. It is now `AssistantNavButton`, pinned above the sections in
+          both sidebar modes. See Sidebar.assistant.test.tsx. */}
     </div>
+  )
+}
+
+/**
+ * The Assistant's nav entry — top level in both sidebar modes, never inside a
+ * collapsible section.
+ *
+ * It toggles `assistantDockOpen` rather than `activeSlidePanel`: the assistant
+ * has its own dock precisely so it can stay on screen while it navigates you
+ * somewhere (see AssistantDock.tsx), and routing it back through the panel
+ * union would restore the self-eviction bug the dock exists to remove.
+ */
+function AssistantNavButton({ compact = false, onCloseModal }: {
+  compact?: boolean
+  onCloseModal?: () => void
+}) {
+  const assistantDockOpen = useUIStore(s => s.assistantDockOpen)
+  const toggleAssistantDock = useUIStore(s => s.toggleAssistantDock)
+  const title = 'Assistant — ask about the open network, drive any tool, and it opens the view it is talking about.'
+  const onClick = () => { toggleAssistantDock(); onCloseModal?.() }
+
+  if (compact) {
+    return (
+      <button
+        onClick={onClick}
+        title={title}
+        aria-label="Assistant"
+        aria-pressed={assistantDockOpen}
+        data-testid="sidebar-assistant"
+        className="flex flex-col items-center justify-center gap-0.5 w-full py-2 transition-colors"
+        style={{
+          color: assistantDockOpen ? 'var(--color-accent)' : 'var(--color-muted)',
+          background: assistantDockOpen ? 'rgba(47,129,247,0.14)' : undefined,
+        }}
+      >
+        <MessageSquare size={18} />
+        <span className="text-[8px] font-mono font-bold uppercase tracking-[0.06em]">Ask</span>
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={assistantDockOpen}
+      data-testid="sidebar-assistant"
+      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] font-semibold rounded-md transition-colors"
+      style={{
+        color: assistantDockOpen ? 'var(--color-accent)' : 'var(--color-text)',
+        background: assistantDockOpen ? 'rgba(47,129,247,0.14)' : 'rgba(47,129,247,0.07)',
+        border: `1px solid ${assistantDockOpen ? 'rgba(47,129,247,0.5)' : 'rgba(47,129,247,0.22)'}`,
+      }}
+    >
+      <MessageSquare size={15} className="shrink-0" />
+      <span className="flex-1 text-left">Assistant</span>
+      <span className="font-mono text-[9px] font-bold uppercase tracking-[0.12em] text-muted">
+        {assistantDockOpen ? 'Open' : 'Ask'}
+      </span>
+    </button>
   )
 }
 
@@ -1753,6 +1754,12 @@ export default function Sidebar() {
             </button>
           </div>
 
+          {/* Assistant first, and outside the section list — the three buttons
+              below open a flyout you then have to read; this one acts. */}
+          <div className="w-full border-b border-border shrink-0">
+            <AssistantNavButton compact onCloseModal={() => setActiveFlyout(null)} />
+          </div>
+
           {/* Section icons */}
           <div className="flex-1 flex flex-col w-full">
             <IconStripBtn icon={<FolderOpen size={18} />}  label="Project"    sectionId="project"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('project')} />
@@ -1814,6 +1821,13 @@ export default function Sidebar() {
           >
             <ChevronLeft size={14} />
           </button>
+        </div>
+
+        {/* Assistant — pinned ABOVE the scroll container, not inside it, so it
+            is on screen whatever the sections are doing and wherever the body
+            is scrolled to. */}
+        <div className="shrink-0 px-2 pt-2 pb-1">
+          <AssistantNavButton />
         </div>
 
         {/* Scrollable body */}

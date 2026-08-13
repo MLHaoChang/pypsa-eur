@@ -28,7 +28,11 @@ _NoneToOne = Annotated[float, BeforeValidator(
 
 
 class BusCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
     name: str
     v_nom: float = 1.0
     carrier: str = "AC"
@@ -41,6 +45,11 @@ class BusCreate(BaseModel):
 
 
 class CarrierCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     # `name` is required on POST (the URL has no name) but OPTIONAL on PUT
     # (the URL carries the name, body is the partial update). Pydantic
     # marks `name` Optional with a None default so PUT /carriers/{name}
@@ -54,6 +63,11 @@ class CarrierCreate(BaseModel):
 
 
 class LineCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus0: str
     bus1: str
@@ -98,6 +112,11 @@ class ImpedanceRescaleRequest(BaseModel):
 
 
 class LinkCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus0: str
     bus1: str
@@ -132,6 +151,11 @@ class LinkCreate(BaseModel):
 
 
 class GeneratorCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     carrier: str = ""
@@ -182,6 +206,11 @@ class GeneratorCreate(BaseModel):
 
 
 class StorageUnitCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     carrier: str = ""
@@ -213,6 +242,11 @@ class StorageUnitCreate(BaseModel):
 
 
 class StoreCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     carrier: str = ""
@@ -237,6 +271,11 @@ class StoreCreate(BaseModel):
 
 
 class LoadCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     carrier: str = ""
@@ -246,6 +285,11 @@ class LoadCreate(BaseModel):
 
 
 class TransformerCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus0: str
     bus1: str
@@ -285,6 +329,11 @@ class TransformerCreate(BaseModel):
 
 
 class ShuntImpedanceCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     g: float = 0.0
@@ -328,6 +377,11 @@ class InvestmentPeriods(BaseModel):
 # `sense` is one of "<=" / ">=" / "==". `investment_period` only applies in
 # multi-period setups.
 class GlobalConstraintCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     type: str = "primary_energy"
     sense: str = "<="
@@ -678,6 +732,10 @@ class CapacityComparison(BaseModel):
     so the user can see the chronological investment plan side-by-side.
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
     # Optimised p_nom_opt by carrier (MW). `by_period[P]` is the capacity IN
     # SERVICE during period P, not a per-period increment: pre-existing
     # (brownfield) capacity is replicated into EVERY period's bucket by
@@ -749,6 +807,10 @@ class DispatchComparison(BaseModel):
     dispatch) — matches what /results/cost_breakdown reports as OPEX(mc).
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
     # GWh dispatched per carrier (Σ p × snapshot_weight × period_weight, /1000).
     dispatch_gwh_by_carrier: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     # OPEX in M€ — Σ marginal_cost × p × snapshot_weight × period_weight, /1e6.
@@ -803,6 +865,10 @@ class LoadingComparison(BaseModel):
     visually (e.g. a small icon next to the name).
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
     # Ordered by peak loading (descending) on the SCENARIO-WIDE aggregate so
     # the worst-loaded branches surface first. Frontend renders top-N.
     lines: list[LineLoadingEntry] = Field(default_factory=list)
@@ -837,6 +903,10 @@ class PricesComparison(BaseModel):
     correctly contribute more density to the curve.
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
     # Sampled duration curve. Index 0 = highest price (0th percentile), index
     # 100 = lowest. Empty for unsolved networks.
     duration_curve: list[float] = Field(default_factory=list)
@@ -871,6 +941,10 @@ class EmissionsComparison(BaseModel):
     headline number to compare scenarios beyond raw kt.
     """
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
     total_kt: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     by_carrier_kt: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     intensity_kg_per_mwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
@@ -943,6 +1017,10 @@ class AssetLCOHEntry(BaseModel):
 class EconomicsComparison(BaseModel):
     """Per-asset-group economic summary used by the Economics comparison tab."""
 
+    # False means this block resolved nothing and every figure below is a
+    # default zero, not a measurement — see ADR-0001. True guarantees the
+    # figures were computed from a solved network.
+    available: bool = False
     by_carrier: dict[str, CarrierEconomics] = Field(default_factory=dict)
     # Per-Link levelised-cost rows (one per extendable Link with non-trivial
     # dispatch). Lets users compare H2 plant economics across scenarios.
@@ -966,6 +1044,15 @@ class CurtailmentComparison(BaseModel):
     different concept.
     """
 
+    # True means this block's figures are REAL, including when the real
+    # figure is a structural zero: a solved network with no Generator at all,
+    # or with generators but none carrying a time-varying `p_max_pu` (e.g.
+    # all-thermal), has genuinely zero curtailment — that is the answer, not
+    # an absence, so those early returns set `available=True` too. False
+    # means nothing was resolved (no solve, or the dispatch/p_max_pu tables
+    # are missing) and every figure below is a default zero, not a
+    # measurement — see ADR-0001.
+    available: bool = False
     total_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     by_carrier_gwh: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     # Curtailment rate per carrier (%). Equals ``curtailed / (curtailed +
@@ -1010,13 +1097,24 @@ class LostLoadComparison(BaseModel):
 
     Populated only when the project's ``results_state.pkl`` carries a
     lost-load capture — i.e. the solver ran with ``voll > 0`` AND the LP
-    shed at least one MW. ``available=False`` covers three states the
-    frontend distinguishes: ``voll`` was zero, the project hasn't been
-    solved, or no shedding occurred (happy path). When ``available=True``,
+    shed at least one MW. ``available=False`` no longer implies a happy
+    path on its own: within the ``has_solve=True`` path, most
+    ``available=False`` returns mean the capture was never READ (missing
+    pickle, an unpickle error, a malformed/empty capture) and the project's
+    actual shedding is unknown; only one — a real zero after
+    reindex/weighting — is a confirmed "no shedding" result. ``captured``
+    (below) is what tells them apart. When ``available=True``,
     ``total_mwh.total`` is guaranteed > 0.
     """
 
     available: bool = False
+    # Whether the lost-load capture was READ AT ALL, independent of what it
+    # said. `available=False, captured=True` is a real measured zero — the
+    # solver ran with voll > 0 and the LP shed nothing. `captured=False` means
+    # we could not read the capture (no results_state.pkl, an unpickle error,
+    # a mid-solve state) and therefore know nothing; the frontend must render
+    # "unavailable" there, never 0.0. See ADR-0001.
+    captured: bool = False
     # VOLL price the solver used (€/MWh). Recovered from
     # ``lost_load_cost_eur / lost_load_total_mwh`` so the frontend doesn't
     # divide-by-zero on the edge case.
@@ -1056,6 +1154,14 @@ class StorageCyclingComparison(BaseModel):
     fleet specifically, with one row per unit.
     """
 
+    # True means this block's figures are REAL, including when the real
+    # figure is a structural zero: a solved network with no StorageUnit at
+    # all has genuinely zero cycling — that is the answer, not an absence, so
+    # that early return sets `available=True` too. False means nothing was
+    # resolved (no solve, or the storage dispatch table is missing) and
+    # every figure below is a default zero, not a measurement — see
+    # ADR-0001.
+    available: bool = False
     cycles_by_carrier: dict[str, CarrierPeriodValue] = Field(default_factory=dict)
     by_unit: list[StorageUnitCycles] = Field(default_factory=list)
 
@@ -1076,10 +1182,14 @@ class ResultsSummary(BaseModel):
     # by_period keys (which are stringified ints).
     periods: list[int] = Field(default_factory=list)
     # True iff the loaded network has a fresh solve (dispatch_status == fresh).
-    # The capacity/dispatch fields are populated regardless, but if has_solve
-    # is False the capacity panel will fall back to installed p_nom (no
-    # p_nom_opt) and dispatch numbers will be all-zero — the frontend uses
-    # this flag to render a "scenario not solved" badge instead of charts.
+    # The capacity/dispatch fields are always PRESENT (non-None) regardless,
+    # but if has_solve is False both are EMPTY, not a fallback to installed
+    # p_nom: `p_nom_opt` is a PyPSA output column that defaults to 0. before
+    # a solve, so every asset is skipped by the p_nom_opt walk that populates
+    # CapacityComparison, and its `available` flag mirrors has_solve for
+    # exactly this reason — see CapacityComparison's field-level docstring.
+    # The frontend uses this top-level flag to render a "scenario not
+    # solved" badge instead of charts.
     has_solve: bool = False
     # Phase 1.
     capacity: CapacityComparison | None = None

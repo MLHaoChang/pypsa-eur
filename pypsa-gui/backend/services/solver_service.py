@@ -2705,7 +2705,29 @@ def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=No
         _safe_log(log_queue, f"[BUDGET] {msg}")
 
     def capex_budget_fn(n, snapshots):
+        # Budgets are keyed by period year. On a MULTI-PERIOD network a key
+        # that is no longer in n.investment_periods is stale — the user removed
+        # that year from the horizon — and must not constrain the LP. Per-period
+        # load scaling already ignores stale keys (it iterates the network's
+        # periods, not the config's); this makes the budget agree.
+        #
+        # `active is None` on a FLAT network, where every budget still applies:
+        # _wrap_with_capex_budget is not multi-period gated, and `build_year` is
+        # a per-asset attribute that does not need investment periods to exist.
+        # A flat membership check here would silently disable every flat-network
+        # budget — a regression, not a fix.
+        active = (
+            {int(p) for p in n.investment_periods}
+            if len(n.investment_periods) > 0
+            else None
+        )
         for period, budget in normalized.items():
+            if active is not None and period not in active:
+                _emit(
+                    f"period {period}: budget EUR {budget:,.0f} ignored — not in "
+                    f"the model's investment periods {sorted(active)}"
+                )
+                continue
             # Find every extendable asset whose build_year matches this
             # period AND whose capacity variable lives in the LP.
             terms: list = []  # list of (name, coef, p_nom_var, p_nom_existing)
@@ -3439,7 +3461,9 @@ def _annuity(rate: float, lifetime: float) -> float:
     return rate * factor / (factor - 1.0)
 
 
-def fill_periodized_cost_defaults(n, cfg: "SolverConfig") -> Callable[[], None]:
+def fill_periodized_cost_defaults(
+    n, cfg: "SolverConfig", *, for_back_calculation: bool = False,
+) -> Callable[[], None]:
     """
     Fill per-asset `discount_rate` / `lifetime` from the global config for
     any asset that has `overnight_cost` set but a blank discount_rate or a
@@ -3459,6 +3483,39 @@ def fill_periodized_cost_defaults(n, cfg: "SolverConfig") -> Callable[[], None]:
     Both sites need the same fill, so it lives here once. Caller MUST invoke
     the returned revert() in a finally block — otherwise the on-disk network
     state keeps the fill and a later global-rate change won't propagate.
+
+    ``for_back_calculation`` adds a SECOND, narrower fill for the mirror-image
+    population: assets that carry a non-zero `capital_cost` and NO
+    `overnight_cost`. Those need `discount_rate` for the OPPOSITE direction —
+    PyPSA's `comp.overnight_cost` recovering an upfront cost from
+    `capital_cost / (annuity x nyears)` — and it raises ValueError for the
+    WHOLE component class when the rate is NaN. That is exactly what happened
+    to Lines: PyPSA-Eur prices them through `capital_cost` alone, so the fill
+    above never touched them, `n.c["Line"].overnight_cost` raised, and
+    `get_cost_breakdown` reported a lifetime CAPEX of 0.00 for 95.8% of the
+    system. Pass it only where an upfront cost is being READ.
+
+    It fills `discount_rate` and DELIBERATELY NOT `lifetime`, which is not
+    symmetric and not an oversight:
+
+      • `discount_rate` cannot move any existing number for this population.
+        `pypsa.costs.periodized_cost` computes
+        `base = annuitized.where(has_overnight, capital_cost)`, so an asset
+        with no `overnight_cost` keeps its raw `capital_cost` whatever the rate
+        says — `n.statistics()` and the LP objective are untouched.
+      • `lifetime` is NOT a cost input alone. On a multi-period network PyPSA
+        derives asset ACTIVITY from `build_year + lifetime`, so substituting
+        the config default retires assets. Measured on the golden fixture: a
+        Line at the default `build_year=0` and `lifetime=inf` went to
+        `lifetime=25`, fell outside both 2030 and 2035, and its Capital
+        Expenditure dropped from EUR 500 M per period to 0.00 — reintroducing
+        the very defect this change exists to fix, one layer down. A blank
+        lifetime therefore stays blank; PyPSA raises, and the caller reports
+        the class as unavailable rather than quietly retiring it.
+
+    (PyPSA's default `lifetime` is `inf`, not NaN, and `annuity(r, inf)` is
+    `max(r, 0)` — so the common "user never typed a lifetime" case still
+    back-calculates fine on the rate alone.)
     """
     import numpy as np
 
@@ -3468,10 +3525,19 @@ def fill_periodized_cost_defaults(n, cfg: "SolverConfig") -> Callable[[], None]:
         if df is None or df.empty or "overnight_cost" not in df.columns:
             continue
         has_overnight = df["overnight_cost"].notna() & (df["overnight_cost"] != 0)
-        if not has_overnight.any():
+        # PyPSA's own back-calculation predicate: no overnight_cost AND a
+        # capital_cost worth converting. Mirrors `Components.overnight_cost`
+        # (`needs_back_calc = ~has_overnight & (capital != 0)`); an asset at
+        # capital_cost 0 needs nothing and is left alone.
+        if for_back_calculation and "capital_cost" in df.columns:
+            back_calc = ~df["overnight_cost"].notna() & (df["capital_cost"].fillna(0) != 0)
+        else:
+            back_calc = pd.Series(False, index=df.index)
+        if not (has_overnight.any() or back_calc.any()):
             continue
         if "discount_rate" in df.columns:
-            missing_dr = has_overnight & df["discount_rate"].isna()
+            # Both populations: the rate is a pure cost input either way.
+            missing_dr = (has_overnight | back_calc) & df["discount_rate"].isna()
             if missing_dr.any():
                 idx = df.index[missing_dr]
                 original = df.loc[idx, "discount_rate"].copy()
@@ -3479,6 +3545,8 @@ def fill_periodized_cost_defaults(n, cfg: "SolverConfig") -> Callable[[], None]:
                 undo.append((comp_attr, "discount_rate", idx, original))
         if "lifetime" in df.columns:
             lt = df["lifetime"]
+            # `has_overnight` ONLY — see the docstring on why the
+            # back-calculation population must keep its lifetime.
             # Treat both NaN and inf as "user didn't pick a number" — PyPSA's
             # default lifetime is +inf, so we can't distinguish "explicit
             # perpetuity" from "unset" anyway.
@@ -3502,16 +3570,45 @@ def fill_periodized_cost_defaults(n, cfg: "SolverConfig") -> Callable[[], None]:
 
 
 @contextmanager
-def with_periodized_cost_defaults(n, cfg: "SolverConfig"):
+def with_periodized_cost_defaults(
+    n, cfg: "SolverConfig", *, for_back_calculation: bool = False,
+):
     """
     Context-manager wrapper around fill_periodized_cost_defaults — for
     callers that prefer `with` over an explicit try/finally pair.
+
+    See that function for what ``for_back_calculation`` widens and why it is
+    opt-in; pass it when the block READS an upfront (overnight) cost.
     """
-    revert = fill_periodized_cost_defaults(n, cfg)
+    revert = fill_periodized_cost_defaults(
+        n, cfg, for_back_calculation=for_back_calculation,
+    )
     try:
         yield
     finally:
         revert()
+
+
+def upfront_cost_series(n, comp_class: str) -> pd.Series:
+    """
+    Upfront (overnight) investment cost per unit of capacity, per asset.
+
+    A one-line named wrapper around PyPSA's `n.c[<class>].overnight_cost`, on
+    purpose: that property has two behaviours a caller must know about, and
+    naming the operation gives them one place to live.
+
+      • It returns the user-typed `overnight_cost` where there is one, and
+        back-calculates `capital_cost / (annuity x nyears)` where there is not.
+      • It raises ValueError for the WHOLE component class if any asset needs
+        the back-calculation and is missing `discount_rate` or `lifetime`. Wrap
+        the call in `with_periodized_cost_defaults(..., for_back_calculation=
+        True)` so the config defaults are in place, and treat a raise as "this
+        class's upfront cost is unknown" — never as zero.
+
+    Callers decide what unknown means for their response; this function has no
+    opinion and swallows nothing.
+    """
+    return n.c[comp_class].overnight_cost
 
 
 def _reference_build_year(n) -> float:
@@ -3581,10 +3678,11 @@ def _pv_factor_series(df, cfg: "SolverConfig", reference_year: float):
     return (1.0 + drs) ** (-years_future)
 
 
-def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict[str, float]]]:
+def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict[str, float | bool | None]]]:
     """
     Return per-asset cost facts for every cost-bearing component, keyed as
-    ``{component_attr: {name: {"capital_cost": float, "overnight_cost": float, "lifetime": float}}}``.
+    ``{component_attr: {name: {"capital_cost": float, "overnight_cost": float | None,
+    "overnight_cost_available": bool, "lifetime": float}}}``.
 
     Two different cost numbers per asset:
 
@@ -3592,26 +3690,55 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
         ``overnight × annuity × nyears`` for assets parameterised via
         overnight_cost, or the raw `capital_cost` column otherwise. This is
         what the LP objective sees and what the "Annualised" toggle on the
-        frontend displays.
+        frontend displays. Always a real, finite number — unaffected by
+        whether the upfront cost below resolves (see
+        `with_periodized_cost_defaults`'s docstring: filling `discount_rate`
+        for the back-calculation population cannot move this value).
 
       * ``overnight_cost`` — the upfront lump-sum investment per unit of
-        capacity (`comp.overnight_cost`). Returned as-typed when the user
-        set `overnight_cost`; back-calculated from `capital_cost ÷ annuity`
-        otherwise. This is what "Total over lifetime" should multiply by
-        Δcapacity to get the user's expected upfront build cost (e.g. a
-        battery with 1000 €/MW × 71.3 MW Δ ⇒ €71.3 k, not the annuity-
-        times-lifetime figure which mixes scaling assumptions and confused
-        users in earlier iterations).
+        capacity (`comp.overnight_cost`, via `upfront_cost_series`). Returned
+        as-typed when the user set `overnight_cost`; back-calculated from
+        `capital_cost ÷ annuity` otherwise — which is why this call passes
+        ``for_back_calculation=True`` below, letting assets priced through
+        `capital_cost` alone (e.g. Lines, which PyPSA-Eur never sets
+        `overnight_cost` on) resolve a real figure instead of raising for the
+        whole component class. This is what "Total over lifetime" should
+        multiply by Δcapacity to get the user's expected upfront build cost
+        (e.g. a battery with 1000 €/MW × 71.3 MW Δ ⇒ €71.3 k, not the
+        annuity-times-lifetime figure which mixes scaling assumptions and
+        confused users in earlier iterations).
+
+        ``None`` when it genuinely cannot be resolved even with the fill
+        (e.g. the resolved value is still NaN/inf — a zero `discount_rate`
+        against a `lifetime`-unset asset divides by zero). NEVER silently
+        substituted with `capital_cost`: that field is an ANNUALISED rate
+        (EUR/MW/yr), not an upfront lump sum (EUR/MW) — off by roughly the
+        annuity factor (~15-20x for a 40-year asset), not a conservative
+        estimate. ``overnight_cost_pv`` (present-value-adjusted) is `None`
+        under the same condition.
+
+      * ``overnight_cost_available`` — `False` exactly when `overnight_cost`
+        / `overnight_cost_pv` are `None` for this asset. Callers must branch
+        on this (or on the nulls directly) and render an "unavailable" state
+        — never fall back to a raw/zero column, which is indistinguishable
+        from a genuinely free asset.
 
       * ``lifetime`` — years, kept for tooltips and CSV exports.
 
-    Returns NaN-free numbers — non-finite intermediates fall back to
-    sensible defaults (raw column / global config / 0).
+    Returns NaN-free numbers everywhere except the two upfront-cost fields,
+    which are `None` (never NaN — NaN is not valid JSON) exactly when
+    `overnight_cost_available` is `False`.
     """
     import math
 
-    out: dict[str, dict[str, dict[str, float]]] = {}
-    with with_periodized_cost_defaults(n, cfg):
+    out: dict[str, dict[str, dict[str, float | bool | None]]] = {}
+    # for_back_calculation=True: this function READS the upfront (overnight)
+    # cost via `upfront_cost_series` below, which is precisely the case that
+    # fill needs (see its docstring). Safe for `capital_cost` (v_ann, above):
+    # the fill only ever supplies `discount_rate`, never `lifetime`, so it
+    # cannot retire an asset out of a multi-period run — see
+    # `fill_periodized_cost_defaults`'s docstring for why that split matters.
+    with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
         reference_year = _reference_build_year(n)
         for comp_attr, comp_class in (
             ("generators", "Generator"),
@@ -3629,17 +3756,19 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
             except Exception:
                 continue
             try:
-                # comp.overnight_cost back-calculates upfront cost from
+                # upfront_cost_series back-calculates upfront cost from
                 # capital_cost / annuity / nyears for assets that didn't
-                # type one in. Raises ValueError if discount_rate/lifetime
-                # are still NaN despite the fill — fall back to per-asset
-                # capital_cost in that case so we don't 500.
-                upfront_series = n.c[comp_class].overnight_cost
+                # type one in. Can still raise ValueError for the whole class
+                # (e.g. `lifetime` genuinely NaN rather than PyPSA's +inf
+                # default — the fill above never touches lifetime). Per-asset
+                # fallback below covers the narrower case where the class
+                # resolves but one asset's own value is still non-finite.
+                upfront_series = upfront_cost_series(n, comp_class)
             except Exception:
                 upfront_series = None
             # PV factor per asset based on (build_year − reference_year).
             pv_series = _pv_factor_series(df, cfg, reference_year)
-            mapping: dict[str, dict[str, float]] = {}
+            mapping: dict[str, dict[str, float | bool | None]] = {}
             raw_cc = df["capital_cost"] if "capital_cost" in df.columns else None
             raw_lt = df["lifetime"] if "lifetime" in df.columns else None
             raw_by = df["build_year"] if "build_year" in df.columns else None
@@ -3652,27 +3781,30 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
                 if math.isnan(v_ann) or math.isinf(v_ann):
                     v_ann = float(raw_cc.loc[name]) if raw_cc is not None and name in raw_cc.index else 0.0
                 # Upfront (overnight). NaN if PyPSA couldn't back-calculate
-                # AND the user didn't set overnight_cost — fall back to the
-                # annualised number so the lifetime toggle still shows a
-                # finite (if conservative) value.
+                # AND the user didn't set overnight_cost. NEVER substituted
+                # with the annualised number below — `capital_cost` is
+                # EUR/MW/yr, `overnight_cost` is EUR/MW, and conflating them
+                # is a unit error of roughly the annuity factor, not a
+                # conservative estimate. Genuinely unresolved is reported as
+                # such via `overnight_cost_available` / `None`.
                 v_upf = float("nan")
                 if upfront_series is not None and name in upfront_series.index:
                     try:
                         v_upf = float(upfront_series.loc[name])
                     except (TypeError, ValueError):
                         v_upf = float("nan")
-                if math.isnan(v_upf) or math.isinf(v_upf):
-                    v_upf = v_ann
+                upfront_available = not (math.isnan(v_upf) or math.isinf(v_upf))
                 # Present value of the upfront cost. For year-0 builds the
                 # factor is 1; for future-year builds it shrinks the nominal
-                # spend by (1+r)^-(years out).
+                # spend by (1+r)^-(years out). Meaningless when the upfront
+                # cost itself didn't resolve.
                 try:
                     pv = float(pv_series.loc[name])
                 except (KeyError, TypeError, ValueError):
                     pv = 1.0
                 if math.isnan(pv) or math.isinf(pv) or pv <= 0:
                     pv = 1.0
-                v_upf_pv = v_upf * pv
+                v_upf_pv = v_upf * pv if upfront_available else float("nan")
                 # Lifetime — used for display only (tooltip/CSV), so still
                 # report after the global-default fill.
                 lt = (float(raw_lt.loc[name])
@@ -3690,10 +3822,11 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
                         by_val = None  # type: ignore[assignment]
                 else:
                     by_val = None  # type: ignore[assignment]
-                entry: dict[str, float] = {
+                entry: dict[str, float | bool | None] = {
                     "capital_cost": v_ann,
-                    "overnight_cost": v_upf,
-                    "overnight_cost_pv": v_upf_pv,
+                    "overnight_cost": v_upf if upfront_available else None,
+                    "overnight_cost_pv": v_upf_pv if upfront_available else None,
+                    "overnight_cost_available": upfront_available,
                     "lifetime": lt,
                 }
                 if by_val is not None:

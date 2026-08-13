@@ -157,9 +157,16 @@ def test_rotation_under_same_lock_as_append(tmp_projects_dir, monkeypatch):
 
 
 def test_read_all_turns_holds_chat_state_lock():
-    """A5 — history reads must share the rotation lock with append_turn."""
+    """
+    A5 — history reads must share the rotation lock with append_turn.
+
+    The read body lives in `read_all_turns_with_gap` (QA #10 added the skip
+    count); `read_all_turns` is the shape-preserving wrapper. Both halves are
+    asserted, so the invariant cannot be bypassed by re-inlining a lock-free
+    read into the wrapper.
+    """
     import inspect
-    src = inspect.getsource(chat_service.read_all_turns)
+    src = inspect.getsource(chat_service.read_all_turns_with_gap)
     assert "with ctx.chat_state.lock:" in src
     lock_idx = src.find("with ctx.chat_state.lock:")
     resolve_idx = src.find("get_persist_path(ctx)")
@@ -168,6 +175,12 @@ def test_read_all_turns_holds_chat_state_lock():
         f"A5 violation: path resolve/read must sit inside the lock. "
         f"lock={lock_idx} resolve={resolve_idx} read={read_idx}"
     )
+    wrapper = inspect.getsource(chat_service.read_all_turns)
+    assert "read_all_turns_with_gap(ctx)" in wrapper, (
+        "A5 violation: read_all_turns must delegate to the locked reader "
+        "rather than carry its own read path."
+    )
+    assert "read_text" not in wrapper
 
 
 def test_concurrent_read_during_rotation_never_empty_spuriously(

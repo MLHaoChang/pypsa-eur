@@ -65,6 +65,10 @@ from routers.projects import (
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.results import corrected_marginal_prices, lp_scaled_load_frame
 
+import logging
+
+logger = logging.getLogger("pypsa_gui.compare")
+
 router = APIRouter()
 
 
@@ -376,6 +380,17 @@ def _periodized_lookup(n) -> dict:
     try:
         return periodized_capital_costs(n, cfg)
     except Exception:
+        # Return contract is deliberately unchanged (``{}``): every caller
+        # already reads through ``_safe_capital_cost``, and reshaping this
+        # without auditing all of them is how the last round of bugs happened.
+        # But the degradation is silent and total — every asset's CAPEX reads
+        # 0.0 — so it must at least be diagnosable from pypsa-gui.log. Matches
+        # `services/asset_results/compute.py`, which names the consequence in
+        # the log line rather than just recording that something failed.
+        logger.exception(
+            "periodized_capital_costs failed while building the Compare view; "
+            "every asset's capital cost will read 0.00 in this comparison",
+        )
         return {}
 
 
@@ -779,6 +794,7 @@ def _compute_capacity_summary(n, periods, is_multi, has_solve) -> CapacityCompar
     )
 
     return CapacityComparison(
+        available=has_solve,
         capacity_mw_by_carrier=_to_pv_dict(cap_by_carrier),
         capex_meur_by_carrier=_to_pv_dict(total_capex_by_carrier),
         new_capex_meur_by_carrier=_to_pv_dict(capex_by_carrier),
@@ -1092,6 +1108,7 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchCompar
             load_bucket["total"] = static_total * float(weights.sum()) / 1000.0
 
     return DispatchComparison(
+        available=True,
         dispatch_gwh_by_carrier=_to_pv_dict(dispatch_by_carrier),
         opex_meur=_to_pv(opex_bucket),
         total_load_gwh=_to_pv(load_bucket),
@@ -1245,7 +1262,7 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
     _walk_branches(n.links,        getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None,        False, is_link=True, nom_field="p_nom")
     # Worst-first ordering across all branch types.
     out.sort(key=lambda e: e.peak_loading.total, reverse=True)
-    return LoadingComparison(lines=out)
+    return LoadingComparison(available=True, lines=out)
 
 
 def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison:
@@ -1437,6 +1454,7 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
     else:
         max_price, min_price = 0.0, 0.0
     return PricesComparison(
+        available=True,
         duration_curve=duration_curve,
         mean_price=CarrierPeriodValue(total=mean_total, by_period=mean_pp),
         median_price=CarrierPeriodValue(total=median_total, by_period=median_pp),
@@ -1479,7 +1497,13 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
     sns = n.snapshots
     co2_map = _co2_intensity_map(n)
     if not co2_map:
-        return EmissionsComparison()
+        # The network resolved fine; it simply has no `carriers` frame (or no
+        # `co2_emissions` column), so every carrier is zero-emitting by
+        # definition — "zero kt" is the real, structurally-guaranteed answer,
+        # not an absence — see the `available` field's docstring. Same
+        # ruling as curtailment's `gens.empty` / storage cycling's
+        # `sus.empty` above.
+        return EmissionsComparison(available=True)
 
     total_bucket = {"total": 0.0, "by_period": {}}
     by_carrier_kt: dict = {}
@@ -1545,6 +1569,7 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         intensity_pp[p] = _intensity(mwh, total_bucket["by_period"].get(p, 0.0))
 
     return EmissionsComparison(
+        available=True,
         total_kt=_to_pv(total_bucket),
         by_carrier_kt=_to_pv_dict(by_carrier_kt),
         intensity_kg_per_mwh=CarrierPeriodValue(total=intensity_total, by_period=intensity_pp),
@@ -2152,7 +2177,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         # Cheapest LCOH first — surface the most competitive Link on top.
         per_asset_lcoh.sort(key=lambda e: e.lcoh_eur_per_mwh.total)
 
-    return EconomicsComparison(by_carrier=out, per_asset_lcoh=per_asset_lcoh)
+    return EconomicsComparison(available=True, by_carrier=out, per_asset_lcoh=per_asset_lcoh)
 
 
 def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> CurtailmentComparison:
@@ -2192,10 +2217,16 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
 
     curt_by_carrier: dict = {}
     avail_by_carrier: dict = {}
+    # Distinguishes "nothing to curtail" from "nothing could be computed".
+    # Both leave curt_by_carrier empty; only the first is a measured zero.
+    failed = 0
 
     gens = n.generators
     if gens.empty:
-        return CurtailmentComparison()
+        # The network resolved fine; it simply has no Generator component at
+        # all, so "zero curtailment" is the real, structurally-guaranteed
+        # answer, not an absence — see the `available` field's docstring.
+        return CurtailmentComparison(available=True)
     p_t = getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None
     p_max_pu_t = getattr(n.generators_t, "p_max_pu", None) if hasattr(n, "generators_t") else None
     if p_t is None or p_t.empty or p_max_pu_t is None or p_max_pu_t.empty:
@@ -2262,12 +2293,17 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         if g not in p_max_pu_t.columns:
             continue
         eff_cap = _effective_capacity_series(g)
-        if not _math.isfinite(float(eff_cap.max())) or float(eff_cap.max()) <= 1e-9:
+        eff_max = float(eff_cap.max())
+        if not _math.isfinite(eff_max):
+            failed += 1          # a computed capacity that is NaN/inf is a failure
             continue
+        if eff_max <= 1e-9:
+            continue             # genuinely no capacity — a legitimate skip
         try:
             disp = p_t[g].reindex(sns).fillna(0.0).astype(float)
             pmu = p_max_pu_t[g].reindex(sns).fillna(0.0).astype(float)
         except Exception:
+            failed += 1
             continue
         available = pmu * eff_cap  # Hadamard product per snapshot
         # Clip negatives — solver tolerance can leave |p| > p_max_pu ×
@@ -2279,9 +2315,10 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         total_c = float(weighted_curt.sum())
         total_a = float(weighted_avail.sum())
         if not _math.isfinite(total_c) or not _math.isfinite(total_a):
+            failed += 1
             continue
         if total_a <= 1e-9:
-            continue
+            continue             # no available energy — a legitimate skip
         carrier = (str(gens.at[g, "carrier"]) if "carrier" in gens.columns else "unknown").lower()
         cb = curt_by_carrier.setdefault(carrier, {"total": 0.0, "by_period": {}})
         cb["total"] += total_c / 1000.0  # GWh
@@ -2293,7 +2330,21 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
             ab["by_period"][p] = ab["by_period"].get(p, 0.0) + v / 1000.0
 
     if not curt_by_carrier:
-        return CurtailmentComparison()
+        # Solved fine, and `p_max_pu_t` is non-empty — the "no generator has
+        # a time-varying p_max_pu at all" case already exited above at the
+        # `p_max_pu_t.empty` check. This branch instead fires when every
+        # generator that reached the loop was skipped by one of six
+        # `continue`s. Three are legitimate "nothing to curtail" outcomes:
+        # not in `gens.index`, no `p_max_pu` column of its own (thermal), or
+        # negligible available energy (<=1e-9). The other three are
+        # failures — the computation never produced a usable number for that
+        # generator, which is not the same as it producing zero: a
+        # non-finite effective capacity, the bare `except Exception` around
+        # the reindex, and a non-finite weighted total. `failed` counts only
+        # those three, so `available` follows whether any of them fired —
+        # the same conflation Task 7 fixed for lost load (whole-branch
+        # review, Minor 2).
+        return CurtailmentComparison(available=(failed == 0))
 
     # System totals.
     total_bucket = {"total": 0.0, "by_period": {}}
@@ -2326,6 +2377,7 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         sys_rate_pp[p] = 100.0 * v / ap if ap > 1e-9 else 0.0
 
     return CurtailmentComparison(
+        available=True,
         total_gwh=_to_pv(total_bucket),
         by_carrier_gwh=_to_pv_dict(curt_by_carrier),
         rate_pct_by_carrier=_to_pv_dict(rate_by_carrier),
@@ -2345,9 +2397,16 @@ def _compute_lost_load_summary(
       ``{lost_load_t: DataFrame(snapshot × bus), lost_load_total_mwh: float,
          lost_load_cost_eur: float}``
     Returns ``available=False`` when the pickle is absent, the capture key
-    is missing, or the DataFrame is empty — all three are "no shedding"
-    states from the user's perspective. Multi-period split uses the snapshot
-    weight matrix the rest of the comparison view shares.
+    is missing, the DataFrame is empty, the reindex/weighting step raises,
+    or the reindexed total is non-finite (NaN/inf) — none of these are "no
+    shedding": they mean the capture was never usefully read, so the
+    project's actual shedding is unknown. ``captured`` (LostLoadComparison)
+    is what tells that apart from the one genuine zero (a FINITE total
+    energy at or below the 1e-9 threshold after reindex/weighting):
+    ``captured=False`` on every unread/unusable-capture return,
+    ``captured=True`` on that zero and on the success path. Multi-period
+    split uses the snapshot weight matrix the rest of the comparison view
+    shares.
     """
     from models.schemas import LostLoadBus, LostLoadByCarrier, LostLoadComparison
 
@@ -2390,10 +2449,23 @@ def _compute_lost_load_summary(
         return LostLoadComparison()
 
     total_e = float(weighted.values.sum())
-    if not _math.isfinite(total_e) or total_e <= 1e-9:
-        # The capture exists but produced zero after reindex — treat as
-        # "no shedding" rather than "available but zero."
-        return LostLoadComparison(available=False, voll_eur_per_mwh=voll)
+    if not _math.isfinite(total_e):
+        # NaN/inf after reindex/weighting (e.g. an inf in the capture, or a
+        # NaN snapshot weight surviving the `.astype(float)` in
+        # `_build_snapshot_weights`) is NOT a measured zero — the capture
+        # was read but produced garbage, so this is exactly as "unread" as
+        # the reindex/mul exception branch above. Falls through to the
+        # all-default `captured=False` return, distinct from the genuine
+        # zero below.
+        return LostLoadComparison()
+    if total_e <= 1e-9:
+        # The capture exists, is finite, and produced zero after reindex —
+        # a genuine measured zero, not "unavailable." `available` stays
+        # False (the frontend's total_mwh.total > 0 invariant for
+        # available=True would otherwise break), but `captured=True` says
+        # the capture WAS read and this zero is real — see ADR-0001 /
+        # LostLoadComparison.
+        return LostLoadComparison(available=False, captured=True, voll_eur_per_mwh=voll)
 
     total_e_bucket = {"total": total_e, "by_period": {}}
     total_c_bucket = {"total": total_e * voll / 1e6, "by_period": {}}
@@ -2488,6 +2560,7 @@ def _compute_lost_load_summary(
 
     return LostLoadComparison(
         available=True,
+        captured=True,
         voll_eur_per_mwh=voll,
         total_mwh=_to_pv(total_e_bucket),
         total_cost_meur=_to_pv(total_c_bucket),
@@ -2529,7 +2602,10 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
         return StorageCyclingComparison()
     sus = n.storage_units
     if sus.empty:
-        return StorageCyclingComparison()
+        # The network resolved fine; it simply has no StorageUnit component,
+        # so "zero cycling" is the real, structurally-guaranteed answer, not
+        # an absence — see the `available` field's docstring.
+        return StorageCyclingComparison(available=True)
     p_storage = getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None
     if p_storage is None or p_storage.empty:
         return StorageCyclingComparison()
@@ -2675,6 +2751,7 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
     by_unit.sort(key=lambda u: -(u.cycles.total or 0))
 
     return StorageCyclingComparison(
+        available=True,
         cycles_by_carrier=_to_pv_dict(cycles_by_carrier),
         by_unit=by_unit,
     )

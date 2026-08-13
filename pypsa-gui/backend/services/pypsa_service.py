@@ -555,10 +555,25 @@ class PyPSAService:
         in the same critical section) and then calls `_evict_if_over_cap`
         directly — it does NOT route through this method, so the no-nesting
         invariant holds on every registration path.
+
+        A registration that REPLACES a resident context writes that context back
+        to disk first, outside the lock, via `_save_evicted_ctx` — identical to
+        an eviction victim, because the outcome for that context is identical:
+        it stops being reachable. `prior is not ctx` keeps a plain
+        re-registration (the common case) from triggering a save.
         """
         with cls._registry_lock:
+            prior = cls._contexts.get(project_id)
             ctx.last_interacted_at = time.monotonic()
             cls._contexts[project_id] = ctx
+        # Write back OUTSIDE `_registry_lock`. A displaced context is no longer
+        # reachable through the registry, so its unsaved edits are lost unless
+        # they are persisted here — the same reasoning, and the same
+        # detach-then-save shape, as `_evict_if_over_cap`. The save takes
+        # mutation_lock + the netCDF I/O lock, which must never nest under
+        # `_registry_lock`.
+        if prior is not None and prior is not ctx:
+            cls._save_evicted_ctx(project_id, prior)
         return cls._evict_if_over_cap(protected_ids={project_id})
 
     @classmethod

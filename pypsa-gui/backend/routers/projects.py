@@ -846,6 +846,7 @@ async def import_bundle(
     name: str | None = None,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ):
     """
     Restore a project from a .pypsaproj.zip bundle.
@@ -968,6 +969,13 @@ async def import_bundle(
             PyPSAService.get_active_context(), _imported_project
         )
 
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed import does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _imported_project)
+
     cfg_path = dest / "solver_config.json"
     if cfg_path.exists():
         from routers.simulation import _state
@@ -1032,6 +1040,12 @@ async def import_bundle(
             solve_time=None,
         )
 
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed import does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _imported_project)
     change_log_service.log(
         "import", "Project", target_name,
         f"Imported project bundle '{file.filename}' as '{target_name}' "
@@ -1122,6 +1136,7 @@ def create_from_template(
     name: str | None = None,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ):
     """
     Create a new project from a bundled starter network.
@@ -1173,6 +1188,13 @@ def create_from_template(
             PyPSAService.get_active_context(), _created_project
         )
 
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed create does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _created_project)
+
     # Templates ship without user_ts / solver_config — reset both to defaults
     # so no stale state from a previously-open project leaks into the new one.
     from routers.network import _reapply_user_ts_to_network, _restore_user_ts
@@ -1204,6 +1226,12 @@ def create_from_template(
         "scenario_description": None,
     })
 
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed create does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _created_project)
     change_log_service.log(
         "import", "Project", target_name,
         f"Created project '{target_name}' from template '{template_id}' "
@@ -2126,6 +2154,7 @@ def load_project(
     name: str,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ) -> ImportSummary | dict[str, object]:
     from services import project_registry
 
@@ -2318,6 +2347,16 @@ def load_project(
                 PyPSAService.reset_network()
             raise _queue_solve_conflict(name)
         PyPSAService.register(registry_id, ctx)
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed load does not leave the session pointing at a project
+    # it never reached. Without this, `resolve_for_session` reads the stale
+    # pointer on the next request and silently reverts the switch.
+    #
+    # Placed after the hydrate-lock block on purpose: a queue-solve refusal
+    # raises inside it, so a refused load never reaches this line — which is
+    # precisely the "failed load must not move the pointer" property above.
+    if session is not None:
+        active_project.set_active_project(db, session, project)
     change_log_service.log(
         "load", "Project", name,
         f"Loaded project '{name}' ({len(n.buses)} buses, {len(n.generators)} generators, {len(n.snapshots)} snapshots)",

@@ -9,7 +9,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { StorageUnit } from '../../api/types'
 import {
-  type TSPayload, WindowCapBanner,
+  type TSPayload, WindowCapBanner, useWeightCtx, snapshotWeightAt,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
@@ -97,14 +97,16 @@ export default function StorageCycling() {
     enabled: winValid,
   })
   const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
-  const { data: snap } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots })
   const { data: vintageResults } = useQuery({ queryKey: nk(currentProject, 'vintage_results'), queryFn: networkApi.listVintageResults })
 
   // Resolve the row range using the same snapshot timeline the dispatch
   // chart uses. Defaults to the full series when no horizon filter / period
-  // is active.
-  const refIndex: string[] = (storPowerTS as TSPayload | null)?.index ?? snap?.snapshots ?? []
-  const refPeriods = (storPowerTS as TSPayload | null)?.periods ?? snap?.periods
+  // is active. `useWeightCtx` (shared.tsx) also hands back the weight
+  // context (snapshot_weightings + investment_period_weightings) the
+  // throughput accumulator below reads via `snapshotWeightAt` — single
+  // recipe shared with every other Results tab instead of a local `snap`
+  // query + hand-rolled weight lookup.
+  const { weightCtx, refIndex, refPeriods } = useWeightCtx(storPowerTS as TSPayload | null)
   const range = resolveRange(refIndex, filter, refPeriods)
 
   // Per-unit accumulator. Walks the storage-power TS once and aggregates
@@ -128,31 +130,36 @@ export default function StorageCycling() {
       const maxHours = Number((s as unknown as { max_hours?: number }).max_hours ?? 0)
       meta.set(s.name, { pNom, maxHours, carrier: storageCarrierKey(s.carrier) })
     }
-    // Keyed by snapshot ISO (flat) or `period|timestep` (multi-period) rather
-    // than array position. `snap.weightings` always covers the FULL horizon,
-    // but `storPowerTS` — and therefore `row` below — is now a WINDOWED
-    // slice: row 0 is whichever absolute snapshot the window starts at, not
-    // absolute row 0. A positional `weight[row]` lookup silently pulled the
-    // wrong snapshot's weight whenever the window didn't start at the
-    // horizon's first row. Matching by the row's own timestamp/period is
-    // correct regardless of the window's offset — same approach `shared.tsx`
-    // uses for `weightedSum`/`weightedSumSplit`.
-    const weightByKey = new Map<string, number>()
-    for (const r of (snap?.weightings as unknown as Array<Record<string, unknown>> | undefined) ?? []) {
-      const w = r.objective
-      if (typeof w !== 'number' || !Number.isFinite(w)) continue
-      const snapshotIso = r.snapshot as string | undefined
-      const timestep = r.timestep as string | undefined
-      const period = r.period as number | string | undefined
-      if (snapshotIso != null) weightByKey.set(snapshotIso, w)
-      else if (timestep != null) weightByKey.set(period != null ? `${period}|${timestep}` : timestep, w)
-    }
-    const wAt = (iso: string, period: number | null): number => {
-      if (weightByKey.size === 0) return 1
-      const w = (period != null ? weightByKey.get(`${period}|${iso}`) : undefined) ?? weightByKey.get(iso)
-      return typeof w === 'number' && Number.isFinite(w) ? w : 1
-    }
-
+    // Snapshot weight is resolved via the shared `snapshotWeightAt`
+    // (shared.tsx) rather than a local Map — that helper already keys by
+    // snapshot ISO (flat) or `period|timestep` (multi-period) instead of
+    // array position, which matters here because `storPowerTS` — and
+    // therefore `row` below — can be a WINDOWED slice (row 0 is whichever
+    // absolute snapshot the window starts at, not absolute row 0) while
+    // `weightCtx.snapshotWeights` always covers the FULL horizon. A
+    // positional `weight[row]` read would silently pull the wrong
+    // snapshot's weight whenever the window didn't start at row 0.
+    //
+    // Basis: 'generators', NOT 'objective'. Storage throughput (MWh) is an
+    // ENERGY quantity — `routers/results.py::get_asset_economics` (backend,
+    // :3308-3310) draws the same line: `w_vals_energy` (snapshot_weightings.
+    // generators) for energy columns, `w_vals` (.objective) for € columns,
+    // and the storage discharge/charge accumulation there (results.py:
+    // 3634-3635) uses `w_vals_energy` too. Weighting throughput by
+    // `objective` disagreed with that convention — and with every other
+    // Results tab's energy path (`shared.tsx`'s `weightedSum` 'generators'
+    // calls) — whenever `objective != generators` (time-aggregated /
+    // sampled-weeks runs, exactly when weights matter).
+    //
+    // `snapshotWeightAt` deliberately excludes `periodWeights.years`:
+    // throughput is bucketed PER PERIOD below and divided by that period's
+    // own capacity, so annualising it here would double-count `years` (the
+    // per-period cycle count is already a per-solved-year figure, same
+    // reasoning as `Dispatch.tsx`'s `FullLoadHoursSection`).
+    //
+    // No local weight Map/`wAt` here — that was a fourth, independently-
+    // drifting copy of the same (period|timestep)-keyed lookup `shared.tsx`
+    // already centralises in `_snapshotWeightRow`.
     const lastRow = ts.data.length - 1
     const rFrom = Math.max(0, Math.min(range.from, lastRow))
     const rTo   = Math.max(0, Math.min(range.to,   lastRow))
@@ -174,7 +181,7 @@ export default function StorageCycling() {
       const p: number | null = typeof raw === 'number' ? raw
                               : typeof raw === 'string' && /^-?\d+$/.test(raw) ? Number(raw)
                               : null
-      const w = wAt(ts.index[row], p)
+      const w = snapshotWeightAt(weightCtx, row, ts.index[row], p, 'generators')
       periodSet.add(p)
       for (let col = 0; col < ts.columns.length; col++) {
         const v = ts.data[row][col]
@@ -250,7 +257,7 @@ export default function StorageCycling() {
     }
     out.sort((a, b) => b.cycles - a.cycles)
     return out
-  }, [storPowerTS, storageUnits, snap, range, vintageResults, filter.selectedPeriod])
+  }, [storPowerTS, storageUnits, weightCtx, range, vintageResults, filter.selectedPeriod])
 
   // Aggregate per-carrier cycle counts: weighted average of unit cycles
   // by energy capacity, so a large unit doesn't get the same weight as a

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import json
 import logging
 import math
 import uuid
@@ -178,8 +179,81 @@ def _sync(value):
 # ── Read tools (22) ─────────────────────────────────────────────────────────
 
 
-def list_components(component_class: str) -> list[dict]:
-    """List all components of one class (transient-filtered)."""
+# Pagination bounds for the list-shaped read tools (#16).
+#
+# Rows are the wrong unit on their own. `_truncate_result` serialises any
+# dict result and replaces it with a `preview` string past ~4000 chars, so a
+# 200-row page is fine for Carriers and 45 KB for Buses — and a page that
+# gets previewed is exactly the opaque blob this item exists to remove.
+# MAX_PAGE_CHARS is therefore the real bound and the row counts are
+# secondary caps; the packing loop below stops at whichever binds first.
+DEFAULT_PAGE_SIZE = 200
+MAX_PAGE_SIZE = 1000
+# Under _truncate_result's 4000, leaving headroom for the envelope's own
+# keys and for JSON escaping of names we did not write.
+MAX_PAGE_CHARS = 3000
+
+
+def _paginate(rows: list[dict], offset: int, limit: int | None) -> dict:
+    """
+    Wrap `rows` in the page envelope shared by the list-shaped read tools.
+
+    The envelope is returned ALWAYS, not only when a page was requested.
+    A bare list cannot answer "did I see everything?" — 200 rows and
+    200-of-5000 look identical at the call site — and a shape that changes
+    depending on the arguments is harder for a model to reason about than
+    one that does not. `total_count` is the field that makes every response
+    self-describing.
+
+    Being a dict also matters mechanically: `_truncate_result` replaces any
+    list over 200 entries with a `sample`, which is the very truncation this
+    exists to replace.
+    """
+    if offset < 0:
+        raise HTTPException(400, f"offset must be >= 0, got {offset}")
+    if limit is not None and limit < 1:
+        raise HTTPException(400, f"limit must be >= 1, got {limit}")
+
+    requested = DEFAULT_PAGE_SIZE if limit is None else limit
+    effective = min(requested, MAX_PAGE_SIZE)
+    candidate = rows[offset:offset + effective]
+
+    # Pack by serialised size. Row width varies by an order of magnitude
+    # across component classes, so no fixed row count is right for all of
+    # them — and overshooting means the whole page comes back as a preview
+    # string, which is worse than a short page.
+    page: list[dict] = []
+    used = 0
+    for row in candidate:
+        cost = len(json.dumps(row, default=str)) + 2  # +2 for ", "
+        # Always take the first row even if it alone busts the budget:
+        # returning an empty page would leave `offset` unable to advance and
+        # the agent looping forever on a row it can never get past.
+        if page and used + cost > MAX_PAGE_CHARS:
+            break
+        page.append(row)
+        used += cost
+
+    out = {
+        "items": page,
+        "total_count": len(rows),
+        "offset": offset,
+        "returned": len(page),
+        "has_more": offset + len(page) < len(rows),
+    }
+    # Say so whenever the ask was reduced, by either bound. A model that
+    # asked for 10 000 and got 13 with no note would read `has_more` as the
+    # network being smaller than it is, or stop early believing it had
+    # reached the end of what it requested.
+    if len(page) < min(requested, len(candidate)):
+        out["limit_clamped_to"] = len(page)
+    return out
+
+
+def list_components(
+    component_class: str, *, offset: int = 0, limit: int | None = None,
+) -> dict:
+    """List one class of component, one page at a time (transient-filtered)."""
     from routers.network import _get_component
     if component_class == "GlobalConstraint":
         attr = "global_constraints"
@@ -187,7 +261,134 @@ def list_components(component_class: str) -> list[dict]:
         raise HTTPException(400, f"Unknown component_class: {component_class!r}")
     else:
         attr = _GENERIC_CRUD_ATTRS[component_class]
-    return _get_component(component_class, attr)
+    return _paginate(_get_component(component_class, attr), offset, limit)
+
+
+# How many islands `diagnose_network` describes in full, and how many buses
+# it names per island. A 400-bus shrapnel network would otherwise serialise
+# past _truncate_result's budget and come back as a preview string — a
+# diagnosis the agent cannot read is not a diagnosis.
+_MAX_ISLANDS_REPORTED = 12
+_MAX_BUSES_PER_ISLAND = 8
+
+
+def diagnose_network() -> dict:
+    """
+    Electrical connectivity of the active network (#15).
+
+    Answers the question nothing else in the tool surface does: is this one
+    electrical system or several, and is anything stranded? `validate_for_run`
+    covers dangling bus references, bounds, costs and solver assumptions, but
+    never looks at the graph — and an infeasible solve is most often a load
+    sitting in an island with nothing able to serve it.
+
+    Dangling bus refs are deliberately NOT re-checked here: the preflight
+    already reports them, and a second differently-worded copy is how two
+    sources of truth start disagreeing.
+    """
+    n = PyPSAService.get_network()
+    buses = list(n.buses.index)
+    if not buses:
+        return {
+            "bus_count": 0, "island_count": 0, "islands": [],
+            "isolated_buses": [], "islands_without_generation": [],
+            "islands_truncated": False, "verdict": "empty",
+        }
+
+    # Union-find over the bus graph. Every branch class joins, including a
+    # multi-port Link's bus2/bus3/… — those extra ports are exactly how
+    # sector coupling reaches heat and hydrogen buses, so walking only
+    # bus0/bus1 would report a coupled network as a pile of fragments.
+    parent = {b: b for b in buses}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        if a in parent and b in parent:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+    for attr in ("lines", "links", "transformers"):
+        df = getattr(n, attr, None)
+        if df is None or df.empty:
+            continue
+        ports = [c for c in df.columns if c.startswith("bus")]
+        for row in df[ports].itertuples(index=False):
+            attached = [str(v) for v in row if isinstance(v, str) and v]
+            for other in attached[1:]:
+                union(attached[0], other)
+
+    groups: dict[str, list[str]] = {}
+    for b in buses:
+        groups.setdefault(find(b), []).append(b)
+
+    # Which buses can serve load, and how much load sits where.
+    supply: set[str] = set()
+    for attr in ("generators", "storage_units", "stores"):
+        df = getattr(n, attr, None)
+        if df is not None and not df.empty and "bus" in df.columns:
+            supply.update(str(b) for b in df["bus"])
+
+    load_by_bus: dict[str, float] = {}
+    loads = getattr(n, "loads", None)
+    if loads is not None and not loads.empty and "bus" in loads.columns:
+        p_set_t = getattr(n.loads_t, "p_set", None)
+        for name, bus in loads["bus"].items():
+            peak = 0.0
+            if p_set_t is not None and name in getattr(p_set_t, "columns", []):
+                series = p_set_t[name]
+                peak = float(series.max()) if len(series) else 0.0
+            else:
+                peak = float(loads.at[name, "p_set"]) if "p_set" in loads.columns else 0.0
+            load_by_bus[str(bus)] = load_by_bus.get(str(bus), 0.0) + peak
+
+    islands = []
+    for members in groups.values():
+        members = sorted(members)
+        peak = sum(load_by_bus.get(b, 0.0) for b in members)
+        islands.append({
+            "size": len(members),
+            "buses": members[:_MAX_BUSES_PER_ISLAND],
+            "has_generation": any(b in supply for b in members),
+            "has_load": peak > 0,
+            "peak_load_mw": round(peak, 6),
+        })
+    # Biggest first: on a fragmented network the large islands are the ones
+    # the user recognises, and the truncation below keeps the head.
+    islands.sort(key=lambda i: (-i["size"], i["buses"][0] if i["buses"] else ""))
+
+    # A generation-only island is odd but solvable. Only a marooned LOAD is
+    # a defect — flagging the rest would train the agent to ignore the field.
+    stranded = [i for i in islands if i["has_load"] and not i["has_generation"]]
+
+    branch_free = {
+        b for b in buses
+        if len(groups[find(b)]) == 1
+    }
+    isolated = sorted(branch_free)
+
+    if stranded:
+        verdict = "infeasible_topology"
+    elif len(groups) > 1:
+        verdict = "fragmented"
+    else:
+        verdict = "connected"
+
+    return {
+        "bus_count": len(buses),
+        "island_count": len(groups),
+        "islands": islands[:_MAX_ISLANDS_REPORTED],
+        "islands_truncated": len(islands) > _MAX_ISLANDS_REPORTED,
+        "isolated_buses": isolated[:_MAX_ISLANDS_REPORTED],
+        "isolated_buses_truncated": len(isolated) > _MAX_ISLANDS_REPORTED,
+        "islands_without_generation": stranded[:_MAX_ISLANDS_REPORTED],
+        "verdict": verdict,
+    }
 
 
 def get_component(component_class: str, name: str) -> dict:
@@ -311,13 +512,17 @@ def get_timeseries(component: str, name: str, attribute: str, period: int | None
     return _h(component=component, attribute=attribute, columns=name)
 
 
-def list_all_timeseries() -> list[dict]:
+def list_all_timeseries(*, offset: int = 0, limit: int | None = None) -> dict:
     # NOTE: the route handler is `list_timeseries` (GET /api/network/timeseries),
     # not `list_all_timeseries`. It walks every `<component>_t` accessor and
     # reports non-empty frames + columns directly off the network, so time series
     # baked into an imported .nc are surfaced (not just user uploads).
+    #
+    # Paginated for the same reason as list_components (#16): a sector-coupled
+    # network has thousands of profiles, and the blind 200-row cut gave the
+    # agent no way to reach the rest.
     from routers.network import list_timeseries as _h
-    return _h()
+    return _paginate(list(_h()), offset, limit)
 
 
 def get_aggregate_load(section: str | None = None, names: str | None = None) -> dict:
@@ -542,10 +747,17 @@ def update_component(
     )
 
 
-def delete_component(component_class: str, name: str) -> None:
-    """Generic delete via the dedicated route handler (so the same lock + audit run)."""
+def _delete_component_handlers() -> dict[str, Any]:
+    """
+    The classes `delete_component` accepts, and the route handler for each.
+
+    Extracted from the function body so `_COMPONENT_CLASS_TO_ATTR` (used by
+    the #19 pre-dispatch validator) can be checked against it — a class added
+    here and missed there would make that component undeletable via chat, the
+    validator refusing it before the handler ever saw it.
+    """
     from routers import network as net
-    handlers = {
+    return {
         "Bus": net.delete_bus,
         "Carrier": net.delete_carrier,
         "Line": net.delete_line,
@@ -558,6 +770,11 @@ def delete_component(component_class: str, name: str) -> None:
         "ShuntImpedance": net.delete_shunt,
         "GlobalConstraint": net.delete_global_constraint,
     }
+
+
+def delete_component(component_class: str, name: str) -> None:
+    """Generic delete via the dedicated route handler (so the same lock + audit run)."""
+    handlers = _delete_component_handlers()
     h = handlers.get(component_class)
     if h is None:
         raise HTTPException(400, f"Unknown component_class: {component_class!r}")
@@ -571,6 +788,154 @@ def cascade_delete_bus(name: str) -> None:
 
 
 # ── Bulk (1) ────────────────────────────────────────────────────────────────
+
+
+# One tool call must not be able to wedge the event loop or bury the undo
+# stack. Unlike a read, where a short page is fine, a partial write is the
+# failure mode — so an oversized batch is refused rather than trimmed.
+MAX_BATCH_SIZE = 200
+
+
+def _check_batch_size(items: list, what: str) -> None:
+    if not isinstance(items, list) or not items:
+        raise HTTPException(400, f"{what} must be a non-empty list")
+    if len(items) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            400,
+            f"{len(items)} {what} exceeds the {MAX_BATCH_SIZE}-item batch "
+            f"limit; split the work across several calls",
+        )
+
+
+def batch_create_components(component_class: str, components: list[dict]) -> dict:
+    """
+    Create many components of one class in a single call (#17).
+
+    Building a 30-bus network was 30 turns — 30 model round-trips, 30 audit
+    entries, and 30 chances for the turn's 25-tool-call cap to cut the job
+    in half, which is a task the agent cannot finish rather than one it
+    finishes slowly.
+
+    Validate-then-apply, refusing the whole batch on any bad entry, per the
+    same rule as /_bulk: a half-created network is not a state the agent can
+    reason about, and undo unwinds one entry at a time.
+
+    Each entry still goes through `create_component`, so every per-class
+    handler runs unchanged — carrier auto-create, line haversine length
+    fill, transformer voltage validation. A batch path that wrote rows
+    directly would silently skip all of it.
+    """
+    _check_batch_size(components, "components")
+    schema_name = _COMPONENT_CREATE_SCHEMAS.get(component_class)
+    if schema_name is None:
+        raise HTTPException(400, f"Unknown component_class: {component_class!r}")
+
+    # ── Pass 1: validate everything, write nothing. ──
+    Schema = _get_schema(schema_name)
+    existing = set(_component_index(component_class))
+    seen: set[str] = set()
+    for i, entry in enumerate(components):
+        if not isinstance(entry, dict):
+            raise HTTPException(400, f"entry {i} is not an object")
+        name = entry.get("name")
+        if not name or not isinstance(name, str):
+            raise HTTPException(400, f"entry {i} has no 'name'")
+        if name in existing:
+            raise HTTPException(
+                409, f"entry {i}: {component_class} {name!r} already exists",
+            )
+        # Caught here rather than by the second create failing — otherwise
+        # entry 1 lands and entry 2 raises, which is the partial state this
+        # design exists to avoid.
+        if name in seen:
+            raise HTTPException(400, f"entry {i}: {name!r} appears twice in the batch")
+        seen.add(name)
+        attrs = {k: v for k, v in entry.items() if k != "name"}
+        try:
+            Schema(name=name, **attrs)
+        except Exception as exc:  # noqa: BLE001 — pydantic + coercion errors
+            raise HTTPException(
+                400, f"entry {i} ({name!r}) is invalid: {exc}",
+            ) from exc
+
+    # ── Pass 2: apply. ──
+    created: list[str] = []
+    for entry in components:
+        name = entry["name"]
+        try:
+            create_component(component_class, name,
+                             {k: v for k, v in entry.items() if k != "name"})
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Validation passed and this still failed, so the batch IS
+            # partial. Say exactly what landed — claiming atomicity we did
+            # not deliver would send the agent looking for the wrong bug.
+            raise HTTPException(
+                500,
+                f"batch partially applied: created {created} before "
+                f"{name!r} failed: {exc}",
+            ) from exc
+        created.append(name)
+    return {"created": created, "count": len(created)}
+
+
+def batch_delete_components(component_class: str, names: list[str]) -> dict:
+    """
+    Delete many components of one class in a single call (#17).
+
+    Same validate-then-apply contract as `batch_create_components`. Each
+    delete routes through `delete_component`, so the per-class handlers
+    keep running — and with them the `_user_ts` profile cleanup and the
+    vintage-bounds cascade that a direct row drop would orphan.
+    """
+    _check_batch_size(names, "names")
+    handlers = _delete_component_handlers()
+    if component_class not in handlers:
+        raise HTTPException(400, f"Unknown component_class: {component_class!r}")
+
+    name_strs = [str(x) for x in names]
+    index = set(_component_index(component_class))
+    missing = [x for x in name_strs if x not in index]
+    if missing:
+        sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+        raise HTTPException(
+            404, f"{len(missing)} {component_class}(s) not found: {sample}",
+        )
+    transient = [x for x in name_strs
+                 if x in PyPSAService.get_transient_rows(component_class)]
+    if transient:
+        sample = ", ".join(transient[:3]) + ("…" if len(transient) > 3 else "")
+        raise HTTPException(
+            409,
+            f"Cannot delete {len(transient)} {component_class}(s) ({sample}) — "
+            f"these rows are LP scaffolding from the current solve.",
+        )
+
+    deleted: list[str] = []
+    for name in name_strs:
+        try:
+            delete_component(component_class, name)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                500,
+                f"batch partially applied: deleted {deleted} before "
+                f"{name!r} failed: {exc}",
+            ) from exc
+        deleted.append(name)
+    return {"deleted": deleted, "count": len(deleted)}
+
+
+def _component_index(component_class: str) -> list[str]:
+    """Current row names for one class, straight off the network."""
+    attr = ("global_constraints" if component_class == "GlobalConstraint"
+            else _GENERIC_CRUD_ATTRS.get(component_class))
+    if attr is None:
+        return []
+    df = getattr(PyPSAService.get_network(), attr, None)
+    return [] if df is None else [str(x) for x in df.index]
 
 
 def bulk_update_components(component_class: str, names: list[str], updates: dict) -> dict:
@@ -1374,7 +1739,15 @@ def import_project_bundle(bundle_bytes_b64: str, filename: str = "bundle.zip") -
     data = base64.b64decode(bundle_bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     with _acting() as (db, user):
-        return _sync(_h(upload, db=db, user=user))
+        # `import_bundle` now also declares `session: SessionRow | None =
+        # Depends(current_session)` (it moves the session's active-project
+        # pointer after a successful import). This call bypasses `_route`
+        # because `import_bundle` is async and `_route` calls its handler
+        # synchronously — so `session` must be injected by hand here the same
+        # way `_route` does it, or it arrives as the raw `Depends` sentinel and
+        # `set_active_project` blows up on it (see `_route`'s docstring on this
+        # exact failure mode).
+        return _sync(_h(upload, db=db, user=user, session=_acting_session(db)))
 
 
 def create_project_from_template(template_id: str, new_name: str) -> dict:
@@ -1453,6 +1826,22 @@ def _sum_cpv_map(mapping: Any) -> float:
     return total
 
 
+def _sum_cpv_map_if_available(mapping: Any, has_solve: bool) -> float | None:
+    """`_sum_cpv_map`, gated on the block having resolved.
+
+    `capacity.available` and `dispatch.available` are both exactly
+    `has_solve` (routers/compare.py's `_compute_capacity_summary` /
+    `_compute_dispatch_summary` early-return their all-default block
+    whenever `not has_solve` and set `available=True` on every success
+    path) — so `has_solve` is the correcting signal for these by-carrier
+    sums, matching `_cpv_total`'s existing None-on-unresolved behaviour
+    instead of defaulting to a confident 0.0 (ADR-0001).
+    """
+    if not has_solve:
+        return None
+    return _sum_cpv_map(mapping)
+
+
 def _scenario_headlines(summary: dict) -> dict:
     cap = summary.get("capacity") or {}
     disp = summary.get("dispatch") or {}
@@ -1460,14 +1849,15 @@ def _scenario_headlines(summary: dict) -> dict:
         cap = _model_to_dict(cap) or {}
     if not isinstance(disp, dict):
         disp = _model_to_dict(disp) or {}
+    has_solve = bool(summary.get("has_solve"))
     return {
-        "has_solve": bool(summary.get("has_solve")),
+        "has_solve": has_solve,
         "is_multi_period": bool(summary.get("is_multi_period")),
         "periods": list(summary.get("periods") or []),
-        "capacity_mw_total": _sum_cpv_map(cap.get("capacity_mw_by_carrier")),
-        "capex_meur_total": _sum_cpv_map(cap.get("capex_meur_by_carrier")),
-        "new_capex_meur_total": _sum_cpv_map(cap.get("new_capex_meur_by_carrier")),
-        "dispatch_gwh_total": _sum_cpv_map(disp.get("dispatch_gwh_by_carrier")),
+        "capacity_mw_total": _sum_cpv_map_if_available(cap.get("capacity_mw_by_carrier"), has_solve),
+        "capex_meur_total": _sum_cpv_map_if_available(cap.get("capex_meur_by_carrier"), has_solve),
+        "new_capex_meur_total": _sum_cpv_map_if_available(cap.get("new_capex_meur_by_carrier"), has_solve),
+        "dispatch_gwh_total": _sum_cpv_map_if_available(disp.get("dispatch_gwh_by_carrier"), has_solve),
         "opex_meur": _cpv_total(disp.get("opex_meur")),
         "total_load_gwh": _cpv_total(disp.get("total_load_gwh")),
     }
@@ -1589,8 +1979,17 @@ def list_project_snapshots(name: str) -> list[dict]:
 
 
 def restore_project_snapshot(name: str, snapshot_id: str) -> dict:
+    # `restore_snapshot` now also declares `db`/`user`/`session` (it moves the
+    # session's active-project pointer after a successful restore, same as
+    # load_project). Unlike `import_bundle`, this handler is plain `def` — not
+    # async — so `_route` (chat_tools.py:1494) can call it directly and inject
+    # all three the way it already does for `activate_project`/`load_project`,
+    # instead of hand-injecting them here. Calling it positionally with just
+    # `snapshot_id` and `project` — as this used to — would otherwise hand
+    # `db`, `user` and `session` their raw `Depends` sentinels and crash (see
+    # `_route`'s docstring on this exact failure mode).
     from routers.snapshots import restore_snapshot as _h
-    return _h(snapshot_id, _authorized_project(name))
+    return _route(_h, snapshot_id, _authorized_project(name))
 
 
 def delete_project_snapshot(name: str, snapshot_id: str) -> None:
@@ -2873,6 +3272,115 @@ def export_chat_summary(
     )
 
 
+# ── Pre-dispatch validation (Improvement #19) ───────────────────────────────
+#
+# A validator answers one question about a destructive call BEFORE the user is
+# asked to authorise it: can this possibly work? It returns an error message
+# to refuse with, or None to proceed. `chat_service` consults this map right
+# before `issue_confirmation`.
+#
+# The problem it solves is not a wasted round-trip. `cascade_delete_bus`
+# carries a TYPED confirmation — the user retypes the bus name before Approve
+# unlocks — so a call that was never going to succeed made someone type a
+# name to authorise nothing. Do that a few times and confirming reads as
+# harmless, which is the one habit a destructive prompt must not build.
+#
+# SCOPE, and why it stops where it does: every validator here checks the
+# ACTIVE in-memory network, which the caller has already proved access to by
+# having it open. Project- and snapshot-level tools (delete_project,
+# restore_project_snapshot, …) are deliberately absent. Their existence check
+# is inseparable from tenancy resolution, and CLAUDE.md's 403→404 rule exists
+# because a check that runs before the caller has proved read access IS an
+# existence oracle. A second, sloppier copy of that logic in a validator is
+# precisely the wrong thing to add; those tools keep answering through the
+# route handler that already gets it right.
+#
+# A validator must be cheap and side-effect-free — it runs on the SSE thread
+# before any lock is taken.
+
+
+# Mirrors `delete_component`'s own handler table, which is the authority on
+# what that tool accepts.
+_COMPONENT_CLASS_TO_ATTR: dict[str, str] = {
+    "Bus": "buses",
+    "Carrier": "carriers",
+    "Line": "lines",
+    "Link": "links",
+    "Transformer": "transformers",
+    "Generator": "generators",
+    "StorageUnit": "storage_units",
+    "Store": "stores",
+    "Load": "loads",
+    "ShuntImpedance": "shunt_impedances",
+    "GlobalConstraint": "global_constraints",
+}
+
+
+def _validate_delete_component(args: dict[str, Any]) -> str | None:
+    from services.pypsa_service import PyPSAService
+    component_class = args.get("component_class")
+    name = args.get("name")
+    attr = _COMPONENT_CLASS_TO_ATTR.get(str(component_class))
+    if attr is None:
+        return (
+            f"unknown component_class {component_class!r}; expected one of: "
+            + ", ".join(sorted(_COMPONENT_CLASS_TO_ATTR))
+        )
+    df = getattr(PyPSAService.get_network(), attr, None)
+    if df is None or name not in df.index:
+        return (
+            f"no {component_class} named {name!r} in the network — nothing to "
+            f"delete. List the existing ones before retrying."
+        )
+    return None
+
+
+def _validate_cascade_delete_bus(args: dict[str, Any]) -> str | None:
+    from services.pypsa_service import PyPSAService
+    name = args.get("name")
+    if name not in PyPSAService.get_network().buses.index:
+        return (
+            f"no Bus named {name!r} in the network — nothing to delete. "
+            f"List the buses before retrying."
+        )
+    return None
+
+
+def _validate_batch_delete_components(args: dict[str, Any]) -> str | None:
+    component_class = args.get("component_class")
+    names = args.get("names")
+    if not isinstance(names, list) or not names:
+        return "names must be a non-empty list"
+    attr = _COMPONENT_CLASS_TO_ATTR.get(str(component_class))
+    if attr is None:
+        return (
+            f"unknown component_class {component_class!r}; expected one of: "
+            + ", ".join(sorted(_COMPONENT_CLASS_TO_ATTR))
+        )
+    from services.pypsa_service import PyPSAService
+    df = getattr(PyPSAService.get_network(), attr, None)
+    index = set() if df is None else {str(x) for x in df.index}
+    missing = [str(x) for x in names if str(x) not in index]
+    if missing:
+        sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+        return (
+            f"{len(missing)} of {len(names)} {component_class}(s) are not in "
+            f"the network: {sample}. The whole batch would be refused — list "
+            f"the existing ones and retry with names that exist."
+        )
+    return None
+
+
+PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
+    "delete_component": _validate_delete_component,
+    "cascade_delete_bus": _validate_cascade_delete_bus,
+    # The widest blast radius in the set: do not make someone approve
+    # deleting thirty components when one name is wrong and the call 404s
+    # either way.
+    "batch_delete_components": _validate_batch_delete_components,
+}
+
+
 # ── Registry entry-point ────────────────────────────────────────────────────
 
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
@@ -2881,6 +3389,7 @@ def export_chat_summary(
 DISPATCHERS: dict[str, Any] = {
     # read (22)
     "list_components": list_components,
+    "diagnose_network": diagnose_network,
     "get_component": get_component,
     "get_meta": get_meta,
     "list_snapshots": list_snapshots,
@@ -2931,6 +3440,8 @@ DISPATCHERS: dict[str, Any] = {
     "cascade_delete_bus": cascade_delete_bus,
     # write_bulk (1)
     "bulk_update_components": bulk_update_components,
+    "batch_create_components": batch_create_components,
+    "batch_delete_components": batch_delete_components,
     # write_carriers (1)
     "create_carrier": create_carrier,
     # write_meta (1)

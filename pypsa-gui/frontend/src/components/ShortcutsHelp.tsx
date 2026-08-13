@@ -6,6 +6,7 @@ import { Dialog } from './Dialog'
 const SHORTCUTS: Array<{ keys: string; desc: string }> = [
   { keys: 'Ctrl / ⌘ + K', desc: 'Command palette' },
   { keys: 'Ctrl / ⌘ + P', desc: 'Quick-open a project' },
+  { keys: 'Ctrl / ⌘ + J', desc: 'Toggle the assistant (and focus its composer)' },
   { keys: 'Ctrl / ⌘ + S', desc: 'Save the current project' },
   { keys: 'Ctrl / ⌘ + Z', desc: 'Undo the last edit' },
   { keys: 'Esc', desc: 'Close the open panel / dismiss the comparison' },

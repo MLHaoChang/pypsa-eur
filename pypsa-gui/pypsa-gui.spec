@@ -278,6 +278,26 @@ app = BUNDLE(                              # noqa: F821 - injected
         # cwd-relative DATABASE_URL that killed the launch.
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "14.0",   # netCDF4's arm64 wheel floor
+        # The chat panel's mic button (`useSpeechToText` / `ChatPanel.tsx`)
+        # dictates into the message box via the Web Speech API. Without this
+        # key macOS TCC kills the whole process the instant recognition
+        # starts — a hard termination, not a Python exception, and nothing
+        # reaches `pypsa-gui.log`. The string is shown verbatim in the
+        # permission dialog, so it names the feature rather than saying
+        # "this app uses speech recognition".
+        "NSSpeechRecognitionUsageDescription": (
+            "PyPSA Studio uses speech recognition to turn what you say into "
+            "text when you use the mic button to dictate a message into the "
+            "chat box."
+        ),
+        # On-device speech recognition captures audio through the microphone,
+        # so macOS gates it behind BOTH usage-description keys — shipping
+        # only NSSpeechRecognitionUsageDescription just moves the same TCC
+        # kill from the speech check to this one.
+        "NSMicrophoneUsageDescription": (
+            "PyPSA Studio uses the microphone to capture your voice when you "
+            "use the mic button to dictate a message into the chat box."
+        ),
         "CFBundleShortVersionString": "0.1.0",
         # The MACHINE-readable build number, distinct from the marketing
         # string above. D9's updater and any stapling workflow key off this

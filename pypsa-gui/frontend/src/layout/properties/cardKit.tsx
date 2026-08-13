@@ -7,6 +7,9 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useCatalog } from '../../hooks/useCatalog'
+import { editScope, loadExtras, saveExtras } from '../../utils/extrasStore'
+import type { SolveMode } from '../../utils/attributeCatalog'
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   X, Plus, Zap, Battery, Database, GitBranch,
@@ -27,6 +30,7 @@ import { tip as docTip } from '../../utils/propertyDocs'
 import { CARRIER_CATALOG_NAMES } from '../../utils/carrierCatalog'
 import { vintageCloneToast } from '../../utils/toasts'
 import VintagePeriodBoundsModal from '../../components/VintagePeriodBoundsModal'
+import { buildYearOptions } from './buildYearOptions'
 
 
 // ── Hover tooltip primitive ────────────────────────────────────────────────────
@@ -293,6 +297,43 @@ export function no(fs: FS, k: string): number | null {
   const s = (fs[k] ?? '').trim(); if (!s) return null; const v = parseFloat(s); return isNaN(v) ? null : v
 }
 
+/**
+ * Form values for the chosen extra keys, ready to Object.assign onto a card's
+ * payload (spec D20's save layer).
+ *
+ * Rendering an extras field alone is a lie: the value would land in `form`,
+ * never reach `payload`, and be overwritten by the `...current` spread at
+ * PropertiesPanel.tsx:144. This is the function that closes that gap.
+ *
+ * Conventions match what the cards already do: a blank is null (Pydantic's
+ * Optional aliases turn it into PyPSA's ±inf / NaN sentinel), 'true'/'false'
+ * are the strings toFS emits for booleans, and a numeric-looking string
+ * becomes a number so it does not upcast a numeric column to object dtype.
+ */
+/**
+ * Widen a card's form seed with the current values of its chosen extras
+ * (spec D20's seed layer). Keeps the change at each card to one line instead
+ * of surgery on its curated key array.
+ */
+export function seedExtras<T extends object>(obj: T, base: FS, keys: string[]): FS {
+  return { ...base, ...toFS(obj, keys as (keyof T)[]) }
+}
+
+export function extrasPatch(fs: FS, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of keys) {
+    const raw = fs[k]
+    if (raw === undefined) continue          // never send undefined
+    const t = raw.trim()
+    if (t === '') { out[k] = null; continue }
+    if (t === 'true') { out[k] = true; continue }
+    if (t === 'false') { out[k] = false; continue }
+    const n = Number(t)
+    out[k] = Number.isFinite(n) ? n : raw
+  }
+  return out
+}
+
 // ── Shared mini input helpers (defined inline in each card) ───────────────────
 export type SetFS = React.Dispatch<React.SetStateAction<FS>>
 
@@ -325,6 +366,21 @@ export function useGlobalDiscountRate(): number | undefined {
   return data?.discount_rate
 }
 
+/**
+ * The configured solve mode, for D22's four mode-gated rules. One data
+ * dependency for all four, read from the same solverConfig query the Solver
+ * Settings page already loads.
+ */
+export function useSolveMode(): SolveMode {
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data } = useQuery({
+    queryKey: nk(currentProject, 'solverConfig'),
+    queryFn: simulationApi.getSolverConfig,
+    staleTime: 60_000,
+  })
+  return data?.mode ?? 'lopf'
+}
+
 export function useGlobalDefaultLifetime(): number | undefined {
   const currentProject = useUIStore(s => s.currentProject)
   const { data } = useQuery({
@@ -335,35 +391,26 @@ export function useGlobalDefaultLifetime(): number | undefined {
   return data?.default_lifetime
 }
 
-// Options for the build-year dropdown. Prefer the user's configured
-// investment_periods so multi-period runs only let users pick years the LP
-// actually models; otherwise generate a sensible 35-year span around the
-// current year in 5-year steps so single-period overnight runs still have
-// reasonable choices. Always merges the asset's current value in so an
-// asset that was created with a non-standard year (e.g. 2027) doesn't
-// silently lose it when the form opens.
+// Options for the build-year dropdown. Reads the NETWORK's investment periods
+// (`/network/investment_periods`) — the store Model Horizon writes and the LP
+// reads. This used to read `cfg.investment_periods` from SolverConfig, which no
+// frontend code ever writes, so it always fell through to the generic grid and
+// a user with periods 2026/2027/2028 was offered 2025/2030/2035/…
 export function useBuildYearOptions(currentValue: number | null | undefined): number[] {
   const currentProject = useUIStore(s => s.currentProject)
-  const { data: cfg } = useQuery({
-    queryKey: nk(currentProject, 'solverConfig'),
-    queryFn: simulationApi.getSolverConfig,
+  const { data: ip } = useQuery({
+    queryKey: nk(currentProject, 'investmentPeriods'),
+    queryFn: networkApi.getInvestmentPeriods,
     staleTime: 60_000,
   })
-  return useMemo(() => {
-    const periods = cfg?.investment_periods ?? []
-    let opts: number[]
-    if (periods.length > 0) {
-      opts = periods.slice().sort((a, b) => a - b)
-    } else {
-      const now = new Date().getFullYear()
-      const start = Math.floor(now / 5) * 5
-      opts = Array.from({ length: 8 }, (_, i) => start + i * 5)  // 35-year span
-    }
-    if (currentValue != null && Number.isFinite(currentValue) && currentValue > 0 && !opts.includes(currentValue)) {
-      opts = [...opts, currentValue].sort((a, b) => a - b)
-    }
-    return opts
-  }, [cfg?.investment_periods, currentValue])
+  const periods = useMemo(
+    () => (ip?.periods ?? []).map(Number).filter(Number.isFinite),
+    [ip?.periods],
+  )
+  return useMemo(
+    () => buildYearOptions(periods, currentValue, new Date().getFullYear()),
+    [periods, currentValue],
+  )
 }
 
 export function BuildYearSelect({ fs, set, tip }: { fs: FS; set: SetFS; tip?: string }) {
@@ -795,3 +842,93 @@ export function EditShell({ title, onSave, onCancel, saving, children }: {
   )
 }
 
+
+// ── ExtrasSection ────────────────────────────────────────────────────────────
+// The appended block on an edit card holding attributes beyond the card's
+// curated set (spec D20). Additive: it renders as the last child of EditShell's
+// 2-column grid and touches nothing above it.
+export function ExtrasSection({ componentClass, fs, set, curated }: {
+  componentClass: string
+  fs: FS
+  set: SetFS
+  curated: string[]
+}) {
+  const { data } = useCatalog(componentClass)
+  const [keys, setKeys] = useState<string[]>(() => loadExtras(editScope(componentClass)))
+  const [picking, setPicking] = useState(false)
+
+  // Until the catalog arrives the card renders exactly as it does today.
+  if (!data) return null
+
+  const curatedSet = new Set(curated)
+  const byName = new Map(data.attributes.map(a => [a.name, a]))
+  // Only Input attributes are offerable: an Output is computed by the solver
+  // and writing one is meaningless (the same authority D13 uses in the grid).
+  const offerable = data.attributes.filter(
+    a => a.status.startsWith('Input') && !curatedSet.has(a.name) && !keys.includes(a.name),
+  )
+
+  const add = (name: string) => {
+    const next = [...keys, name]
+    setKeys(next)
+    saveExtras(editScope(componentClass), next)
+    setPicking(false)
+    // Adding a parameter never seeds a value — the field opens empty and
+    // PyPSA's default continues to apply until the user types one (D23).
+    set(prev => ({ ...prev, [name]: prev[name] ?? '' }))
+  }
+
+  const drop = (name: string) => {
+    const next = keys.filter(k => k !== name)
+    setKeys(next)
+    saveExtras(editScope(componentClass), next)
+  }
+
+  return (
+    <div className="col-span-2 mt-2 pt-2 border-t border-border">
+      <div className="text-[9px] font-semibold text-muted uppercase tracking-wide mb-1">
+        More parameters
+      </div>
+      {keys.map(k => {
+        const attr = byName.get(k)
+        return (
+          <label key={k} className="flex items-center gap-1.5 mb-1">
+            <span className="text-[9px] text-muted w-28 shrink-0 truncate"
+                  title={attr?.description ?? k}>
+              {k}{attr?.unit ? ` (${attr.unit})` : ''}
+            </span>
+            <input
+              value={fs[k] ?? ''}
+              onChange={e => set(prev => ({ ...prev, [k]: e.target.value }))}
+              placeholder={attr?.default_text ?? ''}
+              className="flex-1 bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] font-mono focus:outline-none focus:border-accent"
+            />
+            <button type="button" onClick={() => drop(k)} aria-label={`Remove ${k}`}
+                    className="text-muted hover:text-danger">
+              <X size={11} />
+            </button>
+          </label>
+        )
+      })}
+      {picking ? (
+        <select
+          autoFocus
+          value=""
+          onChange={e => { if (e.target.value) add(e.target.value) }}
+          onBlur={() => setPicking(false)}
+          className="w-full bg-bg border border-accent rounded px-1.5 py-0.5 text-[10px]"
+        >
+          <option value="">Choose a parameter…</option>
+          {offerable.map(a => (
+            <option key={a.name} value={a.name}>
+              {a.name}{a.unit ? ` (${a.unit})` : ''} — {a.type}, default {a.default_text || '—'}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <button type="button" onClick={() => setPicking(true)}
+                className="text-[9px] text-accent hover:underline">+ Add parameter</button>
+      )}
+    </div>
+  )
+}

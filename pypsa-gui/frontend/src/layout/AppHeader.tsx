@@ -277,7 +277,16 @@ export default function AppHeader() {
       // (e.g. user tabbed away but the dropdown is still on screen because
       // the debounced search hasn't cleared yet, or the focus was stolen
       // by a click on another element that doesn't process Escape).
-      if (e.key === 'Escape') closeSearch()
+      //
+      // Guarded against editable elements, the same test App.tsx:485 uses.
+      // This listener is CAPTURE-phase, so it runs before any descendant and
+      // stopPropagation() downstream cannot pre-empt it — the guard has to be
+      // here or an Escape meant to discard a grid cell edit also closes the
+      // header search (spec D5).
+      if (e.key !== 'Escape') return
+      const t = e.target as HTMLElement | null
+      if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || t?.isContentEditable) return
+      closeSearch()
     }
     document.addEventListener('mousedown', onDown, true)
     document.addEventListener('keydown', onKey, true)

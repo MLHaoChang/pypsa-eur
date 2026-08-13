@@ -113,6 +113,10 @@ does not publish per-model pricing it cannot verify, so no EUR (or USD)
 estimate is shown anywhere. If that changes, it needs a verified pricing
 source, not a hardcoded constant.
 
+Cache-read tokens are shown because on a long session they dominate the
+input count, and an in/out pair that ignores them under-reports the work
+by the widest margin exactly when the session is longest.
+
 ## Cost caps
 
 The server enforces hard ceilings — once a cap is hit the stream emits
@@ -130,6 +134,45 @@ All four live as module-level constants in
 [backend/services/chat_service.py](backend/services/chat_service.py); tune
 them per deployment.
 
+## Interrupted turns and damaged history
+
+A turn is written to `chat.jsonl` only once it has *completed*, so a backend
+that dies mid-response would previously lose the user's own message with no
+trace of it anywhere. A pending record is now written at turn start
+(`chat.jsonl.pending`, via tmp + rename + fsync) and removed when the turn
+ends. It survives a crash precisely because the code that removes it never
+runs — so its presence after a restart *is* the signal.
+
+`GET /api/chat/history` therefore reports two extra fields:
+
+| Field | Meaning |
+|---|---|
+| `pending_turn` | A turn that started and was never answered. Reported **once**, then cleared. It is NOT added to `turns` — it has no assistant half, and writing it into the transcript would fabricate a conversation that did not happen. |
+| `history_gap` | How many on-disk records were unreadable. Non-zero means `turns` is incomplete. |
+
+A pending record whose session still has a turn in flight is left alone: a
+second tab polling `/history` must not report a running turn as interrupted,
+nor delete the record protecting it.
+
+## Aborting a turn
+
+Two paths reach the same `session.abort_event`:
+
+- **Explicit** — `POST /api/chat/{session_id}/abort`, which the panel sends
+  on close or from the Stop button.
+- **Implicit** — a disconnect watcher polls `request.is_disconnected()` from
+  the async `/stream` handler every `DISCONNECT_POLL_SECONDS` (2 s). A killed
+  tab, a sleeping laptop or a dropped connection sends no abort, and without
+  this the turn ran to completion: more tokens, and every remaining tool in
+  the plan executed against a network nobody was watching.
+
+The watcher is armed on the event loop and disarmed from the SSE generator's
+`finally`, so no polling task outlives its stream. It relies on uvicorn's
+`receive()` being level-triggered (it re-reports `http.disconnect` on every
+call), which is what lets it coexist with Starlette's own disconnect
+listener. It is an accelerator, not the guarantee — the explicit abort and
+the generator's own teardown remain the backstops.
+
 ## Confirmation flow
 
 | Tool tier | Card? | Typed confirmation? |
@@ -139,6 +182,17 @@ them per deployment.
 | `destructive` | yes (5 min TTL) | only for the highest-risk tools (see below) |
 | `execution` | yes (5 min TTL) | no |
 | `execution_long_running` | yes (5 min TTL) | no |
+
+Before the card is issued, a destructive call's arguments are checked against
+`chat_tools.PRE_DISPATCH_VALIDATORS` and refused with
+`error_kind='invalid_tool_args'` if the call cannot succeed — deleting a
+component that is not in the network, say. Without this the user was asked to
+approve (and for `cascade_delete_bus`, to *retype the bus name* for) an
+operation that would then 404. Validators are advisory: one that raises
+leaves the tool exactly as callable as before. They cover network-local tools
+only; project- and snapshot-level existence checks stay in the route handlers,
+which already resolve tenancy correctly — a second copy of that logic would be
+an existence oracle.
 
 Tools that surface a **typed-confirmation** widget (Phase 4 polish — the
 user must type the target name verbatim before Approve unlocks):

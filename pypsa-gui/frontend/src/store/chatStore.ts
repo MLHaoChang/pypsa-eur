@@ -130,9 +130,16 @@ interface ChatState {
    *
    * The connection belongs to the TURN, not to whichever component happened
    * to open it. ChatPanel used to be the only thing that closed it, from its
-   * unmount handler — and ChatPanel unmounts itself whenever the agent sends
-   * a `ui_event` that navigates to another panel, which killed the turn
-   * mid-answer. Terminal frames call this instead.
+   * unmount handler — and back when ChatPanel was the `'chat'` SlidePanel it
+   * unmounted itself whenever the agent sent a `ui_event` navigating to
+   * another panel, which killed the turn mid-answer.
+   *
+   * That trigger is gone: ChatPanel now lives in AssistantDock and navigation
+   * does not unmount it. The ownership rule stands regardless, because the
+   * remaining unmount paths (ErrorBoundary fallback after a render crash,
+   * project switch, HMR) can still land mid-turn, and none of them should
+   * decide a turn is over. Terminal frames call this instead; ChatPanel's
+   * unmount handler closes only an idle stream.
    */
   closeStream: () => void
   // Upload slice actions

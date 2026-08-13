@@ -31,6 +31,7 @@ Checked by NAME anywhere in the tree, not by path, because the layout inside a
 """
 from __future__ import annotations
 
+import plistlib
 import sys
 from pathlib import Path
 
@@ -101,6 +102,19 @@ ALLOWED_DESPITE_SUFFIX = {
 # but reporting it turns one manual check into zero.
 EXPECTED = ("project_templates", "matpower.jinja2", "alembic", "spa.html")
 
+# Info.plist usage-description keys macOS TCC requires before the app may
+# touch speech recognition / the microphone — see `pypsa-gui.spec`'s
+# `info_plist` block for why each one is there. Missing either is not a
+# broken build, it is a build that LAUNCHES FINE and is hard-killed by the OS
+# (TCC namespace, not a Python exception, nothing in pypsa-gui.log) the
+# instant the chat panel's mic button is used. A future spec edit that drops
+# one of these — e.g. someone "tidying" the info_plist dict — must fail this
+# gate rather than ship an app that dies on first mic use.
+REQUIRED_PLIST_KEYS = (
+    "NSSpeechRecognitionUsageDescription",
+    "NSMicrophoneUsageDescription",
+)
+
 
 def scan(root: Path) -> tuple[list[str], list[str]]:
     problems: list[str] = []
@@ -128,6 +142,35 @@ def scan(root: Path) -> tuple[list[str], list[str]]:
     return problems, missing
 
 
+def check_info_plist(root: Path) -> list[str]:
+    """Assert the TCC usage-description keys are present and non-empty.
+
+    Checked against the BUILT `Contents/Info.plist`, not the `.spec` source —
+    a key can be in the spec dict and still be dropped by PyInstaller, so
+    only the artifact is proof.
+    """
+    plist_path = root / "Contents" / "Info.plist"
+    if not plist_path.is_file():
+        return [f"MISSING Info.plist        {plist_path}"]
+
+    with plist_path.open("rb") as fh:
+        try:
+            data = plistlib.load(fh)
+        except Exception as exc:  # noqa: BLE001 - report, don't crash the gate
+            return [f"UNREADABLE Info.plist      {plist_path}: {exc}"]
+
+    problems: list[str] = []
+    for key in REQUIRED_PLIST_KEYS:
+        value = data.get(key)
+        if not isinstance(value, str) or not value.strip():
+            problems.append(
+                f"MISSING USAGE DESCRIPTION  {key} not present/non-empty in "
+                f"Contents/Info.plist — the app will be killed by TCC the "
+                f"instant it is exercised"
+            )
+    return problems
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print(__doc__.strip().splitlines()[0])
@@ -140,6 +183,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     problems, missing = scan(root)
+    problems += check_info_plist(root)
 
     if missing:
         print(f"WARNING: expected content not found in the bundle: {', '.join(missing)}")
