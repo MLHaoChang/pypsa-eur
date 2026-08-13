@@ -596,3 +596,30 @@ export type LinkProfileMeta =
       p_min_pu?: GeneratorProfileAttrMeta
       marginal_cost?: GeneratorProfileAttrMeta
     }
+
+/**
+ * One row of PyPSA's attribute catalog (spec D24). Class-level metadata,
+ * identical across projects — see hooks/useCatalog.ts for why the query key is
+ * deliberately unscoped.
+ */
+export interface CatalogAttribute {
+  name: string
+  /** 'Input (required)' | 'Input (optional)' | 'Output' — D13's default. */
+  status: string
+  /** True when a time series may shadow the static value — D14. */
+  varying: boolean
+  /** numpy dtype name: 'float64', 'bool', 'object', … — D4's editor pick. */
+  dtype: string
+  unit: string | null
+  description: string | null
+  type: string
+  /** Non-finite defaults are scrubbed to null by clean_scalar. */
+  default: unknown
+  /** The text PyPSA's default reads as — 'inf' where `default` is null. */
+  default_text: string
+}
+
+export interface CatalogPayload {
+  component: string
+  attributes: CatalogAttribute[]
+}

@@ -9,6 +9,19 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { coerceForColumn } from '../utils/coerce'
 import { useSimulationStore } from '../store/simulationStore'
+import { useCatalog } from '../hooks/useCatalog'
+import {
+  CLOSED_SETS, buildSeriesIndex, columnHeaderLabel, columnHeaderTooltip,
+  isBooleanDtype, resolveEditability, resolveEditor, toCatalogMap,
+  type CatalogMap,
+} from '../utils/attributeCatalog'
+import { validateAndCoerce } from '../utils/gridEdit'
+import {
+  guardCell, parseTsv, resolvePasteShape, serialiseTsv, unguardCell,
+} from '../utils/clipboardTsv'
+import { isNumericDtype } from '../utils/attributeCatalog'
+import BusAutocomplete from '../components/BusAutocomplete'
+import CarrierSelect from '../components/CarrierSelect'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -23,6 +36,9 @@ function storedH() {
 
 const TABS = ['Log', 'History', 'Buses', 'Lines', 'Transformers', 'Generators', 'Storage', 'Stores', 'Loads', 'Links', 'Carriers'] as const
 type Tab = typeof TABS[number]
+
+/** Row count above which any bulk write asks first (spec D18, criterion 27). */
+const BULK_CONFIRM_ROWS = 200
 
 const TAB_COLUMNS: Record<Tab, string[]> = {
   Log:          [],
@@ -121,6 +137,177 @@ interface AssetTableProps {
 // coerceForColumn moved to utils/coerce.ts so it can be unit-tested without
 // mounting this panel. Imported at the top of the file.
 
+/**
+ * FastAPI's `detail` is either a string or an array of validation objects.
+ * Rendering the array directly gives "[object Object]", which
+ * .cursor/rules/pypsa-gui-frontend.mdc:19 forbids and success criterion 10
+ * tests for.
+ */
+function formatDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail)) {
+    const parts = detail.map(d => {
+      if (typeof d === 'string') return d
+      const o = d as { loc?: unknown[]; msg?: string }
+      const where = Array.isArray(o.loc) ? o.loc.filter(x => x !== 'body').join('.') : ''
+      return where ? `${where}: ${o.msg ?? 'invalid'}` : (o.msg ?? 'invalid')
+    })
+    if (parts.length) return parts.join('; ')
+  }
+  return fallback
+}
+
+// ── CellEditor ───────────────────────────────────────────────────────────────
+// One editor is mounted at a time, chosen by D4's resolution table. Every
+// editor commits a STRING through the same gridEdit validator, so the typed
+// path and the paste path cannot disagree.
+//
+// Because a fresh editor mounts per cell, the uncontrolled-input staleness rule
+// (CLAUDE.md:586-587) is satisfied structurally — no key-remount trick needed.
+function CellEditor({
+  componentClass, column, initial, seed, busNames, catalog, onCommit, onCancel,
+}: {
+  componentClass: string
+  column: string
+  initial: string
+  seed?: string
+  busNames: string[]
+  catalog: CatalogMap
+  /**
+   * `advance` asks the grid to move the active cell down one row after a
+   * successful commit. Only a plain Enter sets it: D5 gives Ctrl/Cmd+Enter
+   * (fill) and a blur no move, and advancing off a blur would yank focus while
+   * the user is reaching for another cell.
+   */
+  onCommit: (raw: string, fill: boolean, advance?: boolean) => void
+  onCancel: () => void
+}) {
+  const [raw, setRaw] = useState(seed ?? initial)
+  const kind = resolveEditor(componentClass, column, catalog)
+  const inputCls = 'w-full bg-bg border border-accent px-1 py-0 text-[11px] font-mono outline-none'
+
+  // Shared key handling for the text-like editors (D5, open-editor column).
+  const onKey = (e: React.KeyboardEvent) => {
+    const modifier = e.ctrlKey || e.metaKey
+    if (e.key === 'Enter') {
+      e.preventDefault(); e.stopPropagation()
+      // Ctrl/Cmd+Enter = fill gesture, and D5 gives it no downward move.
+      onCommit(raw, modifier, !modifier)
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation()
+      onCancel()
+      return
+    }
+    if (modifier && (e.key === 's' || e.key === 'S')) {
+      // A save must never run with a pending edit outstanding
+      // (CLAUDE.md:650-666,812) and the grid cannot make its PATCH land
+      // synchronously. Swallowing the first keypress is the honest behaviour.
+      e.preventDefault(); e.stopPropagation()
+      onCommit(raw, false)
+      toast.success('Cell saved — press again to save the project')
+      return
+    }
+    // Arrows must not reach the grid while an editor is open (D5). Bus cells
+    // are the exception and handle their own arrows (BusAutocomplete).
+    if (e.key.startsWith('Arrow')) e.stopPropagation()
+  }
+
+  if (kind === 'bus') {
+    // `onChange` fires on every keystroke, so it may only move the draft.
+    // Wiring it to onCommit made the first character commit a partial name —
+    // and since commitCell's first act is setEditing(null), that closed the
+    // editor and left the column unchangeable. Same hazard the colour editor
+    // below already avoids by committing on blur rather than on change.
+    //
+    // The wrapper carries onKeyDown so Escape still cancels and Enter with
+    // nothing highlighted commits a fully typed name; BusAutocomplete stops
+    // both keys itself whenever it consumes them.
+    return (
+      <span onKeyDown={onKey}>
+        <BusAutocomplete
+          autoFocus
+          value={raw}
+          onChange={setRaw}
+          onSelect={v => onCommit(v, false, true)}
+          buses={busNames}
+          allowUnknown={false}
+          placeholder="Bus…"
+        />
+      </span>
+    )
+  }
+
+  if (kind === 'carrier') {
+    // Consumed as-is, styling props only (D4). Its native <select> popup cannot
+    // be clipped by the grid's scroll container.
+    return (
+      <CarrierSelect
+        value={raw}
+        onChange={v => { setRaw(v); onCommit(v, false) }}
+        label={null}
+        className="w-full text-[11px] py-0"
+        wrapperClassName="block"
+      />
+    )
+  }
+
+  if (kind === 'closedSet') {
+    const options = CLOSED_SETS[`${componentClass}.${column}`] ?? []
+    return (
+      <select
+        autoFocus
+        value={raw}
+        onChange={e => { setRaw(e.target.value); onCommit(e.target.value, false) }}
+        onKeyDown={onKey}
+        className={inputCls}
+      >
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    )
+  }
+
+  if (kind === 'color') {
+    // Carried over from CarriersTable: the picker fires on every keystroke, so
+    // commit on blur for one request per change.
+    return (
+      <span className="flex items-center gap-1">
+        <input
+          type="color"
+          value={/^#[0-9a-f]{6}$/i.test(raw) ? raw : '#888888'}
+          onChange={e => setRaw(e.target.value)}
+          onBlur={() => onCommit(raw, false)}
+          className="w-6 h-5 rounded border border-border cursor-pointer"
+        />
+        <input
+          autoFocus
+          type="text"
+          value={raw}
+          onChange={e => setRaw(e.target.value)}
+          onBlur={() => onCommit(raw, false)}
+          onKeyDown={onKey}
+          className={inputCls}
+        />
+      </span>
+    )
+  }
+
+  // numeric and text both use a type="text" input: type="number" cannot hold
+  // `inf` and reads back '' (D12).
+  return (
+    <input
+      autoFocus
+      type="text"
+      value={raw}
+      onChange={e => setRaw(e.target.value)}
+      onBlur={() => onCommit(raw, false)}
+      onKeyDown={onKey}
+      className={inputCls}
+    />
+  )
+}
+
 function AssetTable({
   tab, componentClass, data, defaultColumns, selectedName, onRowClick,
 }: AssetTableProps) {
@@ -168,6 +355,69 @@ function AssetTable({
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   useEffect(() => { setSelectedRows(new Set()) }, [tab])
   const lastClickedIdxRef = useRef<number | null>(null)
+
+  // AssetTable does not receive currentProject as a prop and does not
+  // destructure it today — only its parent BottomPanel does. The grid needs it
+  // for every nk() key below, so take it reactively here. In the non-React
+  // mutation callbacks read it via useUIStore.getState().currentProject
+  // instead: the parity rule at queryKeys.ts:16-22 is what makes a mismatched
+  // id return undefined.
+  const currentProject = useUIStore(s => s.currentProject)
+
+  // ── Active cell (spec D19) ─────────────────────────────────────────────────
+  // Exactly one cell is tabbable at a time; everything else carries -1. Focus
+  // stays on a real element, so blur-commit and Escape work unchanged and no
+  // ARIA grid roles are needed — the <table> already carries the right ones.
+  // `seed` carries the character that opened the editor, so type-over replaces
+  // the value instead of appending to it (D5). Only `editing` ever sets it.
+  type CellRef = { name: string; col: string; seed?: string }
+  const [active, setActive] = useState<CellRef | null>(null)
+  // Which cell has an OPEN editor. One at a time: the draft is a single
+  // { name, col, raw }, not a flat draft map, because at the render cap a map
+  // would mount 1000 x 15 inputs — the DOM budget the cap exists to protect.
+  const [editing, setEditing] = useState<CellRef | null>(null)
+  useEffect(() => { setActive(null); setEditing(null) }, [tab])
+
+  // ── Catalog + series shadow (D13, D14) ────────────────────────────────────
+  const { data: catalogPayload } = useCatalog(componentClass)
+  const catalog = useMemo(
+    () => toCatalogMap(catalogPayload?.attributes ?? []),
+    [catalogPayload],
+  )
+  const { data: tsList = [] } = useQuery({
+    queryKey: nk(currentProject, 'timeseries'),
+    queryFn: networkApi.listTimeseries,
+  })
+  const series = useMemo(
+    () => buildSeriesIndex(tsList, TAB_TO_API_KEY[componentClass] ?? ''),
+    [tsList, componentClass],
+  )
+
+  const editabilityOf = useCallback(
+    (rowName: string, col: string) =>
+      resolveEditability({ componentClass, column: col, rowName, catalog, series }),
+    [componentClass, catalog, series],
+  )
+
+  // The bus list the bus-terminal editor offers, and the set gridEdit checks
+  // membership against (exact and case-sensitive).
+  const { data: allBusRows = [] } = useQuery({
+    queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses,
+  })
+  const busNames = useMemo(
+    () => (allBusRows as Array<{ name: string }>).map(b => b.name).sort(),
+    [allBusRows],
+  )
+
+  const isBooleanCell = useCallback((col: string): boolean => {
+    const attr = catalog.get(col)
+    return !!attr && isBooleanDtype(attr.dtype)
+  }, [catalog])
+
+  const seriesShadowed = useCallback((rowName: string, col: string): boolean => {
+    const ed = editabilityOf(rowName, col)
+    return !ed.editable && ed.reason === 'series'
+  }, [editabilityOf])
 
   // Search: substring match on row.name. Filter happens BEFORE sort so the
   // user sees the same ordering as the unfiltered table — sort is purely
@@ -234,15 +484,100 @@ function AssetTable({
     return String(v)
   }
 
+  /**
+   * Composite key for the cell-ref map. A tab cannot occur in a PyPSA name or
+   * attribute — the same fact utils/clipboardTsv.ts relies on to do without a
+   * quote grammar — so it is a safe separator for `col` + `name`.
+   */
+  const cellKey = (name: string, col: string) => `${col}\t${name}`
+  const cellRefs = useRef<Record<string, HTMLTableCellElement | null>>({})
+  useEffect(() => {
+    if (!active) return
+    cellRefs.current[cellKey(active.name, active.col)]?.focus()
+  }, [active])
+
+  /** Move the active cell by (dRow, dCol) within `displayed` x `visibleCols`. */
+  const moveActive = useCallback((dRow: number, dCol: number) => {
+    setActive(prev => {
+      if (!prev) return prev
+      const rowIdx = displayed.findIndex(r => r.name === prev.name)
+      const colIdx = visibleCols.indexOf(prev.col)
+      if (rowIdx < 0 || colIdx < 0) return prev
+      const nextRow = Math.min(Math.max(rowIdx + dRow, 0), displayed.length - 1)
+      const nextCol = Math.min(Math.max(colIdx + dCol, 0), visibleCols.length - 1)
+      return { name: displayed[nextRow].name as string, col: visibleCols[nextCol] }
+    })
+  }, [displayed, visibleCols])
+
+  /**
+   * Keyboard map for a cell with NO open editor (spec D5). The open-editor
+   * column of that table lives in the editor component.
+   *
+   * stopPropagation() on Escape is what keeps an open slide panel open: every
+   * other Escape listener in the app is bubble-phase (App.tsx:512 and the
+   * unguarded ones in TopologyCanvas / MapCanvas / ChatPanel), so stopping
+   * here pre-empts all of them without touching those files. The one
+   * capture-phase listener, AppHeader.tsx:277, is guarded at its source.
+   */
+  const onCellKeyDown = (e: React.KeyboardEvent, rowName: string, col: string) => {
+    if (editing) return                       // the editor owns the keyboard
+    const modifier = e.ctrlKey || e.metaKey
+    if (modifier) return                      // copy/paste
+
+    switch (e.key) {
+      case 'ArrowDown':  e.preventDefault(); moveActive(1, 0); return
+      case 'ArrowUp':    e.preventDefault(); moveActive(-1, 0); return
+      case 'ArrowRight': e.preventDefault(); moveActive(0, 1); return
+      case 'ArrowLeft':  e.preventDefault(); moveActive(0, -1); return
+      case 'Tab':
+        e.preventDefault(); moveActive(0, e.shiftKey ? -1 : 1); return
+      case 'Escape':
+        e.stopPropagation()
+        setActive(null)
+        return
+      case 'Enter':
+        e.preventDefault()
+        if (editabilityOf(rowName, col).editable) setEditing({ name: rowName, col })
+        return
+      default:
+        // A printable character opens the editor seeded with it (D5).
+        // preventDefault matters: without it the same keypress ALSO reaches the
+        // freshly-focused input, so typing 7 over 400 produced "4007".
+        if (e.key.length === 1 && editabilityOf(rowName, col).editable) {
+          e.preventDefault()
+          setEditing({ name: rowName, col, seed: e.key })
+        }
+    }
+  }
+
+  /** Visual state for a cell: active ring, and the read-only/series greys. */
+  const cellClass = (rowName: string, col: string): string => {
+    const base = 'px-2 font-mono whitespace-nowrap text-[11px] outline-none'
+    const ring = active?.name === rowName && active?.col === col
+      ? ' ring-1 ring-inset ring-accent' : ''
+    const ed = editabilityOf(rowName, col)
+    if (ed.editable) return base + ring
+    // Output / override / unknown read as "not yours to edit"; a series-shadowed
+    // cell reads as "the static value is dead here" (D14) and gets its badge in
+    // the cell body.
+    return `${base}${ring} text-muted bg-panel/40`
+  }
+
   const toggleRow = (row: Record<string, unknown>, idx: number, ev: React.MouseEvent) => {
     const name = row.name as string
     if (!name) return
+    // Read the modifier BEFORE the updater. React runs a functional setState
+    // updater later, by which point the synthetic event has been recycled and
+    // `ev.shiftKey` reads false — the range would silently degrade to a single
+    // toggle. Same reason the anchor is snapshotted here.
+    const rangeSelect = ev.shiftKey
+    const anchor = lastClickedIdxRef.current
     setSelectedRows(prev => {
       const next = new Set(prev)
-      if (ev.shiftKey && lastClickedIdxRef.current !== null) {
+      if (rangeSelect && anchor !== null) {
         // Range select: include every row between the last anchor and this one.
-        const lo = Math.min(lastClickedIdxRef.current, idx)
-        const hi = Math.max(lastClickedIdxRef.current, idx)
+        const lo = Math.min(anchor, idx)
+        const hi = Math.max(anchor, idx)
         for (let i = lo; i <= hi; i++) {
           const n = sorted[i]?.name as string | undefined
           if (n) next.add(n)
@@ -261,57 +596,249 @@ function AssetTable({
     setSelectedRows(new Set(sorted.map(r => r.name as string).filter(Boolean)))
   }
 
-  // Bulk edit
   const [showColMenu, setShowColMenu] = useState(false)
-  const [editCol, setEditCol] = useState<string>('')
-  const [editValue, setEditValue] = useState<string>('')
-  // Reset bulk-edit fields whenever selection changes — re-asking for the
-  // column + value avoids the "wait, what was I editing?" footgun.
-  useEffect(() => { setEditCol(''); setEditValue('') }, [selectedRows])
+
+  // ── Optimistic bulk write (spec D10, D11) ─────────────────────────────────
+  // No in-repo precedent (recon §4), so the contract is implemented exactly as
+  // the spec states it. The key MUST use the same projectId the useQuery that
+  // populated the cache used, or getQueryData returns undefined and the
+  // rollback wipes the payload (queryKeys.ts:16-22).
+  const lastMutationAtRef = useRef(0)
+
+  type BulkRow = { name: string; updates: Record<string, unknown> }
+  type BulkBody = {
+    component_class: string
+    names?: string[]
+    updates?: Record<string, unknown>
+    rows?: BulkRow[]
+  }
+  type BulkCtx = { previous: unknown; selection: Set<string>; key: unknown[] }
 
   const bulkMut = useMutation({
-    mutationFn: (body: { component_class: string; names: string[]; updates: Record<string, unknown> }) =>
-      networkApi.bulkUpdate(body),
+    mutationFn: (body: BulkBody) => networkApi.bulkUpdate(body),
+    onMutate: async (body: BulkBody): Promise<BulkCtx> => {
+      const projectId = useUIStore.getState().currentProject
+      const key = nk(projectId, TAB_TO_API_KEY[componentClass] ?? componentClass.toLowerCase() + 's')
+      await qc.cancelQueries({ queryKey: key })
+      const previous = qc.getQueryData(key)
+      const selection = new Set(selectedRows)
+
+      const patch = new Map<string, Record<string, unknown>>()
+      if (body.rows) for (const r of body.rows) patch.set(r.name, r.updates)
+      else for (const n of body.names ?? []) patch.set(n, body.updates ?? {})
+
+      qc.setQueryData(key, (old: Record<string, unknown>[] | undefined) =>
+        (old ?? []).map(r => {
+          const up = patch.get(r.name as string)
+          return up ? { ...r, ...up } : r
+        }))
+      return { previous, selection, key }
+    },
+    onError: (e: { response?: { data?: { detail?: unknown } } }, _body, ctx) => {
+      if (ctx) {
+        qc.setQueryData(ctx.key, ctx.previous)
+        setSelectedRows(ctx.selection)
+        // Re-read the truth rather than trusting the rollback.
+        qc.invalidateQueries({ queryKey: ctx.key })
+      }
+      toast.error(formatDetail(e.response?.data?.detail, 'Bulk update failed'))
+    },
     onSuccess: (r) => {
-      // SCOPED invalidation. The previous `qc.invalidateQueries()` (no key)
-      // wiped EVERY cached query, triggering ~15 refetches (carriers, profiles,
-      // ac_pf_status, snapshots, etc.) per bulk apply. On large networks this
-      // was the dominant source of perceived lag. We only need:
+      lastMutationAtRef.current = Date.now()
+      // SCOPED invalidation. A bare `qc.invalidateQueries()` would wipe EVERY
+      // cached query, triggering ~15 refetches (carriers, profiles,
+      // ac_pf_status, snapshots, …) per apply. We only need:
       //  • the table for the component class we edited
       //  • the audit-trail surfaces (undoInfo, changelog)
       //  • result queries (they reference component data via bus/name joins)
-      // Other caches (carriers, snapshots, ac_pf_status) are untouched by a
-      // bulk attribute write, so leave them alone.
+      const projectId = useUIStore.getState().currentProject
       const tableKey = TAB_TO_API_KEY[componentClass] ?? componentClass.toLowerCase() + 's'
       qc.invalidateQueries({ queryKey: [tableKey] })
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'undoInfo') })
+      qc.invalidateQueries({ queryKey: nk(projectId, 'undoInfo') })
       qc.invalidateQueries({ queryKey: ['changelog'] })
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'results') })
+      qc.invalidateQueries({ queryKey: nk(projectId, 'results') })
       toast.success(`Updated ${r.updated} ${componentClass.toLowerCase()}(s)`)
-      setSelectedRows(new Set())
-      setEditCol(''); setEditValue('')
-    },
-    onError: (e: { response?: { data?: { detail?: string } } }) => {
-      const detail = e.response?.data?.detail ?? 'Bulk update failed'
-      toast.error(detail)
     },
   })
 
-  const onApply = () => {
-    if (!editCol) { toast.error('Pick a column first'); return }
-    if (selectedRows.size === 0) { toast.error('No rows selected'); return }
-    // Use the first non-null sample to type-coerce the value
-    const sample = data.find(r => r[editCol] != null)?.[editCol]
-    const value = coerceForColumn(editValue, sample)
-    confirmToast(
-      `Set ${editCol} = ${value === null ? '(unset)' : JSON.stringify(value)} on ${selectedRows.size} ${componentClass.toLowerCase()}(s)?`,
-      () => bulkMut.mutate({
-        component_class: componentClass,
-        names: [...selectedRows],
-        updates: { [editCol]: value },
-      }),
-      { confirmLabel: 'Apply' },
-    )
+  /**
+   * Issue one request for one gesture.
+   *
+   * `spaceUndo` is true for a paste or a fill: D11 requires each of those to
+   * get its OWN undo step, and the middleware coalesces pushes inside a 500 ms
+   * window (undo_service.py:55,90-102). Waiting out the remainder of that
+   * window is a client-side timing concern, deliberately not a server flag.
+   * Single-cell commits pass false and are allowed to coalesce (ruling 16).
+   */
+  /**
+   * Ask before any bulk write this large. Lives HERE, at the single chokepoint,
+   * rather than in `onPaste`: the guard used to cover the paste route only, so
+   * a Ctrl/Cmd+Enter fill — or a Ctrl/Cmd+click on a boolean — rewrote exactly
+   * the same rows with no prompt. Same blast radius, same question.
+   */
+  const applyBulk = async (rows: BulkRow[], spaceUndo = false) => {
+    if (rows.length === 0) return
+    if (rows.length > BULK_CONFIRM_ROWS) {
+      // D18: a confirmToast, never a Dialog — Dialog.tsx:148 is capture-phase
+      // AND calls stopPropagation, so while one is open it swallows the grid's
+      // Escape.
+      confirmToast(
+        `Apply this change to ${rows.length} rows?`,
+        () => { void runBulk(rows, spaceUndo) },
+        { confirmLabel: 'Apply' },
+      )
+      return
+    }
+    return runBulk(rows, spaceUndo)
+  }
+
+  const runBulk = async (rows: BulkRow[], spaceUndo = false) => {
+    if (rows.length === 0) return
+    const first = JSON.stringify(rows[0].updates)
+    const sameEverywhere = rows.every(r => JSON.stringify(r.updates) === first)
+
+    if (spaceUndo) {
+      const elapsed = Date.now() - lastMutationAtRef.current
+      if (lastMutationAtRef.current > 0 && elapsed < 500) {
+        await new Promise(res => setTimeout(res, 500 - elapsed))
+      }
+    }
+
+    // The scalar form whenever every row gets the same value in every column
+    // (every fill gesture); the row form otherwise. One gesture is always
+    // exactly one request (D9).
+    bulkMut.mutate(sameEverywhere
+      ? { component_class: componentClass, names: rows.map(r => r.name), updates: rows[0].updates }
+      : { component_class: componentClass, rows })
+  }
+
+  /**
+   * The single commit path for a typed editor (D4). `fill` means the value
+   * applies to the whole paste target (Ctrl/Cmd+Enter, or Ctrl/Cmd+click on a
+   * boolean), not just this row.
+   */
+  const commitCell = (
+    rowName: string, col: string, raw: string, fill: boolean, advance = false,
+  ) => {
+    setEditing(null)
+    const row = sorted.find(r => r.name === rowName)
+    const currentText = row?.[col] == null ? '' : String(row[col])
+    // No round-trip when the committed text equals the cell's current display
+    // text — the same skip the old CarriersTable did (criterion 2). The move
+    // still happens: Enter advanced the cursor whether or not anything changed.
+    if (!fill && raw === currentText) {
+      if (advance) moveActive(1, 0)
+      return
+    }
+
+    const result = validateAndCoerce(col, raw, {
+      componentClass, catalog, busNames: new Set(busNames),
+    })
+    // Deliberately no advance on a rejection: the cell keeps focus so the user
+    // can correct the value they just typed.
+    if (!result.ok) { toast.error(result.error); return }
+
+    const targets = fill && selectedRows.size > 0 ? [...selectedRows] : [rowName]
+    applyBulk(targets.map(n => ({ name: n, updates: { [col]: result.value } })))
+    if (advance) moveActive(1, 0)
+  }
+
+  /**
+   * The paste target (D7): the checkbox selection if non-empty, otherwise the
+   * active cell's row — in `sorted` order, NOT `displayed`, so rows past the
+   * 1000-row render cap are included (criterion 4).
+   */
+  const pasteTargetRows = useCallback((): string[] => {
+    if (selectedRows.size > 0) {
+      return sorted.map(r => r.name as string).filter(n => selectedRows.has(n))
+    }
+    return active ? [active.name] : []
+  }, [selectedRows, sorted, active])
+
+  /** True when a column's values are text, i.e. injection-guard territory. */
+  const isStringColumn = useCallback((col: string): boolean => {
+    const attr = catalog.get(col)
+    if (!attr) return true
+    return !isNumericDtype(attr.dtype) && !isBooleanDtype(attr.dtype)
+  }, [catalog])
+
+  const onCopy = (e: React.ClipboardEvent) => {
+    if (editing) return                        // native input copy
+    const rows = pasteTargetRows()
+    if (!active || rows.length === 0) return
+    e.preventDefault()
+    const cols = selectedRows.size > 0 ? visibleCols : [active.col]
+    const matrix = rows.map(rowName => {
+      const row = sorted.find(r => r.name === rowName)
+      return cols.map(c => guardCell(
+        row?.[c] == null ? '' : String(row[c]), isStringColumn(c),
+      ))
+    })
+    e.clipboardData.setData('text/plain', serialiseTsv(matrix))
+  }
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    if (editing) return                        // native input paste
+    if (!active) return
+    e.preventDefault()
+
+    const matrix = parseTsv(e.clipboardData.getData('text/plain'))
+    const targets = pasteTargetRows()
+    const startCol = visibleCols.indexOf(active.col)
+    const columnsAvailable = Math.max(visibleCols.length - startCol, 0)
+    const shape = resolvePasteShape(matrix, targets.length, columnsAvailable)
+    if (shape.kind === 'reject') { toast.error(shape.message); return }
+
+    // Expand every shape into the same (row, col, raw) list so validation and
+    // the no-op skip have exactly one implementation (D7, D8).
+    const cells: { name: string; col: string; raw: string }[] = []
+    if (shape.kind === 'fill') {
+      for (const nm of targets) cells.push({ name: nm, col: active.col, raw: shape.value })
+    } else if (shape.kind === 'rowwise') {
+      targets.forEach((nm, i) => cells.push({ name: nm, col: active.col, raw: shape.values[i] }))
+    } else {
+      targets.forEach((nm, i) => shape.matrix[i].forEach((raw, j) => {
+        cells.push({ name: nm, col: visibleCols[startCol + j], raw })
+      }))
+    }
+
+    // Whole-batch validation (D8): editability first, then the value.
+    const offenders: string[] = []
+    const accepted: { name: string; col: string; value: unknown }[] = []
+    for (const cell of cells) {
+      const ed = editabilityOf(cell.name, cell.col)
+      if (!ed.editable) { offenders.push(`${cell.name} / ${cell.col}`); continue }
+      const raw = unguardCell(cell.raw, isStringColumn(cell.col))
+      const result = validateAndCoerce(cell.col, raw, {
+        componentClass, catalog, busNames: new Set(busNames),
+      })
+      if (!result.ok) { offenders.push(`${cell.name} / ${cell.col}`); continue }
+      const row = sorted.find(r => r.name === cell.name)
+      const currentText = row?.[cell.col] == null ? '' : String(row[cell.col])
+      if (raw === currentText) continue                    // no-op, criterion 3
+      accepted.push({ name: cell.name, col: cell.col, value: result.value })
+    }
+
+    if (offenders.length > 0) {
+      const shown = offenders.slice(0, 5).join(', ')
+      const rest = offenders.length > 5 ? ` and ${offenders.length - 5} more` : ''
+      toast.error(`Paste rejected — cannot write ${shown}${rest}.`)
+      return
+    }
+    if (accepted.length === 0) { toast('No changes'); return }
+
+    // Group by row so one gesture is one request (D9).
+    const byRow = new Map<string, Record<string, unknown>>()
+    for (const a of accepted) {
+      const existing = byRow.get(a.name) ?? {}
+      existing[a.col] = a.value
+      byRow.set(a.name, existing)
+    }
+    const rows = [...byRow].map(([name, updates]) => ({ name, updates }))
+
+    // The >200 confirmation now lives in applyBulk, so every route to a bulk
+    // write is guarded by one check instead of this one path.
+    applyBulk(rows, true)                                  // true → D11 spacing
   }
 
   useEffect(() => {
@@ -430,35 +957,16 @@ function AssetTable({
           )}
         </div>
 
+        {/* The select-a-column-and-type-a-value toolbar is gone (D29): paste
+            respects the row selection and Ctrl/Cmd+Enter fills it, so the
+            capability survives with a better interface. */}
         {selectedRows.size > 0 ? (
           <>
             <span className="text-muted">·</span>
             <span className="font-medium text-text">{selectedRows.size} selected</span>
-            <span className="text-muted">·</span>
-            <span className="text-muted">Set</span>
-            <select
-              value={editCol}
-              onChange={e => setEditCol(e.target.value)}
-              className="px-1.5 py-0.5 border border-border rounded bg-bg font-mono text-[11px]"
-            >
-              <option value="">(column)</option>
-              {availableCols.filter(c => c !== 'name').map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <span className="text-muted">to</span>
-            <input
-              value={editValue}
-              onChange={e => setEditValue(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') onApply() }}
-              placeholder="value"
-              className="px-1.5 py-0.5 border border-border rounded bg-bg font-mono text-[11px] w-32"
-            />
-            <button
-              onClick={onApply}
-              disabled={bulkMut.isPending || !editCol}
-              className="px-2 py-0.5 bg-accent text-white rounded text-[11px] font-medium hover:bg-accent/90 disabled:opacity-40"
-            >{bulkMut.isPending ? 'Applying…' : 'Apply'}</button>
+            <span className="text-muted">
+              ·  Paste to write every selected row, or Ctrl/Cmd+Enter in a cell to fill them.
+            </span>
             <button
               onClick={() => setSelectedRows(new Set())}
               className="text-muted hover:text-danger flex items-center gap-0.5"
@@ -466,12 +974,18 @@ function AssetTable({
             ><X size={11} /></button>
           </>
         ) : (
-          <span className="text-muted">·  Click checkboxes to select rows for bulk edit (shift-click for range).</span>
+          <span className="text-muted">
+            ·  Click a cell to select it, double-click or press Enter to edit.
+            Select rows to paste or fill across many.
+          </span>
         )}
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto">
+      {/* Table. Copy/paste are bound here rather than on each cell so a paste
+          anywhere in the grid is caught, and via ClipboardEvent rather than
+          navigator.clipboard — no secure context, no gesture permission, no
+          Firefox prompt (spec D6). */}
+      <div className="flex-1 overflow-auto" onCopy={onCopy} onPaste={onPaste}>
         <table className="w-full text-xs border-collapse" style={{ minWidth: 'max-content' }}>
           <thead>
             <tr className="sticky top-0 bg-panel z-10 border-b border-border">
@@ -484,9 +998,13 @@ function AssetTable({
                 <th
                   key={col}
                   onClick={() => handleSort(col)}
+                  // D15: a curated COL_LABELS entry wins; otherwise the catalog
+                  // unit is appended, so Lines read `r (Ohm)`. The tooltip
+                  // additionally states the per-km split for r/x/b.
+                  title={columnHeaderTooltip(componentClass, col, catalog) ?? undefined}
                   className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wide cursor-pointer hover:text-text whitespace-nowrap select-none"
                 >
-                  {COL_LABELS[col] ?? col}
+                  {columnHeaderLabel(col, catalog, COL_LABELS)}
                   {sortCol === col && (
                     <span className="ml-0.5 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>
                   )}
@@ -524,10 +1042,73 @@ function AssetTable({
                   {visibleCols.map(col => (
                     <td
                       key={col}
-                      className={`px-2 font-mono whitespace-nowrap text-[11px] ${isSelected ? 'text-text' : 'text-text'}`}
+                      ref={el => { cellRefs.current[cellKey(name, col)] = el }}
+                      data-row={name}
+                      data-col={col}
+                      // Roving tabindex (D19): exactly one cell is tabbable, so
+                      // focus stays on a real element and blur-commit works.
+                      tabIndex={active?.name === name && active?.col === col ? 0 : -1}
+                      // No stopPropagation: the row's own onClick still opens
+                      // the properties panel, which is existing behaviour.
+                      onClick={() => setActive({ name, col })}
+                      // Double-click edits; a single click only selects. Both
+                      // halves are load-bearing: onCopy/onPaste bail while an
+                      // editor is open, so if a single click opened one the
+                      // multi-row paste flow would be unreachable by mouse.
+                      onDoubleClick={() => {
+                        if (editabilityOf(name, col).editable) {
+                          setEditing({ name, col })
+                        }
+                      }}
+                      onKeyDown={e => onCellKeyDown(e, name, col)}
+                      className={cellClass(name, col)}
                       style={{ paddingBlock: 'var(--row-padding-y)' }}
                     >
-                      {fmt(row[col])}
+                      {/* Editors are disabled while a write is in flight — the
+                          ModelHorizon.tsx:907-913 pattern, which prevents a
+                          double-blur race. */}
+                      {editing?.name === name && editing?.col === col && !bulkMut.isPending ? (
+                        <CellEditor
+                          componentClass={componentClass}
+                          column={col}
+                          initial={row[col] == null ? '' : String(row[col])}
+                          seed={editing.seed}
+                          busNames={busNames}
+                          catalog={catalog}
+                          onCommit={(raw, fill, advance) =>
+                            commitCell(name, col, raw, fill, advance)}
+                          onCancel={() => setEditing(null)}
+                        />
+                      ) : isBooleanCell(col) ? (
+                        // The one exception to click-to-edit (D4): a checkbox
+                        // holds no draft, so there is nothing to open. Bounded
+                        // by boolean columns x 1000, at most two per tab.
+                        <input
+                          type="checkbox"
+                          checked={row[col] === true}
+                          disabled={!editabilityOf(name, col).editable}
+                          onClick={e => {
+                            e.stopPropagation()
+                            // Ctrl/Cmd+click is a FILL gesture over the paste
+                            // target, mirroring Ctrl/Cmd+Enter and preserving
+                            // the deleted toolbar's set-many-booleans ability.
+                            const modifier = e.ctrlKey || e.metaKey
+                            commitCell(name, col, row[col] === true ? 'false' : 'true', modifier)
+                          }}
+                          onChange={() => { /* commit happens in onClick */ }}
+                          className="cursor-pointer"
+                        />
+                      ) : seriesShadowed(name, col) ? (
+                        <span className="flex items-center gap-1">
+                          <span className="opacity-50">{fmt(row[col])}</span>
+                          <span
+                            title="A time series exists for this asset — the static value is not what the solver reads."
+                            className="px-1 rounded bg-border/40 text-[8px] uppercase tracking-wide"
+                          >series</span>
+                        </span>
+                      ) : (
+                        fmt(row[col])
+                      )}
                     </td>
                   ))}
                   <td className="w-7 px-1 whitespace-nowrap" style={{ paddingBlock: 'var(--row-padding-y)' }}>
@@ -547,111 +1128,6 @@ function AssetTable({
         </table>
       </div>
     </div>
-  )
-}
-
-// ── SimpleTable (legacy, retained for any future read-only callers) ──────────
-
-function SimpleTable({
-  columns, data, selectedName, onRowClick,
-}: {
-  columns: string[]
-  data: Record<string, unknown>[]
-  selectedName?: string | null
-  onRowClick: (row: Record<string, unknown>) => void
-}) {
-  const [sortCol, setSortCol] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({})
-
-  useEffect(() => {
-    if (!selectedName) return
-    rowRefs.current[selectedName]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [selectedName])
-
-  const sorted = useMemo(() => {
-    if (!sortCol) return data
-    return [...data].sort((a, b) => {
-      const av = a[sortCol], bv = b[sortCol]
-      if (av == null && bv == null) return 0
-      if (av == null) return 1
-      if (bv == null) return -1
-      const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true })
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-  }, [data, sortCol, sortDir])
-
-  const handleSort = (col: string) => {
-    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortCol(col); setSortDir('asc') }
-  }
-
-  const fmt = (v: unknown): string => {
-    if (v == null) return '–'
-    if (typeof v === 'boolean') return v ? '✓' : '–'
-    if (typeof v === 'number') {
-      if (!isFinite(v)) return '–'
-      return Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/\.?0+$/, '')
-    }
-    return String(v)
-  }
-
-  if (data.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-16 text-muted text-xs">
-        No data
-      </div>
-    )
-  }
-
-  return (
-    <table className="w-full text-xs border-collapse" style={{ minWidth: 'max-content' }}>
-      <thead>
-        <tr className="sticky top-0 bg-panel z-10 border-b border-border">
-          {columns.map(col => (
-            <th
-              key={col}
-              onClick={() => handleSort(col)}
-              className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wide cursor-pointer hover:text-text whitespace-nowrap select-none"
-            >
-              {COL_LABELS[col] ?? col}
-              {sortCol === col && (
-                <span className="ml-0.5 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>
-              )}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((row, i) => {
-          const name = row.name as string
-          const isSelected = selectedName === name
-          return (
-            <tr
-              key={name ?? i}
-              ref={el => { rowRefs.current[name] = el }}
-              onClick={() => onRowClick(row)}
-              className={`border-b border-border/40 cursor-pointer transition-colors
-                ${isSelected
-                  ? 'bg-accent/10 hover:bg-accent/15'
-                  : i % 2 === 0
-                  ? 'bg-bg hover:bg-accent/5'
-                  : 'bg-panel hover:bg-accent/5'}`}
-            >
-              {columns.map(col => (
-                <td
-                  key={col}
-                  className={`px-2 font-mono whitespace-nowrap text-[11px] ${isSelected ? 'text-text' : 'text-text'}`}
-                  style={{ paddingBlock: 'var(--row-padding-y)' }}
-                >
-                  {fmt(row[col])}
-                </td>
-              ))}
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
   )
 }
 
@@ -1028,210 +1504,29 @@ export default function BottomPanel() {
             <SolverLog />
           ) : activeTab === 'History' ? (
             <ChangeHistory />
-          ) : activeTab === 'Carriers' ? (
-            <CarriersTable rows={tableData.Carriers} />
           ) : (
-            <AssetTable
-              tab={activeTab}
-              componentClass={TAB_TYPES[activeTab] ?? ''}
-              data={tableData[activeTab]}
-              defaultColumns={TAB_COLUMNS[activeTab]}
-              selectedName={selectedName}
-              onRowClick={handleRowClick}
-            />
+            <>
+              <AssetTable
+                tab={activeTab}
+                componentClass={TAB_TYPES[activeTab] ?? ''}
+                data={tableData[activeTab]}
+                defaultColumns={TAB_COLUMNS[activeTab]}
+                selectedName={selectedName}
+                onRowClick={handleRowClick}
+              />
+              {activeTab === 'Carriers' && (
+                // Carried over from the deleted CarriersTable — the one piece
+                // of that component the shared grid has no place for (D16).
+                <p className="text-[10px] text-muted px-2 py-1.5 border-t border-border bg-bg-2/50">
+                  CO₂ values are per MWh of <em>primary</em> energy — output-MWh
+                  intensity is computed in the Emissions tab as
+                  <code> co2_emissions / efficiency</code>.
+                </p>
+              )}
+            </>
           )}
         </div>
       )}
-    </div>
-  )
-}
-
-// ── CarriersTable ──────────────────────────────────────────────────────────
-// Inline-editable table for `n.carriers`. Each cell is its own controlled
-// input that calls PUT /api/network/carriers/{name} on blur. The generic
-// AssetTable doesn't do inline edit (it relies on bulk-edit toolbar), but
-// for a small N (~10-30 carriers, typically) per-cell typing is the
-// natural interaction.
-//
-// Editable columns: co2_emissions (number), nice_name / color / unit
-// (string). Name is read-only — renaming a carrier means touching every
-// asset that references it, which would silently break dispatch.
-interface CarriersTableProps {
-  rows: Array<Record<string, unknown>>
-}
-
-function CarriersTable({ rows }: CarriersTableProps) {
-  const qc = useQueryClient()
-  const [draftValues, setDraftValues] = useState<Record<string, string>>({})
-
-  const updateMut = useMutation({
-    mutationFn: ({ name, body }: { name: string; body: Record<string, unknown> }) =>
-      networkApi.updateCarrier(name, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'carriers') })
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'undoInfo') })
-      // The carriers DataFrame is referenced by every result endpoint that
-      // groups by carrier — invalidate those too so the next render sees
-      // the new CO2 intensity / nice_name without a manual refresh.
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'results') })
-    },
-    onError: (e: { response?: { data?: { detail?: unknown } } }) => {
-      // FastAPI returns `detail: string` for HTTPException, but `detail: [
-      // {type, loc, msg, input}, ...]` for Pydantic validation failures.
-      // Passing the raw array to react-hot-toast crashes React because
-      // it tries to render objects as JSX children. Coerce to a string
-      // before display.
-      const raw = e?.response?.data?.detail
-      const msg = typeof raw === 'string'
-        ? raw
-        : Array.isArray(raw)
-          // Validation array: surface every msg with its field path.
-          ? raw.map((d) => {
-              const r = d as { loc?: unknown[]; msg?: string }
-              const field = Array.isArray(r.loc) ? r.loc.slice(1).join('.') : ''
-              return field ? `${field}: ${r.msg ?? 'invalid'}` : (r.msg ?? 'invalid')
-            }).join(' · ')
-          : 'Failed to update carrier'
-      toast.error(msg)
-    },
-  })
-
-  const draftKey = (name: string, col: string) => `${name}|${col}`
-
-  const commit = (name: string, col: string, raw: string, current: unknown) => {
-    const key = draftKey(name, col)
-    // Strip the draft regardless of outcome — the input falls back to the
-    // backend value via the React Query cache invalidation above.
-    setDraftValues(d => { const c = { ...d }; delete c[key]; return c })
-    let next: unknown
-    if (col === 'co2_emissions') {
-      if (raw.trim() === '') { next = 0 }
-      else {
-        const v = Number(raw)
-        if (!Number.isFinite(v) || v < 0) {
-          toast.error('CO₂ emissions must be a non-negative number')
-          return
-        }
-        next = v
-      }
-    } else {
-      next = raw
-    }
-    // Skip the round-trip when the value didn't actually change. Compare as
-    // strings to avoid the 0 vs 0.0 / int vs float false-positives.
-    if (String(next) === String(current ?? '')) return
-    // Build the full carrier object from the React Query cache so the
-    // backend's remove+add cycle (in `_update_component`) doesn't reset
-    // the other columns (`color`, `nice_name`, `unit`, `co2_emissions`)
-    // to schema defaults. Same pattern as the PropertiesPanel cards.
-    const cached = qc.getQueryData<Array<Record<string, unknown>>>(nk(useUIStore.getState().currentProject, 'carriers')) ?? []
-    const row = cached.find(c => c.name === name) ?? rows.find(r => r.name === name) ?? { name }
-    updateMut.mutate({ name, body: { ...row, [col]: next } })
-  }
-
-  const cellInput = (name: string, col: string, value: unknown, kind: 'number' | 'string') => {
-    const key = draftKey(name, col)
-    const displayValue = draftValues[key] !== undefined
-      ? draftValues[key]
-      : (value == null ? '' : String(value))
-    return (
-      <input
-        // Force remount when the cached value changes so the field re-syncs
-        // after a refetch (otherwise React reuses the old DOM element and
-        // the typed-then-reset cycle leaks stale text — a documented
-        // PyPSA-GUI footgun for uncontrolled inputs).
-        key={`${key}-${value ?? ''}`}
-        type={kind === 'number' ? 'number' : 'text'}
-        step={kind === 'number' ? 'any' : undefined}
-        min={kind === 'number' && col === 'co2_emissions' ? 0 : undefined}
-        value={displayValue}
-        onChange={e => setDraftValues(d => ({ ...d, [key]: e.target.value }))}
-        onBlur={() => commit(name, col, displayValue, value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-          if (e.key === 'Escape') {
-            setDraftValues(d => { const c = { ...d }; delete c[key]; return c })
-            ;(e.target as HTMLInputElement).blur()
-          }
-        }}
-        className="w-full px-1.5 py-0.5 border border-transparent rounded text-[11px] font-mono bg-transparent
-                   focus:bg-bg focus:border-accent hover:border-border"
-        placeholder={kind === 'number' ? '0' : ''}
-      />
-    )
-  }
-
-  if (rows.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-32 text-muted text-xs gap-1">
-        <span>No carriers yet.</span>
-        <span className="text-[10px]">Set a generator's <code>carrier</code> field to auto-create one.</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="overflow-auto h-full">
-      <table className="w-full text-xs border-collapse" style={{ minWidth: 'max-content' }}>
-        <thead>
-          <tr className="sticky top-0 bg-panel z-10 border-b border-border">
-            <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap">Name</th>
-            <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap"
-                title="Carrier CO₂ intensity, tCO₂ per MWh of primary energy. The Emissions tab divides by generator efficiency to get tCO₂ per MWh of output.">
-              CO₂ (t/MWh primary)
-            </th>
-            <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap">Display name</th>
-            <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap">Color</th>
-            <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase whitespace-nowrap">Unit</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => {
-            const name = row.name as string
-            return (
-              <tr key={name ?? i}
-                  className={`border-b border-border/40 ${i % 2 === 0 ? 'bg-bg' : 'bg-panel'}`}>
-                <td className="px-2 py-0.5 font-mono text-[11px] text-text whitespace-nowrap" title="Rename via a per-asset workflow only — changing the key here would silently break every reference.">
-                  {name}
-                </td>
-                <td className="px-1 py-0.5 text-right">
-                  {cellInput(name, 'co2_emissions', row.co2_emissions, 'number')}
-                </td>
-                <td className="px-1 py-0.5">
-                  {cellInput(name, 'nice_name', row.nice_name, 'string')}
-                </td>
-                <td className="px-1 py-0.5 flex items-center gap-1">
-                  <input
-                    type="color"
-                    value={(row.color as string) || '#888888'}
-                    onChange={e => {
-                      // Color picker fires every keystroke — buffer in the
-                      // draft, commit on blur for a single PUT per change.
-                      setDraftValues(d => ({ ...d, [draftKey(name, 'color')]: e.target.value }))
-                    }}
-                    onBlur={() => {
-                      const k = draftKey(name, 'color')
-                      const v = draftValues[k]
-                      if (v !== undefined) commit(name, 'color', v, row.color)
-                    }}
-                    className="w-6 h-5 rounded border border-border cursor-pointer"
-                  />
-                  {cellInput(name, 'color', row.color, 'string')}
-                </td>
-                <td className="px-1 py-0.5">
-                  {cellInput(name, 'unit', row.unit, 'string')}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      <p className="text-[10px] text-muted px-2 py-1.5 border-t border-border bg-bg-2/50">
-        Click any cell to edit. <kbd className="px-1 border border-border rounded text-[9px] font-mono">Enter</kbd> saves,
-        {' '}<kbd className="px-1 border border-border rounded text-[9px] font-mono">Esc</kbd> reverts.
-        CO₂ values are per MWh of <em>primary</em> energy — output-MWh intensity is computed in the Emissions tab as
-        <code> co2_emissions / efficiency</code>.
-      </p>
     </div>
   )
 }

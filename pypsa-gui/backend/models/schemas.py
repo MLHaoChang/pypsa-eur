@@ -28,7 +28,11 @@ _NoneToOne = Annotated[float, BeforeValidator(
 
 
 class BusCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
     name: str
     v_nom: float = 1.0
     carrier: str = "AC"
@@ -41,6 +45,11 @@ class BusCreate(BaseModel):
 
 
 class CarrierCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     # `name` is required on POST (the URL has no name) but OPTIONAL on PUT
     # (the URL carries the name, body is the partial update). Pydantic
     # marks `name` Optional with a None default so PUT /carriers/{name}
@@ -54,6 +63,11 @@ class CarrierCreate(BaseModel):
 
 
 class LineCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus0: str
     bus1: str
@@ -98,6 +112,11 @@ class ImpedanceRescaleRequest(BaseModel):
 
 
 class LinkCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus0: str
     bus1: str
@@ -132,6 +151,11 @@ class LinkCreate(BaseModel):
 
 
 class GeneratorCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     carrier: str = ""
@@ -182,6 +206,11 @@ class GeneratorCreate(BaseModel):
 
 
 class StorageUnitCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     carrier: str = ""
@@ -213,6 +242,11 @@ class StorageUnitCreate(BaseModel):
 
 
 class StoreCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     carrier: str = ""
@@ -237,6 +271,11 @@ class StoreCreate(BaseModel):
 
 
 class LoadCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     carrier: str = ""
@@ -246,6 +285,11 @@ class LoadCreate(BaseModel):
 
 
 class TransformerCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus0: str
     bus1: str
@@ -285,6 +329,11 @@ class TransformerCreate(BaseModel):
 
 
 class ShuntImpedanceCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     bus: str
     g: float = 0.0
@@ -328,6 +377,11 @@ class InvestmentPeriods(BaseModel):
 # `sense` is one of "<=" / ">=" / "==". `investment_period` only applies in
 # multi-period setups.
 class GlobalConstraintCreate(BaseModel):
+    # extra='allow' lets an attribute the model does not declare survive
+    # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
+    # at _create_component / _update_component (spec D21) — the two ship
+    # together, because allow without the whitelist lets any key reach n.add().
+    model_config = ConfigDict(extra='allow')
     name: str
     type: str = "primary_energy"
     sense: str = "<="

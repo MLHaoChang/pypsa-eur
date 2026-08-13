@@ -9,6 +9,7 @@ import {
 import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import { useUIStore } from '../store/uiStore'
+import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import { isRenewableCarrier } from '../utils/carriers'
 import { ingestRescale } from '../utils/rescaleActions'
@@ -59,6 +60,9 @@ import {
   MiniProfileChart,
   CardShell,
   EditShell,
+  ExtrasSection,
+  extrasPatch,
+  seedExtras,
 } from "./properties/cardKit"
 
 // ── Delete undo toast ──────────────────────────────────────────────────────────
@@ -96,7 +100,9 @@ function showDeleteUndoToast(label: string, qc: QueryClient) {
 }
 
 // ── Generator card ─────────────────────────────────────────────────────────────
-function GeneratorCard({ gen, onRename, mode = 'card', title }: {
+// Exported so the card can be rendered in isolation by
+// PropertiesPanel.save.test.tsx. Props and behaviour are unchanged.
+export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   gen: Generator
   onRename?: (newName: string) => void
   mode?: 'card' | 'detail'
@@ -191,6 +197,9 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       // null ⇒ NaN on the asset ⇒ solver fills with global at solve time.
       const drPct = no(form, 'discount_rate_pct')
       payload.discount_rate = drPct === null ? null : drPct / 100
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Generator'))))
       return networkApi.updateGenerator(gen.name, payload)
     },
     onSuccess: () => {
@@ -213,12 +222,12 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     // Pre-fill lifetime from solver-config global when blank/inf — matches
     // user expectation that "all assets default to the global lifetime".
     base.lifetime = defaultLifetime(gen.lifetime, globalLt)
-    setForm({
+    setForm(seedExtras(gen, {
       ...base,
       discount_rate_pct: discountRatePct(gen.discount_rate),
       // Control mode: blank if unset (treat as default 'PQ' on save).
       control: gen.control || 'PQ',
-    })
+    }, loadExtras(editScope('Generator'))))
     setOpen(true)
   }
 
@@ -425,6 +434,12 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
                 tip="Minimum total energy produced over the snapshot horizon. PyPSA: e_sum_min ≤ Σ_t (p_t × weight_t). Blank = no lower bound." />
       <NumInput label="E sum max" k="e_sum_max" fs={form} set={setForm} unit="MWh"
                 tip="Maximum total energy produced over the snapshot horizon. PyPSA: Σ_t (p_t × weight_t) ≤ e_sum_max. Blank = no upper bound." />
+      <ExtrasSection
+        componentClass="Generator"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -491,6 +506,9 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       payload.lifetime = no(form, 'lifetime')
       const drPct = no(form, 'discount_rate_pct')
       payload.discount_rate = drPct === null ? null : drPct / 100
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('StorageUnit'))))
       return networkApi.updateStorageUnit(su.name, payload)
     },
     onSuccess: () => {
@@ -511,10 +529,10 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       'inflow',
       'marginal_cost', 'capital_cost', 'fom_cost', 'overnight_cost', 'build_year'])
     base.lifetime = defaultLifetime(su.lifetime, globalLt)
-    setForm({
+    setForm(seedExtras(su, {
       ...base,
       discount_rate_pct: discountRatePct(su.discount_rate),
-    })
+    }, loadExtras(editScope('StorageUnit'))))
     setOpen(true)
   }
 
@@ -639,6 +657,12 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('storage_unit.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
+      <ExtrasSection
+        componentClass="StorageUnit"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -700,6 +724,9 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       // blank to fall back to the solver's default_lifetime at solve time.
       payload.build_year = ni(form, 'build_year', current.build_year ?? 0)
       payload.lifetime = no(form, 'lifetime')
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Store'))))
       return networkApi.updateStore(store.name, payload)
     },
     onSuccess: () => {
@@ -717,7 +744,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       'e_min_pu', 'e_max_pu', 'e_initial', 'e_cyclic', 'capital_cost', 'marginal_cost', 'fom_cost',
       'overnight_cost', 'standing_loss', 'build_year'])
     base.lifetime = defaultLifetime(store.lifetime, globalLt)
-    setForm({ ...base, discount_rate_pct: discountRatePct(store.discount_rate) })
+    setForm(seedExtras(store, { ...base, discount_rate_pct: discountRatePct(store.discount_rate) }, loadExtras(editScope('Store'))))
     setOpen(true)
   }
 
@@ -825,6 +852,12 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       <SectionHdr title="Lifecycle (multi-period)" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('store.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
+      <ExtrasSection
+        componentClass="Store"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -898,7 +931,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    setForm(toFS(load, ['name', 'bus', 'carrier', 'p_set', 'q_set', 'sign']))
+    setForm(seedExtras(load, toFS(load, ['name', 'bus', 'carrier', 'p_set', 'q_set', 'sign']), loadExtras(editScope('Load'))))
     setOpen(true)
   }
 
@@ -984,6 +1017,12 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
             : 'No profile — static p_set used'}
         </span>
       </div>
+      <ExtrasSection
+        componentClass="Load"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -1099,6 +1138,9 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       payload.overnight_cost = no(form, 'overnight_cost')
       const drPct = no(form, 'discount_rate_pct')
       payload.discount_rate = drPct === null ? null : drPct / 100
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
       return networkApi.updateLink(link.name, payload)
     },
     onSuccess: () => {
@@ -1116,10 +1158,10 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       'p_min_pu', 'p_max_pu', 'efficiency', 'marginal_cost', 'capital_cost', 'fom_cost',
       'overnight_cost', 'build_year', 'lifetime'])
     base.lifetime = defaultLifetime(link.lifetime, globalLt)
-    setForm({
+    setForm(seedExtras(link, {
       ...base,
       discount_rate_pct: discountRatePct(link.discount_rate),
-    })
+    }, loadExtras(editScope('Link'))))
     setOpen(true)
   }
 
@@ -1296,6 +1338,12 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('link.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('link.lifetime')} />
+      <ExtrasSection
+        componentClass="Link"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -1541,7 +1589,7 @@ function BusPanel({ name }: { name: string }) {
 
   const startEdit = () => {
     if (!bus) return
-    setForm(toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']))
+    setForm(seedExtras(bus, toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']), loadExtras(editScope('Bus'))))
     setEditing(true)
   }
 
@@ -1640,6 +1688,12 @@ function BusPanel({ name }: { name: string }) {
           <CoordPairInput fs={form} set={setForm} tip={docTip('bus.coordinates')} />
           <NumInput label="Longitude (x)" k="x" fs={form} set={setForm} tip={docTip('bus.x')} />
           <NumInput label="Latitude (y)" k="y" fs={form} set={setForm} tip={docTip('bus.y')} />
+          <ExtrasSection
+            componentClass="Bus"
+            fs={form}
+            set={setForm}
+            curated={Object.keys(form)}
+          />
         </EditShell>
       )}
 
@@ -1786,6 +1840,9 @@ function LinePanel({ name }: { name: string }) {
       } else {
         payload.lifetime = null
       }
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Line'))))
       return networkApi.updateLine(name, payload)
     },
     onSuccess: () => {
@@ -1971,6 +2028,12 @@ function LinePanel({ name }: { name: string }) {
               Cancel
             </button>
           </div>
+          <ExtrasSection
+            componentClass="Line"
+            fs={form}
+            set={setForm}
+            curated={Object.keys(form)}
+          />
         </Section>
       ) : (
         <>
@@ -2099,6 +2162,9 @@ function TransformerPanel({ name }: { name: string }) {
       } else {
         payload.lifetime = null
       }
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Transformer'))))
       return networkApi.updateTransformer(name, payload)
     },
     onSuccess: () => {
@@ -2226,6 +2292,12 @@ function TransformerPanel({ name }: { name: string }) {
               Cancel
             </button>
           </div>
+          <ExtrasSection
+            componentClass="Transformer"
+            fs={form}
+            set={setForm}
+            curated={Object.keys(form)}
+          />
         </Section>
       ) : (
         <>

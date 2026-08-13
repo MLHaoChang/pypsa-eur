@@ -21,14 +21,33 @@ import { ingestRescale } from '../utils/rescaleActions'
 import { useRescaleStore } from '../store/rescaleStore'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
 
+/**
+ * HTML-attribute escaping for the divIcon's `html` string. The marker markup
+ * is built as a string, so a bus called `A"B` would close the attribute early
+ * and the drop hit-test would recover the wrong name. Escaping & first is
+ * required — doing it later would double-escape the entities the other
+ * replacements introduce.
+ */
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 // Draggable bus marker. Mimics the previous CircleMarker visually (12 px,
 // 2 px coloured border, white fill) but uses a Marker + divIcon so leaflet
 // gives us the `draggable` capability and a `dragend` event. The cursor
 // changes to "grab" so users discover that the dot is draggable.
-function busDivIcon(color: string): L.DivIcon {
+//
+// `data-bus-name` is the drop hit-test's only handle on which bus was hit —
+// the same attribute TopologyCanvas's BusNode publishes, so hooks/
+// useAssetDrag.ts needs exactly one branch for both canvases (spec D25).
+export function busDivIcon(color: string, name: string): L.DivIcon {
   return L.divIcon({
     className: 'pypsa-bus-marker',
-    html: `<div style="width:12px;height:12px;border:2px solid ${color};background:#fff;border-radius:50%;box-sizing:border-box;cursor:grab;"></div>`,
+    html: `<div data-bus-name="${escapeAttr(name)}" style="width:12px;height:12px;border:2px solid ${color};background:#fff;border-radius:50%;box-sizing:border-box;cursor:grab;"></div>`,
     iconSize: [12, 12],
     iconAnchor: [6, 6],
   })
@@ -1084,7 +1103,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               key={bus.name}
               position={c}
               draggable
-              icon={busDivIcon(colour)}
+              icon={busDivIcon(colour, bus.name)}
               eventHandlers={{
                 click: () => setSelectedComponent({ type: 'Bus', name: bus.name }),
                 contextmenu: (e) => {

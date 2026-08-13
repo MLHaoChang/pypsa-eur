@@ -15,6 +15,12 @@ export interface CreationRequest {
   id: string
   label: string
   dropPosition?: { x: number; y: number }
+  // Bus the palette item was released over, from the [data-bus-name]
+  // attribute both canvases publish. CreationForm uses it to prefill the
+  // asset's terminal field (spec D27). Absent when the drop landed on empty
+  // canvas — dropping onto nothing must stay exactly as permissive as it is
+  // today, so this is optional and never validated here.
+  dropBusName?: string
 }
 // pendingNodePosition is a one-shot handoff used by the drag-drop flow.
 // CreationForm sets it after a successful create; TopologyCanvas reads it

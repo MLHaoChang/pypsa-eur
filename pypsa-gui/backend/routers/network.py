@@ -29,7 +29,7 @@ from models.schemas import (
 from db.models import Session as SessionRow
 from db.session import get_db
 from deps import current_session
-from services import active_project, change_log_service, vintage_service
+from services import active_project, attribute_catalog, change_log_service, vintage_service
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
@@ -154,12 +154,35 @@ def _filter_transient_names(component_class: str, names: list[str]) -> list[str]
     return [n for n in names if n not in transient]
 
 
+def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
+    """
+    Drop any key PyPSA does not recognise for this component class (spec D21).
+
+    Pydantic's `extra='allow'` lets an undeclared key survive
+    `model_dump(exclude_unset=True)` so a newly-exposed attribute can persist
+    instead of being silently ignored. Without a whitelist that same setting
+    would let an arbitrary key reach `n.add()`, so the two ship together.
+
+    A key passes if the catalog reports it as an Input attribute, OR it is
+    already a column on the frame. The second arm is what preserves today's
+    behaviour for fields a Create model declares but PyPSA marks Output —
+    narrowing to catalog-Input alone would be a silent behaviour change.
+    """
+    n = PyPSAService.get_network()
+    allowed = attribute_catalog.input_attributes(n, component_class)
+    if not allowed:
+        return kwargs
+    columns = set(getattr(n, attr).columns)
+    return {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+
+
 def _create_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
     # Dispatch invalidation lives in the undo middleware (main.py) — it runs
     # after every successful /api/network/* mutation, so cascade-delete,
     # /bulk writes, rename, and global-constraint mutations all benefit
     # without each having to call an invalidation helper here.
     n = PyPSAService.get_network()
+    kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name in df.index:
@@ -207,6 +230,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
     defaults via the destructive remove+add cycle.
     """
     n = PyPSAService.get_network()
+    kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name not in df.index:
@@ -414,6 +438,7 @@ class _RecomputeResult(NamedTuple):
     length WAS rewritten. A changelog that reports `len(previews)` undercounts
     whenever a zero-impedance line is among the ones touched.
     """
+
     updated: int
     previews: list[dict]
 
@@ -1928,21 +1953,109 @@ def reset_network(
 # changes (e.g. flipping `committable`) aren't supported here. For those, the
 # client should fall through to per-row PUT.
 
+def _coerce_bulk_value(df: pd.DataFrame, col: str, value: Any) -> Any:
+    """
+    Coerce one bulk value to `col`'s existing dtype.
+
+    Extracted verbatim from bulk_update's inline loop so the row-wise form
+    (spec D9) applies byte-identical semantics. Mechanical move — the blank
+    sentinels, the boolean vocabulary and the 400 message are unchanged, and
+    tests/test_bulk_update.py pins all three.
+
+    Without this, writing a string into a numeric column upcasts the whole
+    column to `object`, which then breaks `n.export_to_netcdf()` at save time
+    with a cryptic "object array contains mixed native types" ValueError.
+    """
+    col_dtype = df[col].dtype
+    if pd.api.types.is_bool_dtype(col_dtype):
+        if isinstance(value, str):
+            if value.strip().lower() in ("true", "1", "yes"):
+                value = True
+            elif value.strip().lower() in ("false", "0", "no"):
+                value = False
+        return bool(value) if value is not None else value
+    if pd.api.types.is_numeric_dtype(col_dtype):
+        if value is None or value == "":
+            # Blank-to-clear a bound should produce PyPSA's "no bound"
+            # sentinel (±inf), matching how the per-row PUT path clears the
+            # capacity/economic bounds via the schema aliases (_NoneToPosInf
+            # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
+            # endswith("_max") predicate is intentionally a superset: it also
+            # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
+            # v_ang_max) — clearing those to inf is likewise their PyPSA
+            # default, so the resulting network is valid. Everything else
+            # keeps NaN ("missing"), as before.
+            if col.endswith("_max") or col == "lifetime":
+                return float("inf")
+            if col == "e_sum_min":
+                return float("-inf")
+            return float("nan")            # pandas treats this as missing
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise HTTPException(400,
+                f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
+                f"value {value!r}.")
+    # Strings / objects pass through. We still cast to str if the user sent a
+    # number into a string column so dtype stays clean.
+    if pd.api.types.is_string_dtype(col_dtype) or pd.api.types.is_object_dtype(col_dtype):
+        return "" if value is None else str(value)
+    return value
+
+
 @router.patch("/_bulk")
 def bulk_update(body: dict) -> dict:
     component_class = body.get("component_class", "")
     names = body.get("names", [])
     updates = body.get("updates", {})
+    rows = body.get("rows")
 
     if component_class not in _COMPONENT_ATTRS:
         raise HTTPException(400, f"Unknown component_class '{component_class}'. "
             f"Expected one of: {', '.join(sorted(_COMPONENT_ATTRS))}.")
-    if not isinstance(names, list) or len(names) == 0:
-        raise HTTPException(400, "names must be a non-empty list")
-    if not isinstance(updates, dict) or len(updates) == 0:
-        raise HTTPException(400, "updates must be a non-empty object")
-    if "name" in updates:
-        raise HTTPException(400, "Bulk rename not supported. Use PUT /<component>/{name}.")
+
+    # Two body forms (spec D9). The scalar form applies one value per column to
+    # every named row; the row form carries a per-row patch, which is what a
+    # row-by-row paste needs and what `df.loc[names, col] = value` cannot say.
+    row_form = rows is not None
+    if row_form and (names or updates):
+        raise HTTPException(400, "Send either names+updates or rows, not both.")
+
+    if row_form:
+        if not isinstance(rows, list) or len(rows) == 0:
+            raise HTTPException(400, "rows must be a non-empty list")
+        pairs: list[tuple[str, dict]] = []
+        for i, entry in enumerate(rows):
+            if not isinstance(entry, dict):
+                raise HTTPException(400, f"rows[{i}] must be an object")
+            nm = entry.get("name")
+            up = entry.get("updates")
+            if not isinstance(nm, str) or not nm:
+                raise HTTPException(400, f"rows[{i}] needs a non-empty 'name'")
+            if not isinstance(up, dict) or len(up) == 0:
+                raise HTTPException(400, f"rows[{i}] needs a non-empty 'updates' object")
+            if "name" in up:
+                raise HTTPException(400,
+                    "Bulk rename not supported. Use PUT /<component>/{name}.")
+            pairs.append((nm, up))
+        name_strs = [nm for nm, _ in pairs]
+        # A duplicate name would make the result order-dependent and the undo
+        # step ambiguous. One gesture is one request; a client that targets the
+        # same row twice has a bug worth surfacing.
+        if len(set(name_strs)) != len(name_strs):
+            dupes = sorted({x for x in name_strs if name_strs.count(x) > 1})
+            raise HTTPException(400,
+                f"Duplicate row name(s) in rows: {', '.join(dupes[:5])}.")
+        touched_cols = {c for _, up in pairs for c in up}
+    else:
+        if not isinstance(names, list) or len(names) == 0:
+            raise HTTPException(400, "names must be a non-empty list")
+        if not isinstance(updates, dict) or len(updates) == 0:
+            raise HTTPException(400, "updates must be a non-empty object")
+        if "name" in updates:
+            raise HTTPException(400, "Bulk rename not supported. Use PUT /<component>/{name}.")
+        name_strs = [str(x) for x in names]
+        touched_cols = set(updates)
 
     attr = _COMPONENT_ATTRS[component_class]
     n = PyPSAService.get_network()
@@ -1950,7 +2063,6 @@ def bulk_update(body: dict) -> dict:
 
     # Resolve names. Bulk semantics: refuse the whole batch if any target is
     # missing — partial application would be hard to undo predictably.
-    name_strs = [str(x) for x in names]
     missing = [n_ for n_ in name_strs if n_ not in df.index]
     if missing:
         sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
@@ -1979,78 +2091,56 @@ def bulk_update(body: dict) -> dict:
     # Validate every column exists. PyPSA defines its full schema lazily — the
     # column may exist on the DataFrame even if no row has set it explicitly,
     # so this catches typos like "p_min_pu " (trailing space).
-    unknown_cols = [c for c in updates if c not in df.columns]
+    unknown_cols = [c for c in sorted(touched_cols) if c not in df.columns]
     if unknown_cols:
         raise HTTPException(400,
             f"{component_class} has no column(s): {', '.join(unknown_cols)}.")
 
-    # Coerce each value to the column's existing dtype. Without this, writing
-    # a string into a numeric column upcasts the whole column to `object`,
-    # which then breaks `n.export_to_netcdf()` at save time with a cryptic
-    # "object array contains mixed native types" ValueError. Reject up front
-    # so the failure happens at edit-time with a clear message rather than at
-    # save-time where the user has no idea which field is wrong.
+    # Coerce EVERYTHING before taking the lock, so a bad value in row 9 leaves
+    # rows 1-8 untouched. Same all-or-nothing contract the 404 above keeps.
+    coerced_rows: list[tuple[str, dict[str, Any]]] = []
     coerced: dict[str, Any] = {}
-    for col, value in updates.items():
-        col_dtype = df[col].dtype
-        if pd.api.types.is_bool_dtype(col_dtype):
-            if isinstance(value, str):
-                if value.strip().lower() in ("true", "1", "yes"):
-                    value = True
-                elif value.strip().lower() in ("false", "0", "no"):
-                    value = False
-            coerced[col] = bool(value) if value is not None else value
-            continue
-        if pd.api.types.is_numeric_dtype(col_dtype):
-            if value is None or value == "":
-                # Blank-to-clear a bound should produce PyPSA's "no bound"
-                # sentinel (±inf), matching how the per-row PUT path clears the
-                # capacity/economic bounds via the schema aliases (_NoneToPosInf
-                # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
-                # endswith("_max") predicate is intentionally a superset: it also
-                # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
-                # v_ang_max) — clearing those to inf is likewise their PyPSA
-                # default, so the resulting network is valid. Everything else
-                # keeps NaN ("missing"), as before.
-                if col.endswith("_max") or col == "lifetime":
-                    coerced[col] = float("inf")
-                elif col == "e_sum_min":
-                    coerced[col] = float("-inf")
-                else:
-                    coerced[col] = float("nan")  # pandas treats this as missing
-                continue
-            try:
-                coerced[col] = float(value)
-            except (TypeError, ValueError):
-                raise HTTPException(400,
-                    f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
-                    f"value {value!r}.")
-            continue
-        # Strings / objects pass through. We still cast to str if the user
-        # sent a number into a string column so dtype stays clean.
-        if pd.api.types.is_string_dtype(col_dtype) or pd.api.types.is_object_dtype(col_dtype):
-            coerced[col] = "" if value is None else str(value)
-            continue
-        coerced[col] = value
+    if row_form:
+        coerced_rows = [
+            (nm, {c: _coerce_bulk_value(df, c, v) for c, v in up.items()})
+            for nm, up in pairs
+        ]
+        new_carriers = [up["carrier"] for _, up in coerced_rows
+                        if isinstance(up.get("carrier"), str)]
+    else:
+        coerced = {
+            col: _coerce_bulk_value(df, col, value) for col, value in updates.items()
+        }
+        new_carriers = ([coerced["carrier"]]
+                        if isinstance(coerced.get("carrier"), str) else [])
 
     with PyPSAService.get_lock():
         # If the bulk update sets `carrier`, ensure the carrier row exists with
         # catalog metadata first — same auto-add behavior as PUT.
-        if component_class != "Carrier" and "carrier" in coerced:
-            new_carrier = coerced["carrier"]
-            if isinstance(new_carrier, str):
+        if component_class != "Carrier":
+            for new_carrier in new_carriers:
                 ensure_carrier(n, new_carrier)
-        for col, value in coerced.items():
-            df.loc[name_strs, col] = value
+        if row_form:
+            for nm, up in coerced_rows:
+                for col, value in up.items():
+                    df.loc[nm, col] = value
+        else:
+            for col, value in coerced.items():
+                df.loc[name_strs, col] = value
 
     # One audit entry per bulk op (not per component). Pretty-print the values
-    # so the History tab shows what changed at a glance.
-    pretty_updates = ", ".join(f"{k}={v}" for k, v in updates.items())
+    # so the History tab shows what changed at a glance. The row form cannot
+    # print every value, so it prints the shape instead.
+    if row_form:
+        description = f"Bulk: {len(touched_cols)} field(s) across {len(name_strs)} row(s)"
+        fields = sorted(touched_cols)
+    else:
+        description = "Bulk: " + ", ".join(f"{k}={v}" for k, v in updates.items())
+        fields = list(updates.keys())
     change_log_service.log(
-        "update", component_class, f"({len(name_strs)} items)",
-        f"Bulk: {pretty_updates}",
+        "update", component_class, f"({len(name_strs)} items)", description,
     )
-    return {"updated": len(name_strs), "fields": list(updates.keys())}
+    return {"updated": len(name_strs), "fields": fields}
 
 
 # ── Undo stack ─────────────────────────────────────────────────────────────────
@@ -3013,13 +3103,43 @@ def _parse_upload(content: bytes, filename: str) -> pd.DataFrame:
     df.index.name = "timestamp"
     return df
 
+# ── Attribute catalog ─────────────────────────────────────────────────────────
+
+@router.get("/catalog/{component}")
+def get_attribute_catalog(component: str) -> dict:
+    """
+    PyPSA's own attribute metadata for one component class (spec D3, D24).
+
+    Class-level and immutable at runtime, which is why the client caches it
+    under the unscoped key ['catalog', component] with staleTime: Infinity.
+    All catalog logic lives in services/attribute_catalog.py; this stays thin
+    per .cursor/rules/pypsa-gui-backend.mdc:10-12.
+    """
+    n = PyPSAService.get_network()
+    try:
+        attributes = attribute_catalog.catalog_for(n, component)
+    except KeyError:
+        raise HTTPException(
+            400,
+            f"Unknown component '{component}'. Expected one of: "
+            f"{', '.join(attribute_catalog.known_components())}.",
+        )
+    return {"component": component, "attributes": attributes}
+
+
 # ── Time Series ───────────────────────────────────────────────────────────────
 
 @router.get("/timeseries")
 def list_timeseries():
     n = PyPSAService.get_network()
     result = []
-    for component in ["generators", "loads", "storage_units", "stores", "lines", "links"]:
+    # buses and transformers are here for the grid's series-shadow check (spec
+    # D14): a `varying` attribute is only dead if a series actually exists for
+    # that specific asset, and the grid renders both those tabs. The deliberate
+    # side effect is that the Time-Series tab also lists bus and transformer
+    # series that genuinely exist, which is correct, not a regression.
+    for component in ["generators", "loads", "storage_units", "stores", "lines",
+                      "links", "buses", "transformers"]:
         ts_store = getattr(n, f"{component}_t", None)
         if ts_store is None:
             continue
