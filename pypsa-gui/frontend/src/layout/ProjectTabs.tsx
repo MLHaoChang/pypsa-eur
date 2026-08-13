@@ -12,7 +12,7 @@ import {
   switchToProject,
 } from '../utils/projectActions'
 import { useSolveQueue, activeJobForProject } from '../hooks/useSolveQueue'
-import { isActive } from '../api/solveQueue'
+import { useJobTerminalInvalidation } from '../hooks/useJobTerminalInvalidation'
 import { Dialog } from '../components/Dialog'
 
 // The "+" dialog. Two ways to add a tab, because a workspace that can only
@@ -153,38 +153,17 @@ export default function ProjectTabs() {
   // while jobs are active). Marks tabs whose project is queued or solving.
   const { data: solveQueue } = useSolveQueue()
 
-  // Resync the foreground after a batch drains. The swap-based queue solves
-  // through the SHARED active slot, so once the last job finishes the backend's
-  // in-memory network is the LAST-SOLVED project, not `currentProject` — the
-  // editor would be desynced (edits would land on the wrong network until the
-  // autosave identity guard 409s). When the active-job count falls to zero,
-  // reload currentProject to rebind the slot + surface its fresh on-disk
-  // results. Guarded so it fires once per drain and never fights a manual switch.
-  const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
-  const prevActiveRef = useRef(0)
-  useEffect(() => {
-    const prev = prevActiveRef.current
-    const wantResync = prev > 0 && activeQueueCount === 0
-    // If a manual switch/create is mid-flight (busy) at the exact drain tick,
-    // DON'T consume the >0→0 edge — leave prevActiveRef untouched so the effect
-    // retries once `busy` clears, rather than silently missing the resync.
-    if (wantResync && busy) return
-    prevActiveRef.current = activeQueueCount
-    if (wantResync && currentProject) {
-      setBusy(currentProject)
-      projectsApi.load(currentProject)
-        .then(() => {
-          invalidateNetworkQueries(qc, currentProject)
-          setProjectName(currentProject)
-          appLog('INFO', `Solve queue finished — resynced '${currentProject}'`)
-        })
-        .catch(e => {
-          appLog('WARN', `Resync after solve queue failed: ${String((e as Error)?.message ?? e)}`)
-          toast.error(`Couldn't resync '${currentProject}' — it may have been deleted. Pick another tab.`)
-        })
-        .finally(() => setBusy(null))
-    }
-  }, [activeQueueCount, currentProject, busy, qc, setProjectName])
+  // Per-finished-job cache invalidation, scoped to THAT job's project. This
+  // replaces the `>0 → 0` resync that used to live here: it reloaded
+  // `currentProject` from disk (reset_network + import_from_netcdf, with no
+  // save in front of it) whenever the GLOBAL active-job count fell to zero, so
+  // a project that was never queued lost its unsaved edits and another
+  // organisation's redacted rows could trigger it. Its own comment justified it
+  // by "the swap-based queue solves through the SHARED active slot", a design
+  // B4.3 replaced — and increment 1's one-context-per-project invariant means
+  // the freshly solved network IS the one this session holds, so there is
+  // nothing to reload.
+  useJobTerminalInvalidation()
 
   const switchTo = useCallback(async (target: string) => {
     if (target === currentProject || busy) return

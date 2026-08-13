@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Play, X, Trash2, Loader, ChevronRight, ChevronDown,
@@ -106,24 +106,178 @@ function JobResultsPreview({ name }: { name: string }) {
   )
 }
 
+// The row is a job the caller may not see: the backend nulled its identifying
+// fields. Say so plainly rather than rendering an empty element — the row's id,
+// status, position and timings are legitimately visible and the queue depth is
+// the thing the caller actually needs from it.
+export const REDACTED_PROJECT_LABEL = 'Hidden — another organisation’s project'
+
+/**
+ * Whether this row has a log worth opening.
+ *
+ * A `queued` job has produced nothing yet — that is the only status this
+ * excludes. Deliberately NOT `isTerminal(job)`: that set (`TERMINAL_STATUSES`
+ * in `api/solveQueue.ts`) is the narrower one cache-invalidation uses and does
+ * not include `interrupted` — `interrupted` isn't a member of `SolveJobStatus`
+ * until increment 3 (see `useJobTerminalInvalidation.test.ts`'s "treats every
+ * terminal status alike", which pins that gap on purpose). R20 needs the wider
+ * set: the log endpoints (Task 9's `get_log_queue`) serve any status
+ * uniformly with no branching at all, so `interrupted` already has a retained
+ * log to show — the panel must not exclude it just because the frontend enum
+ * hasn't caught up. `job.status !== 'queued'` covers `running` and every
+ * terminal status today, and needs no change when `interrupted` is added to
+ * the type later.
+ *
+ * A redacted row (`project_id: null`) is one the caller may not see at all,
+ * so its endpoints would 404 — disabling it here means the UI and the
+ * authorization agree instead of rendering a control that always fails.
+ */
+export function canExpandJob(job: SolveJob): boolean {
+  if (job.project_id == null) return false
+  return job.status !== 'queued'
+}
+
+function JobLogPanel({ jobId, live }: { jobId: number; live: boolean }) {
+  const [lines, setLines] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setError(null)
+
+    if (!live) {
+      // Terminal row: the retained log is a fixed snapshot. One REST read,
+      // nothing to keep open or clean up.
+      setLines([])
+      solveQueueApi.jobLogHistory(jobId)
+        .then(r => { if (!cancelled) setLines(r.lines) })
+        .catch(() => { if (!cancelled) setError('Could not read this job’s log.') })
+      return () => { cancelled = true }
+    }
+
+    // Live rows follow the job's own stream, not `/api/simulation/log_stream`
+    // — which binds to the ACTIVE context and would serve a different project's
+    // log (or none) whenever the user is not viewing the solving project.
+    //
+    // The stream (Task 9) already replays this job's full history before
+    // going live, in the SAME connection — it is deliberately the ONLY
+    // history source while live. A second, separate `jobLogHistory` fetch
+    // here would race that replay: whichever resolves second would either
+    // clobber live lines the other had already appended, or double-render
+    // the whole backlog, depending on network timing on any given render.
+    // One channel avoids that double-rendering by construction. The stream
+    // itself can still repeat a single line at ITS OWN history/live seam
+    // (subscribed-before-snapshotted, per Task 9's review) — harmless here
+    // since lines are plain strings joined into a `<pre>`, not React-keyed.
+    setLines([])
+    const es = new EventSource(solveQueueApi.jobLogStreamUrl(jobId))
+    let doneReceived = false
+    let lastEventAt = Date.now()
+    // Mirrors `createLogStream` (api/simulation.ts:567-621) — EventSource
+    // auto-reconnects on a transient error (browser sleep, a network blip, a
+    // server hiccup) unless the app closes it. Closing on the FIRST error, as
+    // this branch originally did, silently freezes the log at whatever had
+    // arrived so far: no more lines, no indication anything is wrong, and the
+    // row keeps reading as "live". That is the exact anti-pattern this file's
+    // sibling documents fixing once already — only declare the stream dead
+    // once no event has arrived for STALE_MS, and even then verify with the
+    // job's own status before giving up: a long native-solver phase can be
+    // silent for a while and looks identical to a lost connection.
+    const STALE_MS = 30_000
+    es.onmessage = (e) => {
+      if (cancelled) return
+      lastEventAt = Date.now()
+      // A line arriving is the recovery signal for a prior stale/error banner
+      // — without clearing it here, a connection that heals on its own leaves
+      // a stale "connection lost" message sitting on top of live data that is
+      // actually accumulating fine behind it.
+      setError(null)
+      setLines(prev => [...prev, e.data])
+    }
+    es.addEventListener('done', () => { doneReceived = true; es.close() })
+    es.onerror = () => {
+      if (cancelled || doneReceived) return
+      if (es.readyState === EventSource.CLOSED) {
+        // The browser's own reconnect budget is already exhausted — nothing
+        // further will arrive on this connection, unlike a transient error.
+        setError('Log stream lost before the job finished.')
+        return
+      }
+      if (Date.now() - lastEventAt > STALE_MS) {
+        solveQueueApi.jobLogHistory(jobId)
+          .then(r => {
+            if (cancelled || doneReceived) return
+            if (r.status === 'running') {
+              // Still running — the quiet spell was a real solver phase, not
+              // a dead connection. Let the browser keep retrying.
+              lastEventAt = Date.now()
+            } else {
+              // The job finished while the stream was stuck. `live` will flip
+              // to false on the next queue poll and re-fetch the authoritative
+              // retained log via the branch above; surface the gap in the
+              // meantime rather than leaving a frozen "live" view.
+              es.close()
+              setError('Log stream lost — the job has since finished.')
+            }
+          })
+          .catch(() => {
+            if (cancelled || doneReceived) return
+            // The verification request itself is unreachable — plausibly the
+            // SAME outage that broke the stream (backend down, network gone).
+            // MUST close: leaving `es` open lets the browser's own ~3s
+            // auto-reconnect keep re-firing `onerror`, and since no message
+            // ever arrives to advance `lastEventAt`, every retry re-enters
+            // this stale branch and fires ANOTHER jobLogHistory request —
+            // unbounded, for as long as the row stays expanded, hammering a
+            // backend that just said it was unreachable.
+            es.close()
+            setError('Log stream silent and unreachable — connection lost.')
+          })
+      }
+    }
+    return () => { cancelled = true; es.close() }
+  }, [jobId, live])
+
+  if (error) return <div className="px-3 py-2 text-[11px] text-danger">{error}</div>
+  if (lines.length === 0) {
+    return <div className="px-3 py-2 text-[11px] text-muted">No log lines for this job.</div>
+  }
+  return (
+    <pre className="px-3 py-2 max-h-56 overflow-auto text-[10px] leading-snug font-mono text-muted bg-bg-2/40 border-t border-border whitespace-pre-wrap">
+      {lines.join('\n')}
+    </pre>
+  )
+}
+
 function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: number) => void }) {
   const [expanded, setExpanded] = useState(false)
   const canAbort = job.status === 'queued' || job.status === 'running'
-  const canPreview = job.status === 'completed'
+  // A redacted row names no project, so there is nothing to preview and no name
+  // to put in the URL — `/projects/null/results_bundle` is what the unguarded
+  // version would have requested.
+  const name = job.project_id
+  const canExpand = canExpandJob(job)
+  const canPreview = job.status === 'completed' && name != null
   return (
     <div className="rounded-lg border border-border bg-bg overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2">
         <button
-          onClick={() => canPreview && setExpanded(v => !v)}
-          disabled={!canPreview}
-          className={`p-0.5 rounded ${canPreview ? 'text-muted hover:text-text' : 'opacity-0 pointer-events-none'}`}
-          title={canPreview ? 'Preview results' : ''}
+          onClick={() => canExpand && setExpanded(v => !v)}
+          disabled={!canExpand}
+          className={`p-0.5 rounded ${canExpand ? 'text-muted hover:text-text' : 'opacity-0 pointer-events-none'}`}
+          title={canExpand ? 'Show this job’s log' : 'Not available for this job'}
         >
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-[12px] font-medium text-text" title={job.project_id}>{job.project_id}</span>
+            {name != null ? (
+              <span className="truncate text-[12px] font-medium text-text" title={name}>{name}</span>
+            ) : (
+              <span className="truncate text-[12px] font-medium text-muted italic" title={REDACTED_PROJECT_LABEL}>
+                {REDACTED_PROJECT_LABEL}
+              </span>
+            )}
             {job.status === 'queued' && job.position != null && (
               <span className="text-[10px] text-muted">#{job.position} in line</span>
             )}
@@ -147,7 +301,12 @@ function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: number) => void
           </button>
         )}
       </div>
-      {expanded && canPreview && <JobResultsPreview name={job.project_id} />}
+      {expanded && canExpand && (
+        <>
+          <JobLogPanel jobId={job.id} live={job.status === 'running'} />
+          {canPreview && name != null && <JobResultsPreview name={name} />}
+        </>
+      )}
     </div>
   )
 }
@@ -172,7 +331,11 @@ export default function SolveQueuePanel() {
   const activeCount = jobs.filter(isActive).length
   const finishedCount = jobs.filter(isTerminal).length
   // Project names that already have a queued/running job — don't offer to re-add.
-  const activeProjects = new Set(jobs.filter(isActive).map(j => j.project_id))
+  // A redacted row names no project and can match nothing, so drop it rather
+  // than letting `null` sit in the set.
+  const activeProjects = new Set(
+    jobs.filter(isActive).map(j => j.project_id).filter((n): n is string => n != null),
+  )
 
   // Save (only when it's the active project — it may carry unsaved edits) then
   // enqueue. The dispatcher solves the SAVED version, so persistence first is
@@ -220,7 +383,11 @@ export default function SolveQueuePanel() {
         <p className="text-[11px] text-muted leading-snug">
           Queue saved projects to solve one after another, unattended. Results persist to
           disk — view a finished solve below without loading the project.
-          {activeCount > 0 && <span className="text-accent"> While the queue runs, the active editor is busy.</span>}
+          {activeCount > 0 && (
+            <span className="text-accent">
+              {' '}A project solving in the queue is read-only until it finishes; other projects stay editable.
+            </span>
+          )}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <button

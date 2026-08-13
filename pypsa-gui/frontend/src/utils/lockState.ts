@@ -15,6 +15,11 @@ export interface LockInfo {
   yours: boolean
 }
 
+// WHY a project can be read-only. `readOnly` alone could only ever produce one
+// message — "another user is editing this project" — which is a lie the moment
+// a queue job is what is holding it.
+export type ReadOnlyReason = 'writable' | 'locked-by-user' | 'solving'
+
 export interface LockState {
   // True when the current user may NOT mutate the active project — either
   // someone else holds the lock, or acquisition failed. Every destructive /
@@ -24,12 +29,14 @@ export interface LockState {
   // read-only viewer knows who to ask. null when no lock exists / holder
   // unknown / the lock is ours.
   holderEmail: string | null
+  // Why. Always 'writable' when `readOnly` is false.
+  reason: ReadOnlyReason
 }
 
 // Neutral "you may edit" state. The default when auth is disabled or no lock
 // machinery is in play (legacy single-user workbench) — so the legacy path is
 // never accidentally read-only.
-export const WRITABLE: LockState = { readOnly: false, holderEmail: null }
+export const WRITABLE: LockState = { readOnly: false, holderEmail: null, reason: 'writable' }
 
 // Outcome of attempting to ACQUIRE (or heartbeat) a project lock.
 //   ok:true  — the lock is ours; `lock` describes it (yours=true).
@@ -49,9 +56,31 @@ export function lockStateFromAcquire(outcome: LockAcquireOutcome): LockState {
   if (outcome.ok) {
     // We hold the lock now. Don't advertise our own email as "someone else is
     // editing" — a writable state has no foreign holder to name.
-    return { readOnly: false, holderEmail: outcome.lock?.yours ? null : holderEmail }
+    return {
+      readOnly: false,
+      holderEmail: outcome.lock?.yours ? null : holderEmail,
+      reason: 'writable',
+    }
   }
-  return { readOnly: true, holderEmail }
+  return { readOnly: true, holderEmail, reason: 'locked-by-user' }
+}
+
+/**
+ * Fold the two INDEPENDENT read-only inputs into the single flag the ~20 direct
+ * consumers read, plus the reason.
+ *
+ * They are independent because they clear independently: the edit lock is
+ * released by another user, the solve clears itself when the job ends. Storing
+ * only the fold would make releasing one clear the other. `solving` wins the
+ * message because it is the one with a definite end and a different remedy.
+ */
+export function effectiveLockState(
+  lockReadOnly: boolean,
+  solving: boolean,
+): { readOnly: boolean; reason: ReadOnlyReason } {
+  if (solving) return { readOnly: true, reason: 'solving' }
+  if (lockReadOnly) return { readOnly: true, reason: 'locked-by-user' }
+  return { readOnly: false, reason: 'writable' }
 }
 
 // Destructive / mutating actions consult this before running. Kept as a named

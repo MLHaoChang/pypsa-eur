@@ -1,5 +1,5 @@
 import client from './client'
-import type { Bus, Carrier, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
+import type { Bus, Carrier, CatalogPayload, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
 import type { RescalePreview } from '../utils/rescale'
 
 export const networkApi = {
@@ -232,7 +232,15 @@ export const networkApi = {
   // Refuses the whole batch if any name is unknown, so the caller can rely on
   // partial-failure-safety. component_class must be a PyPSA class name like
   // "Generator" / "Bus" / "StorageUnit".
-  bulkUpdate: (body: { component_class: string; names: string[]; updates: Record<string, unknown> }) =>
+  // Two body forms (spec D9): names+updates applies one value per column to
+  // every named row; rows carries a per-row patch, which is what a row-by-row
+  // paste needs. Send one or the other, never both — the backend 400s on both.
+  bulkUpdate: (body: {
+    component_class: string
+    names?: string[]
+    updates?: Record<string, unknown>
+    rows?: { name: string; updates: Record<string, unknown> }[]
+  }) =>
     client.patch<{ updated: number; fields: string[] }>('/network/_bulk', body)
       .then(r => r.data),
 
@@ -240,6 +248,11 @@ export const networkApi = {
   // wedged backend doesn't tie up axios sockets for 30s and bring down the UI.
   undoInfo: () => client.get<{ depth: number }>('/network/undo/info', { timeout: 5000 }).then(r => r.data),
   undo: () => client.post<{ undone: boolean; remaining: number }>('/network/undo').then(r => r.data),
+
+  // Attribute catalog (spec D3/D24). Class-level metadata; cached forever by
+  // hooks/useCatalog.ts under a deliberately unscoped key.
+  getCatalog: (component: string) =>
+    client.get<CatalogPayload>(`/network/catalog/${encodeURIComponent(component)}`).then(r => r.data),
 
   // Time series
   listTimeseries: () => client.get<TimeseriesInfo[]>('/network/timeseries').then(r => r.data),

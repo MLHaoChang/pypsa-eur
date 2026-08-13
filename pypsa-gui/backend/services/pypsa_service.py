@@ -96,6 +96,64 @@ class PyPSAService:
     # take it, and they take it FIRST) — prevents the two-lock deadlock.
     _registry_lock: threading.RLock = threading.RLock()
 
+    # ── Hydrate-or-adopt lock (one ProjectContext per project, always) ────────
+    # Per-registry-key lock, taken ONLY on a registry miss. FOUR cold paths
+    # build-and-register a context — `activate_project`, `resolve_project_context`,
+    # `active_project.resolve_for_session` (both branches, twice per authenticated
+    # request on every route) and the solve-queue dispatcher — and every one of
+    # them ran an UNSYNCHRONISED get_context -> build -> hydrate -> register.
+    # `get_context` is an unlocked dict read and `register` takes `_registry_lock`
+    # only for the insert without re-checking for a concurrent winner, so two
+    # cold paths racing on the same non-resident project each built a context and
+    # the second overwrote the first in `_contexts` while the first was already
+    # bound into a live request.
+    #
+    # A FIFTH path publishes without building: `routers.projects.load_project`
+    # resets the CALLER'S OWN context, imports the project into it, and
+    # republishes it under the project's key — a deliberate REPLACEMENT of the
+    # resident entry (that is what re-opening a project from disk means), not a
+    # fork. It takes this lock for the insert like everyone else, and it
+    # REFUSES with 409 while the solve queue is running a job for the key,
+    # because replacing the entry there would leave the dispatcher solving —
+    # and saving — a context nothing can resolve any more (defect D-1).
+    #
+    # LOCK ORDER — hydrate -> `_registry_lock` -> `solve_queue._lock`. A hydrate
+    # lock is NEVER acquired while `_registry_lock` is held. `_hydrate_guard` is a
+    # leaf lock held only for the dict lookup that hands out the per-key lock, and
+    # nothing is called while it is held. The pre-existing rule that
+    # `_registry_lock` never nests a per-ctx `mutation_lock` (see
+    # `_evict_if_over_cap`) is unchanged.
+    #
+    # The three named locks are not the whole order, and the tail is where a
+    # future contributor is most likely to invert it. Nested UNDER a held
+    # hydrate lock, on the slow path, are also:
+    #   * the ctx being built: its `mutation_lock` and then the process-global
+    #     `_netcdf_io_lock` — `_hydrate_context_from_disk` takes both to
+    #     `import_from_netcdf`;
+    #   * an ARBITRARY VICTIM context's `mutation_lock` and the same
+    #     `_netcdf_io_lock`, because `register` -> `_evict_if_over_cap` ->
+    #     `_save_evicted_ctx` -> `_save_context` saves whatever the cap
+    #     evicts, and the victim is chosen by LRU — it is not the caller's
+    #     context and not knowable from the call site.
+    # So the full order is: hydrate -> `_registry_lock` -> `solve_queue._lock`,
+    # and hydrate -> (any ctx) `mutation_lock` -> `_netcdf_io_lock`. Nothing
+    # today acquires a hydrate lock while holding a `mutation_lock` or the I/O
+    # lock, and nothing may start: that is the cycle this note exists to
+    # prevent. (`_evict_if_over_cap` deliberately runs its saves OUTSIDE
+    # `_registry_lock` for the same reason, one level down.)
+    #
+    # Refcounted: `hydrate_or_adopt` increments the waiter count on entry and
+    # decrements (deleting the entry once it hits zero) in a `finally`, so the
+    # dict holds an entry only while at least one thread is actually inside
+    # the slow path for that key — bounded by CONCURRENT misses in flight, not
+    # by how many distinct keys were EVER missed. Without this the dict would
+    # be a genuine leak on a long-lived server process: `active_project.
+    # resolve_for_session` (Task 2) routes the per-session `scratch:<id>` key
+    # through this same helper, and every session ever created would else
+    # pin a permanent entry that nothing removes.
+    _hydrate_locks: dict[str, tuple[threading.Lock, int]] = {}
+    _hydrate_guard: threading.Lock = threading.Lock()
+
     # ── Request-scoped active context (Step 0b) ──────────────────────────────
     # The "active project" is per SESSION, not per process. `_request_ctx` holds
     # the context resolved for the request currently on this thread/task; when
@@ -733,6 +791,59 @@ class PyPSAService:
         B6 path-scoped endpoints resolve their target context through this.
         """
         return cls._contexts.get(project_id)
+
+    @classmethod
+    @contextmanager
+    def hydrate_or_adopt(cls, registry_key: str):
+        """
+        Yield the resident ctx for `registry_key` if one exists, else yield None
+        while holding this key's hydrate lock so the caller may build+hydrate+register
+        exactly once. Fast path (registry hit) takes NO lock.
+
+        Lock order: hydrate -> _registry_lock -> solve_queue._lock, and
+        hydrate -> (any ctx) mutation_lock -> _netcdf_io_lock. The second half
+        is not optional bookkeeping — the caller's body hydrates from disk
+        under this lock, and its `register` can evict and SAVE an unrelated
+        context. See the `_hydrate_locks` comment for the whole order.
+        """
+        resident = cls._contexts.get(registry_key)
+        if resident is not None:
+            # The common path. Deliberately identical to `get_context` — no
+            # lock, no bookkeeping — so routing every cold path through this
+            # helper costs a resident hit nothing.
+            yield resident
+            return
+
+        # Register as a waiter on this key's lock BEFORE acquiring it, so the
+        # lock object stays referenced (and the dict entry stays alive) for as
+        # long as ANY thread is still using it — including a thread still
+        # queued on `with lock:` below. Only the waiter that brings the count
+        # back to zero, in `finally`, deletes the entry.
+        with cls._hydrate_guard:
+            entry = cls._hydrate_locks.get(registry_key)
+            if entry is None:
+                lock, waiters = threading.Lock(), 0
+            else:
+                lock, waiters = entry
+            cls._hydrate_locks[registry_key] = (lock, waiters + 1)
+
+        try:
+            with lock:
+                # Re-check UNDER the lock: the thread that just released it may
+                # have registered the very context we were about to build.
+                # Yielding it here is the "adopt" half of the name. If the
+                # caller's body raises (a build/hydrate/register failure), the
+                # exception propagates through `with lock:` (releasing it
+                # normally) straight into `finally` below — no lock is left
+                # held and no waiter is left uncounted.
+                yield cls._contexts.get(registry_key)
+        finally:
+            with cls._hydrate_guard:
+                lock, waiters = cls._hydrate_locks[registry_key]
+                if waiters <= 1:
+                    del cls._hydrate_locks[registry_key]
+                else:
+                    cls._hydrate_locks[registry_key] = (lock, waiters - 1)
 
     @classmethod
     def set_active(cls, project_id: str) -> ProjectContext:

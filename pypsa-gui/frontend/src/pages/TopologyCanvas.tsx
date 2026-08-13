@@ -305,7 +305,9 @@ const CENTER_HANDLE: React.CSSProperties = {
 const BUS_NODE_H = 30
 const BUS_NODE_MIN_W = 72
 
-function BusNode({ id, data, selected }: NodeProps) {
+// Exported so a test can render one node in isolation inside a
+// <ReactFlowProvider>. nodeTypes (:1786) still references it locally.
+export function BusNode({ id, data, selected }: NodeProps) {
   const { bus } = data as unknown as { bus: Bus }
   const color = getLineColor(bus.v_nom ?? 1)
   const overlapping = useContext(OverlapContext)
@@ -326,6 +328,10 @@ function BusNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
+      // The drop hit-test's only handle on which bus was hit — the same
+      // attribute MapCanvas's busDivIcon publishes, so hooks/useAssetDrag.ts
+      // needs exactly one branch for both canvases (spec D25).
+      data-bus-name={bus.name}
       className="relative flex items-center gap-1.5 transition-all"
       style={{
         minWidth: BUS_NODE_MIN_W,

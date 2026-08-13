@@ -14,6 +14,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
+import { useAssetDrag } from '../hooks/useAssetDrag'
 import { networkApi } from '../api/network'
 import { ioApi } from '../api/io'
 import { projectsApi } from '../api/projects'
@@ -21,6 +22,7 @@ import { simulationApi } from '../api/simulation'
 import type { ImportSummary, ProjectInfo } from '../api/types'
 import { ImportZone } from '../pages/ImportExport'
 import { appLog, useSimulationStore } from '../store/simulationStore'
+import { formatApiDetail } from '../api/client'
 import toast from 'react-hot-toast'
 import {
   invalidateNetworkQueries, saveProjectQuietly,
@@ -234,74 +236,14 @@ function SubHdr({ title }: { title: string }) {
 // ── AssetPaletteInline ─────────────────────────────────────────────────────────
 function AssetPaletteInline() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const { setCreationItem } = useUIStore()
-  // Drag ghost — rendered as a fixed-position chip that follows the cursor
-  // during a drag. Pointer-events:none so pointerup passes through to the
-  // actual drop target underneath.
-  const [ghost, setGhost] = useState<{ label: string; x: number; y: number } | null>(null)
+  // The pointer-drag gesture and its drop hit-test live in the hook — it is
+  // the single owner of "what is under the cursor", shared by the schematic
+  // and map canvases (spec D25). setCreationItem is still needed directly
+  // for the keyboard path below (Enter/Space), which is not a drag.
+  const { ghost, beginDrag } = useAssetDrag()
+  const setCreationItem = useUIStore(s => s.setCreationItem)
   const toggle = (id: string) =>
     setCollapsed(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-
-  // Manual pointer-event drag (NOT HTML5 drag-and-drop). The HTML5 API was
-  // unreliable in the user's environment — drops didn't land. Pointer events
-  // are bulletproof: we track mousedown→move→up ourselves, render our own
-  // ghost, and detect the drop target via document.elementFromPoint.
-  //
-  // Threshold: 3px of movement promotes "click" → "drag". Below ⇒ pointerup
-  // fires the click handler (opens slide-in panel without dropPosition). At
-  // or above ⇒ pointerup checks if the cursor is over the React Flow canvas
-  // and opens the panel WITH dropPosition.
-  function beginDrag(e: React.PointerEvent, item: { id: string; label: string }) {
-    if (e.button !== 0) return  // left button only
-    e.preventDefault()
-    const startX = e.clientX
-    const startY = e.clientY
-    let moved = false
-
-    const onMove = (ev: PointerEvent) => {
-      const dx = Math.abs(ev.clientX - startX)
-      const dy = Math.abs(ev.clientY - startY)
-      if (!moved && (dx > 3 || dy > 3)) {
-        moved = true
-        document.body.style.cursor = 'grabbing'
-      }
-      if (moved) setGhost({ label: item.label, x: ev.clientX, y: ev.clientY })
-    }
-
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      document.body.style.cursor = ''
-      setGhost(null)
-
-      if (!moved) {
-        // Click — open the right-side slide-in panel with no drop position.
-        setCreationItem({ id: item.id, label: item.label })
-        return
-      }
-
-      // Drop detection. document.elementFromPoint walks the actual DOM hit
-      // test under the release coordinates; we check if that element (or
-      // any ancestor) is the React Flow canvas (.react-flow wrapper).
-      const target = document.elementFromPoint(ev.clientX, ev.clientY)
-      const rfEl = target?.closest('.react-flow') as HTMLElement | null
-      if (!rfEl) return  // released outside the canvas — cancel silently
-
-      // Convert screen → React Flow coords via the global instance handle
-      // TopologyCanvas pins to window in onInit. Without it, the new node
-      // would land at (0, 0) on the canvas regardless of where you dropped.
-      const rf = (window as unknown as {
-        rfInstance?: { screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } }
-      }).rfInstance
-      const pos = rf?.screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
-      if (!pos) return
-
-      setCreationItem({ id: item.id, label: item.label, dropPosition: pos })
-    }
-
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
 
   return (
     <div>
@@ -736,7 +678,7 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly,
+    readOnly, readOnlyReason,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -775,12 +717,12 @@ function ProjectSectionContent({
   const networkHasBuses = (networkMeta?.bus_count ?? 0) > 0
 
   const guardProjectMutation = useCallback((opts?: { silent?: boolean }) => {
-    const verdict = evaluateMutation(readOnly)
+    const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (verdict.allowed) return true
     if (opts?.silent) appLog('INFO', `Autosave skipped — ${verdict.blockedMessage}`)
     else toast.error(verdict.blockedMessage!)
     return false
-  }, [readOnly])
+  }, [readOnly, readOnlyReason])
 
   // Save current network state to backend (under `name`), then offer the
   // resulting bundle as a download via the OS save-file picker (Chromium) or
@@ -1045,8 +987,15 @@ function ProjectSectionContent({
           break
       }
     } catch (e) {
-      appLog('ERROR', `Open '${name}' failed: ${String((e as Error)?.message ?? e)}`)
-      toast.error(`Could not open '${name}'`, { id: tId })
+      // Same seam as the clone wizard: `name === currentProject` above calls
+      // `projectsApi.load`, which is `load_project` — the route that now
+      // refuses (409, error_kind `solver_in_flight`) while a queue job owns
+      // this project's context. A bare "Could not open" here would hide
+      // exactly the reason this whole fix exists to surface.
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = formatApiDetail(detail, (e as Error)?.message ?? String(e))
+      appLog('ERROR', `Open '${name}' failed: ${msg}`)
+      toast.error(`Could not open '${name}': ${msg}`, { id: tId })
     } finally {
       setProjectSwitchInProgress(false)
     }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   WRITABLE,
   canMutate,
+  effectiveLockState,
   lockStateFromAcquire,
   type LockInfo,
 } from './lockState'
@@ -14,6 +15,7 @@ describe('lockStateFromAcquire', () => {
     expect(lockStateFromAcquire({ ok: true, lock: mine })).toEqual({
       readOnly: false,
       holderEmail: null,
+      reason: 'writable',
     })
   })
 
@@ -26,6 +28,7 @@ describe('lockStateFromAcquire', () => {
     expect(lockStateFromAcquire({ ok: false, lock: theirs })).toEqual({
       readOnly: true,
       holderEmail: 'other@example.com',
+      reason: 'locked-by-user',
     })
   })
 
@@ -33,10 +36,12 @@ describe('lockStateFromAcquire', () => {
     expect(lockStateFromAcquire({ ok: false })).toEqual({
       readOnly: true,
       holderEmail: null,
+      reason: 'locked-by-user',
     })
     expect(lockStateFromAcquire({ ok: false, lock: null })).toEqual({
       readOnly: true,
       holderEmail: null,
+      reason: 'locked-by-user',
     })
   })
 
@@ -63,5 +68,33 @@ describe('canMutate', () => {
     expect(canMutate(refused)).toBe(false)
     const held = lockStateFromAcquire({ ok: true, lock: mine })
     expect(canMutate(held)).toBe(true)
+  })
+})
+
+describe('effectiveLockState', () => {
+  it('is writable when neither input holds', () => {
+    expect(effectiveLockState(false, false)).toEqual({ readOnly: false, reason: 'writable' })
+  })
+
+  it('reports locked-by-user when only the edit lock holds', () => {
+    expect(effectiveLockState(true, false)).toEqual({ readOnly: true, reason: 'locked-by-user' })
+  })
+
+  it('reports solving when a queue job holds the project', () => {
+    expect(effectiveLockState(false, true)).toEqual({ readOnly: true, reason: 'solving' })
+  })
+
+  it('prefers solving when both hold — it is the one that clears on its own', () => {
+    expect(effectiveLockState(true, true)).toEqual({ readOnly: true, reason: 'solving' })
+  })
+})
+
+describe('lockStateFromAcquire reasons', () => {
+  it('tags a successful acquire writable', () => {
+    expect(lockStateFromAcquire({ ok: true }).reason).toBe('writable')
+  })
+
+  it('tags a refusal locked-by-user', () => {
+    expect(lockStateFromAcquire({ ok: false }).reason).toBe('locked-by-user')
   })
 })

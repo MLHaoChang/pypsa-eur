@@ -744,7 +744,11 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "solve_queue_enqueue",
         "Enqueue a project for background solving. Dispatcher auto-runs on "
-        "enqueue. Project must have a saved network.nc. Safety: execution.",
+        "enqueue. Project must have a saved network.nc. Idempotent per project: "
+        "if the project already has a queued or running job the response is 200 "
+        "with THAT job and `already_queued: true`, and no second job is created "
+        "— this is not an error, so do not retry. A new job returns "
+        "`already_queued: false`. Safety: execution.",
         {"project_id": {"type": "string"}},
         ["project_id"],
     ),
