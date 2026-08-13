@@ -383,6 +383,11 @@ export const resultsApi = {
   // gen_cost / storage_charge_cost / curtailment_cost / lost_load_cost,
   // capex_meur, dispatch_gwh, lcoe_eur_per_mwh).
   getEconomicsByCarrier: () => client.get<{
+    // False means the figures were never resolved (unsolved network, or the
+    // roll-up itself failed) and every number below is a default zero rather
+    // than a measurement — ADR-0001. Optional so a response from an older
+    // backend, which omitted the field entirely, is not read as `false`.
+    available?: boolean
     by_carrier?: Record<string, {
       revenue_meur: { total: number; by_period: Record<string, number> }
       opex_meur:    { total: number; by_period: Record<string, number> }

@@ -969,7 +969,11 @@ def get_economics_by_carrier():
     """
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
-        return {}
+        # A bare `{}` was indistinguishable from "solved, and this network
+        # genuinely rolls up to no carriers" — the wider of this endpoint's
+        # two availability holes, and the one a user hits first. Same shape as
+        # the success path so callers need one branch, not two.
+        return {"available": False, "by_carrier": {}}
     try:
         import pandas as _pd
 
@@ -981,9 +985,14 @@ def get_economics_by_carrier():
         except Exception:
             periods = []
         result = _compute_economics_summary(n, periods, is_multi, True)
-        # Return just the by_carrier dict — that's what the Results tab needs.
-        # Drop per_asset_lcoh (lives in /api/results/lcoh) to keep the payload small.
+        # Forward `available` alongside by_carrier. Dropping it here stopped
+        # the whole Compare-side availability fix at Compare: the Results tab
+        # received figures with no way to tell a real zero from one that was
+        # never resolved, which is the exact conflation ADR-0001 forbids.
+        # Still drops per_asset_lcoh (lives in /api/results/lcoh) to keep the
+        # payload small.
         return {
+            "available": bool(result.available),
             "by_carrier": {k: v.model_dump() for k, v in result.by_carrier.items()},
         }
     except Exception as exc:
