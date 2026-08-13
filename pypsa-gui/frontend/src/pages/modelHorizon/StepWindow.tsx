@@ -14,11 +14,20 @@
 // NoPeriodsFallback itself stays private to ModelHorizon.tsx per the Task 4
 // brief ("leave alone"); this file never imports it.
 //
-// The "Different year per period" table lives in StepWindowAdvanced (below),
-// rendered by ModelHorizon.tsx into StepShell's `advanced` slot only while
-// that mode is selected and at least one period exists — see ModelHorizon.tsx
-// for the composition. Everything else about the per-period constructor
-// (the mode radios, the explanatory paragraph, the Build button) stays here.
+// The "Different year per period" table (`PerPeriodRangeTable`, below)
+// renders INLINE in this step's own body, right below the mode radios —
+// NOT behind StepShell's `advanced` slot. It used to live there (final
+// whole-branch review, Blocker 1): that disclosure is collapsed by default
+// AND reset to collapsed on every step entry, with the "Build MultiIndex
+// snapshots" button sitting ABOVE it — so selecting "Different year per
+// period" showed only an explanatory paragraph, and the natural path was
+// pick the mode → click Build → get a "Fill start + end for period …" toast
+// with no field anywhere on screen. The table is at most a handful of rows
+// (one per investment period), the same size argument that already justifies
+// StepShell's default always-mounted disclosure behaviour for it — so there
+// was never a performance reason to hide it behind a click in the first
+// place. Because of this, `window` contributes no StepShell advanced content
+// at all (see ModelHorizon.tsx's `advancedContent` derivation).
 import type { ReactNode } from 'react'
 import { FREQ_OPTIONS } from '../modelHorizonModel'
 
@@ -56,6 +65,10 @@ export interface StepWindowProps {
   onMpFreqChange: (value: string) => void
   onApplyMultiPeriod: () => void
   applyMultiPeriodPending: boolean
+
+  // ── Per-period range table (rendered inline when mpMode === 'per_period') ─
+  mpPerPeriod: Array<{ start: string; end: string; freq: string }>
+  onMpPerPeriodChange: (index: number, patch: Partial<{ start: string; end: string; freq: string }>) => void
 }
 
 export function StepWindow({
@@ -65,11 +78,12 @@ export function StepWindow({
   mpMode, onMpModeChange, mpStart, mpEnd, mpFreq,
   onMpStartChange, onMpEndChange, onMpFreqChange,
   onApplyMultiPeriod, applyMultiPeriodPending,
+  mpPerPeriod, onMpPerPeriodChange,
 }: StepWindowProps) {
   if (isMultiPeriod) {
     return (
       <section>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Multi-period planning</h3>
+        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Snapshot window</h3>
         {periods.length === 0 ? noPeriodsFallback : (
           <div className="border border-border rounded">
             <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center justify-between">
@@ -146,6 +160,11 @@ export function StepWindow({
                     have multi-year weather data and want each decade to see a
                     different operational year.
                   </p>
+                  <PerPeriodRangeTable
+                    periods={periods}
+                    mpPerPeriod={mpPerPeriod}
+                    onMpPerPeriodChange={onMpPerPeriodChange}
+                  />
                 </div>
               )}
 
@@ -221,19 +240,21 @@ export function StepWindow({
   )
 }
 
-// ── Advanced: the per-period range table ("Different year per period") ────
-// Rendered by ModelHorizon.tsx into StepShell's `advanced` slot only while
-// isMultiPeriod, mpMode === 'per_period', and periods.length > 0 — otherwise
-// there's nothing to fill in and no Advanced disclosure shows at all, same
-// as before this table had a disclosure to hide behind.
+// ── The per-period range table ("Different year per period") ──────────────
+// Rendered inline by StepWindow itself, directly below the explanatory
+// paragraph, only while mpMode === 'per_period' — at that point periods.length
+// is always > 0 (zero periods short-circuits to noPeriodsFallback above this
+// branch entirely), so no extra guard is needed here. NOT exported: nothing
+// outside this file renders it — see the file header for why this moved out
+// of StepShell's `advanced` slot.
 
-export interface StepWindowAdvancedProps {
+interface PerPeriodRangeTableProps {
   periods: number[]
   mpPerPeriod: Array<{ start: string; end: string; freq: string }>
   onMpPerPeriodChange: (index: number, patch: Partial<{ start: string; end: string; freq: string }>) => void
 }
 
-export function StepWindowAdvanced({ periods, mpPerPeriod, onMpPerPeriodChange }: StepWindowAdvancedProps) {
+function PerPeriodRangeTable({ periods, mpPerPeriod, onMpPerPeriodChange }: PerPeriodRangeTableProps) {
   return (
     <div className="border border-border rounded overflow-auto max-h-64">
       <table className="w-full text-[11px] border-collapse" style={{ minWidth: 480 }}>

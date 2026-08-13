@@ -4,15 +4,15 @@
 //
 // This is a COLUMN split of one table, not a section split. The naive
 // version of "put the rest behind StepShell's `advanced` slot" — like
-// StepWindowAdvanced / StepWeightsAdvanced do — would render the extra
-// columns in a SECOND `<table>` physically relocated below a `<details>`,
-// independent of the first: two scrollbars, two header rows, and nothing
-// keeping a period's row in table A vertically aligned with its row in table
-// B once either scrolls or a row's height differs (long carrier list wraps a
-// header, a validation message changes a row's height, etc.). That's worse
-// than today's single wide table, not better, so this file does NOT use
-// StepShell's `advanced` prop — ModelHorizon.tsx passes nothing into it for
-// the 'economics' step, same as it already does for 'mode' and 'years'.
+// StepWeightsAdvanced does — would render the extra columns in a SECOND
+// `<table>` physically relocated below a `<details>`, independent of the
+// first: two scrollbars, two header rows, and nothing keeping a period's row
+// in table A vertically aligned with its row in table B once either scrolls
+// or a row's height differs (long carrier list wraps a header, a validation
+// message changes a row's height, etc.). That's worse than today's single
+// wide table, not better, so this file does NOT use StepShell's `advanced`
+// prop — ModelHorizon.tsx passes nothing into it for the 'economics' step,
+// same as it already does for 'mode', 'years', and now 'window'.
 //
 // Instead there is exactly one `<table>`. A local `advancedOpen` boolean
 // (owned here, not by StepShell) conditionally renders the extra `<th>`/`<td>`

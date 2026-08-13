@@ -233,10 +233,16 @@ it('PATCHes a multi-period weight edit with a period-qualified key, not a bare I
 
 // ── 2. Resolution comes from the network, never a local form default (B3) ─
 
-// "Resolution" is ambiguous on this page: the StatCard eyebrow (a <div>) AND
-// the single-period constructor's field label (a <span>, "seed a NEW index")
-// both carry the literal text. Only the StatCard is the status card under
-// test — it's the one <div> among the matches.
+// "Resolution" used to collide on this page: pre-restructure, the whole
+// scroll rendered every section at once, so the StatCard eyebrow (a <div>)
+// and the single-period constructor's field label (a <span>, in what's now
+// StepWindow's own "Snapshot range" body) both carried the literal text
+// simultaneously. Post-restructure, only the current guided step is mounted
+// — this test never navigates past the summary/mode landing view, so that
+// second span never mounts here and the collision doesn't actually occur in
+// this render path anymore. The DIV filter + count guard below stays as a
+// defensive check (it still fails correctly if a future routing change ever
+// puts a second "Resolution" text node on screen), not a live workaround.
 function findResolutionCard(): HTMLElement {
   const matches = screen.getAllByText('Resolution').filter(el => el.tagName === 'DIV')
   if (matches.length !== 1) throw new Error(`expected exactly one Resolution stat-card eyebrow, found ${matches.length}`)
@@ -471,17 +477,18 @@ it('collapses the weights Advanced disclosure by default, mounting the per-row t
   expect(await screen.findByRole('table')).not.toBeNull()
 })
 
-// ── 7. Window step: Advanced disclosure stays native, unlike weights' ─────
-// (Task 4 review fix.) The per-period range table is at most a handful of
-// rows (one per investment period) — no size argument for unmounting it, so
-// unlike the weights table it should behave like every other <details> in
-// this codebase (SolverSettings.tsx, results/Economics.tsx): always mounted,
-// collapsed via native disclosure semantics. Collapsed-by-default is still
-// required, but it's asserted through the `open` attribute, not DOM absence
-// — DOM absence is specifically the wrong assertion for a consumer that
-// isn't supposed to unmount.
+// ── 7. Window step: per-period inputs are reachable without opening anything
+// (final-review Blocker 1.) The per-period range table used to render inside
+// StepShell's `advanced` slot — a disclosure that's collapsed by default AND
+// reset to collapsed on every step entry, with the "Build MultiIndex
+// snapshots" button sitting ABOVE it. Selecting "Different year per period"
+// therefore showed only an explanatory paragraph; the natural path was pick
+// the mode → click Build → get a "Fill start + end for period …" toast with
+// no field anywhere on screen. The fix moves the table into the step body
+// itself (this step now carries no StepShell advanced content at all), so
+// selecting that radio makes the inputs appear directly — nothing to open.
 
-it('collapses the window Advanced disclosure by default without unmounting its per-period table', async () => {
+it('makes the per-period range table reachable without opening anything, once "Different year per period" is selected', async () => {
   vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
   vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
     periods: [2030, 2050],
@@ -497,22 +504,56 @@ it('collapses the window Advanced disclosure by default without unmounting its p
   renderPage()
   await openStep(/Snapshot window/)
 
-  // The per-period table is only Advanced content in "Different year per
-  // period" mode — switch to it first.
+  // Starting mode is "Same year per period" — no per-period table yet.
+  expect(screen.queryByRole('table')).toBeNull()
+
   await userEvent.click(screen.getByRole('radio', { name: /Different year per period/ }))
 
-  const summary = await screen.findByText('Advanced')
-  const details = summary.closest('details')
-  if (!details) throw new Error('Advanced disclosure not found')
+  // This step must carry no "Advanced" disclosure at all now — the table is
+  // plain step-body content, not something hidden behind a collapsed toggle.
+  expect(screen.queryByText('Advanced')).toBeNull()
 
-  // Collapsed by default...
-  expect(details.hasAttribute('open')).toBe(false)
-  // ...but, unlike the weights table, still mounted — native <details>
-  // hides it visually/from the accessibility tree, not by removing it.
-  expect(screen.getByRole('table')).not.toBeNull()
+  // The table — and its per-row inputs — must be immediately present and
+  // interactable, with no click required to reveal them.
+  const table = await screen.findByRole('table')
+  const rows = within(table).getAllByRole('row')
+  const row2030 = rows.find(r => within(r).queryByText('2030'))
+  if (!row2030) throw new Error('row for period 2030 not found in per-period range table')
+  const dateInputs = row2030.querySelectorAll('input[type="datetime-local"]')
+  expect(dateInputs.length).toBe(2) // start + end
 
-  await userEvent.click(summary)
-  expect(details.hasAttribute('open')).toBe(true)
+  await userEvent.type(dateInputs[0] as HTMLInputElement, '2030-01-01T00:00')
+  expect((dateInputs[0] as HTMLInputElement).value).toBe('2030-01-01T00:00')
+})
+
+// ── 8. Window step: body heading names THIS step (final-review Blocker 2) ──
+// Every other step's body carries its own heading matching the step it's
+// standing in (Economics → "Economics", Investment years → "Investment
+// years", …) — Window's body said "Multi-period planning" instead, the only
+// heading in the flow naming something other than its own step.
+
+it("gives the Window step body its own heading, not \"Multi-period planning\"", async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2050],
+    weightings: [
+      { period: 2030, years: 1, objective: 1 },
+      { period: 2050, years: 1, objective: 1 },
+    ],
+  })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true }),
+  )
+
+  renderPage()
+  await openStep(/Snapshot window/)
+
+  // Exact string (not a regex), same disambiguation the Economics test above
+  // uses: StepShell's own chrome heading reads "Step N of M — Snapshot
+  // window", a different (longer) exact string, so this can only match
+  // StepWindow's own body heading.
+  expect(await screen.findByRole('heading', { name: 'Snapshot window' })).not.toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Multi-period planning' })).toBeNull()
 })
 
 it('gives Economics and Window an actionable way out at zero investment years, not a blank frame', async () => {
@@ -552,7 +593,14 @@ it('gives Economics and Window an actionable way out at zero investment years, n
 
   // Same fallback path must cover the multi-period Window step too.
   await userEvent.click(within(nav).getByRole('button', { name: /Snapshot window/ }))
-  const windowHeading = await screen.findByRole('heading', { name: /Snapshot window/ })
+  // Exact string, not `/Snapshot window/`: StepWindow's own <h3> now reads
+  // "Snapshot window" too (final-review Blocker 2 — the body used to say
+  // "Multi-period planning", the only heading in the flow naming something
+  // other than its own step), which now coexists with StepShell's chrome
+  // heading ("Step N of M — Snapshot window"). Same disambiguation as the
+  // Economics heading above: the exact string matches only StepWindow's own
+  // <h3>, scoping to its own <section> rather than StepShell's outer one.
+  const windowHeading = await screen.findByRole('heading', { name: 'Snapshot window' })
   const windowBody = windowHeading.closest('section')
   if (!windowBody) throw new Error('Window step body section not found')
   expect(within(windowBody).queryByText('Snapshot constructor (MultiIndex)')).toBeNull()

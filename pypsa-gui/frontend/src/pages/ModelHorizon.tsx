@@ -18,7 +18,7 @@ import { HorizonSummary } from './modelHorizon/HorizonSummary'
 import { StepMode } from './modelHorizon/StepMode'
 import { StepYears } from './modelHorizon/StepYears'
 import { StepPeriodEconomics } from './modelHorizon/StepPeriodEconomics'
-import { StepWindow, StepWindowAdvanced } from './modelHorizon/StepWindow'
+import { StepWindow } from './modelHorizon/StepWindow'
 import { StepSampling } from './modelHorizon/StepSampling'
 import { StepWeights, StepWeightsAdvanced } from './modelHorizon/StepWeights'
 
@@ -710,11 +710,21 @@ export default function ModelHorizon() {
   }
 
   // Content for StepShell's `advanced` disclosure, per current step. Only
-  // 'window' (the per-period range table, and only in its 'per_period' mode
-  // with at least one period) and 'weights' (CSV controls + the paginated
-  // per-row table) have anything to hide behind THIS slot — every other step
-  // gets `undefined`, which is exactly what StepShell already treats as "no
-  // disclosure at all" (unchanged from Task 3).
+  // 'weights' (CSV controls + the paginated per-row table) has anything to
+  // hide behind THIS slot — every other step gets `undefined`, which is
+  // exactly what StepShell already treats as "no disclosure at all"
+  // (unchanged from Task 3).
+  //
+  // 'window' does NOT go through this slot. Its per-period range table
+  // ("Different year per period") used to (Task 4), but the final
+  // whole-branch review found that broken: the disclosure is collapsed by
+  // default AND reset to collapsed on every step entry, with the "Build
+  // MultiIndex snapshots" button sitting above it — so selecting that mode
+  // showed only an explanatory paragraph with nothing to fill in anywhere on
+  // screen. StepWindow.tsx now renders that table inline in its own body
+  // instead (see that file's header comment), so 'window' contributes no
+  // StepShell advanced content at all, same as 'mode', 'years', and
+  // 'economics'.
   //
   // 'economics' also has Advanced content (the per-carrier load-scaler
   // columns + CAPEX budget column) but does NOT go through this slot —
@@ -722,23 +732,11 @@ export default function ModelHorizon() {
   // column split of one live table rather than a block of content that can
   // be relocated below a separate <details>. See that file's header comment.
   //
-  // Only 'weights' unmounts while collapsed. Its table can be 8,760 rows on
-  // an hourly model — always mounting it would defeat the point of hiding
-  // it. The window per-period table is at most a handful of rows (one per
-  // investment period), so it uses StepShell's default: a native,
-  // always-mounted <details> that stays reachable by in-page find, same as
-  // SolverSettings.tsx / results/Economics.tsx.
+  // 'weights' unmounts while collapsed. Its table can be 8,760 rows on an
+  // hourly model — always mounting it would defeat the point of hiding it.
   let advancedContent: ReactNode
   let unmountAdvancedWhenCollapsed = false
-  if (view === 'window' && isMultiPeriod && mpMode === 'per_period' && periods.length > 0) {
-    advancedContent = (
-      <StepWindowAdvanced
-        periods={periods}
-        mpPerPeriod={mpPerPeriod}
-        onMpPerPeriodChange={(i, patch) => setMpPerPeriod(prev => prev.map((r, j) => j === i ? { ...r, ...patch } : r))}
-      />
-    )
-  } else if (view === 'weights' && snap && snap.weightings && snap.weightings.length > 0) {
+  if (view === 'weights' && snap && snap.weightings && snap.weightings.length > 0) {
     advancedContent = (
       <StepWeightsAdvanced
         weightings={snap.weightings as WeightingRow[]}
@@ -806,7 +804,13 @@ export default function ModelHorizon() {
             steps={steps}
             current={view}
             onSelect={setView}
-            title={`Step ${steps.indexOf(view) + 1} of ${steps.length} — ${STEP_LABELS[view]}`}
+            // `steps.indexOf(view)` can be -1 for one render: turning the
+            // multi-period toggle off while parked on 'years'/'economics'
+            // removes those ids from `steps`, and the guard effect above
+            // (that resets `view` back to 'mode') only fires a frame later.
+            // Render nothing rather than a bogus "Step 0 of N" in that gap —
+            // `steps.includes(view)` is false for exactly that one frame.
+            title={steps.includes(view) ? `Step ${steps.indexOf(view) + 1} of ${steps.length} — ${STEP_LABELS[view]}` : ''}
             advanced={advancedContent}
             unmountAdvancedWhenCollapsed={unmountAdvancedWhenCollapsed}
           >
@@ -950,6 +954,8 @@ export default function ModelHorizon() {
           onMpFreqChange={setMpFreq}
           onApplyMultiPeriod={onApplyMultiPeriod}
           applyMultiPeriodPending={applyMultiPeriodSnapshots.isPending}
+          mpPerPeriod={mpPerPeriod}
+          onMpPerPeriodChange={(i, patch) => setMpPerPeriod(prev => prev.map((r, j) => j === i ? { ...r, ...patch } : r))}
         />
       )}
 

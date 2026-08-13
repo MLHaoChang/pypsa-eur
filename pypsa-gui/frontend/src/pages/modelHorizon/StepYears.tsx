@@ -41,9 +41,6 @@ export function StepYears({
     <section>
       <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Investment years</h3>
       <div className="border border-border rounded mb-3">
-        <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted">
-          Investment years
-        </div>
         <div className="p-2.5">
           <p className="text-[11px] text-muted mb-2 leading-relaxed">
             Each year becomes one optimisation period. Capacity decisions are
