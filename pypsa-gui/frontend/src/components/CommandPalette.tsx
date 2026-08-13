@@ -5,7 +5,7 @@ import {
   Search, X, FolderOpen, Camera, Save as SaveIcon, FilePlus, Settings2,
   TrendingUp, Clock, Zap, RotateCcw, LayoutDashboard,
   Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks, LayoutGrid, Users,
-  SlidersHorizontal,
+  SlidersHorizontal, MessageSquare,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Dialog } from './Dialog'
@@ -295,6 +295,20 @@ function useCommands(mode: PaletteMode): Command[] {
             qc.invalidateQueries({ queryKey: nk(currentProject, 'undoInfo') })
             qc.invalidateQueries({ queryKey: ['projects'] })
             toast.success(`Saved · ${currentProject}`)
+          },
+        },
+        {
+          // The assistant was reachable only by mouse, from one sidebar
+          // button — for the feature whose spec is about being present.
+          id: 'act-assistant',
+          kind: 'action',
+          title: 'Toggle the assistant',
+          subtitle: 'Ask about the open network, drive tools, get taken to the view',
+          hint: 'Cmd J',
+          icon: <MessageSquare size={14} />,
+          run: () => {
+            const ui = useUIStore.getState()
+            ui.setAssistantDockOpen(!ui.assistantDockOpen)
           },
         },
         {

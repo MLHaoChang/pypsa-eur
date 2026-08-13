@@ -469,9 +469,28 @@ function ConfirmationCard() {
   )
 }
 
-function ErrorBanner() {
+/**
+ * Failures a fresh attempt could plausibly clear on its own.
+ *
+ * Mirrors `chat_service._RETRYABLE_SDK_KINDS` (rate_limited / upstream_error)
+ * rather than inventing a second list, plus the two the server does NOT retry
+ * inside a turn but a NEW turn resolves: an unexplained internal_error, and a
+ * tool-call cap that resets per turn.
+ *
+ * Everything else is excluded on purpose. A missing or rejected key, a name
+ * collision, a file over the size cap — none of those change because you
+ * asked again, and a button that cannot work is worse than no button: it
+ * teaches the user the button is a lie.
+ */
+const RETRYABLE_ERROR_KINDS = new Set([
+  'rate_limited', 'upstream_error', 'internal_error', 'tool_call_cap_exceeded',
+])
+
+function ErrorBanner({ onRetry }: { onRetry: () => void }) {
   const error = useChatStore((s) => s.error)
   const setError = useChatStore((s) => s.setError)
+  const streaming = useChatStore((s) => s.streaming)
+  const hasQuestion = useChatStore((s) => s.messages.some((m) => m.role === 'user'))
   if (!error) return null
 
   // v6-F2 — cold-path activate is NOT an error from the user's POV; the
@@ -552,12 +571,27 @@ function ErrorBanner() {
         find out.
       */}
       {error.error_kind === 'missing_api_key' && <ApiKeySetup />}
-      <button
-        className="mt-2 text-[10px] underline text-muted hover:text-text"
-        onClick={() => setError(null)}
-      >
-        Dismiss
-      </button>
+      <div className="flex items-center gap-3 mt-2">
+        {/* The failure modes above are the ONLY place a user could previously
+            end up with their question on screen, an error on screen, and
+            nothing to click. `rate_limited` is transient and self-healing —
+            the textbook one-click retry — and it was a dead end. */}
+        {RETRYABLE_ERROR_KINDS.has(error.error_kind) && hasQuestion && !streaming && (
+          <button
+            className="text-[10px] underline text-rose-300 hover:text-rose-200"
+            onClick={() => { setError(null); onRetry() }}
+            data-testid="chat-error-retry"
+          >
+            Try again
+          </button>
+        )}
+        <button
+          className="text-[10px] underline text-muted hover:text-text"
+          onClick={() => setError(null)}
+        >
+          Dismiss
+        </button>
+      </div>
     </div>
   )
 }
@@ -1883,12 +1917,77 @@ export default function ChatPanel() {
     const idx = useChatStore.getState().messages.findIndex((x) => x.id === m.id)
     if (idx < 0) return
     const text = m.content
+    // The files come back with the text. Retry always carried them; Edit did
+    // not, so rewording a question about an attached PDF silently re-sent it
+    // with no PDF — and the chips were gone from the composer too, so there
+    // was nothing on screen to notice. Always assigned, never merged: a
+    // leftover from a previous compose must not ride along with a question
+    // that never mentioned it.
+    const files = m.attachment_file_ids ?? []
     // The whole turn goes, question included — the user is replacing it, and
     // leaving the old phrasing above the new one would show them asking twice.
     if (!await withdrawTurn(idx)) return
     setInput(text)
+    useChatStore.getState().setAttachedFileIds(files)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [withdrawTurn])
+
+  /**
+   * Re-ask the last question after a turn FAILED.
+   *
+   * Retry hangs off an assistant message, and a turn that dies before its
+   * first token leaves none — so the case retry exists for was the one case
+   * it did not cover. The rewind is not optional: `run_turn` appends the user
+   * message to the server history before it calls the model, so an error does
+   * not unwind it, and re-asking without rewinding stacks the question twice.
+   */
+  const onRetryLastTurn = useCallback(async () => {
+    const msgs = useChatStore.getState().messages
+    let idx = -1
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') { idx = i; break }
+    }
+    if (idx < 0) return
+    const question = msgs[idx]
+    if (!await withdrawTurn(idx)) return
+    dispatchSend(question.content, question.attachment_file_ids ?? [])
+  }, [withdrawTurn, dispatchSend])
+
+  // ⌘/Ctrl-J toggles the assistant, and the OPEN path lands the caret in the
+  // composer.
+  //
+  // Bound here rather than in App.tsx's global handler because this component
+  // owns `textareaRef` — and a shortcut that opens the panel but leaves the
+  // caret elsewhere has saved nothing, which is the failure the focus effect
+  // below exists to prevent.
+  //
+  // Deliberately NOT guarded on an editable target, unlike the palette's
+  // ⌘K/⌘P: the composer IS an editable target, and "close the assistant I am
+  // typing in" is the most natural moment to press this. The modifier check
+  // still comes first, so a literal "j" never toggles a panel.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (e.key !== 'j' && e.key !== 'J') return
+      e.preventDefault()
+      const ui = useUIStore.getState()
+      ui.setAssistantDockOpen(!ui.assistantDockOpen)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Focus follows the OPENING, never the mount. The dock defaults to open, so
+  // focusing on mount would steal the caret on every page load — out of the
+  // project search, out of a half-filled form, out of the canvas. The ref
+  // starts at the CURRENT value so the first run after mount is a no-op.
+  const prevDockOpenRef = useRef(assistantDockOpen)
+  useEffect(() => {
+    const opened = assistantDockOpen && !prevDockOpenRef.current
+    prevDockOpenRef.current = assistantDockOpen
+    if (!opened) return
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [assistantDockOpen])
 
   const onClearHistory = useCallback(() => {
     // Clear UI state in-place (does NOT trigger the project-switch reset
@@ -2025,7 +2124,7 @@ export default function ChatPanel() {
           </button>
         )}
       </div>
-      <ErrorBanner />
+      <ErrorBanner onRetry={onRetryLastTurn} />
       {historyGap > 0 && (
         <div
           role="status"

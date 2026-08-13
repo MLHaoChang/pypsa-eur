@@ -203,6 +203,112 @@ it('withdraws the edited turn from screen and server', async () => {
   expect(useChatStore.getState().messages).toEqual([])
 })
 
+// ── edit must not lose the attachments ──────────────────────────────────────
+//
+// REGRESSION, and it shipped in the same commit as the feature. Retry carried
+// `question.attachment_file_ids`; Edit restored only the text. So attaching a
+// PDF, asking about it, then rewording the question sent the reworded question
+// with no file — silently, and with the chips gone from the composer so there
+// was nothing on screen to notice. The original tests asked "does the composer
+// get the text" and never asked about the files.
+
+it('restores the attachments when a question is edited', async () => {
+  renderPanel()
+  act(() => {
+    useChatStore.setState({
+      messages: [
+        {
+          id: 'u1', role: 'user', content: 'what does this sheet say?',
+          attachment_file_ids: ['f-1', 'f-2'], ts: 1,
+        },
+        { id: 'a1', role: 'assistant', content: 'It lists demand by hour.', ts: 2 },
+      ] as never,
+      attachedFileIds: [],
+    })
+  })
+
+  fireEvent.click(await screen.findByTestId('chat-edit-u1'))
+
+  await waitFor(() => {
+    expect(useChatStore.getState().attachedFileIds).toEqual(['f-1', 'f-2'])
+  })
+})
+
+it('leaves the composer unattached when the edited question had no files', async () => {
+  renderPanel()
+  act(() => { seedExchange(); useChatStore.setState({ attachedFileIds: ['stale'] }) })
+
+  fireEvent.click(await screen.findByTestId('chat-edit-u1'))
+
+  // Not merely "does not add" — it must CLEAR, or a file left over from a
+  // previous compose rides along with a question that never mentioned it.
+  await waitFor(() => {
+    expect(useChatStore.getState().attachedFileIds).toEqual([])
+  })
+})
+
+// ── a failed turn has to be recoverable ─────────────────────────────────────
+//
+// Retry hangs off assistant messages, and a turn that fails BEFORE any token
+// leaves no assistant bubble — so the case retry exists for was the one case
+// it did not cover. The question sits on screen, the error sits on screen, and
+// there is nothing to click. `rate_limited` is transient and self-healing: the
+// textbook one-click retry.
+
+function seedFailedTurn(kind: string) {
+  useChatStore.setState({
+    messages: [
+      { id: 'u1', role: 'user', content: 'why is Onshore Wind 3 curtailed?', ts: 1 },
+    ] as never,
+    error: { error_kind: kind, message: 'slow down' } as never,
+  })
+}
+
+it('offers a way back from a transient failure', async () => {
+  renderPanel()
+  act(() => { seedFailedTurn('rate_limited') })
+
+  expect(await screen.findByTestId('chat-error-retry')).toBeTruthy()
+})
+
+it('rewinds and re-asks the failed question', async () => {
+  renderPanel()
+  act(() => { seedFailedTurn('rate_limited') })
+
+  fireEvent.click(await screen.findByTestId('chat-error-retry'))
+
+  // The failed turn still occupies the SERVER history — run_turn appends the
+  // user message before the model call, so the error does not unwind it.
+  // Re-asking without rewinding would stack the question twice.
+  await waitFor(() => expect(vi.mocked(postChatRewind)).toHaveBeenCalled())
+  await waitFor(() => expect(vi.mocked(createChatStream)).toHaveBeenCalled())
+  expect(vi.mocked(createChatStream).mock.calls[0][0].message)
+    .toBe('why is Onshore Wind 3 curtailed?')
+})
+
+// Offering a button that cannot work is worse than offering none: it teaches
+// the user the button is a lie. A missing key is not fixed by asking again.
+it('offers no retry for a failure that asking again cannot fix', async () => {
+  renderPanel()
+  act(() => { seedFailedTurn('missing_api_key') })
+
+  await screen.findByTestId('chat-error-banner')
+  expect(screen.queryByTestId('chat-error-retry')).toBeNull()
+})
+
+it('offers no retry when there is no question to re-ask', async () => {
+  renderPanel()
+  act(() => {
+    useChatStore.setState({
+      messages: [],
+      error: { error_kind: 'rate_limited', message: 'slow down' } as never,
+    })
+  })
+
+  await screen.findByTestId('chat-error-banner')
+  expect(screen.queryByTestId('chat-error-retry')).toBeNull()
+})
+
 // ── while streaming ─────────────────────────────────────────────────────────
 
 it('offers no retry or edit while a turn is running', async () => {
