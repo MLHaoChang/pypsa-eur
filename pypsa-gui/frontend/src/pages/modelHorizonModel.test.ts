@@ -225,3 +225,196 @@ describe('horizonRangeLabel', () => {
       .toBe(`${years[0]}…${years[years.length - 1]} × op. 01-01→12-31`)
   })
 })
+
+import {
+  visibleSteps,
+  isHorizonUnset,
+  stepSummary,
+  type HorizonStepId,
+  type HorizonSummaryContext,
+} from './modelHorizonModel'
+
+describe('visibleSteps', () => {
+  it('shows all six steps, in rail order, on a multi-period project', () => {
+    expect(visibleSteps(true)).toEqual([
+      'mode', 'years', 'economics', 'window', 'sampling', 'weights',
+    ])
+  })
+
+  it('drops the three period-level steps on a single-period project', () => {
+    expect(visibleSteps(false)).toEqual(['mode', 'window', 'sampling', 'weights'])
+  })
+
+  it('never includes a period-level step for single-period', () => {
+    const periodSteps: HorizonStepId[] = ['years', 'economics']
+    for (const id of periodSteps) {
+      expect(visibleSteps(false)).not.toContain(id)
+    }
+  })
+})
+
+describe('isHorizonUnset', () => {
+  it('is unset at 0 — no snapshots at all', () => {
+    expect(isHorizonUnset(0)).toBe(true)
+  })
+
+  it('is unset at exactly 1 — PyPSA\'s default single "now" snapshot, not a configured horizon', () => {
+    expect(isHorizonUnset(1)).toBe(true)
+  })
+
+  it('is configured at 2 — the smallest count that is not the default', () => {
+    expect(isHorizonUnset(2)).toBe(false)
+  })
+
+  it('is unset when undefined — data has not loaded yet, never flash the summary early', () => {
+    expect(isHorizonUnset(undefined)).toBe(true)
+  })
+})
+
+describe('stepSummary', () => {
+  const multiCtx: HorizonSummaryContext = {
+    isMultiPeriod: true,
+    periods: [2030, 2040, 2050],
+    snapshotCount: 26280,
+    freq: 'h',
+    rangeLabel: '2030…2050 × op. 01-01→12-31',
+    canSampleWeeks: true,
+    weightsAreDefault: true,
+  }
+  const singleCtx: HorizonSummaryContext = {
+    isMultiPeriod: false,
+    periods: [],
+    snapshotCount: 8760,
+    freq: 'h',
+    rangeLabel: '2024-01-01 → 2024-12-31',
+    canSampleWeeks: false,
+    weightsAreDefault: false,
+  }
+
+  describe('mode', () => {
+    it('names the investment-year count on a multi-period project', () => {
+      expect(stepSummary('mode', multiCtx)).toBe('Multi-period, 3 investment years')
+    })
+
+    it('says single-period, plainly, when not multi-period', () => {
+      expect(stepSummary('mode', singleCtx)).toBe('Single-period')
+    })
+
+    it('singularises a lone investment year', () => {
+      expect(stepSummary('mode', { ...multiCtx, periods: [2030] }))
+        .toBe('Multi-period, 1 investment year')
+    })
+  })
+
+  describe('years (multi-period only)', () => {
+    it('lists the configured years, not just a count', () => {
+      expect(stepSummary('years', multiCtx)).toBe('3 investment years: 2030, 2040, 2050')
+    })
+
+    it('says none are set when the list is empty, rather than "0 investment years: "', () => {
+      expect(stepSummary('years', { ...multiCtx, periods: [] })).toBe('No investment years set')
+    })
+  })
+
+  describe('economics (multi-period only)', () => {
+    it('names every configured year, not just the endpoints', () => {
+      expect(stepSummary('economics', multiCtx))
+        .toBe('Objective weighting set across 3 years (2030…2040…2050)')
+    })
+
+    it('calls out that a single period needs no discounting', () => {
+      expect(stepSummary('economics', { ...multiCtx, periods: [2030] }))
+        .toBe('Single period (2030) — no discounting between periods')
+    })
+
+    it('has nothing to weight when no years are configured yet', () => {
+      expect(stepSummary('economics', { ...multiCtx, periods: [] }))
+        .toBe('No investment years to weight yet')
+    })
+
+    it('distinguishes two period sets with the same count and span but different spacing', () => {
+      // [2030,2035,2050] and [2030,2040,2050] share count (3) and span (2030-2050) —
+      // a summary keyed only on lo/hi would render both identically, hiding a real
+      // difference: PyPSA's discount weighting is sensitive to inter-period spacing.
+      const evenlySpaced = stepSummary('economics', { ...multiCtx, periods: [2030, 2040, 2050] })
+      const unevenlySpaced = stepSummary('economics', { ...multiCtx, periods: [2030, 2035, 2050] })
+      expect(evenlySpaced).not.toBe(unevenlySpaced)
+      expect(unevenlySpaced).toBe('Objective weighting set across 3 years (2030…2035…2050)')
+    })
+  })
+
+  describe('window', () => {
+    it('composes the existing range label with the existing resolution label, multi-period', () => {
+      expect(stepSummary('window', multiCtx)).toBe('2030…2050 × op. 01-01→12-31, Hourly (h)')
+    })
+
+    it('composes the existing range label with the existing resolution label, single-period', () => {
+      expect(stepSummary('window', singleCtx)).toBe('2024-01-01 → 2024-12-31, Hourly (h)')
+    })
+
+    it('reflects a different resolution rather than always saying hourly', () => {
+      expect(stepSummary('window', { ...singleCtx, freq: 'MS' }))
+        .toBe('2024-01-01 → 2024-12-31, Monthly (MS)')
+    })
+  })
+
+  describe('sampling', () => {
+    it('reports the observable count and weights state, plus availability, on a multi-period project', () => {
+      expect(stepSummary('sampling', multiCtx))
+        .toBe('26,280 snapshots · default weights · representative weeks available')
+    })
+
+    it('names the reason sampling is unavailable rather than repeating the available text', () => {
+      expect(stepSummary('sampling', singleCtx))
+        .toBe('8,760 snapshots · custom weights · upload an hourly profile to enable sampling')
+    })
+
+    it('does not claim a full year for a sub-year snapshot count', () => {
+      // A single-period network can carry a custom sub-year window via the ordinary
+      // Apply-snapshots path — entirely unrelated to representative-week sampling.
+      // `ctx` has no field that supports a "this is a full year" claim, so the
+      // sentence must not make one regardless of `canSampleWeeks`.
+      const subYear: HorizonSummaryContext = { ...singleCtx, snapshotCount: 168, canSampleWeeks: true }
+      expect(stepSummary('sampling', subYear)).not.toMatch(/full year/i)
+      const subYearUnavailable: HorizonSummaryContext = { ...singleCtx, snapshotCount: 168 }
+      expect(stepSummary('sampling', subYearUnavailable)).not.toMatch(/full year/i)
+    })
+
+    it('makes no claim that sampling did not happen, for a network that WAS sampled', () => {
+      // Small snapshot count + non-default weights is exactly the shape a sampled
+      // network has (representative weeks replace the full index and each sampled
+      // hour is reweighted) — but `ctx` cannot prove causation, only report the
+      // two facts. The sentence must not assert the negative either.
+      const sampled: HorizonSummaryContext = {
+        ...multiCtx, snapshotCount: 2016, weightsAreDefault: false,
+      }
+      expect(stepSummary('sampling', sampled)).not.toMatch(/not sampled/i)
+      expect(stepSummary('sampling', sampled))
+        .toBe('2,016 snapshots · custom weights · representative weeks available')
+    })
+  })
+
+  describe('weights', () => {
+    it('says default when every snapshot still carries weight 1', () => {
+      expect(stepSummary('weights', multiCtx)).toBe('Default weights (every snapshot weighted 1)')
+    })
+
+    it('says custom when weights have been edited away from default', () => {
+      expect(stepSummary('weights', singleCtx)).toBe('Custom weights applied')
+    })
+  })
+
+  it('never returns the same sentence for genuinely different states, per step', () => {
+    const pairs: Array<[HorizonStepId, HorizonSummaryContext, HorizonSummaryContext]> = [
+      ['mode', multiCtx, singleCtx],
+      ['years', multiCtx, { ...multiCtx, periods: [2030] }],
+      ['economics', multiCtx, { ...multiCtx, periods: [2030] }],
+      ['window', multiCtx, singleCtx],
+      ['sampling', multiCtx, singleCtx],
+      ['weights', multiCtx, singleCtx],
+    ]
+    for (const [step, a, b] of pairs) {
+      expect(stepSummary(step, a)).not.toBe(stepSummary(step, b))
+    }
+  })
+})

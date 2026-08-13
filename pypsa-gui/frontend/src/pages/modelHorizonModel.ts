@@ -184,3 +184,152 @@ export function horizonRangeLabel(
   // MM-DD only — the operational year is a base year, not a planning year.
   return `${span} × op. ${first.slice(5, 10)}→${last.slice(5, 10)}`
 }
+
+/**
+ * Steps of the guided Model Horizon flow, split along PyPSA's two-level
+ * `(period, timestep)` snapshot MultiIndex: `mode` / `years` / `economics`
+ * are period-level and disappear entirely in single-period mode (there is no
+ * investment period to configure); `window` / `sampling` / `weights` are
+ * timestep-level and are always present.
+ */
+export type HorizonStepId = 'mode' | 'years' | 'economics' | 'window' | 'sampling' | 'weights'
+
+/**
+ * Which steps a project shows, in rail order. Multi-period gets all six;
+ * single-period drops the three period-level steps and keeps the four
+ * timestep-level ones.
+ */
+export function visibleSteps(isMultiPeriod: boolean): HorizonStepId[] {
+  const timestepSteps: HorizonStepId[] = ['window', 'sampling', 'weights']
+  return isMultiPeriod
+    ? ['mode', 'years', 'economics', ...timestepSteps]
+    : ['mode', ...timestepSteps]
+}
+
+/**
+ * Whether the horizon is still PyPSA's default — a single "now" snapshot —
+ * rather than something a user actually configured. Decides whether a
+ * returning user meets the guided flow at step 1 or lands on the summary.
+ *
+ * A count of exactly 1 is unset, not a one-snapshot horizon: this mirrors
+ * the heuristic `ModelHorizon.tsx` already uses (`snap.count <= 1`) to decide
+ * whether to hydrate its constructor defaults. `undefined` (data not loaded
+ * yet) also reads as unset, so the summary never flashes before data arrives.
+ */
+export function isHorizonUnset(snapshotCount: number | undefined): boolean {
+  return snapshotCount === undefined || snapshotCount <= 1
+}
+
+/**
+ * Plain data `stepSummary` needs to write its sentences, all of it already
+ * computed by the page. Deliberately NOT the raw `SnapshotInfo` /
+ * `SolverConfig` API payloads — that would couple this pure module to
+ * response shapes and force every test to build a full fake payload just to
+ * exercise a string. `rangeLabel` is `horizonRangeLabel`'s output, composed
+ * here rather than re-derived.
+ */
+export interface HorizonSummaryContext {
+  isMultiPeriod: boolean
+  /** Investment period years, e.g. `[2030, 2040, 2050]`. Empty outside multi-period. */
+  periods: number[]
+  snapshotCount: number | undefined
+  freq: string | null | undefined
+  /** Pre-computed by `horizonRangeLabel` — compose it, don't re-derive it. */
+  rangeLabel: string
+  canSampleWeeks: boolean
+  weightsAreDefault: boolean
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
+/**
+ * `2030…2040…2050` — every configured year, not just the endpoints.
+ *
+ * A lo/hi span (`2030–2050`) would render `[2030,2035,2050]` and
+ * `[2030,2040,2050]` identically despite them being genuinely different
+ * configurations — PyPSA's discount weighting is sensitive to inter-period
+ * spacing, not just count and range. Listing every year is the only
+ * representation that can't alias two different period sets together.
+ *
+ * `periods` is an investment-period list (single/low-double-digit years),
+ * never the large per-snapshot array `horizonRangeLabel` guards against, so
+ * there is no call-stack-size concern here — a plain join is fine.
+ *
+ * Uses the same `…` separator as `horizonRangeLabel`'s span notation rather
+ * than an en dash, so the two step summaries that both describe a range of
+ * years read as one convention, not two.
+ */
+function periodList(periods: number[]): string {
+  return periods.join('…')
+}
+
+/** `"26,280 snapshots"`, or a pending-load phrasing when the count hasn't arrived yet. */
+function snapshotCountLabel(count: number | undefined): string {
+  if (count === undefined) return 'snapshot count pending'
+  return `${count.toLocaleString()} snapshot${count === 1 ? '' : 's'}`
+}
+
+/**
+ * One-sentence summary of a step's current configuration, for the
+ * summary-first landing view. A returning user reads this instead of
+ * opening the step, so it must name the actual configured value (a count, a
+ * year, a resolution) — never a placeholder or a bare label.
+ */
+export function stepSummary(step: HorizonStepId, ctx: HorizonSummaryContext): string {
+  switch (step) {
+    case 'mode':
+      return ctx.isMultiPeriod
+        ? `Multi-period, ${plural(ctx.periods.length, 'investment year')}`
+        : 'Single-period'
+
+    case 'years':
+      return ctx.periods.length === 0
+        ? 'No investment years set'
+        : `${plural(ctx.periods.length, 'investment year')}: ${ctx.periods.join(', ')}`
+
+    case 'economics':
+      if (ctx.periods.length === 0) return 'No investment years to weight yet'
+      if (ctx.periods.length === 1) {
+        return `Single period (${ctx.periods[0]}) — no discounting between periods`
+      }
+      return `Objective weighting set across ${plural(ctx.periods.length, 'year')} (${periodList(ctx.periods)})`
+
+    case 'window':
+      return `${ctx.rangeLabel}, ${resolutionLabel(ctx.freq)}`
+
+    case 'sampling': {
+      // `ctx` carries no signal for "representative weeks were actually
+      // sampled" — the backend's SnapshotInfo has no such field, and the
+      // page only learns it transiently from a mutation response, which is
+      // not plain persisted data this module is allowed to depend on. So
+      // this sentence must not assert a sampling state in EITHER direction:
+      // not "sampled", not "not sampled" — both would be an unconditional
+      // claim from data that cannot support one. (An earlier version of
+      // this code said "Not sampled" unconditionally, which is simply false
+      // for a network that was sampled — the exact defect this comment now
+      // warns against repeating.)
+      //
+      // Instead it reports what IS knowable: the snapshot count and whether
+      // weights are still default — both already in `ctx`, and together the
+      // observable shape a sampled network actually has (a small count with
+      // non-default weights). It never claims that shape was CAUSED by
+      // sampling, only states the two facts, plus the separate and fully
+      // supportable fact of whether sampling is available going forward.
+      // A post-sampling network and a pristine one with the same count and
+      // weights state are indistinguishable here; that is the honest
+      // ceiling of this interface, not an oversight.
+      const weights = ctx.weightsAreDefault ? 'default weights' : 'custom weights'
+      const capability = ctx.canSampleWeeks
+        ? 'representative weeks available'
+        : 'upload an hourly profile to enable sampling'
+      return `${snapshotCountLabel(ctx.snapshotCount)} · ${weights} · ${capability}`
+    }
+
+    case 'weights':
+      return ctx.weightsAreDefault
+        ? 'Default weights (every snapshot weighted 1)'
+        : 'Custom weights applied'
+  }
+}
