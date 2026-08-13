@@ -332,24 +332,10 @@ def _reset_metrics_for_tests() -> None:
 # in-memory session.messages are NOT redacted — only the on-disk record.
 # ─────────────────────────────────────────────────────────────────────────
 
-# Module-level so the patterns compile once. _SECRET_KV catches
-# password=/passwd=/secret=/api_key=/token= followed by a value; _BEARER
-# catches 'bearer <token>'; the sk-ant-* pattern is shared with _redact_for_log.
-import re as _re  # noqa: E402 — local alias kept beside the patterns that use it
-
-_SECRET_KV_RE = _re.compile(
-    r"(?i)\b(password|passwd|secret|api[_-]?key|token)\s*[=:]\s*(\S+)"
+from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
+    redact_for_log,
+    redact_secrets_in_str as _redact_secrets_in_str,
 )
-_BEARER_RE = _re.compile(r"(?i)\bbearer\s+\S+")
-_SK_ANT_RE = _re.compile(r"sk-ant-[A-Za-z0-9_\-]+")
-
-
-def _redact_secrets_in_str(text: str) -> str:
-    """Apply the secret patterns to one string. Order: key=val, bearer, sk-ant."""
-    text = _SECRET_KV_RE.sub(r"\1=[REDACTED]", text)
-    text = _BEARER_RE.sub("bearer [REDACTED]", text)
-    text = _SK_ANT_RE.sub("[REDACTED-API-KEY]", text)
-    return text
 
 
 def _redact_for_persist(value: Any) -> Any:
@@ -1465,23 +1451,7 @@ def _with_history_cache_breakpoint(
     return out
 
 
-def _redact_for_log(value: Any) -> str:
-    """
-    Strip plausible secrets from a string before logging. Phase 3 invariant
-    (i) — the ANTHROPIC_API_KEY literal value MUST NEVER appear in backend
-    logs. We belt-and-suspender this by redacting any substring that LOOKS
-    like an API key (matches the `sk-ant-*` prefix the Anthropic SDK uses)
-    in addition to never explicitly passing the value to log calls.
-    """
-    import os
-    import re
-    text = str(value)
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if key:
-        text = text.replace(key, "[REDACTED-API-KEY]")
-    # Generic shape: sk-ant-<...non-whitespace...>
-    text = re.sub(r"sk-ant-[A-Za-z0-9_\-]+", "[REDACTED-API-KEY]", text)
-    return text
+_redact_for_log = redact_for_log  # moved 2026-08-13 (provider seam, Task 1)
 
 
 def _build_anthropic_client():
