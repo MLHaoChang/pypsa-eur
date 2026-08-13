@@ -179,6 +179,184 @@ def test_migrated_schema_matches_the_model_schema(tmp_path):
         model_engine.dispose()
 
 
+def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
+    """
+    Closes a verification gap `test_migrated_schema_matches_the_model_schema`
+    (above) does NOT cover: that test builds an EMPTY database and diffs
+    reflected schemas, which proves 0005 *describes* the right tables but
+    proves nothing about running it against a database that already has rows
+    — the only path an installed user's `alembic upgrade head` ever takes.
+    That was previously checked by hand, once, against a real 0004-era
+    database supplied out-of-band; the database lived in a temp directory and
+    is gone, so the check was not repeatable. This test generates its own.
+
+    Mechanics: build the pre-migration schema by running the REAL migration
+    chain up to (not including) the migration under test — not a hand-rolled
+    copy of `db/models.py`, which would silently drift the day a FUTURE
+    migration changes a column on one of these tables instead of only adding
+    a table. Seed real rows (valid FKs — SQLite enforces them here via
+    `enable_sqlite_foreign_keys`, so a fabricated `created_by` would be
+    rejected, not merely wrong-shaped). Stamp + upgrade to head for real.
+    Assert alembic_version advanced, the new table exists, and — the
+    load-bearing assertion — every pre-existing row is byte-identical
+    before/after, not just count-identical: a migration that silently
+    recreates a table passes a count check and fails this one.
+
+    Predecessor revision is DERIVED from the chain (`ScriptDirectory`), not
+    hardcoded as "0004_scenario_type": `get_current_head()` always names the
+    latest migration, and its `down_revision` is always the one before it. So
+    when 0006 lands, this test automatically starts exercising 0006's upgrade
+    instead of 0005's. `NEW_TABLE_NAME` below is the one piece that genuinely
+    cannot be derived — "what table did the latest migration add" is
+    migration-specific knowledge — so it is a documented module-local
+    constant per the plan's fallback allowance, to be updated alongside any
+    migration that changes what's seeded here.
+    """
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from alembic import command
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import MetaData, select, text
+    from sqlalchemy.orm import sessionmaker
+
+    import local_bootstrap
+    from db.models import OrgMembership, Organization, Project
+    from db.models import Session as SessionRow
+    from db.models import User
+    from db.session import enable_sqlite_foreign_keys
+
+    # Added by 0005_solve_jobs. Update this alongside the seed data below
+    # whenever a later migration becomes the one this test exercises.
+    NEW_TABLE_NAME = "solve_jobs"
+    PRE_EXISTING_TABLES = ["organizations", "users", "org_memberships", "projects", "sessions"]
+
+    def _dump_rows(engine, table_names):
+        """
+        Full-row content for `table_names`, ordered by primary key so the
+        comparison is stable even if a migration rebuilds a table (SQLite
+        batch-alter copies rows into a fresh table and physical order is not
+        guaranteed to survive that). Reflected (untyped) columns, deliberately
+        — this must not lean on `db/models.py`'s current column types, which
+        is exactly the coupling that would let a drifted model paper over a
+        real migration bug.
+        """
+        md = MetaData()
+        md.reflect(bind=engine, only=table_names)
+        with engine.connect() as conn:
+            return {
+                name: [
+                    dict(row)
+                    for row in conn.execute(
+                        select(md.tables[name]).order_by(*md.tables[name].primary_key.columns)
+                    ).mappings()
+                ]
+                for name in table_names
+            }
+
+    url = f"sqlite+pysqlite:///{(tmp_path / 'predecessor.db').as_posix()}"
+    cfg = local_bootstrap._alembic_config(url)
+
+    script = ScriptDirectory.from_config(cfg)
+    head_id = script.get_current_head()
+    predecessor = script.get_revision(head_id).down_revision
+    assert predecessor is not None, "chain has only one revision — nothing to seed as 'predecessor'"
+
+    # 1+2: a fresh SQLite DB, brought to the schema as it stood immediately
+    # before the migration under test, via the real chain.
+    engine = create_engine(url)
+    enable_sqlite_foreign_keys(engine)
+    command.upgrade(cfg, predecessor)
+
+    org_id, user_id = uuid.uuid4(), uuid.uuid4()
+    project1_id, project2_id = uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(tz=timezone.utc)
+    Session_ = sessionmaker(bind=engine)
+    with Session_() as db:
+        db.add_all([
+            Organization(id=org_id, name="Predecessor Org", created_at=now),
+            User(
+                id=user_id, email="predecessor-seed@example.com", password_hash=None,
+                status="active", is_super_admin=False, created_at=now,
+            ),
+        ])
+        db.flush()
+        db.add_all([
+            # role="admin" — the pairing `project_acl` actually needs.
+            OrgMembership(id=uuid.uuid4(), user_id=user_id, org_id=org_id, role="admin"),
+            # Two projects, both with a real `created_by` FK. A fabricated
+            # one would be rejected outright: `enable_sqlite_foreign_keys`
+            # above turns SQLite's FK enforcement on for this connection.
+            Project(
+                id=project1_id, org_id=org_id, name="Project One", created_by=user_id,
+                storage_path="predecessor-org/project-one", created_at=now, updated_at=now,
+            ),
+            Project(
+                id=project2_id, org_id=org_id, name="Project Two", created_by=user_id,
+                storage_path="predecessor-org/project-two", created_at=now, updated_at=now,
+            ),
+        ])
+        db.flush()
+        db.add(
+            # `active_project_id` is the column CLAUDE.md flags as the one
+            # test harnesses forget: it's the field most likely to be
+            # disturbed by a migration that rewrites or reindexes.
+            SessionRow(
+                id=uuid.uuid4(), user_id=user_id, token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
+                expires_at=now + timedelta(hours=8), revoked_at=None,
+                active_project_id=project1_id,
+            )
+        )
+        db.commit()
+
+    with engine.connect() as conn:
+        version_before = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    assert version_before == predecessor
+
+    before = _dump_rows(engine, PRE_EXISTING_TABLES)
+    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 1], (
+        "seeding produced the wrong row counts — the byte-identical comparison below "
+        "would be vacuous against an empty or partially-seeded table"
+    )
+    engine.dispose()
+
+    # 3: the DB claims to be at the revision before the one under test. A
+    # no-op here (the real `upgrade` above already left it there) — spelled
+    # out anyway per the verification plan, and it is the call a real
+    # "declare this database's revision" bootstrap would use if the
+    # pre-migration schema had been built some other way (e.g. `create_all`
+    # minus the new table).
+    command.stamp(cfg, predecessor)
+
+    # 4: the real upgrade under test.
+    command.upgrade(cfg, "head")
+
+    after_engine = create_engine(url)
+    try:
+        table_names = set(inspect(after_engine).get_table_names())
+        assert NEW_TABLE_NAME in table_names, f"{NEW_TABLE_NAME} missing after upgrade to head"
+
+        with after_engine.connect() as conn:
+            version_after = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        assert version_after == head_id
+        assert version_after != version_before
+
+        after = _dump_rows(after_engine, PRE_EXISTING_TABLES)
+    finally:
+        after_engine.dispose()
+
+    # The load-bearing assertion: full row content, not counts. A migration
+    # that dropped and silently recreated a table (e.g. an errant
+    # `batch_alter_table` touching the wrong table) would still pass a count
+    # check — new PKs, defaulted columns — and fail this one.
+    assert before == after, "0005 did not preserve pre-existing rows byte-for-byte across the upgrade"
+
+    [session_after] = after["sessions"]
+    assert session_after["active_project_id"] == project1_id.hex, (
+        "sessions.active_project_id was disturbed by the upgrade"
+    )
+
+
 def test_ensure_app_dirs_creates_every_writable_root(tmp_path, monkeypatch):
     from local_bootstrap import ensure_app_dirs
     import settings as settings_module
