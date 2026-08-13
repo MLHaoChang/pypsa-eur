@@ -11,9 +11,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { SolveJob, SolveJobStatus } from '../api/solveQueue'
 import SolveQueuePanel, { canExpandJob } from './SolveQueuePanel'
 
+const JOB_ID = '55555555-5555-4555-8555-555555555555'
+
 function job(status: SolveJobStatus, project_id: string | null = 'demo'): SolveJob {
   return {
-    id: 5, project_id, project_key: null, status,
+    id: JOB_ID, project_id, project_key: null, status,
     position: null, objective: null, solve_time: null, condition: null, error: null,
     enqueued_at: 0, started_at: 0, finished_at: 1,
   }
@@ -36,8 +38,8 @@ vi.mock('../api/solveQueue', async (orig) => ({
   ...(await orig<typeof import('../api/solveQueue')>()),
   solveQueueApi: {
     ...(await orig<typeof import('../api/solveQueue')>()).solveQueueApi,
-    jobLogHistory: (id: number) => jobLogHistory(id),
-    jobLogStreamUrl: (id: number) => `/api/simulation/queue/${id}/log_stream`,
+    jobLogHistory: (id: string) => jobLogHistory(id),
+    jobLogStreamUrl: (id: string) => `/api/simulation/queue/${id}/log_stream`,
     resultsBundle: vi.fn().mockResolvedValue(null),
   },
 }))
@@ -81,7 +83,7 @@ describe('SolveQueuePanel log expansion', () => {
     renderPanel()
     await userEvent.click(screen.getByTitle('Show this job’s log'))
     await waitFor(() => expect(screen.getByText('solver: infeasible')).toBeTruthy())
-    expect(jobLogHistory).toHaveBeenCalledWith(5)
+    expect(jobLogHistory).toHaveBeenCalledWith(JOB_ID)
   })
 })
 
@@ -133,7 +135,7 @@ describe('SolveQueuePanel live log stream', () => {
     await userEvent.click(screen.getByTitle('Show this job’s log'))
 
     const es = FakeEventSource.instances[0]
-    expect(es?.url).toBe('/api/simulation/queue/5/log_stream')
+    expect(es?.url).toBe(`/api/simulation/queue/${JOB_ID}/log_stream`)
 
     act(() => { es.emitMessage('solver: iteration 1') })
     act(() => { es.emitMessage('solver: iteration 2') })
@@ -163,7 +165,7 @@ describe('SolveQueuePanel live log stream', () => {
     now.mockReturnValue(1_000 + 31_000) // past STALE_MS since the last event
     act(() => { es.emitError() })
 
-    await waitFor(() => expect(jobLogHistory).toHaveBeenCalledWith(5))
+    await waitFor(() => expect(jobLogHistory).toHaveBeenCalledWith(JOB_ID))
     expect(screen.queryByText(/Log stream lost/)).toBeNull()
     expect(es.readyState).not.toBe(FakeEventSource.CLOSED)
   })
@@ -269,7 +271,7 @@ describe('SolveQueuePanel live log stream', () => {
     act(() => { es.emitMessage('solver: iteration 1') })
     now.mockReturnValue(1_000 + 31_000)
     act(() => { es.emitError() }) // stale check fires; jobLogHistory left pending
-    await waitFor(() => expect(jobLogHistory).toHaveBeenCalledWith(5))
+    await waitFor(() => expect(jobLogHistory).toHaveBeenCalledWith(JOB_ID))
 
     // `done` arrives before the stale check's REST call resolves.
     act(() => { es.emitDone({ status: 'completed' }) })

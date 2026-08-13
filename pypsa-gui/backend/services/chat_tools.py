@@ -1360,12 +1360,12 @@ def solve_queue_list() -> dict:
 
 
 def solve_queue_abort(job_id: str) -> dict:
-    # The queue's jobs dict is int-keyed (services/solve_queue.py); a string
-    # job_id silently misses every key and the handler 404s while the model
-    # thinks the abort worked. Coerce to int. A non-numeric id raises a clear
-    # ValueError that the dispatcher surfaces as a tool_error.
+    # Job ids are UUIDs (0005_solve_jobs). The old `int(job_id)` coercion
+    # existed because the jobs dict was int-keyed and a string silently missed
+    # every key — it now has to go, or every abort raises ValueError before it
+    # reaches the handler.
     from routers.solve_queue import abort_job as _h
-    return _route(_h, int(job_id))
+    return _route(_h, job_id)
 
 
 def solve_queue_clear_finished() -> dict:

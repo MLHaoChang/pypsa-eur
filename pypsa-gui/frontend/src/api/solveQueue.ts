@@ -3,10 +3,15 @@ import client from './client'
 // One queued solve of a saved project. Mirrors the backend SolveJob.to_public
 // (services/solve_queue.py). `position` is the 1-based place in the queue for a
 // still-queued job, null once it's running/terminal.
-export type SolveJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
+// `interrupted`: the backend process died while this job was running and nobody
+// stopped it (services/solve_job_store.reconcile_on_boot). Terminal, and
+// deliberately NOT the same word as `aborted`, which means a user decided.
+export type SolveJobStatus =
+  'queued' | 'running' | 'completed' | 'failed' | 'aborted' | 'interrupted'
 
 export interface SolveJob {
-  id: number
+  // UUID string. Was a per-process integer that collided across replicas.
+  id: string
   // NULLED for a job the caller may not see. `routers/solve_queue.py` redacts
   // `project_id`, `project_key` and `error` rather than dropping the row,
   // because `position` is a place in a GLOBALLY sequential queue and hiding
@@ -30,7 +35,7 @@ export interface SolveJob {
 
 export interface QueueList {
   jobs: SolveJob[]
-  current: number | null   // id of the running job, if any
+  current: string | null   // id of the running job, if any
 }
 
 // Standard {index, columns, data} time-series payload (NaN→null), with an
@@ -61,7 +66,7 @@ export const solveQueueApi = {
   list: () => client.get<QueueList>('/simulation/queue').then(r => r.data),
   enqueue: (projectId: string) =>
     client.post<SolveJob>('/simulation/queue', { project_id: projectId }).then(r => r.data),
-  abort: (jobId: number) =>
+  abort: (jobId: string) =>
     client.post<SolveJob>(`/simulation/queue/${jobId}/abort`).then(r => r.data),
   clearFinished: () =>
     client.post<{ removed: number }>('/simulation/queue/clear_finished').then(r => r.data),
@@ -75,16 +80,17 @@ export const solveQueueApi = {
   // One job's log, by job id — live while it runs, retained once terminal.
   // Authorized by the same predicate as the listing, and 404s (never 403s)
   // when the caller may not see the job.
-  jobLogHistory: (jobId: number) =>
+  jobLogHistory: (jobId: string) =>
     client.get<{ lines: string[]; status: SolveJobStatus }>(
       `/simulation/queue/${jobId}/log_history`,
     ).then(r => r.data),
   // EventSource takes an absolute app path, not the axios base, so this is a
   // URL builder rather than a request.
-  jobLogStreamUrl: (jobId: number) => `/api/simulation/queue/${jobId}/log_stream`,
+  jobLogStreamUrl: (jobId: string) => `/api/simulation/queue/${jobId}/log_stream`,
 }
 
-export const TERMINAL_STATUSES: ReadonlySet<SolveJobStatus> = new Set(['completed', 'failed', 'aborted'])
+export const TERMINAL_STATUSES: ReadonlySet<SolveJobStatus> =
+  new Set(['completed', 'failed', 'aborted', 'interrupted'])
 export const ACTIVE_STATUSES: ReadonlySet<SolveJobStatus> = new Set(['queued', 'running'])
 
 export function isActive(j: SolveJob): boolean {

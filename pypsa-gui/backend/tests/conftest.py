@@ -308,13 +308,25 @@ def _reset_tenant_tables(_auth_db):
     too slow to repeat 1000×), but project rows must not survive: dozens of
     tests save a project called `A`, and a leftover row makes the second one
     409 on a name collision. Users, orgs and memberships deliberately persist.
+
+    `solve_jobs` joined this list with Task 15's boot reconciliation. The
+    `client` fixture below is FUNCTION-scoped and enters `TestClient(main.app)`
+    as a context manager, so `lifespan` — and with it
+    `solve_job_store.reconcile_on_boot()` — runs on every single test that
+    requests `client`, not once per process the way it does in production. A
+    `queued` or `running` row a PRIOR test left behind (the in-memory queue is
+    cleared by `reset_backend` below, but that never touches the table) would
+    otherwise be resurrected into the freshly-reset in-memory queue at the
+    START of an unrelated later test — observed as extra jobs a queue-listing
+    test never enqueued itself. Cheap and always safe to drop: nothing else
+    reads solve_jobs rows across a test boundary.
     """
     engine, _session_local = _auth_db
     from sqlalchemy import text
 
     yield
     with engine.begin() as conn:
-        for table in ("project_locks", "project_memberships", "projects"):
+        for table in ("project_locks", "project_memberships", "projects", "solve_jobs"):
             conn.execute(text(f"DELETE FROM {table}"))
 
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import uuid
 
 from services.solve_queue import solve_queue
 from tests.conftest import build_network
@@ -26,6 +27,7 @@ def _save_project(client, name: str) -> None:
 
 
 def _wait_for_terminal(job_id, timeout: float = 90.0) -> dict:
+    job_id = uuid.UUID(str(job_id))
     deadline = time.time() + timeout
     while time.time() < deadline:
         job = solve_queue.get_job(job_id) or {}
@@ -107,14 +109,15 @@ def test_an_interrupted_jobs_log_is_served_like_any_other_terminal_jobs():
     try:
         q = BufferedLogQueue()
         q.put("job log: died under it")
+        jid = uuid.uuid4()
         with solve_queue._lock:
-            job = SolveJob(id=941, project_id="Ghost", enqueued_at=0.0)
+            job = SolveJob(id=jid, project_id="Ghost", enqueued_at=0.0)
             job.status = "interrupted"
             job.log_queue = q
-            solve_queue._jobs[941] = job
-            solve_queue._order.append(941)
+            solve_queue._jobs[jid] = job
+            solve_queue._order.append(jid)
 
-        assert solve_queue.get_log_queue(941) is q
+        assert solve_queue.get_log_queue(jid) is q
         assert q.history() == ["job log: died under it"]
     finally:
         solve_queue.reset_for_tests()
@@ -142,11 +145,15 @@ def test_the_log_endpoints_404_for_a_caller_who_may_not_see_the_job(
     theirs = other_org_client.get(f"/api/simulation/queue/{job['id']}/log_history")
     assert theirs.status_code == 404, theirs.text
     # Byte-identical to the genuine not-found message, so a 404 is not an
-    # existence oracle.
-    missing = other_org_client.get("/api/simulation/queue/99999/log_history")
+    # existence oracle. A well-formed but never-issued UUID — NOT a malformed
+    # string — so this exercises the "parsed, not in `_jobs`" 404 branch
+    # rather than `_parse_job_id`'s malformed-id short-circuit (that one's
+    # covered by test_solve_queue_uuid_ids.py).
+    missing_id = str(uuid.uuid4())
+    missing = other_org_client.get(f"/api/simulation/queue/{missing_id}/log_history")
     assert missing.status_code == 404
     assert theirs.json()["detail"] == missing.json()["detail"].replace(
-        "99999", str(job["id"])
+        missing_id, str(job["id"])
     )
 
     # `/log_stream`'s half of R18: the authorization check
@@ -159,10 +166,10 @@ def test_the_log_endpoints_404_for_a_caller_who_may_not_see_the_job(
     # catch it.
     theirs_stream = other_org_client.get(f"/api/simulation/queue/{job['id']}/log_stream")
     assert theirs_stream.status_code == 404, theirs_stream.text
-    missing_stream = other_org_client.get("/api/simulation/queue/99999/log_stream")
+    missing_stream = other_org_client.get(f"/api/simulation/queue/{missing_id}/log_stream")
     assert missing_stream.status_code == 404
     assert theirs_stream.json()["detail"] == missing_stream.json()["detail"].replace(
-        "99999", str(job["id"])
+        missing_id, str(job["id"])
     )
 
 
@@ -218,6 +225,6 @@ def test_the_log_stream_serves_history_then_done_and_leaves_no_subscriber(
     assert done_payload is not None, "SSE stream ended without a `done` event"
     assert done_payload["status"] == "completed", done_payload
 
-    q = solve_queue.get_log_queue(job["id"])
+    q = solve_queue.get_log_queue(uuid.UUID(str(job["id"])))
     assert q is not None
     assert q._subscribers == {}

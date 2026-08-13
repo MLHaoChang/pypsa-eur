@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 
 from services.solve_queue import solve_queue
 from tests.conftest import build_network
@@ -94,7 +95,7 @@ def test_a_terminal_job_does_not_block_a_new_one(
     _save_project(client, "Again")
     first = client.post("/api/simulation/queue", json={"project_id": "Again"}).json()
     _wait_until(
-        lambda: (solve_queue.get_job(first["id"]) or {}).get("status")
+        lambda: (solve_queue.get_job(uuid.UUID(str(first["id"]))) or {}).get("status")
         # `_TERMINAL` in services/solve_queue.py — no "interrupted" status
         # exists on `SolveJob` as of Increment 2 (that's Increment 3).
         in ("completed", "failed", "aborted"),

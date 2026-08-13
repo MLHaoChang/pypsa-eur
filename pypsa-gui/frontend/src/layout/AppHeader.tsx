@@ -543,7 +543,7 @@ export default function AppHeader() {
   // log_queue, so a 1.5s poll can land in that microsecond gap). On an early
   // stream error we reset the attach guard so the next poll re-attaches —
   // bounded so a genuinely dead stream still surfaces as 'failed'.
-  const attachRetryRef = useRef<{ id: number; tries: number }>({ id: -1, tries: 0 })
+  const attachRetryRef = useRef<{ id: string | null; tries: number }>({ id: null, tries: 0 })
   // Latch covering the idle-click enqueue path (pre-save await + enqueue), so a
   // fast double-click can't stack two jobs before enqueue.isPending flips.
   const enqueuingRef = useRef(false)
@@ -560,13 +560,13 @@ export default function AppHeader() {
   const myJob = currentProject ? activeJobForProject(solveQueue, currentProject) : undefined
   // Tracks the job id we've already opened the SSE for, so the auto-attach
   // effect opens the stream EXACTLY once per run (not on every 1.5s poll).
-  const attachedJobRef = useRef<number | null>(null)
+  const attachedJobRef = useRef<string | null>(null)
 
   // The single SSE-open closure, shared by the auto-attach effect (and kept
   // identical to the historical direct-/run done/err logic). `runLabel` is
   // read via the ref-captured closure value at attach time. On `done` we also
   // invalidate ['solveQueue'] so the queue UI reflects the finished job.
-  const openLogStream = useCallback((label: string, jobId?: number) => {
+  const openLogStream = useCallback((label: string, jobId?: string) => {
     esCleanupRef.current?.()
     esCleanupRef.current = createLogStream(
       (line) => {

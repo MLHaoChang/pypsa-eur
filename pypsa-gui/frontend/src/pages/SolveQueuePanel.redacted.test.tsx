@@ -16,7 +16,7 @@ import type { SolveJob } from '../api/solveQueue'
 import SolveQueuePanel, { REDACTED_PROJECT_LABEL } from './SolveQueuePanel'
 
 const redactedJob: SolveJob = {
-  id: 7,
+  id: '77777777-7777-4777-8777-777777777777',
   project_id: null,
   project_key: null,
   status: 'completed',
@@ -30,7 +30,9 @@ const redactedJob: SolveJob = {
   finished_at: 1,
 }
 
-const runningJob: SolveJob = { ...redactedJob, id: 8, project_id: 'mine', status: 'running' }
+const runningJob: SolveJob = {
+  ...redactedJob, id: '88888888-8888-4888-8888-888888888888', project_id: 'mine', status: 'running',
+}
 
 let jobs: SolveJob[] = []
 

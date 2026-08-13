@@ -42,26 +42,55 @@ solve — acceptable for the walk-away batch model.
 """
 from __future__ import annotations
 
-import itertools
+import json
 import logging
 import pathlib
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass
+from datetime import timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+def _row_epoch(value: Any) -> float:
+    """
+    A `SolveJobRow` timestamp column, as a `time.time()`-style epoch float.
+
+    SQLite's `DateTime(timezone=True)` reads back a NAIVE datetime (SQLite has
+    no timezone-aware storage) even though every writer stamps it with
+    `datetime.now(tz=timezone.utc)` / `datetime.fromtimestamp(..., tz=
+    timezone.utc)`. `datetime.timestamp()` on a naive value silently assumes
+    LOCAL time rather than UTC — no exception, just a wrong epoch shifted by
+    the machine's UTC offset. Treat a naive value as UTC before converting;
+    a genuinely tz-aware value (a non-SQLite backend) is unaffected either way.
+    """
+    if value is None or not hasattr(value, "timestamp"):
+        return time.time()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
 # A job in one of these states is finished and won't be processed (or re-aborted).
-_TERMINAL = ("completed", "failed", "aborted")
+# `interrupted` is one of them: the process died under a running job and nobody
+# stopped it. It is a distinct FACT from `aborted` (which means a user did), but
+# it is finished all the same, so `clear_finished`, `_position_locked` and the
+# dispatcher's pop-time re-check all treat it exactly like the other three.
+_TERMINAL = ("completed", "failed", "aborted", "interrupted")
 
 
 @dataclass
 class SolveJob:
     """One queued solve of a single saved project."""
 
-    id: int
+    # UUID, matching every model in `db/models.py`. Per-process integers from
+    # `itertools.count(1)` made two replicas both issue id 1 — harmless while
+    # ids died with the process, and not harmless once `solve_jobs` outlives it.
+    id: uuid.UUID
     # Human-readable project NAME. What the UI shows and what the API has
     # always called `project_id`; kept under that key in `to_public` so the
     # frontend contract is unchanged.
@@ -76,6 +105,15 @@ class SolveJob:
     # path from the name — it runs on a worker thread with no request, no user,
     # and no way to authorize anything.
     storage_dir: str | None = None
+    # JSON snapshot of the SolverConfig this job was ENQUEUED with. The
+    # dispatcher used to read `ctx.solver_state["solver_config"]` at RUN time,
+    # so a `PUT /api/simulation/solver_config` after enqueue silently changed
+    # what a queued job solved, and which config a job got depended on whether
+    # the project happened to be resident. Resolved once, by the route that has
+    # the request and the authorized directory. None means "fall back to the
+    # context's config", which is the pre-snapshot behaviour and what a
+    # hand-made job gets.
+    solver_config_json: str | None = None
     status: str = "queued"          # queued | running | completed | failed | aborted
     objective: Any = None
     solve_time: Any = None
@@ -102,7 +140,7 @@ class SolveJob:
         1-based place in the queue for a still-queued job, else None.
         """
         return {
-            "id": self.id,
+            "id": str(self.id),
             "project_id": self.project_id,
             "project_key": self.project_key,
             "status": self.status,
@@ -125,11 +163,10 @@ class SolveQueue:
         # bookkeeping — never across a solve (that would serialise the status
         # endpoints behind a multi-minute LP).
         self._lock = threading.Lock()
-        self._jobs: dict[int, SolveJob] = {}
-        self._order: list[int] = []                 # insertion order, stable listing
-        self._q: queue.Queue[int] = queue.Queue()
-        self._counter = itertools.count(1)
-        self._current_id: int | None = None
+        self._jobs: dict[uuid.UUID, SolveJob] = {}
+        self._order: list[uuid.UUID] = []            # insertion order, stable listing
+        self._q: queue.Queue[uuid.UUID] = queue.Queue()
+        self._current_id: uuid.UUID | None = None
         self._dispatcher: threading.Thread | None = None
 
     # ── public API ──────────────────────────────────────────────────────────
@@ -139,15 +176,17 @@ class SolveQueue:
         *,
         project_key: str | None = None,
         storage_dir: str | None = None,
+        solver_config_json: str | None = None,
     ) -> SolveJob:
         """Append a job for `project_id` and ensure the dispatcher is running."""
         with self._lock:
-            jid = next(self._counter)
+            jid = uuid.uuid4()
             job = SolveJob(
                 id=jid,
                 project_id=project_id,
                 project_key=project_key,
                 storage_dir=storage_dir,
+                solver_config_json=solver_config_json,
                 enqueued_at=time.time(),
             )
             self._jobs[jid] = job
@@ -163,12 +202,15 @@ class SolveQueue:
         *,
         project_key: str | None = None,
         storage_dir: str | None = None,
+        solver_config_json: str | None = None,
     ) -> tuple[SolveJob, bool]:
         """
         Enqueue `project_id` UNLESS it already has a queued or running job.
 
         Returns `(job, created)`. When `created` is False the returned job is
-        the existing one, untouched, and nothing was appended.
+        the existing one, untouched, and nothing was appended — `solver_config_json`
+        is silently discarded in that case, so a re-enqueue of an already-active
+        project can never overwrite the config the FIRST enqueue snapshotted.
 
         This is the enforcement point. `enqueue` appended unconditionally and
         the one-active-job-per-project invariant lived in three separate client
@@ -182,8 +224,19 @@ class SolveQueue:
         and the only one that survives a rename. The display name is the
         fallback, which is all a legacy unkeyed job carries.
 
-        `enqueue` is deliberately left in place and unchanged: it is the raw
-        append the test harness uses to build queue states directly.
+        `solver_config_json` is a CONSTRUCTOR argument, not a post-construction
+        assignment (R24). The job becomes visible to the dispatcher the moment
+        `self._q.put(jid)` runs, on a background thread that is woken by that
+        same call — so a caller that built the job with `SolveJob(...)` and
+        only assigned `.solver_config_json` afterwards leaves a window where an
+        idle dispatcher can win the race, read `solver_config_json is None`,
+        and fall back to the live context — the exact defect this snapshot
+        exists to close, just for one job in one narrow window. Taking it as a
+        constructor argument means the job is never in `self._jobs` / `self._q`
+        in a state where the snapshot is missing but was supplied.
+
+        `enqueue` is deliberately left in place and unchanged in shape: it is
+        the raw append the test harness uses to build queue states directly.
         """
         with self._lock:
             existing = self._active_job_locked(project_id, project_key)
@@ -193,12 +246,13 @@ class SolveQueue:
                     project_id, existing.id, existing.status,
                 )
                 return existing, False
-            jid = next(self._counter)
+            jid = uuid.uuid4()
             job = SolveJob(
                 id=jid,
                 project_id=project_id,
                 project_key=project_key,
                 storage_dir=storage_dir,
+                solver_config_json=solver_config_json,
                 enqueued_at=time.time(),
             )
             self._jobs[jid] = job
@@ -234,12 +288,12 @@ class SolveQueue:
             return [self._jobs[jid].to_public(self._position_locked(jid))
                     for jid in self._order if jid in self._jobs]
 
-    def get_job(self, job_id: int) -> dict | None:
+    def get_job(self, job_id: uuid.UUID) -> dict | None:
         with self._lock:
             job = self._jobs.get(job_id)
             return job.to_public(self._position_locked(job_id)) if job else None
 
-    def get_log_queue(self, job_id) -> Any | None:
+    def get_log_queue(self, job_id: uuid.UUID) -> Any | None:
         """
         The BufferedLogQueue this job's solve wrote to, or None.
 
@@ -252,7 +306,7 @@ class SolveQueue:
             job = self._jobs.get(job_id)
             return job.log_queue if job is not None else None
 
-    def abort(self, job_id: int) -> dict | None:
+    def abort(self, job_id: uuid.UUID) -> dict | None:
         """
         Abort a RUNNING job (signal its stop_event) or cancel a QUEUED one
         (skip on pop). No-op on an already-terminal job. Returns the job view,
@@ -270,6 +324,24 @@ class SolveQueue:
                 job.status = "aborted"
                 job.finished_at = time.time()
             pub = job.to_public(self._position_locked(job_id))
+        # Mirror to the table OUTSIDE `_lock`, same discipline as `_run_job`.
+        # A QUEUED job cancelled here never reaches `_run_job` at all — the
+        # dispatcher pops it, sees `cancelled`, and `continue`s straight past
+        # both `record_status` call sites in `_run_job` — so this is the ONLY
+        # place that terminal transition is ever persisted. Without it the row
+        # stays `status="queued"` forever, and boot reconciliation (which
+        # re-enqueues everything still `queued`) would resurrect a job the
+        # user explicitly cancelled. Unconditional, not gated on which branch
+        # fired above: for a RUNNING job this just re-mirrors the still-current
+        # `running` status (idempotent, and cheap insurance against drift);
+        # for a job with no row yet (never went through the router) it is a
+        # harmless no-op (`record_status` returns early on a missing row).
+        try:
+            from services import solve_job_store
+
+            solve_job_store.record_status(job)
+        except Exception:  # noqa: BLE001 — bookkeeping must not fail an abort
+            logger.exception("solve_queue: could not persist job %s", job.id)
         # Signal outside the lock — stop_event.set() never blocks, but keep the
         # discipline that no external call happens while holding _lock.
         if ev is not None:
@@ -289,6 +361,30 @@ class SolveQueue:
         role, not an org-scoped one (`routers/solve_queue.py:clear_finished`
         gates on `User.is_super_admin`). A `predicate=` parameter here would
         read like a second, weaker authorization path that no caller uses.
+
+        Also deletes the matching `solve_jobs` ROWS (Task 16a), not just the
+        in-memory entries. Once the listing route merges persisted TERMINAL
+        rows back in, popping `_jobs` alone would not be visible to a caller:
+        the very next `GET /api/simulation/queue` would pull the same jobs
+        straight back out of the table, and this super-admin "wipe" would
+        silently do nothing from the listing's point of view.
+
+        THE ROWS TO DELETE ARE NOT `removed` ALONE (fixed in review round 1,
+        Important 1). `removed` derives exclusively from `_order` — jobs the
+        process currently holds resident. A job that is persisted but NOT
+        resident (every `interrupted` job, by construction: R25's crash-loop
+        guard means one can never be re-admitted to `_jobs`; and any job whose
+        process outlived it, i.e. everything from before the last restart)
+        was, before this fix, permanently un-prunable through this route —
+        `delete_jobs(removed)` never saw its id, the row survived the "clear",
+        and the very next poll pulled it straight back in, with the
+        super-admin told `removed: 0`. So this queries the TABLE for every
+        `_TERMINAL` row — resident or not — and deletes that set. The return
+        value is the count of DISTINCT jobs actually removed from the
+        caller's point of view: the union of what left memory and what left
+        the table (usually the same ids, since a normal solve mirrors its
+        terminal status to both — but not always, e.g. a job whose row lagged
+        behind a status forced directly in memory).
         """
         with self._lock:
             removed = [jid for jid in self._order
@@ -296,7 +392,21 @@ class SolveQueue:
             for jid in removed:
                 self._jobs.pop(jid, None)
                 self._order.remove(jid)
-            return len(removed)
+        # Resolve + delete OUTSIDE `_lock`, same discipline as `abort()` /
+        # `_run_job`: the store opens a database session, and `_lock` is
+        # documented as short bookkeeping only, never held across I/O.
+        # Best-effort — a DB hiccup must not stop the in-memory clear the
+        # caller already observed via `removed`.
+        to_delete = set(removed)
+        try:
+            from services import solve_job_store
+
+            to_delete |= {row["id"] for row in solve_job_store.load_by_status(_TERMINAL)}
+            if to_delete:
+                solve_job_store.delete_jobs(to_delete)
+        except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
+            logger.exception("solve_queue: could not delete persisted jobs %s", to_delete)
+        return len(to_delete)
 
     def reset_for_tests(self) -> None:
         """
@@ -328,6 +438,33 @@ class SolveQueue:
             except Exception:
                 pass
 
+    def restore(self, row: dict) -> SolveJob:
+        """
+        Re-admit a persisted `queued` job into the in-memory queue.
+
+        Keeps the job's OWN id rather than minting a new one, so a client (or a
+        chat transcript) holding the id from before the restart can still abort
+        it, and so the row and the in-memory job never diverge.
+
+        Only ever called with a `queued` row. A `running` one is deliberately
+        NOT restored — see `solve_job_store.reconcile_on_boot`.
+        """
+        with self._lock:
+            job = SolveJob(
+                id=row["id"],
+                project_id=row["project_id"],
+                project_key=row.get("project_key"),
+                storage_dir=row.get("storage_dir"),
+                solver_config_json=row.get("solver_config"),
+                enqueued_at=_row_epoch(row.get("enqueued_at")),
+            )
+            self._jobs[job.id] = job
+            self._order.append(job.id)
+            self._q.put(job.id)
+            self._ensure_dispatcher_locked()
+        logger.info("solve_queue: restored job %s for project %r", job.id, job.project_id)
+        return job
+
     # ── internals ───────────────────────────────────────────────────────────
     def _ensure_dispatcher_locked(self) -> None:
         """Lazily start the dispatcher on first enqueue (caller holds _lock)."""
@@ -338,7 +475,7 @@ class SolveQueue:
             self._dispatcher = t
             t.start()
 
-    def _position_locked(self, job_id: int) -> int | None:
+    def _position_locked(self, job_id: uuid.UUID) -> int | None:
         """
         1-based position among not-yet-finished jobs in FIFO order. None for
         a running/terminal job (only queued jobs have a meaningful position).
@@ -449,6 +586,16 @@ class SolveQueue:
                 # carries a bounded retry for.
                 job.log_queue = log_queue
 
+            # Persist `running` before the solve starts. A process that dies
+            # mid-solve leaves the row here, which is precisely what boot
+            # reconciliation reads to mark the job `interrupted`.
+            try:
+                from services import solve_job_store
+
+                solve_job_store.record_status(job)
+            except Exception:  # noqa: BLE001
+                logger.exception("solve_queue: could not persist job %s", job.id)
+
             # 1. Resolve the context to solve. If the queued project IS the
             #    foreground, solve the resident instance in place (unsaved edits
             #    included). Otherwise build a fresh background ctx and hydrate it
@@ -524,7 +671,20 @@ class SolveQueue:
 
             n = ctx.network
             lock = ctx.mutation_lock
+            # THIS job's config, snapshotted at enqueue — not whatever the
+            # context holds now. Falling back to the context's config keeps
+            # hand-made jobs (and any row written before 0005) working.
             config = ctx.solver_state["solver_config"]
+            if job.solver_config_json:
+                try:
+                    from routers.projects import _solver_config_from_dict
+
+                    config = _solver_config_from_dict(json.loads(job.solver_config_json))
+                except Exception:  # noqa: BLE001 — a bad snapshot must not fail the solve
+                    logger.exception(
+                        "solve_queue: job %s has an unreadable config snapshot; "
+                        "falling back to the context's config", job.id,
+                    )
 
             # `_state`-style writer scoped to THIS ctx (the per-context analogue
             # of sim._state_update). run_simulation pushes its side-results
@@ -662,6 +822,15 @@ class SolveQueue:
                 job.solve_time = solve_time
                 job.error = error
                 job.finished_at = time.time()
+            # Mirror the terminal record to the job table, OUTSIDE `_lock`:
+            # the store opens a database session and `_lock` is documented as
+            # short bookkeeping only, never held across I/O.
+            try:
+                from services import solve_job_store
+
+                solve_job_store.record_status(job)
+            except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
+                logger.exception("solve_queue: could not persist job %s", job.id)
             # Close the SSE log stream for this job so the foreground consumer's
             # `done` event fires (run_simulation pushes None on its own success
             # path, but the abort/error paths above may not have).

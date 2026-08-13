@@ -187,10 +187,20 @@ def _enqueue(test_client, install_network, name: str) -> dict:
     return r.json()
 
 
-def _force_status(job_id: int, status: str) -> None:
+def _jid(job_id) -> uuid.UUID:
+    """
+    Parse a job id echoed back from JSON (a string) into the UUID `_jobs` is
+    keyed on. Also accepts an already-parsed UUID (from a `SolveJob` object
+    returned directly by a service call, not round-tripped through JSON) —
+    `uuid.UUID(str(u)) == u` for any UUID `u`, so this is safe either way.
+    """
+    return uuid.UUID(str(job_id))
+
+
+def _force_status(job_id, status: str) -> None:
     """Drive a parked job into `status` without running the dispatcher."""
     with solve_queue._lock:
-        job = solve_queue._jobs[job_id]
+        job = solve_queue._jobs[_jid(job_id)]
         job.status = status
         if status in ("completed", "failed", "aborted"):
             job.finished_at = time.time()
@@ -199,14 +209,14 @@ def _force_status(job_id: int, status: str) -> None:
             job.started_at = time.time()
 
 
-def _clone_job(job_id: int, times: int) -> None:
+def _clone_job(job_id, times: int) -> None:
     """Append `times` more parked jobs carrying the same job's project key."""
     from services.solve_queue import SolveJob
 
     with solve_queue._lock:
-        template = solve_queue._jobs[job_id]
+        template = solve_queue._jobs[_jid(job_id)]
         for _ in range(times):
-            new_id = next(solve_queue._counter)
+            new_id = uuid.uuid4()
             solve_queue._jobs[new_id] = SolveJob(
                 id=new_id,
                 project_id=template.project_id,
@@ -241,8 +251,12 @@ def count_queries(_auth_db):
     return _count
 
 
-def _by_id(payload: dict, job_id: int) -> dict:
-    match = [j for j in payload["jobs"] if j["id"] == job_id]
+def _by_id(payload: dict, job_id) -> dict:
+    # `job_id` may be a JSON-echoed string (`some_job["id"]`) or a raw
+    # `SolveJob.id` UUID object (`orphan.id`) — normalise both to the string
+    # form the JSON listing carries.
+    target = str(job_id)
+    match = [j for j in payload["jobs"] if j["id"] == target]
     assert match, f"job {job_id} missing from listing {payload}"
     return match[0]
 
@@ -355,7 +369,7 @@ def test_list_and_abort_agree_for_a_same_org_project(
 
     denied = org_member_client.post(f"/api/simulation/queue/{theirs['id']}/abort")
     assert denied.status_code == 404, denied.text
-    assert solve_queue.get_job(theirs["id"])["status"] == "queued"
+    assert solve_queue.get_job(_jid(theirs["id"]))["status"] == "queued"
 
 
 def test_list_shows_a_project_shared_by_root_membership(
@@ -446,7 +460,7 @@ def test_abort_is_scoped_to_the_caller(
 
     denied = client.post(f"/api/simulation/queue/{theirs['id']}/abort")
     assert denied.status_code == 404, denied.text
-    assert solve_queue.get_job(theirs["id"])["status"] == "queued", (
+    assert solve_queue.get_job(_jid(theirs["id"]))["status"] == "queued", (
         "another org's job was aborted"
     )
 
@@ -459,7 +473,11 @@ def test_unauthorized_abort_is_indistinguishable_from_not_found(
     client, other_org_client, install_network, tmp_projects_dir
 ):
     theirs = _enqueue(other_org_client, install_network, "Bravo")
-    absent_id = 10_000_000
+    # A well-formed id that was never issued — distinct from a MALFORMED one
+    # (covered by test_solve_queue_uuid_ids.py). `uuid.UUID(str(...))` still
+    # parses this, so the request reaches the real "not in `_jobs`" branch
+    # rather than `_parse_job_id` short-circuiting to 404 on a garbage string.
+    absent_id = uuid.uuid4()
 
     denied = client.post(f"/api/simulation/queue/{theirs['id']}/abort")
     missing = client.post(f"/api/simulation/queue/{absent_id}/abort")
@@ -478,7 +496,7 @@ def test_abort_of_another_orgs_running_job_does_not_signal_its_stop_event(
     theirs = _enqueue(other_org_client, install_network, "Bravo")
     stop_event = threading.Event()
     with solve_queue._lock:
-        job = solve_queue._jobs[theirs["id"]]
+        job = solve_queue._jobs[_jid(theirs["id"])]
         job.status = "running"
         job.stop_event = stop_event
 
@@ -502,10 +520,10 @@ def test_clear_finished_is_refused_for_a_non_super_admin(
     # where an org admin has no authority.
     r = client.post("/api/simulation/queue/clear_finished")
     assert r.status_code == 403, r.text
-    assert solve_queue.get_job(theirs["id"]) is not None, (
+    assert solve_queue.get_job(_jid(theirs["id"])) is not None, (
         "another org's finished job was cleared"
     )
-    assert solve_queue.get_job(mine["id"]) is not None
+    assert solve_queue.get_job(_jid(mine["id"])) is not None
 
 
 def test_super_admin_can_clear_finished_globally(
@@ -523,6 +541,90 @@ def test_super_admin_can_clear_finished_globally(
     assert r.status_code == 200, r.text
     assert r.json()["removed"] == 2
     assert solve_queue.list_jobs() == []
+
+
+def test_clear_finished_also_deletes_the_persisted_row(
+    client, super_admin_client, install_network, tmp_projects_dir
+):
+    """
+    Task 16a (`routers/solve_queue.py::_merged_jobs`) makes the listing merge
+    persisted TERMINAL rows back in for jobs no longer resident. That changes
+    what `clear_finished` must do to stay effective: popping `_jobs` alone is
+    no longer enough, because the very next `GET /api/simulation/queue` would
+    pull the same row straight back out of `solve_jobs` — a super-admin's
+    "empty the queue" would silently do nothing from the caller's point of
+    view. `_force_status` (unlike a real solve) only mutates memory, so this
+    mirrors the terminal status to the table explicitly before clearing, the
+    same way `_run_job`'s own `finally` block does.
+    """
+    from services import solve_job_store
+
+    mine = _enqueue(client, install_network, "ClearMeToo")
+    _force_status(mine["id"], "completed")
+    solve_job_store.record_status(solve_queue._jobs[_jid(mine["id"])])
+
+    r = super_admin_client.post("/api/simulation/queue/clear_finished")
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 1
+
+    payload = client.get("/api/simulation/queue").json()
+    assert all(j["id"] != mine["id"] for j in payload["jobs"]), (
+        "clear_finished cleared memory but the persisted row resurrected the "
+        "job on the very next listing"
+    )
+
+    from db.models import SolveJobRow
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        assert db.get(SolveJobRow, _jid(mine["id"])) is None, (
+            "clear_finished did not delete the persisted row"
+        )
+
+
+def test_clear_finished_deletes_a_non_resident_persisted_row(
+    client, super_admin_client,
+):
+    """
+    Review round 1, Important 1: the FIRST version of the clear_finished fix
+    derived the rows to delete EXCLUSIVELY from `_order`
+    (`self._order` -> `self._jobs[jid].status in _TERMINAL`), so it only ever
+    reached jobs the process still had resident — exactly
+    `test_clear_finished_also_deletes_the_persisted_row` above, which mirrors
+    the status while the job is STILL resident and so exercises only the path
+    that already worked before this fix.
+
+    A persisted row that is NEVER resident is the class Task 16a exists to
+    surface in the first place: every `interrupted` job (R25's crash-loop
+    guard means one can never be re-admitted to `_jobs`) and any job from
+    before the last restart. Built directly here — `SolveJob` +
+    `record_enqueued` + `record_status`, never touching `solve_queue._jobs` /
+    `_order` at all — so this cannot pass by accident of the job having
+    touched memory at some point in the test.
+    """
+    from services import solve_job_store
+    from services.solve_queue import SolveJob
+
+    orphan = SolveJob(id=uuid.uuid4(), project_id="NeverResident", enqueued_at=time.time())
+    solve_job_store.record_enqueued(orphan, enqueued_by_user_id=None, solver_config_json=None)
+    orphan.status = "interrupted"
+    orphan.condition = "process_exited"
+    orphan.finished_at = time.time()
+    solve_job_store.record_status(orphan)
+
+    r = super_admin_client.post("/api/simulation/queue/clear_finished")
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 1, (
+        "clear_finished did not count a non-resident persisted row at all"
+    )
+
+    from db.models import SolveJobRow
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        assert db.get(SolveJobRow, orphan.id) is None, (
+            "clear_finished did not delete a persisted-only (never resident) row"
+        )
 
 
 # ── chat tools (Task 4: the same handlers, reached in-process) ───────────────
@@ -553,13 +655,13 @@ def test_chat_solve_queue_tools_carry_the_acting_identity(
         chat_tools.solve_queue_abort(str(theirs["id"]))
     assert denied.value.status_code == 404
     assert denied.value.detail == f"No solve job with id {theirs['id']}."
-    assert solve_queue.get_job(theirs["id"])["status"] == "queued"
+    assert solve_queue.get_job(_jid(theirs["id"]))["status"] == "queued"
 
     _force_status(mine["id"], "completed")
     with pytest.raises(HTTPException) as refused:
         chat_tools.solve_queue_clear_finished()
     assert refused.value.status_code == 403
-    assert solve_queue.get_job(mine["id"]) is not None
+    assert solve_queue.get_job(_jid(mine["id"])) is not None
 
     # The caller's OWN job is still abortable through the same tool.
     assert chat_tools.solve_queue_abort(str(mine["id"]))["id"] == mine["id"]

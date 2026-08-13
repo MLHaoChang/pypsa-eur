@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 
 from services import shutdown as shutdown_service
 from services.solve_queue import solve_queue
@@ -22,6 +23,8 @@ from tests.conftest import build_network
 
 
 def test_a_queue_owned_context_is_counted_once_by_the_job_table():
+    import uuid
+
     from services.pypsa_service import PyPSAService
     from services.solve_queue import SolveJob, solve_queue
 
@@ -34,11 +37,12 @@ def test_a_queue_owned_context_is_counted_once_by_the_job_table():
     try:
         with ctx.solver_state_lock:
             ctx.solver_state.update(thread=worker, kind="queue")
+        jid = uuid.uuid4()
         with solve_queue._lock:
-            job = SolveJob(id=931, project_id="Q", enqueued_at=0.0)
+            job = SolveJob(id=jid, project_id="Q", enqueued_at=0.0)
             job.status = "running"
-            solve_queue._jobs[931] = job
-            solve_queue._order.append(931)
+            solve_queue._jobs[jid] = job
+            solve_queue._order.append(jid)
 
         paths = [s.path for s in shutdown_service.solves_in_flight()]
 
@@ -98,14 +102,15 @@ def test_a_finished_queue_job_leaves_no_queue_mark_on_its_context(
     # RESIDENT context in place and this test can read the state it left.
     ctx = session_ctx(client)
     job = client.post("/api/simulation/queue", json={"project_id": "K1"}).json()
+    jid = uuid.UUID(str(job["id"]))
 
     deadline = time.time() + 90
     while time.time() < deadline:
-        status = (solve_queue.get_job(job["id"]) or {}).get("status")
+        status = (solve_queue.get_job(jid) or {}).get("status")
         if status in ("completed", "failed", "aborted", "interrupted"):
             break
         time.sleep(0.2)
-    assert status == "completed", solve_queue.get_job(job["id"])
+    assert status == "completed", solve_queue.get_job(jid)
 
     with ctx.solver_state_lock:
         assert ctx.solver_state.get("thread") is None

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 
 import pypsa
 import pytest
@@ -37,6 +38,7 @@ def _wait_until(pred, timeout: float = 60.0, interval: float = 0.05):
 
 
 def _wait_for_terminal(job_id, timeout: float = 90.0) -> dict:
+    job_id = uuid.UUID(str(job_id))
     _wait_until(
         lambda: (solve_queue.get_job(job_id) or {}).get("status")
         in ("completed", "failed", "aborted", "interrupted"),

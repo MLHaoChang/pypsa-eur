@@ -30,9 +30,9 @@ import type { SolveJob } from '../api/solveQueue'
 
 vi.mock('./useSolveQueue', () => ({ useSolveQueue: vi.fn() }))
 
-// Same `job` helper as useJobTerminalInvalidation.test.ts — `id` stays a
-// NUMBER here for the same reason (see that file's header comment).
-function job(id: number, project_id: string | null, status: SolveJob['status']): SolveJob {
+// Same `job` helper as useJobTerminalInvalidation.test.ts — `id` is a UUID
+// string here for the same reason (see that file's header comment).
+function job(id: string, project_id: string | null, status: SolveJob['status']): SolveJob {
   return {
     id, project_id, project_key: null, status,
     position: null, objective: null, solve_time: null, condition: null, error: null,
@@ -64,14 +64,14 @@ describe('useJobTerminalInvalidation wiring', () => {
   it("invalidates all three keys for the finishing job's project only, on the render where it transitions", () => {
     const client = makeClient()
     const spy = vi.spyOn(client, 'invalidateQueries')
-    setJobs([job(1, 'alpha', 'running'), job(2, 'beta', 'queued')])
+    setJobs([job('1', 'alpha', 'running'), job('2', 'beta', 'queued')])
     const { rerender } = renderHook(() => useJobTerminalInvalidation(), { wrapper: wrapper(client) })
     // First render only SEEDS prevRef — no prior snapshot to diff against, so
     // nothing should invalidate yet (mirrors the pure-function "first poll"
     // case, but exercised through the actual mount + effect this time).
     expect(spy).not.toHaveBeenCalled()
 
-    setJobs([job(1, 'alpha', 'completed'), job(2, 'beta', 'queued')])
+    setJobs([job('1', 'alpha', 'completed'), job('2', 'beta', 'queued')])
     rerender()
 
     expect(spy).toHaveBeenCalledWith({ queryKey: nk('alpha', 'results') })
@@ -88,10 +88,10 @@ describe('useJobTerminalInvalidation wiring', () => {
     // being reset) across renders of the actual hook.
     const client = makeClient()
     const spy = vi.spyOn(client, 'invalidateQueries')
-    setJobs([job(1, 'alpha', 'running')])
+    setJobs([job('1', 'alpha', 'running')])
     const { rerender } = renderHook(() => useJobTerminalInvalidation(), { wrapper: wrapper(client) })
 
-    setJobs([job(1, 'alpha', 'completed')])
+    setJobs([job('1', 'alpha', 'completed')])
     rerender()
     expect(spy).toHaveBeenCalledTimes(3)
 
@@ -99,7 +99,7 @@ describe('useJobTerminalInvalidation wiring', () => {
     // A later poll response with a fresh array reference but the SAME status
     // — the common steady-state case once a job has finished and the queue
     // keeps being polled/refetched.
-    setJobs([job(1, 'alpha', 'completed')])
+    setJobs([job('1', 'alpha', 'completed')])
     rerender()
     expect(spy).not.toHaveBeenCalled()
   })
@@ -107,10 +107,10 @@ describe('useJobTerminalInvalidation wiring', () => {
   it('invalidates nothing when a redacted row (project_id: null) transitions to terminal', () => {
     const client = makeClient()
     const spy = vi.spyOn(client, 'invalidateQueries')
-    setJobs([job(1, null, 'running')])
+    setJobs([job('1', null, 'running')])
     const { rerender } = renderHook(() => useJobTerminalInvalidation(), { wrapper: wrapper(client) })
 
-    setJobs([job(1, null, 'completed')])
+    setJobs([job('1', null, 'completed')])
     rerender()
 
     expect(spy).not.toHaveBeenCalled()
