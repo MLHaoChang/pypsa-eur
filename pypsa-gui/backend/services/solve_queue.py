@@ -50,12 +50,37 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+def _row_epoch(value: Any) -> float:
+    """
+    A `SolveJobRow` timestamp column, as a `time.time()`-style epoch float.
+
+    SQLite's `DateTime(timezone=True)` reads back a NAIVE datetime (SQLite has
+    no timezone-aware storage) even though every writer stamps it with
+    `datetime.now(tz=timezone.utc)` / `datetime.fromtimestamp(..., tz=
+    timezone.utc)`. `datetime.timestamp()` on a naive value silently assumes
+    LOCAL time rather than UTC — no exception, just a wrong epoch shifted by
+    the machine's UTC offset. Treat a naive value as UTC before converting;
+    a genuinely tz-aware value (a non-SQLite backend) is unaffected either way.
+    """
+    if value is None or not hasattr(value, "timestamp"):
+        return time.time()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
 # A job in one of these states is finished and won't be processed (or re-aborted).
-_TERMINAL = ("completed", "failed", "aborted")
+# `interrupted` is one of them: the process died under a running job and nobody
+# stopped it. It is a distinct FACT from `aborted` (which means a user did), but
+# it is finished all the same, so `clear_finished`, `_position_locked` and the
+# dispatcher's pop-time re-check all treat it exactly like the other three.
+_TERMINAL = ("completed", "failed", "aborted", "interrupted")
 
 
 @dataclass
@@ -374,6 +399,33 @@ class SolveQueue:
                 ev.set()
             except Exception:
                 pass
+
+    def restore(self, row: dict) -> SolveJob:
+        """
+        Re-admit a persisted `queued` job into the in-memory queue.
+
+        Keeps the job's OWN id rather than minting a new one, so a client (or a
+        chat transcript) holding the id from before the restart can still abort
+        it, and so the row and the in-memory job never diverge.
+
+        Only ever called with a `queued` row. A `running` one is deliberately
+        NOT restored — see `solve_job_store.reconcile_on_boot`.
+        """
+        with self._lock:
+            job = SolveJob(
+                id=row["id"],
+                project_id=row["project_id"],
+                project_key=row.get("project_key"),
+                storage_dir=row.get("storage_dir"),
+                solver_config_json=row.get("solver_config"),
+                enqueued_at=_row_epoch(row.get("enqueued_at")),
+            )
+            self._jobs[job.id] = job
+            self._order.append(job.id)
+            self._q.put(job.id)
+            self._ensure_dispatcher_locked()
+        logger.info("solve_queue: restored job %s for project %r", job.id, job.project_id)
+        return job
 
     # ── internals ───────────────────────────────────────────────────────────
     def _ensure_dispatcher_locked(self) -> None:

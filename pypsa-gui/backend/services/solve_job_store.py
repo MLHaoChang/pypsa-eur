@@ -162,3 +162,54 @@ def load_by_status(statuses: tuple[str, ...]) -> list[dict]:
     except Exception:  # noqa: BLE001 — an unreadable table means "nothing to restore"
         logger.exception("solve_job_store: could not load jobs by status %s", statuses)
         return []
+
+
+def reconcile_on_boot() -> tuple[int, int]:
+    """
+    Bring the persisted queue back after a restart. Returns `(interrupted, resumed)`.
+
+    Two rules, and the asymmetry between them is the point:
+
+      * every job left `running` becomes `interrupted` and is NEVER re-enqueued.
+        The process died under it; nobody stopped it. Auto-retrying is what
+        would let a job that crashed the process crash-loop the boot.
+      * every job left `queued` is re-enqueued under its own id and the
+        dispatcher starts. That is the walk-away promise: a batch queued at
+        18:00 survives a restart at 18:05.
+
+    NEVER RAISES. Called from `lifespan`, where `ensure_schema` is local-mode
+    only — in web mode Alembic is somebody else's deployment step, so the table
+    may legitimately not exist yet, and a boot that dies on a missing table is a
+    worse outcome than a queue that starts empty.
+    """
+    interrupted = 0
+    resumed = 0
+    try:
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+        from services.solve_queue import solve_queue
+
+        running = load_by_status(("running",))
+        if running:
+            with SessionLocal() as db:
+                for row in running:
+                    orm = db.get(SolveJobRow, row["id"])
+                    if orm is None:
+                        continue
+                    orm.status = "interrupted"
+                    orm.finished_at = datetime.now(tz=timezone.utc)
+                    orm.condition = "process_exited"
+                    interrupted += 1
+                db.commit()
+
+        for row in load_by_status(("queued",)):
+            solve_queue.restore(row)
+            resumed += 1
+    except Exception:  # noqa: BLE001 — R26: this must never fail the boot
+        logger.exception("solve-queue boot reconciliation failed; continuing without it")
+        return interrupted, resumed
+    logger.info(
+        "solve-queue boot reconciliation: %d job(s) marked interrupted, %d resumed",
+        interrupted, resumed,
+    )
+    return interrupted, resumed

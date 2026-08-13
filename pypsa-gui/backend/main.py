@@ -329,6 +329,20 @@ async def lifespan(app: FastAPI):
         # desktop splash reasonably read it as the first.
         run_first_run_import()
     PyPSAService.initialize()
+    # Solve-queue boot reconciliation. Placed AFTER `ensure_schema` (which runs
+    # in the local branch above) so the table exists on the desktop path, and
+    # after `PyPSAService.initialize()` so a resumed job has a service to build
+    # contexts from. It swallows every exception — the same never-fail-boot
+    # posture as `_chatbot_startup_check` and `run_first_run_import` — because
+    # in web mode migrations are a deployment step this process does not own.
+    try:
+        from services import solve_job_store
+
+        solve_job_store.reconcile_on_boot()
+    except Exception:  # noqa: BLE001 — a queue that starts empty beats a boot that dies
+        logging.getLogger("pypsa_gui").exception(
+            "solve-queue boot reconciliation failed; continuing without it"
+        )
     yield
 
 
