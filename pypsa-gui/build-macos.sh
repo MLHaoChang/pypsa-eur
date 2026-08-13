@@ -103,6 +103,38 @@ step "Building the SPA"
 test -f "$HERE/frontend/dist/spa.html" || {
   echo "frontend/dist/spa.html missing after the build" >&2; exit 1; }
 
+# ── the test gate ───────────────────────────────────────────────────────────
+#
+# Deliberately AFTER the SPA build and BEFORE the freeze.
+#
+# AFTER, because `tests/test_local_mode_e2e.py` covers the backend serving the
+# BUILT SPA — the one seam a desktop build actually depends on — and those tests
+# SKIP when `frontend/dist/` is absent. A gate placed first therefore reports a
+# green suite whose packaging coverage never ran. Measured on 2026-08-12: four
+# tests skipped in the gating run and passed only when re-run by hand after the
+# build, so the gate that authorised the artifact had not tested the seam the
+# artifact exists for.
+#
+# BEFORE, because a red suite should cost seconds rather than a whole
+# PyInstaller run — and because no artifact should exist for a commit that did
+# not pass.
+#
+# No skip flag, for the reason the secret scan has none: a gate with a
+# documented bypass is the gate that gets bypassed on the tired build.
+#
+# `pixi run` resolves against THIS checkout on purpose. Building from a detached
+# worktree (the right move when the main tree is dirty) provisions that
+# worktree's pixi env on first use — a few minutes, mostly hardlinks from the
+# shared package cache. That cost buys the only property that matters here: the
+# tree being gated is the tree being frozen. Pointing the gate at another
+# checkout would test source this build is not shipping.
+step "Running the test gate"
+command -v pixi >/dev/null 2>&1 || {
+  echo "pixi not found — the gate ('pixi run gui-tests') cannot run." >&2
+  echo "Install pixi and re-invoke this script. Do not build around the gate." >&2
+  exit 2; }
+( cd "$REPO" && pixi run gui-tests )
+
 step "Freezing the app"
 ( cd "$HERE" && "$VENV/bin/pyinstaller" pypsa-gui.spec --noconfirm \
     --distpath "$DIST" --workpath "$WORK" )
@@ -252,8 +284,17 @@ fi
 step "Done"
 echo "  $APP"
 echo
+echo "Quit any running copy FIRST — replacing the bundle under a live process"
+echo "breaks it minutes later, in ways that read as product bugs:"
+echo "  osascript -e 'tell application \"PyPSA Studio\" to quit'"
+echo
 echo "Install:  rm -rf '/Applications/PyPSA Studio.app' && cp -R '$APP' /Applications/"
-echo "Run:      open -a 'PyPSA Studio'"
+# NOT `open -a 'PyPSA Studio'`. `-a` asks LaunchServices to resolve the NAME,
+# and this build just registered the copy in dist-app/; the most recently
+# registered bundle tends to win. Measured: immediately after a verified
+# install, `open -a` started the dist-app copy, so the "installed" app under
+# test was running out of the build directory with nothing looking wrong.
+echo 'Run:      open "/Applications/PyPSA Studio.app"'
 
 if [ -z "${CODESIGN_IDENTITY:-}" ]; then
   cat <<'MSG'
