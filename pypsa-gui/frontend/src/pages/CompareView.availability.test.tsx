@@ -840,3 +840,38 @@ describe('OverviewTab distinguishes unavailable from zero', () => {
     expect(await screen.findAllByText('200.0 MW')).toHaveLength(2)
   })
 })
+
+// The marker's PRESENTATION, pinned so collapsing CompareView's 19 verbatim
+// copies of the cell span into `<UnavailableCell />` is provably
+// behaviour-preserving. This is a characterisation test, not a RED one:
+// the refactor changes no behaviour, so there is no failing state to
+// capture first — its job is to fail if the collapse drops the muted
+// styling or the tooltip that tells the user WHY the cell is empty.
+describe('the unavailable marker carries its explanation', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders every marker cell with the muted class and the explanatory title', async () => {
+    vi.mocked(projectsApi.compareState).mockImplementation(
+      (project: string) => Promise.resolve(overviewCompareState(project) as never),
+    )
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(overviewSummary(project === 'alpha', project) as never),
+    )
+    renderOverviewTab()
+
+    const markers = await screen.findAllByText(COST_UNAVAILABLE)
+    expect(markers.length).toBeGreaterThan(0)
+
+    // Every marker rendered as a CELL (a <span>) must explain itself. The
+    // block-level whole-tab fallback is a <p> and carries its meaning in
+    // surrounding prose, so it is excluded rather than asserted against.
+    const cells = markers.filter(el => el.tagName === 'SPAN')
+    expect(cells.length).toBeGreaterThan(0)
+    for (const cell of cells) {
+      expect(cell.getAttribute('title')).toBe(
+        "This scenario's figures could not be resolved",
+      )
+      expect(cell.className).toContain('text-muted')
+    }
+  })
+})
