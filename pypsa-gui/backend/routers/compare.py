@@ -2376,8 +2376,15 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         ap = total_avail["by_period"].get(p, 0.0)
         sys_rate_pp[p] = 100.0 * v / ap if ap > 1e-9 else 0.0
 
+    # At least one generator produced a real figure, so `available` is True —
+    # but `failed > 0` means the others did NOT, and their contribution is
+    # missing from every number below. Task 8 fixed the all-failed case (the
+    # empty return above); this is the partial case it recorded and deferred,
+    # which is the more dangerous of the two because the response looks
+    # complete. See ADR-0001.
     return CurtailmentComparison(
         available=True,
+        partial=(failed > 0),
         total_gwh=_to_pv(total_bucket),
         by_carrier_gwh=_to_pv_dict(curt_by_carrier),
         rate_pct_by_carrier=_to_pv_dict(rate_by_carrier),
