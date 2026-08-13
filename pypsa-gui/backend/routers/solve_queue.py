@@ -33,7 +33,7 @@ import local_mode
 from db.models import User
 from db.session import get_db
 from deps import optional_user
-from services.solve_queue import _TERMINAL, solve_queue
+from services.solve_queue import _TERMINAL, _row_epoch, solve_queue
 
 router = APIRouter()
 
@@ -445,20 +445,110 @@ async def job_log_stream(
     )
 
 
+def _persisted_job_public(row: dict) -> dict:
+    """
+    A `solve_jobs` row (from `solve_job_store.load_by_status`), reshaped to
+    the same shape `SolveJob.to_public()` returns, so `_merged_jobs` can hand
+    `list_queue` ONE uniform list and the existing authorization pass
+    (`_may_see` / `_redact`, keyed on `project_key`) needs no branch for
+    "was this job live or persisted".
+
+    `position` is always `None`. Every row this is ever called with is
+    TERMINAL — `_merged_jobs` only loads `_TERMINAL` statuses — and a queue
+    position is only meaningful for a job still waiting to run. Fabricating
+    one for a job that finished, possibly restarts ago, would be a made-up
+    number with no actual queue behind it.
+    """
+    started_at = row.get("started_at")
+    finished_at = row.get("finished_at")
+    return {
+        "id": str(row["id"]),
+        "project_id": row.get("project_id"),
+        "project_key": row.get("project_key"),
+        "status": row.get("status"),
+        "position": None,
+        "objective": row.get("objective"),
+        "solve_time": row.get("solve_time"),
+        "condition": row.get("condition"),
+        "error": row.get("error"),
+        "enqueued_at": _row_epoch(row.get("enqueued_at")),
+        "started_at": _row_epoch(started_at) if started_at is not None else None,
+        "finished_at": _row_epoch(finished_at) if finished_at is not None else None,
+    }
+
+
+def _merged_jobs() -> list[dict]:
+    """
+    Every in-memory job, plus persisted TERMINAL rows for jobs that are no
+    longer resident — the gap Task 16a closes.
+
+    Why a job can be persisted but not resident: a restart drops EVERY entry
+    from `_jobs` (a fresh `SolveQueue()` singleton), and boot reconciliation
+    (`solve_job_store.reconcile_on_boot`) only ever re-admits `queued` rows
+    back into memory — a `running` row becomes `interrupted` and is
+    DELIBERATELY never re-enqueued (R25's crash-loop guard: auto-retrying a
+    job that crashed the process would crash-loop the boot). So the only way
+    an `interrupted` job — or any terminal job from before the last restart —
+    can ever reach a caller is by being read back from the table here, at the
+    listing's read boundary. Nothing is re-admitted to `_jobs`; a persisted
+    row that matches a live job is simply not fetched into the result at all
+    (see below), so this can never put a terminal job back in front of the
+    dispatcher.
+
+    IN-MEMORY WINS for any id present in both. `solve_queue.list_jobs()` is
+    the FIRST source and its ids are excluded from what the DB query is
+    allowed to contribute — a live job's `status` / `started_at` / `position`
+    can be ahead of what was last mirrored to its row (`record_status` runs
+    outside the dispatcher's lock and is best-effort), and a stale row must
+    never overwrite a job the dispatcher is actively running. Filtering by id
+    achieves this without ever inspecting the persisted row's own status: even
+    a persisted row that happens to read TERMINAL for a job that is actually
+    still live (a lagging mirror) is dropped, because its id is already
+    accounted for by the in-memory copy.
+
+    ORDERING: both sources are already ascending by `enqueued_at` — `_order`
+    by construction (a job is appended to `_jobs` and `_order` together, under
+    `_lock`, at the moment its `enqueued_at = time.time()` is stamped, so the
+    list is chronological by construction) and `load_by_status`'s own
+    `ORDER BY enqueued_at`. Combining and re-sorting by that one key gives a
+    single globally chronological list — a caller's queue view and job
+    history read oldest-enqueued-first either way, restart or not, and a
+    STABLE sort (Python's `sorted`) means the common case (no persisted-only
+    rows to add) reproduces `list_jobs()`'s existing order exactly, so this is
+    additive over the pre-Task-16a behaviour rather than a new ordering rule.
+    """
+    from services import solve_job_store
+
+    jobs = solve_queue.list_jobs()
+    live_ids = {job["id"] for job in jobs}
+    persisted_only = [
+        _persisted_job_public(row)
+        for row in solve_job_store.load_by_status(_TERMINAL)
+        if str(row["id"]) not in live_ids
+    ]
+    return sorted(jobs + persisted_only, key=lambda job: job["enqueued_at"])
+
+
 @router.get("")
 def list_queue(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
     """
-    All jobs in FIFO order. `current` is the id of the running job, if any.
+    All jobs in FIFO order, live ones merged with persisted history
+    (`_merged_jobs`, Task 16a). `current` is the id of the running job, if any.
 
     AUTHORIZATION (P-1): this REDACTS, it does not filter. `position`
     (`SolveJob.to_public`) is the 1-based place in a GLOBALLY sequential queue,
     because one solver serves every org — a caller's wait genuinely depends on
     jobs they do not own. Dropping other orgs' rows would leave them at
     "position 4" with one job visible and no way to reconcile the number, so
-    queue depth (the thing they legitimately need) becomes unreadable.
+    queue depth (the thing they legitimately need) becomes unreadable. The
+    same predicate applies uniformly to a persisted row — `_may_see` /
+    `_project_uuid` only ever look at `project_key`, which a persisted row
+    carries exactly like a live one, so a caller cannot see another
+    organisation's job merely because it was read back from `solve_jobs`
+    instead of `_jobs`.
 
     So every job comes back with `id`, `status`, `position` and its timings
     intact, and the fields that say WHOSE work it is are nulled for jobs the
@@ -476,7 +566,7 @@ def list_queue(
 
     project_registry.require_user(user)
     prefix = _org_prefix(db, user)
-    jobs = solve_queue.list_jobs()
+    jobs = _merged_jobs()
     allowed = project_acl.accessible_project_ids(
         db, user, (_project_uuid(job, prefix) for job in jobs)
     )

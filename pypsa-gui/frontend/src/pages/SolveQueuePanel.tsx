@@ -128,14 +128,16 @@ export const REDACTED_PROJECT_LABEL = 'Hidden — another organisation’s proje
  * `aborted` / `interrupted` (increment 3, R27) — with no per-status branch.
  *
  * NOTE: as of increment 3, `interrupted` is a real `SolveJobStatus` and this
- * function correctly returns `true` for it — but a real interrupted job does
- * not currently reach this component at all. `services/solve_queue.list_jobs`
- * serves the in-memory queue, and boot reconciliation
- * (`services/solve_job_store.reconcile_on_boot`) deliberately never re-admits
- * a `running → interrupted` row into that in-memory store (the crash-loop
- * guard). So this is dormant-correct: right the moment the backend starts
- * surfacing interrupted jobs through `list_jobs`/`get_job`, no frontend change
- * is needed here.
+ * function correctly returns `true` for it. Until Task 16a this was
+ * dormant-correct: `services/solve_queue.list_jobs` served the in-memory
+ * queue only, and boot reconciliation (`services/solve_job_store.
+ * reconcile_on_boot`) deliberately never re-admits a `running → interrupted`
+ * row into that in-memory store (the crash-loop guard), so no interrupted job
+ * could ever reach this component. Task 16a made `GET /api/simulation/queue`
+ * merge persisted rows back into the listing at the READ boundary (never by
+ * re-admitting anything to the in-memory store, so the crash-loop guard is
+ * untouched) — an interrupted job now reaches this component for real, and
+ * this line was already correct for it, unchanged.
  *
  * A redacted row (`project_id: null`) is one the caller may not see at all,
  * so its endpoints would 404 — disabling it here means the UI and the

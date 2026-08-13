@@ -361,6 +361,13 @@ class SolveQueue:
         role, not an org-scoped one (`routers/solve_queue.py:clear_finished`
         gates on `User.is_super_admin`). A `predicate=` parameter here would
         read like a second, weaker authorization path that no caller uses.
+
+        Also deletes the matching `solve_jobs` ROWS (Task 16a), not just the
+        in-memory entries. Once the listing route merges persisted TERMINAL
+        rows back in, popping `_jobs` alone would not be visible to a caller:
+        the very next `GET /api/simulation/queue` would pull the same jobs
+        straight back out of the table, and this super-admin "wipe" would
+        silently do nothing from the listing's point of view.
         """
         with self._lock:
             removed = [jid for jid in self._order
@@ -368,7 +375,19 @@ class SolveQueue:
             for jid in removed:
                 self._jobs.pop(jid, None)
                 self._order.remove(jid)
-            return len(removed)
+        # Mirror the delete to the table OUTSIDE `_lock`, same discipline as
+        # `abort()` / `_run_job`: the store opens a database session, and
+        # `_lock` is documented as short bookkeeping only, never held across
+        # I/O. Best-effort — a DB hiccup must not stop the in-memory clear
+        # the caller already observed via the return value.
+        if removed:
+            try:
+                from services import solve_job_store
+
+                solve_job_store.delete_jobs(removed)
+            except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
+                logger.exception("solve_queue: could not delete persisted jobs %s", removed)
+        return len(removed)
 
     def reset_for_tests(self) -> None:
         """

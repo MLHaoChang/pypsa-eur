@@ -543,6 +543,45 @@ def test_super_admin_can_clear_finished_globally(
     assert solve_queue.list_jobs() == []
 
 
+def test_clear_finished_also_deletes_the_persisted_row(
+    client, super_admin_client, install_network, tmp_projects_dir
+):
+    """
+    Task 16a (`routers/solve_queue.py::_merged_jobs`) makes the listing merge
+    persisted TERMINAL rows back in for jobs no longer resident. That changes
+    what `clear_finished` must do to stay effective: popping `_jobs` alone is
+    no longer enough, because the very next `GET /api/simulation/queue` would
+    pull the same row straight back out of `solve_jobs` — a super-admin's
+    "empty the queue" would silently do nothing from the caller's point of
+    view. `_force_status` (unlike a real solve) only mutates memory, so this
+    mirrors the terminal status to the table explicitly before clearing, the
+    same way `_run_job`'s own `finally` block does.
+    """
+    from services import solve_job_store
+
+    mine = _enqueue(client, install_network, "ClearMeToo")
+    _force_status(mine["id"], "completed")
+    solve_job_store.record_status(solve_queue._jobs[_jid(mine["id"])])
+
+    r = super_admin_client.post("/api/simulation/queue/clear_finished")
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 1
+
+    payload = client.get("/api/simulation/queue").json()
+    assert all(j["id"] != mine["id"] for j in payload["jobs"]), (
+        "clear_finished cleared memory but the persisted row resurrected the "
+        "job on the very next listing"
+    )
+
+    from db.models import SolveJobRow
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        assert db.get(SolveJobRow, _jid(mine["id"])) is None, (
+            "clear_finished did not delete the persisted row"
+        )
+
+
 # ── chat tools (Task 4: the same handlers, reached in-process) ───────────────
 
 

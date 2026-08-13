@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -133,7 +134,17 @@ def load_by_status(statuses: tuple[str, ...]) -> list[dict]:
     Rows in any of `statuses`, oldest first, as plain dicts.
 
     Dicts rather than ORM objects so the caller (the dispatcher, a worker
-    thread) never holds a detached instance whose session is gone.
+    thread — or the listing route, this module's second caller as of the
+    read-side merge in `routers/solve_queue.py`) never holds a detached
+    instance whose session is gone.
+
+    Carries every column `SolveJob.to_public()` needs (Task 16a): boot
+    reconciliation only ever reads `id` / `project_id` / `project_key` /
+    `storage_dir` / `solver_config` / `enqueued_at` off the returned dicts
+    (via `.get()`, so extra keys are inert to it), but the listing's merge
+    also needs `objective` / `solve_time` / `condition` / `error` /
+    `started_at` / `finished_at` to show a persisted TERMINAL job with its
+    real result rather than blanks. One query, reused, not a second path.
     """
     try:
         from sqlalchemy import select
@@ -155,13 +166,53 @@ def load_by_status(statuses: tuple[str, ...]) -> list[dict]:
                     "storage_dir": r.storage_dir,
                     "status": r.status,
                     "solver_config": r.solver_config,
+                    "objective": r.objective,
+                    "solve_time": r.solve_time,
+                    "condition": r.condition,
+                    "error": r.error,
                     "enqueued_at": r.enqueued_at,
+                    "started_at": r.started_at,
+                    "finished_at": r.finished_at,
                 }
                 for r in rows
             ]
     except Exception:  # noqa: BLE001 — an unreadable table means "nothing to restore"
         logger.exception("solve_job_store: could not load jobs by status %s", statuses)
         return []
+
+
+def delete_jobs(ids: Iterable[uuid.UUID]) -> None:
+    """
+    Delete rows by id. Best-effort — never raises.
+
+    The only caller is `SolveQueue.clear_finished()`. That is a super-admin,
+    process-wide "wipe the terminal jobs" action — and once the listing route
+    merges persisted TERMINAL rows back in (Task 16a), removing a job from
+    `_jobs` alone is not enough: the very next `GET /api/simulation/queue`
+    would pull the same row straight back out of `solve_jobs` and clear_finished
+    would silently stop doing anything the caller could observe. So the row
+    itself has to go too.
+
+    Deliberately NOT how per-user dismissal works (`dismissed_by_user_id`,
+    a later task): that is a per-user flag on a row that survives, because one
+    user hiding a job must not affect another user's — or a future requeue's —
+    view of it. `clear_finished` is the one place a row is actually deleted,
+    matching its existing "empties the queue for every organization" contract.
+    """
+    id_list = list(ids)
+    if not id_list:
+        return
+    try:
+        from sqlalchemy import delete
+
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+
+        with SessionLocal() as db:
+            db.execute(delete(SolveJobRow).where(SolveJobRow.id.in_(id_list)))
+            db.commit()
+    except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
+        logger.exception("solve_job_store: could not delete jobs %s", id_list)
 
 
 def reconcile_on_boot() -> tuple[int, int]:
