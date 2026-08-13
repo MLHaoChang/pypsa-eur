@@ -44,14 +44,26 @@ def test_capacity_capex_agrees_with_periodized_capital_costs(golden):
     pcc = periodized_capital_costs(golden, _state.get("solver_config"))
     horizon_years = float(sum(gf.GOLDEN_YEARS))
     expected = 0.0
-    # Links are EXTENDABLE-ONLY here, mirroring `_walk(..., extendable_only=True)`
-    # in `_compute_total_annuitised_capex`. A passive branch the LP cannot
-    # resize contributes nothing to the objective and is deliberately excluded
-    # from this tab; an extendable link is sized by the LP and is not.
+    # EVERY cost-bearing class, passive branches included, and every link
+    # rather than only the extendable ones.
+    #
+    # Both of those used to be otherwise, and this list had drifted from the
+    # code twice over. The link entry still said `extendable_only=True` long
+    # after `_compute_total_annuitised_capex` stopped restricting the link
+    # walk; it kept passing only because every link in the golden fixture
+    # happens to be extendable, so the two policies coincide here and the
+    # stale expectation was never exercised.
+    #
+    # Lines and transformers are new, per the 2026-08-13 ruling that a passive
+    # branch's capital cost is part of what the system costs. Omitting them
+    # here was worth 7500 MEUR on this very fixture — see
+    # tests/test_capex_line_inclusion_parity.py for the measurement.
     for attr, nom, ext_only in (("generators", "p_nom", False),
                                 ("storage_units", "p_nom", False),
                                 ("stores", "e_nom", False),
-                                ("links", "p_nom", True)):
+                                ("links", "p_nom", False),
+                                ("lines", "s_nom", False),
+                                ("transformers", "s_nom", False)):
         df = getattr(golden, attr)
         for name in df.index:
             if ext_only and not bool(df.at[name, f"{nom}_extendable"]):

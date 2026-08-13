@@ -77,7 +77,7 @@ def co2_intensity_map(n) -> dict[str, float]:
 
 
 def annuitised_capex_by_carrier(
-    generators, storage_units, stores, links,
+    generators, storage_units, stores, links, lines=None, transformers=None,
     *,
     periods, is_multi, years_map, capital_cost_of,
 ) -> dict:
@@ -146,13 +146,28 @@ def annuitised_capex_by_carrier(
             else:
                 b["total"] += per_year_meur
 
-    # Generation / storage / stores unconditionally, plus links.
+    # Every cost-bearing component class, passive branches included.
     #
-    # Lines and transformers stay omitted: a passive branch that the LP
-    # cannot resize contributes nothing to the objective, and reporting its
-    # notional CAPEX here produced a "line CAPEX" carrier value nobody could
-    # reconcile with the Results panel. Branch expansion is visible in the
-    # Line loading tab; that is where it belongs.
+    # Lines and transformers USED to be omitted here, on the reasoning that a
+    # passive branch the LP cannot resize contributes nothing to the objective,
+    # and that a "line CAPEX" carrier appeared in Compare which "nobody could
+    # reconcile with the Results panel".
+    #
+    # That reason was self-cancelling: it named a reconciliation failure and
+    # then made it permanent. Results is built from `n.statistics()`, which
+    # charges capital_cost x capacity for EVERY asset including lines — so the
+    # omission WAS the irreconcilable difference, not a defence against one.
+    # MEASURED on the golden fixture (periods 2030/2035): Compare's Capacity
+    # tab reported 25.320785 MEUR against Results' 7525.320785 MEUR, and the
+    # entire 7500 MEUR gap was Lines at carrier `ac`. Every other carrier
+    # agreed to six decimals. Neither capex parity suite caught it because
+    # neither fixture contains a line carrying a capital_cost — see
+    # tests/test_capex_line_inclusion_parity.py, which does.
+    #
+    # Ruled by the human 2026-08-13: a passive branch's capital cost is part of
+    # what the system costs, so both views count it. Deliberately NOT a
+    # parameter — an inclusion policy that can be set two ways is how the two
+    # views diverged in the first place.
     #
     # An EXTENDABLE link is a different animal, and excluding it was a defect:
     # the LP does size it, its capital_cost does enter the objective, and
@@ -173,4 +188,7 @@ def annuitised_capex_by_carrier(
     _walk(storage_units, "p_nom", "storage_units")
     _walk(stores,        "e_nom", "stores")
     _walk(links,         "p_nom", "links")
+    # Passive branches are sized on `s_nom` (apparent power), not `p_nom`.
+    _walk(lines,         "s_nom", "lines")
+    _walk(transformers,  "s_nom", "transformers")
     return out

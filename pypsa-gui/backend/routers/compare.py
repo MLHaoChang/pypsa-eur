@@ -830,7 +830,7 @@ def _compute_total_annuitised_capex(
     from services.economics import annuitised_capex_by_carrier
 
     return annuitised_capex_by_carrier(
-        n.generators, n.storage_units, n.stores, n.links,
+        n.generators, n.storage_units, n.stores, n.links, n.lines, n.transformers,
         periods=periods, is_multi=is_multi, years_map=years_map,
         capital_cost_of=lambda row, comp_attr: _safe_capital_cost(row, pcc, comp_attr),
     )
@@ -1823,10 +1823,24 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     _walk_capex_vintage("StorageUnit", n.storage_units)
     _walk_capex_vintage("Store",       n.stores)
     _walk_capex_vintage("Link",        n.links)
+    # Passive branches, per the 2026-08-13 ruling that a line's capital cost
+    # is part of what the system costs. These no-op unless a branch actually
+    # carries a `vintage_results` entry — passive branches are not normally
+    # vintage-expanded, since expansion exists for LP-sized assets — but the
+    # symmetry matters: an omission here is invisible, and this walk being one
+    # class short of `_compute_total_annuitised_capex` is exactly how Compare's
+    # own two tabs came to disagree by 7500 MEUR on the golden fixture.
+    _walk_capex_vintage("Line",        n.lines)
+    _walk_capex_vintage("Transformer", n.transformers)
     _walk_capex_plain("Generator",   n.generators,    "p_nom")
     _walk_capex_plain("StorageUnit", n.storage_units, "p_nom")
     _walk_capex_plain("Store",       n.stores,        "e_nom")
     _walk_capex_plain("Link",        n.links,         "p_nom")
+    # Sized on `s_nom` (apparent power), not `p_nom` — a walk that reached for
+    # the power field would silently contribute zero here, which is the same
+    # trap `test_compare_store_capex_parity.py` was written to catch on Stores.
+    _walk_capex_plain("Line",        n.lines,         "s_nom")
+    _walk_capex_plain("Transformer", n.transformers,  "s_nom")
 
     # DISPATCH/OPEX/REVENUE: storage uses `_t.p` (signed, grid-side) so the
     # GWh match the dispatch summary + `/results/storage_dispatch`. Stores
