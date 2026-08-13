@@ -46,7 +46,7 @@ vi.mock('../api/projects', () => ({
 import { projectsApi } from '../api/projects'
 import {
   EconomicsTab, EmissionsTab, StorageCyclingTab,
-  LoadingTab, PricesTab, OverviewTab, LostLoadTab,
+  LoadingTab, PricesTab, OverviewTab, LostLoadTab, CurtailmentTab,
 } from './CompareView'
 
 const summary = (available: boolean, project: string) => ({
@@ -873,5 +873,67 @@ describe('the unavailable marker carries its explanation', () => {
       )
       expect(cell.className).toContain('text-muted')
     }
+  })
+})
+
+// The curtailment PARTIAL case. `available` is correctly true — a real
+// measurement IS present — so it cannot carry this, and every existing
+// availability guard on this tab passes. The block ships a number that
+// silently understates by however much the failed generators would have
+// contributed. Nothing on screen said so, which makes it the ADR-0001
+// failure mode wearing a plausible figure instead of a zero.
+function renderCurtailmentTab() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <CurtailmentTab a="alpha" b="beta" />
+    </QueryClientProvider>,
+  )
+}
+
+const curtailmentSummary = (partial: boolean, project: string) => ({
+  project,
+  has_solve: true,
+  periods: [],
+  curtailment: {
+    available: true,
+    partial,
+    total_gwh: { total: 12.5, by_period: {} },
+    by_carrier_gwh: { wind: { total: 12.5, by_period: {} } },
+    rate_pct_by_carrier: { wind: { total: 8.25, by_period: {} } },
+    system_rate_pct: { total: 8.25, by_period: {} },
+  },
+})
+
+describe('CurtailmentTab surfaces the partial case', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('warns that one side understates when its block is partial', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) =>
+        Promise.resolve(curtailmentSummary(project === 'beta', project) as never),
+    )
+    renderCurtailmentTab()
+
+    // beta's figures are real but incomplete — the user must be told before
+    // reading 12.5 GWh as beta's whole curtailment.
+    const warning = await screen.findByText(/understate/i)
+    expect(warning).toBeTruthy()
+    expect(warning.textContent).toContain('beta')
+    expect(warning.textContent).not.toContain('alpha')
+  })
+
+  it('says nothing when both sides are complete', async () => {
+    vi.mocked(projectsApi.resultsSummary).mockImplementation(
+      (project: string) => Promise.resolve(curtailmentSummary(false, project) as never),
+    )
+    renderCurtailmentTab()
+
+    // The real figure must still render — the guard must not fire on a
+    // complete answer and blank out a perfectly good comparison.
+    expect(await screen.findAllByText(/12\.5 GWh/)).not.toHaveLength(0)
+    expect(screen.queryByText(/understate/i)).toBeNull()
   })
 })

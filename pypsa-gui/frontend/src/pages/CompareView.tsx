@@ -1943,7 +1943,7 @@ function AssetLCOHTable({
 // already filters generators with a non-trivial p_max_pu profile so the
 // numbers stay meaningful.
 
-function CurtailmentTab({ a, b }: { a: string; b: string }) {
+export function CurtailmentTab({ a, b }: { a: string; b: string }) {
   const qA = useQuery({ queryKey: ['results-summary', a], queryFn: () => projectsApi.resultsSummary(a), staleTime: 30_000 })
   const qB = useQuery({ queryKey: ['results-summary', b], queryFn: () => projectsApi.resultsSummary(b), staleTime: 30_000 })
   const [period, setPeriod] = useState<PeriodChoice>('all')
@@ -2012,12 +2012,32 @@ function CurtailmentTab({ a, b }: { a: string; b: string }) {
   const availableA = cA?.available ?? false
   const availableB = cB?.available ?? false
 
+  // PARTIAL is a third state, and neither of the two above can express it.
+  // Some generators' figures failed while others succeeded, so `available`
+  // is correctly true — a real measurement IS present — and every guard on
+  // this tab passes. The number is real and UNDERSTATES, by however much
+  // the failed generators would have contributed. Without this banner the
+  // tab is the ADR-0001 failure mode wearing a plausible figure instead of
+  // a zero: nothing on screen looks wrong.
+  const partialSides = [
+    cA?.partial && sa.project,
+    cB?.partial && sb.project,
+  ].filter(Boolean) as string[]
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-4 flex-wrap">
         <PeriodSelector periods={periods} value={period} onChange={setPeriod} />
         <CarrierFilter {...bindCarrierFilter(filter, availableCarriers)} label="Carrier" />
       </div>
+
+      {partialSides.length > 0 && (
+        <p className="text-[11px] text-warn py-2">
+          ⚠ Curtailment for {partialSides.join(' and ')} could not be computed for every
+          generator. The figures below are real measurements but understate the true
+          total — treat them as a lower bound, and the deltas as indicative only.
+        </p>
+      )}
 
       <Section title="Total curtailed energy" subtitle={periodLabel(period) + ' — renewable output the LP rejected (cost-feasible but not dispatched)'}>
         <ABKpiPair
