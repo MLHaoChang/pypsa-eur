@@ -194,8 +194,12 @@ def solves_in_flight() -> list[InFlightSolve]:
 
         for job in solve_queue.list_jobs():
             if job.get("status") in ("queued", "running"):
+                # `to_public` emits `project_id` (the display NAME) and
+                # `project_key` — it has NEVER emitted `project_name`, which is
+                # what this line used to read, so every queue solve was labelled
+                # `job <id>` in the confirmation the user is asked to act on.
                 found.append(InFlightSolve(
-                    "queue", job.get("project_name") or f"job {job.get('id')}", True,
+                    "queue", job.get("project_id") or f"job {job.get('id')}", True,
                 ))
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("could not inspect the solve queue: %s", exc)
