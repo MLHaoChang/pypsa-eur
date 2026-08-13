@@ -58,14 +58,27 @@ function loadCarrierSortKey(key: string): string {
   return `m_${key}`
 }
 
-// User flow this page implements (top → bottom):
-//   1. Status header — what the network is RIGHT NOW (mode, periods, snapshot
-//      count + breakdown). Read-only summary so the user grounds themselves.
-//   2. Mode toggle — "Is this a multi-period model?" A single decision point.
-//   3. Mode-specific config — multi-period (years + period weights + MultiIndex
-//      constructor) when ON, single-period snapshot range when OFF.
-//   4. Snapshot weightings — used in both modes. Inline pagination for hourly
-//      horizons + CSV download/upload for bulk edits at 8760-row scale.
+// What this page is: a shell, not a scroll. It owns every query, mutation,
+// and piece of scratch state the six Model Horizon steps need, and renders
+// exactly one of two things below the always-visible status strip —
+// HorizonSummary (a returning user's landing view, one line per step) or
+// StepShell routed to whichever single step `view` names. Never both, never
+// stacked; see `view` state below for how the choice is made and kept.
+//
+// The six steps split along PyPSA's own two-level snapshot index —
+// (period, timestep) — not along any UI convenience grouping:
+//   • period-level — mode, years, economics. These configure the investment
+//     periods themselves and are ABSENT ENTIRELY in single-period mode
+//     (there is no period axis to configure); `visibleSteps()` in
+//     modelHorizonModel.ts is the single source of truth for that filtering.
+//   • timestep-level — window, sampling, weights. These configure the
+//     operational index within each period (or the one flat index in
+//     single-period mode) and are always present, in both modes.
+//
+// Each step's own UI lives in pages/modelHorizon/*.tsx. What stays here is
+// wiring: thirteen `useMutation`s, the queries feeding them, and derived
+// values (rangeStr, autoDiscountOn, summaryCtx, …) computed once and read by
+// both the StatCard strip and the routed step, so the two can't drift apart.
 
 // PyPSA's snapshot index is full ISO; the HTML datetime-local input only
 // accepts "YYYY-MM-DDTHH:mm". This trims any seconds / fractional part the
@@ -749,7 +762,7 @@ export default function ModelHorizon() {
       />
       <div className="flex flex-col gap-5 px-8 py-5 overflow-y-auto flex-1 min-h-0 text-sm">
 
-      {/* ── 1. Status — StatCard strip ───────────────────────── */}
+      {/* ── Status strip — always shown, above whichever view is routed ── */}
       <RowGrid cols={3}>
         <StatCard
           accent
@@ -779,7 +792,7 @@ export default function ModelHorizon() {
         />
       </RowGrid>
 
-      {/* ── 2+. Guided steps, routed off `view` (Task 3 shell) ── */}
+      {/* ── Guided steps, routed off `view` (Task 3 shell) ── */}
       {view === 'summary' ? (
         <HorizonSummary steps={steps} ctx={summaryCtx} onOpen={setView} />
       ) : (
@@ -798,7 +811,7 @@ export default function ModelHorizon() {
             unmountAdvancedWhenCollapsed={unmountAdvancedWhenCollapsed}
           >
 
-      {/* ── 2a. Mode toggle (the single decision point) ───────── */}
+      {/* ── Mode toggle (the single decision point) ───────────── */}
       {/* Task 5: moved to modelHorizon/StepMode.tsx. */}
       {view === 'mode' && (
         <StepMode
@@ -808,7 +821,7 @@ export default function ModelHorizon() {
         />
       )}
 
-      {/* ── 3a. Investment years (only when toggle ON) ─────────── */}
+      {/* ── Investment years (only when toggle ON) ──────────────── */}
       {/* Task 5: moved to modelHorizon/StepYears.tsx. `years` and `economics`
           used to share one physical <section> with a generic "Multi-period
           planning" <h3> (the same heading Task 4 also left, deliberately, in
@@ -829,7 +842,7 @@ export default function ModelHorizon() {
         />
       )}
 
-      {/* ── 3b. Economics: period weightings + PV preview (only when toggle ON) */}
+      {/* ── Economics: period weightings + PV preview (only when toggle ON) ── */}
       {/* Task 5: moved to modelHorizon/StepPeriodEconomics.tsx. The per-carrier
           load-scaler columns and the CAPEX budget column render behind that
           component's OWN internal Advanced disclosure — not StepShell's
@@ -896,7 +909,7 @@ export default function ModelHorizon() {
         />
       )}
 
-      {/* ── 3b. Snapshot window — both single- and multi-period forms
+      {/* ── Snapshot window — both single- and multi-period forms
           (Task 4: moved to modelHorizon/StepWindow.tsx) ──────────────── */}
       {view === 'window' && (
         <StepWindow
@@ -940,7 +953,7 @@ export default function ModelHorizon() {
         />
       )}
 
-      {/* ── 3c. Representative weeks (works in both modes) ───── */}
+      {/* ── Representative weeks (works in both modes) ────────── */}
       {/* Samples random ISO weeks from an uploaded full-year hourly profile.
           Adapts automatically: flat networks get a flat sampled index,
           multi-period networks get the sample replicated under every period.
@@ -960,7 +973,7 @@ export default function ModelHorizon() {
         />
       )}
 
-      {/* ── 4. Snapshot weightings (always shown) ────────────── */}
+      {/* ── Snapshot weightings (always shown) ────────────────── */}
       {/* Task 4: moved to modelHorizon/StepWeights.tsx. The bulk apply-to-all
           control stays in the main step body; the CSV controls and the
           paginated per-row table (unusable as an always-visible element at
