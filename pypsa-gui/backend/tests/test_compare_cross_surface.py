@@ -329,3 +329,112 @@ def test_capacity_and_economics_agree_on_total_capex(golden):
     econ_total = sum(e.capex_meur.total for e in s["economics"].by_carrier.values())
     assert cap_total == pytest.approx(econ_total, rel=1e-6), (
         f"Capacity tab {cap_total} M€ vs Economics tab {econ_total} M€")
+
+
+# ── Dispatch tab OPEX vs. Results cost_breakdown ────────────────────────────
+def test_dispatch_opex_agrees_with_cost_breakdown(golden):
+    """
+    The Dispatch tab's headline OPEX must equal Results' cost_breakdown OPEX
+    and the sum of Economics' gen_cost split — all three are the LP's
+    variable cost, Σ marginal_cost × dispatch × weight.
+
+    MEASURED before the fix, golden fixture: Dispatch said 2.494286 MEUR
+    while Economics and Results both said 2.597143. The 0.102857 gap is the
+    electrolyzer Link's VOM (|p0| 10 285.714 MWh × 10 €/MWh) — the dispatch
+    summary's opex loop covered generators ONLY, so any Link or StorageUnit
+    marginal cost was silently absent from one of the three surfaces.
+
+    Same defect shape as the 7500 MEUR capex gap fixed at 75786a49: a
+    component class present in one walk and missing from another, invisible
+    because no cross-surface test compared the two totals.
+    """
+    import routers.simulation as sim_router
+    from routers.results import get_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    sim_router._state["solver_config"] = SolverConfig()
+
+    s = cs.summarise(golden)
+    dispatch_opex = s["dispatch"].opex_meur.total
+    econ_gen_cost = sum(e.gen_cost_meur.total for e in s["economics"].by_carrier.values())
+
+    payload = get_cost_breakdown()
+    results_opex = float(payload["opex"]) / 1e6
+
+    assert econ_gen_cost == pytest.approx(results_opex, rel=1e-6), (
+        f"Economics gen_cost {econ_gen_cost} vs Results {results_opex} — "
+        f"these two already agreed before this test existed; a failure here "
+        f"is a NEW regression, not the known dispatch gap"
+    )
+    assert dispatch_opex == pytest.approx(results_opex, rel=1e-6), (
+        f"Dispatch tab says {dispatch_opex} MEUR, Results cost_breakdown "
+        f"says {results_opex} — the same LP cannot have two variable costs"
+    )
+
+
+def test_dispatch_opex_counts_storage_discharge_vom_like_economics():
+    """
+    The golden fixture's storage unit carries marginal_cost=0, so the
+    dispatch-vs-cost_breakdown test above exercises the LINK half of the
+    OPEX fix and not the storage half — the same no-fixture-reaches-the-
+    branch trap that let both capex parity suites pass while the views
+    disagreed by 7500 MEUR. This network gives BOTH a link and a storage
+    unit a non-zero marginal_cost, then requires the Dispatch headline to
+    equal Economics' gen_cost sum.
+
+    Convention pinned: storage VOM applies to the clipped DISCHARGE half
+    only (the charge side is a bus-price transfer, not an LP cost), links
+    on raw signed p0 — both mirroring `_walk_dispatch_side`.
+    """
+    import pandas as pd
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=6, freq="h"))
+    n.add("Bus", "elec", carrier="AC")
+    n.add("Bus", "h2", carrier="h2")
+    n.add("Carrier", "AC")
+    n.add("Carrier", "gas")
+    n.add("Carrier", "battery")
+    n.add("Carrier", "h2")
+    n.add(
+        "Generator", "gas",
+        bus="elec", carrier="gas",
+        p_nom=200.0, marginal_cost=50.0,
+    )
+    # The peak exceeds the gas plant's 200 MW, so the battery MUST charge in
+    # the low hours and discharge into the peak — its VOM term is genuinely
+    # non-zero. (A peak within gas capacity defeats the fixture: the LP just
+    # runs gas and the battery sits idle, which the guard below catches.)
+    n.add("Load", "L", bus="elec", p_set=[60.0, 60.0, 60.0, 60.0, 250.0, 250.0])
+    n.add(
+        "StorageUnit", "bess",
+        bus="elec", carrier="battery",
+        p_nom=80.0, max_hours=4.0, marginal_cost=7.0,
+        efficiency_store=1.0, efficiency_dispatch=1.0,
+    )
+    n.add(
+        "Link", "electrolyzer",
+        bus0="elec", bus1="h2", carrier="h2",
+        p_nom=30.0, efficiency=0.7, marginal_cost=12.0,
+    )
+    n.add("Load", "HL", bus="h2", p_set=10.0)
+    n.optimize(solver_name="highs")
+
+    s = cs.summarise(n)
+    dispatch_opex = s["dispatch"].opex_meur.total
+    econ_gen_cost = sum(e.gen_cost_meur.total for e in s["economics"].by_carrier.values())
+
+    # Guard against the vacuous case: if neither the battery nor the
+    # electrolyzer actually ran, this network proves nothing.
+    assert float(n.storage_units_t.p["bess"].clip(lower=0).sum()) > 1e-6, (
+        "fixture defeated — the battery never discharged"
+    )
+    assert float(n.links_t.p0["electrolyzer"].abs().sum()) > 1e-6, (
+        "fixture defeated — the electrolyzer never ran"
+    )
+
+    assert dispatch_opex == pytest.approx(econ_gen_cost, rel=1e-6), (
+        f"Dispatch {dispatch_opex} MEUR vs Economics gen_cost {econ_gen_cost} "
+        f"— storage discharge VOM or link VOM is missing from one walk"
+    )

@@ -931,6 +931,54 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve) -> DispatchCompar
             pp = _per_period_groupby(weighted, sns, is_multi)
             carrier = str(sus.at[s, "carrier"]) if "carrier" in sus.columns else "storage"
             _accum_carrier(carrier.lower(), total_mwh, pp)
+            # Discharge VOM — same convention as `_compute_economics_summary`'s
+            # storage branch (VOM on the clipped discharge half only; the
+            # charge side is a bus-price transfer, not an LP cost term).
+            # `series` is already clipped to lower=0 above.
+            try:
+                mc = float(sus.at[s, "marginal_cost"]) if "marginal_cost" in sus.columns else 0.0
+            except (TypeError, ValueError):
+                mc = 0.0
+            if _math.isfinite(mc) and mc > 0:
+                opex_t = series * mc * cost_weights
+                opex_bucket["total"] += float(opex_t.sum()) / 1e6
+                for p, v in _per_period_groupby(opex_t, sns, is_multi).items():
+                    opex_bucket["by_period"][p] = opex_bucket["by_period"].get(p, 0.0) + v / 1e6
+
+    # Link VOM — OPEX only, deliberately NOT added to the energy mix: a
+    # link is conversion, and counting its p0 as dispatch would double-count
+    # energy a generator already produced (the docstring convention
+    # test_dispatch_agrees_with_carrier_kpis pins). But its marginal_cost is
+    # a real LP objective term, and omitting it made this tab's OPEX the odd
+    # one out of three surfaces: MEASURED on the golden fixture, Dispatch
+    # said 2.494286 MEUR while Economics and cost_breakdown both said
+    # 2.597143 — the 0.102857 gap being exactly the electrolyzer's
+    # |p0| × 10 €/MWh. Same defect shape as the 7500 MEUR capex gap
+    # (75786a49): one component class missing from one of several walks.
+    # Series convention (raw signed p0, no abs/clip) mirrors
+    # `_walk_dispatch_side`'s non-storage branch in
+    # `_compute_economics_summary` so the two Compare tabs agree by
+    # construction.
+    lks = n.links
+    p0_t = getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None
+    if p0_t is not None and not p0_t.empty:
+        for l in p0_t.columns:
+            if l not in lks.index:
+                continue
+            try:
+                mc = float(lks.at[l, "marginal_cost"]) if "marginal_cost" in lks.columns else 0.0
+            except (TypeError, ValueError):
+                mc = 0.0
+            if not _math.isfinite(mc) or mc <= 0:
+                continue
+            try:
+                series = p0_t[l].reindex(sns).fillna(0.0).astype(float)
+            except Exception:
+                continue
+            opex_t = series * mc * cost_weights
+            opex_bucket["total"] += float(opex_t.sum()) / 1e6
+            for p, v in _per_period_groupby(opex_t, sns, is_multi).items():
+                opex_bucket["by_period"][p] = opex_bucket["by_period"].get(p, 0.0) + v / 1e6
 
     # Storage equivalent-cycles per carrier — fleet-level.
     # Cycle = (gross throughput) / (2 × total energy capacity).
