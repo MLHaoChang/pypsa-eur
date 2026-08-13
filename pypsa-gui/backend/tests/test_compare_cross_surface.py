@@ -438,3 +438,105 @@ def test_dispatch_opex_counts_storage_discharge_vom_like_economics():
         f"Dispatch {dispatch_opex} MEUR vs Economics gen_cost {econ_gen_cost} "
         f"— storage discharge VOM or link VOM is missing from one walk"
     )
+
+
+# ── Economics tab revenue vs. /results/asset_economics ──────────────────────
+def test_economics_revenue_agrees_with_asset_economics(golden):
+    """
+    Per-carrier revenue on the Economics tab must equal the same carrier's
+    revenue summed over /results/asset_economics rows.
+
+    MEASURED in the 2026-08-14 sweep before the fix: carrier h2 (the
+    electrolyzer Link) showed economics=0.0 against asset_econ=0.2136903 —
+    `_walk_dispatch_side`'s revenue block read `row.get("bus")`, links carry
+    `bus0`/`bus1` and no `bus` column, so every pure-link carrier's revenue
+    was a fabricated 0.00 while the Results side computed the real figure.
+    A zero that means "unimplemented branch" rendering identically to a
+    measured zero is ADR-0001's exact prohibition, wearing the Economics
+    table's Revenue column.
+
+    Class mapping mirrors what each surface actually reports: generators and
+    links carry `revenue_eur` (net of input cost for links, matching this
+    codebase's LCOH accounting), storage_units carry `discharge_revenue_eur`
+    (the gross discharge side — Compare books the charge side separately in
+    `storage_charge_cost_eur`). Stores are deliberately absent: neither
+    surface computes store revenue today.
+    """
+    import routers.results as R
+    import routers.simulation as sim_router
+    from services.solver_service import SolverConfig
+
+    sim_router._state["solver_config"] = SolverConfig()
+
+    econ = {
+        k: e.revenue_meur.total
+        for k, e in cs.summarise(golden)["economics"].by_carrier.items()
+    }
+
+    ae = R.get_asset_economics()
+    per_car: dict[str, float] = {}
+    for cls, key in (
+        ("generators", "revenue_eur"),
+        ("links", "revenue_eur"),
+        ("storage_units", "discharge_revenue_eur"),
+    ):
+        for row in ae.get(cls) or []:
+            val = row.get(key)
+            if val is None:
+                continue
+            car = str(row.get("carrier", "")).lower()
+            per_car[car] = per_car.get(car, 0.0) + float(val) / 1e6
+
+    # Guards: the fixture must exercise the branch that diverged — a carrier
+    # whose ONLY revenue-bearing asset is a Link.
+    assert "h2" in per_car and per_car["h2"] > 0, (
+        "fixture defeated — asset_economics no longer reports link revenue "
+        "for h2, so this test cannot see the divergent branch"
+    )
+    compared = 0
+    for car, av in per_car.items():
+        if car not in econ:
+            continue
+        assert econ[car] == pytest.approx(av, rel=1e-6), (
+            f"carrier {car!r}: Economics tab says {econ[car]} MEUR, "
+            f"asset_economics sums to {av} — the same assets cannot earn "
+            f"two different revenues depending on which tab is open"
+        )
+        compared += 1
+    assert compared >= 3, f"only {compared} carriers compared — key drift?"
+
+
+# ── Storage cycles: the two Compare-internal implementations ────────────────
+@pytest.mark.parametrize("solve_fixture", [
+    cln.solve_storage_cycling_flat_network,
+    cln.solve_storage_cycling_multi_network,
+])
+def test_dispatch_cycles_agree_with_the_cycling_block(solve_fixture):
+    """
+    Compare computes equivalent cycles TWICE: `_compute_dispatch_summary`'s
+    `storage_cycles_by_carrier` and `_compute_storage_cycling_summary`'s
+    `cycles_by_carrier`. Both render in the same view. They have already
+    diverged once — the dispatch walk summed throughput across the horizon
+    against a single period's energy cap, reporting n_periods× the per-year
+    rate until it was aligned to mean-per-year (see the comment block in the
+    dispatch walk) — and nothing but this test holds them together now.
+
+    The 2026-08-14 sweep measured them agreeing (2.0 == 2.0 on both
+    fixtures); this pins that agreement rather than fixing anything.
+    """
+    n = solve_fixture()
+    s = cs.summarise(n)
+    d = s["dispatch"].storage_cycles_by_carrier
+    c = s["storage_cycling"].cycles_by_carrier
+
+    shared = set(d) & set(c)
+    assert shared, (
+        f"no carrier computed by both implementations — dispatch={sorted(d)} "
+        f"cycling={sorted(c)}; the fixture no longer exercises the overlap"
+    )
+    for car in shared:
+        assert d[car].total == pytest.approx(c[car].total, rel=1e-9), (
+            f"carrier {car!r}: dispatch walk says {d[car].total} cycles, "
+            f"cycling block says {c[car].total} — the same fleet cannot "
+            f"cycle at two different rates in one view"
+        )

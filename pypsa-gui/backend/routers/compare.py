@@ -1846,6 +1846,39 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 _accum(b["opex_eur"], opex_total, opex_pp)
                 _accum(b["gen_cost_eur"], opex_total, opex_pp)
 
+            is_link = df is n.links
+            if is_link and bus_prices is not None and not bus_prices.empty:
+                # Links carry `bus0`/`bus1`(/`bus2`…) and NO `bus` column, so
+                # the generic branch below silently skipped them and every
+                # pure-link carrier's Revenue rendered a fabricated 0.00 —
+                # measured in the 2026-08-14 sweep: h2 showed 0.0 here against
+                # asset_economics' 0.2136903 MEUR for the same electrolyzer.
+                # Convention mirrors /results/asset_economics' link rows term
+                # for term: NET revenue = Σ over output ports of
+                # (-p{i} × price_bus{i}) minus the input cost (p0 × price_bus0),
+                # all on the cost weighting basis. `series` here is links_t.p0.
+                try:
+                    net_t = pd.Series(0.0, index=sns)
+                    for col in df.columns:
+                        if not (col.startswith("bus") and col[3:].isdigit() and col != "bus0"):
+                            continue
+                        bus_n = row.get(col)
+                        if not bus_n or bus_n not in bus_prices.columns:
+                            continue
+                        p_n_df = getattr(n.links_t, f"p{col[3:]}", None)
+                        if p_n_df is None or asset_name not in getattr(p_n_df, "columns", []):
+                            continue
+                        out_n = -p_n_df[asset_name].reindex(sns).fillna(0.0).astype(float)
+                        net_t = net_t + out_n * bus_prices[bus_n].reindex(sns).fillna(0.0).astype(float)
+                    bus0 = row.get("bus0")
+                    if bus0 and bus0 in bus_prices.columns:
+                        net_t = net_t - series * bus_prices[bus0].reindex(sns).fillna(0.0).astype(float)
+                    rev_t = net_t * weights
+                    _accum(b["revenue_eur"], float(rev_t.sum()),
+                           _per_period_groupby(rev_t, sns, is_multi))
+                except Exception:
+                    pass
+
             bus = row.get("bus") if "bus" in df.columns else None
             if bus_prices is not None and not bus_prices.empty and bus in bus_prices.columns:
                 try:
