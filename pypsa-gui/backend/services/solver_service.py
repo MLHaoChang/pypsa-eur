@@ -4602,9 +4602,27 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             # alone in the result payload — friendlier to plot.
                             sub.columns = [c.replace("__voll_", "") for c in sub.columns]
                             # Aggregate stats for the KPI tiles in the UI.
-                            # Assumes hourly snapshots (MW=MWh/h) — matches the
-                            # convention used by the curtailment KPI.
-                            total_mwh = float(sub.values.clip(min=0).sum())
+                            # SNAPSHOT-WEIGHTED energy, generators basis — the
+                            # same basis Compare's `_compute_lost_load_summary`
+                            # applies when it reweights this series. The raw
+                            # MW sum ("assumes hourly snapshots") understated
+                            # energy by the weight factor on representative-
+                            # period networks, and /results/lost_load serves
+                            # this scalar verbatim — measured in the
+                            # 2026-08-14 sweep: Compare 51.0 MWh vs Results
+                            # 17.0 on an identical 3.0-weighted capture. The
+                            # LP charges shed load × weight in the objective,
+                            # so the weighted figure is what the solve priced.
+                            try:
+                                _w = _period_utils.snapshot_weights(n, "generators")
+                                _w = _w.reindex(sub.index).fillna(1.0)
+                            except Exception:
+                                _w = None
+                            clipped = sub.clip(lower=0)
+                            if _w is not None:
+                                total_mwh = float(clipped.mul(_w, axis=0).values.sum())
+                            else:
+                                total_mwh = float(clipped.values.sum())
                             captured["lost_load_t"] = sub
                             captured["lost_load_total_mwh"] = total_mwh
                             captured["lost_load_cost_eur"] = total_mwh * float(voll)
