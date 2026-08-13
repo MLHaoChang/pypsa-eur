@@ -59,8 +59,20 @@ describe('resolveEditability', () => {
       .toEqual({ editable: false, reason: 'output' })
   })
 
-  it('refuses a column PyPSA does not define', () => {
+  // Reversed on 2026-08-13. Refusing an undeclared column made `country` —
+  // a PyPSA-Eur column on n.buses that is absent from PyPSA's own schema —
+  // permanently read-only, and the same for every other frame extra. PyPSA
+  // declares everything it COMPUTES, so an undeclared column is user data,
+  // and PATCH /_bulk already accepts it (`col in df.columns`).
+  it('allows a column PyPSA does not define, once the catalog has loaded', () => {
     expect(resolveEditability({ ...base, column: 'my_custom_col' }))
+      .toEqual({ editable: true })
+  })
+
+  it('refuses everything while the catalog is still empty', () => {
+    // The loading state, where an empty map would otherwise read as "PyPSA
+    // declares nothing" and make the whole grid editable.
+    expect(resolveEditability({ ...base, column: 'my_custom_col', catalog: new Map() }))
       .toEqual({ editable: false, reason: 'unknown' })
   })
 
