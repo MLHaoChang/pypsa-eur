@@ -3,7 +3,11 @@ import client from './client'
 // One queued solve of a saved project. Mirrors the backend SolveJob.to_public
 // (services/solve_queue.py). `position` is the 1-based place in the queue for a
 // still-queued job, null once it's running/terminal.
-export type SolveJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
+// `interrupted`: the backend process died while this job was running and nobody
+// stopped it (services/solve_job_store.reconcile_on_boot). Terminal, and
+// deliberately NOT the same word as `aborted`, which means a user decided.
+export type SolveJobStatus =
+  'queued' | 'running' | 'completed' | 'failed' | 'aborted' | 'interrupted'
 
 export interface SolveJob {
   // UUID string. Was a per-process integer that collided across replicas.
@@ -85,7 +89,8 @@ export const solveQueueApi = {
   jobLogStreamUrl: (jobId: string) => `/api/simulation/queue/${jobId}/log_stream`,
 }
 
-export const TERMINAL_STATUSES: ReadonlySet<SolveJobStatus> = new Set(['completed', 'failed', 'aborted'])
+export const TERMINAL_STATUSES: ReadonlySet<SolveJobStatus> =
+  new Set(['completed', 'failed', 'aborted', 'interrupted'])
 export const ACTIVE_STATUSES: ReadonlySet<SolveJobStatus> = new Set(['queued', 'running'])
 
 export function isActive(j: SolveJob): boolean {

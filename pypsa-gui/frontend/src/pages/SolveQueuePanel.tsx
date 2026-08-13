@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Play, X, Trash2, Loader, ChevronRight, ChevronDown,
-  CheckCircle2, AlertCircle, Clock, CircleSlash, Plus,
+  CheckCircle2, AlertCircle, Clock, CircleSlash, Plus, PlugZap,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
@@ -13,11 +13,14 @@ import { useSolveQueue, useEnqueueSolve, useAbortJob, useClearFinished } from '.
 import { useAuth } from '../auth/AuthProvider'
 
 const STATUS_META: Record<SolveJobStatus, { label: string; cls: string; Icon: typeof Clock }> = {
-  queued:    { label: 'Queued',    cls: 'text-muted bg-panel border-border',                Icon: Clock },
-  running:   { label: 'Running',   cls: 'text-accent bg-accent/10 border-accent/30',        Icon: Loader },
-  completed: { label: 'Completed', cls: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/30', Icon: CheckCircle2 },
-  failed:    { label: 'Failed',    cls: 'text-danger bg-danger/10 border-danger/30',        Icon: AlertCircle },
-  aborted:   { label: 'Aborted',   cls: 'text-amber-600 bg-amber-500/10 border-amber-500/30', Icon: CircleSlash },
+  queued:      { label: 'Queued',      cls: 'text-muted bg-panel border-border',                Icon: Clock },
+  running:     { label: 'Running',     cls: 'text-accent bg-accent/10 border-accent/30',        Icon: Loader },
+  completed:   { label: 'Completed',   cls: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/30', Icon: CheckCircle2 },
+  failed:      { label: 'Failed',      cls: 'text-danger bg-danger/10 border-danger/30',        Icon: AlertCircle },
+  aborted:     { label: 'Aborted',     cls: 'text-amber-600 bg-amber-500/10 border-amber-500/30', Icon: CircleSlash },
+  // Visually separate from `aborted` on purpose: the user did NOT stop this
+  // one. Slate rather than amber, and a plug icon rather than a "no entry".
+  interrupted: { label: 'Interrupted', cls: 'text-slate-500 bg-slate-500/10 border-slate-500/30', Icon: PlugZap },
 }
 
 function fmtObjective(v: number | null): string {
@@ -117,16 +120,22 @@ export const REDACTED_PROJECT_LABEL = 'Hidden — another organisation’s proje
  *
  * A `queued` job has produced nothing yet — that is the only status this
  * excludes. Deliberately NOT `isTerminal(job)`: that set (`TERMINAL_STATUSES`
- * in `api/solveQueue.ts`) is the narrower one cache-invalidation uses and does
- * not include `interrupted` — `interrupted` isn't a member of `SolveJobStatus`
- * until increment 3 (see `useJobTerminalInvalidation.test.ts`'s "treats every
- * terminal status alike", which pins that gap on purpose). R20 needs the wider
- * set: the log endpoints (Task 9's `get_log_queue`) serve any status
- * uniformly with no branching at all, so `interrupted` already has a retained
- * log to show — the panel must not exclude it just because the frontend enum
- * hasn't caught up. `job.status !== 'queued'` covers `running` and every
- * terminal status today, and needs no change when `interrupted` is added to
- * the type later.
+ * in `api/solveQueue.ts`) is narrower in the OTHER direction — it excludes
+ * `running`, whose in-progress log is exactly what R9's live tail exists to
+ * show. Using `isTerminal` here would disable the expand control on the one
+ * status where the log is most useful mid-solve. `job.status !== 'queued'`
+ * covers `running` and every terminal status — `completed` / `failed` /
+ * `aborted` / `interrupted` (increment 3, R27) — with no per-status branch.
+ *
+ * NOTE: as of increment 3, `interrupted` is a real `SolveJobStatus` and this
+ * function correctly returns `true` for it — but a real interrupted job does
+ * not currently reach this component at all. `services/solve_queue.list_jobs`
+ * serves the in-memory queue, and boot reconciliation
+ * (`services/solve_job_store.reconcile_on_boot`) deliberately never re-admits
+ * a `running → interrupted` row into that in-memory store (the crash-loop
+ * guard). So this is dormant-correct: right the moment the backend starts
+ * surfacing interrupted jobs through `list_jobs`/`get_job`, no frontend change
+ * is needed here.
  *
  * A redacted row (`project_id: null`) is one the caller may not see at all,
  * so its endpoints would 404 — disabling it here means the UI and the
@@ -287,6 +296,9 @@ function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: string) => void
             {job.status === 'failed' && <span className="text-danger truncate" title={job.error ?? job.condition ?? ''}>{job.error ?? job.condition ?? 'Failed'}</span>}
             {job.status === 'aborted' && (
               <span>{job.condition === 'superseded' ? 'Superseded by a newer run' : 'Aborted by user'}</span>
+            )}
+            {job.status === 'interrupted' && (
+              <span>Did not finish — stopped by a restart, not by you</span>
             )}
           </div>
         </div>

@@ -48,11 +48,10 @@ describe('terminalTransitions', () => {
   })
 
   it('treats every terminal status alike', () => {
-    // `interrupted` is not a member of `SolveJobStatus` until increment 3, so
-    // the no-per-status-branch guarantee is asserted over the three terminal
-    // statuses that exist here; `isTerminal` is the single definition of the
-    // set, so adding the fourth needs no change in this file.
-    for (const s of ['completed', 'failed', 'aborted'] as const) {
+    // `interrupted` became a member of `SolveJobStatus` in increment 3 (R27);
+    // it's included here now that it exists as a literal. `isTerminal` is the
+    // single definition of the set, so this loop needed no other change.
+    for (const s of ['completed', 'failed', 'aborted', 'interrupted'] as const) {
       const prev = statusMap([job('1', 'alpha', 'running')])
       expect(terminalTransitions(prev, [job('1', 'alpha', s)])).toEqual(['alpha'])
     }
