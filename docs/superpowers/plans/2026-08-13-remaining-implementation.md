@@ -548,6 +548,32 @@ cd pypsa-gui/frontend && npx vitest run
 
 ---
 
+## Execution record (2026-08-13)
+
+| Task | Outcome |
+|---|---|
+| A — cleanup | **BLOCKED.** `rm -rf` on the orphaned worktree denied by permissions, same as the previous attempt. Git has already pruned it; only 143 MB of files remain. Needs a human hand. |
+| B — curtailment partial | Done, `efa9db38`, plus UI wiring in `3e58e424`. |
+| C — economics wire | Done, `439e6cd7`. Found a **second** drop site the plan had missed. |
+| D — unavailable cell | Done, `06503276`. Re-scoped after inventory — see below. |
+| E — CAPEX seam | Done, `f2724d5c`. |
+
+Three things the plan got wrong, all found by reading code rather than trusting
+the plan's own prose — the same failure mode that produced four defects on the
+previous branch:
+
+1. **Task C had two drop sites, not one.** The `not _dispatch_ready` guard
+   returned a bare `{}`, which is the wider hole and the one a user hits first.
+   The plan named only the success path.
+2. **Task D's premise was wrong.** "Four spellings" implied four texts; the text
+   was already centralised as `COST_UNAVAILABLE`. What had 19 verbatim copies was
+   the JSX *presentation*. Two other shapes turned out to be justified renderings
+   (block-level `<p>` fallback, bare interpolation into a text run) and were left
+   alone rather than forced into one mould.
+3. **Task B was incomplete as planned.** A backend flag plus a type mirror is
+   invisible to the user, and the defect IS the user misreading the number. The
+   UI wiring was added; `captured` set that precedent on the previous branch.
+
 ## Explicitly NOT in this plan
 
 Recorded so the omission is a decision, not a silent drop:
