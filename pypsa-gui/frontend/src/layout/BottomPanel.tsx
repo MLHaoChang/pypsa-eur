@@ -12,8 +12,8 @@ import { useSimulationStore } from '../store/simulationStore'
 import { useCatalog } from '../hooks/useCatalog'
 import {
   CLOSED_SETS, buildSeriesIndex, columnHeaderLabel, columnHeaderTooltip,
-  isBooleanDtype, resolveEditability, resolveEditor, toCatalogMap,
-  type CatalogMap,
+  isBooleanDtype, readOnlyReason, resolveEditability, resolveEditor,
+  toCatalogMap, type CatalogMap,
 } from '../utils/attributeCatalog'
 import { validateAndCoerce } from '../utils/gridEdit'
 import {
@@ -376,7 +376,12 @@ function AssetTable({
   // { name, col, raw }, not a flat draft map, because at the render cap a map
   // would mount 1000 x 15 inputs — the DOM budget the cap exists to protect.
   const [editing, setEditing] = useState<CellRef | null>(null)
-  useEffect(() => { setActive(null); setEditing(null) }, [tab])
+  // The cell rectangle a mouse drag painted: anchor is where the drag started,
+  // focus is the cell it is over now. Kept as the two corners rather than a
+  // materialised set so it survives a sort or a search without going stale.
+  const [drag, setDrag] = useState<{ anchor: CellRef; focus: CellRef } | null>(null)
+  const draggingRef = useRef(false)
+  useEffect(() => { setActive(null); setEditing(null); setDrag(null) }, [tab])
 
   // ── Catalog + series shadow (D13, D14) ────────────────────────────────────
   const { data: catalogPayload } = useCatalog(componentClass)
@@ -469,6 +474,47 @@ function AssetTable({
   }, [sorted, selectedName])
   const truncated = sorted.length > RENDER_CAP
 
+  /**
+   * The dragged rectangle, resolved against what is on screen right now.
+   *
+   * Null for a 1x1 drag — a plain click lands both corners on the same cell,
+   * and treating that as a range would take the paste target away from the
+   * checkbox selection. Null too if either corner has since been sorted or
+   * filtered out of view, which is why the corners are stored, not the set.
+   */
+  const dragRange = useMemo((): { rows: string[]; cols: string[] } | null => {
+    if (!drag) return null
+    const r0 = displayed.findIndex(r => r.name === drag.anchor.name)
+    const r1 = displayed.findIndex(r => r.name === drag.focus.name)
+    const c0 = visibleCols.indexOf(drag.anchor.col)
+    const c1 = visibleCols.indexOf(drag.focus.col)
+    if (r0 < 0 || r1 < 0 || c0 < 0 || c1 < 0) return null
+    if (r0 === r1 && c0 === c1) return null
+    return {
+      rows: displayed.slice(Math.min(r0, r1), Math.max(r0, r1) + 1)
+        .map(r => r.name as string),
+      cols: visibleCols.slice(Math.min(c0, c1), Math.max(c0, c1) + 1),
+    }
+  }, [drag, displayed, visibleCols])
+
+  /** Membership test for the range highlight — O(1) per cell, not O(range). */
+  const inDragRange = useMemo(() => {
+    if (!dragRange) return null
+    return { rows: new Set(dragRange.rows), cols: new Set(dragRange.cols) }
+  }, [dragRange])
+
+  // A drag ends wherever the mouse comes up, which is routinely outside the
+  // cell it started in — and outside the table entirely if the user overshoots.
+  useEffect(() => {
+    const end = () => { draggingRef.current = false }
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    return () => {
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+  }, [])
+
   const handleSort = (col: string) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortCol(col); setSortDir('asc') }
@@ -552,15 +598,20 @@ function AssetTable({
 
   /** Visual state for a cell: active ring, and the read-only/series greys. */
   const cellClass = (rowName: string, col: string): string => {
-    const base = 'px-2 font-mono whitespace-nowrap text-[11px] outline-none'
+    // select-none: a drag paints a cell range, so the native text selection it
+    // would otherwise smear across the table is noise (and in WebKit it is
+    // what the copy handler would have to fight over).
+    const base = 'px-2 font-mono whitespace-nowrap text-[11px] outline-none select-none'
     const ring = active?.name === rowName && active?.col === col
       ? ' ring-1 ring-inset ring-accent' : ''
+    const ranged = inDragRange?.rows.has(rowName) && inDragRange.cols.has(col)
+      ? ' bg-accent/20' : ''
     const ed = editabilityOf(rowName, col)
-    if (ed.editable) return base + ring
+    if (ed.editable) return base + ring + ranged
     // Output / override / unknown read as "not yours to edit"; a series-shadowed
     // cell reads as "the static value is dead here" (D14) and gets its badge in
     // the cell body.
-    return `${base}${ring} text-muted bg-panel/40`
+    return `${base}${ring}${ranged} text-muted bg-panel/40`
   }
 
   const toggleRow = (row: Record<string, unknown>, idx: number, ev: React.MouseEvent) => {
@@ -744,16 +795,22 @@ function AssetTable({
   }
 
   /**
-   * The paste target (D7): the checkbox selection if non-empty, otherwise the
-   * active cell's row — in `sorted` order, NOT `displayed`, so rows past the
-   * 1000-row render cap are included (criterion 4).
+   * The paste target (D7): a dragged range if there is one, else the checkbox
+   * selection, else the active cell's row — in `sorted` order, NOT
+   * `displayed`, so rows past the 1000-row render cap are included
+   * (criterion 4).
+   *
+   * A 1x1 drag is NOT a range (`dragRange` is null for one), so a plain click
+   * still leaves the checkbox selection in charge — that is the select-all →
+   * click a cell → paste flow, and it must keep working.
    */
   const pasteTargetRows = useCallback((): string[] => {
+    if (dragRange) return dragRange.rows
     if (selectedRows.size > 0) {
       return sorted.map(r => r.name as string).filter(n => selectedRows.has(n))
     }
     return active ? [active.name] : []
-  }, [selectedRows, sorted, active])
+  }, [dragRange, selectedRows, sorted, active])
 
   /** True when a column's values are text, i.e. injection-guard territory. */
   const isStringColumn = useCallback((col: string): boolean => {
@@ -762,12 +819,16 @@ function AssetTable({
     return !isNumericDtype(attr.dtype) && !isBooleanDtype(attr.dtype)
   }, [catalog])
 
-  const onCopy = (e: React.ClipboardEvent) => {
+  const onCopy = (e: ClipboardEvent) => {
     if (editing) return                        // native input copy
     const rows = pasteTargetRows()
-    if (!active || rows.length === 0) return
+    if (!active || rows.length === 0 || !e.clipboardData) return
     e.preventDefault()
-    const cols = selectedRows.size > 0 ? visibleCols : [active.col]
+    // A dragged range is the most specific thing the user pointed at, so it
+    // names both axes. Otherwise: the checkbox selection spans every visible
+    // column, and a lone active cell is just itself.
+    const cols = dragRange ? dragRange.cols
+      : selectedRows.size > 0 ? visibleCols : [active.col]
     const matrix = rows.map(rowName => {
       const row = sorted.find(r => r.name === rowName)
       return cols.map(c => guardCell(
@@ -777,9 +838,9 @@ function AssetTable({
     e.clipboardData.setData('text/plain', serialiseTsv(matrix))
   }
 
-  const onPaste = (e: React.ClipboardEvent) => {
+  const onPaste = (e: ClipboardEvent) => {
     if (editing) return                        // native input paste
-    if (!active) return
+    if (!active || !e.clipboardData) return
     e.preventDefault()
 
     const matrix = parseTsv(e.clipboardData.getData('text/plain'))
@@ -840,6 +901,55 @@ function AssetTable({
     // write is guarded by one check instead of this one path.
     applyBulk(rows, true)                                  // true → D11 spacing
   }
+
+  /**
+   * Clipboard listeners live on `document`, NOT on the grid container.
+   *
+   * WKWebView — the desktop shell's engine — dispatches copy/paste at
+   * `document.body` whenever the focused element is not editable, and the
+   * grid's active cell is a <td tabindex=0>. A listener on the scroll
+   * container is a DESCENDANT of body, so it never ran: Cmd+C/Cmd+V did
+   * nothing in the shipped app while every test here passed, because Chrome
+   * (and a synthetic dispatch AT the cell) targets the focused element
+   * instead. Measured against pywebview 6.2.1 in scratchpad/probe.
+   *
+   * The handlers are read through a ref so this subscribes once rather than
+   * on every render — they close over `active`, `sorted` and the rest, and
+   * are rebuilt each pass.
+   */
+  const clipboardRef = useRef({ onCopy, onPaste })
+  clipboardRef.current = { onCopy, onPaste }
+  const gridRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // Anything with its own clipboard semantics keeps them: the search box,
+    // the cell editor's input, the chat composer, a contenteditable elsewhere.
+    const ownsClipboard = (t: EventTarget | null): boolean => {
+      const el = t instanceof HTMLElement ? t : null
+      if (!el) return false
+      return el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)
+    }
+    // The fence for a document-wide listener. `active` outlives clicking away
+    // — the panel is always mounted — so without this the grid would answer a
+    // Cmd+C aimed at selected text elsewhere in the app. Focus is the honest
+    // test of whose gesture it is, and it survives WebKit's retargeting: the
+    // event says BODY while `activeElement` is still the cell.
+    const gridHasFocus = () =>
+      !!gridRef.current?.contains(document.activeElement)
+    const claims = (e: ClipboardEvent) =>
+      !ownsClipboard(e.target) && gridHasFocus()
+    const copy = (e: ClipboardEvent) => {
+      if (claims(e)) clipboardRef.current.onCopy(e)
+    }
+    const paste = (e: ClipboardEvent) => {
+      if (claims(e)) clipboardRef.current.onPaste(e)
+    }
+    document.addEventListener('copy', copy)
+    document.addEventListener('paste', paste)
+    return () => {
+      document.removeEventListener('copy', copy)
+      document.removeEventListener('paste', paste)
+    }
+  }, [])
 
   useEffect(() => {
     if (!selectedName) return
@@ -981,11 +1091,11 @@ function AssetTable({
         )}
       </div>
 
-      {/* Table. Copy/paste are bound here rather than on each cell so a paste
-          anywhere in the grid is caught, and via ClipboardEvent rather than
-          navigator.clipboard — no secure context, no gesture permission, no
-          Firefox prompt (spec D6). */}
-      <div className="flex-1 overflow-auto" onCopy={onCopy} onPaste={onPaste}>
+      {/* Copy/paste are bound on `document` (see the effect above), not here:
+          WKWebView targets them at document.body, which is this div's
+          ancestor. Still ClipboardEvent rather than navigator.clipboard —
+          no secure context, no gesture permission, no Firefox prompt (D6). */}
+      <div ref={gridRef} className="flex-1 overflow-auto">
         <table className="w-full text-xs border-collapse" style={{ minWidth: 'max-content' }}>
           <thead>
             <tr className="sticky top-0 bg-panel z-10 border-b border-border">
@@ -1051,6 +1161,23 @@ function AssetTable({
                       // No stopPropagation: the row's own onClick still opens
                       // the properties panel, which is existing behaviour.
                       onClick={() => setActive({ name, col })}
+                      // Drag paints a cell range (defect 10). Left button
+                      // only — a right-click must not start one, and a drag
+                      // begun on an open editor belongs to the text in it.
+                      onPointerDown={e => {
+                        if (e.button !== 0 || editing) return
+                        draggingRef.current = true
+                        setActive({ name, col })
+                        setDrag({ anchor: { name, col }, focus: { name, col } })
+                      }}
+                      // `pointerover`, not `pointerenter`: React derives the
+                      // enter/leave pair from over/out, so a real drag and a
+                      // dispatched event both arrive here.
+                      onPointerOver={() => {
+                        if (!draggingRef.current) return
+                        setDrag(prev => (prev ? { ...prev, focus: { name, col } } : prev))
+                      }}
+                      title={readOnlyReason(editabilityOf(name, col))}
                       // Double-click edits; a single click only selects. Both
                       // halves are load-bearing: onCopy/onPaste bail while an
                       // editor is open, so if a single click opened one the

@@ -78,6 +78,30 @@ export type Editability =
   | { editable: false; reason: EditabilityReason }
 
 /**
+ * Why a cell is greyed out, as tooltip text. Empty for an editable cell, so
+ * the attribute can be spread straight onto the <td> without a wrapper.
+ *
+ * A read-only cell used to look identical whatever the cause, which is how
+ * `sub_network` (PyPSA computes it — correctly read-only) and `country` (a
+ * plain bug) arrived as one complaint.
+ */
+export function readOnlyReason(ed: Editability): string {
+  if (ed.editable) return ''
+  switch (ed.reason) {
+    case 'name':
+      return 'The name identifies the row. Rename it from the properties panel.'
+    case 'output':
+      return 'PyPSA computes this value — it is a result, not an input.'
+    case 'series':
+      return 'A time series drives this attribute, so the static value is unused.'
+    case 'override':
+      return 'Not editable from the grid. Use the properties panel.'
+    case 'unknown':
+      return 'Still loading this component’s attributes…'
+  }
+}
+
+/**
  * May this cell be edited?
  *
  * Order is fixed and each step answers a different question:
@@ -103,7 +127,23 @@ export function resolveEditability(args: {
   if (column === 'name') return { editable: false, reason: 'name' }
 
   const attr = catalog.get(column)
-  if (!attr) return { editable: false, reason: 'unknown' }
+  if (!attr) {
+    // A column PyPSA does not declare — `country`, `location`, `tags` and the
+    // rest of what PyPSA-Eur puts on the frame. The grid takes its columns
+    // from the DATA and its editability from the SCHEMA, so every one of them
+    // used to be read-only with no way to say why.
+    //
+    // Editable is the right default: PyPSA declares everything it *computes*,
+    // so an undeclared column is by definition user data, and the backend
+    // already accepts the write (PATCH /_bulk validates `col in df.columns`).
+    //
+    // Except while the catalog is still in flight — an empty map would
+    // otherwise make the entire grid briefly editable, which is the one
+    // direction that loses data.
+    return catalog.size === 0
+      ? { editable: false, reason: 'unknown' }
+      : { editable: true }
+  }
 
   // Only a `varying` attribute can be shadowed — the catalog's claim wins over
   // a stale entry in the series listing.

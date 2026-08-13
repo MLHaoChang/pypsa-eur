@@ -170,7 +170,31 @@ describe('text columns', () => {
 })
 
 describe('an unknown column', () => {
-  it('is rejected rather than guessed at', () => {
-    expect(validateAndCoerce('mystery', '5', CTX).ok).toBe(false)
+  // Was "is rejected rather than guessed at". Reversed on 2026-08-13: the
+  // grid's columns come from the DATA, so an undeclared column is a real
+  // column carrying real user values (`country` on a PyPSA-Eur network), and
+  // rejecting it made every one of them uneditable. Nothing is guessed —
+  // there is no dtype to coerce against, so the raw string is committed and
+  // the backend enforces `col in df.columns`.
+  it('commits as free text rather than being rejected', () => {
+    expect(validateAndCoerce('mystery', '5', CTX)).toEqual({ ok: true, value: '5' })
+  })
+})
+
+describe('a column PyPSA does not declare — found in the app, 2026-08-13', () => {
+  // The editability rule was fixed first, and this gate was missed: the grid
+  // let you open an editor on `country` and then refused the commit with
+  // "Paste rejected — cannot write B0 / country". Two gates, one rule.
+  it('accepts a value for an undeclared column as free text', () => {
+    expect(validateAndCoerce('country', 'ES', CTX)).toEqual({ ok: true, value: 'ES' })
+  })
+
+  it('still refuses everything while the catalog is empty', () => {
+    expect(validateAndCoerce('country', 'ES', { ...CTX, catalog: new Map() }))
+      .toEqual({ ok: false, error: expect.stringContaining('still loading') })
+  })
+
+  it('a blank into an undeclared column clears it, as everywhere else', () => {
+    expect(validateAndCoerce('country', '', CTX)).toEqual({ ok: true, value: null })
   })
 })

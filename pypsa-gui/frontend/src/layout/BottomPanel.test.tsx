@@ -910,3 +910,176 @@ describe('defect 7 — the >200 confirmation guards every bulk write', () => {
     expect(confirmToast).toHaveBeenCalledTimes(1)
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// Reported from the shipped macOS app, 2026-08-13. None of these could fail
+// in the suite as written, because every existing clipboard test dispatches
+// the event AT a cell — which is what Chrome does and WebKit does not.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('defect 8 — WebKit targets clipboard events at document.body', () => {
+  /**
+   * Measured with pywebview 6.2.1 / WKWebView (scratchpad/probe): with
+   * `document.activeElement` on a <td tabindex=0>, `paste:` from the Edit menu
+   * dispatches a paste event whose target is BODY, not the focused cell. A
+   * handler bound on the grid's scroll container is a DESCENDANT of body, so
+   * it never runs — Cmd+V does nothing in the desktop app. Chrome targets the
+   * focused element, which is why this shipped green.
+   */
+  it('a paste targeted at document.body still reaches the grid', async () => {
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue(
+      { updated: 5, fields: ['v_nom'] } as never)
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(headerCheckbox())
+    await userEvent.click(cellAt('B0', 'v_nom'))
+    await act(async () => { firePaste(document.body, '111') })
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalled())
+    expect(vi.mocked(networkApi).bulkUpdate.mock.calls[0][0].updates)
+      .toEqual({ v_nom: 111 })
+  })
+
+  it('a copy targeted at document.body still emits the grid TSV', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(cellAt('B0', 'v_nom'))
+    expect(fireCopy(document.body)).toBe('380')
+  })
+
+  it('leaves a paste into a real input alone', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(cellAt('B0', 'v_nom'))
+    const box = screen.getByPlaceholderText(/search/i)
+    await act(async () => { firePaste(box, '999') })
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+  })
+})
+
+describe('defect 9 — a column PyPSA does not declare is still editable', () => {
+  /**
+   * `country` is a PyPSA-Eur column on n.buses; it is NOT in
+   * n.components.buses.defaults, so /catalog/Bus cannot report it and
+   * `catalog.get('country')` is undefined. Columns come from the DATA,
+   * editability from the SCHEMA — so every extra column was read-only.
+   * The backend already accepts it: PATCH /_bulk validates `col in
+   * df.columns`. This fixture drops `country`, which is what the real
+   * endpoint returns; the old one declared it and hid the bug.
+   */
+  function withRealBusCatalog() {
+    vi.mocked(networkApi).getCatalog.mockImplementation(async (component: string) =>
+      ({
+        component,
+        attributes: component === 'Bus'
+          ? BUS_CATALOG.filter(a => a.name !== 'country')
+          : [],
+      }) as never)
+  }
+
+  /** `country` is not a default Buses column; the user turns it on. */
+  async function showCountryColumn() {
+    await userEvent.click(screen.getByTitle(/show \/ hide columns/i))
+    const row = screen.getByText('country').closest('label')!
+    await userEvent.click(row.querySelector('input[type="checkbox"]')!)
+  }
+
+  it('country is editable even though the catalog has no entry for it', async () => {
+    withRealBusCatalog()
+    renderPanel()
+    await screen.findByText('B0')
+    await showCountryColumn()
+    await userEvent.dblClick(cellAt('B0', 'country'))
+    expect(cellAt('B0', 'country').querySelector('input, select')).toBeTruthy()
+  })
+
+  it('sub_network stays read-only — PyPSA computes it', async () => {
+    withRealBusCatalog()
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.dblClick(cellAt('B0', 'sub_network'))
+    expect(cellAt('B0', 'sub_network').querySelector('input, select')).toBeNull()
+  })
+
+  it('says WHY a cell cannot be edited', async () => {
+    withRealBusCatalog()
+    renderPanel()
+    await screen.findByText('B0')
+    expect(cellAt('B0', 'sub_network').title).toMatch(/PyPSA computes/i)
+  })
+
+  it('nothing is editable until the catalog has actually loaded', async () => {
+    vi.mocked(networkApi).getCatalog.mockImplementation(async (component: string) =>
+      ({ component, attributes: [] }) as never)
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.dblClick(cellAt('B0', 'v_nom'))
+    expect(cellAt('B0', 'v_nom').querySelector('input, select')).toBeNull()
+  })
+})
+
+describe('defect 10 — drag across cells selects a range', () => {
+  function drag(from: HTMLElement, over: HTMLElement[]) {
+    fireEvent.pointerDown(from, { button: 0, bubbles: true })
+    for (const el of over) fireEvent.pointerEnter(el, { buttons: 1, bubbles: true })
+    fireEvent.pointerUp(window, { bubbles: true })
+  }
+
+  it('dragging down a column copies every cell dragged over', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    drag(cellAt('B0', 'v_nom'), [cellAt('B1', 'v_nom'), cellAt('B2', 'v_nom')])
+    expect(fireCopy(document.body)).toBe('380\r\n379\r\n378')
+  })
+
+  it('dragging across columns copies the rectangle', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    drag(cellAt('B0', 'v_nom'), [cellAt('B1', 'carrier')])
+    expect(fireCopy(document.body)).toBe('380\tAC\r\n379\tAC')
+  })
+
+  it('a pasted value fills the dragged rows, not the whole table', async () => {
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue(
+      { updated: 2, fields: ['v_nom'] } as never)
+    renderPanel()
+    await screen.findByText('B0')
+    drag(cellAt('B0', 'v_nom'), [cellAt('B1', 'v_nom')])
+    await act(async () => { firePaste(document.body, '111') })
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalled())
+    expect(vi.mocked(networkApi).bulkUpdate.mock.calls[0][0].names).toEqual(['B0', 'B1'])
+  })
+
+  it('a plain click still leaves just the one active cell', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    fireEvent.pointerDown(cellAt('B0', 'v_nom'), { button: 0, bubbles: true })
+    fireEvent.pointerUp(window, { bubbles: true })
+    expect(fireCopy(document.body)).toBe('380')
+  })
+})
+
+describe('defect 8b — the grid only claims the clipboard when it has focus', () => {
+  // The document-level listener is deliberately wide, so it needs a fence:
+  // the bottom panel is always mounted, and `active` survives clicking away.
+  // Without this the grid would answer a Cmd+C aimed at selected text
+  // somewhere else entirely.
+  it('ignores a copy when focus has moved outside the grid', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(cellAt('B0', 'v_nom'))
+
+    const outside = document.createElement('div')
+    outside.tabIndex = 0
+    document.body.appendChild(outside)
+    outside.focus()
+
+    expect(fireCopy(document.body)).toBe('')
+  })
+
+  it('still answers while the active cell holds focus', async () => {
+    renderPanel()
+    await screen.findByText('B0')
+    await userEvent.click(cellAt('B0', 'v_nom'))
+    expect(fireCopy(document.body)).toBe('380')
+  })
+})

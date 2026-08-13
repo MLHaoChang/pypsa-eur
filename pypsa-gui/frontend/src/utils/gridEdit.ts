@@ -63,10 +63,22 @@ export function validateAndCoerce(
 
   const attr = ctx.catalog.get(column)
   if (!attr) {
-    return {
-      ok: false,
-      error: `Column '${column}' is not a PyPSA attribute of ${ctx.componentClass}.`,
+    // The second gate on an undeclared column, and it was missed when
+    // `resolveEditability` learned to allow them: the grid opened an editor on
+    // `country` and then refused the commit. PyPSA-Eur columns are free text
+    // as far as this layer is concerned — there is no dtype to validate
+    // against, and the backend checks `col in df.columns` itself.
+    //
+    // An empty catalog still means "not loaded", exactly as in
+    // resolveEditability; the two must agree or the UI offers an edit it
+    // cannot commit.
+    if (ctx.catalog.size === 0) {
+      return {
+        ok: false,
+        error: `${ctx.componentClass} attributes are still loading — try again.`,
+      }
     }
+    return { ok: true, value: raw }
   }
 
   const kind = resolveEditor(ctx.componentClass, column, ctx.catalog)
