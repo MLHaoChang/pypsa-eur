@@ -333,6 +333,55 @@ it('greys the PV x preview column when auto-discount would not actually write an
   expect(inertCell.className).toContain('text-muted/40')
 })
 
+// ── 3b. Economics step: CAPEX budget column hides behind Advanced (Task 5) ─
+// The period table is one wide table today: period / years / objective / PV
+// preview, then a per-carrier load-scaler column per network carrier, then
+// CAPEX budget — all always visible. Task 5 puts the load-scaler and budget
+// columns behind an Advanced disclosure while period/years/objective/PV stay
+// in the default view. This is a genuine column split of ONE table, not a
+// second table — so the assertion below is specifically that the PV column
+// is present by default while the Budget column is not, then becomes present
+// once Advanced is opened.
+
+it('shows the PV column but hides the CAPEX budget column until Advanced is opened, in the Economics step', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2050],
+    weightings: [
+      { period: 2030, years: 1, objective: 1 },
+      { period: 2050, years: 1, objective: 1 },
+    ],
+  })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true, auto_discount_periods: true }),
+  )
+
+  renderPage()
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings')
+
+  // PV preview column: present in the default view (identified by its
+  // tooltip, same as the greying test above).
+  expect(screen.getAllByTitle(/Auto-discount/).length).toBeGreaterThan(0)
+
+  // CAPEX budget column: must NOT be in the document yet — neither the
+  // header cell (scoped to `columnheader` role so the explanatory paragraph's
+  // prose mention of "Budget M€" can't cause a false match) nor per-row inputs.
+  expect(screen.queryByRole('columnheader', { name: 'Budget M€' })).toBeNull()
+  expect(screen.queryByTitle(/CAPEX budget for this period/)).toBeNull()
+
+  // Open the table's own Advanced disclosure.
+  await userEvent.click(screen.getByText('Advanced'))
+
+  // Now the budget column exists.
+  expect(await screen.findByRole('columnheader', { name: 'Budget M€' })).not.toBeNull()
+  expect(screen.getAllByTitle(/CAPEX budget for this period/).length).toBeGreaterThan(0)
+
+  // The PV column is still there too — opening Advanced adds columns, it
+  // doesn't replace the default ones.
+  expect(screen.getAllByTitle(/Auto-discount/).length).toBeGreaterThan(0)
+})
+
 // ── 4. Guided-step shell: routing between summary and steps (Task 3) ──────
 
 it('opens on step 1, not the summary, when the horizon is unset (count <= 1)', async () => {
@@ -479,7 +528,16 @@ it('gives Economics and Window an actionable way out at zero investment years, n
   // Scope to the step's own body section (excludes the rail, which also has
   // an "Investment years" entry) — same `heading.closest('section')` pattern
   // the multi-period-weight-edit test above uses.
-  const economicsHeading = await screen.findByRole('heading', { name: /Economics/ })
+  //
+  // Exact string, not `/Economics/`: Task 5 gave StepPeriodEconomics its own
+  // honest heading ("Economics", resolving the "Multi-period planning"
+  // heading years/economics used to share), which now coexists with
+  // StepShell's own chrome heading ("Step N of M — Economics") — a `name:
+  // /Economics/` regex matches both and `findByRole` throws on the
+  // ambiguity. The exact string matches only StepPeriodEconomics' own <h3>,
+  // and scopes even tighter than before (its own <section>, not StepShell's
+  // outer one that happened to also contain it).
+  const economicsHeading = await screen.findByRole('heading', { name: 'Economics' })
   const economicsBody = economicsHeading.closest('section')
   if (!economicsBody) throw new Error('Economics step body section not found')
 

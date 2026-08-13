@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Plus, X } from 'lucide-react'
 import { confirmToast } from '../utils/toasts'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
@@ -10,12 +9,15 @@ import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
 import type { Load } from '../api/types'
 import {
-  resolutionLabel, pvFactor, horizonRangeLabel,
+  resolutionLabel, horizonRangeLabel,
   visibleSteps, isHorizonUnset, stepSummary,
   type WeightingRow, type HorizonStepId, type HorizonSummaryContext,
 } from './modelHorizonModel'
 import { StepShell, STEP_LABELS } from './modelHorizon/StepShell'
 import { HorizonSummary } from './modelHorizon/HorizonSummary'
+import { StepMode } from './modelHorizon/StepMode'
+import { StepYears } from './modelHorizon/StepYears'
+import { StepPeriodEconomics } from './modelHorizon/StepPeriodEconomics'
 import { StepWindow, StepWindowAdvanced } from './modelHorizon/StepWindow'
 import { StepSampling } from './modelHorizon/StepSampling'
 import { StepWeights, StepWeightsAdvanced } from './modelHorizon/StepWeights'
@@ -395,18 +397,12 @@ export default function ModelHorizon() {
       toast.error(e.response?.data?.detail ?? 'Failed to update weight'),
   })
 
-  // Period chip add/remove (multi-period mode).
+  // Period chip add/remove (multi-period mode). The year-range validation
+  // (1900–2200) and the add input's reset now live in StepYears.tsx — see
+  // its `onAddPeriod` prop below — since that's presentational input
+  // handling, not the mutation itself. `removePeriod` needs no validation so
+  // it's passed straight through to StepYears unchanged.
   const [newPeriod, setNewPeriod] = useState<string>('')
-  const addPeriod = () => {
-    const y = parseInt(newPeriod, 10)
-    if (!Number.isFinite(y) || y < 1900 || y > 2200) {
-      toast.error('Year must be between 1900 and 2200')
-      return
-    }
-    const next = Array.from(new Set([...periods, y])).sort((a, b) => a - b)
-    applyPeriods.mutate(next)
-    setNewPeriod('')
-  }
   const removePeriod = (year: number) => {
     applyPeriods.mutate(periods.filter(y => y !== year))
   }
@@ -703,9 +699,15 @@ export default function ModelHorizon() {
   // Content for StepShell's `advanced` disclosure, per current step. Only
   // 'window' (the per-period range table, and only in its 'per_period' mode
   // with at least one period) and 'weights' (CSV controls + the paginated
-  // per-row table) have anything to hide behind Advanced — every other step
+  // per-row table) have anything to hide behind THIS slot — every other step
   // gets `undefined`, which is exactly what StepShell already treats as "no
   // disclosure at all" (unchanged from Task 3).
+  //
+  // 'economics' also has Advanced content (the per-carrier load-scaler
+  // columns + CAPEX budget column) but does NOT go through this slot —
+  // StepPeriodEconomics.tsx owns that disclosure itself, because it's a
+  // column split of one live table rather than a block of content that can
+  // be relocated below a separate <details>. See that file's header comment.
   //
   // Only 'weights' unmounts while collapsed. Its table can be 8,760 rows on
   // an hourly model — always mounting it would defeat the point of hiding
@@ -797,382 +799,101 @@ export default function ModelHorizon() {
           >
 
       {/* ── 2a. Mode toggle (the single decision point) ───────── */}
+      {/* Task 5: moved to modelHorizon/StepMode.tsx. */}
       {view === 'mode' && (
-      <section className="border border-border rounded-[10px] bg-bg p-3.5 shadow-[0_1px_0_rgba(10,14,20,0.04)]">
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isMultiPeriod}
-            disabled={!cfg || toggleMultiPeriod.isPending}
-            onChange={e => toggleMultiPeriod.mutate(e.target.checked)}
-            className="accent-accent mt-0.5"
-          />
-          <div>
-            <div className="font-semibold text-text">Multi-investment periods</div>
-            <p className="text-[11px] text-muted mt-0.5 leading-relaxed">
-              Enables PyPSA's multi-horizon LP. The optimiser sizes new capacity
-              for several investment years (e.g. <code>2030/2040/2050</code>),
-              each with its own operational profile. Leave OFF for a single
-              operational range with capacity decided once.
-            </p>
-          </div>
-        </label>
-      </section>
+        <StepMode
+          isMultiPeriod={isMultiPeriod}
+          disabled={!cfg || toggleMultiPeriod.isPending}
+          onToggle={enabled => toggleMultiPeriod.mutate(enabled)}
+        />
       )}
 
-      {/* ── 3a. Multi-period config: years + economics (only when toggle ON) */}
-      {/* years / economics are two distinct steps that this file still
-          bundles into ONE physical section — window was the third and was
-          split out to StepWindow.tsx in Task 4 (see the Task 4 report for
-          how). Task 5 needs to finish splitting these last two. */}
-      {isMultiPeriod && (view === 'years' || view === 'economics') && (
-        <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Multi-period planning</h3>
+      {/* ── 3a. Investment years (only when toggle ON) ─────────── */}
+      {/* Task 5: moved to modelHorizon/StepYears.tsx. `years` and `economics`
+          used to share one physical <section> with a generic "Multi-period
+          planning" <h3> (the same heading Task 4 also left, deliberately, in
+          StepWindow.tsx). Now that all three period-level steps are split,
+          each carries its own honest heading instead — StepYears' is
+          "Investment years", StepPeriodEconomics' is "Economics". */}
+      {isMultiPeriod && view === 'years' && (
+        <StepYears
+          periods={periods}
+          onRemovePeriod={removePeriod}
+          newPeriod={newPeriod}
+          onNewPeriodChange={setNewPeriod}
+          onAddPeriod={y => {
+            const next = Array.from(new Set([...periods, y])).sort((a, b) => a - b)
+            applyPeriods.mutate(next)
+          }}
+          addPeriodPending={applyPeriods.isPending}
+        />
+      )}
 
-          {/* Investment years */}
-          {view === 'years' && (
-          <div className="border border-border rounded mb-3">
-            <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted">
-              Investment years
-            </div>
-            <div className="p-2.5">
-              <p className="text-[11px] text-muted mb-2 leading-relaxed">
-                Each year becomes one optimisation period. Capacity decisions are
-                made independently per period; assets must have <code>build_year</code>
-                ≤ period to be available, and are retired at
-                <code> build_year + lifetime</code>.
-              </p>
-              <div className="flex flex-wrap items-center gap-1">
-                {periods.map(y => (
-                  <span
-                    key={y}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-bg text-[11px] font-mono"
-                  >
-                    {y}
-                    <button
-                      onClick={() => removePeriod(y)}
-                      className="text-muted hover:text-danger"
-                      title={`Remove ${y}`}
-                    ><X size={10} /></button>
-                  </span>
-                ))}
-                <input
-                  type="number"
-                  value={newPeriod}
-                  onChange={e => setNewPeriod(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') addPeriod() }}
-                  placeholder="add year"
-                  className="w-20 px-1.5 py-0.5 border border-border rounded text-[11px] font-mono bg-bg"
-                />
-                <button
-                  onClick={addPeriod}
-                  disabled={!newPeriod.trim() || applyPeriods.isPending}
-                  className="px-1.5 py-0.5 border border-border rounded text-[11px] text-accent hover:border-accent disabled:opacity-40"
-                ><Plus size={10} /></button>
-              </div>
-              {periods.length === 0 && (
-                <p className="text-[10px] text-warn mt-2">
-                  No years yet — add at least one before solving.
-                </p>
-              )}
-            </div>
-          </div>
-          )}
-
-          {/* Period weightings (years + objective per period) */}
-          {view === 'economics' && (periods.length === 0 ? (
+      {/* ── 3b. Economics: period weightings + PV preview (only when toggle ON) */}
+      {/* Task 5: moved to modelHorizon/StepPeriodEconomics.tsx. The per-carrier
+          load-scaler columns and the CAPEX budget column render behind that
+          component's OWN internal Advanced disclosure — not StepShell's
+          `advanced` slot, see that file's header comment for why a column
+          split of one table can't use the same "second block below a
+          <details>" shape StepWindow/StepWeights use for their Advanced
+          content. Accordingly `advancedContent` below still only branches on
+          'window' and 'weights' — 'economics' deliberately gets no StepShell
+          advanced content, same as 'mode' and 'years'. */}
+      {isMultiPeriod && view === 'economics' && (
+        <StepPeriodEconomics
+          periods={periods}
+          periodWeightings={periodWeightings}
+          noPeriodsFallback={
             <NoPeriodsFallback
               message={stepSummary('economics', summaryCtx)}
               onGoToYears={() => setView('years')}
             />
-          ) : (
-            <div className="border border-border rounded mb-3">
-              <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center justify-between">
-                <span>Period weightings</span>
-                <span className="text-[10px] text-muted/70 normal-case">years × objective per period</span>
-              </div>
-              <div className="p-2.5 flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={0}
-                    placeholder="Apply years to all (e.g. 10)"
-                    value={bulkYears}
-                    onChange={e => setBulkYears(e.target.value)}
-                    className="flex-1 px-2 py-1 border border-border rounded text-[11px] bg-bg font-mono"
-                  />
-                  <button
-                    disabled={!bulkYears || applyBulkPeriodYears.isPending}
-                    onClick={() => {
-                      const v = parseFloat(bulkYears)
-                      if (!Number.isFinite(v) || v < 0) {
-                        toast.error('Enter a non-negative number')
-                        return
-                      }
-                      applyBulkPeriodYears.mutate(v)
-                      setBulkYears('')
-                    }}
-                    className="px-2 py-1 bg-accent/80 text-white rounded text-[11px] font-medium hover:bg-accent disabled:opacity-40"
-                  >Apply years</button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    placeholder="Apply objective weight to all (e.g. 0.6)"
-                    value={bulkObjective}
-                    onChange={e => setBulkObjective(e.target.value)}
-                    className="flex-1 px-2 py-1 border border-border rounded text-[11px] bg-bg font-mono"
-                  />
-                  <button
-                    disabled={!bulkObjective || applyBulkPeriodObjective.isPending}
-                    onClick={() => {
-                      const v = parseFloat(bulkObjective)
-                      if (!Number.isFinite(v) || v < 0) {
-                        toast.error('Enter a non-negative number')
-                        return
-                      }
-                      applyBulkPeriodObjective.mutate(v)
-                      setBulkObjective('')
-                    }}
-                    className="px-2 py-1 bg-accent/80 text-white rounded text-[11px] font-medium hover:bg-accent disabled:opacity-40"
-                  >Apply objective</button>
-                </div>
-
-                {/* Auto-discount: the ONLY automated path to ipw.objective.
-                    Writes PV × years per period at LP build time using the
-                    solver settings' discount_rate and inflation_rate, and
-                    reverts in restore() so the on-disk network keeps whatever
-                    the user typed. The PV column in the table below previews
-                    exactly what it will write. Manual edits to the objective
-                    cell still work and are what to use for one-off factors. */}
-                <label className="flex items-center gap-2 mt-1 pt-2 border-t border-border/60 text-[10px] text-muted">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(cfg?.auto_discount_periods)}
-                    onChange={e => updateAutoDiscount.mutate(e.target.checked)}
-                    className="cursor-pointer"
-                  />
-                  <span className="select-none">
-                    Auto-discount: overwrite <code>objective</code> per period at solve time using
-                    <code> discount_rate</code> from solver settings. Stops the LP from front-loading
-                    all CAPEX into period 1.
-                  </span>
-                </label>
-
-                {/* Per-period inline editor */}
-                <div className="border border-border rounded overflow-auto max-h-64 mt-1">
-                  {/* 400 → 480: gained the PV × preview column. Same +80
-                      bump the weightings table below took (480 → 560) for
-                      its new Period column. */}
-                  <table className="w-full text-[11px] border-collapse" style={{ minWidth: 480 }}>
-                    <thead className="sticky top-0 bg-bg-2 z-10">
-                      <tr className="border-b border-border">
-                        <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Period</th>
-                        <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Years</th>
-                        <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Objective</th>
-                        <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase"
-                            title="What Auto-discount will write into `objective` at solve time: (1+real rate)^-(period-first period) x years. Preview only — nothing is written until you solve.">
-                          PV ×<br />preview
-                        </th>
-                        {networkLoadCarriers.map(carrier => (
-                          <th key={`hdr-load-${carrier}`}
-                              className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase"
-                              title={`Per-period load multiplier for carrier "${carrier}". 1.00 = unchanged, 1.10 = +10% growth. Applied to every load whose carrier canonicalises to "${carrier}".`}>
-                            Load ×<br />{loadCarrierLabel(carrier)}
-                          </th>
-                        ))}
-                        <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase"
-                          title="Per-period upper bound on overnight CAPEX (€). LP enforces Σ overnight_cost × Δp_nom ≤ budget for all extendable assets with build_year=P. Leave 0 (or empty) for unconstrained.">Budget M€</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {periodWeightings.map((row, i) => {
-                        const period = Number(row.period ?? row.name ?? periods[i] ?? 0)
-                        const years = Number(row.years ?? 1)
-                        const objective = Number(row.objective ?? 1)
-                        // Resolve scaler per carrier: prefer the new
-                        // `load_scalers_by_carrier[carrier][period]`, fall
-                        // back to legacy `load_scalers[period]` (applied to
-                        // every carrier when there's no per-carrier entry).
-                        const byCarrier = cfg?.load_scalers_by_carrier ?? {}
-                        const legacyScaler = Number(cfg?.load_scalers?.[String(period)] ?? 1)
-                        const resolvedScaler = (carrier: string): number => {
-                          const v = byCarrier[carrier]?.[String(period)]
-                          return v != null && Number.isFinite(v) ? Number(v) : legacyScaler
-                        }
-                        const budgetEur = Number(cfg?.capex_budget_per_period?.[String(period)] ?? 0)
-                        const budgetMeur = budgetEur > 0 ? budgetEur / 1e6 : 0
-                        return (
-                          <tr key={period} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
-                            <td className="px-2 py-1 font-mono text-[11px]">{period}</td>
-                            <td className="px-2 py-1 text-right">
-                              <input
-                                key={`y-${period}-${years}`}
-                                type="number"
-                                step="0.1"
-                                min={0}
-                                defaultValue={years.toFixed(2)}
-                                // Disable while a sibling mutation is in
-                                // flight — without this, a fast double-blur
-                                // (user clicks away, immediately clicks back
-                                // in & blurs again) fires two PUTs racing
-                                // each other; the second one's response can
-                                // overwrite the first's success state.
-                                disabled={updateOnePeriodCol.isPending}
-                                onBlur={e => {
-                                  const v = parseFloat(e.target.value)
-                                  if (!Number.isFinite(v) || v < 0) {
-                                    e.target.value = String(years)
-                                    return
-                                  }
-                                  if (v !== years) {
-                                    updateOnePeriodCol.mutate({ period, col: 'years', value: v })
-                                  }
-                                }}
-                                className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
-                              />
-                            </td>
-                            <td className="px-2 py-1 text-right">
-                              <input
-                                key={`o-${period}-${objective}`}
-                                type="number"
-                                step="0.01"
-                                min={0}
-                                defaultValue={objective.toFixed(4)}
-                                disabled={updateOnePeriodCol.isPending}
-                                onBlur={e => {
-                                  const v = parseFloat(e.target.value)
-                                  if (!Number.isFinite(v) || v < 0) {
-                                    e.target.value = String(objective)
-                                    return
-                                  }
-                                  if (v !== objective) {
-                                    updateOnePeriodCol.mutate({ period, col: 'objective', value: v })
-                                  }
-                                }}
-                                className="w-24 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
-                              />
-                            </td>
-                            <td className={`px-2 py-1 text-right font-mono text-[11px] ${autoDiscountOn ? 'text-text' : 'text-muted/40'}`}
-                                title={autoDiscountOn
-                                  ? `Auto-discount will set objective = ${pvFactor({ period, refPeriod, years, discountRate: cfg?.discount_rate ?? 0, inflationRate: cfg?.inflation_rate ?? 0 }).toFixed(4)} at solve time, overriding the value on the left.`
-                                  : 'Auto-discount is off — the objective value on the left is what the LP uses.'}>
-                              {pvFactor({
-                                period,
-                                refPeriod,
-                                years,
-                                discountRate: cfg?.discount_rate ?? 0,
-                                inflationRate: cfg?.inflation_rate ?? 0,
-                              }).toFixed(4)}
-                            </td>
-                            {networkLoadCarriers.map(carrier => {
-                              const v = resolvedScaler(carrier)
-                              return (
-                                <td key={`ls-${period}-${carrier}`} className="px-2 py-1 text-right">
-                                  <input
-                                    key={`ls-${period}-${carrier}-${v}`}
-                                    type="number"
-                                    step="0.01"
-                                    min={0.01}
-                                    defaultValue={v.toFixed(2)}
-                                    title={`Load multiplier for "${carrier}" in period ${period} (1.00 = unchanged, 1.10 = +10% growth)`}
-                                    disabled={updateLoadScalersByCarrier.isPending}
-                                    onBlur={e => {
-                                      const nv = parseFloat(e.target.value)
-                                      if (!Number.isFinite(nv) || nv <= 0) {
-                                        e.target.value = v.toFixed(2)
-                                        return
-                                      }
-                                      if (nv === v) return
-                                      // Wholesale PUT: clone the nested map,
-                                      // ensure the per-carrier slot exists,
-                                      // write the new value. 1.0 entries are
-                                      // dropped so the server-side map stays
-                                      // compact (anything missing falls back
-                                      // to legacy load_scalers or 1.0 anyway).
-                                      const next: Record<string, Record<string, number>> = {}
-                                      for (const [c, m] of Object.entries(byCarrier ?? {})) {
-                                        next[c] = { ...m }
-                                      }
-                                      const slot = next[carrier] ?? {}
-                                      if (nv === 1) delete slot[String(period)]
-                                      else slot[String(period)] = nv
-                                      if (Object.keys(slot).length === 0) delete next[carrier]
-                                      else next[carrier] = slot
-                                      updateLoadScalersByCarrier.mutate(next)
-                                    }}
-                                    className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
-                                  />
-                                </td>
-                              )
-                            })}
-                            <td className="px-2 py-1 text-right">
-                              <input
-                                key={`b-${period}-${budgetMeur}`}
-                                type="number"
-                                step="10"
-                                min={0}
-                                defaultValue={budgetMeur > 0 ? budgetMeur.toFixed(0) : ''}
-                                placeholder="—"
-                                title="CAPEX budget for this period in millions of EUR. 0 / empty = unconstrained"
-                                disabled={updateCapexBudget.isPending}
-                                onBlur={e => {
-                                  const raw = e.target.value.trim()
-                                  const next: Record<string, number> = { ...(cfg?.capex_budget_per_period ?? {}) }
-                                  if (!raw) {
-                                    delete next[String(period)]
-                                  } else {
-                                    const v = parseFloat(raw)
-                                    if (!Number.isFinite(v) || v < 0) {
-                                      e.target.value = budgetMeur > 0 ? budgetMeur.toFixed(0) : ''
-                                      return
-                                    }
-                                    if (v === 0) {
-                                      delete next[String(period)]
-                                    } else {
-                                      next[String(period)] = v * 1e6  // M€ → €
-                                    }
-                                  }
-                                  // Only send the PUT if the stored value actually changed.
-                                  if ((next[String(period)] ?? 0) !== budgetEur) {
-                                    updateCapexBudget.mutate(next)
-                                  }
-                                }}
-                                className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
-                              />
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <p className="text-[10px] text-muted leading-relaxed">
-                  <code>years</code> = calendar years the period stands in for
-                  (period 2030 with <code>years=10</code> → 2030–2039).
-                  <code> objective</code> = LP-objective weight. When
-                  Auto-discount is ON the <code>PV × preview</code> column is
-                  what actually reaches the LP; the value you type here is
-                  overridden at solve time and restored afterwards. With
-                  Auto-discount OFF, what you type is what the LP uses.
-                  <code>Load × · {'{carrier}'}</code> =
-                  per-carrier load growth multiplier — loads of that carrier
-                  are scaled independently per period at solve time
-                  (<code>1.00</code> = unchanged, <code>1.10</code> = +10 %).
-                  Each carrier present in the network gets its own column;
-                  set Hydrogen ×1.5 in 2030 without affecting Electrical.
-                  <code> Budget M€</code> = upper bound on total NEW overnight
-                  CAPEX for assets built in this period; blank = unconstrained.
-                  Defaults: 1.
-                </p>
-              </div>
-            </div>
-          ))}
-        </section>
+          }
+          refPeriod={refPeriod}
+          autoDiscountOn={autoDiscountOn}
+          discountRate={cfg?.discount_rate ?? 0}
+          inflationRate={cfg?.inflation_rate ?? 0}
+          bulkYears={bulkYears}
+          onBulkYearsChange={setBulkYears}
+          onApplyBulkYears={v => applyBulkPeriodYears.mutate(v)}
+          applyBulkYearsPending={applyBulkPeriodYears.isPending}
+          bulkObjective={bulkObjective}
+          onBulkObjectiveChange={setBulkObjective}
+          onApplyBulkObjective={v => applyBulkPeriodObjective.mutate(v)}
+          applyBulkObjectivePending={applyBulkPeriodObjective.isPending}
+          autoDiscountChecked={Boolean(cfg?.auto_discount_periods)}
+          onAutoDiscountChange={enabled => updateAutoDiscount.mutate(enabled)}
+          onPeriodColChange={args => updateOnePeriodCol.mutate(args)}
+          updatePeriodColPending={updateOnePeriodCol.isPending}
+          loadCarriers={networkLoadCarriers.map(c => ({ key: c, label: loadCarrierLabel(c) }))}
+          loadScalersByCarrier={cfg?.load_scalers_by_carrier ?? {}}
+          legacyLoadScalers={cfg?.load_scalers ?? {}}
+          onLoadScalerChange={(carrier, period, value) => {
+            // Wholesale PUT: clone the nested map, ensure the per-carrier
+            // slot exists, write the new value. 1.0 entries are dropped so
+            // the server-side map stays compact (anything missing falls
+            // back to legacy load_scalers or 1.0 anyway).
+            const next: Record<string, Record<string, number>> = {}
+            for (const [c, m] of Object.entries(cfg?.load_scalers_by_carrier ?? {})) {
+              next[c] = { ...m }
+            }
+            const slot = next[carrier] ?? {}
+            if (value === 1) delete slot[String(period)]
+            else slot[String(period)] = value
+            if (Object.keys(slot).length === 0) delete next[carrier]
+            else next[carrier] = slot
+            updateLoadScalersByCarrier.mutate(next)
+          }}
+          loadScalerPending={updateLoadScalersByCarrier.isPending}
+          capexBudgetPerPeriod={cfg?.capex_budget_per_period ?? {}}
+          onCapexBudgetChange={(period, valueEur) => {
+            const next: Record<string, number> = { ...(cfg?.capex_budget_per_period ?? {}) }
+            if (valueEur == null) delete next[String(period)]
+            else next[String(period)] = valueEur
+            updateCapexBudget.mutate(next)
+          }}
+          capexBudgetPending={updateCapexBudget.isPending}
+        />
       )}
 
       {/* ── 3b. Snapshot window — both single- and multi-period forms
