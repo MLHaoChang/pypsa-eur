@@ -34,3 +34,35 @@ def test_llm_event_vocabulary_and_provider_error():
         tools=[], tools_stable=True, messages=[], history_stable_anchor=None,
     )
     assert req.system_blocks[0]["stable"] is True
+
+
+def test_fake_provider_scripts_and_records():
+    import copy
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent, LLMRequest, ProviderError
+
+    turns = [
+        {"events": [LLMEvent(type="text_delta", text="he"),
+                    LLMEvent(type="text_delta", text="llo")],
+         "blocks": [{"type": "text", "text": "hello"}],
+         "usage": {"input_tokens": 3, "output_tokens": 2}},
+        ProviderError("rate_limited", "scripted 429"),
+    ]
+    p = FakeProvider(turns)
+    req = LLMRequest(model="m", max_tokens=8,
+                     system_blocks=[{"type": "text", "text": "s", "stable": True}],
+                     tools=[{"name": "t", "description": "d", "input_schema": {}}],
+                     tools_stable=True, messages=[], history_stable_anchor=None)
+    got = list(p.stream(req))
+    assert [e.type for e in got] == ["text_delta", "text_delta", "message_done"]
+    assert got[-1].blocks == [{"type": "text", "text": "hello"}]
+    assert got[-1].usage["input_tokens"] == 3
+    # request recorded by value, not reference
+    assert p.requests[0].system_blocks[0]["stable"] is True
+    req.system_blocks[0]["stable"] = False
+    assert p.requests[0].system_blocks[0]["stable"] is True
+
+    import pytest
+    with pytest.raises(ProviderError) as ei:
+        list(p.stream(req))
+    assert ei.value.kind == "rate_limited"
