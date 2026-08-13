@@ -368,6 +368,23 @@ class SolveQueue:
         the very next `GET /api/simulation/queue` would pull the same jobs
         straight back out of the table, and this super-admin "wipe" would
         silently do nothing from the listing's point of view.
+
+        THE ROWS TO DELETE ARE NOT `removed` ALONE (fixed in review round 1,
+        Important 1). `removed` derives exclusively from `_order` — jobs the
+        process currently holds resident. A job that is persisted but NOT
+        resident (every `interrupted` job, by construction: R25's crash-loop
+        guard means one can never be re-admitted to `_jobs`; and any job whose
+        process outlived it, i.e. everything from before the last restart)
+        was, before this fix, permanently un-prunable through this route —
+        `delete_jobs(removed)` never saw its id, the row survived the "clear",
+        and the very next poll pulled it straight back in, with the
+        super-admin told `removed: 0`. So this queries the TABLE for every
+        `_TERMINAL` row — resident or not — and deletes that set. The return
+        value is the count of DISTINCT jobs actually removed from the
+        caller's point of view: the union of what left memory and what left
+        the table (usually the same ids, since a normal solve mirrors its
+        terminal status to both — but not always, e.g. a job whose row lagged
+        behind a status forced directly in memory).
         """
         with self._lock:
             removed = [jid for jid in self._order
@@ -375,19 +392,21 @@ class SolveQueue:
             for jid in removed:
                 self._jobs.pop(jid, None)
                 self._order.remove(jid)
-        # Mirror the delete to the table OUTSIDE `_lock`, same discipline as
-        # `abort()` / `_run_job`: the store opens a database session, and
-        # `_lock` is documented as short bookkeeping only, never held across
-        # I/O. Best-effort — a DB hiccup must not stop the in-memory clear
-        # the caller already observed via the return value.
-        if removed:
-            try:
-                from services import solve_job_store
+        # Resolve + delete OUTSIDE `_lock`, same discipline as `abort()` /
+        # `_run_job`: the store opens a database session, and `_lock` is
+        # documented as short bookkeeping only, never held across I/O.
+        # Best-effort — a DB hiccup must not stop the in-memory clear the
+        # caller already observed via `removed`.
+        to_delete = set(removed)
+        try:
+            from services import solve_job_store
 
-                solve_job_store.delete_jobs(removed)
-            except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
-                logger.exception("solve_queue: could not delete persisted jobs %s", removed)
-        return len(removed)
+            to_delete |= {row["id"] for row in solve_job_store.load_by_status(_TERMINAL)}
+            if to_delete:
+                solve_job_store.delete_jobs(to_delete)
+        except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
+            logger.exception("solve_queue: could not delete persisted jobs %s", to_delete)
+        return len(to_delete)
 
     def reset_for_tests(self) -> None:
         """

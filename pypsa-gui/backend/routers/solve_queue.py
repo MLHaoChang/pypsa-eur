@@ -153,7 +153,19 @@ def enqueue_solve(
 #
 # Fields that name the work rather than measure it. `error` is included because
 # a failure message routinely quotes a project name, a path or a solver detail.
-_REDACTED = ("project_id", "project_key", "error")
+#
+# `objective` / `solve_time` / `condition` joined this set in Task 16a's review
+# round 1 (Important 2, human-adjudicated): before persisted rows were merged
+# into the listing, these were never redacted because the queue was
+# self-clearing — a finished job eventually left `_jobs` and took its result
+# with it. Once a terminal row can survive indefinitely (interrupted jobs are
+# permanently un-restartable back into memory; any job's history now outlives
+# a restart), leaving them un-redacted let any authenticated caller read every
+# organisation's solved system cost, forever. Redacting them still preserves
+# the queue-depth rationale below — a foreign job still shows its `status` and
+# `position`, so a caller can see someone is ahead of them, just not what that
+# job's model cost.
+_REDACTED = ("project_id", "project_key", "error", "objective", "solve_time", "condition")
 
 
 def _org_prefix(db: DBSession, user: User) -> str | None:
@@ -445,6 +457,18 @@ async def job_log_stream(
     )
 
 
+# Bounds the persisted-history slice `_merged_jobs` reads on every poll
+# (Task 16a review round 1, Important 3): unbounded, that query's cost grows
+# with every terminal job the process has EVER recorded, on a route polled
+# every 1.5s while any job is active. 200 is generous for "what a caller would
+# plausibly want to see" while keeping the worst case bounded regardless of
+# process uptime. `load_by_status` returns the NEWEST rows first when capped,
+# so the ones dropped are the oldest history, not the most relevant. Deliberately
+# NOT applied to `clear_finished` — that is a rare, deliberate, super-admin
+# wipe, not a hot poll, and capping it would leave un-wiped rows behind.
+_PERSISTED_HISTORY_LIMIT = 200
+
+
 def _persisted_job_public(row: dict) -> dict:
     """
     A `solve_jobs` row (from `solve_job_store.load_by_status`), reshaped to
@@ -506,16 +530,17 @@ def _merged_jobs() -> list[dict]:
     still live (a lagging mirror) is dropped, because its id is already
     accounted for by the in-memory copy.
 
-    ORDERING: both sources are already ascending by `enqueued_at` — `_order`
-    by construction (a job is appended to `_jobs` and `_order` together, under
-    `_lock`, at the moment its `enqueued_at = time.time()` is stamped, so the
-    list is chronological by construction) and `load_by_status`'s own
-    `ORDER BY enqueued_at`. Combining and re-sorting by that one key gives a
-    single globally chronological list — a caller's queue view and job
-    history read oldest-enqueued-first either way, restart or not, and a
-    STABLE sort (Python's `sorted`) means the common case (no persisted-only
-    rows to add) reproduces `list_jobs()`'s existing order exactly, so this is
-    additive over the pre-Task-16a behaviour rather than a new ordering rule.
+    ORDERING: `_order` is already ascending by `enqueued_at` by construction
+    (a job is appended to `_jobs` and `_order` together, under `_lock`, at the
+    moment its `enqueued_at = time.time()` is stamped). `load_by_status` is
+    asked for the `_PERSISTED_HISTORY_LIMIT` NEWEST rows (see there), then
+    re-sorted ascending together with the live ones by that one key.
+    Combining and re-sorting gives a single globally chronological list — a
+    caller's queue view and job history read oldest-enqueued-first either way,
+    restart or not — and a STABLE sort (Python's `sorted`) means the common
+    case (no persisted-only rows to add) reproduces `list_jobs()`'s existing
+    order exactly, so this is additive over the pre-Task-16a behaviour rather
+    than a new ordering rule.
     """
     from services import solve_job_store
 
@@ -523,7 +548,7 @@ def _merged_jobs() -> list[dict]:
     live_ids = {job["id"] for job in jobs}
     persisted_only = [
         _persisted_job_public(row)
-        for row in solve_job_store.load_by_status(_TERMINAL)
+        for row in solve_job_store.load_by_status(_TERMINAL, limit=_PERSISTED_HISTORY_LIMIT)
         if str(row["id"]) not in live_ids
     ]
     return sorted(jobs + persisted_only, key=lambda job: job["enqueued_at"])
@@ -551,7 +576,10 @@ def list_queue(
     instead of `_jobs`.
 
     So every job comes back with `id`, `status`, `position` and its timings
-    intact, and the fields that say WHOSE work it is are nulled for jobs the
+    intact, and the fields that say WHOSE work it is (`project_id`,
+    `project_key`, `error`) OR WHAT IT PRODUCED (`objective`, `solve_time`,
+    `condition` — added in Task 16a's review, since a persisted row can now
+    outlive the queue that used to self-clear it) are nulled for jobs the
     caller cannot access. `current` is the true running job id only when the
     caller may see it — otherwise null, since the id alone was enough to abort
     it before this change.

@@ -129,9 +129,9 @@ def record_status(job: Any) -> None:
         logger.exception("solve_job_store: could not update job %s", getattr(job, "id", None))
 
 
-def load_by_status(statuses: tuple[str, ...]) -> list[dict]:
+def load_by_status(statuses: tuple[str, ...], *, limit: int | None = None) -> list[dict]:
     """
-    Rows in any of `statuses`, oldest first, as plain dicts.
+    Rows in any of `statuses`, as plain dicts.
 
     Dicts rather than ORM objects so the caller (the dispatcher, a worker
     thread — or the listing route, this module's second caller as of the
@@ -145,6 +145,20 @@ def load_by_status(statuses: tuple[str, ...]) -> list[dict]:
     also needs `objective` / `solve_time` / `condition` / `error` /
     `started_at` / `finished_at` to show a persisted TERMINAL job with its
     real result rather than blanks. One query, reused, not a second path.
+
+    UNBOUNDED and OLDEST FIRST by default (`limit=None`). This is boot
+    reconciliation's contract — its only caller — and it must see EVERY
+    matching row (every `running` row to flip, every `queued` row to resume),
+    never a capped recent slice; the ordering happens to not matter to it, but
+    is left exactly as it always was so nothing about that path changes.
+
+    `limit`, when given, switches to NEWEST first (`ORDER BY enqueued_at
+    DESC`) before capping — the shape `routers/solve_queue.py::_merged_jobs`
+    needs (Task 16a review round 1, Important 3): that call sits behind a
+    listing polled every 1.5s while a job is active, and an unbounded query
+    there would grow O(every terminal job the process has ever recorded) on
+    EVERY poll for the life of the process. The caller re-sorts ascending for
+    display afterwards; this only bounds what leaves the database.
     """
     try:
         from sqlalchemy import select
@@ -153,11 +167,12 @@ def load_by_status(statuses: tuple[str, ...]) -> list[dict]:
         from db.session import SessionLocal
 
         with SessionLocal() as db:
-            rows = db.scalars(
-                select(SolveJobRow)
-                .where(SolveJobRow.status.in_(statuses))
-                .order_by(SolveJobRow.enqueued_at)
-            ).all()
+            stmt = select(SolveJobRow).where(SolveJobRow.status.in_(statuses))
+            if limit is None:
+                stmt = stmt.order_by(SolveJobRow.enqueued_at)
+            else:
+                stmt = stmt.order_by(SolveJobRow.enqueued_at.desc()).limit(limit)
+            rows = db.scalars(stmt).all()
             return [
                 {
                     "id": r.id,

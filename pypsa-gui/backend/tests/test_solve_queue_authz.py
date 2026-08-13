@@ -582,6 +582,51 @@ def test_clear_finished_also_deletes_the_persisted_row(
         )
 
 
+def test_clear_finished_deletes_a_non_resident_persisted_row(
+    client, super_admin_client,
+):
+    """
+    Review round 1, Important 1: the FIRST version of the clear_finished fix
+    derived the rows to delete EXCLUSIVELY from `_order`
+    (`self._order` -> `self._jobs[jid].status in _TERMINAL`), so it only ever
+    reached jobs the process still had resident — exactly
+    `test_clear_finished_also_deletes_the_persisted_row` above, which mirrors
+    the status while the job is STILL resident and so exercises only the path
+    that already worked before this fix.
+
+    A persisted row that is NEVER resident is the class Task 16a exists to
+    surface in the first place: every `interrupted` job (R25's crash-loop
+    guard means one can never be re-admitted to `_jobs`) and any job from
+    before the last restart. Built directly here — `SolveJob` +
+    `record_enqueued` + `record_status`, never touching `solve_queue._jobs` /
+    `_order` at all — so this cannot pass by accident of the job having
+    touched memory at some point in the test.
+    """
+    from services import solve_job_store
+    from services.solve_queue import SolveJob
+
+    orphan = SolveJob(id=uuid.uuid4(), project_id="NeverResident", enqueued_at=time.time())
+    solve_job_store.record_enqueued(orphan, enqueued_by_user_id=None, solver_config_json=None)
+    orphan.status = "interrupted"
+    orphan.condition = "process_exited"
+    orphan.finished_at = time.time()
+    solve_job_store.record_status(orphan)
+
+    r = super_admin_client.post("/api/simulation/queue/clear_finished")
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 1, (
+        "clear_finished did not count a non-resident persisted row at all"
+    )
+
+    from db.models import SolveJobRow
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        assert db.get(SolveJobRow, orphan.id) is None, (
+            "clear_finished did not delete a persisted-only (never resident) row"
+        )
+
+
 # ── chat tools (Task 4: the same handlers, reached in-process) ───────────────
 
 

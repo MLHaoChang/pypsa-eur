@@ -136,12 +136,23 @@ export const REDACTED_PROJECT_LABEL = 'Hidden — another organisation’s proje
  * could ever reach this component. Task 16a made `GET /api/simulation/queue`
  * merge persisted rows back into the listing at the READ boundary (never by
  * re-admitting anything to the in-memory store, so the crash-loop guard is
- * untouched) — an interrupted job now reaches this component for real, and
- * this line was already correct for it, unchanged.
+ * untouched) — an interrupted job now reaches this component for real.
  *
  * A redacted row (`project_id: null`) is one the caller may not see at all,
  * so its endpoints would 404 — disabling it here means the UI and the
  * authorization agree instead of rendering a control that always fails.
+ *
+ * KNOWN GAP, genuinely out of Task 16a's scope: this can still return `true`
+ * for a job the caller MAY see but that is no longer resident (a
+ * persisted-only row served through the new merge — any `interrupted` job, or
+ * any terminal job from before the last restart). Its log endpoints
+ * (`job_log_history` / `job_log_stream`, `routers/solve_queue.py`) still
+ * resolve through `solve_queue.get_log_queue()` — memory-only, NOT the merged
+ * view — so expanding such a row shows an empty/404 log rather than a
+ * disabled control. The job's METADATA is durable (Task 13); its
+ * `BufferedLogQueue` never was, and making it so is a separate task. If that
+ * ships, this function needs no change — it is already correct for the
+ * "durable log" case, same as it turned out to be for `interrupted` here.
  */
 export function canExpandJob(job: SolveJob): boolean {
   if (job.project_id == null) return false
