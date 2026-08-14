@@ -144,3 +144,48 @@ def test_a_cancelled_queued_job_is_not_resurrected():
         assert _status(jid) == "aborted", "reconciliation must not touch an aborted row"
     finally:
         solve_queue.reset_for_tests()
+
+
+class _NullQueue:
+    """A `queue.Queue` stand-in that swallows work instead of dispatching it.
+    Same rationale as `test_solve_queue_persisted_listing._parked_dispatcher`:
+    keeps the restored job deterministically `queued` instead of racing the
+    real dispatcher (which would fail-fast a job for a project that does not
+    exist and flip its row terminal mid-test)."""
+
+    def put(self, item) -> None:
+        pass
+
+    def get_nowait(self):
+        import queue as _q
+
+        raise _q.Empty
+
+    def task_done(self) -> None:
+        pass
+
+
+def test_reconciliation_running_twice_does_not_duplicate_a_job(monkeypatch):
+    """
+    `restore()` appended unconditionally, so any re-entry of the lifespan (a
+    second TestClient context in one interpreter, a re-run of the startup
+    hook) put the same id in `_order`/`_q` twice: the listing showed one job
+    as two rows, and the dispatcher would run the same solve twice back to
+    back. Restoring an id that is already resident must be a no-op.
+    """
+    monkeypatch.setattr(solve_queue, "_ensure_dispatcher_locked", lambda: None)
+    monkeypatch.setattr(solve_queue, "_q", _NullQueue())
+    solve_queue.reset_for_tests()
+    was_queued = _seed("queued", project_id="DoubleBoot")
+    try:
+        first = solve_job_store.reconcile_on_boot()
+        second = solve_job_store.reconcile_on_boot()
+        assert first == (0, 1), first
+
+        ids = [j["id"] for j in solve_queue.list_jobs()]
+        assert ids.count(str(was_queued)) == 1, (
+            f"a second reconciliation duplicated the job in the queue: {ids} "
+            f"(second run reported {second})"
+        )
+    finally:
+        solve_queue.reset_for_tests()

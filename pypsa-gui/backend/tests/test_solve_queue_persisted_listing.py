@@ -419,3 +419,37 @@ def test_aborting_a_persisted_only_terminal_job_is_a_no_op_not_a_404(
         assert r.json()["status"] == "interrupted"
     finally:
         solve_queue.reset_for_tests()
+
+
+def test_deleting_a_project_with_an_active_queue_job_is_refused(
+    client, install_network, tmp_projects_dir,
+):
+    """
+    `_delete_project_db` rmtrees the storage dir and drops the row with no
+    queue consultation — asymmetric with load/activate, which both 409 while
+    the queue owns the project. A queued job then fails at dispatch on the
+    missing directory, and a RUNNING job is worse: `_save_context`'s
+    `mkdir(parents=True)` re-creates the deleted directory on completion,
+    orphaned from any DB row and invisible to every ACL. Refuse with the same
+    `solver_in_flight` shape the load/activate guards use; abort first, then
+    delete.
+    """
+    job = _enqueue(client, install_network, "DeleteWhileQueued")
+    try:
+        r = client.delete("/api/projects/DeleteWhileQueued")
+        assert r.status_code == 409, (
+            f"delete proceeded despite an active queue job: {r.status_code} {r.text}"
+        )
+        assert r.json()["detail"]["error_kind"] == "solver_in_flight"
+        assert solve_queue.get_job(uuid.UUID(str(job["id"])))["status"] == "queued", (
+            "the refused delete must leave the job untouched"
+        )
+
+        r = client.post(f"/api/simulation/queue/{job['id']}/abort")
+        assert r.status_code == 200, r.text
+        r = client.delete("/api/projects/DeleteWhileQueued")
+        assert r.status_code == 200, (
+            f"delete still refused after the job was aborted: {r.status_code} {r.text}"
+        )
+    finally:
+        solve_queue.reset_for_tests()

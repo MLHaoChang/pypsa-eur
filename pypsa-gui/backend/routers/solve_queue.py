@@ -516,10 +516,23 @@ def _persisted_job_public(row: dict) -> dict:
     }
 
 
-def _merged_jobs() -> list[dict]:
+def _merged_jobs(project_key_prefix: str | None = None) -> list[dict]:
     """
     Every in-memory job, plus persisted TERMINAL rows for jobs that are no
     longer resident — the gap Task 16a closes.
+
+    `project_key_prefix` (the caller's `org_uuid:` half, None in local mode)
+    adds a SECOND capped read scoped to the caller's own org, unioned with
+    the global one. Capping globally alone let one org's volume evict
+    another org's entire history: the newest-N window filled with rows the
+    victim only ever sees fully redacted, displacing their own completed
+    jobs. Scoping the ONLY read to the caller's org is not an option either —
+    `test_solve_queue_persisted_listing.py::
+    test_a_persisted_terminal_job_is_redacted_for_another_org` pins
+    (human-adjudicated, review round 1) that foreign history is REDACTED,
+    never silently absent. The union gives both properties: the caller's own
+    newest-N can never be displaced, foreign rows stay visible-redacted, and
+    the result stays bounded at 2N.
 
     Why a job can be persisted but not resident: a restart drops EVERY entry
     from `_jobs` (a fresh `SolveQueue()` singleton), and boot reconciliation
@@ -561,10 +574,23 @@ def _merged_jobs() -> list[dict]:
 
     jobs = solve_queue.list_jobs()
     live_ids = {job["id"] for job in jobs}
+    rows = {
+        str(row["id"]): row
+        for row in solve_job_store.load_by_status(
+            _TERMINAL, limit=_PERSISTED_HISTORY_LIMIT,
+        )
+    }
+    if project_key_prefix is not None:
+        for row in solve_job_store.load_by_status(
+            _TERMINAL,
+            limit=_PERSISTED_HISTORY_LIMIT,
+            project_key_prefix=project_key_prefix,
+        ):
+            rows.setdefault(str(row["id"]), row)
     persisted_only = [
         _persisted_job_public(row)
-        for row in solve_job_store.load_by_status(_TERMINAL, limit=_PERSISTED_HISTORY_LIMIT)
-        if str(row["id"]) not in live_ids
+        for rid, row in rows.items()
+        if rid not in live_ids
     ]
     return sorted(jobs + persisted_only, key=lambda job: job["enqueued_at"])
 
@@ -609,7 +635,7 @@ def list_queue(
 
     project_registry.require_user(user)
     prefix = _org_prefix(db, user)
-    jobs = _merged_jobs()
+    jobs = _merged_jobs(project_key_prefix=prefix)
     allowed = project_acl.accessible_project_ids(
         db, user, (_project_uuid(job, prefix) for job in jobs)
     )

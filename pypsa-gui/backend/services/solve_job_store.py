@@ -184,9 +184,22 @@ def load_job(job_id: uuid.UUID) -> dict | None:
         return None
 
 
-def load_by_status(statuses: tuple[str, ...], *, limit: int | None = None) -> list[dict]:
+def load_by_status(
+    statuses: tuple[str, ...],
+    *,
+    limit: int | None = None,
+    project_key_prefix: str | None = None,
+) -> list[dict]:
     """
     Rows in any of `statuses`, as plain dicts.
+
+    `project_key_prefix`, when given, restricts rows to `project_key`s
+    starting with it — the caller's `org_uuid:` half. It exists for the
+    LISTING's capped history read: capping globally and filtering visibility
+    afterwards let one org's volume evict another org's entire history from
+    the panel (all the victim gained in exchange was rows that render fully
+    redacted for them). Boot reconciliation and `clear_finished` never pass
+    it — those are deliberately process-global.
 
     Dicts rather than ORM objects so the caller (the dispatcher, a worker
     thread — or the listing route, this module's second caller as of the
@@ -223,6 +236,8 @@ def load_by_status(statuses: tuple[str, ...], *, limit: int | None = None) -> li
 
         with SessionLocal() as db:
             stmt = select(SolveJobRow).where(SolveJobRow.status.in_(statuses))
+            if project_key_prefix is not None:
+                stmt = stmt.where(SolveJobRow.project_key.startswith(project_key_prefix))
             if limit is None:
                 stmt = stmt.order_by(SolveJobRow.enqueued_at)
             else:

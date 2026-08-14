@@ -494,8 +494,22 @@ class SolveQueue:
 
         Only ever called with a `queued` row. A `running` one is deliberately
         NOT restored — see `solve_job_store.reconcile_on_boot`.
+
+        IDEMPOTENT on the job id: restoring an id that is already resident
+        returns the existing job untouched. Unguarded, any re-entry of the
+        lifespan (a second `TestClient` context in one interpreter, a re-run
+        of the startup hook) appended the same id to `_order`/`_q` twice —
+        the listing showed one job as two rows and the dispatcher ran the
+        same solve twice back to back.
         """
         with self._lock:
+            existing = self._jobs.get(row["id"])
+            if existing is not None:
+                logger.info(
+                    "solve_queue: job %s already resident — restore is a no-op",
+                    row["id"],
+                )
+                return existing
             job = SolveJob(
                 id=row["id"],
                 project_id=row["project_id"],
