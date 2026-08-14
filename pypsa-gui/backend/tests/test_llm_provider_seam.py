@@ -293,3 +293,93 @@ def test_openai_compat_maps_connect_and_status_errors():
         with pytest.raises(ProviderError) as ei:
             list(pp.stream(_seam_request()))
         assert ei.value.kind == kind, status
+
+
+def _openai_provider_scripted_hello():
+    import httpx
+    from services.llm_openai_compat import OpenAICompatProvider
+    body = _sse_bytes(
+        b'{"choices":[{"delta":{"content":"he"}}]}',
+        b'{"choices":[{"delta":{"content":"llo"}}]}',
+        b'{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}',
+    )
+    return OpenAICompatProvider(
+        "http://fake/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, content=body,
+                headers={"content-type": "text/event-stream"}))))
+
+
+def _fake_provider_scripted_hello():
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+    return FakeProvider([
+        {"events": [LLMEvent(type="text_delta", text="he"),
+                    LLMEvent(type="text_delta", text="llo")],
+         "blocks": [{"type": "text", "text": "hello"}],
+         "usage": {"input_tokens": 5, "output_tokens": 2}},
+    ])
+
+
+def test_seam_same_harness_behaviour_across_providers():
+    """The seam spec's core assertion: a test that only runs against the
+    fake proves nothing about the abstraction."""
+    from services import chat_service
+
+    def frames(provider):
+        session = chat_service.ChatSession(model="claude-sonnet-5")
+        out = list(chat_service.run_turn(session, "hi", provider=provider))
+        # session_id differs per run; compare names + token deltas only
+        return ([n for n, _ in out],
+                [p["delta"] for n, p in out if n == "token"])
+
+    fake_names, fake_tokens = frames(_fake_provider_scripted_hello())
+    oai_names, oai_tokens = frames(_openai_provider_scripted_hello())
+    assert fake_names == oai_names
+    assert fake_tokens == oai_tokens == ["he", "llo"]
+
+
+def test_stable_markers_reach_all_sites_via_fake():
+    """Cache-cost guard: without this, the tenfold input-cost regression is
+    invisible (seam spec, capability section)."""
+    from services import chat_service
+    from services.llm_provider import LLMEvent
+    from services.llm_fake import FakeProvider
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    fake = FakeProvider([
+        {"events": [], "blocks": [{"type": "text", "text": "a"}],
+         "usage": {}},
+        {"events": [], "blocks": [{"type": "text", "text": "b"}],
+         "usage": {}},
+    ])
+    list(chat_service.run_turn(session, "one", provider=fake))
+    list(chat_service.run_turn(session, "two", provider=fake))
+    first, second = fake.requests[0], fake.requests[1]
+    assert first.system_blocks[-1]["stable"] and first.tools_stable
+    assert first.history_stable_anchor is None      # no history yet
+    assert second.history_stable_anchor is not None  # anchored to turn 1
+    assert 0 <= second.history_stable_anchor < len(second.messages)
+
+
+import os
+import pytest
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PYPSA_GUI_TEST_OLLAMA_URL"),
+    reason="no local OpenAI-compatible endpoint configured")
+def test_seam_against_live_local_endpoint():
+    from services import chat_service
+    from services.llm_openai_compat import OpenAICompatProvider
+    provider = OpenAICompatProvider(
+        os.environ["PYPSA_GUI_TEST_OLLAMA_URL"],
+        api_key=os.environ.get("PYPSA_GUI_TEST_OLLAMA_KEY"))
+    session = chat_service.ChatSession(
+        model=os.environ.get("PYPSA_GUI_TEST_OLLAMA_MODEL", "qwen3:8b"))
+    names = [n for n, _ in chat_service.run_turn(
+        session, "Reply with the single word: ok", provider=provider)]
+    # Successful turns end at turn_done (pinned by test_chat_e2e.py:213).
+    assert names[0] == "session_init" and names[-1] == "turn_done"
+    assert "token" in names
