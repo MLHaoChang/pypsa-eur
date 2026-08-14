@@ -214,3 +214,82 @@ def test_run_turn_accepts_a_provider_and_emits_identical_frames():
     assert req.tools_stable is True
     assert req.max_tokens == chat_service.MAX_OUTPUT_TOKENS_PER_TURN
     assert len(req.tools) == 117
+
+
+def _sse_bytes(*chunks):
+    out = b""
+    for c in chunks:
+        out += b"data: " + c + b"\n\n"
+    return out + b"data: [DONE]\n\n"
+
+
+def test_openai_compat_streams_text_tools_reasoning_and_usage():
+    import httpx, json
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    body = _sse_bytes(
+        b'{"choices":[{"delta":{"reasoning_content":"hmm"}}]}',
+        b'{"choices":[{"delta":{"content":"he"}}]}',
+        b'{"choices":[{"delta":{"content":"llo"}}]}',
+        b'{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",'
+        b'"function":{"name":"list_projects","arguments":"{\\"li"}}]}}]}',
+        b'{"choices":[{"delta":{"tool_calls":[{"index":0,'
+        b'"function":{"arguments":"mit\\":2}"}}]}}]}',
+        b'{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4}}',
+    )
+    captured = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(req.content)
+        captured["auth"] = req.headers.get("authorization")
+        return httpx.Response(200, content=body,
+                              headers={"content-type": "text/event-stream"})
+
+    provider = OpenAICompatProvider(
+        "http://localhost:11434/v1", api_key="k",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    req = _seam_request()
+    events = list(provider.stream(req))
+    kinds = [e.type for e in events]
+    assert kinds[0] == "thinking_delta" and events[0].text == "hmm"
+    assert kinds.count("text_delta") == 2
+    assert kinds[-1] == "message_done"
+    done = events[-1]
+    assert {"type": "text", "text": "hello"} in done.blocks
+    tool = [b for b in done.blocks if b["type"] == "tool_use"][0]
+    assert tool["id"] == "c1" and tool["name"] == "list_projects"
+    assert tool["input"] == {"limit": 2}
+    assert done.usage == {"input_tokens": 11, "output_tokens": 4}
+    # request translation
+    sent = captured["json"]
+    assert captured["auth"] == "Bearer k"
+    assert sent["stream"] is True
+    assert sent["messages"][0]["role"] == "system"
+    assert sent["tools"][0]["function"]["name"] == "a"
+    assert "cache_control" not in json.dumps(sent)  # stable dropped, silently
+
+
+def test_openai_compat_maps_connect_and_status_errors():
+    import httpx, pytest
+    from services.llm_openai_compat import OpenAICompatProvider
+    from services.llm_provider import ProviderError
+
+    def refuse(req):
+        raise httpx.ConnectError("refused")
+
+    p = OpenAICompatProvider(
+        "http://localhost:11434/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(refuse)))
+    with pytest.raises(ProviderError) as ei:
+        list(p.stream(_seam_request()))
+    assert ei.value.kind == "unreachable"
+
+    for status, kind in [(401, "unauthorized"), (429, "rate_limited"),
+                         (404, "invalid_request"), (500, "upstream_error")]:
+        pp = OpenAICompatProvider(
+            "http://h/v1",
+            http_client=httpx.Client(transport=httpx.MockTransport(
+                lambda r, s=status: httpx.Response(s, json={"error": {}}))))
+        with pytest.raises(ProviderError) as ei:
+            list(pp.stream(_seam_request()))
+        assert ei.value.kind == kind, status
