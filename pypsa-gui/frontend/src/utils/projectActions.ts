@@ -226,7 +226,7 @@ export type SwitchResult =
 // Backend TTL is 120 s; refresh well inside that so a slow tick / transient
 // blip doesn't drop the lock. In-memory only — a reload re-acquires via the
 // App mount effect + the switch flow.
-const LOCK_HEARTBEAT_MS = 45_000
+export const LOCK_HEARTBEAT_MS = 45_000
 
 let _heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let _heartbeatProject: string | null = null
@@ -264,11 +264,20 @@ function startLockHeartbeat(projectId: string): void {
       .catch((e) => {
         const status = (e as { response?: { status?: number } })?.response?.status
         if (status === 409) {
-          // Lost the lock — it expired and another user grabbed it, or the
-          // server dropped it. Fall to read-only and stop pinging.
-          _applyLock({ ok: false, lock: _lockFromErrorDetail(e) })
-          stopLockHeartbeat()
-          appLog('WARN', `Lost the edit lock on '${projectId}' — the workbench is now read-only.`)
+          // The lock may have merely EXPIRED (laptop sleep outlives the
+          // 120 s TTL) rather than been genuinely taken by someone else.
+          // Acquire is idempotent for the holder and succeeds on a
+          // free/expired slot — try ONE re-acquire before declaring the
+          // workbench read-only.
+          projectsApi.acquireLock(projectId)
+            .then(res => _applyLock({ ok: true, lock: res.lock }))
+            .catch((e2) => {
+              // Re-acquire was refused too — someone else genuinely holds
+              // it now. Fall to read-only and stop pinging.
+              _applyLock({ ok: false, lock: _lockFromErrorDetail(e2) })
+              stopLockHeartbeat()
+              appLog('WARN', `Lost the edit lock on '${projectId}' — the workbench is now read-only.`)
+            })
         }
         // Other errors (network blip during a backend reload) are transient;
         // keep the lock optimistically and retry on the next tick.
@@ -488,6 +497,19 @@ export async function saveProjectQuietly(name: string, clearUndo = false): Promi
     useUIStore.getState().markProjectSaved(name)
     return true
   } catch (e) {
+    // A foreign write lock refuses the save with a structured
+    // `error_kind: "project_locked"` detail (backend Task 4). Beyond the
+    // toast below, apply the lock banner and stop autosave from hammering
+    // a project someone else now holds — otherwise the heartbeat keeps
+    // retrying the same 409 every tick with no user-visible explanation.
+    const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+    const errorKind = detail && typeof detail === 'object' && 'error_kind' in detail
+      ? (detail as { error_kind?: unknown }).error_kind
+      : undefined
+    if (errorKind === 'project_locked') {
+      _applyLock({ ok: false, lock: _lockFromErrorDetail(e) })
+      stopLockHeartbeat()
+    }
     appLog('WARN', `Could not save '${name}': ${String((e as Error)?.message ?? e)}`)
     return false
   }

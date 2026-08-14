@@ -1,14 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  downloadProjectBundle, forgetBundleLocation,
-  formatRelativeTime, nextUntitledName, slugify,
+  acquireProjectLock, downloadProjectBundle, forgetBundleLocation,
+  formatRelativeTime, nextUntitledName, saveProjectQuietly, slugify, stopLockHeartbeat,
 } from './projectActions'
 import { projectsApi } from '../api/projects'
 import { useSimulationStore } from '../store/simulationStore'
+import { useUIStore } from '../store/uiStore'
+import type { LockInfo } from './lockState'
 
 vi.mock('../api/projects', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/projects')>()
-  return { ...actual, projectsApi: { ...actual.projectsApi, downloadBundle: vi.fn() } }
+  return {
+    ...actual,
+    projectsApi: {
+      ...actual.projectsApi,
+      downloadBundle: vi.fn(),
+      acquireLock: vi.fn(),
+      heartbeatLock: vi.fn(),
+      save: vi.fn(),
+    },
+  }
 })
 
 // The RETURN VALUE is this helper's contract, and its three callers branch on
@@ -164,5 +175,107 @@ describe('formatRelativeTime', () => {
   it('clamps future timestamps to "just now" instead of going negative', () => {
     const future = new Date(now + 60_000).toISOString()
     expect(formatRelativeTime(future, now)).toBe('just now')
+  })
+})
+
+// ── Lock-loss recovery (Task 7) ─────────────────────────────────────────────
+//
+// `startLockHeartbeat` is module-private; drive it the same way production
+// code does — via `acquireProjectLock`, which starts the heartbeat on a
+// successful acquire — then advance the fake clock one tick to fire it.
+describe('lock-loss recovery', () => {
+  const mine: LockInfo = { holder_email: 'me@example.com', yours: true }
+  const theirs: LockInfo = { holder_email: 'other@example.com', yours: false }
+
+  beforeEach(() => {
+    vi.mocked(projectsApi.acquireLock).mockReset()
+    vi.mocked(projectsApi.heartbeatLock).mockReset()
+    vi.mocked(projectsApi.save).mockReset()
+    useUIStore.setState({
+      readOnly: false, lockReadOnly: false, lockHolderEmail: null, readOnlyReason: 'writable',
+    })
+    useSimulationStore.setState({ status: 'idle' })
+  })
+
+  afterEach(() => {
+    stopLockHeartbeat()
+    vi.useRealTimers()
+  })
+
+  it('heartbeat 409 re-acquires when the lock merely expired', async () => {
+    // Fake timers must be active BEFORE `acquireProjectLock` starts the
+    // heartbeat `setInterval`, or the interval is scheduled against the
+    // real clock and `advanceTimersByTimeAsync` below never fires it.
+    vi.useFakeTimers()
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
+    await acquireProjectLock('proj-1')
+    expect(useUIStore.getState().readOnly).toBe(false)
+
+    vi.mocked(projectsApi.heartbeatLock).mockRejectedValueOnce({ response: { status: 409 } })
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
+
+    await vi.advanceTimersByTimeAsync(45_000) // LOCK_HEARTBEAT_MS
+    // advanceTimersByTimeAsync flushes microtasks between ticks, but the
+    // re-acquire's own `.then` runs one more microtask turn after that.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(projectsApi.acquireLock).toHaveBeenCalledWith('proj-1')
+    expect(projectsApi.acquireLock).toHaveBeenCalledTimes(2) // initial + re-acquire
+    expect(useUIStore.getState().readOnly).toBe(false) // did NOT fall read-only
+  })
+
+  it('heartbeat 409 falls read-only when re-acquire is refused', async () => {
+    vi.useFakeTimers()
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
+    await acquireProjectLock('proj-1')
+    expect(useUIStore.getState().readOnly).toBe(false)
+
+    vi.mocked(projectsApi.heartbeatLock).mockRejectedValueOnce({
+      response: { status: 409, data: { detail: { lock: theirs } } },
+    })
+    vi.mocked(projectsApi.acquireLock).mockRejectedValueOnce({ response: { status: 409 } })
+
+    await vi.advanceTimersByTimeAsync(45_000) // LOCK_HEARTBEAT_MS
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(useUIStore.getState().readOnly).toBe(true)
+  })
+
+  it('a save refused with error_kind "project_locked" applies the lock banner and stops the heartbeat', async () => {
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
+    await acquireProjectLock('proj-1')
+    expect(useUIStore.getState().readOnly).toBe(false)
+
+    vi.mocked(projectsApi.save).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: { detail: { error_kind: 'project_locked', message: 'locked', lock: theirs } },
+      },
+    })
+
+    const ok = await saveProjectQuietly('proj-1')
+
+    expect(ok).toBe(false)
+    expect(useUIStore.getState().readOnly).toBe(true)
+    expect(useUIStore.getState().lockHolderEmail).toBe('other@example.com')
+
+    // The heartbeat must be stopped — advancing well past a tick must not
+    // produce another heartbeatLock call that could resurrect a writable state.
+    vi.useFakeTimers()
+    vi.mocked(projectsApi.heartbeatLock).mockClear()
+    await vi.advanceTimersByTimeAsync(45_000)
+    expect(projectsApi.heartbeatLock).not.toHaveBeenCalled()
+  })
+
+  it('a save refused WITHOUT error_kind "project_locked" leaves the lock state untouched', async () => {
+    // beforeEach already seeded the writable default state.
+    vi.mocked(projectsApi.save).mockRejectedValueOnce(new Error('network blip'))
+
+    const ok = await saveProjectQuietly('proj-1')
+
+    expect(ok).toBe(false)
+    expect(useUIStore.getState().readOnly).toBe(false)
   })
 })
