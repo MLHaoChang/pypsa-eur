@@ -1327,6 +1327,7 @@ def save_project(
     else:
         project_acl.ensure_project_access(db, user, project)
     storage_dir = project_registry.ensure_project_dir(project)
+    _enforce_project_lock(db, project, user)
     name = project.name
     # Captured BEFORE the save, which is what performs the claim. Mirrors
     # `_save_context`'s own condition (`loaded is None or rebind`) — keying on
@@ -2532,6 +2533,7 @@ def update_scenario_metadata(
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_delete_project(db, user, project):
         raise HTTPException(403, f"You do not have permission to edit '{project.name}'")
+    _enforce_project_lock(db, project, user)
 
     submitted = req.model_dump(exclude_unset=True)
     if not submitted:
@@ -2610,6 +2612,7 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_delete_project(db, user, project):
         raise HTTPException(403, f"You do not have permission to delete '{project.name}'")
+    _enforce_project_lock(db, project, user)
 
     child_projects = project_registry.descendants(db, project)
     if child_projects and not cascade:
@@ -2708,6 +2711,7 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_delete_project(db, user, project):
         raise HTTPException(403, f"You do not have permission to rename '{project.name}'")
+    _enforce_project_lock(db, project, user)
     old_name = project.name
     if new_name == old_name:
         raise HTTPException(400, "new_name must differ from the current name")
@@ -2976,6 +2980,14 @@ def put_layout(
     dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
         raise HTTPException(404, f"Project '{name}' not found")
+    # `_resolve_project_src` resolves a PATH, not a row — re-resolve the row so
+    # the lock can be checked. A row-absent project is the legacy flat-storage
+    # path (no DB registry entry, no lock table to speak of), so it's ungated.
+    from services import project_registry
+
+    lock_project = project_registry.find_project(db, user, name)
+    if lock_project is not None:
+        _enforce_project_lock(db, lock_project, user)
     # Compact (no indent): layout.json is a machine-written coordinate blob,
     # never hand-read — pretty-printing only inflates the on-disk size.
     serialized = json.dumps(layout, separators=(",", ":"))
@@ -3094,6 +3106,7 @@ def put_project_members(
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_manage_membership(db, user, project):
         raise HTTPException(403, "You do not have permission to manage members on this project")
+    _enforce_project_lock(db, project, user)
 
     try:
         user_ids = [_uuid.UUID(str(uid)) for uid in body.user_ids]

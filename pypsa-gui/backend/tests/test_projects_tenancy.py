@@ -782,3 +782,74 @@ def test_save_as_copies_uploads_from_auth_storage(session_local):
     copied = project_registry.project_dir(copy_row) / "uploads" / "file-1" / "ref.csv"
     assert copied.exists(), "uploads/ was not copied from the source storage_path"
     assert copied.read_text() == "a,b\n1,2\n"
+
+
+# ── Task 5: lock enforcement at project write edges ───────────────────────────
+#
+# This file has no `client_a`/`client_b`/`shared_project` fixtures, so the
+# brief's sketches are adapted to the inline org/user/project construction
+# style already used above and in `test_project_locks.py`'s own Task 4
+# section — two org-admin users share one project (org-admin access means
+# neither the rename/delete permission check nor the save ACL check shadows
+# the lock check we're testing).
+
+
+def _seed_two_user_project(session_local, *, name="Shared"):
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name=name)
+    return org, user_a, user_b, project
+
+
+def test_save_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post(f"/api/projects/{project.name}")
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+
+def test_rename_and_delete_409_under_foreign_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+
+        rename = client_b.post(
+            f"/api/projects/{project.name}/rename", json={"new_name": "Taken"}
+        )
+        assert rename.status_code == 409, rename.text
+        assert rename.json()["detail"]["error_kind"] == "project_locked"
+
+        delete = client_b.delete(f"/api/projects/{project.name}")
+        assert delete.status_code == 409, delete.text
+        assert delete.json()["detail"]["error_kind"] == "project_locked"
+
+
+def test_holder_still_saves_and_free_project_saves(session_local):
+    _org, user_a, _user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_a.post(f"/api/projects/{project.name}")
+        assert r.status_code in (200, 409), r.text
+        # 409 is only acceptable if some OTHER save gate (e.g. empty-network
+        # guard) fired — the lock itself must never be the reason the holder's
+        # own save is refused.
+        if r.status_code == 409:
+            assert r.json()["detail"].get("error_kind") != "project_locked"
+
+
+def test_enqueue_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post("/api/simulation/queue", json={"project_id": str(project.id)})
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
