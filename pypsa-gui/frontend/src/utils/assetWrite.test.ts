@@ -161,3 +161,43 @@ describe('updateAsset — the chokepoint (Task 3)', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 })
+
+describe('updateAsset with a patch BUILDER', () => {
+  const api = () => (globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it('hands the current row to the builder and spreads its return', async () => {
+    // The PropertiesPanel mappings need `current` for their fallbacks
+    // (nf(form, 'p_nom', current.p_nom)) — the builder form keeps that
+    // per-form knowledge at the call site while the chokepoint still owns
+    // fetch, spread, PUT and invalidation.
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [
+      { name: 'g1', p_nom: 100, marginal_cost: 50, carrier: 'gas' },
+    ])
+    api().updateGenerator.mockResolvedValue({})
+
+    await updateAsset(qc, 'p1', 'generators', 'g1',
+      (current) => ({ p_nom: (current.p_nom as number) * 2 }))
+
+    expect(api().updateGenerator).toHaveBeenCalledWith('g1', {
+      name: 'g1', p_nom: 200, marginal_cost: 50, carrier: 'gas',
+    })
+  })
+
+  it('builder + cold cache: fetches first, builder sees the FETCHED row', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    api().getLoads.mockResolvedValue([{ name: 'l1', p_set: 10, carrier: 'AC' }])
+    api().updateLoad.mockResolvedValue({})
+
+    await updateAsset(qc, 'p1', 'loads', 'l1',
+      (current) => ({ p_set: (current.p_set as number) + 5 }))
+
+    expect(api().updateLoad).toHaveBeenCalledWith('l1', {
+      name: 'l1', p_set: 15, carrier: 'AC',
+    })
+  })
+})

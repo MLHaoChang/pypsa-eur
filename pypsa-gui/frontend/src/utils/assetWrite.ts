@@ -134,12 +134,18 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   project: string | null,
   cls: WritableRoot,
   name: string,
+  // Either the patch itself, or a BUILDER given the current row — for
+  // mappings whose fallbacks need `current` (nf(form, 'p_nom',
+  // current.p_nom) in the PropertiesPanel cards). The builder keeps that
+  // per-form knowledge at the call site; the chokepoint still owns fetch,
+  // spread, PUT and invalidation either way.
+  //
   // NoInfer: without it TS infers T from the patch literal itself ({p_nom:1}
   // fails the name-constraint and collapses T to {name: string}, rejecting
   // every real field). T comes only from explicit annotation —
   // updateAsset<Generator>(...) for field-checked call sites — and defaults
   // to the open AssetRow for untyped ones.
-  patch: Partial<NoInfer<T>>,
+  patch: Partial<NoInfer<T>> | ((current: NoInfer<T>) => Partial<NoInfer<T>>),
 ): Promise<void> {
   const e = ENDPOINTS[cls]
   const rows = await qc.ensureQueryData({
@@ -150,6 +156,9 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   if (!current) {
     throw new Error(`${cls}/${name} not found in the current network`)
   }
-  await e.put(name, { ...current, ...patch })
+  // The rows really are T (getGenerators returns Generator[]); the table
+  // widened them to AssetRow at its seam, so narrow back at this one.
+  const resolved = typeof patch === 'function' ? patch(current as unknown as T) : patch
+  await e.put(name, { ...current, ...resolved })
   invalidateAssetQueries(qc, project)
 }
