@@ -8,10 +8,13 @@ Phase 1 (shipped, in chat_tools.py) — tool registry + dispatcher.
 
 Phase 2 (this file) — session lifecycle, SSE protocol, confirmation card
 machinery, M7 parallel-destructive rejection, F10 solver-bridge with
-try/finally unsubscribe, M8 abort-on-disconnect. Anthropic SDK is STILL
-NOT imported — the agent loop is stubbed (`agent_loop_stub`) so the SSE
+try/finally unsubscribe, M8 abort-on-disconnect. The Anthropic SDK is no
+longer imported here at all — `run_turn` drives an `LLMProvider` (the seam
+in `services/llm_provider.py`; `services/llm_anthropic.py` is the real
+implementation, `services/llm_fake.py` a scripted test double), so the SSE
 protocol + confirmation lifecycle + solver bridge + rotation lock discipline
-can be exercised end-to-end by Phase 2 tests without an LLM call.
+can be exercised end-to-end by Phase 2 tests without an LLM call, and by
+Phase 3+ tests with a `FakeProvider` instead of a live API key.
 
 Key Phase 2 invariants enforced here:
   * F13 — confirmation tokens: server-stamped, single-use, 5-min TTL. Expired
@@ -1388,10 +1391,19 @@ _redact_for_log = redact_for_log  # moved 2026-08-13 (provider seam, Task 1)
 
 from services.llm_anthropic import (  # moved 2026-08-13 (provider seam)
     build_client as _build_anthropic_client,
-    map_sdk_exception as _map_sdk_exception,
-    serialise_block as _serialise_for_anthropic,
-    with_history_cache_breakpoint as _with_history_cache_breakpoint,
+    # Task 5: no longer called from this module (translation now lives in
+    # AnthropicProvider.stream) — these three aliases are kept as a
+    # backward-compat re-export surface for test_chat_thinking_blocks.py
+    # (calls `_map_sdk_exception` directly) and
+    # test_chat_service_seam_aliases_point_at_llm_anthropic.
+    map_sdk_exception as _map_sdk_exception,  # noqa: F401
+    serialise_block as _serialise_for_anthropic,  # noqa: F401
+    with_history_cache_breakpoint as _with_history_cache_breakpoint,  # noqa: F401
 )
+# Module attributes (not just names) so tests can monkeypatch
+# `llm_anthropic.build_client` / `llm_anthropic.AnthropicProvider` and have
+# the seam pick up the patched version (Task 5, 2026-08-13).
+from services import llm_anthropic, llm_provider
 
 
 def _tools_payload() -> list[dict[str, Any]]:
@@ -1694,6 +1706,7 @@ def run_turn(
     message: str,
     *,
     client: Any | None = None,
+    provider: Any | None = None,
     message_history: list[dict[str, Any]] | None = None,
     attachment_file_ids: list[str] | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1724,7 +1737,10 @@ def run_turn(
         `session.usage_acc["output_tokens"]` before each new turn.
 
     `client` is injected for tests; in production callers omit it and we
-    build one via `_build_anthropic_client()`.
+    build one via `_build_anthropic_client()`. `provider` (an `LLMProvider`,
+    e.g. `FakeProvider`) wins over `client` when both are given — it is the
+    seam Task 7's harness drives; production callers omit it too and we wrap
+    the built/injected `client` in `AnthropicProvider`.
 
     Concurrency (#19): guards against TWO concurrent `run_turn` invocations on
     ONE ChatSession (e.g. two browser tabs sharing a session_id — their
@@ -1772,6 +1788,7 @@ def run_turn(
             session,
             message,
             client=client,
+            provider=provider,
             message_history=message_history,
             attachment_file_ids=attachment_file_ids,
         )
@@ -1786,6 +1803,7 @@ def _run_turn_body(
     message: str,
     *,
     client: Any | None = None,
+    provider: Any | None = None,
     message_history: list[dict[str, Any]] | None = None,
     attachment_file_ids: list[str] | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1851,19 +1869,24 @@ def _run_turn_body(
             }
             return
 
-    if client is None:
-        client, err = _build_anthropic_client()
+    if provider is None:
         if client is None:
-            _metric_error(err or "internal_error")
-            yield "error", {
-                "error_kind": err or "internal_error",
-                "message": (
-                    "Anthropic client unavailable — chat is disabled until "
-                    "ANTHROPIC_API_KEY is set and the SDK is installed."
-                ),
-            }
-            yield "session_done", {"reason": "no_client"}
-            return
+            client, err = _build_anthropic_client()
+            if client is None:
+                _metric_error(err or "internal_error")
+                yield "error", {
+                    "error_kind": err or "internal_error",
+                    "message": (
+                        "Anthropic client unavailable — chat is disabled until "
+                        "ANTHROPIC_API_KEY is set and the SDK is installed."
+                    ),
+                }
+                yield "session_done", {"reason": "no_client"}
+                return
+        # Module attribute (not the imported name) so a test that
+        # monkeypatches `llm_anthropic.AnthropicProvider` sees its double
+        # here too.
+        provider = llm_anthropic.AnthropicProvider(client)
 
     yield "session_init", {
         "session_id": session.session_id,
@@ -2022,28 +2045,36 @@ def _run_turn_body(
         # $0.30/MTOK vs raw input at $3/MTOK. The first turn pays a small
         # cache-write premium ($3.75/MTOK on the cached blocks), then every
         # following turn on the SAME session benefits. `ephemeral` cache TTL is
-        # 5 min on Anthropic's side. Built once — identical across retries.
+        # 5 min on Anthropic's side. The `stable` markers below are the
+        # neutral seam vocabulary for this; the translation to `cache_control`
+        # happens in llm_anthropic, not here. Built once — identical across
+        # retries.
         system_blocks = [{
             "type": "text",
             "text": system_prompt,
-            "cache_control": {"type": "ephemeral"},
+            "stable": True,
         }]
-        tools_with_cache = list(tools)
-        if tools_with_cache:
-            # Mark the LAST tool as a cache breakpoint — Anthropic caches
-            # everything up to and including this marker.
-            tools_with_cache[-1] = {
-                **tools_with_cache[-1],
-                "cache_control": {"type": "ephemeral"},
-            }
+        # request carries the SAME `messages` list this loop appends to below
+        # (tool_result / assistant replays), so rebuilding it fresh every
+        # outer-loop pass is what makes those appends visible to the next
+        # provider call.
+        request = llm_provider.LLMRequest(
+            model=session.model,
+            max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
+            system_blocks=system_blocks,
+            tools=tools,
+            tools_stable=True,
+            messages=messages,
+            history_stable_anchor=history_cache_anchor,
+        )
 
-        # Inner retry loop. A transient SDK failure (rate-limit / Anthropic
-        # overload) BEFORE any token is emitted on this attempt is retried with
-        # capped exponential backoff. Once a token has been yielded to the
-        # client, retry is UNSAFE (it would duplicate already-streamed output),
-        # so we surface the error instead. The loop always either breaks (the
-        # stream completed) or returns (terminal/exhausted error).
-        final_message = None
+        # Inner retry loop. A transient provider failure (rate-limit /
+        # upstream overload) BEFORE any token is emitted on this attempt is
+        # retried with capped exponential backoff. Once a token has been
+        # yielded to the client, retry is UNSAFE (it would duplicate
+        # already-streamed output), so we surface the error instead. The loop
+        # always either breaks (the stream completed) or returns
+        # (terminal/exhausted error).
         # A8 — at most one Opus→Sonnet downgrade after rate_limited retries
         # are exhausted (public cost/availability escape hatch).
         model_fallback_used = False
@@ -2053,60 +2084,46 @@ def _run_turn_body(
         max_attempts = MAX_STREAM_RETRIES + 1
         while attempt < max_attempts:
             emitted_this_attempt = False
-            # Drain the streaming events purely for their SSE side-effects
+            final_blocks: list[dict[str, Any]] = []
+            final_usage: dict[str, int] = {}
+            # Drain the streamed events purely for their SSE side-effects
             # (token / thinking / tool_preparing frames). The blocks that get
-            # replayed to the SDK next turn are read from
-            # `stream.get_final_message()` below, NOT accumulated here — an
-            # earlier `pending_blocks` list did accumulate them and was never
-            # read by anything, while a comment claimed it was the replay
-            # source. A comment asserting a fact the code does not have is
-            # what let the original thinking-block bug hide.
+            # replayed to the provider next turn are read from the
+            # `message_done` event below, NOT accumulated here — an earlier
+            # `pending_blocks` list did accumulate them and was never read by
+            # anything, while a comment claimed it was the replay source. A
+            # comment asserting a fact the code does not have is what let the
+            # original thinking-block bug hide.
             try:
-                with client.messages.stream(
-                    model=session.model,
-                    max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
-                    system=system_blocks,
-                    tools=tools_with_cache,
-                    messages=_with_history_cache_breakpoint(
-                        messages, history_cache_anchor
-                    ),
-                ) as stream:
-                    for event in stream:
-                        if session.abort_event.is_set():
-                            yield "session_done", {"reason": "aborted"}
-                            return
-                        etype = getattr(event, "type", None)
-                        if etype == "text":
-                            emitted_this_attempt = True
-                            yield "token", {"delta": getattr(event, "text", "") or ""}
-                        elif etype == "thinking":
-                            emitted_this_attempt = True
-                            yield "thinking", {
-                                "delta": getattr(event, "thinking", "") or "",
-                            }
-                        # Tool-arg streaming is silent on `token` — without a
-                        # signal the UI looks frozen after "I'll create them…".
-                        # Emit as soon as the model opens a tool_use block.
-                        elif etype == "content_block_start":
-                            block = getattr(event, "content_block", None)
-                            btype = getattr(block, "type", None) if block else None
-                            if btype == "tool_use":
-                                emitted_this_attempt = True
-                                yield "tool_preparing", {
-                                    "tool_use_id": getattr(block, "id", "") or "",
-                                    "tool_name": getattr(block, "name", "") or "",
-                                }
-                        # NOTE: `content_block_stop` is deliberately NOT
-                        # handled. It carries the finished block, but the SDK
-                        # also hands us every block on get_final_message(),
-                        # which is what we replay — handling it here as well
-                        # only re-serialised the same blocks into a list
-                        # nothing read.
-
-                    final_message = stream.get_final_message()
+                request.model = session.model  # A8 fallback re-read per attempt
+                for ev in provider.stream(request):
+                    if session.abort_event.is_set():
+                        yield "session_done", {"reason": "aborted"}
+                        return
+                    if ev.type == "text_delta":
+                        emitted_this_attempt = True
+                        yield "token", {"delta": ev.text}
+                    elif ev.type == "thinking_delta":
+                        emitted_this_attempt = True
+                        yield "thinking", {"delta": ev.text}
+                    # Tool-arg streaming is silent on `token` — without a
+                    # signal the UI looks frozen after "I'll create them…".
+                    # Emit as soon as the model opens a tool_use block.
+                    elif ev.type == "tool_use_start":
+                        emitted_this_attempt = True
+                        yield "tool_preparing", {
+                            "tool_use_id": ev.tool_use_id,
+                            "tool_name": ev.tool_name,
+                        }
+                    elif ev.type == "message_done":
+                        final_blocks = ev.blocks
+                        final_usage = ev.usage
+                    # "ping": abort-check only, no frame — every other
+                    # upstream event surfaces here so the per-event abort
+                    # check above keeps its latency.
                 break  # stream completed — leave the retry loop
-            except Exception as exc:  # noqa: BLE001 — SDK error → typed frame
-                error_kind, msg = _map_sdk_exception(exc)
+            except llm_provider.ProviderError as exc:
+                error_kind, msg = exc.kind, exc.message
                 retriable = (
                     error_kind in _RETRYABLE_SDK_KINDS
                     and not emitted_this_attempt
@@ -2170,38 +2187,29 @@ def _run_turn_body(
                 yield "session_done", {"reason": error_kind}
                 return
 
-        usage = getattr(final_message, "usage", None)
-        if usage is not None:
-            in_tok = int(getattr(usage, "input_tokens", 0) or 0)
-            out_tok = int(getattr(usage, "output_tokens", 0) or 0)
+        if final_usage:
             session.accrue_usage(
-                input_tokens=in_tok,
-                output_tokens=out_tok,
-                cache_read_tokens=int(
-                    getattr(usage, "cache_read_input_tokens", 0) or 0
-                ),
-                cache_create_tokens=int(
-                    getattr(usage, "cache_creation_input_tokens", 0) or 0
-                ),
+                input_tokens=final_usage.get("input_tokens", 0),
+                output_tokens=final_usage.get("output_tokens", 0),
+                cache_read_tokens=final_usage.get("cache_read_tokens", 0),
+                cache_create_tokens=final_usage.get("cache_create_tokens", 0),
             )
             # #20 — process-lifetime cumulative tokens for GET /metrics.
-            _metric_add_tokens(in_tok, out_tok)
+            _metric_add_tokens(final_usage.get("input_tokens", 0),
+                               final_usage.get("output_tokens", 0))
 
-        # The SDK's assembled final message is the ONLY source of the blocks
-        # we replay. Serialise them and add the assistant turn to both the
-        # outbound array and the session history for the next iteration.
-        assistant_blocks = [
-            _serialise_for_anthropic(b)
-            for b in getattr(final_message, "content", []) or []
-        ]
+        # The provider's `message_done` event is the ONLY source of the
+        # blocks we replay — already serialised by the provider. Add the
+        # assistant turn to both the outbound array and the session history
+        # for the next iteration.
+        assistant_blocks = final_blocks
         # One rule for both arrays: a turn with no blocks the API accepts is
-        # not replayed at all. `final_message.content` comes back EMPTY on a
-        # refused or aborted generation, and `{"role": "assistant",
-        # "content": []}` is a 400 on the next call. Skipping cannot orphan a
-        # tool_result: tool_use blocks are never dropped by the sanitiser, so
-        # a turn that is empty here had no tool_use, and `tool_uses` below is
-        # therefore empty too — the turn ends without any tool_result being
-        # appended.
+        # not replayed at all. `final_blocks` comes back EMPTY on a refused
+        # or aborted generation, and `{"role": "assistant", "content": []}`
+        # is a 400 on the next call. Skipping cannot orphan a tool_result:
+        # tool_use blocks are never dropped by the sanitiser, so a turn that
+        # is empty here had no tool_use, and `tool_uses` below is therefore
+        # empty too — the turn ends without any tool_result being appended.
         assistant_msg = _sanitise_history_message(
             {"role": "assistant", "content": assistant_blocks}
         )

@@ -184,3 +184,33 @@ def test_chat_service_seam_aliases_point_at_llm_anthropic():
     assert chat_service._serialise_for_anthropic is llm_anthropic.serialise_block
     assert (chat_service._with_history_cache_breakpoint
             is llm_anthropic.with_history_cache_breakpoint)
+
+
+def test_run_turn_accepts_a_provider_and_emits_identical_frames():
+    from services import chat_service
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    fake = FakeProvider([
+        {"events": [LLMEvent(type="text_delta", text="he"),
+                    LLMEvent(type="text_delta", text="llo")],
+         "blocks": [{"type": "text", "text": "hello"}],
+         "usage": {"input_tokens": 5, "output_tokens": 2}},
+    ])
+    events = list(chat_service.run_turn(session, "hi", provider=fake))
+    names = [n for n, _ in events]
+    assert names[0] == "session_init"
+    assert names.count("token") == 2
+    # A successful turn with no further tool_use ends at `turn_done` — no
+    # trailing `session_done` (pinned by test_chat_e2e.py: event_names[-1]
+    # == "turn_done" for the identical no-more-tools scenario). The brief's
+    # Step 1 snippet asserted names[-1] == "session_done"; corrected here to
+    # match that pinned invariant rather than changing run_turn's behaviour.
+    assert ("turn_done" in names) and (names[-1] == "turn_done")
+    # the request carried the stable annotations (cache-cost guard)
+    req = fake.requests[0]
+    assert req.system_blocks[-1]["stable"] is True
+    assert req.tools_stable is True
+    assert req.max_tokens == chat_service.MAX_OUTPUT_TOKENS_PER_TURN
+    assert len(req.tools) == 117
