@@ -173,11 +173,21 @@ describe('branching the active project captures what is on screen', () => {
 })
 
 describe('deleting a project that still has children', () => {
-  it('asks in words, naming the children', async () => {
-    // The backend refuses with a STRUCTURED detail; the panel interpolated
-    // that object into a template literal and asked the user to confirm
-    // "[object Object] — delete it and all its child scenarios?".
-    vi.mocked(projectsApi.delete).mockRejectedValue({
+  it('does not delete until the dialog is confirmed', async () => {
+    renderPanel()
+    const row = await rowFor('base')
+    await userEvent.click(within(row).getByTitle('Delete this scenario'))
+    expect(vi.mocked(projectsApi.delete)).not.toHaveBeenCalled()
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(vi.mocked(projectsApi.delete)).toHaveBeenCalledWith('id-base', false))
+  })
+
+  it('shows descendants in the same dialog on 409 and retries with cascade', async () => {
+    // The backend refuses with a STRUCTURED detail; the panel used to
+    // interpolate that object into a template literal and ask the user to
+    // confirm "[object Object] — delete it and all its child scenarios?".
+    vi.mocked(projectsApi.delete).mockRejectedValueOnce({
       response: {
         status: 409,
         data: { detail: { error_kind: 'descendants_exist', message: 'Pass ?cascade=true …', descendants: ['variant'] } },
@@ -186,24 +196,15 @@ describe('deleting a project that still has children', () => {
     renderPanel()
     const row = await rowFor('base')
     await userEvent.click(within(row).getByTitle('Delete this scenario'))
-    await waitFor(() => expect(vi.mocked(confirmToast)).toHaveBeenCalled())
-    const prompt = vi.mocked(confirmToast).mock.calls[0][0]
-    expect(prompt).not.toContain('[object Object]')
-    expect(prompt).toContain('variant')
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    // 409 → dialog re-opens with the descendant list, never a toast.
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/variant/)).toBeTruthy()
     // The backend's own message ends with an API instruction. Never shown.
-    expect(prompt).not.toContain('cascade=true')
-  })
-
-  it('retries with cascade when the user confirms', async () => {
-    vi.mocked(projectsApi.delete).mockRejectedValueOnce({
-      response: { status: 409, data: { detail: { descendants: ['variant'] } } },
-    })
-    renderPanel()
-    const row = await rowFor('base')
-    await userEvent.click(within(row).getByTitle('Delete this scenario'))
-    await waitFor(() => expect(vi.mocked(confirmToast)).toHaveBeenCalled())
+    expect(within(dialog).queryByText(/cascade=true/)).toBeNull()
+    expect(vi.mocked(confirmToast)).not.toHaveBeenCalled()
     vi.mocked(projectsApi.delete).mockResolvedValue({ deleted: ['base', 'variant'], failed: [] } as never)
-    await vi.mocked(confirmToast).mock.calls[0][1]()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete all' }))
     await waitFor(() => expect(vi.mocked(projectsApi.delete)).toHaveBeenCalledWith('id-base', true))
   })
 })
