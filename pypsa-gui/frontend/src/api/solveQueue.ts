@@ -64,8 +64,13 @@ export interface ResultsBundle {
 
 export const solveQueueApi = {
   list: () => client.get<QueueList>('/simulation/queue').then(r => r.data),
+  // `already_queued: true` means the server returned the EXISTING job for an
+  // idempotent re-enqueue (200, not 409 — routers/solve_queue.py) and created
+  // nothing. Callers must not report "queued" for that case.
   enqueue: (projectId: string) =>
-    client.post<SolveJob>('/simulation/queue', { project_id: projectId }).then(r => r.data),
+    client.post<SolveJob & { already_queued: boolean }>(
+      '/simulation/queue', { project_id: projectId },
+    ).then(r => r.data),
   abort: (jobId: string) =>
     client.post<SolveJob>(`/simulation/queue/${jobId}/abort`).then(r => r.data),
   clearFinished: () =>

@@ -36,9 +36,15 @@ describe('terminalTransitions', () => {
     expect(terminalTransitions(prev, [job('1', 'alpha', 'completed')])).toEqual([])
   })
 
-  it('reports nothing for a job seen for the first time', () => {
-    // A first poll must not invalidate the whole history of finished jobs.
-    expect(terminalTransitions(new Map(), [job('1', 'alpha', 'completed')])).toEqual([])
+  it('reports a job first seen already terminal — the between-polls case', () => {
+    // 2026-08-14 review: a job that appears ALREADY terminal (queued and
+    // finished between two polls, or enqueued from another tab/the chat while
+    // this client's poll was idle) must invalidate its project — skipping it
+    // left the user reading pre-solve results for a re-solved project. The
+    // first-poll "don't invalidate all history" property moved to the HOOK,
+    // which seeds its baseline before ever calling this function.
+    expect(terminalTransitions(new Map(), [job('1', 'alpha', 'completed')]))
+      .toEqual(['alpha'])
   })
 
   it('touches only the finishing job\'s project, not every project in the list', () => {

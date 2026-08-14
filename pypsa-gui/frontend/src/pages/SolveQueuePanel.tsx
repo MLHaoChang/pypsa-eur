@@ -23,6 +23,11 @@ const STATUS_META: Record<SolveJobStatus, { label: string; cls: string; Icon: ty
   interrupted: { label: 'Interrupted', cls: 'text-slate-500 bg-slate-500/10 border-slate-500/30', Icon: PlugZap },
 }
 
+// Live-log buffer bound — matches store/simulationStore.ts's cap for the
+// foreground solver log. The backend retains up to 5000 lines per job; the
+// panel only ever needs the visible tail.
+const LIVE_LOG_CAP = 2000
+
 function fmtObjective(v: number | null): string {
   if (v == null || !isFinite(v)) return '—'
   const abs = Math.abs(v)
@@ -33,7 +38,12 @@ function fmtObjective(v: number | null): string {
 }
 
 function StatusBadge({ status }: { status: SolveJobStatus }) {
+  // A status outside the known six (a newer backend writer, a legacy row)
+  // must degrade to a neutral badge showing the raw string — `db/models.py`
+  // keeps `solve_jobs.status` a plain string for exactly this reason, and an
+  // unguarded `STATUS_META[status]` here crashed the WHOLE panel, every row.
   const m = STATUS_META[status]
+    ?? { label: status, cls: 'text-muted bg-panel border-border', Icon: Clock }
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${m.cls}`}>
       <m.Icon size={11} className={status === 'running' ? 'animate-spin' : ''} />
@@ -214,7 +224,15 @@ function JobLogPanel({ jobId, live }: { jobId: string; live: boolean }) {
       // a stale "connection lost" message sitting on top of live data that is
       // actually accumulating fine behind it.
       setError(null)
-      setLines(prev => [...prev, e.data])
+      // Bounded like the other live-log consumer (store/simulationStore.ts,
+      // 2000): the stream replays up to 5000 buffered lines on expand and a
+      // chatty solver keeps appending — uncapped, the array copy plus the
+      // join-per-render below is O(n²) for the life of the solve.
+      setLines(prev => (
+        prev.length >= LIVE_LOG_CAP
+          ? [...prev.slice(prev.length - LIVE_LOG_CAP + 1), e.data]
+          : [...prev, e.data]
+      ))
     }
     es.addEventListener('done', () => { doneReceived = true; es.close() })
     es.onerror = () => {
@@ -260,14 +278,21 @@ function JobLogPanel({ jobId, live }: { jobId: string; live: boolean }) {
     return () => { cancelled = true; es.close() }
   }, [jobId, live])
 
-  if (error) return <div className="px-3 py-2 text-[11px] text-danger">{error}</div>
-  if (lines.length === 0) {
-    return <div className="px-3 py-2 text-[11px] text-muted">No log lines for this job.</div>
-  }
+  // The banner sits ABOVE the lines, never in place of them — a stream dying
+  // past the reconnect budget used to swap the whole view for the banner,
+  // hiding every line already received until the job went terminal and the
+  // retained log was refetched (2026-08-14 review).
   return (
-    <pre className="px-3 py-2 max-h-56 overflow-auto text-[10px] leading-snug font-mono text-muted bg-bg-2/40 border-t border-border whitespace-pre-wrap">
-      {lines.join('\n')}
-    </pre>
+    <>
+      {error && <div className="px-3 py-2 text-[11px] text-danger">{error}</div>}
+      {lines.length === 0 ? (
+        <div className="px-3 py-2 text-[11px] text-muted">No log lines for this job.</div>
+      ) : (
+        <pre className="px-3 py-2 max-h-56 overflow-auto text-[10px] leading-snug font-mono text-muted bg-bg-2/40 border-t border-border whitespace-pre-wrap">
+          {lines.join('\n')}
+        </pre>
+      )}
+    </>
   )
 }
 
@@ -374,8 +399,15 @@ export default function SolveQueuePanel() {
         await projectsApi.save(name, false, false, name)
         markProjectSaved(name)
       }
-      await enqueue.mutateAsync(name)
-      toast.success(`Queued '${name}' to solve`)
+      const res = await enqueue.mutateAsync(name)
+      // Idempotent 200: the server returned the EXISTING job and created
+      // nothing (already_queued, routers/solve_queue.py). Claiming "Queued"
+      // here would misreport a no-op as a new job.
+      if (res?.already_queued) {
+        toast.success(`'${name}' is already in the queue — kept its existing job`)
+      } else {
+        toast.success(`Queued '${name}' to solve`)
+      }
     } catch (e) {
       const resp = (e as { response?: { status?: number; data?: { detail?: string } } })?.response
       const detail = resp?.data?.detail
@@ -393,7 +425,21 @@ export default function SolveQueuePanel() {
 
   const onAbort = (id: string) => {
     abortJob.mutate(id, {
-      onError: (e) => toast.error(`Abort failed: ${(e as Error)?.message ?? e}`),
+      onError: (e) => {
+        const resp = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+        if (resp?.status === 404) {
+          // The deliberate existence-oracle 404: a redacted row's abort is
+          // indistinguishable from a bad id server-side. Raw axios text
+          // ("Request failed with status code 404") explains nothing; say
+          // what actually happened. The X stays rendered on redacted rows on
+          // purpose — a job orphaned by a project delete is redacted AND
+          // abortable by its own org (`_may_abort`'s carve-out).
+          toast.error("Couldn't abort — this job is not visible to your account.")
+          return
+        }
+        const detail = typeof resp?.data?.detail === 'string' ? resp.data.detail : null
+        toast.error(`Abort failed: ${detail ?? (e as Error)?.message ?? e}`)
+      },
     })
   }
 
@@ -425,7 +471,15 @@ export default function SolveQueuePanel() {
             Queue current project
           </button>
           <button
-            onClick={() => clearFinished.mutate()}
+            onClick={() => clearFinished.mutate(undefined, {
+              // Without this, a failed clear (a 403 for a super-admin revoked
+              // since page load, a network error) did nothing visible at all.
+              onError: (e) => {
+                const resp = (e as { response?: { data?: { detail?: unknown } } })?.response
+                const detail = typeof resp?.data?.detail === 'string' ? resp.data.detail : null
+                toast.error(`Could not clear finished jobs: ${detail ?? (e as Error)?.message ?? e}`)
+              },
+            })}
             disabled={!canClearFinished || finishedCount === 0 || clearFinished.isPending}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-border text-muted hover:text-text hover:bg-panel disabled:opacity-40 transition-colors"
             title={canClearFinished

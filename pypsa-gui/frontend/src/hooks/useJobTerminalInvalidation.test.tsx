@@ -77,9 +77,35 @@ describe('useJobTerminalInvalidation wiring', () => {
     expect(spy).toHaveBeenCalledWith({ queryKey: nk('alpha', 'results') })
     expect(spy).toHaveBeenCalledWith({ queryKey: nk('alpha', 'simulationStatus') })
     expect(spy).toHaveBeenCalledWith({ queryKey: nk('alpha', 'meta') })
-    expect(spy).toHaveBeenCalledTimes(3)
+    // 2026-08-14 review: the queue row's results preview caches under
+    // `['resultsBundle', name, source]` — without this fourth key, expanding
+    // a re-solved row within `staleTime` served the PREVIOUS solve's numbers.
+    expect(spy).toHaveBeenCalledWith({ queryKey: nk('alpha', 'resultsBundle') })
+    expect(spy).toHaveBeenCalledTimes(4)
     // 'beta' stayed queued the whole time — must not be touched.
     expect(spy).not.toHaveBeenCalledWith({ queryKey: nk('beta', 'results') })
+  })
+
+  it('invalidates a job first seen ALREADY terminal after the baseline', () => {
+    // 2026-08-14 review: polling stops while the queue is idle, so a solve
+    // queued from another tab (or the chat agent) can appear for the first
+    // time already `completed`. The old `before === undefined → skip` ate
+    // that transition and the user kept reading pre-solve results. Only the
+    // FIRST data (the baseline) may skip — a NEW id appearing later is an
+    // event.
+    const client = makeClient()
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    setJobs([job('1', 'alpha', 'running')])
+    const { rerender } = renderHook(() => useJobTerminalInvalidation(), { wrapper: wrapper(client) })
+    expect(spy).not.toHaveBeenCalled()
+
+    setJobs([job('1', 'alpha', 'running'), job('9', 'gamma', 'completed')])
+    rerender()
+
+    expect(spy).toHaveBeenCalledWith({ queryKey: nk('gamma', 'results') })
+    expect(spy).toHaveBeenCalledWith({ queryKey: nk('gamma', 'resultsBundle') })
+    // alpha did not transition — untouched.
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: nk('alpha', 'results') })
   })
 
   it('does not invalidate again on a later render where the job is STILL terminal (prevRef threading)', () => {
@@ -93,7 +119,7 @@ describe('useJobTerminalInvalidation wiring', () => {
 
     setJobs([job('1', 'alpha', 'completed')])
     rerender()
-    expect(spy).toHaveBeenCalledTimes(3)
+    expect(spy).toHaveBeenCalledTimes(4)
 
     spy.mockClear()
     // A later poll response with a fresh array reference but the SAME status
