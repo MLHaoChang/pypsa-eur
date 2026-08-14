@@ -333,3 +333,90 @@ def test_logout_releases_all_project_locks(session_local):
         ).all()
 
     assert held_after == []
+
+
+# ── Task 4: _enforce_project_lock (write-edge lock-enforcement helper) ─────
+#
+# Fixtures here mirror this file's own construction style (session_local +
+# _create_org/_create_user/_add_membership/_create_project) rather than the
+# `db`/`user_a`/`project_row` fixture names sketched in the task brief, since
+# this file has no such fixtures and the brief says to borrow the inline
+# construction style used elsewhere instead of adding a conftest.
+
+
+def test_enforce_allows_free_and_makes_caller_holder(session_local):
+    from routers.projects import _enforce_project_lock
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        db_project = db.get(Project, project.id)
+        _enforce_project_lock(db, db_project, user_a)  # no raise
+        lock = project_locks.get_lock(db, project.id)
+        assert lock is not None and lock.holder_user_id == user_a.id
+
+
+def test_enforce_409_when_foreign_holder(session_local):
+    from fastapi import HTTPException
+
+    from routers.projects import _enforce_project_lock
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        db_project = db.get(Project, project.id)
+        with pytest.raises(HTTPException) as exc:
+            _enforce_project_lock(db, db_project, user_a)
+        assert exc.value.status_code == 409
+        assert exc.value.detail["error_kind"] == "project_locked"
+        assert "lock" in exc.value.detail
+
+
+def test_enforce_reacquires_after_expiry(session_local):
+    from routers.projects import _enforce_project_lock
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        project_locks.acquire_lock(db, project.id, user_b.id)
+        row = db.get(ProjectLock, project.id)
+        row.expires_at = datetime.now(tz=timezone.utc) - timedelta(seconds=1)
+        db.commit()
+        db_project = db.get(Project, project.id)
+        _enforce_project_lock(db, db_project, user_a)  # expired lock pruned, A takes over
+        assert project_locks.get_lock(db, project.id).holder_user_id == user_a.id
+
+
+def test_enforce_noops_in_local_mode(session_local, monkeypatch):
+    import routers.projects as projects_router
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        project_locks.acquire_lock(db, project.id, user_b.id)
+        db_project = db.get(Project, project.id)
+        monkeypatch.setattr(projects_router.local_mode, "is_local_mode", lambda: True)
+        projects_router._enforce_project_lock(db, db_project, user_a)  # no raise

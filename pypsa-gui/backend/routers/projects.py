@@ -661,6 +661,35 @@ def _serialize_project_lock(db: DBSession, project_id, user: User) -> dict[str, 
     }
 
 
+def _enforce_project_lock(db: DBSession, project, user) -> None:
+    """
+    Write-edge lock gate (design D3/D4). Called from HANDLER BODIES — never a
+    route decorator: chat's `_route` invokes handlers as plain functions, so a
+    decorator dependency would silently never run for chat-driven writes.
+
+    Auto-reacquire semantics: `acquire_lock` is idempotent for the current
+    holder and succeeds on a free slot, so a holder whose heartbeat lapsed
+    (laptop sleep) is re-armed by their next write instead of stranded. Only a
+    live lock held by a DIFFERENT user raises.
+    """
+    if local_mode.is_local_mode():
+        return
+    if project is None or user is None:
+        # First save creates the row after this point; nothing to lock yet.
+        return
+    from services import project_locks
+
+    if project_locks.acquire_lock(db, project.id, user.id) is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_locked",
+                "message": f"'{project.name}' is being edited by another user.",
+                "lock": _serialize_project_lock(db, project.id, user),
+            },
+        )
+
+
 @router.get("/")
 def list_projects(
     db: DBSession = Depends(get_db),
