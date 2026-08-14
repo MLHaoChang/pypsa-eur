@@ -26,6 +26,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
+# Kept in sync with `services/solve_queue._TERMINAL` by
+# `tests/test_solve_jobs_table.py` rather than imported: this module is the
+# ORM seam and deliberately imports nothing from the queue at module level.
+_TERMINAL = ("completed", "failed", "aborted", "interrupted")
+
 
 def _dt(epoch: float | None) -> datetime | None:
     """`SolveJob` timestamps are `time.time()` floats; the column is tz-aware."""
@@ -117,6 +122,16 @@ def record_status(job: Any) -> None:
             row = db.get(SolveJobRow, job.id)
             if row is None:
                 return
+            if row.status in _TERMINAL and job.status not in _TERMINAL:
+                # A terminal row never regresses to a live status. `abort()`
+                # mirrors a job it read as `running` OUTSIDE the queue's lock,
+                # so its commit can land AFTER the worker's terminal commit —
+                # unguarded, that stale mirror left a finished job's row at
+                # `running`, and the next boot flipped it to `interrupted`,
+                # discarding the objective it actually produced. Terminal →
+                # terminal stays allowed (a re-mirror of the same state is
+                # idempotent); a genuine re-run is a NEW row by design (R31).
+                return
             row.status = job.status
             row.objective = job.objective
             row.solve_time = job.solve_time
@@ -127,6 +142,46 @@ def record_status(job: Any) -> None:
             db.commit()
     except Exception:  # noqa: BLE001 — a bookkeeping failure must not fail a solve
         logger.exception("solve_job_store: could not update job %s", getattr(job, "id", None))
+
+
+def load_job(job_id: uuid.UUID) -> dict | None:
+    """
+    One row by id, as the same plain dict shape `load_by_status` returns, or
+    None. Never raises — an unreadable table means "no such row", matching the
+    rest of this module.
+
+    Exists for the detail routes (`/log_history`, `/log_stream`, `/abort`):
+    the listing merges persisted-only TERMINAL rows in (Task 16a), so an id it
+    serves must also resolve when the caller clicks it — resolving through
+    `solve_queue.get_job` alone answered the existence-oracle 404 for every
+    `interrupted` job after a restart, indistinguishable from a bad id.
+    """
+    try:
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+
+        with SessionLocal() as db:
+            r = db.get(SolveJobRow, job_id)
+            if r is None:
+                return None
+            return {
+                "id": r.id,
+                "project_id": r.project_id,
+                "project_key": r.project_key,
+                "storage_dir": r.storage_dir,
+                "status": r.status,
+                "solver_config": r.solver_config,
+                "objective": r.objective,
+                "solve_time": r.solve_time,
+                "condition": r.condition,
+                "error": r.error,
+                "enqueued_at": r.enqueued_at,
+                "started_at": r.started_at,
+                "finished_at": r.finished_at,
+            }
+    except Exception:  # noqa: BLE001 — an unreadable table means "no such row"
+        logger.exception("solve_job_store: could not load job %s", job_id)
+        return None
 
 
 def load_by_status(statuses: tuple[str, ...], *, limit: int | None = None) -> list[dict]:

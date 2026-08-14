@@ -356,3 +356,66 @@ def test_persisted_and_live_jobs_are_merged_in_chronological_order(
         assert ids == [first["id"], second["id"], third["id"]]
     finally:
         solve_queue.reset_for_tests()
+
+
+# ── listing-visible ids must resolve on the detail routes too ────────────────
+
+
+def _interrupted_after_restart(client, install_network, name: str) -> dict:
+    """A job left `running`, restarted, reconciled to `interrupted` — the
+    canonical persisted-only job (never re-admitted to `_jobs`, R25)."""
+    job = _enqueue(client, install_network, name)
+    jid = uuid.UUID(str(job["id"]))
+    with solve_queue._lock:
+        mem = solve_queue._jobs[jid]
+        mem.status = "running"
+        mem.started_at = time.time()
+    solve_job_store.record_status(solve_queue._jobs[jid])
+    _simulate_restart()
+    solve_job_store.reconcile_on_boot()
+    return job
+
+
+def test_a_persisted_only_jobs_log_history_is_not_a_404(
+    client, install_network, tmp_projects_dir,
+):
+    """
+    The listing serves this job (that is Task 16a's whole point), so clicking
+    it must not answer the byte-identical existence-oracle 404 — the caller
+    has no way to tell "no retained log" from "bad id". An interrupted job's
+    log died with the process; the honest answer is 200 with no lines and the
+    job's real status, exactly what the expand panel needs to render.
+    """
+    job = _interrupted_after_restart(client, install_network, "RestartedNoLog")
+    try:
+        assert solve_queue.get_job(uuid.UUID(str(job["id"]))) is None  # persisted-only
+        r = client.get(f"/api/simulation/queue/{job['id']}/log_history")
+        assert r.status_code == 200, (
+            f"listing-visible job 404s on its own log_history: {r.text}"
+        )
+        body = r.json()
+        assert body["status"] == "interrupted"
+        assert body["lines"] == []
+    finally:
+        solve_queue.reset_for_tests()
+
+
+def test_aborting_a_persisted_only_terminal_job_is_a_no_op_not_a_404(
+    client, install_network, tmp_projects_dir,
+):
+    """
+    Same boundary, destructive route. A persisted-only job is terminal by
+    construction (queued rows are re-admitted at boot, running rows become
+    interrupted), so there is nothing to stop — `abort()` on a terminal
+    in-memory job is already a documented no-op returning the job view, and
+    the persisted-only case must answer the same way rather than 404.
+    """
+    job = _interrupted_after_restart(client, install_network, "RestartedAbortMe")
+    try:
+        r = client.post(f"/api/simulation/queue/{job['id']}/abort")
+        assert r.status_code == 200, (
+            f"listing-visible job 404s on abort: {r.text}"
+        )
+        assert r.json()["status"] == "interrupted"
+    finally:
+        solve_queue.reset_for_tests()

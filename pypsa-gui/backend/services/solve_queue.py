@@ -207,6 +207,7 @@ class SolveQueue:
         project_key: str | None = None,
         storage_dir: str | None = None,
         solver_config_json: str | None = None,
+        enqueued_by_user_id: Any = None,
     ) -> tuple[SolveJob, bool]:
         """
         Enqueue `project_id` UNLESS it already has a queued or running job.
@@ -241,6 +242,20 @@ class SolveQueue:
 
         `enqueue` is deliberately left in place and unchanged in shape: it is
         the raw append the test harness uses to build queue states directly.
+
+        THE ROW IS INSERTED HERE TOO, BEFORE `self._q.put(jid)` — the same
+        happens-before the constructor argument establishes for the config,
+        applied to persistence. The route used to call `record_enqueued`
+        after this method returned, but `put` wakes the dispatcher: a job
+        that fails fast could go terminal before the route's INSERT
+        committed, both `record_status` mirrors no-oped on the missing row,
+        and the row then landed as `queued` — so boot reconciliation re-ran a
+        job that had already run and failed. Registration in `_jobs`/`_order`
+        (dedupe visibility) happens under `_lock`; the INSERT happens outside
+        it (`_lock` is never held across I/O); publication comes last, in a
+        `finally` so even a programming error out of `record_enqueued` (its
+        TypeErrors deliberately propagate) cannot strand a registered job
+        that would dedupe every future enqueue of its project.
         """
         with self._lock:
             existing = self._active_job_locked(project_id, project_key)
@@ -261,8 +276,18 @@ class SolveQueue:
             )
             self._jobs[jid] = job
             self._order.append(jid)
-            self._q.put(jid)
-            self._ensure_dispatcher_locked()
+        try:
+            from services import solve_job_store
+
+            solve_job_store.record_enqueued(
+                job,
+                enqueued_by_user_id=enqueued_by_user_id,
+                solver_config_json=solver_config_json,
+            )
+        finally:
+            with self._lock:
+                self._q.put(jid)
+                self._ensure_dispatcher_locked()
         logger.info("solve_queue: enqueued job %s for project %r", jid, project_id)
         return job, True
 

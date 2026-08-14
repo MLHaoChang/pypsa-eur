@@ -125,23 +125,22 @@ def enqueue_solve(
     # wrong: `enqueue_unique` discards it for an idempotent re-enqueue and the
     # existing job keeps the config IT was created with.
     snapshot = _config_snapshot_for(project_registry.registry_key(project), project_dir)
+    # `enqueued_by_user_id` stamps the ACTING user alongside the org-scoped
+    # directory this route already resolved. Keying per-user dismiss on project
+    # access instead would let two users sharing a project dismiss each other's
+    # rows — the exact thing per-user dismiss exists to prevent. The row INSERT
+    # itself happens INSIDE `enqueue_unique`, before the job is published to
+    # the dispatcher — inserting here, after it returned, left a window where a
+    # fast-failing job went terminal against a missing row and boot
+    # reconciliation re-ran it (see `enqueue_unique`'s docstring).
     job, created = solve_queue.enqueue_unique(
         project.name,
         project_key=project_registry.registry_key(project),
         storage_dir=str(project_dir),
         solver_config_json=snapshot,
+        enqueued_by_user_id=user.id,
     )
-    if created:
-        # Stamp the ACTING user alongside the org-scoped directory this route
-        # already resolved. Keying per-user dismiss on project access instead
-        # would let two users sharing a project dismiss each other's rows —
-        # the exact thing per-user dismiss exists to prevent.
-        from services import solve_job_store
-
-        solve_job_store.record_enqueued(
-            job, enqueued_by_user_id=user.id, solver_config_json=snapshot,
-        )
-    return {**solve_queue.get_job(job.id), "already_queued": not created}
+    return {**(solve_queue.get_job(job.id) or job.to_public(None)), "already_queued": not created}
 
 
 # ── Authorization helpers (P-1) ─────────────────────────────────────────────
@@ -299,7 +298,7 @@ def _visible_job_or_404(db: DBSession, user: User, job_id: str) -> dict:
     parsed = _parse_job_id(job_id)
     if parsed is None:
         raise not_found
-    job = solve_queue.get_job(parsed)
+    job = solve_queue.get_job(parsed) or _persisted_public_or_none(parsed)
     if job is None:
         raise not_found
     prefix = _org_prefix(db, user)
@@ -307,6 +306,22 @@ def _visible_job_or_404(db: DBSession, user: User, job_id: str) -> dict:
     if not _may_see(job, prefix, allowed):
         raise not_found
     return job
+
+
+def _persisted_public_or_none(parsed: uuid.UUID) -> dict | None:
+    """
+    A persisted-only job (its row survives, its `SolveJob` did not — every
+    `interrupted` job after a restart, by construction) in `to_public()`
+    shape, or None. The listing merges these rows in (Task 16a), so an id it
+    serves must ALSO resolve on the detail routes — resolving through
+    `solve_queue.get_job` alone answered the existence-oracle 404 for every
+    such job, indistinguishable from a bad id, with no way for the caller to
+    tell "no retained log" from "this job never existed".
+    """
+    from services import solve_job_store
+
+    row = solve_job_store.load_job(parsed)
+    return _persisted_job_public(row) if row is not None else None
 
 
 def _sse_line(text: object) -> str:
@@ -317,7 +332,7 @@ def _sse_line(text: object) -> str:
 
 def _done_event(job_id: uuid.UUID) -> str:
     """The `event: done` SSE frame carrying a job's current/terminal snapshot."""
-    job = solve_queue.get_job(job_id) or {}
+    job = solve_queue.get_job(job_id) or _persisted_public_or_none(job_id) or {}
     payload = json.dumps({
         "status": job.get("status"),
         "objective": job.get("objective"),
@@ -637,7 +652,17 @@ def abort_job(
     if parsed is None:
         raise not_found
     job = solve_queue.get_job(parsed)
-    if job is None or not _may_abort(db, user, job):
+    if job is None:
+        # Persisted-only: the row survived a restart, the `SolveJob` did not —
+        # terminal by construction (`queued` rows are re-admitted at boot,
+        # `running` rows become `interrupted`). Nothing to stop; answer the
+        # same authorized no-op an in-memory TERMINAL job gets from `abort()`
+        # rather than the existence-oracle 404 for an id the listing serves.
+        persisted = _persisted_public_or_none(parsed)
+        if persisted is None or not _may_abort(db, user, persisted):
+            raise not_found
+        return persisted
+    if not _may_abort(db, user, job):
         raise not_found
     res = solve_queue.abort(parsed)
     if res is None:
