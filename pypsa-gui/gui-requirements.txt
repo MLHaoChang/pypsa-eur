@@ -98,6 +98,14 @@ pypdf==6.14.2        # PDF page-count probe. Guarded, but the fallback returns
                      # "unknown", which lets a >100-page PDF through to the
                      # Anthropic 100-page cap as a 415 instead of a clean
                      # local truncation banner.
+httpx==0.28.1        # OpenAICompatProvider's chat-completions SSE
+                     # (`services/llm_openai_compat.py`), function-local
+                     # import but deliberately UNGUARDED: the design spec
+                     # rejects a guarded import here because it would pass
+                     # tests while every OpenAI-compatible provider was
+                     # silently dead in the shipped app — the worst failure
+                     # shape available. A missing httpx must fail the build,
+                     # not the user's chat.
 #
 # DELIBERATELY NOT PINNED — both are guarded AND their fallback is correct:
 #
