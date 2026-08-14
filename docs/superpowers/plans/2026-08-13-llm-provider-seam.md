@@ -746,7 +746,9 @@ def test_run_turn_accepts_a_provider_and_emits_identical_frames():
     names = [n for n, _ in events]
     assert names[0] == "session_init"
     assert names.count("token") == 2
-    assert ("turn_done" in names) and (names[-1] == "session_done")
+    # Successful turns END at turn_done — no trailing session_done
+    # (pinned by test_chat_e2e.py:213; corrected during execution).
+    assert names[-1] == "turn_done"
     # the request carried the stable annotations (cache-cost guard)
     req = fake.requests[0]
     assert req.system_blocks[-1]["stable"] is True
@@ -1312,7 +1314,8 @@ def test_seam_against_live_local_endpoint():
         model=os.environ.get("PYPSA_GUI_TEST_OLLAMA_MODEL", "qwen3:8b"))
     names = [n for n, _ in chat_service.run_turn(
         session, "Reply with the single word: ok", provider=provider)]
-    assert names[0] == "session_init" and names[-1] == "session_done"
+    # Successful turns end at turn_done (pinned by test_chat_e2e.py:213).
+    assert names[0] == "session_init" and names[-1] == "turn_done"
     assert "token" in names
 ```
 
