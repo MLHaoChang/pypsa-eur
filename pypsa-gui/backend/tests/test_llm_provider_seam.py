@@ -216,7 +216,12 @@ def test_run_turn_accepts_a_provider_and_emits_identical_frames():
     assert req.system_blocks[-1]["stable"] is True
     assert req.tools_stable is True
     assert req.max_tokens == chat_service.MAX_OUTPUT_TOKENS_PER_TURN
-    assert len(req.tools) == 117
+    # Against the registry, never a literal — chat_tools_schema's own doctrine
+    # is "len(TOOLS) is the only source of truth". A hardcoded 117 broke the
+    # first time this branch merged into a trunk whose other waves had grown
+    # the registry (to 120), with a green branch gate on both sides.
+    from services.chat_tools_schema import TOOLS
+    assert len(req.tools) == len(TOOLS)
 
 
 def _sse_bytes(*chunks):
