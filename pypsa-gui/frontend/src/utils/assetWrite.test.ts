@@ -6,8 +6,27 @@
  * blanket invalidation. The update() chokepoint itself arrives in Task 3
  * and grows FROM these — decision 1 of the 2026-08-14 grilling.
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
+
+// Mock the api client BEFORE assetWrite imports it. The factory parks the
+// mock object on globalThis because vi.mock hoists above every const in
+// this module scope (TDZ) — tests reach it through the `api()` helper.
+vi.mock('../api/network', () => {
+  const m = {
+    getBuses: vi.fn(), updateBus: vi.fn(),
+    getCarriers: vi.fn(), updateCarrier: vi.fn(),
+    getLines: vi.fn(), updateLine: vi.fn(),
+    getLinks: vi.fn(), updateLink: vi.fn(),
+    getGenerators: vi.fn(), updateGenerator: vi.fn(),
+    getStorageUnits: vi.fn(), updateStorageUnit: vi.fn(),
+    getStores: vi.fn(), updateStore: vi.fn(),
+    getLoads: vi.fn(), updateLoad: vi.fn(),
+    getTransformers: vi.fn(), updateTransformer: vi.fn(),
+  }
+  ;(globalThis as never as { __awMock: typeof m }).__awMock = m
+  return { networkApi: m }
+})
 
 import {
   COMPONENT_QUERY_ROOTS,
@@ -66,5 +85,79 @@ describe('invalidateAssetQueries', () => {
     const spy = vi.spyOn(qc, 'invalidateQueries')
     invalidateAssetQueries(qc, null)
     expect(spy).toHaveBeenCalledWith({ queryKey: nk(null, 'generators') })
+  })
+})
+
+describe('updateAsset — the chokepoint (Task 3)', () => {
+  // vi.mock is hoisted; the factory refs live on globalThis to dodge TDZ.
+  const api = () => (globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it('spreads the cached row under the patch — a partial PUT is unrepresentable', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [
+      { name: 'g1', p_nom: 100, marginal_cost: 50, carrier: 'gas' },
+    ])
+    api().updateGenerator.mockResolvedValue({})
+
+    await updateAsset(qc, 'p1', 'generators', 'g1', { p_nom: 120 })
+
+    expect(api().updateGenerator).toHaveBeenCalledWith('g1', {
+      name: 'g1', p_nom: 120, marginal_cost: 50, carrier: 'gas',
+    })
+  })
+
+  it('cold cache: fetches the list first, then spreads — no bare-fields path exists', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    api().getGenerators.mockResolvedValue([
+      { name: 'g1', p_nom: 100, marginal_cost: 50, carrier: 'gas' },
+    ])
+    api().updateGenerator.mockResolvedValue({})
+
+    await updateAsset(qc, 'p1', 'generators', 'g1', { marginal_cost: 60 })
+
+    expect(api().getGenerators).toHaveBeenCalled()
+    expect(api().updateGenerator).toHaveBeenCalledWith('g1', {
+      name: 'g1', p_nom: 100, marginal_cost: 60, carrier: 'gas',
+    })
+  })
+
+  it('real absence: throws and issues NO put', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [{ name: 'other', p_nom: 1 }])
+
+    await expect(
+      updateAsset(qc, 'p1', 'generators', 'ghost', { p_nom: 5 }),
+    ).rejects.toThrow(/ghost/)
+    expect(api().updateGenerator).not.toHaveBeenCalled()
+  })
+
+  it('invalidates the component families after the PUT', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    qc.setQueryData(nk('p1', 'buses'), [{ name: 'b1', v_nom: 380 }])
+    api().updateBus.mockResolvedValue({})
+
+    await updateAsset(qc, 'p1', 'buses', 'b1', { v_nom: 220 })
+
+    expect(spy).toHaveBeenCalledWith({ queryKey: nk('p1', 'buses') })
+  })
+
+  it('a failed PUT propagates and does NOT invalidate (state unchanged, cache still true)', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    qc.setQueryData(nk('p1', 'loads'), [{ name: 'l1', p_set: 10 }])
+    api().updateLoad.mockRejectedValue(new Error('422'))
+
+    await expect(
+      updateAsset(qc, 'p1', 'loads', 'l1', { p_set: 20 }),
+    ).rejects.toThrow('422')
+    expect(spy).not.toHaveBeenCalled()
   })
 })

@@ -17,6 +17,7 @@
  */
 import type { QueryClient } from '@tanstack/react-query'
 
+import { networkApi } from '../api/network'
 import { nk } from './queryKeys'
 
 /**
@@ -68,4 +69,87 @@ export function invalidateAssetQueries(qc: QueryClient, project: string | null):
   for (const root of COMPONENT_QUERY_ROOTS) {
     qc.invalidateQueries({ queryKey: nk(project, root) })
   }
+}
+
+/** An asset row as the chokepoint sees it: a name plus whatever the class carries. */
+type AssetRow = { name: string } & Record<string, unknown>
+
+/** One row of the per-class dispatch table: how to list and how to PUT. */
+type Endpoints = {
+  get: () => Promise<AssetRow[]>
+  put: (name: string, body: AssetRow) => Promise<unknown>
+}
+
+/**
+ * Widen a class's typed api pair to the chokepoint's row-agnostic shape.
+ * The casts are safe because both sides are the SAME runtime functions —
+ * per-class typing is enforced where it means something: at the call site
+ * (a typed `Partial<Generator>` patch) and inside networkApi itself. The
+ * chokepoint's job is the idiom, not the field vocabulary.
+ */
+function ep<G extends { name: string }, P>(
+  get: () => Promise<G[]>,
+  put: (name: string, body: P) => Promise<unknown>,
+): Endpoints {
+  return {
+    get: get as unknown as Endpoints['get'],
+    put: put as unknown as Endpoints['put'],
+  }
+}
+
+/**
+ * `meta` is a roll-up, not a writable class, so the update surface is the
+ * table below rather than COMPONENT_QUERY_ROOTS itself.
+ */
+const ENDPOINTS = {
+  buses:         ep(networkApi.getBuses,        networkApi.updateBus),
+  carriers:      ep(networkApi.getCarriers,     networkApi.updateCarrier),
+  lines:         ep(networkApi.getLines,        networkApi.updateLine),
+  links:         ep(networkApi.getLinks,        networkApi.updateLink),
+  generators:    ep(networkApi.getGenerators,   networkApi.updateGenerator),
+  storage_units: ep(networkApi.getStorageUnits, networkApi.updateStorageUnit),
+  stores:        ep(networkApi.getStores,       networkApi.updateStore),
+  loads:         ep(networkApi.getLoads,        networkApi.updateLoad),
+  transformers:  ep(networkApi.getTransformers, networkApi.updateTransformer),
+}
+
+export type WritableRoot = keyof typeof ENDPOINTS
+
+/**
+ * The Asset-write chokepoint: fetch → spread → PUT → invalidate.
+ *
+ * The backend's `_update_component` is remove+add — any field the PUT omits
+ * resets to its Pydantic default (the B1/B2 corruption class). Every caller
+ * therefore hands over a PATCH of what changed, and this function owns the
+ * spread of the full current row underneath it.
+ *
+ * Cache miss is fetch-then-spread (ruling 3): `ensureQueryData` returns the
+ * cached list or fetches it, so the miss case stops existing rather than
+ * being handled — no throw-on-cold-cache, no closure fallback, and the
+ * bare-fields PUT is unrepresentable through this path. An error here means
+ * the asset genuinely does not exist in the current network.
+ */
+export async function updateAsset<T extends { name: string } = AssetRow>(
+  qc: QueryClient,
+  project: string | null,
+  cls: WritableRoot,
+  name: string,
+  // NoInfer: without it TS infers T from the patch literal itself ({p_nom:1}
+  // fails the name-constraint and collapses T to {name: string}, rejecting
+  // every real field). T comes only from explicit annotation —
+  // updateAsset<Generator>(...) for field-checked call sites — and defaults
+  // to the open AssetRow for untyped ones.
+  patch: Partial<NoInfer<T>>,
+): Promise<void> {
+  const e = ENDPOINTS[cls]
+  const rows = await qc.ensureQueryData({
+    queryKey: nk(project, cls),
+    queryFn: e.get,
+  })
+  const current = rows.find((r) => r.name === name)
+  if (!current) {
+    throw new Error(`${cls}/${name} not found in the current network`)
+  }
+  await e.put(name, { ...current, ...patch })
+  invalidateAssetQueries(qc, project)
 }
