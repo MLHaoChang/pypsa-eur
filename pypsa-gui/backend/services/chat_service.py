@@ -45,7 +45,8 @@ Key Phase 2 invariants enforced here:
     concurrent `/confirm` POSTs from two threads serialise correctly (one
     succeeds, the other returns 404 — single-use enforced under lock).
 
-NO ANTHROPIC SDK IMPORT. Phase 3 wires the actual LLM call in `run_turn`.
+NO ANTHROPIC SDK IMPORT. `run_turn` drives an `LLMProvider` (the seam in
+`services/llm_provider.py`); the provider — not this module — drives the SDK.
 """
 from __future__ import annotations
 
@@ -1362,7 +1363,8 @@ def _dispatch_stub_call(
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Phase 3 — real Anthropic SDK agent loop (run_turn)
+# Phase 3 — provider-driven agent loop (run_turn drives an LLMProvider; the
+# provider drives its SDK — see services/llm_provider.py)
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -1390,6 +1392,11 @@ def _safety_tier_for(tool_name: str) -> str:
 _redact_for_log = redact_for_log  # moved 2026-08-13 (provider seam, Task 1)
 
 from services.llm_anthropic import (  # moved 2026-08-13 (provider seam)
+    # `_build_anthropic_client` is NOT test-only: it has a production caller
+    # (chat_tools.reconstruct_network_from_image's vision sub-call) and
+    # app_secrets.py documents it as the call-time surface that picks up a
+    # freshly-saved API key without a restart. This alias — and the compat
+    # surface below — is a caller/patch indirection, not dead re-export.
     build_client as _build_anthropic_client,
     # Task 5: no longer called from this module (translation now lives in
     # AnthropicProvider.stream) — these three aliases are kept as a
@@ -1400,14 +1407,18 @@ from services.llm_anthropic import (  # moved 2026-08-13 (provider seam)
     serialise_block as _serialise_for_anthropic,  # noqa: F401
     with_history_cache_breakpoint as _with_history_cache_breakpoint,  # noqa: F401
 )
-# Module attributes (not just names) so tests can monkeypatch
-# `llm_anthropic.build_client` / `llm_anthropic.AnthropicProvider` and have
-# the seam pick up the patched version (Task 5, 2026-08-13).
+# `llm_anthropic` imported as a module (not just names) so
+# `llm_anthropic.AnthropicProvider` is reached as a module attribute and
+# tests can monkeypatch it there and have the seam pick up the patched
+# version (Task 5, 2026-08-13). `build_client` is NOT re-read through this
+# module reference at call time — it's invoked via the
+# `chat_service._build_anthropic_client` alias above, which is the actual
+# patch surface tests pin, not `llm_anthropic.build_client`.
 from services import llm_anthropic, llm_provider
 
 
 def _tools_payload() -> list[dict[str, Any]]:
-    """The `tools=` argument for messages.stream — exactly chat_tools_schema.TOOLS."""
+    """The `tools` field of the neutral `LLMRequest` — exactly chat_tools_schema.TOOLS."""
     from services.chat_tools_schema import TOOLS
     return list(TOOLS)
 
@@ -1682,7 +1693,8 @@ def _sanitise_history_message(msg: dict[str, Any]) -> dict[str, Any] | None:
     they were dropped here or the list arrived empty. BOTH cases must return
     None: `content: []` is itself a 400 ("all messages must have non-empty
     content"), and it is reachable without any dropping at all, from a refused
-    or aborted generation whose `final_message.content` comes back empty. An
+    or aborted generation whose provider `message_done` event (`final_blocks`
+    in `run_turn`, the seam's serialised-blocks source) comes back empty. An
     earlier version tested `len(kept) == len(content)` first, which is `0 == 0`
     for an already-empty list and returned it unchanged — a guard the
     docstring claimed but the code did not have.
@@ -1711,14 +1723,15 @@ def run_turn(
     attachment_file_ids: list[str] | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
-    Real Anthropic-SDK-backed turn driver (Phase 3 replacement for the
-    Phase 2 stub). Yields the same (event_name, payload) tuples the SSE
-    writer expects so routers/chat.py can swap stub → real without touching
-    the frame shape.
+    Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
+    drives an `LLMProvider` (services/llm_provider.py) rather than any SDK
+    directly. Yields the same (event_name, payload) tuples the SSE writer
+    expects so routers/chat.py can swap stub → real without touching the
+    frame shape.
 
     Loop:
       1. Build messages array (history + new user message).
-      2. Open `client.messages.stream(...)` with tools=chat_tools_schema.TOOLS.
+      2. Call `provider.stream(request)` with tools=chat_tools_schema.TOOLS.
       3. For each streamed event:
          - text_delta → emit token frame
          - tool_use complete → dispatch via chat_tools.DISPATCHERS, route
@@ -2054,10 +2067,12 @@ def _run_turn_body(
             "text": system_prompt,
             "stable": True,
         }]
-        # request carries the SAME `messages` list this loop appends to below
-        # (tool_result / assistant replays), so rebuilding it fresh every
-        # outer-loop pass is what makes those appends visible to the next
-        # provider call.
+        # `request.messages` is the SAME `messages` list object this loop
+        # appends to below (tool_result / assistant replays) — appends are
+        # visible to the next provider call because the list is shared by
+        # reference, not because `request` is rebuilt. Rebuilding `request`
+        # fresh every outer-loop pass is instead what makes `request.model`
+        # re-read `session.model` (A8 fallback can change it mid-turn).
         request = llm_provider.LLMRequest(
             model=session.model,
             max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
