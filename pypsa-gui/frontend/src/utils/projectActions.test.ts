@@ -243,6 +243,89 @@ describe('lock-loss recovery', () => {
     expect(useUIStore.getState().readOnly).toBe(true)
   })
 
+  // Regression (code-review Critical finding on the initial Task 7 patch): the
+  // heartbeat 409's re-acquire chain checked `_heartbeatProject === projectId`
+  // only ONCE, before starting the async `acquireLock` call — not again after
+  // it resolves. If the user switches projects while that re-acquire is still
+  // in flight (release outgoing, acquire incoming — done by `switchToProject`
+  // via `stopLockHeartbeat` + `acquireProjectLock`), the stale promise's
+  // `.then`/`.catch` fires LATER and unconditionally calls `_applyLock` /
+  // `stopLockHeartbeat` — clobbering the INCOMING project's just-established
+  // writable state with the OUTGOING project's stale outcome.
+  it('a stale re-acquire SUCCESS for the outgoing project must not clobber the incoming project state', async () => {
+    vi.useFakeTimers()
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
+    await acquireProjectLock('proj-A')
+    expect(useUIStore.getState().readOnly).toBe(false)
+
+    vi.mocked(projectsApi.heartbeatLock).mockRejectedValueOnce({ response: { status: 409 } })
+    // Controllable re-acquire for A — stays pending until we resolve it below,
+    // simulating a slow request that outlives the user's project switch.
+    let resolveReacquireA!: (v: { lock: LockInfo | null }) => void
+    const reacquireA = new Promise<{ lock: LockInfo | null }>((resolve) => { resolveReacquireA = resolve })
+    vi.mocked(projectsApi.acquireLock).mockImplementationOnce(() => reacquireA)
+
+    await vi.advanceTimersByTimeAsync(45_000) // fires the tick: heartbeatLock 409s, catch starts the re-acquire
+    await Promise.resolve() // let the 409 handler reach `projectsApi.acquireLock(projectId)`
+
+    // The user switches to project B WHILE A's re-acquire is still pending —
+    // exactly what `switchToProject` does: release A (stop its heartbeat),
+    // then acquire B (start its own heartbeat).
+    stopLockHeartbeat()
+    // B's own acquire reports `theirs` as the (co-)holder — deliberately
+    // DIFFERENT from A's `mine`, so a clobber is distinguishable from a
+    // coincidental match: `_applyLock({ok:true, lock:X})` always sets
+    // readOnly=false regardless of X, so readOnly alone can't catch this —
+    // holderEmail is the tell.
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: theirs })
+    await acquireProjectLock('proj-B')
+    expect(useUIStore.getState().readOnly).toBe(false) // B is writable
+    expect(useUIStore.getState().lockHolderEmail).toBe('other@example.com')
+
+    // NOW the stale A re-acquire resolves — it must be a no-op.
+    resolveReacquireA({ lock: mine })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(useUIStore.getState().readOnly).toBe(false) // B's state must survive untouched
+    expect(useUIStore.getState().lockHolderEmail).toBe('other@example.com') // NOT clobbered by A's stale resolve
+  })
+
+  it('a stale re-acquire REFUSAL for the outgoing project must not kill the incoming project heartbeat', async () => {
+    vi.useFakeTimers()
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
+    await acquireProjectLock('proj-A')
+
+    vi.mocked(projectsApi.heartbeatLock).mockRejectedValueOnce({ response: { status: 409 } })
+    let rejectReacquireA!: (e: unknown) => void
+    const reacquireA = new Promise<{ lock: LockInfo | null }>((_resolve, reject) => { rejectReacquireA = reject })
+    vi.mocked(projectsApi.acquireLock).mockImplementationOnce(() => reacquireA)
+
+    await vi.advanceTimersByTimeAsync(45_000)
+    await Promise.resolve()
+
+    stopLockHeartbeat()
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
+    await acquireProjectLock('proj-B')
+    expect(useUIStore.getState().readOnly).toBe(false)
+
+    // The stale re-acquire for A is refused — must NOT flip B read-only and
+    // must NOT stop B's heartbeat.
+    rejectReacquireA({ response: { status: 409 } })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(useUIStore.getState().readOnly).toBe(false)
+
+    // Prove B's heartbeat is still alive: advancing one more tick must still
+    // ping heartbeatLock for B. If the stale catch had called
+    // `stopLockHeartbeat()`, this interval would be dead and the call below
+    // would never happen.
+    vi.mocked(projectsApi.heartbeatLock).mockClear()
+    vi.mocked(projectsApi.heartbeatLock).mockResolvedValueOnce({ lock: mine })
+    await vi.advanceTimersByTimeAsync(45_000)
+    expect(projectsApi.heartbeatLock).toHaveBeenCalledWith('proj-B')
+  })
+
   it('a save refused with error_kind "project_locked" applies the lock banner and stops the heartbeat', async () => {
     vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
     await acquireProjectLock('proj-1')

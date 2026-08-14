@@ -270,8 +270,20 @@ function startLockHeartbeat(projectId: string): void {
           // free/expired slot — try ONE re-acquire before declaring the
           // workbench read-only.
           projectsApi.acquireLock(projectId)
-            .then(res => _applyLock({ ok: true, lock: res.lock }))
+            .then(res => {
+              // The user may have switched away WHILE this re-acquire was in
+              // flight — `switchToProject` releases this project (stopping
+              // this very heartbeat) and starts a new one for the incoming
+              // project. Applying a stale outcome here would clobber the
+              // incoming project's just-established lock state with this
+              // one's, and could even stop ITS heartbeat below. Re-check the
+              // singleton identity (mirrors the guard at the top of the tick)
+              // before touching any shared state.
+              if (_heartbeatProject !== projectId) return
+              _applyLock({ ok: true, lock: res.lock })
+            })
             .catch((e2) => {
+              if (_heartbeatProject !== projectId) return
               // Re-acquire was refused too — someone else genuinely holds
               // it now. Fall to read-only and stop pinging.
               _applyLock({ ok: false, lock: _lockFromErrorDetail(e2) })
