@@ -141,6 +141,22 @@ describe('closed-set columns (D4)', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('Slack')
   })
+
+  it('holds on the Storage tab too — StorageUnit.control is the same set', () => {
+    // Fell through to free text before the CLOSED_SETS entry existed, so a
+    // paste could write "Swing" into a column only PQ/PV/Slack make sense in.
+    const SU_CTX = {
+      componentClass: 'StorageUnit',
+      catalog: toCatalogMap([
+        attr({ name: 'control', dtype: 'object', type: 'string' }),
+      ]),
+      busNames: new Set<string>(),
+    }
+    expect(validateAndCoerce('control', 'PV', SU_CTX)).toEqual({ ok: true, value: 'PV' })
+    const r = validateAndCoerce('control', 'Swing', SU_CTX)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('Slack')
+  })
 })
 
 describe('boolean columns — case-insensitive (D4)', () => {

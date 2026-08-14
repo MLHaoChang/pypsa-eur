@@ -98,6 +98,21 @@ def enqueue_solve(
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, req.project_id)
+    # Lock CHECK, not an acquire (design §Open items): enqueueing on your own
+    # locked project must not steal or extend anything, and an unlocked
+    # project must stay unlocked — the dispatcher's own completion save is
+    # exempt from lock enforcement by design.
+    from services import project_locks
+
+    lock = project_locks.get_lock(db, project.id)
+    if lock is not None and lock.holder_user_id != user.id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_locked",
+                "message": f"'{project.name}' is being edited by another user.",
+            },
+        )
     project_dir = project_registry.project_dir(project)
     if not (project_dir / "network.nc").exists():
         raise HTTPException(

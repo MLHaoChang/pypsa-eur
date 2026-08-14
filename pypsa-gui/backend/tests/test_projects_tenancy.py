@@ -782,3 +782,161 @@ def test_save_as_copies_uploads_from_auth_storage(session_local):
     copied = project_registry.project_dir(copy_row) / "uploads" / "file-1" / "ref.csv"
     assert copied.exists(), "uploads/ was not copied from the source storage_path"
     assert copied.read_text() == "a,b\n1,2\n"
+
+
+# ── Task 5: lock enforcement at project write edges ───────────────────────────
+#
+# This file has no `client_a`/`client_b`/`shared_project` fixtures, so the
+# brief's sketches are adapted to the inline org/user/project construction
+# style already used above and in `test_project_locks.py`'s own Task 4
+# section — two org-admin users share one project (org-admin access means
+# neither the rename/delete permission check nor the save ACL check shadows
+# the lock check we're testing).
+
+
+def _seed_two_user_project(session_local, *, name="Shared"):
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name=name)
+    return org, user_a, user_b, project
+
+
+def test_save_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post(f"/api/projects/{project.name}")
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+
+def test_rename_and_delete_409_under_foreign_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+
+        rename = client_b.post(
+            f"/api/projects/{project.name}/rename", json={"new_name": "Taken"}
+        )
+        assert rename.status_code == 409, rename.text
+        assert rename.json()["detail"]["error_kind"] == "project_locked"
+
+        delete = client_b.delete(f"/api/projects/{project.name}")
+        assert delete.status_code == 409, delete.text
+        assert delete.json()["detail"]["error_kind"] == "project_locked"
+
+
+def test_holder_still_saves_and_free_project_saves(session_local):
+    _org, user_a, _user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_a.post(f"/api/projects/{project.name}")
+        assert r.status_code in (200, 409), r.text
+        # 409 is only acceptable if some OTHER save gate (e.g. empty-network
+        # guard) fired — the lock itself must never be the reason the holder's
+        # own save is refused.
+        if r.status_code == 409:
+            assert r.json()["detail"].get("error_kind") != "project_locked"
+
+
+def test_enqueue_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post("/api/simulation/queue", json={"project_id": str(project.id)})
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+
+# ── Task 6: foreign-lock gate in the write middleware ──────────────────────
+#
+# `_enforce_project_lock` (Task 4/5) covers the /api/projects/* write edges
+# (save/rename/delete/scenario/layout/members/snapshots/enqueue). It does NOT
+# cover /api/network/* or /api/io/* — those routes never resolve a `project`
+# row, they mutate the resident `PyPSAService` singleton directly. Because the
+# resident ProjectContext is shared per (org, project) (both users' sessions
+# `activate` the SAME registry slot and get the SAME in-memory network), a
+# non-holder's component write lands in the holder's memory and the holder's
+# next autosave persists it. This is a middleware CHECK ONLY (get_lock +
+# compare holder) — never an acquire; `_enforce_project_lock` still owns
+# acquisition at the project write edges.
+#
+# No `client_a`/`client_b`/`shared_project` fixtures exist in this file (see
+# the Task 5 section note above) — reuse `_seed_two_user_project` /
+# `_client_for` and the real bus-create shape from
+# `tests/test_line_lengths.py` (`POST /api/network/buses` with
+# `{"name", "v_nom"}`).
+
+def test_network_write_409s_when_active_project_lock_held_by_other(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        # Both users activate the same project; A holds the lock. Activation
+        # is what binds the middleware's active-context project_uuid that the
+        # gate reads — without it there's nothing for the gate to check.
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post(
+            "/api/network/buses", json={"name": "Intruder", "v_nom": 380.0}
+        )
+        assert r.status_code == 409, r.text
+        assert r.json().get("code") == "project_locked"
+
+        # The holder's own writes against the same shared context still pass.
+        r = client_a.post(
+            "/api/network/buses", json={"name": "Legit", "v_nom": 380.0}
+        )
+        assert r.status_code in (200, 201), r.text
+
+
+def test_network_write_allowed_when_lock_check_db_call_errors(session_local, monkeypatch):
+    """
+    The gate's DB block (`with SessionLocal() as gate_db: get_lock(...)`) must
+    fail OPEN on any DB error, matching every other branch (free/expired lock,
+    unbound context, no auth_user) and the auth block's own fail-open handling
+    a few lines above it in the same middleware.
+
+    Not hypothetical: `get_lock` -> `_prune_expired` does a `db.delete` +
+    `db.commit` on the expired-lock path, so two concurrent writes racing a
+    lock's expiry can hit a SQLAlchemy `StaleDataError` from THIS exact call.
+    Simulated here by monkeypatching `get_lock` to raise directly.
+
+    Uses the SAME foreign-lock setup as the 409 test above (A holds, B
+    writes) so this proves the fail-open path specifically for the case an
+    unguarded gate gets most wrong: the DB error hits on a write that WOULD
+    have been refused had `get_lock` succeeded. An unguarded gate would
+    surface that as an opaque 500; the required behaviour is to let it
+    through, same as a free/expired lock would.
+
+    The monkeypatch is applied only around the write itself, AFTER activate
+    + lock: `project_locks.get_lock` is also called by
+    `_serialize_project_lock` inside the activate/lock endpoints themselves
+    (routers/projects.py), which have no fail-open wrapper of their own and
+    are not what this test is exercising — raising for the whole test would
+    just 500 those setup calls instead.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        def _raise(*_args, **_kwargs):
+            raise RuntimeError("simulated DB error (e.g. StaleDataError on prune)")
+
+        monkeypatch.setattr("services.project_locks.get_lock", _raise)
+
+        r = client_b.post(
+            "/api/network/buses", json={"name": "StillWorks", "v_nom": 380.0}
+        )
+        assert r.status_code in (200, 201), r.text
