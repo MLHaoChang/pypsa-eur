@@ -70,6 +70,15 @@ list as `(name, description, json_schema)` triples, and the model id.
 yields downstream — `text_delta`, `thinking_delta`, `tool_use`, `usage`,
 `stop`, `error`.
 
+> **As built (2026-08-14):** the shipped vocabulary is `text_delta`,
+> `thinking_delta`, `tool_use_start`, `ping`, `message_done`
+> (`services/llm_provider.py:EVENT_TYPES`). `usage` + `stop` merged into the
+> terminal `message_done` (blocks + usage dict); `error` became the
+> `ProviderError` exception, which the harness maps — with a catch-all for
+> anything a provider fails to map; `ping` surfaces every otherwise-unhandled
+> upstream event so the harness's per-event abort check keeps its latency.
+> Plan 2 should read this block, not the list above.
+
 `chat_tools_schema.TOOLS` already stores the neutral triple; only the wrapper
 differs per provider (Anthropic takes `input_schema`, OpenAI nests under
 `function.parameters`). No tool definitions change.
