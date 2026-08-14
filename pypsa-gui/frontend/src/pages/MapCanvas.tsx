@@ -11,6 +11,8 @@ import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink } from 'lucide-r
 import ReactDOMServer from 'react-dom/server'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { updateAsset } from '../utils/assetWrite'
+import type { RescalePreview } from '../utils/rescale'
 import { networkApi } from '../api/network'
 import { appLog } from '../store/simulationStore'
 import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, Store, Transformer } from '../api/types'
@@ -738,33 +740,22 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // its own per-bus position cache in localStorage and is unaffected by
   // changes here for any bus the user has already laid out there.
   const updateBusPosMut = useMutation({
-    mutationFn: ({ name, lat, lng }: { name: string; lat: number; lng: number }) => {
-      const cached = (qc.getQueryData<Bus[]>(nk(useUIStore.getState().currentProject, 'buses')) ?? []).find(b => b.name === name)
-      if (!cached) {
-        // Refuse the partial PUT — without the cached row's full fields,
-        // the backend's _update_component (remove + add) would reset
-        // every omitted attribute (v_nom, carrier, control, sub_network,
-        // country, …) to its Pydantic default. The buses query hydrates
-        // on mount and a drag normally can't fire before then, but a
-        // slow first network round-trip would expose the trap. Reject
-        // explicitly rather than silently corrupt the bus.
-        throw new Error(
-          `Bus '${name}' not yet loaded from backend — wait for the buses query to settle and try the drag again.`
-        )
-      }
-      const payload: Partial<Bus> = { ...cached, x: lng, y: lat }
-      return networkApi.updateBus(name, payload)
+    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
+    // PUT and invalidation. The old throw-on-cache-miss ("wait for the
+    // buses query to settle") is gone: the chokepoint FETCHES on a miss
+    // (ruling 3), so a drag racing the first buses round-trip now succeeds
+    // instead of asking the user to retry — while the bare-fields PUT the
+    // throw guarded against stays unrepresentable.
+    mutationFn: async ({ name, lat, lng }: { name: string; lat: number; lng: number }) => {
+      const resp = await updateAsset<Bus>(
+        qc, useUIStore.getState().currentProject, 'buses', name, { x: lng, y: lat })
+      return resp as { name: string; rescale: RescalePreview[] }
     },
     onSuccess: (data, vars) => {
       // The backend's update_bus already recomputed the lengths of THIS bus's
       // connected lines (_recompute_lengths_for_bus, scoped to the moved bus)
-      // and logged a changelog entry. We previously also called the global
-      // recalculateLineLengths() here, which rewrote EVERY line in the network
-      // (O(all lines) per drag) and produced a SECOND changelog entry per drag.
-      // Drop that redundant whole-fleet pass — just refresh the two affected
-      // caches so the connected lines re-render with their new lengths.
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
+      // and logged a changelog entry; the chokepoint's blanket invalidation
+      // covers the buses AND lines refetch that used to be done here.
       appLog('INFO', `Bus '${vars.name}' moved · connected line lengths recalculated.`)
       ingestRescale(qc, data.rescale)
     },
