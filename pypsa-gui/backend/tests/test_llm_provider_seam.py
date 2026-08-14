@@ -28,6 +28,9 @@ def test_llm_event_vocabulary_and_provider_error():
     assert "message_done" in EVENT_TYPES
     err = ProviderError("rate_limited", "429 from upstream")
     assert err.kind == "rate_limited" and "429" in err.message
+    # T2 — the seam's only silent coercion: an unrecognised kind string
+    # collapses to "internal_error" rather than raising or passing through.
+    assert ProviderError("bogus_kind", "m").kind == "internal_error"
     req = LLMRequest(
         model="m", max_tokens=10,
         system_blocks=[{"type": "text", "text": "s", "stable": True}],
@@ -383,3 +386,50 @@ def test_seam_against_live_local_endpoint():
     # Successful turns end at turn_done (pinned by test_chat_e2e.py:213).
     assert names[0] == "session_init" and names[-1] == "turn_done"
     assert "token" in names
+
+
+def test_run_turn_catches_non_provider_error_stream_failures():
+    """I1 — restore the harness catch-all.
+
+    Pre-branch, `except Exception` ran every stream failure through mapping →
+    `_metric_error(kind)` + terminal `logger.error` + `error` frame +
+    `session_done`. The provider extraction narrowed the clause to
+    `except llm_provider.ProviderError`, so a provider that raises anything
+    outside that typed contract (a bug in the provider, e.g. a bare
+    ValueError) escaped `run_turn` entirely — no metric, no terminal log
+    line, and the router only catches it generically as a bare internal_error
+    frame, breaking the documented frame contract. This pins the restored
+    catch-all: an unmapped exception still becomes error_kind="internal_error",
+    still gets redacted before it reaches the frame, and still increments
+    errors_by_kind.
+
+    Note: with the catch-all restored, FakeProvider's own script-exhaustion
+    signal (`AssertionError: FakeProvider: script exhausted`, used elsewhere
+    in this file) is likewise swallowed into an internal_error frame rather
+    than propagating as a loud test-failing traceback — this matches
+    pre-branch semantics (a bare `except Exception` always did this) and is
+    accepted here, not a new regression.
+    """
+    from services import chat_service
+    from services.llm_provider import LLMRequest
+
+    class _BoomProvider:
+        name = "boom"
+
+        def stream(self, request: LLMRequest):
+            raise ValueError("boom sk-ant-leak123")
+            yield  # pragma: no cover - never reached; makes this a generator
+
+    chat_service._reset_metrics_for_tests()
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    events = list(chat_service.run_turn(session, "hi", provider=_BoomProvider()))
+    names = [n for n, _ in events]
+
+    assert "error" in names
+    error_payload = dict(events[names.index("error")][1])
+    assert error_payload["error_kind"] == "internal_error"
+    assert "sk-ant-leak123" not in error_payload["message"]
+    assert names[-1] == "session_done"
+
+    snap = chat_service._metrics_snapshot()
+    assert snap["errors_by_kind"]["internal_error"] == 1

@@ -2122,8 +2122,24 @@ def _run_turn_body(
                     # upstream event surfaces here so the per-event abort
                     # check above keeps its latency.
                 break  # stream completed — leave the retry loop
-            except llm_provider.ProviderError as exc:
-                error_kind, msg = exc.kind, exc.message
+            except Exception as exc:  # noqa: BLE001 — provider contract violation
+                # Typed ProviderError is the documented contract; anything
+                # else is a provider bug (an unmapped exception escaping
+                # `stream`). Pre-branch this whole path was one bare
+                # `except Exception`, which is why every stream failure —
+                # typed or not — got mapped, metriced, terminal-logged, and
+                # turned into an `error` + `session_done` frame pair. The
+                # branch narrowed the clause to `llm_provider.ProviderError`
+                # only, so an unmapped exception (e.g. ValueError from a
+                # buggy provider) would skip metrics/logging entirely and
+                # escape `run_turn` — the router's bare catch-all still turns
+                # it into a frame, but the contract above breaks silently.
+                # Map first, then share the exact same retry/A8/terminal
+                # handling for both cases — no duplicated control flow.
+                if isinstance(exc, llm_provider.ProviderError):
+                    error_kind, msg = exc.kind, exc.message
+                else:
+                    error_kind, msg = "internal_error", _redact_for_log(exc)
                 retriable = (
                     error_kind in _RETRYABLE_SDK_KINDS
                     and not emitted_this_attempt
