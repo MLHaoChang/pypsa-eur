@@ -370,6 +370,19 @@ def _active_context():
 
 def _abort_everything() -> bool:
     from services import shutdown as shutdown_service
+    from services.solve_queue import solve_queue
+
+    # Gate the dispatcher BEFORE anything else, or aborting the running job
+    # frees it to pop the next queued job, flip it to `running`, and hand the
+    # process exit a fresh solve to kill — which boot then marks `interrupted`
+    # and R25 never resumes. At the top of the function, not inside
+    # `abort_queue`: with a queued-only backlog `abort_and_wait` returns on its
+    # empty-`in_flight` fast path without ever calling `abort_queue`, and the
+    # un-gated dispatcher could still start that job mid-flush. The ordering
+    # matters too: with the gate set first, a job racing it either parks as
+    # `queued` or completes its flip to `running` before the `list_jobs()`
+    # snapshot below, which then signals it (see `_run_job`'s claim block).
+    solve_queue.stop_dispatching()
 
     def abort_active() -> None:
         from routers.simulation import abort

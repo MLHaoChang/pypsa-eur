@@ -168,6 +168,10 @@ class SolveQueue:
         self._q: queue.Queue[uuid.UUID] = queue.Queue()
         self._current_id: uuid.UUID | None = None
         self._dispatcher: threading.Thread | None = None
+        # Set by `stop_dispatching()` during a desktop quit. While set, a job
+        # the dispatcher pops is left `queued` instead of started — see the
+        # check in `_run_job`'s claim block for why it lives THERE.
+        self._draining = threading.Event()
 
     # ── public API ──────────────────────────────────────────────────────────
     def enqueue(
@@ -351,6 +355,22 @@ class SolveQueue:
                 pass
         return pub
 
+    def stop_dispatching(self) -> None:
+        """
+        Stop starting new jobs; already-running jobs are unaffected.
+
+        One-way by design — the only caller is the desktop quit
+        (`desktop/gui.py:_abort_everything`), after which the process exits.
+        Without this gate, the quit's abort of the RUNNING job frees the
+        dispatcher, which immediately pops the next queued job and flips it to
+        `running`; the process exit then kills it mid-solve, boot marks it
+        `interrupted`, and R25 never resumes an interrupted job — the exact
+        work loss R28 exists to prevent, reintroduced through a one-job window.
+        A job parked by this gate keeps its `queued` row and is re-enqueued at
+        the next boot. (`reset_for_tests` clears the flag for the harness.)
+        """
+        self._draining.set()
+
     def clear_finished(self) -> int:
         """
         Drop terminal jobs from the listing. Returns the count removed.
@@ -432,6 +452,7 @@ class SolveQueue:
             self._jobs.clear()
             self._order.clear()
             self._current_id = None
+            self._draining.clear()
         if ev is not None:
             try:
                 ev.set()
@@ -564,6 +585,7 @@ class SolveQueue:
         error: str | None = None
         t0 = time.time()
         ctx = None
+        parked = False
         try:
             # Claim under the bookkeeping lock — but honour an abort that landed
             # in the pop->claim window (abort() flips a still-queued job to
@@ -575,6 +597,19 @@ class SolveQueue:
             with self._lock:
                 if job.cancelled:
                     final_status = "aborted"
+                    return
+                if self._draining.is_set():
+                    # A desktop quit is in progress (`stop_dispatching`). Leave
+                    # the job `queued` — row untouched, boot re-enqueues it.
+                    # The check lives HERE, in the same critical section as the
+                    # status flip, and not only in `_dispatch_loop`: the quit
+                    # thread sets the flag and THEN snapshots `list_jobs()` to
+                    # signal every running job, so under this lock either we
+                    # see the flag (park) or our flip to `running` completes
+                    # first and the snapshot sees and signals us. A check
+                    # outside this section leaves a window where the job turns
+                    # `running` after the snapshot and nothing ever stops it.
+                    parked = True
                     return
                 job.status = "running"
                 job.started_at = time.time()
@@ -815,29 +850,35 @@ class SolveQueue:
             except Exception:
                 pass
         finally:
-            with self._lock:
-                job.status = final_status
-                job.condition = condition
-                job.objective = objective
-                job.solve_time = solve_time
-                job.error = error
-                job.finished_at = time.time()
-            # Mirror the terminal record to the job table, OUTSIDE `_lock`:
-            # the store opens a database session and `_lock` is documented as
-            # short bookkeeping only, never held across I/O.
-            try:
-                from services import solve_job_store
+            # A PARKED job (quit-time drain, see the claim block) skips all of
+            # this: it is still `queued`, not terminal — writing `final_status`
+            # would turn the park into a bogus `failed` — and no consumer ever
+            # saw its log queue (published only with the status flip we never
+            # reached), so there is no SSE stream to close.
+            if not parked:
+                with self._lock:
+                    job.status = final_status
+                    job.condition = condition
+                    job.objective = objective
+                    job.solve_time = solve_time
+                    job.error = error
+                    job.finished_at = time.time()
+                # Mirror the terminal record to the job table, OUTSIDE `_lock`:
+                # the store opens a database session and `_lock` is documented as
+                # short bookkeeping only, never held across I/O.
+                try:
+                    from services import solve_job_store
 
-                solve_job_store.record_status(job)
-            except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
-                logger.exception("solve_queue: could not persist job %s", job.id)
-            # Close the SSE log stream for this job so the foreground consumer's
-            # `done` event fires (run_simulation pushes None on its own success
-            # path, but the abort/error paths above may not have).
-            try:
-                log_queue.put(None)
-            except Exception:
-                pass
+                    solve_job_store.record_status(job)
+                except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
+                    logger.exception("solve_queue: could not persist job %s", job.id)
+                # Close the SSE log stream for this job so the foreground consumer's
+                # `done` event fires (run_simulation pushes None on its own success
+                # path, but the abort/error paths above may not have).
+                try:
+                    log_queue.put(None)
+                except Exception:
+                    pass
 
 
 # Module-level singleton — the router imports this instance.
