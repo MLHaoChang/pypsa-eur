@@ -7,9 +7,10 @@ import { projectsApi } from '../api/projects'
 import type { ImportSummary } from '../api/types'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
-import { invalidateNetworkQueries } from '../utils/projectActions'
+import { invalidateNetworkQueries, saveProjectQuietly } from '../utils/projectActions'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 const EXPORT_FORMATS = [
   {
@@ -90,6 +91,7 @@ function ExportCard({ format }: { format: typeof EXPORT_FORMATS[number] }) {
 
 export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, fileName?: string) => void }) {
   const [dragging, setDragging] = useState(false)
+  const [pendingImport, setPendingImport] = useState<{ file: File; message: string } | null>(null)
   const pendingFileRef = useRef<string>('')
   const importedNameRef = useRef<string | null>(null)
   const { setCurrentProject, setProjectName, currentProject } = useUIStore()
@@ -141,7 +143,32 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
     onError: (e: Error) => toast.error(e.message),
   })
 
-  const handleFile = useCallback((file: File) => importMut.mutate(file), [importMut])
+  const handleFile = useCallback(async (file: File) => {
+    const isBundle = file.name.toLowerCase().endsWith('.pypsaproj.zip')
+    if (currentProject && isBundle) {
+      // Bundle-into-current overwrites the project's contents and is NOT
+      // undo-captured (backend _UNDO_PREFIXES excludes /api/projects/) — ask.
+      setPendingImport({
+        file,
+        message: `Importing this bundle will replace the contents of '${currentProject}'.`,
+      })
+      return
+    }
+    if (currentProject && !isBundle) {
+      // Raw import is undo-captured; persist the outgoing project first so
+      // nothing is lost, then proceed without a prompt (Sidebar precedent).
+      await saveProjectQuietly(currentProject)
+      importMut.mutate(file)
+      return
+    }
+    let depth = 0
+    try { depth = (await networkApi.undoInfo()).depth } catch { /* unreachable backend: fall through */ }
+    if (depth > 0) {
+      setPendingImport({ file, message: 'The current unsaved network will be replaced.' })
+      return
+    }
+    importMut.mutate(file)
+  }, [importMut, currentProject])
 
   const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -175,6 +202,16 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
         />
       </label>
       {importMut.isPending && <p className="text-xs text-muted animate-pulse">Importing…</p>}
+      <ConfirmDialog
+        open={pendingImport != null}
+        title="Replace current network"
+        message={pendingImport?.message ?? ''}
+        confirmLabel="Import"
+        danger
+        pending={importMut.isPending}
+        onConfirm={() => { if (pendingImport) { importMut.mutate(pendingImport.file); setPendingImport(null) } }}
+        onCancel={() => setPendingImport(null)}
+      />
     </div>
   )
 }
