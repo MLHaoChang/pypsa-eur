@@ -643,9 +643,14 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # covers /api/projects/* writes, but /api/network/* and /api/io/* never
     # resolve a `project` row — without this, a non-holder's component edit
     # lands in the holder's memory and the holder's next autosave persists
-    # it. CHECK ONLY — never an acquire; a free/expired lock, the holder's
+    # it. CHECK ONLY — never an ACQUIRE; a free/expired lock, the holder's
     # own writes, local mode, an unbound scratch context, or a request with
-    # no resolved auth_user all pass through untouched.
+    # no resolved auth_user all pass through untouched. "Check only" is
+    # about acquisition, not about the DB call being read-only: `get_lock`
+    # prunes an expired row via `_prune_expired`, which does a DELETE +
+    # commit on that path — so this still needs the same fail-open handling
+    # every other DB access in this middleware gets (see the auth block
+    # above), not a bare unguarded call.
     if is_write and any(path.startswith(p) for p in _FOREIGN_LOCK_GATE_PREFIXES):
         gate_user = getattr(request.state, "auth_user", None)
         if gate_user is not None and not local_mode.is_local_mode():
@@ -670,21 +675,42 @@ async def undo_snapshot_middleware(request: Request, call_next):
                 except (TypeError, ValueError):
                     lock_project_id = None
                 if lock_project_id is not None:
-                    with db_session_module.SessionLocal() as gate_db:
-                        lock = project_locks.get_lock(gate_db, lock_project_id)
-                        if lock is not None and lock.holder_user_id != gate_user.id:
-                            return JSONResponse(
-                                status_code=409,
-                                content={
-                                    "detail": (
-                                        "This project is being edited by "
-                                        "another user. Their edit lock must "
-                                        "expire or be released before "
-                                        "network changes are accepted."
-                                    ),
-                                    "code": "project_locked",
-                                },
-                            )
+                    try:
+                        with db_session_module.SessionLocal() as gate_db:
+                            lock = project_locks.get_lock(gate_db, lock_project_id)
+                            if (
+                                lock is not None
+                                and lock.holder_user_id != gate_user.id
+                            ):
+                                return JSONResponse(
+                                    status_code=409,
+                                    content={
+                                        "detail": (
+                                            "This project is being edited by "
+                                            "another user. Their edit lock "
+                                            "must expire or be released "
+                                            "before network changes are "
+                                            "accepted."
+                                        ),
+                                        "code": "project_locked",
+                                    },
+                                )
+                    except Exception:
+                        # get_lock is NOT read-only (see the comment above):
+                        # _prune_expired does a DELETE + commit on the
+                        # expired-lock path, so two concurrent writes racing
+                        # one lock's expiry can raise a SQLAlchemy
+                        # StaleDataError (the loser's DELETE matches 0 rows),
+                        # and an unreachable/misconfigured DB raises here
+                        # too. Every other branch of this gate fails OPEN
+                        # (free/expired lock, unbound context, no auth_user)
+                        # — a DB error must fail open the same way rather
+                        # than turning an ordinary canvas edit into an
+                        # opaque 500.
+                        logger.exception(
+                            "foreign-lock gate: DB check failed; allowing "
+                            "the write through"
+                        )
 
     should_snapshot = (
         is_write

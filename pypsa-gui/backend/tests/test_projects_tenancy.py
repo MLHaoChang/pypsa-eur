@@ -896,3 +896,47 @@ def test_network_write_409s_when_active_project_lock_held_by_other(session_local
             "/api/network/buses", json={"name": "Legit", "v_nom": 380.0}
         )
         assert r.status_code in (200, 201), r.text
+
+
+def test_network_write_allowed_when_lock_check_db_call_errors(session_local, monkeypatch):
+    """
+    The gate's DB block (`with SessionLocal() as gate_db: get_lock(...)`) must
+    fail OPEN on any DB error, matching every other branch (free/expired lock,
+    unbound context, no auth_user) and the auth block's own fail-open handling
+    a few lines above it in the same middleware.
+
+    Not hypothetical: `get_lock` -> `_prune_expired` does a `db.delete` +
+    `db.commit` on the expired-lock path, so two concurrent writes racing a
+    lock's expiry can hit a SQLAlchemy `StaleDataError` from THIS exact call.
+    Simulated here by monkeypatching `get_lock` to raise directly.
+
+    Uses the SAME foreign-lock setup as the 409 test above (A holds, B
+    writes) so this proves the fail-open path specifically for the case an
+    unguarded gate gets most wrong: the DB error hits on a write that WOULD
+    have been refused had `get_lock` succeeded. An unguarded gate would
+    surface that as an opaque 500; the required behaviour is to let it
+    through, same as a free/expired lock would.
+
+    The monkeypatch is applied only around the write itself, AFTER activate
+    + lock: `project_locks.get_lock` is also called by
+    `_serialize_project_lock` inside the activate/lock endpoints themselves
+    (routers/projects.py), which have no fail-open wrapper of their own and
+    are not what this test is exercising — raising for the whole test would
+    just 500 those setup calls instead.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        def _raise(*_args, **_kwargs):
+            raise RuntimeError("simulated DB error (e.g. StaleDataError on prune)")
+
+        monkeypatch.setattr("services.project_locks.get_lock", _raise)
+
+        r = client_b.post(
+            "/api/network/buses", json={"name": "StillWorks", "v_nom": 380.0}
+        )
+        assert r.status_code in (200, 201), r.text
