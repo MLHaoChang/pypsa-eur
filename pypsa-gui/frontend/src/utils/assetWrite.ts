@@ -146,7 +146,7 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   // updateAsset<Generator>(...) for field-checked call sites — and defaults
   // to the open AssetRow for untyped ones.
   patch: Partial<NoInfer<T>> | ((current: NoInfer<T>) => Partial<NoInfer<T>>),
-): Promise<void> {
+): Promise<unknown> {
   const e = ENDPOINTS[cls]
   const rows = await qc.ensureQueryData({
     queryKey: nk(project, cls),
@@ -159,6 +159,10 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   // The rows really are T (getGenerators returns Generator[]); the table
   // widened them to AssetRow at its seam, so narrow back at this one.
   const resolved = typeof patch === 'function' ? patch(current as unknown as T) : patch
-  await e.put(name, { ...current, ...resolved })
+  // Return the PUT's response body: some endpoints answer with more than an
+  // ack (updateBus carries a `rescale` preview the Bus card must ingest),
+  // and a chokepoint that swallowed it would silently drop that behaviour.
+  const resp = await e.put(name, { ...current, ...resolved })
   invalidateAssetQueries(qc, project)
+  return resp
 }

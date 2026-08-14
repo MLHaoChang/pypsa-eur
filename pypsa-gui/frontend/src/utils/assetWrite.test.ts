@@ -201,3 +201,24 @@ describe('updateAsset with a patch BUILDER', () => {
     })
   })
 })
+
+describe('updateAsset returns the PUT response', () => {
+  const api = () => (globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it('resolves with the api response body — the Bus card consumes data.rescale', async () => {
+    // updateBus responds {name, rescale: RescalePreview[]}; the Bus card
+    // feeds `data.rescale` into ingestRescale. A chokepoint that swallowed
+    // the response would silently drop that preview — the exact regression
+    // the 2026-08-09 architecture report told this module to prevent.
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'buses'), [{ name: 'b1', v_nom: 380 }])
+    api().updateBus.mockResolvedValue({ name: 'b1', rescale: [{ line: 'L1' }] })
+
+    const resp = await updateAsset(qc, 'p1', 'buses', 'b1', { v_nom: 220 })
+
+    expect(resp).toEqual({ name: 'b1', rescale: [{ line: 'L1' }] })
+  })
+})
