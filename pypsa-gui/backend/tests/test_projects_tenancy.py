@@ -853,3 +853,46 @@ def test_enqueue_409s_when_other_user_holds_lock(session_local):
         r = client_b.post("/api/simulation/queue", json={"project_id": str(project.id)})
         assert r.status_code == 409, r.text
         assert r.json()["detail"]["error_kind"] == "project_locked"
+
+
+# ── Task 6: foreign-lock gate in the write middleware ──────────────────────
+#
+# `_enforce_project_lock` (Task 4/5) covers the /api/projects/* write edges
+# (save/rename/delete/scenario/layout/members/snapshots/enqueue). It does NOT
+# cover /api/network/* or /api/io/* — those routes never resolve a `project`
+# row, they mutate the resident `PyPSAService` singleton directly. Because the
+# resident ProjectContext is shared per (org, project) (both users' sessions
+# `activate` the SAME registry slot and get the SAME in-memory network), a
+# non-holder's component write lands in the holder's memory and the holder's
+# next autosave persists it. This is a middleware CHECK ONLY (get_lock +
+# compare holder) — never an acquire; `_enforce_project_lock` still owns
+# acquisition at the project write edges.
+#
+# No `client_a`/`client_b`/`shared_project` fixtures exist in this file (see
+# the Task 5 section note above) — reuse `_seed_two_user_project` /
+# `_client_for` and the real bus-create shape from
+# `tests/test_line_lengths.py` (`POST /api/network/buses` with
+# `{"name", "v_nom"}`).
+
+def test_network_write_409s_when_active_project_lock_held_by_other(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        # Both users activate the same project; A holds the lock. Activation
+        # is what binds the middleware's active-context project_uuid that the
+        # gate reads — without it there's nothing for the gate to check.
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post(
+            "/api/network/buses", json={"name": "Intruder", "v_nom": 380.0}
+        )
+        assert r.status_code == 409, r.text
+        assert r.json().get("code") == "project_locked"
+
+        # The holder's own writes against the same shared context still pass.
+        r = client_a.post(
+            "/api/network/buses", json={"name": "Legit", "v_nom": 380.0}
+        )
+        assert r.status_code in (200, 201), r.text

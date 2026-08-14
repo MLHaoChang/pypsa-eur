@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,6 +95,17 @@ _UNDO_PREFIXES = ("/api/network/", "/api/io/")
 # Exact paths that must never trigger a snapshot (the undo endpoint itself,
 # and the info probe which is a GET anyway but listed for safety).
 _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
+
+# Prefixes gated by the foreign-lock check (project-write-safety Task 6),
+# below. Deliberately the SAME two prefixes as `_UNDO_PREFIXES` — these are
+# exactly the routes that mutate the resident PyPSA network directly without
+# ever resolving a `project` row, so `_enforce_project_lock` (which runs
+# inside `routers/projects.py` / `routers/snapshots.py` handler bodies) never
+# sees them. `_SOLVER_BLOCKING_PREFIXES` below is NOT the right surface to
+# reuse here: it also includes `/api/projects/`, whose write edges already
+# get an endpoint-level lock CHECK-AND-ACQUIRE via `_enforce_project_lock` —
+# gating them again here would just be a second, less contextual 409.
+_FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES
 
 # Path prefixes whose write methods (POST/PUT/PATCH/DELETE) are refused with
 # 409 while the LP worker is alive. These touch the in-memory network
@@ -622,6 +634,57 @@ async def undo_snapshot_middleware(request: Request, call_next):
                     "code": "solver_in_flight",
                 },
             )
+
+    # ── Foreign-lock gate (project-write-safety Task 6) ────────────────
+    # The resident ProjectContext is shared per (org, project): both a lock
+    # holder's session and a non-holder's session that `activate` the same
+    # project point at the SAME in-memory network. Route-edge enforcement
+    # (`_enforce_project_lock`, routers/projects.py + routers/snapshots.py)
+    # covers /api/projects/* writes, but /api/network/* and /api/io/* never
+    # resolve a `project` row — without this, a non-holder's component edit
+    # lands in the holder's memory and the holder's next autosave persists
+    # it. CHECK ONLY — never an acquire; a free/expired lock, the holder's
+    # own writes, local mode, an unbound scratch context, or a request with
+    # no resolved auth_user all pass through untouched.
+    if is_write and any(path.startswith(p) for p in _FOREIGN_LOCK_GATE_PREFIXES):
+        gate_user = getattr(request.state, "auth_user", None)
+        if gate_user is not None and not local_mode.is_local_mode():
+            binding_uuid = None
+            try:
+                # Local re-import: see the UnboundLocalError note on the
+                # module-level `PyPSAService` import above — several blocks
+                # earlier in this function do `from services.pypsa_service
+                # import PyPSAService`, which makes the name function-local
+                # for this whole body.
+                from services.pypsa_service import PyPSAService
+
+                active_ctx = PyPSAService.get_active_context()
+                binding_uuid = active_ctx.project_uuid
+            except Exception:
+                binding_uuid = None  # unbound scratch context — nothing to guard
+            if binding_uuid is not None:
+                from services import project_locks
+
+                try:
+                    lock_project_id = uuid.UUID(binding_uuid)
+                except (TypeError, ValueError):
+                    lock_project_id = None
+                if lock_project_id is not None:
+                    with db_session_module.SessionLocal() as gate_db:
+                        lock = project_locks.get_lock(gate_db, lock_project_id)
+                        if lock is not None and lock.holder_user_id != gate_user.id:
+                            return JSONResponse(
+                                status_code=409,
+                                content={
+                                    "detail": (
+                                        "This project is being edited by "
+                                        "another user. Their edit lock must "
+                                        "expire or be released before "
+                                        "network changes are accepted."
+                                    ),
+                                    "code": "project_locked",
+                                },
+                            )
 
     should_snapshot = (
         is_write
