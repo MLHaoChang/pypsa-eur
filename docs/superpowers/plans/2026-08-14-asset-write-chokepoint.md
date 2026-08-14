@@ -135,6 +135,31 @@ export async function updateAsset<T extends { name: string }>(
 | BottomPanel collision with grid session | Task 5 gate |
 | `ensureQueryData` typing per class | dispatch table typed per root, checked by tsc |
 
+## Execution record (2026-08-14)
+
+| Task | Outcome |
+|---|---|
+| 1 | `assetWrite.ts` seed + CONTEXT.md term |
+| 2 | Chat invalidation defect closed (tier map, fail-safe on unknown/error) |
+| 3 | `updateAsset` + builder form + response passthrough (rescale preview) |
+| 4 | PropertiesPanel ×8 rewired; `getQueryData` count 8 → 0 |
+| 5 | TopologyCanvas, MapCanvas, GenerationStack rewired; throws became fetches |
+
+Corrections found during execution, recorded rather than silently absorbed:
+
+1. **The plan's `Promise<void>` return was wrong.** The Bus card and both
+   canvas bus paths consume the PUT response (`data.rescale` →
+   `ingestRescale`). A chokepoint that swallowed it would have re-introduced
+   the exact preview-drop Finding 1 (2026-07-31) closed. `updateAsset`
+   returns the response; a test pins it.
+2. **The plan needed a builder form.** The card mappings read `current` for
+   their fallbacks (`nf(form, 'p_nom', current.p_nom)`); a plain patch
+   object cannot express that without hoisting the cache read back out.
+3. **BottomPanel is NOT one of the nine.** Its write is the optimistic bulk
+   PATCH through `/_bulk` — rollback machinery, no remove+add hazard, sends
+   only changed fields by design. The 2026-08-09 report miscounted it;
+   inventory-before-edit caught the misclassification. It keeps its idiom.
+
 ## Explicitly NOT in this plan
 
 - Creates (CreationForm ×14) and deletes (pendingEdgeDeletes/undo) — follow-on adopters.
