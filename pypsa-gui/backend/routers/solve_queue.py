@@ -697,6 +697,57 @@ def abort_job(
     return res
 
 
+@router.post("/cancel_queued")
+def cancel_queued(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Cancel every QUEUED job this caller could cancel one at a time.
+
+    AUTHORIZATION: each candidate goes through `_may_abort` — the same predicate
+    the single-job abort route applies — so the two agree for every job in the
+    queue. A caller who gets a 404 from `POST /{job_id}/abort` sees that job
+    left `queued` and otherwise untouched here, and the response counts only
+    what they actually cancelled, so the number is never a hint about somebody
+    else's work.
+
+    `running` jobs are OUT OF SCOPE. Stopping a live solve is a decision about
+    one specific piece of work in flight — it wastes minutes of solver time and
+    it is what the single-job abort is for. Sweeping it into a bulk control
+    makes "cancel the queue" occasionally mean "kill the thing that was almost
+    done".
+
+    NO global variant and NO super-admin escalation, deliberately.
+    `clear_finished` is unconditionally global and gated on `is_super_admin`,
+    and that precedent is not followed here: clearing finished rows is listing
+    hygiene, while this destroys queued work.
+
+    Does NOT call `solve_job_store.record_status` itself: `solve_queue.abort()`
+    already mirrors a cancelled queued job's terminal status to the `solve_jobs`
+    table unconditionally (see its docstring) — a second call here would just
+    re-persist the same row `abort()` already wrote.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    cancelled = 0
+    for job in solve_queue.list_jobs():
+        if job.get("status") != "queued":
+            continue
+        if not _may_abort(db, user, job):
+            continue
+        parsed = _parse_job_id(job["id"])
+        if parsed is None:
+            continue
+        if solve_queue.abort(parsed) is None:
+            # Cleared by a concurrent clear_finished between the listing and
+            # the abort. Nothing was cancelled, so nothing is counted.
+            continue
+        cancelled += 1
+    return {"cancelled": cancelled}
+
+
 @router.post("/clear_finished")
 def clear_finished(
     db: DBSession = Depends(get_db),
