@@ -261,3 +261,33 @@ def test_hand_written_quotes_are_stripped():
     app_secrets.bootstrap_environment()
 
     assert os.environ[KEY] == SAMPLE
+
+
+def test_is_managed_key_rule():
+    from services import app_secrets as s
+    assert s.is_managed_key("OPENAI_API_KEY")
+    assert s.is_managed_key("PYPSA_GUI_LLM_KEY__OLLAMA_LOCAL")
+    assert not s.is_managed_key("SECRET_KEY")
+    assert not s.is_managed_key("PYPSAGUI_APP_DATA_DIR")
+    assert not s.is_managed_key("DATABASE_URL")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__bad-lower")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__")
+
+
+def test_saving_key_a_does_not_erase_key_b(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import app_secrets as s
+    s.set_secret("PYPSA_GUI_LLM_KEY__A1", "value-aaaa-1234")
+    s.set_secret("OPENAI_API_KEY", "value-bbbb-5678")
+    assert s.get_stored("PYPSA_GUI_LLM_KEY__A1") == "value-aaaa-1234"
+    assert s.get_stored("OPENAI_API_KEY") == "value-bbbb-5678"
+
+
+def test_live_secret_values_covers_shell_only_keys(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "shell-only-value-99")
+    from services import app_secrets as s
+    s.set_secret("PYPSA_GUI_LLM_KEY__F1", "file-value-1234")
+    vals = s.live_secret_values()
+    assert "shell-only-value-99" in vals      # env-only, never in user.env
+    assert "file-value-1234" in vals

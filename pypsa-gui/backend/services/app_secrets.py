@@ -26,11 +26,18 @@ PRECEDENCE — shell env  >  user.env  >  backend/.env.
     reverts to the stale `.env` value on the next restart. A setting that
     un-sets itself overnight is worse than no setting.
 
-ALLOWLIST. Only `MANAGED_KEYS` are ever read out of `user.env` or written into
-it. This is a security boundary, not tidiness: without it, anything that could
-write this file could set `SECRET_KEY` (forging session cookies) or
-`PYPSAGUI_APP_DATA_DIR` (repointing the database), and the second is circular
-besides — the file lives *inside* the directory that variable names.
+ALLOWLIST. Only names that `is_managed_key` accepts are ever read out of
+`user.env` or written into it: the fixed `KNOWN_PROVIDER_KEYS` (aliased as
+`MANAGED_KEYS` for existing callers), plus any `PYPSA_GUI_LLM_KEY__<SLOT>` name
+whose suffix is uppercase letters, digits and underscores — one slot per
+saved provider profile. This is a security boundary, not tidiness: without
+it, anything that could write this file could set `SECRET_KEY` (forging
+session cookies) or `PYPSAGUI_APP_DATA_DIR` (repointing the database), and the
+second is circular besides — the file lives *inside* the directory that
+variable names. The rule is membership, never enumeration: it widens to admit
+new slots, but every check — read, write, and the four call-site guards below
+— still runs every name through `is_managed_key` rather than trusting a fixed
+list to have already been iterated.
 
 STORAGE. Plaintext, mode 0600, created with `O_CREAT|O_EXCL`-style flags so the
 key is never briefly world-readable. Not the OS keychain: `keyring` would need
@@ -44,18 +51,57 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 import app_paths
 
 logger = logging.getLogger(__name__)
 
-# The only names this module will read from, or write to, `user.env`.
-MANAGED_KEYS: tuple[str, ...] = ("ANTHROPIC_API_KEY",)
+# The fixed set of provider keys this module has always known about.
+KNOWN_PROVIDER_KEYS: tuple[str, ...] = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "MOONSHOT_API_KEY",
+    "DASHSCOPE_API_KEY",
+)
 
-# Longest value accepted. Anthropic keys are ~100 chars; this is a sanity bound
-# against a paste of an entire file into the field, not a format assertion.
-MAX_VALUE_LENGTH = 500
+# Alias kept for existing callers (`local_settings.py`, `routers/`) that refer
+# to specific names, not the tuple itself.
+MANAGED_KEYS: tuple[str, ...] = KNOWN_PROVIDER_KEYS
+
+# Per-profile key slots: PYPSA_GUI_LLM_KEY__<SLOT>, SLOT uppercase-only.
+# Uppercase-only, not case-insensitive, because `os.environ` upper-cases keys
+# on Windows — a mixed-case slot name would pass here but silently fail the
+# `_SHELL_NAMES` precedence check on that platform.
+_LLM_KEY_PREFIX = "PYPSA_GUI_LLM_KEY__"
+_LLM_KEY_SLOT_RE = re.compile(r"^[A-Z0-9_]{1,64}$")
+
+# Longest value accepted. Some provider keys (e.g. long-lived tokens) run well
+# past a typical Anthropic key; this is a sanity bound against a paste of an
+# entire file into the field, not a format assertion.
+MAX_VALUE_LENGTH = 2000
+
+
+def is_managed_key(name: str) -> bool:
+    """
+    True iff `name` may be read from, or written to, `user.env`.
+
+    This is the allowlist rule itself — the security boundary the module
+    docstring describes. `KNOWN_PROVIDER_KEYS` covers the fixed built-in
+    providers; the `PYPSA_GUI_LLM_KEY__<SLOT>` prefix covers one slot per
+    saved provider profile, with the slot restricted to uppercase letters,
+    digits and underscores so it can never collide with, or be mistaken for,
+    an unrelated environment variable such as `SECRET_KEY` or
+    `PYPSAGUI_APP_DATA_DIR`.
+    """
+    if name in KNOWN_PROVIDER_KEYS:
+        return True
+    if name.startswith(_LLM_KEY_PREFIX):
+        suffix = name[len(_LLM_KEY_PREFIX):]
+        return bool(_LLM_KEY_SLOT_RE.match(suffix))
+    return False
+
 
 # Names that were already in the process environment when `bootstrap_environment`
 # ran — i.e. set by the launching shell, before any file was loaded. Nothing in
@@ -109,14 +155,22 @@ def _read_managed() -> dict[str, str]:
         logger.warning("user.env exists but could not be read", exc_info=True)
         return {}
     parsed = _parse(text)
-    return {k: v for k, v in parsed.items() if k in MANAGED_KEYS and v}
+    return {k: v for k, v in parsed.items() if is_managed_key(k) and v}
 
 
 def _write_managed(values: dict[str, str]) -> None:
     """Rewrite `user.env` from `values`, 0600, never world-readable."""
     path = app_paths.user_env_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    body = "".join(f"{name}={values[name]}\n" for name in MANAGED_KEYS if values.get(name))
+    # Iterate `values`, not the allowlist: the allowlist is a membership rule,
+    # not an enumerable set, so it can only ever act as a filter here. Iterating
+    # a fixed tuple instead would silently drop every PYPSA_GUI_LLM_KEY__* slot
+    # on the next save.
+    body = "".join(
+        f"{name}={values[name]}\n"
+        for name in sorted(values)
+        if is_managed_key(name) and values.get(name)
+    )
     header = (
         "# PyPSA Studio — settings written by the app.\n"
         "# Edit by hand only if you know what you are doing; the app rewrites\n"
@@ -202,7 +256,7 @@ def get_stored(name: str = "ANTHROPIC_API_KEY") -> str | None:
     It never reaches an HTTP response: `routers/local_settings.py` passes the
     result straight to `api_key_hint` and returns only the hint.
     """
-    if name not in MANAGED_KEYS:
+    if not is_managed_key(name):
         raise SecretValueError(f"{name} is not a managed setting.")
     return _read_managed().get(name) or None
 
@@ -215,7 +269,7 @@ def status(name: str = "ANTHROPIC_API_KEY") -> dict[str, object]:
     enough for a person to tell two of their own keys apart and not enough to
     reconstruct either.
     """
-    if name not in MANAGED_KEYS:
+    if not is_managed_key(name):
         raise SecretValueError(f"{name} is not a managed setting.")
     live = os.environ.get(name) or ""
     stored = _read_managed().get(name)
@@ -242,7 +296,7 @@ def status(name: str = "ANTHROPIC_API_KEY") -> dict[str, object]:
 
 def set_secret(name: str, value: str) -> dict[str, object]:
     """Persist `name` and apply it to this process immediately."""
-    if name not in MANAGED_KEYS:
+    if not is_managed_key(name):
         raise SecretValueError(f"{name} is not a managed setting.")
     cleaned = validate_value(value)
     values = _read_managed()
@@ -265,7 +319,7 @@ def set_secret(name: str, value: str) -> dict[str, object]:
 
 def clear_secret(name: str) -> dict[str, object]:
     """Forget `name` — remove it from the file and from this process."""
-    if name not in MANAGED_KEYS:
+    if not is_managed_key(name):
         raise SecretValueError(f"{name} is not a managed setting.")
     values = _read_managed()
     values.pop(name, None)
@@ -273,3 +327,19 @@ def clear_secret(name: str) -> dict[str, object]:
     if name not in _SHELL_NAMES:
         os.environ.pop(name, None)
     return status(name)
+
+
+def live_secret_values() -> frozenset[str]:
+    """
+    Every non-blank value currently in effect for a managed key, from either
+    source — the live `os.environ` scan, unioned with what is on disk.
+
+    This is what Task 4's redaction consumes: it must also catch a managed key
+    that a shell set directly and that never touches `user.env` at all (e.g. an
+    operator-exported `OPENAI_API_KEY`), which a file-only read would miss.
+    """
+    from_env = {
+        value for name, value in os.environ.items() if is_managed_key(name) and value
+    }
+    from_file = {value for value in _read_managed().values() if value}
+    return frozenset(from_env | from_file)
