@@ -15,6 +15,7 @@ Confirm-only delete — no trash/soft-delete in this slice.
 | D5 | Delete confirm = new `ConfirmDialog` wrapper over `Dialog.tsx` (danger style, project-name echo, pending state); cascade-409 re-opens the same dialog with the descendant list — replaces the 8s auto-dismissing `confirmToast` on that path | verification |
 | D6 | Import gate lives inside `ImportZone.handleFile` (covers drop + Browse + both mounts). Policy: raw import with a bound project → **silent save-then-import** (Sidebar precedent); bundle-into-current-project → explicit confirm; scratch network with undo depth > 0 → confirm | verification |
 | D7 | Local mode: enforcement no-ops via `local_mode.is_local_mode()` per call | Claude, unchallenged by verification |
+| D8 | Acquire-on-write stands for save/rename/delete/scenario/members/snapshots (incl. autosave and chat saves — writer becomes holder for TTL); put_layout is check-only; no-op empty PATCH does not gate | final review + controller ruling |
 
 ## Verified constraints
 
@@ -66,6 +67,9 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
 | Cascade dialog regression for keyboard/screen-reader users | Reuse Dialog primitives; manual a11y pass per modal-a11y doc |
 
 ## Open items
+
+- A future read-only ACL tier would re-open lock-acquisition DoS (security F3, downgraded because no such tier exists today — `project_acl.py` has admin/member only) — revisit acquisition tier then; admin force-release / hold-cap deferred to slice 2.
+- Uploads POST/DELETE handlers (`routers/uploads.py`) write into the project dir with no lock gate — fast-follow.
 
 - Unsaved-but-undoless dirt: solver results (`/api/simulation/*` not undo-captured) on a scratch network won't trigger the import confirm. Accepted gap this slice; noting for slice 2.
 - CommandPalette snapshot restore (`CommandPalette.tsx:522-536`), Sidebar same-name destructive re-load (`Sidebar.tsx:950-956`), and `App.tsx:441` reload remain unconfirmed destructive ops — named out of scope (candidate follow-up: reuse ConfirmDialog).
