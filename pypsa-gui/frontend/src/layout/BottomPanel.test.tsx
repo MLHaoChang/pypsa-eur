@@ -1058,6 +1058,109 @@ describe('defect 10 — drag across cells selects a range', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-tab clipboard sweep (2026-08-17). The chain itself is tab-agnostic and
+// covered above through Buses; what differs per tab is the wiring — TAB_TYPES'
+// componentClass, the data getter, and the catalog fetch keyed off the class.
+// A broken mapping for, say, Stores would ship with every test above green.
+// One copy and one paste per tab the suite doesn't otherwise touch.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('clipboard works on every asset tab', () => {
+  const SWEEP = [
+    { tab: 'Lines', cls: 'Line', getter: 'getLines' as const, col: 's_nom',
+      rows: [{ name: 'L0', bus0: 'B0', bus1: 'B1', s_nom: 100 },
+             { name: 'L1', bus0: 'B1', bus1: 'B2', s_nom: 200 }] },
+    { tab: 'Transformers', cls: 'Transformer', getter: 'getTransformers' as const, col: 's_nom',
+      rows: [{ name: 'T0', bus0: 'B0', bus1: 'B1', s_nom: 300 },
+             { name: 'T1', bus0: 'B1', bus1: 'B2', s_nom: 400 }] },
+    { tab: 'Storage', cls: 'StorageUnit', getter: 'getStorageUnits' as const, col: 'p_nom',
+      rows: [{ name: 'S0', bus: 'B0', p_nom: 50, control: 'PQ' },
+             { name: 'S1', bus: 'B1', p_nom: 60, control: 'PQ' }] },
+    { tab: 'Stores', cls: 'Store', getter: 'getStores' as const, col: 'e_nom',
+      rows: [{ name: 'St0', bus: 'B0', e_nom: 500 },
+             { name: 'St1', bus: 'B1', e_nom: 600 }] },
+    { tab: 'Loads', cls: 'Load', getter: 'getLoads' as const, col: 'p_set',
+      rows: [{ name: 'Ld0', bus: 'B0', p_set: 10 },
+             { name: 'Ld1', bus: 'B1', p_set: 20 }] },
+    { tab: 'Links', cls: 'Link', getter: 'getLinks' as const, col: 'p_nom',
+      rows: [{ name: 'Lk0', bus0: 'B0', bus1: 'B1', p_nom: 70 },
+             { name: 'Lk1', bus0: 'B1', bus1: 'B2', p_nom: 80 }] },
+  ]
+
+  /** Numeric catalog for one class: name + the swept column (+ control on SU). */
+  function sweepCatalog(cls: string, col: string): CatalogAttribute[] {
+    const attrs = [
+      catalogAttr({ name: 'name', dtype: 'object', status: 'Input (required)' }),
+      catalogAttr({ name: col }),
+    ]
+    if (cls === 'StorageUnit') {
+      attrs.push(catalogAttr({ name: 'control', dtype: 'object', type: 'string' }))
+    }
+    return attrs
+  }
+
+  function mockTab(entry: typeof SWEEP[number]) {
+    const api = vi.mocked(networkApi)
+    api[entry.getter].mockReset().mockResolvedValue(entry.rows as never)
+    api.getCatalog.mockReset().mockImplementation(async (component: string) => ({
+      component,
+      attributes: component === 'Bus' ? BUS_CATALOG
+        : component === entry.cls ? sweepCatalog(entry.cls, entry.col) : [],
+    }) as never)
+  }
+
+  for (const entry of SWEEP) {
+    it(`${entry.tab}: copies the active cell and pastes through ${entry.cls}`, async () => {
+      mockTab(entry)
+      vi.mocked(networkApi).bulkUpdate.mockResolvedValue({ updated: 1 } as never)
+      renderPanel()
+      await userEvent.click(screen.getByText(entry.tab))
+      await screen.findByText(entry.rows[0].name)
+
+      const cell = cellAt(entry.rows[0].name, entry.col)
+      await userEvent.click(cell)
+      expect(fireCopy(document.body)).toBe(String(entry.rows[0][entry.col as 'name']))
+
+      await act(async () => { firePaste(document.body, '250') })
+      await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(networkApi).bulkUpdate.mock.calls[0][0]).toEqual({
+        component_class: entry.cls,
+        names: [entry.rows[0].name],
+        updates: { [entry.col]: 250 },
+      })
+    })
+  }
+
+  it('Storage: paste into control enforces the closed set end to end', async () => {
+    // Integration guard for the CLOSED_SETS['StorageUnit.control'] entry —
+    // the unit tests pin resolveEditor/validateAndCoerce; this pins the wiring.
+    const entry = SWEEP.find(e => e.cls === 'StorageUnit')!
+    mockTab(entry)
+    const errSpy = vi.spyOn(toast, 'error').mockImplementation(() => '' as never)
+    vi.mocked(networkApi).bulkUpdate.mockResolvedValue({ updated: 1 } as never)
+    renderPanel()
+    await userEvent.click(screen.getByText('Storage'))
+    await screen.findByText('S0')
+
+    // `control` is not in the Storage tab's curated defaults; turn it on.
+    await userEvent.click(screen.getByTitle(/show \/ hide columns/i))
+    const row = screen.getByText('control').closest('label')!
+    await userEvent.click(row.querySelector('input[type="checkbox"]')!)
+
+    const cell = cellAt('S0', 'control')
+    await userEvent.click(cell)
+    await act(async () => { firePaste(document.body, 'Swing') })
+    expect(errSpy).toHaveBeenCalled()
+    expect(errSpy.mock.calls[0][0]).toContain('S0 / control')
+    expect(vi.mocked(networkApi).bulkUpdate).not.toHaveBeenCalled()
+
+    await act(async () => { firePaste(document.body, 'PV') })
+    await waitFor(() => expect(vi.mocked(networkApi).bulkUpdate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(networkApi).bulkUpdate.mock.calls[0][0].updates).toEqual({ control: 'PV' })
+  })
+})
+
 describe('defect 8b — the grid only claims the clipboard when it has focus', () => {
   // The document-level listener is deliberately wide, so it needs a fence:
   // the bottom panel is always mounted, and `active` survives clicking away.
