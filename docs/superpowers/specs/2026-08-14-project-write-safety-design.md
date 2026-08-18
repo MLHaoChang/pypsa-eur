@@ -70,6 +70,18 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
 
 - A future read-only ACL tier would re-open lock-acquisition DoS (security F3, downgraded because no such tier exists today — `project_acl.py` has admin/member only) — revisit acquisition tier then; admin force-release / hold-cap deferred to slice 2.
 - Uploads POST/DELETE handlers (`routers/uploads.py`) write into the project dir with no lock gate — fast-follow.
+- **Preflight failure renders as a clean bill of health — ADR-0001 violation, independent of this slice.**
+  `layout/Sidebar.tsx:1223-1224` computes `issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)`
+  and never consults the query's error state; `pages/IssuesPanel.tsx` renders the same response, and its own
+  comment promises "if this panel is empty the solver run will not fail on pre-checks". So a REFUSED preflight
+  (any cause: 409, 503, auth, network, a future guard) is indistinguishable from a clean one — the badge reads
+  zero and the panel empties, asserting there are no problems when the answer was merely never obtained.
+  This is `docs/adr/0001-unresolvable-figures-ship-as-null.md` exactly ("a defaulted zero ... silently converts
+  'we could not compute this' into 'we computed this and it is nothing'"), wearing a badge instead of a
+  currency figure. Exempting preflight from the lock gate (`bc14189c`) removes the current trigger and HIDES
+  this defect; it does not fix it. The fix is to distinguish "no issues" from "could not check" at both
+  consumers. Recorded separately on purpose: folded into the gate fix, the symptom disappears and the defect
+  survives. Credit: raised cross-session by the assistant-dock and coordinator sessions, 2026-08-18.
 
 - Unsaved-but-undoless dirt: solver results (`/api/simulation/*` not undo-captured) on a scratch network won't trigger the import confirm. Accepted gap this slice; noting for slice 2.
 - CommandPalette snapshot restore (`CommandPalette.tsx:522-536`), Sidebar same-name destructive re-load (`Sidebar.tsx:950-956`), and `App.tsx:441` reload remain unconfirmed destructive ops — named out of scope (candidate follow-up: reuse ConfirmDialog).
