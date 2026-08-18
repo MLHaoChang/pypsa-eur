@@ -3584,7 +3584,28 @@ DISPATCHERS: dict[str, Any] = {
 # bypass the chat surface (tests, smoke harnesses) are unaffected.
 
 _LOCK_GATE_PREFIXES = ("/api/network/", "/api/io/", "/api/simulation/")
-_LOCK_GATE_EXEMPT_PATHS = frozenset({"/api/simulation/queue"})
+# Explicit allowlist, not a prefix — mirrors `main.py`'s
+# `_FOREIGN_LOCK_GATE_EXEMPT_EXACT` / `_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`.
+# A queue route is exempt only when it acts on a JOB or names its project in
+# the body; a hypothetical future sibling under `/api/simulation/queue/`
+# that acts on the active project must stay gated by default, so this is
+# spelled out per-route rather than `path.startswith("/api/simulation/queue")`.
+#
+#   * `/api/simulation/queue`                      (`solve_queue_enqueue`)
+#     — names its project in the body, runs its own holder check.
+#   * `/api/simulation/queue/clear_finished`       (`solve_queue_clear_finished`)
+#     — cross-org by construction, super-admin-gated; never touches the
+#       active project.
+#   * `/api/simulation/queue/{job_id}/abort`       (`solve_queue_abort`)
+#     — job-scoped; carries its own authorization keyed on the job. This is
+#       `TOOL_ROUTES`'s literal template string (never a real job id at this
+#       seam), so an exact match on the template is correct and does not need
+#       the regex `main.py` uses against real request paths.
+_LOCK_GATE_EXEMPT_PATHS = frozenset({
+    "/api/simulation/queue",
+    "/api/simulation/queue/clear_finished",
+    "/api/simulation/queue/{job_id}/abort",
+})
 _LOCK_GATE_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 # Tools with no HTTP route (`_service_call_` in TOOL_ROUTES) that nonetheless

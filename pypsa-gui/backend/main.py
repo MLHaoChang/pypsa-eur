@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -113,11 +114,53 @@ _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 # question from who is allowed to write.
 _FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)
 
-# Exact paths exempt from the gate above. `POST /api/simulation/queue` names
-# its project in the BODY and runs its own holder check against THAT project
-# (`routers/solve_queue.py`), so the middleware — which can only test the
-# session's ACTIVE project — would be refusing on the wrong project's lock.
-_FOREIGN_LOCK_GATE_EXEMPT = {"/api/simulation/queue"}
+# Paths exempt from the gate above. The rule is NOT "everything under
+# `/api/simulation/queue/`" — it is an explicit allowlist: a queue route is
+# exempt only when it acts on a JOB or names its project in the BODY, never
+# because it merely shares the `/api/simulation/queue` prefix. A route that
+# acts on the session's ACTIVE project (a hypothetical future
+# `/queue/purge_all` or similar) must stay gated by default — a prefix match
+# would silently exempt it the day it's added, and a destructive route
+# inheriting an exemption is worse than the 409 this list exists to avoid.
+# Add new siblings here only after confirming they don't resolve the active
+# project.
+#
+#   * `POST /api/simulation/queue`                       — enqueue; names its
+#     project in the BODY and runs its own holder check against THAT project
+#     (`routers/solve_queue.py`), so the middleware — which can only test the
+#     session's ACTIVE project — would be refusing on the wrong project's lock.
+#   * `POST /api/simulation/queue/clear_finished`         — drops every org's
+#     terminal jobs; cross-org by construction and super-admin-gated. Never
+#     resolves the active project at all.
+#   * `POST /api/simulation/queue/{job_id}/abort`         — job-scoped; carries
+#     its own authorization (`_may_abort`) keyed on the job, not on the
+#     caller's active project.
+_FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
+    "/api/simulation/queue",
+    "/api/simulation/queue/clear_finished",
+})
+#
+# The abort pattern is anchored to the canonical dashed-UUID shape, not "any
+# non-slash segment": `_parse_job_id` (`routers/solve_queue.py`) only ever
+# resolves a real job from `uuid.UUID(job_id)`, so anything else can't
+# address a job regardless. Failing OUT of the exemption on a non-canonical
+# id is the safe direction — the frontend only ever sends the canonical form
+# it got back from the API, so a stray/odd-form segment just gets gated (a
+# 409 at worst), never an accidental bypass.
+_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS = (
+    re.compile(
+        r"^/api/simulation/queue/"
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        r"/abort$"
+    ),
+)
+
+
+def _foreign_lock_gate_exempt(path: str) -> bool:
+    """True iff `path` is on the explicit queue-route allowlist above."""
+    if path in _FOREIGN_LOCK_GATE_EXEMPT_EXACT:
+        return True
+    return any(p.match(path) for p in _FOREIGN_LOCK_GATE_EXEMPT_PATTERNS)
 
 # Path prefixes whose write methods (POST/PUT/PATCH/DELETE) are refused with
 # 409 while the LP worker is alive. These touch the in-memory network
@@ -665,7 +708,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # above), not a bare unguarded call.
     if (is_write
             and any(path.startswith(p) for p in _FOREIGN_LOCK_GATE_PREFIXES)
-            and path not in _FOREIGN_LOCK_GATE_EXEMPT):
+            and not _foreign_lock_gate_exempt(path)):
         gate_user = getattr(request.state, "auth_user", None)
         if gate_user is not None and not local_mode.is_local_mode():
             binding_uuid = None

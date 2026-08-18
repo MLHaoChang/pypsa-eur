@@ -1031,3 +1031,82 @@ def test_enqueue_of_an_unlocked_project_passes_under_a_foreign_active_lock(
 
         r = client_b.post("/api/simulation/queue", json={"project_id": str(other.id)})
         assert r.status_code != 409, r.text
+
+
+# ── N1: abort/clear_finished are job-scoped, not active-project-scoped ─────
+#
+# `POST /api/simulation/queue/{job_id}/abort` and
+# `POST /api/simulation/queue/clear_finished` never resolve the session's
+# ACTIVE project — abort is authorized against the JOB, clear_finished is
+# cross-org/super-admin-gated. An exact-path exemption for bare
+# `/api/simulation/queue` left these two 409ing merely because the caller's
+# active project happened to be foreign-locked: refusing on the wrong
+# project's lock, the exact failure the exemption exists to prevent.
+
+
+def test_abort_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    Pre-fix, the middleware's foreign-lock gate 409s BEFORE the router ever
+    sees the job id (exact-path exemption only matched bare
+    `/api/simulation/queue`). Post-fix, an unknown job id reaches the router
+    and gets its own 404 `No solve job with id ...` — a perfectly good
+    negative assertion since the point is that `project_locked` must not be
+    the reason.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        unknown_job_id = str(uuid.uuid4())
+        r = client_b.post(f"/api/simulation/queue/{unknown_job_id}/abort")
+        assert r.status_code != 409, r.text
+        assert r.status_code == 404, r.text
+
+
+def test_clear_finished_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    Same reasoning as the abort test above: clear_finished is cross-org and
+    super-admin-gated, never scoped to the caller's active project. `user_b`
+    is not a super-admin here, so the real refusal is 403 — the assertion
+    that matters is that it is NOT 409 `project_locked`.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/simulation/queue/clear_finished")
+        assert r.status_code != 409, r.text
+
+
+def test_foreign_lock_gate_exempt_predicate_is_an_explicit_allowlist(monkeypatch):
+    """
+    N1 follow-up: the exemption must not silently widen to every path that
+    happens to share the `/api/simulation/queue` prefix. A future sibling
+    route acting on the active project (a hypothetical `purge_all`, or a
+    per-job route beyond abort) must default to GATED, not exempt.
+
+    Asserted directly against the predicate `main._foreign_lock_gate_exempt`
+    since no such sibling route exists yet to exercise over HTTP.
+    """
+    exempt = main._foreign_lock_gate_exempt
+
+    # The three real, deliberately-exempt routes.
+    assert exempt("/api/simulation/queue") is True
+    assert exempt("/api/simulation/queue/clear_finished") is True
+    assert exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/abort") is True
+
+    # Hypothetical siblings under the SAME prefix must stay gated by default.
+    assert exempt("/api/simulation/queue/purge_all") is False
+    assert exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/priority") is False
+
+    # Non-canonical / crafted job-id segments on the abort route must NOT
+    # ride the exemption — fail-gated is the safe direction (a stray 409,
+    # never an accidental bypass).
+    assert exempt("/api/simulation/queue/not-a-uuid/abort") is False
+    assert exempt("/api/simulation/queue/../abort") is False

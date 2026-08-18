@@ -788,3 +788,32 @@ def test_seam_lock_gate_is_a_no_op_in_local_mode(
             component_class="Bus", name="LocalModeBus", attrs={"v_nom": 380.0}
         )
     assert result is not None
+
+
+def test_solve_queue_abort_tool_is_not_lock_gated(
+    foreign_locked_active_project, second_identity
+):
+    """
+    N1 mirror of `main.py`'s middleware exemption: `solve_queue_abort` is
+    job-scoped, carries its own authorization keyed on the job, and never
+    resolves the acting user's active project — so it must not be in the
+    seam's derived gated-tool set, and a real call under a foreign lock on
+    the active project must not be refused with `project_locked`.
+
+    The job id is made up (no real queued job), so the call falls through to
+    the router's own 404 `No solve job with id ...` — the point here is only
+    that the refusal is NOT the lock gate's 409.
+    """
+    from fastapi import HTTPException
+
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+
+    assert "solve_queue_abort" not in chat_tools._lock_gated_tool_names()
+
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    with _bound_to(ctx):
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.DISPATCHERS["solve_queue_abort"](job_id=str(_uuid.uuid4()))
+    assert exc.value.status_code == 404
+    assert exc.value.status_code != 409
