@@ -746,9 +746,30 @@ def requeue_job(
     the row afterward would leave a window where it goes terminal against a
     row that does not exist yet — the exact TOCTOU `enqueue_solve` closed for
     the first enqueue (see there), reopened here for the second one.
+
+    THE PROJECT NAME AND DIRECTORY ARE RESOLVED FRESH (fix round 1, review
+    Important). The source job's own `project_id` / `storage_dir` are a
+    point-in-time CAPTURE from whenever it was enqueued, and in LOCAL mode
+    `project_registry.rename_project` MOVES the directory on disk: enqueue
+    "Alpha" -> finish -> rename Alpha to "Beta" (directory moves) -> requeue
+    the old job would otherwise carry a `storage_dir` that no longer exists.
+    The dispatcher then hydrates nothing, and `_save_context`'s
+    `mkdir(parents=True, exist_ok=True)` RECREATES the stale directory,
+    orphaned from any DB row — the same defect class already fixed for
+    project delete. So the project row is re-resolved from `old["project_key"]`
+    (the same `org_uuid:project_uuid` identity `_project_uuid` already knows
+    how to parse) and `project_registry.project_dir(project)` is read again,
+    HERE, not carried over from the source job. Only the config SNAPSHOT is
+    still read from the source job/row — that reuse is the deliberate R31
+    semantic ("run THAT run again"), and it is not a project-identity field.
+
+    A legacy job with no `project_key` (pre-Step-0a artefact, or hand-made in
+    a test) has no row to re-resolve against; that one case falls back to
+    whatever the job/row itself carries.
     """
     import pathlib
 
+    from db.models import Project
     from services import project_registry, solve_job_store
 
     project_registry.require_user(user)
@@ -764,22 +785,39 @@ def requeue_job(
     with solve_queue._lock:
         source = solve_queue._jobs.get(parsed)
     if source is not None:
-        storage_dir = source.storage_dir
+        stored_dir = source.storage_dir
         snapshot = source.solver_config_json
     else:
         persisted = solve_job_store.load_job(parsed)
-        storage_dir = persisted.get("storage_dir") if persisted else None
+        stored_dir = persisted.get("storage_dir") if persisted else None
         snapshot = persisted.get("solver_config") if persisted else None
+
+    not_found = HTTPException(404, f"No solve job with id {job_id}.")
+    prefix = _org_prefix(db, user)
+    project_uuid = _project_uuid(old, prefix)
+    if project_uuid is not None:
+        project = db.get(Project, project_uuid)
+        if project is None:
+            raise not_found
+        project_name = project.name
+        storage_dir = str(project_registry.project_dir(project))
+    else:
+        # No project_key to resolve against — a legacy unkeyed job. Every job
+        # `enqueue_solve` has created since Step 0a carries one; this is only
+        # reachable for a hand-made or pre-Step-0a artefact, so fall back to
+        # whatever the job/row itself captured.
+        project_name = old["project_id"]
+        storage_dir = stored_dir
 
     if not storage_dir or not (pathlib.Path(storage_dir) / "network.nc").exists():
         raise HTTPException(
             404,
-            f"Project '{old['project_id']}' has no saved network on disk. Save the "
+            f"Project '{project_name}' has no saved network on disk. Save the "
             "project before queuing it to solve.",
         )
 
     job, created = solve_queue.enqueue_unique(
-        old["project_id"],
+        project_name,
         project_key=old["project_key"],
         storage_dir=storage_dir,
         solver_config_json=snapshot,

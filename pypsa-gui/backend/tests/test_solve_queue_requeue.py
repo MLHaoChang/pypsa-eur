@@ -13,6 +13,9 @@ from __future__ import annotations
 import time
 import uuid
 
+from fastapi.testclient import TestClient
+
+import main
 from services.solve_queue import SolveJob, solve_queue
 from tests.conftest import build_network
 
@@ -193,3 +196,101 @@ def test_requeue_of_a_persisted_only_interrupted_job_survives_a_restart(
         assert _json.loads(row.solver_config)["co2_price"] == 7.0
     finally:
         solve_queue.reset_for_tests()
+
+
+def test_requeue_after_rename_uses_the_current_directory_and_name(
+    _auth_db, monkeypatch, tmp_path, install_network,
+):
+    """
+    Fix round 1 (review finding). In LOCAL mode, `project_registry.rename_project`
+    MOVES the project directory on disk. A requeue must resolve the project's
+    CURRENT directory and name fresh from the DB row — via the source job's
+    `project_key` — rather than reusing the source job's captured
+    `storage_dir` / display name: enqueue "Alpha" -> finish -> rename Alpha to
+    "Beta" (directory moves) -> requeue the old job must carry Beta's CURRENT
+    directory, not Alpha's now-gone one, and the old directory must not be
+    recreated.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    import local_mode
+    from db.models import Project
+    from services import project_registry
+
+    monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        local_mode.ensure_local_identity(db)
+    try:
+        with TestClient(main.app) as local_client:
+            local_client.cookies.clear()
+            install_network(build_network(), name="Alpha")
+            r = local_client.post(
+                "/api/projects/Alpha", params={"force": True, "rebind": True}
+            )
+            assert r.status_code == 200, r.text
+
+            with session_local() as db:
+                project = db.scalar(select(Project).where(Project.name == "Alpha"))
+                assert project is not None
+                key = f"{project.org_id}:{project.id}"
+                old_dir = project_registry.project_dir(project)
+            assert old_dir.exists()
+
+            solve_queue.reset_for_tests()
+            jid = _uuid.uuid4()
+            with solve_queue._lock:
+                job = SolveJob(
+                    id=jid, project_id="Alpha", project_key=key,
+                    storage_dir=str(old_dir), enqueued_at=time.time(),
+                )
+                job.status = "completed"
+                job.finished_at = time.time()
+                job.solver_config_json = '{"solver_name": "highs", "co2_price": 7.0}'
+                solve_queue._jobs[jid] = job
+                solve_queue._order.append(jid)
+
+            r = local_client.post(
+                "/api/projects/Alpha/rename", json={"new_name": "Beta"}
+            )
+            assert r.status_code == 200, r.text
+
+            with session_local() as db:
+                renamed = db.get(Project, project.id)
+                new_dir = project_registry.project_dir(renamed)
+            assert new_dir != old_dir
+            assert new_dir.exists()
+            assert not old_dir.exists(), (
+                "requeue must not have recreated the stale pre-rename directory"
+            )
+
+            resp = local_client.post(f"/api/simulation/queue/{jid}/requeue")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["project_id"] == "Beta", "requeue served the stale display name"
+            assert not old_dir.exists(), (
+                "requeue recreated the pre-rename directory via a stale storage_dir"
+            )
+
+            import json as _json
+
+            from db.models import SolveJobRow
+            from db.session import SessionLocal as _SessionLocal
+
+            with _SessionLocal() as db:
+                row = db.scalar(
+                    select(SolveJobRow).where(SolveJobRow.id == _uuid.UUID(body["id"]))
+                )
+            assert row is not None
+            assert row.storage_dir == str(new_dir), (
+                "requeue carried the source job's stale storage_dir instead of "
+                "resolving the project's current directory"
+            )
+            assert _json.loads(row.solver_config)["co2_price"] == 7.0
+    finally:
+        solve_queue.reset_for_tests()
+        with session_local() as db:
+            local_mode.remove_local_identity(db)
