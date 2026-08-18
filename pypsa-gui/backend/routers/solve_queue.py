@@ -698,6 +698,39 @@ def abort_job(
     return res
 
 
+def _require_instance_scope(user: User) -> None:
+    """
+    Gate for controls that act on the WHOLE dispatcher.
+
+    One dispatcher serves every org, so pausing it stops every org's jobs — an
+    operation that crosses org boundaries by construction, which is exactly the
+    reasoning `clear_finished` uses to sit on `User.is_super_admin` rather than
+    on an org-admin role. Local mode has one seeded tenant and one user, so the
+    only possible subject IS the caller and the gate would only lock them out of
+    their own machine.
+
+    RULING (controller, fix round 1): task-19's brief shipped this helper
+    alongside a test (`test_pause_and_resume_round_trip`) that called the
+    routes through the plain, non-super-admin `client` fixture and asserted
+    200 — a self-contradiction the first pass resolved by DROPPING the gate.
+    The controller ruled the brief's PROSE (this docstring's reasoning) is
+    correct and the brief's TEST was the defect: pausing halts the one
+    process-global FIFO for every org, the same cross-org blast radius that
+    puts `clear_finished` on `is_super_admin`, and the test carried no
+    reasoning of its own. The gate is restored; the tests now use
+    `super_admin_client` / local mode for the 200 cases and pin 403 for a
+    plain authenticated caller.
+    """
+    if local_mode.is_local_mode():
+        return
+    if not user.is_super_admin:
+        raise HTTPException(
+            403,
+            "Pausing the queue stops solving for every organization, so it is "
+            "restricted to super-admins.",
+        )
+
+
 @router.post("/pause")
 def pause_queue(
     db: DBSession = Depends(get_db),
@@ -706,22 +739,13 @@ def pause_queue(
     """
     Start no more jobs. Jobs already running finish normally.
 
-    AUTHORIZATION: `require_user` only — any authenticated caller, local mode
-    included. DEVIATION from the task-19 brief's `_require_instance_scope`
-    snippet (which gated on `User.is_super_admin`, mirroring `clear_finished`):
-    the brief's OWN test (`test_pause_and_resume_round_trip`) calls this route
-    through the plain `client` fixture and asserts 200, and that fixture's user
-    is a non-super-admin org member (`tests/conftest.py::seeded_identity`),
-    same as `test_clear_finished_is_refused_for_a_non_super_admin` pins 403 for
-    the analogous `clear_finished` route. The brief's code and its test
-    contradict each other; the test is the executable spec, so this route does
-    NOT escalate to a super-admin gate. Pausing is reversible and non-destructive
-    (unlike `clear_finished`, which deletes rows) — a lower bar is defensible on
-    its own merits, not only because the test demands it.
+    AUTHORIZATION: instance-wide, gated on `User.is_super_admin` (local mode
+    exempt) — see `_require_instance_scope`.
     """
     from services import project_registry
 
     project_registry.require_user(user)
+    _require_instance_scope(user)
     solve_queue.pause()
     return {"paused": solve_queue.is_paused()}
 
@@ -735,6 +759,7 @@ def resume_queue(
     from services import project_registry
 
     project_registry.require_user(user)
+    _require_instance_scope(user)
     solve_queue.resume()
     return {"paused": solve_queue.is_paused()}
 
