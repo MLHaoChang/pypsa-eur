@@ -145,9 +145,21 @@ _FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)
 #
 #   * `POST /api/simulation/preflight`                    — calls
 #     `validate_for_run(n, config)` and returns the issue list. Takes no
-#     PyPSA lock, calls no `n.add`/`n.remove`. Refusing it 409 makes the
-#     Validate button a silent no-op for a non-holder (`project_locked` is
-#     toast-suppressed on the frontend).
+#     PyPSA lock, calls no `n.add`/`n.remove`.
+#
+#     Refusing it 409 is worse than it first looks, because the endpoint is
+#     not just the Validate button: `layout/Sidebar.tsx` POLLS it to drive
+#     the sidebar's error/warning BADGE, and `pages/IssuesPanel.tsx` renders
+#     the same response. For a non-holder the badge therefore reads ZERO and
+#     the Issues panel empties — a workbench affirmatively reporting NO
+#     problems, which is worse than one reporting nothing.
+#
+#     It presents silently because two suppressions stack: `api/client.ts`
+#     lists preflight in `QUIET_MUTATION_URLS` (its 2xx traffic is noise) and
+#     `project_locked` in `QUIET_TOAST_CODES` (a standing condition, not an
+#     incident). BOTH ARE CORRECT AND NEITHER IS THE BUG — do not "fix" a
+#     recurrence by un-suppressing either one, which keeps the wrong answer
+#     and merely adds noise to it. The bug is refusing the read at all.
 #
 # Adding to THIS category requires confirming the handler takes no PyPSA lock
 # and performs no mutation — read the handler body, don't infer it from the
