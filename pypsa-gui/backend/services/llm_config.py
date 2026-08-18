@@ -1,8 +1,8 @@
 """
 LLM profile store (spec 2026-08-13, plan 2026-08-14, Task 1).
 
-Imports only stdlib, `app_paths` and `services.app_secrets`, deliberately —
-same rule `local_settings.py` documents at its own top: `main.py` and the
+Imports only stdlib and `app_paths`, deliberately — same rule
+`local_settings.py` documents at its own top: `main.py` and the
 provider seam must be able to read profile config before the router graph
 exists, so this module may not import `chat_service`, any `llm_*` provider
 module, or anything else that could pull the app graph in behind it.
@@ -47,7 +47,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import app_paths
-from services import app_secrets  # noqa: F401 — see module docstring import rule
 
 logger = logging.getLogger(__name__)
 
@@ -201,12 +200,24 @@ def _validate_base_url(profile_id: str, base_url: str) -> None:
             f"profile {profile_id!r}: base_url must not contain userinfo (user:pass@host)"
         )
     query = parse_qs(parts.query)
-    leaked = _CREDENTIAL_QUERY_KEYS & set(query)
+    leaked = _CREDENTIAL_QUERY_KEYS & {key.lower() for key in query}
     if leaked:
         raise ProfileValidationError(
             f"profile {profile_id!r}: base_url query must not contain credential-shaped "
             f"parameters ({', '.join(sorted(leaked))})"
         )
+
+
+def _strict_bool(data: dict, key: str) -> bool:
+    # `bool(data.get(key, False))` would coerce any truthy JSON value —
+    # including the string "false" — to True. A capability field must be a
+    # real JSON boolean; anything else makes the whole entry invalid so it
+    # gets skipped (and logged) by `load_profiles`, same as a missing
+    # required field.
+    value = data.get(key, False)
+    if not isinstance(value, bool):
+        raise TypeError(f"{key!r} must be a boolean, got {value!r}")
+    return value
 
 
 def _profile_from_dict(data: dict) -> LLMProfile:
@@ -220,8 +231,8 @@ def _profile_from_dict(data: dict) -> LLMProfile:
         wire=data["wire"],
         base_url=data.get("base_url"),
         model=data["model"],
-        tools=bool(data.get("tools", False)),
-        vision=bool(data.get("vision", False)),
+        tools=_strict_bool(data, "tools"),
+        vision=_strict_bool(data, "vision"),
         auth=data["auth"],
         fallback_model=data.get("fallback_model"),
         max_output_tokens=data.get("max_output_tokens"),

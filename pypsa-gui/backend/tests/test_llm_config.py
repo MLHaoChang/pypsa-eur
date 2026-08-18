@@ -58,6 +58,9 @@ def test_custom_key_env_is_derived_uppercase(appdata):
     "https://user:pass@evil.example/v1",         # userinfo
     "https://h.example/v1?api_key=sk-live",      # credential query
     "ftp://h.example/v1",                        # scheme
+    "https://h.example/v1?API_KEY=sk-live",      # credential query, uppercase key
+    "https://h.example/v1?Token=abc",            # credential query, mixed case key
+    "https://h.example/v1?KEY=abc",              # credential query, uppercase key
 ])
 def test_base_url_validation_rejects_credentials(appdata, base_url):
     from services import llm_config
@@ -66,6 +69,24 @@ def test_base_url_validation_rejects_credentials(appdata, base_url):
             id="x", label="x", preset="custom", wire="openai",
             base_url=base_url, model="m", tools=True, vision=False,
             auth="bearer", fallback_model=None, max_output_tokens=None)], "x")
+
+
+def test_non_bool_capability_field_is_skipped_builtins_still_load(appdata):
+    from services import llm_config
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [{
+            "id": "bad-tools", "label": "Bad", "preset": "custom", "wire": "openai",
+            "base_url": None, "model": "m", "tools": "false", "vision": True,
+            "auth": "none", "fallback_model": None, "max_output_tokens": None,
+        }],
+    }), encoding="utf-8")
+    profiles, active = llm_config.load_profiles()
+    ids = [p.id for p in profiles]
+    assert "bad-tools" not in ids
+    assert ids == ["anthropic-sonnet", "anthropic-opus"]
+    assert active == "anthropic-sonnet"
 
 
 def test_resolve_unknown_falls_back_to_active(appdata):
