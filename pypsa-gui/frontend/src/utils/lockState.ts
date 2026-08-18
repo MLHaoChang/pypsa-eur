@@ -83,6 +83,54 @@ export function effectiveLockState(
   return { readOnly: false, reason: 'writable' }
 }
 
+// ── Reading a refusal off the wire ─────────────────────────────────────────
+//
+// The backend refuses a write under a foreign lock from three places, and the
+// two readers below have to accept all of them:
+//
+//   `_enforce_project_lock`   detail: {error_kind, message, lock}
+//   the write middleware      detail: {…same…}, plus a top-level `code`
+//   the enqueue check         detail: {…same…}
+//
+// The middleware's top-level `code` predates the unification and stays for
+// compatibility, which is why `lockRefusalCode` looks in both places. Keeping
+// both readers here — rather than inline at the axios interceptor and again in
+// `projectActions` — is what stops the two from drifting the next time a
+// fourth emitter appears.
+
+export const PROJECT_LOCKED = 'project_locked'
+
+function detailOf(responseData: unknown): Record<string, unknown> | null {
+  if (!responseData || typeof responseData !== 'object') return null
+  const detail = (responseData as { detail?: unknown }).detail
+  if (!detail || typeof detail !== 'object') return null
+  return detail as Record<string, unknown>
+}
+
+/**
+ * `'project_locked'` when this response body is a foreign-lock refusal from any
+ * emitter, else null. Callers key toast suppression off it: a blocked write
+ * belongs in the read-only banner, not in a toast per retry.
+ */
+export function lockRefusalCode(responseData: unknown): string | null {
+  if (!responseData || typeof responseData !== 'object') return null
+  if ((responseData as { code?: unknown }).code === PROJECT_LOCKED) return PROJECT_LOCKED
+  return detailOf(responseData)?.error_kind === PROJECT_LOCKED ? PROJECT_LOCKED : null
+}
+
+/**
+ * The current holder carried by a refusal, or null when unknown.
+ *
+ * null is a legitimate answer, not only a parse failure: the backend serialiser
+ * degrades a DB error to `lock: null` rather than turning a correct 409 into a
+ * 500, and the banner then falls back to "another user".
+ */
+export function lockFromErrorData(responseData: unknown): LockInfo | null {
+  const detail = detailOf(responseData)
+  if (detail === null || !('lock' in detail)) return null
+  return (detail.lock as LockInfo | null) ?? null
+}
+
 // Destructive / mutating actions consult this before running. Kept as a named
 // helper (rather than an inline `!readOnly` at each call site) so the intent is
 // greppable and the unit test documents the rule: read-only mode blocks every

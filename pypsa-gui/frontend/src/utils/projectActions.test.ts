@@ -352,6 +352,36 @@ describe('lock-loss recovery', () => {
     expect(projectsApi.heartbeatLock).not.toHaveBeenCalled()
   })
 
+  it("applies the banner from the MIDDLEWARE's payload shape too (I1)", async () => {
+    // The write middleware refuses /api/network/* and /api/simulation/* under a
+    // foreign lock. Its 409 used to carry `detail` as a bare prose string plus a
+    // top-level `code`, so `_lockFromErrorDetail` found no `lock` and the banner
+    // could not name the holder. It now sends the SAME detail object the route
+    // edges do; this pins that the reader accepts it, top-level `code` and all.
+    vi.mocked(projectsApi.acquireLock).mockResolvedValueOnce({ lock: mine })
+    await acquireProjectLock('proj-1')
+
+    vi.mocked(projectsApi.save).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          code: 'project_locked',
+          detail: {
+            error_kind: 'project_locked',
+            message: 'This project is being edited by another user.',
+            lock: theirs,
+          },
+        },
+      },
+    })
+
+    const ok = await saveProjectQuietly('proj-1')
+
+    expect(ok).toBe(false)
+    expect(useUIStore.getState().readOnly).toBe(true)
+    expect(useUIStore.getState().lockHolderEmail).toBe('other@example.com')
+  })
+
   it('a save refused WITHOUT error_kind "project_locked" leaves the lock state untouched', async () => {
     // beforeEach already seeded the writable default state.
     vi.mocked(projectsApi.save).mockRejectedValueOnce(new Error('network blip'))

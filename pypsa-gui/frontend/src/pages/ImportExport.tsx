@@ -141,6 +141,13 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
       onSuccess(s, pendingFileRef.current)
     },
     onError: (e: Error) => toast.error(e.message),
+    // M2: the DIALOG closes here, on settle — not in onConfirm. Clearing
+    // `pendingImport` synchronously in onConfirm unmounted the dialog on the
+    // same tick, so `pending={importMut.isPending}` had nothing left to render
+    // and the "Working…" affordance never appeared; and on failure the user
+    // was left with no dialog and no signal. ScenariosPanel's delete dialog is
+    // the precedent: confirm fires the mutation, the mutation closes the dialog.
+    onSettled: () => setPendingImport(null),
   })
 
   const handleFile = useCallback(async (file: File) => {
@@ -157,7 +164,16 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
     if (currentProject && !isBundle) {
       // Raw import is undo-captured; persist the outgoing project first so
       // nothing is lost, then proceed without a prompt (Sidebar precedent).
-      await saveProjectQuietly(currentProject)
+      //
+      // M3: the prompt-less path is prompt-less BECAUSE the save happens
+      // first. If that save is refused — a foreign edit lock is the realistic
+      // cause — importing anyway destroys the in-memory network the save was
+      // meant to protect. Stop, say so once, and leave the user's work alone.
+      const saved = await saveProjectQuietly(currentProject)
+      if (!saved) {
+        toast.error(`Could not save '${currentProject}' before importing — nothing was imported.`)
+        return
+      }
       importMut.mutate(file)
       return
     }
@@ -209,7 +225,7 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
         confirmLabel="Import"
         danger
         pending={importMut.isPending}
-        onConfirm={() => { if (pendingImport) { importMut.mutate(pendingImport.file); setPendingImport(null) } }}
+        onConfirm={() => { if (pendingImport) importMut.mutate(pendingImport.file) }}
         onCancel={() => setPendingImport(null)}
       />
     </div>
