@@ -218,7 +218,7 @@ def test_local_presets_are_keyless():
     assert by_id["lmstudio"]["auth"] == "none"
 ```
 
-- [ ] **Step 3:** run RED (`load_presets()` returns `[]` → set mismatch), write `presets.json` from the verified research, add the `pypsa-gui.spec` datas entry (`("backend/presets.json", "backend")` — match the existing tuple style in the file), append `"user.env"` and `"llm-profiles.json"` to `check_bundle.py`'s `FORBIDDEN_FILES` with comments in that file's style.
+- [ ] **Step 3:** run RED (`load_presets()` returns `[]` → set mismatch), write `presets.json` from the verified research, add the `pypsa-gui.spec` datas entry — **dest is `"."`, not `"backend"`**: `pathex` puts `backend/` on the frozen root, so `services/llm_config.py`'s `Path(__file__).parent.parent` resolves to `_MEIPASS` itself (same math as `local_bootstrap.py`'s `alembic.ini` entry, which is also `"."`). A `"backend"` dest ships a catalogue the frozen app can never read — silent, and invisible outside a real bundle, append `"user.env"` and `"llm-profiles.json"` to `check_bundle.py`'s `FORBIDDEN_FILES` with comments in that file's style.
 - [ ] **Step 4:** run GREEN; also `pixi run -e test python -m pytest pypsa-gui/backend/tests/test_packaging_requirements.py -q`.
 - [ ] **Step 5:** commit `feat(chat): verified provider preset catalogue + bundle rules`.
 
