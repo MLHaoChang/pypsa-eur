@@ -12,6 +12,60 @@ def test_redaction_module_scrubs_key_shapes(monkeypatch):
     assert "hunter2" not in out2 and "tok123" not in out2
 
 
+def test_redaction_substitutes_managed_values(tmp_path, monkeypatch):
+    """Task 4 — redact_secrets_in_str/redact_for_log widen to every managed
+    value (app_secrets.live_secret_values()), floor of 8 chars so a short
+    Ollama placeholder like OPENAI_API_KEY=ollama is not blown away."""
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PYPSA_GUI_LLM_KEY__X1", "supersecretvalue42")
+    monkeypatch.setenv("OPENAI_API_KEY", "ollama")  # 6 chars — below floor
+    from services import redaction
+    out = redaction.redact_secrets_in_str(
+        "err: supersecretvalue42 while ollama ran")
+    assert "supersecretvalue42" not in out
+    assert "ollama ran" in out  # short values are NOT substituted
+
+
+def test_redact_for_log_substitutes_managed_values(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PYPSA_GUI_LLM_KEY__X3", "yetanotherlongsecret9")
+    from services import redaction
+    out = redaction.redact_for_log("trace: yetanotherlongsecret9 failed")
+    assert "yetanotherlongsecret9" not in out
+
+
+def test_tool_error_content_is_redacted():
+    # the chat_service tool_error persist site wraps content in redaction
+    from services import chat_service
+    import inspect
+    src = inspect.getsource(chat_service)
+    # the raw f-string/str(...) is gone from the collector append site
+    assert "\"content\": str(detail or exc)[:1000]," not in src
+
+
+def test_vision_failure_message_is_redacted():
+    # The vision failure f-string is wrapped in redaction before it becomes
+    # the HTTPException detail["message"], not assigned to it raw.
+    from services import chat_tools
+    import inspect
+    src = inspect.getsource(chat_tools)
+    assert (
+        '"message": f"vision sub-call raised {type(exc).__name__}: {exc}",'
+        not in src
+    )
+    assert "_redact_secrets_in_str(" in src
+
+
+def test_bootstrap_caps_httpx_loggers():
+    # install_file_logging touches app-data; source-assertion avoids that,
+    # matching the existing test_no_module_hardcodes_a_model_literal pattern.
+    from desktop import bootstrap  # noqa: F401 — importing applies nothing
+    import inspect
+    src = inspect.getsource(bootstrap)
+    assert 'getLogger("httpx")' in src and 'getLogger("httpcore")' in src
+    assert "logging.WARNING" in src
+
+
 def test_chat_service_redaction_aliases_still_exist():
     from services import chat_service, redaction
     assert chat_service._redact_for_log is redaction.redact_for_log

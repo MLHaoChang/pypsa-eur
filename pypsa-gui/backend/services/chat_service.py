@@ -342,7 +342,7 @@ from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
 )
 
 
-def _redact_for_persist(value: Any) -> Any:
+def _redact_for_persist(value: Any, _values: frozenset[str] | None = None) -> Any:
     """
     Strip plausible secrets from a value before it is written to chat.jsonl.
 
@@ -355,16 +355,26 @@ def _redact_for_persist(value: Any) -> Any:
 
     Deliberately scoped to the high-value, low-false-positive patterns:
     sk-ant-* keys, password=/token=/api_key=/secret= values, and bearer
-    tokens. Bare email addresses are NOT redacted — that pattern over-redacts
+    tokens, plus (Task 4) every managed secret value currently in effect.
+    Bare email addresses are NOT redacted — that pattern over-redacts
     legitimate component / project names and model summaries (see the reviewer
     note) for little secret-leak benefit, so it is intentionally omitted.
+
+    PERFORMANCE: this recurses over every block of every turn. `_values` is
+    the `app_secrets.live_secret_values()` snapshot, taken ONCE by the
+    top-level caller (here, when `_values` is None) and threaded down through
+    every recursive call — never re-read from disk per string.
     """
+    if _values is None:
+        from services.app_secrets import live_secret_values  # noqa: PLC0415
+
+        _values = live_secret_values()
     if isinstance(value, str):
-        return _redact_secrets_in_str(value)
+        return _redact_secrets_in_str(value, _values)
     if isinstance(value, dict):
-        return {k: _redact_for_persist(v) for k, v in value.items()}
+        return {k: _redact_for_persist(v, _values) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_redact_for_persist(v) for v in value]
+        return [_redact_for_persist(v, _values) for v in value]
     return value
 
 
@@ -3120,7 +3130,7 @@ def _dispatch_real_tool_call(
             "type": "tool_result",
             "tool_use_id": tool_use_id,
             "is_error": True,
-            "content": str(detail or exc)[:1000],
+            "content": _redact_secrets_in_str(str(detail or exc)[:1000]),
         })
         return
 

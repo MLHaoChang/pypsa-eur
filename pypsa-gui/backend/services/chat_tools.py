@@ -50,6 +50,7 @@ from typing import Any
 from fastapi import HTTPException, params as fastapi_params
 
 from services.pypsa_service import PyPSAService
+from services.redaction import redact_secrets_in_str as _redact_secrets_in_str
 
 logger = logging.getLogger("pypsa_gui.chat_tools")
 
@@ -2772,7 +2773,9 @@ def reconstruct_network_from_image(
             status_code=502,
             detail={
                 "error_kind": "vision_call_failed",
-                "message": f"vision sub-call raised {type(exc).__name__}: {exc}",
+                "message": _redact_secrets_in_str(
+                    f"vision sub-call raised {type(exc).__name__}: {exc}"
+                ),
             },
         ) from exc
 
