@@ -172,6 +172,16 @@ class SolveQueue:
         # the dispatcher pops is left `queued` instead of started — see the
         # check in `_run_job`'s claim block for why it lives THERE.
         self._draining = threading.Event()
+        # Pause gate. SET means "running"; a dispatcher worker waits on it after
+        # popping and before claiming, so pausing stops the queue STARTING work
+        # without touching work already in flight — a running solve is minutes
+        # of solver time that a pause must not throw away. Waiting AFTER the pop
+        # is what preserves FIFO across a pause: the parked worker is holding
+        # the head of the queue, so resume continues exactly where it stopped.
+        # DIFFERENT gate from `_draining`: `_draining` is one-way (desktop quit),
+        # this is user-toggleable in both directions.
+        self._resumed = threading.Event()
+        self._resumed.set()
 
     # ── public API ──────────────────────────────────────────────────────────
     def enqueue(
@@ -417,6 +427,19 @@ class SolveQueue:
             logger.exception("solve_queue: could not persist job %s", job.id)
         return True
 
+    def pause(self) -> None:
+        """Start no more jobs. Running jobs are untouched and finish normally."""
+        self._resumed.clear()
+        logger.info("solve_queue: paused")
+
+    def resume(self) -> None:
+        """Continue in FIFO order."""
+        self._resumed.set()
+        logger.info("solve_queue: resumed")
+
+    def is_paused(self) -> bool:
+        return not self._resumed.is_set()
+
     def stop_dispatching(self) -> None:
         """
         Stop starting new jobs; already-running jobs are unaffected.
@@ -515,6 +538,7 @@ class SolveQueue:
             self._order.clear()
             self._current_id = None
             self._draining.clear()
+        self._resumed.set()
         if ev is not None:
             try:
                 ev.set()
@@ -594,6 +618,11 @@ class SolveQueue:
         while True:
             jid = self._q.get()
             try:
+                # Honour a pause here — after the pop, before the claim. This
+                # worker now holds the head of the queue and blocks on it, so
+                # resume continues in FIFO order rather than letting a later
+                # job overtake.
+                self._resumed.wait()
                 with self._lock:
                     job = self._jobs.get(jid)
                     if job is None or job.cancelled or job.status in _TERMINAL:

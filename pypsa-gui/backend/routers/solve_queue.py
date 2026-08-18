@@ -647,6 +647,7 @@ def list_queue(
     return {
         "jobs": [job if ok else _redact(job) for job, ok in zip(jobs, seen)],
         "current": current,
+        "paused": solve_queue.is_paused(),
     }
 
 
@@ -695,6 +696,47 @@ def abort_job(
         # Cleared by a concurrent clear_finished between the two lookups.
         raise not_found
     return res
+
+
+@router.post("/pause")
+def pause_queue(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Start no more jobs. Jobs already running finish normally.
+
+    AUTHORIZATION: `require_user` only — any authenticated caller, local mode
+    included. DEVIATION from the task-19 brief's `_require_instance_scope`
+    snippet (which gated on `User.is_super_admin`, mirroring `clear_finished`):
+    the brief's OWN test (`test_pause_and_resume_round_trip`) calls this route
+    through the plain `client` fixture and asserts 200, and that fixture's user
+    is a non-super-admin org member (`tests/conftest.py::seeded_identity`),
+    same as `test_clear_finished_is_refused_for_a_non_super_admin` pins 403 for
+    the analogous `clear_finished` route. The brief's code and its test
+    contradict each other; the test is the executable spec, so this route does
+    NOT escalate to a super-admin gate. Pausing is reversible and non-destructive
+    (unlike `clear_finished`, which deletes rows) — a lower bar is defensible on
+    its own merits, not only because the test demands it.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    solve_queue.pause()
+    return {"paused": solve_queue.is_paused()}
+
+
+@router.post("/resume")
+def resume_queue(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Continue in FIFO order. Authorization: see `pause_queue`."""
+    from services import project_registry
+
+    project_registry.require_user(user)
+    solve_queue.resume()
+    return {"paused": solve_queue.is_paused()}
 
 
 @router.post("/cancel_queued")
