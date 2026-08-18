@@ -420,3 +420,125 @@ def test_enforce_noops_in_local_mode(session_local, monkeypatch):
         db_project = db.get(Project, project.id)
         monkeypatch.setattr(projects_router.local_mode, "is_local_mode", lambda: True)
         projects_router._enforce_project_lock(db, db_project, user_a)  # no raise
+
+
+# ── I2: acquisition tiers at the write edges ───────────────────────────────
+#
+# D8 keeps acquire-on-write for save/rename/delete/scenario/members/snapshots
+# — the writer becoming the holder for the TTL is what un-strands a holder
+# whose heartbeat lapsed. Two edges are deliberately NOT in that set:
+#
+#   * `put_layout` is a CHECK. The canvas PUTs a layout on every drag-settle
+#     and on remount, so acquiring there would let a passive viewer's autosaved
+#     layout take an idle project's lock away from nobody's benefit.
+#   * `update_scenario_metadata` with an EMPTY body is a documented no-op that
+#     must not stamp `updated_at` — and must therefore not take a lock either.
+
+
+def test_put_layout_checks_the_lock_without_acquiring_it(session_local):
+    from routers.projects import put_layout
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.get_lock(db, project.id) is None
+        put_layout(project.name, {"nodes": []}, db=db, user=db.get(User, user_a.id))
+        assert project_locks.get_lock(db, project.id) is None, (
+            "put_layout must not become the lock holder"
+        )
+
+
+def test_put_layout_409s_under_a_foreign_lock(session_local):
+    from fastapi import HTTPException
+
+    from routers.projects import put_layout
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        with pytest.raises(HTTPException) as exc:
+            put_layout(project.name, {"nodes": []}, db=db, user=db.get(User, user_a.id))
+        assert exc.value.status_code == 409
+        assert exc.value.detail["error_kind"] == "project_locked"
+        assert "lock" in exc.value.detail
+
+
+def test_empty_scenario_metadata_patch_does_not_take_the_lock(session_local):
+    from models.schemas import UpdateScenarioRequest
+    from routers.projects import update_scenario_metadata
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.get_lock(db, project.id) is None
+        update_scenario_metadata(
+            project.name,
+            UpdateScenarioRequest(),
+            db=db,
+            user=db.get(User, user_a.id),
+        )
+        assert project_locks.get_lock(db, project.id) is None, (
+            "a no-op PATCH must not gate, and must not acquire"
+        )
+
+
+def test_non_empty_scenario_metadata_patch_still_gates(session_local):
+    from fastapi import HTTPException
+
+    from models.schemas import UpdateScenarioRequest
+    from routers.projects import update_scenario_metadata
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        with pytest.raises(HTTPException) as exc:
+            update_scenario_metadata(
+                project.name,
+                UpdateScenarioRequest(description="new"),
+                db=db,
+                user=db.get(User, user_a.id),
+            )
+        assert exc.value.status_code == 409
+        assert exc.value.detail["error_kind"] == "project_locked"
+
+
+# ── M1: a lock serialisation failure must not turn a 409 into a 500 ────────
+
+
+def test_serialize_project_lock_returns_none_on_db_error(session_local, monkeypatch):
+    from routers.projects import _serialize_project_lock
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("simulated DB error (e.g. StaleDataError on prune)")
+
+    monkeypatch.setattr("services.project_locks.get_lock", _raise)
+
+    with session_local() as db:
+        assert _serialize_project_lock(db, project.id, db.get(User, user_a.id)) is None

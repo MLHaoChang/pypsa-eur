@@ -111,6 +111,11 @@ def enqueue_solve(
             detail={
                 "error_kind": "project_locked",
                 "message": f"'{project.name}' is being edited by another user.",
+                # I1: same wire shape as `_enforce_project_lock` and the write
+                # middleware — the frontend reads `detail.lock` to name the
+                # holder in the read-only banner, and a refusal that omits it
+                # leaves the banner saying "another user".
+                "lock": project_locks.serialize_lock(db, project.id, user.id),
             },
         )
     project_dir = project_registry.project_dir(project)

@@ -97,15 +97,27 @@ _UNDO_PREFIXES = ("/api/network/", "/api/io/")
 _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 
 # Prefixes gated by the foreign-lock check (project-write-safety Task 6),
-# below. Deliberately the SAME two prefixes as `_UNDO_PREFIXES` — these are
-# exactly the routes that mutate the resident PyPSA network directly without
-# ever resolving a `project` row, so `_enforce_project_lock` (which runs
-# inside `routers/projects.py` / `routers/snapshots.py` handler bodies) never
-# sees them. `_SOLVER_BLOCKING_PREFIXES` below is NOT the right surface to
-# reuse here: it also includes `/api/projects/`, whose write edges already
-# get an endpoint-level lock CHECK-AND-ACQUIRE via `_enforce_project_lock` —
-# gating them again here would just be a second, less contextual 409.
-_FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES
+# below. These are exactly the routes that mutate the resident PyPSA network
+# directly without ever resolving a `project` row, so `_enforce_project_lock`
+# (which runs inside `routers/projects.py` / `routers/snapshots.py` handler
+# bodies) never sees them. `_SOLVER_BLOCKING_PREFIXES` below is NOT the right
+# surface to reuse here: it also includes `/api/projects/`, whose write edges
+# already get an endpoint-level lock CHECK-AND-ACQUIRE via
+# `_enforce_project_lock` — gating them again here would just be a second,
+# less contextual 409.
+#
+# `/api/simulation/` joined the two undo prefixes (F2): solver-config edits,
+# run, abort and force_reset all land in the SAME shared `(org, project)`
+# resident context, and the holder's next autosave persists them. It was left
+# out originally only because the undo stack does not capture it — a different
+# question from who is allowed to write.
+_FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)
+
+# Exact paths exempt from the gate above. `POST /api/simulation/queue` names
+# its project in the BODY and runs its own holder check against THAT project
+# (`routers/solve_queue.py`), so the middleware — which can only test the
+# session's ACTIVE project — would be refusing on the wrong project's lock.
+_FOREIGN_LOCK_GATE_EXEMPT = {"/api/simulation/queue"}
 
 # Path prefixes whose write methods (POST/PUT/PATCH/DELETE) are refused with
 # 409 while the LP worker is alive. These touch the in-memory network
@@ -651,7 +663,9 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # commit on that path — so this still needs the same fail-open handling
     # every other DB access in this middleware gets (see the auth block
     # above), not a bare unguarded call.
-    if is_write and any(path.startswith(p) for p in _FOREIGN_LOCK_GATE_PREFIXES):
+    if (is_write
+            and any(path.startswith(p) for p in _FOREIGN_LOCK_GATE_PREFIXES)
+            and path not in _FOREIGN_LOCK_GATE_EXEMPT):
         gate_user = getattr(request.state, "auth_user", None)
         if gate_user is not None and not local_mode.is_local_mode():
             binding_uuid = None
@@ -685,13 +699,30 @@ async def undo_snapshot_middleware(request: Request, call_next):
                                 return JSONResponse(
                                     status_code=409,
                                     content={
-                                        "detail": (
-                                            "This project is being edited by "
-                                            "another user. Their edit lock "
-                                            "must expire or be released "
-                                            "before network changes are "
-                                            "accepted."
-                                        ),
+                                        # I1: same object shape
+                                        # `_enforce_project_lock` and the
+                                        # enqueue check send, so the
+                                        # frontend's `_lockFromErrorDetail`
+                                        # can name the holder in the
+                                        # read-only banner from ANY of the
+                                        # three emitters. The top-level
+                                        # `code` stays for the existing
+                                        # quiet-toast keying.
+                                        "detail": {
+                                            "error_kind": "project_locked",
+                                            "message": (
+                                                "This project is being edited "
+                                                "by another user. Their edit "
+                                                "lock must expire or be "
+                                                "released before network "
+                                                "changes are accepted."
+                                            ),
+                                            "lock": project_locks.serialize_lock(
+                                                gate_db,
+                                                lock_project_id,
+                                                gate_user.id,
+                                            ),
+                                        },
                                         "code": "project_locked",
                                     },
                                 )
@@ -701,15 +732,34 @@ async def undo_snapshot_middleware(request: Request, call_next):
                         # expired-lock path, so two concurrent writes racing
                         # one lock's expiry can raise a SQLAlchemy
                         # StaleDataError (the loser's DELETE matches 0 rows),
-                        # and an unreachable/misconfigured DB raises here
-                        # too. Every other branch of this gate fails OPEN
-                        # (free/expired lock, unbound context, no auth_user)
-                        # — a DB error must fail open the same way rather
-                        # than turning an ordinary canvas edit into an
-                        # opaque 500.
+                        # and an unreachable/misconfigured DB raises here too.
+                        #
+                        # FAIL CLOSED (F4). This branch is NOT the same as the
+                        # pass-through branches above it: a free lock, an
+                        # unbound context and an absent auth_user all KNOW
+                        # there is nothing to guard, whereas a DB error means
+                        # the lock is UNKNOWN. Allowing the write is then
+                        # exactly the case the gate exists for — a non-holder's
+                        # edit landing in the holder's shared resident context
+                        # — waved through because the check that would have
+                        # caught it broke. The auth block a few blocks above
+                        # answers an unreachable DB with 503 for the same
+                        # reason.
                         logger.exception(
-                            "foreign-lock gate: DB check failed; allowing "
-                            "the write through"
+                            "foreign-lock gate: DB check failed; refusing "
+                            "the write (lock state unknown)"
+                        )
+                        return JSONResponse(
+                            status_code=503,
+                            content={
+                                "detail": (
+                                    "Could not verify this project's edit "
+                                    "lock, so the change was not applied. "
+                                    "Retry in a moment; if it persists, "
+                                    "check the database connection."
+                                ),
+                                "code": "project_lock_unavailable",
+                            },
                         )
 
     should_snapshot = (

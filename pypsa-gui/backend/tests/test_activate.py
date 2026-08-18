@@ -86,7 +86,17 @@ def test_activate_resident_swaps_active(
     # B9: the response carries an `evicted` list (empty here — well below cap).
     # `activated`/`evicted` stay DISPLAY NAMES even though the registry key is
     # now `org:uuid` — the frontend's caches are keyed by name.
-    assert r.json() == {"activated": "B", "evicted": [], "lock": None}
+    #
+    # `lock` is NOT None: `_put_A_and_B_on_disk` saves through the real save
+    # route, and a save ACQUIRES the lock for its writer (D4/D8 — the writer
+    # becomes the holder for the TTL, which is what un-strands a holder whose
+    # heartbeat lapsed). The seeded test identity is that writer, so activating
+    # B hands back its own live lock.
+    assert r.json() == {
+        "activated": "B",
+        "evicted": [],
+        "lock": {"holder_email": "tester@example.com", "yours": True},
+    }
 
     # Active flipped to B; the swap reused the SAME resident ctx (no re-hydrate).
     assert session_ctx(client).registry_key == key_b
