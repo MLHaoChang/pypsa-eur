@@ -21,6 +21,7 @@ import { appLog } from '../store/simulationStore'
 import type { ProjectInfo } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn, Tag } from '../components/PageKit'
 import { Dialog } from '../components/Dialog'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 // ── Tree-building helpers ────────────────────────────────────────────────────
 // The backend returns a flat list of projects with `parent_project` pointers.
@@ -357,6 +358,7 @@ export default function ScenariosPanel() {
   const [creating, setCreating] = useState<{ base: string; baseId: string } | null>(null)
   const [switching, setSwitching] = useState<string | null>(null)
   const [editing, setEditing] = useState<ProjectInfo | null>(null)
+  const [deleting, setDeleting] = useState<{ id: string; name: string; cascade: boolean; message: string } | null>(null)
   // Collapse + selection are SESSION state, deliberately not persisted. The
   // panel is a slide-over that closes often, and a remembered collapse that
   // hides a branch the user forgot they collapsed is worse than re-expanding.
@@ -627,6 +629,7 @@ export default function ScenariosPanel() {
     mutationFn: (params: { id: string; name: string; cascade: boolean }) =>
       projectsApi.delete(params.id, params.cascade),
     onSuccess: async ({ deleted, failed }) => {
+      setDeleting(null)
       qc.invalidateQueries({ queryKey: ['projects'] })
       // If the active project (or one of its ancestors) was deleted,
       // `currentProject` now dangles — the autosave loop would re-create the
@@ -661,13 +664,13 @@ export default function ScenariosPanel() {
       // Only re-prompt for cascade when this was a non-cascade attempt — a
       // 409 on a cascade=true call would otherwise loop the prompt.
       if (e.response?.status === 409 && !params.cascade) {
-        confirmToast(
-          describeDescendants(e.response.data?.detail, params.name),
-          () => deleteMut.mutate({ id: params.id, name: params.name, cascade: true }),
-          { confirmLabel: 'Delete all', danger: true },
-        )
+        setDeleting({
+          id: params.id, name: params.name, cascade: true,
+          message: describeDescendants(e.response.data?.detail, params.name),
+        })
         return
       }
+      setDeleting(null)
       // `formatApiDetail`, not a bare interpolation: FastAPI details are
       // string | validation-array | object, and this endpoint sends an object.
       // `${detail}` on it rendered the literal text "[object Object]".
@@ -798,7 +801,16 @@ export default function ScenariosPanel() {
                   onSwitch={switchTo}
                   onCreateChild={(base) => { if (guardMutation(base)) setCreating({ base, baseId: apiIdFor(base) }) }}
                   onEdit={(project) => { if (guardMutation(project.name)) setEditing(project) }}
-                  onDelete={(name) => { if (guardMutation(name)) deleteMut.mutate({ id: apiIdFor(name), name, cascade: false }) }}
+                  onDelete={(name) => {
+                    if (!guardMutation(name)) return
+                    const missing = projectList.find(p => p.name === name)?.missing
+                    setDeleting({
+                      id: apiIdFor(name), name, cascade: false,
+                      message: missing
+                        ? `Remove the registry entry for '${name}'? Its files are already gone.`
+                        : `Delete '${name}'? This removes its files from disk.`,
+                    })
+                  }}
                 />
               ))}
             </div>
@@ -819,6 +831,17 @@ export default function ScenariosPanel() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={deleting != null}
+        title={deleting?.cascade ? 'Delete project and descendants' : 'Delete project'}
+        message={deleting?.message ?? ''}
+        confirmLabel={deleting?.cascade ? 'Delete all' : 'Delete'}
+        danger
+        pending={deleteMut.isPending}
+        onConfirm={() => deleting && deleteMut.mutate({ id: deleting.id, name: deleting.name, cascade: deleting.cascade })}
+        onCancel={() => setDeleting(null)}
+      />
 
       {creating && (
         <CreateScenarioDialog

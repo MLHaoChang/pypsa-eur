@@ -26,7 +26,9 @@ import json
 import pathlib
 import re
 import shutil
+import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pypsa
 from fastapi import APIRouter, Depends, HTTPException
@@ -51,6 +53,7 @@ from services.atomic_io import (
 )
 from routers.projects import (
     _BUNDLE_FILES,
+    _enforce_project_lock,
     _force_rmtree,
     _read_meta,
     _restore_results_state,
@@ -59,6 +62,17 @@ from routers.projects import (
 )
 
 router = APIRouter()
+
+
+def _lock_target(project: AuthorizedProject) -> SimpleNamespace:
+    """
+    Adapt an `AuthorizedProject` (an id/name/directory view built for ACL, not
+    an ORM row) into the shape `_enforce_project_lock` needs: `.id` as the
+    `uuid.UUID` the lock table keys on (matches `Project.id`), and `.name` for
+    the error message. `AuthorizedProject.uuid` carries the same value as a
+    plain string.
+    """
+    return SimpleNamespace(id=uuid.UUID(project.uuid), name=project.name)
 
 _MAX_SNAPSHOTS_PER_PROJECT = 50
 
@@ -383,6 +397,8 @@ def _create_snapshot_internal(
 def create_snapshot(
     req: CreateSnapshotRequest,
     project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
     """
     Snapshot the current on-disk project bundle.
@@ -392,6 +408,7 @@ def create_snapshot(
     This is the same semantics as git: you snapshot what's committed.
     Callers that want to capture in-memory state should Save first.
     """
+    _enforce_project_lock(db, _lock_target(project), user)
     return _create_snapshot_internal(
         project.name, req.label, req.message or "", project_dir=project.directory
     )
@@ -436,6 +453,8 @@ def restore_snapshot(
     snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
     if not snap_dir.exists() or not (snap_dir / "network.nc").exists():
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found (or incomplete)")
+
+    _enforce_project_lock(db, _lock_target(project), user)
 
     # Safety net: create an auto-snapshot of the current state before we
     # overwrite it. Pass `protect={snapshot_id}` so the cap-driven prune that
@@ -612,7 +631,10 @@ def restore_snapshot(
 
 @router.delete("/{name}/snapshots/{snapshot_id}", status_code=204)
 def delete_snapshot(
-    snapshot_id: str, project: AuthorizedProject = ProjectAccessDep
+    snapshot_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
     name = project.name
     project_dir = project.directory
@@ -621,6 +643,7 @@ def delete_snapshot(
     snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
     if not snap_dir.exists():
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found")
+    _enforce_project_lock(db, _lock_target(project), user)
     label = _read_snapshot_meta(snap_dir).get("label", snapshot_id)
     # `_force_rmtree` clears read-only attributes and retries with a backoff —
     # a plain `shutil.rmtree` raises WinError 5 on OneDrive-synced paths.

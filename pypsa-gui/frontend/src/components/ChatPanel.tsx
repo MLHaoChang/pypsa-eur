@@ -36,6 +36,7 @@ import {
   type InterruptedTurn,
 } from '../api/chat'
 import { nk } from '../utils/queryKeys'
+import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import {
   deleteUpload,
   getUploadBlobUrl,
@@ -923,6 +924,10 @@ function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
 
 export default function ChatPanel() {
   const qc = useQueryClient()
+  // tool_use_id → safety_tier, written at tool_request, consumed at
+  // tool_result / tool_error. `tool_result` frames don't carry the tier, so
+  // this map is how a completion knows whether it mutated (assetWrite fix).
+  const toolTierRef = useRef(new Map<string, string>())
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
   const model = useChatStore((s) => s.model)
@@ -1542,7 +1547,10 @@ export default function ChatPanel() {
         break
       }
       case 'tool_request': {
-        const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
+        const d = _frame_data<{ tool_name: string; tool_use_id: string; safety_tier?: string }>(frame)
+        // Remember the tier for the completion frame — `tool_result` doesn't
+        // carry it. Consumed (and cleared) by tool_result / tool_error below.
+        if (d.tool_use_id) toolTierRef.current.set(d.tool_use_id, d.safety_tier ?? '')
         appendMessage({
           role: 'tool',
           content: `→ ${d.tool_name}`,
@@ -1572,6 +1580,20 @@ export default function ChatPanel() {
       }
       case 'tool_result': {
         const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
+        // The chat-staleness fix: a completed tool whose tier is not `read`
+        // may have changed any component, and the caches MUST follow — a
+        // stale row here is spread into the user's next manual PUT and the
+        // backend's remove+add cycle silently reverts the agent's work.
+        // Tier-keyed blanket per ruling 2 (asset-write-chokepoint plan); an
+        // unseen tool_use_id resolves to undefined and isMutatingTier fails
+        // SAFE (a spurious refetch beats a silent revert).
+        {
+          const tier = toolTierRef.current.get(d.tool_use_id)
+          toolTierRef.current.delete(d.tool_use_id)
+          if (isMutatingTier(tier)) {
+            invalidateAssetQueries(qc, useUIStore.getState().currentProject)
+          }
+        }
         appendMessage({
           role: 'tool',
           content: `✓ ${d.tool_name}`,
@@ -1581,6 +1603,16 @@ export default function ChatPanel() {
       }
       case 'tool_error': {
         const d = _frame_data<ToolErrorFrame>(frame)
+        // Same invalidation as tool_result: a FAILED mutating tool may have
+        // partially applied before raising, and serving the pre-attempt cache
+        // as truth is the same staleness this fix exists to close.
+        if (d.tool_use_id) {
+          const tier = toolTierRef.current.get(d.tool_use_id)
+          toolTierRef.current.delete(d.tool_use_id)
+          if (isMutatingTier(tier)) {
+            invalidateAssetQueries(qc, useUIStore.getState().currentProject)
+          }
+        }
         // v4-MAJOR-1 / v4-MINOR-1 / v6-F1 + Phase D upload errors — route
         // structured error_kinds into the ErrorBanner so the user sees a
         // typed banner instead of a gray tool-line buried in the message list.

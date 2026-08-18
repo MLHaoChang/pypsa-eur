@@ -38,7 +38,7 @@ export function buildSeriesIndex(
 
 /**
  * Editability that differs from the catalog's `status` (spec D13, ruling 17).
- * Exactly two entries, each with its reason. Keyed `<ComponentClass>.<column>`.
+ * Each entry carries its reason. Keyed `<ComponentClass>.<column>`.
  */
 export const EDITABILITY_OVERRIDES: Record<string, 'editable' | 'readonly'> = {
   // Editable against status='Output': it selects the AC-PF slack, the app has
@@ -48,7 +48,9 @@ export const EDITABILITY_OVERRIDES: Record<string, 'editable' | 'readonly'> = {
   // Read-only against status='Input': PATCH /_bulk writes df.loc directly and
   // its own header comment names flipping `committable` as unsupported through
   // that path. The right panel's per-row PUT stays the way to change it.
+  // The reason is class-agnostic, so every class carrying the flag is listed.
   'Generator.committable': 'readonly',
+  'Link.committable': 'readonly',
 }
 
 /**
@@ -59,6 +61,10 @@ export const EDITABILITY_OVERRIDES: Record<string, 'editable' | 'readonly'> = {
 export const CLOSED_SETS: Record<string, string[]> = {
   'Bus.control': ['PQ', 'PV', 'Slack'],
   'Generator.control': ['PQ', 'PV', 'Slack'],
+  // Same AC-PF control vocabulary as the two above — PyPSA declares the
+  // attribute on StorageUnit too (Input, string). Without this entry the grid
+  // fell through to free text and a paste could write any string.
+  'StorageUnit.control': ['PQ', 'PV', 'Slack'],
 }
 
 /** PyPSA's terminal columns: bus, bus0, bus1, bus2 … (recon §6). */
