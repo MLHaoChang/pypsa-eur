@@ -272,6 +272,9 @@ def test_is_managed_key_rule():
     assert not s.is_managed_key("DATABASE_URL")
     assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__bad-lower")
     assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__ABC\n")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__ABC\r")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__A\nBC")
 
 
 def test_saving_key_a_does_not_erase_key_b(tmp_path, monkeypatch):

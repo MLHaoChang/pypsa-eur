@@ -75,7 +75,7 @@ MANAGED_KEYS: tuple[str, ...] = KNOWN_PROVIDER_KEYS
 # on Windows — a mixed-case slot name would pass here but silently fail the
 # `_SHELL_NAMES` precedence check on that platform.
 _LLM_KEY_PREFIX = "PYPSA_GUI_LLM_KEY__"
-_LLM_KEY_SLOT_RE = re.compile(r"^[A-Z0-9_]{1,64}$")
+_LLM_KEY_SLOT_RE = re.compile(r"\A[A-Z0-9_]{1,64}\Z")
 
 # Longest value accepted. Some provider keys (e.g. long-lived tokens) run well
 # past a typical Anthropic key; this is a sanity bound against a paste of an
