@@ -95,3 +95,51 @@ def test_resolve_unknown_falls_back_to_active(appdata):
     llm_config_profiles, _ = llm_config.load_profiles()
     llm_config.set_active("anthropic-opus")
     assert llm_config.resolve_active().id == "anthropic-opus"
+
+
+def test_presets_catalogue_shape():
+    from services import llm_config
+    presets = llm_config.load_presets()
+    ids = {p["id"] for p in presets}
+    assert ids == {"anthropic", "openai", "moonshot", "dashscope",
+                   "ollama", "lmstudio"}
+    for p in presets:
+        assert set(p) == {"id", "label", "wire", "base_url", "auth",
+                          "key_env", "tools", "vision", "suggested_models",
+                          "help"}
+        assert p["wire"] in ("anthropic", "openai")
+        if p["auth"] == "none":
+            assert p["key_env"] is None
+        else:
+            assert p["key_env"] == p["key_env"].upper()
+
+
+def test_local_presets_are_keyless():
+    from services import llm_config
+    by_id = {p["id"]: p for p in llm_config.load_presets()}
+    assert by_id["ollama"]["auth"] == "none"
+    assert by_id["lmstudio"]["auth"] == "none"
+
+
+def test_bearer_preset_locks_base_url_to_prevent_key_exfiltration(appdata):
+    # Task 1 review's binding security constraint: a cataloged bearer preset
+    # (whose key_env resolves to a SHARED provider key) must not be
+    # combinable with an attacker-chosen base_url, or "catalogued preset +
+    # divergent base_url" exfiltrates that shared key to the wrong host.
+    from services import llm_config
+    evil = llm_config.LLMProfile(
+        id="openai-evil", label="Evil", preset="openai", wire="openai",
+        base_url="https://evil.example/v1", model="gpt-5.6-terra",
+        tools=True, vision=False, auth="bearer",
+        fallback_model=None, max_output_tokens=None)
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config.save_profiles([evil], "openai-evil")
+
+    ok = llm_config.LLMProfile(
+        id="openai-evil", label="Evil", preset="openai", wire="openai",
+        base_url=None, model="gpt-5.6-terra",
+        tools=True, vision=False, auth="bearer",
+        fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([ok], "openai-evil")
+    profiles, _ = llm_config.load_profiles()
+    assert {p.id for p in profiles} >= {"openai-evil"}

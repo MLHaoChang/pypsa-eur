@@ -118,12 +118,19 @@ def derive_key_env(profile_id: str, preset: str) -> str | None:
     derived from its slug, so two custom profiles never collide on one
     variable.
 
-    The two built-in ids are hardcoded here rather than left to depend on
-    `presets.json`: they must resolve correctly even in a dev checkout that
-    predates Task 2, when the catalogue file does not exist yet and
-    `load_presets()` returns `[]`.
+    The two built-in ids read the catalogue's `anthropic` entry FIRST — not
+    their own hardcode — so there is exactly one place `ANTHROPIC_API_KEY` is
+    written down once `presets.json` exists (Task 1's review flagged the
+    original version of this function for declaring it twice). The literal
+    `"ANTHROPIC_API_KEY"` here is kept ONLY as the no-catalogue fallback: a
+    dev checkout that predates Task 2, or a build that somehow omits
+    `presets.json`, where `load_presets()` returns `[]` and the builtins must
+    still resolve correctly.
     """
     if profile_id in _BUILTIN_IDS:
+        anthropic_entry = _preset_catalogue().get("anthropic")
+        if anthropic_entry is not None:
+            return anthropic_entry.get("key_env")
         return "ANTHROPIC_API_KEY"
     if preset != "custom":
         entry = _preset_catalogue().get(preset)
@@ -184,6 +191,42 @@ def _validate_profile(profile: LLMProfile) -> None:
         )
     if profile.base_url is not None:
         _validate_base_url(profile.id, profile.base_url)
+    _validate_preset_base_url_lock(profile)
+
+
+def _validate_preset_base_url_lock(profile: LLMProfile) -> None:
+    """
+    BINDING SECURITY CONSTRAINT (Task 1 review): a profile catalogued under a
+    bearer-auth preset must not carry a `base_url` that diverges from that
+    preset's declared `base_url`.
+
+    Without this, "catalogued preset + attacker-chosen base_url" would
+    exfiltrate a SHARED provider key: `key_env` for a non-custom preset
+    resolves to a well-known env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+    `MOONSHOT_API_KEY`, `DASHSCOPE_API_KEY` today), and `llm_provider` sends
+    whatever is in that variable to `profile.base_url` — so a profile that
+    kept `preset="openai"` (to inherit the OpenAI key) but pointed
+    `base_url` at an attacker's host would hand that host a live
+    `OPENAI_API_KEY`. `base_url=None` — "use the preset's own endpoint" — is
+    always fine, and always the normal case: nothing sets base_url for a
+    cataloged bearer preset. `preset="custom"` is exempt because it owns its
+    own namespaced key slot (`PYPSA_GUI_LLM_KEY__<SLUG>`, never a shared
+    provider key), so pointing it anywhere is not a shared-key leak — that is
+    the entire reason a custom profile exists.
+    """
+    if profile.preset == "custom" or profile.base_url is None:
+        return
+    entry = _preset_catalogue().get(profile.preset)
+    if entry is None or entry.get("auth") != "bearer":
+        return
+    preset_base_url = entry.get("base_url")
+    if profile.base_url != preset_base_url:
+        raise ProfileValidationError(
+            f"profile {profile.id!r}: base_url must match preset "
+            f"{profile.preset!r}'s base_url ({preset_base_url!r}) or be "
+            f"omitted — a bearer-auth preset's key is a shared provider "
+            f"credential and must not be sent to a different host"
+        )
 
 
 def _validate_base_url(profile_id: str, base_url: str) -> None:
