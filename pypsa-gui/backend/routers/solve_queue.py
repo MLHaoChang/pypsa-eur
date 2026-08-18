@@ -698,6 +698,96 @@ def abort_job(
     return res
 
 
+@router.post("/{job_id}/requeue")
+def requeue_job(
+    job_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Run a finished job again: a NEW `queued` job for the same project.
+
+    All four terminal statuses are eligible on identical terms, `interrupted`
+    included. R25 bars only AUTOMATIC re-enqueue at boot — the point of that
+    rule is that a job which crashed the process must not crash-loop the boot,
+    and a user clicking "run it again" is not that.
+
+    A `queued` or `running` job is not requeueable: 409, because the caller's
+    intent is already in flight and a second job would be the duplicate R15
+    exists to refuse.
+
+    AUTHORIZATION is `_may_see` (via `_visible_job_or_404`), not `_may_abort`.
+    Requeue CREATES work rather than stopping it, so `_may_abort`'s deliberate
+    exception — a job orphaned by a project delete stays abortable so the shared
+    solver can be freed — is exactly wrong here: there is no project left to
+    solve.
+
+    The new job inherits the ORIGINAL config snapshot rather than re-resolving
+    it. "Run that again" means that run, and silently substituting today's
+    config would make requeue the one operation whose result cannot be
+    reproduced.
+
+    SOURCING `storage_dir` / the snapshot: `_visible_job_or_404` returns a
+    `to_public()`-shaped dict, which carries neither field. When the source
+    job is still resident (`solve_queue._jobs`), read them off the live
+    `SolveJob`. When it is not — every `interrupted` job after a restart, by
+    construction (`solve_job_store.reconcile_on_boot` never re-admits a
+    `running` row to memory) — read them off the persisted row via
+    `solve_job_store.load_job`. Resolving through `solve_queue.get_job` alone
+    would make a restart-surviving job unrequeueable with no way to tell that
+    from a bad id.
+
+    THE ROW INSERT happens INSIDE `enqueue_unique`, which also takes the
+    snapshot and the acting user as constructor arguments — not an
+    assign-then-`record_enqueued` pair afterward. `enqueue_unique` publishes
+    the new job to the dispatcher's queue before returning; assigning the
+    snapshot post-return would leave a window where a fast-failing job goes
+    terminal against a job whose config was never actually set, and inserting
+    the row afterward would leave a window where it goes terminal against a
+    row that does not exist yet — the exact TOCTOU `enqueue_solve` closed for
+    the first enqueue (see there), reopened here for the second one.
+    """
+    import pathlib
+
+    from services import project_registry, solve_job_store
+
+    project_registry.require_user(user)
+    old = _visible_job_or_404(db, user, job_id)
+    if old["status"] not in _TERMINAL:
+        raise HTTPException(
+            409,
+            f"Job {job_id} is {old['status']}, not finished. Only a finished job "
+            "can be requeued; abort it first if you want to start over.",
+        )
+
+    parsed = _parse_job_id(job_id)
+    with solve_queue._lock:
+        source = solve_queue._jobs.get(parsed)
+    if source is not None:
+        storage_dir = source.storage_dir
+        snapshot = source.solver_config_json
+    else:
+        persisted = solve_job_store.load_job(parsed)
+        storage_dir = persisted.get("storage_dir") if persisted else None
+        snapshot = persisted.get("solver_config") if persisted else None
+
+    if not storage_dir or not (pathlib.Path(storage_dir) / "network.nc").exists():
+        raise HTTPException(
+            404,
+            f"Project '{old['project_id']}' has no saved network on disk. Save the "
+            "project before queuing it to solve.",
+        )
+
+    job, created = solve_queue.enqueue_unique(
+        old["project_id"],
+        project_key=old["project_key"],
+        storage_dir=storage_dir,
+        solver_config_json=snapshot,
+        enqueued_by_user_id=user.id,
+    )
+    return {**(solve_queue.get_job(job.id) or job.to_public(None)), "already_queued": not created}
+
+
 def _require_instance_scope(user: User) -> None:
     """
     Gate for controls that act on the WHOLE dispatcher.
