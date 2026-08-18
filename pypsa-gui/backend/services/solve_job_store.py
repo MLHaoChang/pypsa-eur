@@ -300,6 +300,52 @@ def delete_jobs(ids: Iterable[uuid.UUID]) -> None:
         logger.exception("solve_job_store: could not delete jobs %s", id_list)
 
 
+def record_dismissed(job_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Persist a dismissal so it survives a restart and reaches other devices."""
+    try:
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+
+        with SessionLocal() as db:
+            row = db.get(SolveJobRow, job_id)
+            if row is None:
+                return
+            row.dismissed_by_user_id = user_id
+            db.commit()
+    except Exception:  # noqa: BLE001 — a dismissal is a view preference, not data
+        logger.exception("solve_job_store: could not record dismissal of %s", job_id)
+
+
+def load_dismissed_ids(user_id: uuid.UUID) -> set:
+    """
+    Every job id `user_id` has dismissed, straight off the table. Never
+    raises — an unreadable table means "nothing persisted", matching the rest
+    of this module.
+
+    Exists for `SolveQueue.dismissed_ids_for` (Ruling 2 of Task 21): a
+    dismissal recorded only in `_jobs` would evaporate the instant a job's id
+    fell out of memory — every `interrupted` job after a restart, or any
+    terminal job from before the last restart, is served to the listing
+    exclusively from this table (`_merged_jobs`), never re-admitted to
+    `_jobs`. Reading the persisted flag here is what keeps a dismissal in
+    effect after a restart.
+    """
+    try:
+        from sqlalchemy import select
+
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+
+        with SessionLocal() as db:
+            stmt = select(SolveJobRow.id).where(
+                SolveJobRow.dismissed_by_user_id == user_id
+            )
+            return set(db.scalars(stmt).all())
+    except Exception:  # noqa: BLE001 — an unreadable table means "nothing dismissed"
+        logger.exception("solve_job_store: could not load dismissed ids for %s", user_id)
+        return set()
+
+
 def reconcile_on_boot() -> tuple[int, int]:
     """
     Bring the persisted queue back after a restart. Returns `(interrupted, resumed)`.

@@ -636,6 +636,15 @@ def list_queue(
     project_registry.require_user(user)
     prefix = _org_prefix(db, user)
     jobs = _merged_jobs(project_key_prefix=prefix)
+    # Per-user dismissal (R32). Dropped rather than redacted: the caller asked
+    # for these to be gone from THEIR view, and they are still in every other
+    # user's listing and still in the table. Applied AFTER the merge, against
+    # `str(job["id"])`, so a job served only from the persisted-row half of
+    # `_merged_jobs` (every `interrupted` job after a restart, or any terminal
+    # job from before the last restart) is filtered too — `dismissed_ids_for`
+    # itself reads the table for exactly this reason (Ruling 2).
+    dismissed = {str(jid) for jid in solve_queue.dismissed_ids_for(user.id)}
+    jobs = [job for job in jobs if job["id"] not in dismissed]
     allowed = project_acl.accessible_project_ids(
         db, user, (_project_uuid(job, prefix) for job in jobs)
     )
@@ -824,6 +833,52 @@ def requeue_job(
         enqueued_by_user_id=user.id,
     )
     return {**(solve_queue.get_job(job.id) or job.to_public(None)), "already_queued": not created}
+
+
+@router.post("/{job_id}/dismiss")
+def dismiss_job(
+    job_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Hide a finished job from THIS caller's listing.
+
+    Filtered on `enqueued_by_user_id`: you may clear what you queued, and
+    nothing else. Keying this on project access instead would let two users
+    sharing a project dismiss each other's rows — the exact thing per-user
+    dismiss exists to fix. 403, not 404, because the caller can already SEE the
+    row (that is why they are asking to hide it), so refusing tells them nothing
+    they did not know.
+
+    All four terminal statuses are dismissible, `interrupted` included. A
+    `queued` or `running` job is not: hiding live work from your own listing is
+    how a solve gets forgotten about.
+    """
+    from services import project_registry, solve_job_store
+
+    project_registry.require_user(user)
+    job = _visible_job_or_404(db, user, job_id)
+    if job["status"] not in _TERMINAL:
+        raise HTTPException(
+            409,
+            f"Job {job_id} is {job['status']}. Only a finished job can be "
+            "dismissed; abort it first if you want it out of the queue.",
+        )
+    parsed = _parse_job_id(job_id)
+    with solve_queue._lock:
+        source = solve_queue._jobs.get(parsed)
+        owner = None if source is None else source.enqueued_by_user_id
+    if owner is None or str(owner) != str(user.id):
+        raise HTTPException(
+            403,
+            "You can only dismiss jobs you queued. Dismissal is per user, so "
+            "hiding someone else's row would change their view too.",
+        )
+    if not solve_queue.dismiss(parsed, user.id):
+        raise HTTPException(404, f"No solve job with id {job_id}.")
+    solve_job_store.record_dismissed(parsed, user.id)
+    return {"dismissed": True}
 
 
 def _require_instance_scope(user: User) -> None:

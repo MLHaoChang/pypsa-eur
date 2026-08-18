@@ -126,6 +126,16 @@ class SolveJob:
     stop_event: Any = None
     # True when abort() cancelled a job that was still QUEUED (skipped on pop).
     cancelled: bool = False
+    # Who queued this. Stamped inside `enqueue_unique`'s `SolveJob(...)`
+    # construction from the `enqueued_by_user_id` kwarg it already receives —
+    # the route is the only place with an acting identity (the dispatcher has
+    # no request and no user). The queue becomes auditable as a side effect:
+    # before this, a shared instance could not say who started a solve.
+    enqueued_by_user_id: Any = None
+    # Who has hidden this row from their own listing. Only the enqueuer may
+    # dismiss, so one column expresses "hidden from that user only" without a
+    # join table and without touching anyone else's view.
+    dismissed_by_user_id: Any = None
     # The BufferedLogQueue this job's solve wrote to. Lives for the LIFE OF THE
     # JOB, not the life of the context: the log used to be stored only on the
     # ctx (`ctx_state_update(log_queue=…)`), so it was unreachable by job id,
@@ -283,6 +293,7 @@ class SolveQueue:
                 storage_dir=storage_dir,
                 solver_config_json=solver_config_json,
                 enqueued_at=time.time(),
+                enqueued_by_user_id=enqueued_by_user_id,
             )
             self._jobs[jid] = job
             self._order.append(jid)
@@ -512,6 +523,56 @@ class SolveQueue:
         except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
             logger.exception("solve_queue: could not delete persisted jobs %s", to_delete)
         return len(to_delete)
+
+    def dismiss(self, job_id, user_id) -> bool:
+        """
+        Hide a TERMINAL job from `user_id`'s listing. Returns False when the job
+        is unknown (to `_jobs` — an id resolved only from a persisted row still
+        returns False here; the caller mirrors the dismissal to the row itself
+        via `solve_job_store.record_dismissed`) or not terminal.
+
+        Only hides — the row stays in the table and in every other user's view.
+        `clear_finished` remains the unconditionally-global, instance-wide
+        operation it was documented as; this is the separate per-caller control
+        it deliberately is not.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status not in _TERMINAL:
+                return False
+            job.dismissed_by_user_id = user_id
+            return True
+
+    def dismissed_ids_for(self, user_id) -> set:
+        """
+        Job ids this user has dismissed — in-memory AND persisted.
+
+        A dismissal must stay in effect across a restart. `_merged_jobs`
+        (`routers/solve_queue.py`) serves every `interrupted` job — and any
+        terminal job from before the last restart — from the `solve_jobs`
+        table rather than from `_jobs`, because boot reconciliation never
+        re-admits a terminal row to memory. A filter that only ever consulted
+        `_jobs` would therefore let a dismissed row reappear the moment its id
+        fell out of memory, which defeats the durability this feature exists
+        to provide. The DB read is best-effort and happens OUTSIDE `_lock`,
+        same discipline as every other I/O in this class — a bookkeeping
+        failure degrades to "nothing persisted", never to a queue error.
+        """
+        with self._lock:
+            ids = {
+                jid for jid, job in self._jobs.items()
+                if job.dismissed_by_user_id is not None
+                and str(job.dismissed_by_user_id) == str(user_id)
+            }
+        try:
+            from services import solve_job_store
+
+            ids |= solve_job_store.load_dismissed_ids(user_id)
+        except Exception:  # noqa: BLE001 — a listing must not fail over bookkeeping
+            logger.exception(
+                "solve_queue: could not load persisted dismissals for %s", user_id
+            )
+        return ids
 
     def reset_for_tests(self) -> None:
         """
