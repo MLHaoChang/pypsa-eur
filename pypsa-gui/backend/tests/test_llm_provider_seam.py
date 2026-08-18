@@ -26,6 +26,42 @@ def test_redaction_substitutes_managed_values(tmp_path, monkeypatch):
     assert "ollama ran" in out  # short values are NOT substituted
 
 
+def test_redaction_does_not_leak_fragment_when_regex_partially_consumes_secret(
+    tmp_path, monkeypatch,
+):
+    """Fix round 1 — a managed secret containing 'password=' (or similar)
+    was partially eaten by the regex pass BEFORE value-substitution ran, so
+    the exact original string no longer existed in the text and
+    _substitute_managed_values silently no-opped, leaking the un-consumed
+    fragment ("AAAA-") in plaintext."""
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PYPSA_GUI_LLM_KEY__X9", "AAAA-password=tailvalue1")
+    from services import redaction
+    out = redaction.redact_secrets_in_str(
+        "before AAAA-password=tailvalue1 after")
+    assert "AAAA-" not in out
+    assert "AAAA-password=tailvalue1" not in out
+    assert "tailvalue1" not in out
+
+
+def test_redaction_prefers_longer_secret_when_one_is_a_substring_of_another(
+    tmp_path, monkeypatch,
+):
+    """Fix round 1 — when a shorter configured secret is a substring of a
+    longer one, the shorter must not be substituted first (which would
+    fragment the longer value and leak its prefix/suffix)."""
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PYPSA_GUI_LLM_KEY__X10", "shortsecret12")
+    monkeypatch.setenv("PYPSA_GUI_LLM_KEY__X11", "prefixshortsecret12suffix")
+    from services import redaction
+    out = redaction.redact_secrets_in_str(
+        "start prefixshortsecret12suffix end")
+    assert "shortsecret12" not in out
+    assert "prefixshortsecret12suffix" not in out
+    assert "prefix" not in out
+    assert "suffix" not in out
+
+
 def test_redact_for_log_substitutes_managed_values(tmp_path, monkeypatch):
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("PYPSA_GUI_LLM_KEY__X3", "yetanotherlongsecret9")

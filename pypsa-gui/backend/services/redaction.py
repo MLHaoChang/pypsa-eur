@@ -30,10 +30,31 @@ MIN_SUBSTITUTION_LENGTH = 8
 
 
 def _substitute_managed_values(text: str, values: frozenset[str]) -> str:
-    """Blot out every value in `values` that is >= the length floor."""
-    for value in values:
-        if len(value) >= MIN_SUBSTITUTION_LENGTH and value in text:
-            text = text.replace(value, "[REDACTED]")
+    """
+    Blot out every value in `values` that is >= the length floor.
+
+    Longest-first (Fix round 1): if one configured secret is a substring of
+    another (e.g. "shortsecret12" inside "prefixshortsecret12suffix"),
+    replacing the shorter one first would consume only the middle of the
+    longer value, leaving its un-matched prefix/suffix in plaintext — the
+    exact original longer string would then no longer be present in `text`,
+    so its own substitution pass would silently no-op. Sorting by length
+    descending guarantees the longer (superset) value is always replaced as
+    a whole unit before any of its substrings get a turn.
+    """
+    for value in sorted(values, key=len, reverse=True):
+        if len(value) < MIN_SUBSTITUTION_LENGTH or value not in text:
+            continue
+        # A managed value that is itself shaped like an Anthropic key (the
+        # common case: ANTHROPIC_API_KEY's live value) keeps the specific
+        # "[REDACTED-API-KEY]" marker the sk-ant-* regex pass would have
+        # produced — this substitution now runs BEFORE that regex pass (Fix
+        # round 1), so it must reproduce the marker or existing callers that
+        # pin the specific marker text would regress.
+        marker = (
+            "[REDACTED-API-KEY]" if SK_ANT_RE.fullmatch(value) else "[REDACTED]"
+        )
+        text = text.replace(value, marker)
     return text
 
 
@@ -55,7 +76,7 @@ def _snapshot_values() -> frozenset[str]:
 
 def redact_secrets_in_str(text: str, _values: frozenset[str] | None = None) -> str:
     """
-    Apply the secret patterns to one string, then substitute managed values.
+    Substitute managed values, THEN apply the shape-based regex patterns.
 
     `_values` lets a caller that redacts many strings in one logical
     operation (e.g. `chat_service._redact_for_persist`'s recursive walk)
@@ -63,13 +84,21 @@ def redact_secrets_in_str(text: str, _values: frozenset[str] | None = None) -> s
     instead of this function re-reading `user.env` from disk per string.
     Leave it unset for a single, self-contained call — the value set is then
     read fresh, matching the per-call-read guarantee `app_secrets` promises.
+
+    ORDER MATTERS (Fix round 1): value-substitution runs FIRST. A managed
+    secret's literal value can itself contain "password=", "token=", "bearer "
+    etc (people paste header fragments and full tokens as key values) — if
+    the regex passes ran first, they would partially consume the secret,
+    the exact original string would no longer be present in `text`, and
+    `_substitute_managed_values` would silently no-op, leaking the
+    un-consumed fragment.
     """
-    text = SECRET_KV_RE.sub(r"\1=[REDACTED]", text)
-    text = BEARER_RE.sub("bearer [REDACTED]", text)
-    text = SK_ANT_RE.sub("[REDACTED-API-KEY]", text)
     if _values is None:
         _values = _snapshot_values()
     text = _substitute_managed_values(text, _values)
+    text = SECRET_KV_RE.sub(r"\1=[REDACTED]", text)
+    text = BEARER_RE.sub("bearer [REDACTED]", text)
+    text = SK_ANT_RE.sub("[REDACTED-API-KEY]", text)
     return text
 
 
@@ -81,15 +110,17 @@ def redact_for_log(value: Any, _values: frozenset[str] | None = None) -> str:
     like an API key (matches the `sk-ant-*` prefix the Anthropic SDK uses)
     in addition to never explicitly passing the value to log calls. Task 4
     widens this to every managed secret value currently in effect (see
-    `redact_secrets_in_str` for the `_values` snapshot-threading contract).
+    `redact_secrets_in_str` for the `_values` snapshot-threading contract and
+    the Fix round 1 note on why value-substitution must run before the
+    shape-based patterns below).
     """
     text = str(value)
+    if _values is None:
+        _values = _snapshot_values()
+    text = _substitute_managed_values(text, _values)
     key = os.environ.get("ANTHROPIC_API_KEY")
     if key:
         text = text.replace(key, "[REDACTED-API-KEY]")
     # Generic shape: sk-ant-<...non-whitespace...>
     text = re.sub(r"sk-ant-[A-Za-z0-9_\-]+", "[REDACTED-API-KEY]", text)
-    if _values is None:
-        _values = _snapshot_values()
-    text = _substitute_managed_values(text, _values)
     return text
