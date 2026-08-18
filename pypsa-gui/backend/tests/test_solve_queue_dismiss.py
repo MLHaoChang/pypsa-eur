@@ -286,3 +286,121 @@ def test_dismissal_survives_a_restart_ruling_2(
         )
     finally:
         solve_queue.reset_for_tests()
+
+
+def _seed_persisted_only(session_local, name, key, owner, *, status="completed"):
+    """
+    Build a job that is ONLY in `solve_jobs`, never in `_jobs` — the shape of
+    every `interrupted` job after a restart, and any terminal job from before
+    the last restart. Bypasses `_seed` + `record_enqueued` + `reset_for_tests`
+    (which would still leave a live `SolveJob` momentarily resident) by
+    inserting the row directly, so there is never a `_jobs` entry to fall
+    back on and the persisted-fallback path is the ONLY path exercised.
+    """
+    from datetime import datetime, timezone
+
+    from db.models import SolveJobRow
+
+    jid = uuid.uuid4()
+    with session_local() as db:
+        db.add(SolveJobRow(
+            id=jid,
+            project_id=name,
+            project_key=key,
+            storage_dir=None,
+            status=status,
+            enqueued_by_user_id=owner,
+            solver_config=None,
+            enqueued_at=datetime.now(tz=timezone.utc),
+            finished_at=datetime.now(tz=timezone.utc),
+        ))
+        db.commit()
+    return jid
+
+
+def test_a_persisted_only_job_can_be_dismissed_by_its_true_owner_fix_round_1(
+    client, org_member_client, install_network, tmp_projects_dir, registry_key_for, _auth_db,
+):
+    """
+    Fix round 1. A job that is persisted but NOT resident in `_jobs` (every
+    `interrupted` job after a restart, or any terminal job from before the
+    last restart) must still be dismissable by the user who queued it — this
+    is precisely the row a user wants to clear. Before the fix, the route
+    only ever asked `solve_queue._jobs` for the owner, read None because the
+    job was never resident to begin with, and refused even the true owner
+    with a 403.
+
+    Unlike `test_dismissal_survives_a_restart_ruling_2`, this dismisses
+    AFTER the persisted-only state is already in place — the earlier test
+    dismissed a still-resident job and only then restarted, so it never
+    exercised the owner-lookup's persisted fallback at all.
+    """
+    _engine, session_local = _auth_db
+
+    install_network(build_network(), name="PersistedOnly")
+    _save_project(client, "PersistedOnly")
+    key = registry_key_for("PersistedOnly")
+    solve_queue.reset_for_tests()
+    try:
+        me = _acting_user_id(client)
+        jid = _seed_persisted_only(session_local, "PersistedOnly", key, me)
+        assert jid not in solve_queue._jobs
+
+        r = client.post(f"/api/simulation/queue/{jid}/dismiss")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"dismissed": True}
+
+        mine = client.get("/api/simulation/queue").json()["jobs"]
+        assert not any(j["id"] == str(jid) for j in mine), (
+            "the true owner's dismissal of a persisted-only job did not stick"
+        )
+
+        theirs = org_member_client.get("/api/simulation/queue").json()["jobs"]
+        assert any(j["id"] == str(jid) for j in theirs), (
+            "dismissing a persisted-only job leaked into another user's listing"
+        )
+    finally:
+        solve_queue.reset_for_tests()
+
+
+def test_a_persisted_only_job_cannot_be_dismissed_by_someone_else_fix_round_1(
+    client, org_member_client, install_network, tmp_projects_dir, registry_key_for, _auth_db,
+):
+    """
+    Fix round 1, negative case. A persisted-only job (see above) whose true
+    owner is someone else must still refuse dismissal — the persisted-
+    fallback lookup has to answer ownership correctly, not just "found a
+    row and it's visible, so let it through". The owner is a REAL user
+    (`enqueued_by_user_id` FKs to `users.id`; a bare `uuid.uuid4()` 500s on
+    the insert), so this borrows `org_member_client`'s seeded user as the
+    owner but has `client` — not that user — attempt the dismiss. `client`
+    has full ACL on this project (it created it), so this exercises the
+    OWNERSHIP check specifically, not the visibility check
+    `test_a_persisted_only_job_can_be_dismissed_by_its_true_owner_fix_round_1`
+    already covers with 200 for the true owner: before the fix, ANY caller
+    got 404 here (owner resolved to None because the job was never
+    resident), which would have made a bare "refused" assertion pass for
+    the wrong reason — pinning 403 (not 404) is what isolates the fixed
+    ownership-fallback path from the pre-fix "nobody can dismiss this"
+    behaviour the RED run above demonstrated.
+    """
+    _engine, session_local = _auth_db
+
+    install_network(build_network(), name="PersistedOnlyOther")
+    _save_project(client, "PersistedOnlyOther")
+    key = registry_key_for("PersistedOnlyOther")
+    solve_queue.reset_for_tests()
+    try:
+        owner = _acting_user_id(org_member_client)
+        jid = _seed_persisted_only(session_local, "PersistedOnlyOther", key, owner)
+        assert jid not in solve_queue._jobs
+
+        r = client.post(f"/api/simulation/queue/{jid}/dismiss")
+        assert r.status_code == 403, r.text
+
+        mine = client.get("/api/simulation/queue").json()["jobs"]
+        assert any(j["id"] == str(jid) for j in mine), (
+            "a refused dismissal attempt by a non-owner still hid the row"
+        )
+    finally:
+        solve_queue.reset_for_tests()

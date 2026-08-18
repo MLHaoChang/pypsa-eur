@@ -854,6 +854,17 @@ def dismiss_job(
     All four terminal statuses are dismissible, `interrupted` included. A
     `queued` or `running` job is not: hiding live work from your own listing is
     how a solve gets forgotten about.
+
+    OWNERSHIP HAS A PERSISTED FALLBACK (fix round 1). A job that isn't
+    resident in `_jobs` — every `interrupted` job after a restart, and any
+    terminal job from before the last restart — is exactly the kind of row a
+    user wants to clear, and it is precisely the case `_visible_job_or_404`
+    already handles for VISIBILITY (via `_persisted_public_or_none`). Asking
+    only `solve_queue._jobs` for the owner made that whole class of job
+    permanently un-dismissable by anyone, its own enqueuer included — the
+    same gap Ruling 2 already closed for the listing filter, left open here.
+    Falling back to `solve_job_store.load_job` answers the one question that
+    remains once visibility is settled: WHO queued it.
     """
     from services import project_registry, solve_job_store
 
@@ -869,13 +880,29 @@ def dismiss_job(
     with solve_queue._lock:
         source = solve_queue._jobs.get(parsed)
         owner = None if source is None else source.enqueued_by_user_id
+    if owner is None:
+        # Not resident — fall back to the persisted row. A row with a NULL
+        # `enqueued_by_user_id` (a legacy job from before Task 13, or one
+        # built by hand) stays un-dismissable by design: there is no owner to
+        # compare against, so this fails closed rather than guessing. That is
+        # a dead end for the caller (a 403 with no way to become the owner),
+        # not a bug — the row is still visible and still counts toward queue
+        # depth, it just can never be dismissed.
+        persisted = solve_job_store.load_job(parsed)
+        owner = persisted.get("enqueued_by_user_id") if persisted else None
     if owner is None or str(owner) != str(user.id):
         raise HTTPException(
             403,
             "You can only dismiss jobs you queued. Dismissal is per user, so "
             "hiding someone else's row would change their view too.",
         )
-    if not solve_queue.dismiss(parsed, user.id):
+    # `solve_queue.dismiss` only has something to mutate when the job is
+    # resident; for a persisted-only job there is no in-memory `SolveJob` to
+    # flag, so the DB write below is the only effect that can persist. Both
+    # branches converge on the same `record_dismissed` call because
+    # `dismissed_ids_for` (and therefore the listing filter) reads the table,
+    # not `_jobs`, for exactly this kind of row.
+    if source is not None and not solve_queue.dismiss(parsed, user.id):
         raise HTTPException(404, f"No solve job with id {job_id}.")
     solve_job_store.record_dismissed(parsed, user.id)
     return {"dismissed": True}

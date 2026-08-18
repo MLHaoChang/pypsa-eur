@@ -155,6 +155,12 @@ def load_job(job_id: uuid.UUID) -> dict | None:
     serves must also resolve when the caller clicks it — resolving through
     `solve_queue.get_job` alone answered the existence-oracle 404 for every
     `interrupted` job after a restart, indistinguishable from a bad id.
+
+    `enqueued_by_user_id` (Task 21 fix round 1) exists here for the same
+    reason: `routers.solve_queue.dismiss_job` needs to answer "who owns
+    this?" for a job that isn't resident in `_jobs` — every `interrupted`
+    job after a restart, and any terminal job from before the last restart —
+    and this dict is the only thing it can ask.
     """
     try:
         from db.models import SolveJobRow
@@ -178,6 +184,7 @@ def load_job(job_id: uuid.UUID) -> dict | None:
                 "enqueued_at": r.enqueued_at,
                 "started_at": r.started_at,
                 "finished_at": r.finished_at,
+                "enqueued_by_user_id": r.enqueued_by_user_id,
             }
     except Exception:  # noqa: BLE001 — an unreadable table means "no such row"
         logger.exception("solve_job_store: could not load job %s", job_id)
