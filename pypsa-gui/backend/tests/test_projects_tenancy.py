@@ -1084,6 +1084,30 @@ def test_clear_finished_is_not_refused_by_active_project_foreign_lock(session_lo
         assert r.status_code != 409, r.text
 
 
+def test_preflight_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    `POST /api/simulation/preflight` is a read-only diagnostic: it calls
+    `validate_for_run(n, config)` and returns the issue list, taking no
+    PyPSA lock and mutating nothing. But it is a POST under the gated
+    `/api/simulation/` prefix, and the gate's `is_write` test keys on the
+    HTTP verb, not on behaviour — so pre-fix, a non-holder's Validate button
+    409s `project_locked`, and since that code is toast-suppressed on the
+    frontend, the button silently does nothing.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/simulation/preflight")
+        if r.status_code == 409:
+            assert r.json().get("detail", {}).get("error_kind") != "project_locked", r.text
+        else:
+            assert r.status_code != 409
+
+
 def test_foreign_lock_gate_exempt_predicate_is_an_explicit_allowlist(monkeypatch):
     """
     N1 follow-up: the exemption must not silently widen to every path that
@@ -1100,6 +1124,17 @@ def test_foreign_lock_gate_exempt_predicate_is_an_explicit_allowlist(monkeypatch
     assert exempt("/api/simulation/queue") is True
     assert exempt("/api/simulation/queue/clear_finished") is True
     assert exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/abort") is True
+    assert exempt("/api/simulation/preflight") is True
+
+    # The queue negatives below pin the job-scoped family, but nothing yet
+    # pins the NEW read-only-POST category against being widened into "POSTs
+    # someone found inconvenient". `/api/simulation/run` and
+    # `/api/simulation/run_ac_pf` are the canonical MUTATING POSTs under the
+    # same prefix — both take the PyPSA lock and drive n.add/n.remove through
+    # the LP/PF build — so they must stay gated. If either assertion below
+    # ever fails, the read-only category has been abused.
+    assert exempt("/api/simulation/run") is False
+    assert exempt("/api/simulation/run_ac_pf") is False
 
     # Hypothetical siblings under the SAME prefix must stay gated by default.
     assert exempt("/api/simulation/queue/purge_all") is False

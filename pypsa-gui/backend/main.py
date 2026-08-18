@@ -135,9 +135,29 @@ _FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)
 #   * `POST /api/simulation/queue/{job_id}/abort`         — job-scoped; carries
 #     its own authorization (`_may_abort`) keyed on the job, not on the
 #     caller's active project.
+#
+# A third, separately-worded category: a route that is a POST by HTTP
+# convention but MUTATES NOTHING — a read-only diagnostic. It exists because
+# the gate's `is_write` test (below, keyed on `request.method`) tests the
+# VERB, not behaviour: verb != mutation. It satisfies neither "acts on a job"
+# nor "names its project in the body" above, so it earns its own category
+# rather than being smuggled into either existing one.
+#
+#   * `POST /api/simulation/preflight`                    — calls
+#     `validate_for_run(n, config)` and returns the issue list. Takes no
+#     PyPSA lock, calls no `n.add`/`n.remove`. Refusing it 409 makes the
+#     Validate button a silent no-op for a non-holder (`project_locked` is
+#     toast-suppressed on the frontend).
+#
+# Adding to THIS category requires confirming the handler takes no PyPSA lock
+# and performs no mutation — read the handler body, don't infer it from the
+# route name. `/api/simulation/run` and `/api/simulation/run_ac_pf` are
+# POSTs under the same prefix that do NOT belong here: both acquire the lock
+# and drive the network through `n.add`/`n.remove` via the LP/PF build.
 _FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
     "/api/simulation/queue",
     "/api/simulation/queue/clear_finished",
+    "/api/simulation/preflight",
 })
 #
 # The abort pattern is anchored to the canonical dashed-UUID shape, not "any
