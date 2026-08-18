@@ -104,3 +104,60 @@ def test_an_empty_queue_is_a_zero_not_an_error(client):
     r = client.post("/api/simulation/queue/cancel_queued")
     assert r.status_code == 200, r.text
     assert r.json() == {"cancelled": 0}
+
+
+def test_a_job_claimed_by_the_dispatcher_mid_sweep_is_left_running_not_killed(
+    client, install_network, tmp_projects_dir, registry_key_for, monkeypatch,
+):
+    """
+    Fix round 1 — pins the TOCTOU race a Critical review finding identified:
+    `cancel_queued` snapshots the queue, filters to `queued`, then runs a
+    per-job `_may_abort` DB read BEFORE cancelling. If the dispatcher claims
+    the job (queued -> running) inside that window, the OLD implementation
+    called `solve_queue.abort()`, which — seeing `running` — took its abort
+    branch and SET THE STOP EVENT, killing an in-flight solve that R29 says
+    is out of scope for a bulk cancel.
+
+    `_may_abort` is the natural place to inject the race: it is the last thing
+    the route does before touching the job, and it runs with no lock held, so
+    flipping the job's status inside it faithfully reproduces "the dispatcher
+    claimed it right here" without needing real thread interleaving.
+    """
+    import threading
+
+    import routers.solve_queue as solve_queue_router
+
+    install_network(build_network(), name="Mine")
+    _save_project(client, "Mine")
+    key = registry_key_for("Mine")
+    solve_queue.reset_for_tests()
+    try:
+        jid = _seed("queued", "Mine", key)
+        stop_event = threading.Event()
+
+        real_may_abort = solve_queue_router._may_abort
+
+        def claim_then_check(db, user, job):
+            if job.get("id") == str(jid):
+                with solve_queue._lock:
+                    row = solve_queue._jobs.get(jid)
+                    if row is not None:
+                        row.status = "running"
+                        row.stop_event = stop_event
+            return real_may_abort(db, user, job)
+
+        monkeypatch.setattr(solve_queue_router, "_may_abort", claim_then_check)
+
+        r = client.post("/api/simulation/queue/cancel_queued")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"cancelled": 0}, (
+            "a job claimed mid-sweep must not be counted as cancelled"
+        )
+        assert (solve_queue.get_job(jid) or {})["status"] == "running", (
+            "the bulk cancel must not touch a job the dispatcher already claimed"
+        )
+        assert stop_event.is_set() is False, (
+            "cancel_queued killed an in-flight solve — running jobs are out of scope"
+        )
+    finally:
+        solve_queue.reset_for_tests()

@@ -723,10 +723,21 @@ def cancel_queued(
     and that precedent is not followed here: clearing finished rows is listing
     hygiene, while this destroys queued work.
 
-    Does NOT call `solve_job_store.record_status` itself: `solve_queue.abort()`
-    already mirrors a cancelled queued job's terminal status to the `solve_jobs`
-    table unconditionally (see its docstring) — a second call here would just
-    re-persist the same row `abort()` already wrote.
+    Does NOT call `solve_job_store.record_status` itself: `cancel_if_queued`
+    already mirrors a cancelled job's terminal status to the `solve_jobs`
+    table (see its docstring) — a second call here would just re-persist the
+    same row.
+
+    Calls `solve_queue.cancel_if_queued`, NOT `solve_queue.abort` (fix round
+    1, Critical, review). The candidate list here is a SNAPSHOT
+    (`list_jobs()`), and `_may_abort` runs a DB read per candidate with no
+    lock held — a window wide enough for the dispatcher to claim a job
+    (queued -> running) between the snapshot and the cancel. `abort()` would
+    see `running` in that window and set the job's stop_event, killing an
+    in-flight solve that R29 explicitly puts out of scope. `cancel_if_queued`
+    re-checks `status == "queued"` under its own lock at the moment it acts
+    and has no running branch at all, so a job claimed out from under this
+    sweep is left alone rather than aborted.
     """
     from services import project_registry
 
@@ -740,11 +751,8 @@ def cancel_queued(
         parsed = _parse_job_id(job["id"])
         if parsed is None:
             continue
-        if solve_queue.abort(parsed) is None:
-            # Cleared by a concurrent clear_finished between the listing and
-            # the abort. Nothing was cancelled, so nothing is counted.
-            continue
-        cancelled += 1
+        if solve_queue.cancel_if_queued(parsed):
+            cancelled += 1
     return {"cancelled": cancelled}
 
 

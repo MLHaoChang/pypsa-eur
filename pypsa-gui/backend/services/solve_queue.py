@@ -380,6 +380,43 @@ class SolveQueue:
                 pass
         return pub
 
+    def cancel_if_queued(self, job_id: uuid.UUID) -> bool:
+        """
+        Cancel this job ONLY IF it is still QUEUED at the instant this call
+        takes `_lock`. Returns False for anything else — running, terminal,
+        or missing — and, unlike `abort()`, has NO running branch at all: it
+        never reads or touches `stop_event`.
+
+        Exists for `routers.solve_queue.cancel_queued` (R29, fix round 1
+        after review). That route snapshots the queue, filters to `queued`,
+        then runs a per-job `_may_abort` DB read BEFORE cancelling — a window
+        wide enough for the dispatcher to claim the job (queued -> running)
+        in between. Calling `abort()` there took its RUNNING branch and SET
+        THE STOP EVENT, killing an in-flight solve that a bulk cancel has no
+        business touching (`abort()`'s single-job route is the only place
+        that is allowed to stop a running job). Re-checking `status ==
+        "queued"` under the SAME lock that performs the transition closes
+        that window: whichever of "the sweep" and "the dispatcher's claim"
+        reaches `_lock` first wins, and the loser is a clean no-op.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status != "queued":
+                return False
+            job.cancelled = True
+            job.status = "aborted"
+            job.finished_at = time.time()
+        # Mirror to the table OUTSIDE `_lock`, same discipline as `abort()`.
+        # Without this the row stays `status="queued"` forever and boot
+        # reconciliation resurrects a job the bulk cancel just cancelled.
+        try:
+            from services import solve_job_store
+
+            solve_job_store.record_status(job)
+        except Exception:  # noqa: BLE001 — bookkeeping must not fail a cancel
+            logger.exception("solve_queue: could not persist job %s", job.id)
+        return True
+
     def stop_dispatching(self) -> None:
         """
         Stop starting new jobs; already-running jobs are unaffected.
