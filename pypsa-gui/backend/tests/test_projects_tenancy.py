@@ -855,6 +855,74 @@ def test_enqueue_409s_when_other_user_holds_lock(session_local):
         assert r.json()["detail"]["error_kind"] == "project_locked"
 
 
+# `routers/uploads.py` write edges (`POST`/`DELETE .../uploads`) write into
+# `project.directory` the same as save/rename/delete, but were missed by the
+# sweep that added `_enforce_project_lock` to this router family — neither
+# handler called it, and the write middleware's `_FOREIGN_LOCK_GATE_PREFIXES`
+# doesn't cover `/api/projects/` either (that prefix is exempt there by
+# design, since it IS covered by the route-edge calls — except these two
+# weren't). This is a consistency gap, not an authz hole: `ProjectAccessDep`
+# already ACL-gates the project inside the caller's org before either handler
+# runs; what was missing is refusing a non-holder's write while someone else
+# holds the edit lock.
+
+def test_upload_post_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post(
+            f"/api/projects/{project.id}/uploads",
+            files={"file": ("intruder.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+
+def test_upload_delete_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        # Seed a file as the (soon-to-be) holder, BEFORE locking, so there is
+        # something real for the non-holder to try to delete.
+        upload = client_a.post(
+            f"/api/projects/{project.id}/uploads",
+            files={"file": ("ref.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        assert upload.status_code == 200, upload.text
+        file_id = upload.json()["file_id"]
+
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+
+        r = client_b.delete(f"/api/projects/{project.id}/uploads/{file_id}")
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+        # And it genuinely wasn't deleted — the intruder's refused DELETE
+        # didn't quietly go through underneath the 409.
+        listed = client_a.get(f"/api/projects/{project.id}/uploads").json()
+        assert any(u["file_id"] == file_id for u in listed)
+
+
+def test_upload_holder_can_still_post_and_delete_under_own_lock(session_local):
+    # Regression guard: the lock check must gate the NON-holder, not everyone.
+    _org, user_a, _user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+
+        upload = client_a.post(
+            f"/api/projects/{project.id}/uploads",
+            files={"file": ("mine.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        assert upload.status_code == 200, upload.text
+        file_id = upload.json()["file_id"]
+
+        delete = client_a.delete(f"/api/projects/{project.id}/uploads/{file_id}")
+        assert delete.status_code == 200, delete.text
+        assert delete.json()["deleted"] is True
+
+
 # ── Task 6: foreign-lock gate in the write middleware ──────────────────────
 #
 # `_enforce_project_lock` (Task 4/5) covers the /api/projects/* write edges
