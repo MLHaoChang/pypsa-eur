@@ -112,7 +112,28 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
   so it is not worth code. Recorded so it is not rediscovered as novel.
 
 - Unsaved-but-undoless dirt: solver results (`/api/simulation/*` not undo-captured) on a scratch network won't trigger the import confirm. Accepted gap this slice; noting for slice 2.
-- CommandPalette snapshot restore (`CommandPalette.tsx:522-536`), Sidebar same-name destructive re-load (`Sidebar.tsx:950-956`), and `App.tsx:441` reload remain unconfirmed destructive ops — named out of scope (candidate follow-up: reuse ConfirmDialog).
+- ~~CommandPalette snapshot restore, Sidebar same-name destructive re-load, and `App.tsx:441` reload
+  remain unconfirmed destructive ops~~ — **RESOLVED 2026-08-27.** Two confirmed, one deliberately declined:
+  - **Snapshot restore** (`f0c993c7`): confirmed. The guard is a dispatch chokepoint, not a wrapper — the
+    palette has TWO run paths (Enter, click), so commands now DECLARE a `confirm` descriptor and
+    `runCommand` enforces it. Future destructive commands opt in by description rather than by the author
+    remembering which of two call sites to patch.
+  - **Sidebar re-load** (`330ed9ce`): confirmed, but gated on the dirty state rather than unconditionally.
+    This branch exists for the "stale frontend, empty backend" recovery — the case where there is nothing
+    to lose — so an unconditional prompt would be noise on the workflow it serves. Unknown fails CLOSED.
+  - **`App.tsx:441` — DECLINED, and this is a decision, not an omission.** It is not a button: it is the
+    automatic recovery effect, which returns early unless the backend's in-memory network is EMPTY, and a
+    thrown `getMeta` is caught and aborts the load. There is nothing to lose at the moment it fires and no
+    user gesture to attach a prompt to. Confirming it would interrupt a recovery with a question about work
+    that does not exist. (The separate `localStorage.clear(); location.reload()` at `App.tsx:78` is the crash
+    ErrorBoundary's escape hatch — also declined: it discards UI state only, the backend is untouched as its
+    own copy states, and rendering a React dialog inside a crashed React tree is not a guard, it is a second
+    failure.) Residual, latent only: `(meta?.bus_count ?? 0) > 0` would read a 200 whose payload lacks
+    `bus_count` as "empty". Not reachable today; noted so the `?? 0` is not mistaken for a checked value.
+
+- Unsaved-but-undoless dirt: solver results (`/api/simulation/*` not undo-captured) on a scratch network
+  remain the one dirty-state signal the confirms above cannot see — the undo depth is the input to all three
+  guards, so work that never enters the undo stack is invisible to every one of them. Still open.
 - Web deploy with auth off but not local mode would diverge from the frontend's `authEnabled` no-op keying (`frontend/src/auth/config.ts:7`). No such deployment exists today.
 - `activate` (pointer swap + eviction) and unclaimed/folder import dir-moves left unenforced this slice — they don't overwrite a locked project's content directly.
 
