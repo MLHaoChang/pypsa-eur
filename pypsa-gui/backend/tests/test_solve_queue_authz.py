@@ -15,8 +15,9 @@ These tests pin the three fixes:
     other orgs' jobs would leave a caller at "position 4" with one job visible
     and no way to reconcile the number. Every job is returned with `id`,
     `status`, `position` and timings intact; `project_id`, `project_key` and
-    `error` are nulled for jobs the caller cannot access, and `current` is the
-    running job's id only when the caller may see it.
+    `error` are nulled for jobs the caller cannot access, and `running` is the
+    list of ids of jobs currently running, filtered to the ones the caller may
+    see.
   * **abort answers 404, never 403, when unauthorized** — byte-identical to the
     genuine not-found body, because a 403 confirms the job exists and reopens
     enumeration through a side channel.

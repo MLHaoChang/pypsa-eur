@@ -242,3 +242,69 @@ def test_quit_with_a_backlog_is_prompt_and_leaves_the_queued_job():
         if hasattr(solve_queue, "_draining"):
             solve_queue._draining.clear()
         solve_queue.reset_for_tests()
+
+
+def test_abort_queue_continues_past_a_failing_job_at_quit(monkeypatch):
+    """
+    Final whole-branch review, Important 3 — severity changed by the worker
+    pool. `abort_queue`'s loop over `solve_queue.list_jobs()` called
+    `solve_queue.abort(...)` for each RUNNING job unguarded. With a single
+    concurrent solve that was harmless (at most one job to abort), but the
+    pool means `list_jobs()` can hold MORE THAN ONE running job at quit time
+    — an exception aborting job N used to skip every job after it in
+    iteration order, and those jobs then die unaborted with the process
+    instead of parking cleanly. Each per-job abort must be independently
+    guarded so one failure cannot strand the rest.
+
+    `solve_queue.abort` is patched to blow up for the FIRST running job
+    (after still flagging its own stop_event, so its fake solver unwinds
+    promptly regardless) and behave normally for the second. Only a fix that
+    wraps each call in its own try/except reaches — and signals — the second
+    job.
+    """
+    from desktop import gui
+
+    solve_queue.reset_for_tests()
+    try:
+        first, second = uuid.uuid4(), uuid.uuid4()
+        stop_first, stop_second = threading.Event(), threading.Event()
+        with solve_queue._lock:
+            job_a = SolveJob(id=first, project_id="First", enqueued_at=0.0)
+            job_a.status = "running"
+            job_a.stop_event = stop_first
+            solve_queue._jobs[first] = job_a
+            solve_queue._order.append(first)
+
+            job_b = SolveJob(id=second, project_id="Second", enqueued_at=1.0)
+            job_b.status = "running"
+            job_b.stop_event = stop_second
+            solve_queue._jobs[second] = job_b
+            solve_queue._order.append(second)
+
+        real_abort = solve_queue.abort
+
+        def flaky_abort(job_id):
+            if job_id == first:
+                # The fake solver still needs to unwind so this job doesn't
+                # hold up the quit's wait() for the full ABORT_TIMEOUT — the
+                # bug under test is "later jobs get skipped", not "this job's
+                # own signal is lost".
+                stop_first.set()
+                raise RuntimeError("boom aborting the first job")
+            return real_abort(job_id)
+
+        monkeypatch.setattr(solve_queue, "abort", flaky_abort)
+        _unwind_on_signal(first, stop_first)
+        _unwind_on_signal(second, stop_second)
+
+        gui._abort_everything()
+
+        assert stop_second.is_set(), (
+            "the second running job was never signalled — an exception "
+            "aborting the first job skipped every job after it in the "
+            "quit-time abort_queue loop"
+        )
+    finally:
+        if hasattr(solve_queue, "_draining"):
+            solve_queue._draining.clear()
+        solve_queue.reset_for_tests()

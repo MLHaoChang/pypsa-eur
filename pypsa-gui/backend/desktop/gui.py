@@ -404,9 +404,21 @@ def _abort_everything() -> bool:
         # returns `None`, nothing is signalled, and the caller never learns —
         # a silent no-op on the desktop app's quit-time abort path. Preserve
         # the `uuid.UUID(...)` parse.
+        #
+        # Each job's abort() call is wrapped in its own try/except: with the
+        # worker pool, `list_jobs()` can hold MORE THAN ONE running job at
+        # quit time, so an unguarded loop would let an exception on job N
+        # skip every job after it — those later jobs then die unaborted with
+        # the process instead of parking cleanly. A bug in one job's abort
+        # must not strand the rest.
         for job in solve_queue.list_jobs():
             if job.get("status") == "running":
-                solve_queue.abort(uuid.UUID(str(job["id"])))
+                try:
+                    solve_queue.abort(uuid.UUID(str(job["id"])))
+                except Exception:  # noqa: BLE001 — one job's failure must not skip the rest
+                    logger.exception(
+                        "abort_queue: could not abort job %s at quit", job.get("id")
+                    )
 
     def wait(timeout: float) -> bool:
         import time

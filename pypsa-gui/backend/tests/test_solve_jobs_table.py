@@ -110,6 +110,37 @@ def test_record_status_mirrors_the_terminal_record():
     assert row.finished_at is not None
 
 
+def test_record_status_reports_whether_it_actually_committed():
+    """
+    Fix round 2 (final whole-branch review, Important 2): `record_status`
+    used to return `None` unconditionally — a caller had no way to tell a
+    landed mirror from a silently swallowed one. `abort()` / `cancel_if_queued()`
+    now need a real signal to log a WARNING on divergence, so the function
+    must report True only on an actual commit and False on every way the
+    write did not happen: a missing row, and the terminal-regression guard.
+    """
+    # Missing row: nothing was ever inserted for this id.
+    ghost = SolveJob(id=uuid.uuid4(), project_id="NoRow", enqueued_at=time.time())
+    ghost.status = "aborted"
+    assert solve_job_store.record_status(ghost) is False
+
+    # A genuine commit.
+    job = SolveJob(id=uuid.uuid4(), project_id="Lands", enqueued_at=time.time())
+    solve_job_store.record_enqueued(job, enqueued_by_user_id=None, solver_config_json=None)
+    job.status = "aborted"
+    job.finished_at = time.time()
+    assert solve_job_store.record_status(job) is True
+    assert _row(job.id).status == "aborted"
+
+    # The terminal-regression guard: row is already terminal, job tries to
+    # move back to a live status — the write is refused, so it must report
+    # False even though no exception was raised.
+    job.status = "running"
+    job.finished_at = None
+    assert solve_job_store.record_status(job) is False
+    assert _row(job.id).status == "aborted", "the regression guard let a stale mirror through"
+
+
 def test_load_by_status_returns_only_the_asked_for_statuses():
     queued = SolveJob(id=uuid.uuid4(), project_id="Q", enqueued_at=time.time())
     done = SolveJob(id=uuid.uuid4(), project_id="D", enqueued_at=time.time())
@@ -195,6 +226,62 @@ def test_aborting_a_queued_job_persists_as_aborted():
     assert row.status == "aborted", (
         "abort() of a queued job never reached the table — a restart would "
         "resurrect a job the user explicitly cancelled"
+    )
+
+
+def test_abort_logs_a_warning_when_the_terminal_mirror_does_not_land(monkeypatch, caplog):
+    """
+    Final whole-branch review, fix round 2 (Important 2 — precondition for the
+    `restore()` per-project dedupe fix). `abort()` used to swallow a failed
+    `record_status` mirror with nothing but a DEBUG-invisible `except: pass`
+    equivalent — the exact silent divergence (memory says `aborted`, table
+    still says `queued`) that let `restore()` re-admit a job twice at boot.
+    `record_status` now reports whether it actually committed, and `abort()`
+    must log a WARNING naming the job id when it did not.
+    """
+    from services.solve_queue import SolveQueue
+
+    monkeypatch.setattr(solve_job_store, "record_status", lambda job: False)
+    sq = SolveQueue()
+    jid = uuid.uuid4()
+    job = SolveJob(id=jid, project_id="MirrorFails", enqueued_at=time.time())
+    sq._jobs[jid] = job
+    sq._order.append(jid)
+
+    with caplog.at_level("WARNING"):
+        result = sq.abort(jid)
+
+    assert result["status"] == "aborted", "the in-memory transition must still succeed"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert any(str(jid) in r.getMessage() for r in warnings), (
+        f"abort() did not log a WARNING naming job {jid} when the table mirror "
+        f"failed to land; records were: {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_cancel_if_queued_logs_a_warning_when_the_terminal_mirror_does_not_land(
+    monkeypatch, caplog,
+):
+    """Same divergence risk as `abort()`'s WARNING, for the bulk-cancel path."""
+    from services.solve_queue import SolveQueue
+
+    monkeypatch.setattr(solve_job_store, "record_status", lambda job: False)
+    sq = SolveQueue()
+    jid = uuid.uuid4()
+    job = SolveJob(id=jid, project_id="MirrorFailsToo", enqueued_at=time.time())
+    job.status = "queued"
+    sq._jobs[jid] = job
+    sq._order.append(jid)
+
+    with caplog.at_level("WARNING"):
+        result = sq.cancel_if_queued(jid)
+
+    assert result is True, "the in-memory cancellation must still succeed"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert any(str(jid) in r.getMessage() for r in warnings), (
+        f"cancel_if_queued() did not log a WARNING naming job {jid} when the "
+        f"table mirror failed to land; records were: "
+        f"{[r.getMessage() for r in caplog.records]}"
     )
 
 

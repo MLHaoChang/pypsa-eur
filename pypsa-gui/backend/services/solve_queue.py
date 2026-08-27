@@ -306,10 +306,22 @@ class SolveQueue:
         and the row then landed as `queued` — so boot reconciliation re-ran a
         job that had already run and failed. Registration in `_jobs`/`_order`
         (dedupe visibility) happens under `_lock`; the INSERT happens outside
-        it (`_lock` is never held across I/O); publication comes last, in a
-        `finally` so even a programming error out of `record_enqueued` (its
-        TypeErrors deliberately propagate) cannot strand a registered job
-        that would dedupe every future enqueue of its project.
+        it (`_lock` is never held across I/O).
+
+        PUBLICATION IS CONDITIONAL ON THE INSERT NOT RAISING. `record_enqueued`
+        draws a line between two failure classes: an OPERATIONAL failure (table
+        not migrated, SQLite locked) is swallowed internally and returns
+        normally — durability is an upgrade to the queue, not a precondition
+        for solving, so that case still publishes exactly as before. A
+        PROGRAMMING failure (its `TypeError`s on a malformed id) propagates
+        deliberately — and publishing anyway on THAT path used to mean the
+        route surfaced a 500 while the job was quietly dispatched and solved
+        with no row at all, invisible to boot reconciliation. So a raised
+        exception here is caught, the half-registered job is undone (popped
+        from `_jobs`/`_order` under `_lock`) so it cannot dedupe every future
+        enqueue of its project forever, and the exception is re-raised
+        unchanged — the caller still sees the programming error, but nothing
+        was published or left resident.
         """
         with self._lock:
             existing = self._active_job_locked(project_id, project_key)
@@ -339,10 +351,15 @@ class SolveQueue:
                 enqueued_by_user_id=enqueued_by_user_id,
                 solver_config_json=solver_config_json,
             )
-        finally:
+        except Exception:
             with self._lock:
-                self._q.put(jid)
-                self._ensure_dispatcher_locked()
+                self._jobs.pop(jid, None)
+                if jid in self._order:
+                    self._order.remove(jid)
+            raise
+        with self._lock:
+            self._q.put(jid)
+            self._ensure_dispatcher_locked()
         logger.info("solve_queue: enqueued job %s for project %r", jid, project_id)
         return job, True
 
@@ -423,9 +440,22 @@ class SolveQueue:
         try:
             from services import solve_job_store
 
-            solve_job_store.record_status(job)
+            landed = solve_job_store.record_status(job)
         except Exception:  # noqa: BLE001 — bookkeeping must not fail an abort
             logger.exception("solve_queue: could not persist job %s", job.id)
+            landed = False
+        if not landed:
+            # A swallowed mirror leaves the row at its PREVIOUS status (e.g.
+            # still `queued` after this job transitioned to `aborted` in
+            # memory) — exactly the divergence `restore()`'s active-job guard
+            # exists to survive, but silent otherwise. Loud enough to
+            # diagnose, not loud enough to fail the abort: the in-memory
+            # transition already satisfied the caller's intent.
+            logger.warning(
+                "solve_queue: abort of job %s did not land in the table "
+                "(row missing, terminal-regression guard, or a DB error) — "
+                "status may read stale until the next mirror", job.id,
+            )
         # Signal outside the lock — stop_event.set() never blocks, but keep the
         # discipline that no external call happens while holding _lock.
         if ev is not None:
@@ -467,9 +497,17 @@ class SolveQueue:
         try:
             from services import solve_job_store
 
-            solve_job_store.record_status(job)
+            landed = solve_job_store.record_status(job)
         except Exception:  # noqa: BLE001 — bookkeeping must not fail a cancel
             logger.exception("solve_queue: could not persist job %s", job.id)
+            landed = False
+        if not landed:
+            # Same divergence risk as `abort()`'s mirror — see its comment.
+            logger.warning(
+                "solve_queue: cancel of job %s did not land in the table "
+                "(row missing, terminal-regression guard, or a DB error) — "
+                "status may read stale until the next mirror", job.id,
+            )
         return True
 
     def pause(self) -> None:
@@ -561,9 +599,16 @@ class SolveQueue:
     def dismiss(self, job_id, user_id) -> bool:
         """
         Hide a TERMINAL job from `user_id`'s listing. Returns False when the job
-        is unknown (to `_jobs` — an id resolved only from a persisted row still
-        returns False here; the caller mirrors the dismissal to the row itself
-        via `solve_job_store.record_dismissed`) or not terminal.
+        is unknown to `_jobs` or not terminal.
+
+        A job resolved only from a persisted row — every `interrupted` job
+        after a restart, and any terminal job from before the last restart —
+        is NOT passed here at all: the caller (`routers.solve_queue.
+        dismiss_job`) checks residency first and, for a non-resident job,
+        writes the dismissal straight to the row via
+        `solve_job_store.record_dismissed` without ever calling this method.
+        That is why this method has no persisted-row fallback of its own —
+        the one call site that would need it routes around it instead.
 
         Only hides — the row stays in the table and in every other user's view.
         `clear_finished` remains the unconditionally-global, instance-wide
@@ -648,9 +693,16 @@ class SolveQueue:
             except Exception:
                 pass
 
-    def restore(self, row: dict) -> SolveJob:
+    def restore(self, row: dict) -> tuple[SolveJob, bool]:
         """
         Re-admit a persisted `queued` job into the in-memory queue.
+
+        Returns `(job, created)`. `created` is True only when this call
+        actually admitted a NEW job into `_jobs`/`_order`/`_q` — the caller
+        (`solve_job_store.reconcile_on_boot`, whose `resumed` count comes
+        straight off this) must be able to tell an actual resume apart from
+        either no-op below, or its boot log lies about how many jobs it put
+        back to work.
 
         Keeps the job's OWN id rather than minting a new one, so a client (or a
         chat transcript) holding the id from before the restart can still abort
@@ -660,11 +712,33 @@ class SolveQueue:
         NOT restored — see `solve_job_store.reconcile_on_boot`.
 
         IDEMPOTENT on the job id: restoring an id that is already resident
-        returns the existing job untouched. Unguarded, any re-entry of the
-        lifespan (a second `TestClient` context in one interpreter, a re-run
-        of the startup hook) appended the same id to `_order`/`_q` twice —
-        the listing showed one job as two rows and the dispatcher ran the
-        same solve twice back to back.
+        returns the existing job untouched, `created=False`. Unguarded, any
+        re-entry of the lifespan (a second `TestClient` context in one
+        interpreter, a re-run of the startup hook) appended the same id to
+        `_order`/`_q` twice — the listing showed one job as two rows and the
+        dispatcher ran the same solve twice back to back.
+
+        PER-PROJECT DEDUPE (the OTHER `created=False` path, and the more
+        important one). Before admitting a genuinely new row, check
+        `_active_job_locked` for an already-active (queued or running) job on
+        the SAME project — the identical collision check `enqueue_unique`
+        performs before it appends. Without it, two persisted `queued` rows
+        for one project both restore into two active jobs, which is the exact
+        invariant `enqueue_unique` exists to enforce, just reached through the
+        boot path instead of a double-click. Reachable in practice: a
+        best-effort `record_status` mirror fails (see `abort()` /
+        `cancel_if_queued()`'s WARNING log for this), so a job memory has
+        already moved to a terminal status still reads `queued` in the table;
+        `enqueue_unique` then sees nothing active IN MEMORY (correctly — at
+        that moment nothing is) and legitimately inserts a second row for the
+        same project; a restart then tries to restore both. At
+        `MAX_CONCURRENT_SOLVES=1` that would be a duplicate wasted solve; above
+        it, the two jobs would `hydrate_or_adopt` the SAME resident context and
+        share one `mutation_lock`, racing `_save_context` — a direct R35
+        violation. The row for a skipped duplicate is left exactly as
+        persisted (still `queued`, untouched) — nothing about the skip needs
+        undoing, and the row is reconsidered the next time reconciliation runs
+        once the project's active job goes terminal.
         """
         with self._lock:
             existing = self._jobs.get(row["id"])
@@ -673,7 +747,16 @@ class SolveQueue:
                     "solve_queue: job %s already resident — restore is a no-op",
                     row["id"],
                 )
-                return existing
+                return existing, False
+            active = self._active_job_locked(row["project_id"], row.get("project_key"))
+            if active is not None:
+                logger.warning(
+                    "solve_queue: not restoring job %s for project %r — job %s "
+                    "(%s) is already active for that project; skipping to avoid "
+                    "two active jobs for one project",
+                    row["id"], row["project_id"], active.id, active.status,
+                )
+                return active, False
             job = SolveJob(
                 id=row["id"],
                 project_id=row["project_id"],
@@ -687,7 +770,7 @@ class SolveQueue:
             self._q.put(job.id)
             self._ensure_dispatcher_locked()
         logger.info("solve_queue: restored job %s for project %r", job.id, job.project_id)
-        return job
+        return job, True
 
     # ── internals ───────────────────────────────────────────────────────────
     def _ensure_dispatcher_locked(self) -> None:

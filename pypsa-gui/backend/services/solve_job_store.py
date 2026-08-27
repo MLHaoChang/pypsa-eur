@@ -98,9 +98,18 @@ def record_enqueued(
         logger.exception("solve_job_store: could not persist job %s", getattr(job, "id", None))
 
 
-def record_status(job: Any) -> None:
+def record_status(job: Any) -> bool:
     """
     Mirror a job's current status + result onto its row. Best-effort.
+
+    Returns whether the mirror actually COMMITTED — True only on the write
+    that reaches `db.commit()`. False covers every way the mirror did not
+    land: the row is missing, the terminal→live regression guard skipped the
+    write, or the session raised. This does not change the "never fail a
+    solve" contract below — the caller still gets a plain bool back, never an
+    exception — it only gives callers that need to know (`abort()`,
+    `cancel_if_queued()`) a way to notice and log a silent divergence instead
+    of asserting success unconditionally.
 
     Broad `except Exception` here, unlike `record_enqueued`, and the asymmetry
     is deliberate rather than an oversight: this runs inside a solver worker's
@@ -121,7 +130,7 @@ def record_status(job: Any) -> None:
         with SessionLocal() as db:
             row = db.get(SolveJobRow, job.id)
             if row is None:
-                return
+                return False
             if row.status in _TERMINAL and job.status not in _TERMINAL:
                 # A terminal row never regresses to a live status. `abort()`
                 # mirrors a job it read as `running` OUTSIDE the queue's lock,
@@ -131,7 +140,7 @@ def record_status(job: Any) -> None:
                 # discarding the objective it actually produced. Terminal →
                 # terminal stays allowed (a re-mirror of the same state is
                 # idempotent); a genuine re-run is a NEW row by design (R31).
-                return
+                return False
             row.status = job.status
             row.objective = job.objective
             row.solve_time = job.solve_time
@@ -140,8 +149,10 @@ def record_status(job: Any) -> None:
             row.started_at = _dt(job.started_at)
             row.finished_at = _dt(job.finished_at)
             db.commit()
+            return True
     except Exception:  # noqa: BLE001 — a bookkeeping failure must not fail a solve
         logger.exception("solve_job_store: could not update job %s", getattr(job, "id", None))
+        return False
 
 
 def load_job(job_id: uuid.UUID) -> dict | None:
@@ -392,8 +403,9 @@ def reconcile_on_boot() -> tuple[int, int]:
                 db.commit()
 
         for row in load_by_status(("queued",)):
-            solve_queue.restore(row)
-            resumed += 1
+            _job, created = solve_queue.restore(row)
+            if created:
+                resumed += 1
     except Exception:  # noqa: BLE001 — R26: this must never fail the boot
         logger.exception("solve-queue boot reconciliation failed; continuing without it")
         return interrupted, resumed

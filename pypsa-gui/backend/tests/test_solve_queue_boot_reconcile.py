@@ -189,3 +189,55 @@ def test_reconciliation_running_twice_does_not_duplicate_a_job(monkeypatch):
         )
     finally:
         solve_queue.reset_for_tests()
+
+
+def test_two_queued_rows_for_the_same_project_do_not_both_restore(monkeypatch):
+    """
+    Final whole-branch review, Important 1 — REPRODUCED with a throwaway probe.
+
+    `restore()` had no per-project dedupe, unlike `enqueue_unique`'s
+    `_active_job_locked` check. Reachable path: a best-effort `record_status`
+    mirror fails (see the `abort()` / `cancel_if_queued()` WARNING added
+    alongside this fix), so a job memory has already marked terminal still
+    reads `queued` in the table; `enqueue_unique` then sees nothing active IN
+    MEMORY and legitimately inserts a SECOND `queued` row for the same
+    project. A restart must not restore BOTH into active jobs — at
+    `MAX_CONCURRENT_SOLVES=1` that is a wasted duplicate solve, and above it
+    the two jobs would `hydrate_or_adopt` the SAME resident context and race
+    `_save_context` on one `mutation_lock` (R35).
+
+    Uses the same neutered-dispatcher harness as
+    `test_reconciliation_running_twice_does_not_duplicate_a_job` so both rows
+    restore deterministically instead of racing a real dispatcher thread.
+    """
+    monkeypatch.setattr(solve_queue, "_ensure_dispatcher_locked", lambda: None)
+    monkeypatch.setattr(solve_queue, "_q", _NullQueue())
+    solve_queue.reset_for_tests()
+    first = _seed("queued", project_id="DupeProject")
+    second = _seed("queued", project_id="DupeProject")
+    try:
+        interrupted, resumed = solve_job_store.reconcile_on_boot()
+
+        assert interrupted == 0, (interrupted, resumed)
+        assert resumed == 1, (
+            f"both queued rows for the same project were counted as resumed: "
+            f"{(interrupted, resumed)} — the boot log would lie about how "
+            f"many jobs it put back to work"
+        )
+
+        active = [
+            j for j in solve_queue.list_jobs()
+            if j["project_id"] == "DupeProject" and j["status"] in ("queued", "running")
+        ]
+        assert len(active) == 1, (
+            f"two active jobs exist for one project after restore: {active} — "
+            f"this is the exact invariant enqueue_unique exists to enforce"
+        )
+
+        # The row that lost the race is untouched — still `queued` in the
+        # table, not silently dropped, not resurrected into a second active
+        # job. It will be reconsidered next boot once the winner goes terminal.
+        statuses = {"first": _status(first), "second": _status(second)}
+        assert list(statuses.values()).count("queued") == 2, statuses
+    finally:
+        solve_queue.reset_for_tests()

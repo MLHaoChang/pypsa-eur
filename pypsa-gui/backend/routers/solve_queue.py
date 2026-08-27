@@ -10,9 +10,14 @@ Endpoints:
     GET    /api/simulation/queue/{job_id}/log_history   a job's log lines so far
     GET    /api/simulation/queue/{job_id}/log_stream    SSE live tail of a job's log
     POST   /api/simulation/queue/{job_id}/abort         abort running / cancel queued
+    POST   /api/simulation/queue/{job_id}/requeue       re-enqueue a finished job
+    POST   /api/simulation/queue/{job_id}/dismiss       hide a finished job from the caller
+    POST   /api/simulation/queue/pause                  stop starting new jobs
+    POST   /api/simulation/queue/resume                 continue in FIFO order
+    POST   /api/simulation/queue/cancel_queued          bulk-cancel the caller's queued jobs
     POST   /api/simulation/queue/clear_finished         drop terminal jobs from listing
 
-AUTHORIZATION. All six routes take `db`/`user` and authorize against the
+AUTHORIZATION. All eleven routes take `db`/`user` and authorize against the
 caller. Three of the original four did not until P-1, and the queue is a
 PROCESS-GLOBAL singleton shared by every org — see the per-route docstrings
 for what each one now refuses, and `_may_see` / `_may_abort` for the two
