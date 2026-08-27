@@ -17,6 +17,7 @@ import Sidebar from './Sidebar'
 import { useUIStore } from '../store/uiStore'
 import { WRITABLE } from '../utils/lockState'
 import { projectsApi } from '../api/projects'
+import { networkApi } from '../api/network'
 import type { ProjectInfo } from '../api/types'
 
 vi.mock('../hooks/useSolveQueue', () => ({
@@ -57,6 +58,13 @@ beforeEach(() => {
   vi.spyOn(toast, 'error').mockImplementation(() => '')
   vi.spyOn(toast, 'success').mockImplementation(() => '')
   vi.spyOn(toast, 'loading').mockImplementation(() => 'tid')
+  // The re-load path now confirms when the project is dirty OR when the dirty
+  // state can't be determined (Sidebar.reloadConfirm.test.tsx). This test is
+  // about the 409 detail reaching the toast, not about the prompt, so pin a
+  // genuinely CLEAN project and it takes the same unprompted path it always
+  // did. Previously it got that by accident: `undoInfo` was unmocked, and the
+  // old code defaulted a failed probe to depth 0.
+  vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0, unsaved: false } as never)
 })
 
 describe('reopening the current project while a queue job owns it', () => {

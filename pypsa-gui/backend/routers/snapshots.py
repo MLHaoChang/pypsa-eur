@@ -493,8 +493,9 @@ def restore_snapshot(
     # file safe against crashes, but a concurrent writer to the same path
     # (e.g. autosave triggering during restore) could lose updates without
     # the lock.
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the

@@ -1017,8 +1017,9 @@ async def import_bundle(
             atomic_write_bytes(target_path, zf.read(member))
 
     nc_path = dest / "network.nc"
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
@@ -1237,8 +1238,9 @@ def create_from_template(
     atomic_copy(src_nc, dest / "network.nc")
 
     # Reset + load, mirroring import_bundle / load_project.
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
@@ -1398,8 +1400,9 @@ def save_project(
     # the undo stack so revert can't roll back across the checkpoint. Autosave
     # passes clear_undo=false to keep the in-memory revert history intact.
     if clear_undo:
-        from services import undo_service
+        from services import dirty_state, undo_service
         undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
     return result
 
 
@@ -2274,8 +2277,9 @@ def load_project(
 
     # Clear undo history — snapshots from a previous project are meaningless
     # after loading a different one.
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
 
     with PyPSAService.get_lock():
         PyPSAService.reset_network()

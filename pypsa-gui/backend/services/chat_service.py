@@ -3042,6 +3042,29 @@ def _dispatch_real_tool_call(
             return
 
     yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
+    # Chat edits reach the same handlers as HTTP, but call them DIRECTLY —
+    # so `undo_snapshot_middleware` never runs and, before this, NOTHING
+    # recorded that the project now held unsaved work. depth stayed 0 and
+    # `unsaved` stayed False, so every destructive-action guard treated a
+    # chat-edited project as clean and could discard the edit with no prompt.
+    #
+    # Marked HERE, at the single dispatch site, rather than in
+    # `routers.network._update_component`: generic classes reach that helper
+    # but Transformer, GlobalConstraint and Bus-rename dispatch to dedicated
+    # handlers (chat_tools.py:730-740), so marking there would look complete
+    # and leave those three silently invisible.
+    #
+    # AFTER the confirmation gate on purpose. Every denial/expiry path above
+    # returns before reaching this line, so a declined destructive tool does
+    # not leave the project marked dirty for work the user refused.
+    #
+    # Before the handler runs, not after, and that is deliberate: a tool that
+    # fails partway can still have mutated the network, so marking on success
+    # only would under-report. Over-marking costs a prompt about already-clean
+    # work; under-marking costs the work itself.
+    if tier != "read":
+        from services import dirty_state
+        dirty_state.mark_dirty()
 
     # Execute via the chat_tools dispatcher. `handler` was resolved above the
     # confirmation gate — see Improvement #19 there.

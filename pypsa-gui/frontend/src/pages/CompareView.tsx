@@ -15,7 +15,7 @@ import type {
 } from '../api/types'
 import { canonicaliseCarrier, carrierDisplayName, type ComponentClass } from './results/carrierAliases'
 import { useCarrierFilter, CarrierFilter, bindCarrierFilter } from './results/CarrierFilter'
-import { COST_UNAVAILABLE, UnavailableCell } from './results/shared'
+import { COST_UNAVAILABLE, UnavailableBlock, UnavailableCell } from './results/shared'
 
 // ── Compare view ─────────────────────────────────────────────────────────────
 // Tabbed A/B comparison across two saved projects. Each tab loads its own
@@ -735,7 +735,7 @@ export function LoadingTab({ a, b }: { a: string; b: string }) {
       return (
         <div className="space-y-3">
           <PeriodSelector periods={periods} value={period} onChange={setPeriod} />
-          <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+          <UnavailableBlock />
         </div>
       )
     }
@@ -884,7 +884,7 @@ function LoadingBarChart({
   // Neither side resolved — there is nothing to plot, not even an empty
   // chart frame (mirrors ABBarChart's matching guard exactly).
   if (!availableA && !availableB) {
-    return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+    return <UnavailableBlock />
   }
   return (
     <div className="w-full h-72 mb-2">
@@ -1012,7 +1012,7 @@ export function PricesTab({ a, b }: { a: string; b: string }) {
   const availableA = pa.available ?? false
   const availableB = pb.available ?? false
   if (!availableA && !availableB) {
-    return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+    return <UnavailableBlock />
   }
   if (pa.duration_curve.length === 0 && pb.duration_curve.length === 0) {
     return <p className="text-[11px] text-muted py-2">No marginal-price data in either project (buses_t.marginal_price empty).</p>
@@ -1655,7 +1655,7 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
     // unresolved, "both projects have empty asset lists" is a claim we
     // can't back up for that side — say so instead of guessing.
     if (!availableA || !availableB) {
-      return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+      return <UnavailableBlock />
     }
     return <p className="text-[11px] text-muted py-2">No economic data — both projects have empty asset lists.</p>
   }
@@ -2173,7 +2173,7 @@ export function LostLoadTab({ a, b }: { a: string; b: string }) {
   //      captured-keyed availableA/availableB already render the correct
   //      per-side state for each half independently.
   if (!availableA && !availableB) {
-    return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+    return <UnavailableBlock />
   }
   if (availableA && availableB && !llA?.available && !llB?.available) {
     return (
@@ -2715,7 +2715,7 @@ function ABBarChart({
   // chart frame. Checked before the data.length===0 branch below: that one
   // means "resolved, but nothing for this period," a different statement.
   if (!availableA && !availableB) {
-    return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+    return <UnavailableBlock />
   }
   if (data.length === 0) {
     return <p className="text-[11px] text-muted py-2">No data for this period.</p>

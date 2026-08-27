@@ -61,7 +61,7 @@ async function driveClone() {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(projectsApi.list).mockResolvedValue([SOURCE])
-  vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0 })
+  vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0, unsaved: false })
   vi.spyOn(toast, 'error').mockImplementation(() => '')
   vi.spyOn(toast, 'success').mockImplementation(() => '')
 })

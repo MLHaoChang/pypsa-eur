@@ -17,6 +17,22 @@ must agree on.
 **Tech Stack:** FastAPI + PyPSA + Pydantic (backend), React + TypeScript + Vitest
 (frontend), pytest via `pixi run gui-tests`.
 
+## Status (verified 2026-08-27, not inferred from the checkboxes)
+
+**The `- [ ]` boxes below are STALE.** They were never ticked as the work landed, so the
+document reads as untouched when three of its four tasks shipped. Verified against the
+code and the suite, not against the boxes:
+
+| Task | State | Evidence |
+|---|---|---|
+| A — delete the `ctx-binding-and-compare-nulls` worktree | **OPEN** | directory still present, 143 MB; `git worktree list` no longer registers it |
+| B — curtailment reports the PARTIAL case | **DONE** | `tests/test_compare_availability.py::test_curtailment_flags_the_partial_case_when_some_generators_failed` passes; `partial` consumed at `CompareView.tsx:2022` |
+| C — `/results` economics stops dropping `available` | **DONE** | `tests/test_results_economics_availability.py` present and passing |
+| D — one spelling of the unavailable cell | **DONE** | `COST_UNAVAILABLE` exported from `results/shared`, imported at `CompareView.tsx:18`, ~9 call sites |
+
+Ticking boxes is not the point; a plan that says "not started" about shipped work sends the
+next reader to re-implement it. If you land a step here, tick it or update this table.
+
 ## Global Constraints
 
 - **ADR-0001**: zero is a legitimate result in an energy-system model; an unresolvable

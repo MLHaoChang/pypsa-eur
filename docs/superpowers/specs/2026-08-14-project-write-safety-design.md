@@ -69,7 +69,9 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
 ## Open items
 
 - A future read-only ACL tier would re-open lock-acquisition DoS (security F3, downgraded because no such tier exists today — `project_acl.py` has admin/member only) — revisit acquisition tier then; admin force-release / hold-cap deferred to slice 2.
-- **Uploads write edges are outside the lock's coverage — concurrency gap, NOT an authz hole.**
+- ~~**Uploads write edges are outside the lock's coverage**~~ — **CLOSED 2026-08-19/27.**
+  Gated by `2c2bf504`; corrected to CHECK-only by `f977c3c5` (see below). Original entry kept for the
+  reasoning, which still explains why the gap was invisible:
   `POST /{name}/uploads` (`routers/uploads.py:138`) and `DELETE /{name}/uploads/{file_id}` (`:256`), mounted at
   `/api/projects` (`main.py:1045`), both write into `project.directory`. Neither calls `_enforce_project_lock`,
   and the middleware does not reach them either: `_FOREIGN_LOCK_GATE_PREFIXES` (`main.py:115`) is
@@ -81,7 +83,11 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
   The asymmetry that hides it: `/api/projects/` IS in `_SOLVER_BLOCKING_PREFIXES` (`main.py:219`), so these
   routes are guarded against a solve-in-flight but not against another user's lock. Same path, two guards,
   one applied — which is why reading either guard alone reads as complete.
-- **Preflight failure renders as a clean bill of health — ADR-0001 violation, independent of this slice.**
+- ~~**Preflight failure renders as a clean bill of health**~~ — **CLOSED 2026-08-19** by `f0af0a63`
+  (`IssuesPanel.tsx` + `Sidebar.tsx` now distinguish "could not check" from "no issues"); ADR-0001 entry
+  `8f1f6a59`. The same defect at the StatusBar save-state dot was closed by `7cedd7a8` on 2026-08-27 —
+  worth noting that the second instance was NOT found by fixing the first, which is why the ADR matters
+  more than either fix. Original entry kept for the reasoning:
   `layout/Sidebar.tsx:1223-1224` computes `issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)`
   and never consults the query's error state; `pages/IssuesPanel.tsx` renders the same response, and its own
   comment promises "if this panel is empty the solver run will not fail on pre-checks". So a REFUSED preflight
@@ -94,8 +100,39 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
   consumers. Recorded separately on purpose: folded into the gate fix, the symptom disappears and the defect
   survives. Credit: raised cross-session by the assistant-dock and coordinator sessions, 2026-08-18.
 
-- Unsaved-but-undoless dirt: solver results (`/api/simulation/*` not undo-captured) on a scratch network won't trigger the import confirm. Accepted gap this slice; noting for slice 2.
-- CommandPalette snapshot restore (`CommandPalette.tsx:522-536`), Sidebar same-name destructive re-load (`Sidebar.tsx:950-956`), and `App.tsx:441` reload remain unconfirmed destructive ops — named out of scope (candidate follow-up: reuse ConfirmDialog).
+- **`_enforce_project_lock` vs `_check_project_lock` (2026-08-27).** Acquire-on-write is for edges that ARE
+  the edit; CHECK-only is for incidental writes (uploads, `put_layout`). `2c2bf504` used the wrong one and
+  an attachment upload claimed a 120 s lock — caught only by the FULL suite, as cross-file pollution, with
+  79 targeted tests green. Fixed in `f977c3c5`; `a0cf3948` collapsed `put_layout`'s duplicate copy of the
+  predicate onto the shared helper. When adding a gated write edge, pick deliberately and state which.
+
+- **TOCTOU residual on the uploads guard, accepted, not a defect (2026-08-27).** `_safe_file_dir` resolves
+  and returns; `rmtree` re-walks. A symlink swapped in between would defeat the containment check. The
+  precondition is local write access to the uploads dir — strictly more access than the bug it guards —
+  so it is not worth code. Recorded so it is not rediscovered as novel.
+
+- ~~CommandPalette snapshot restore, Sidebar same-name destructive re-load, and `App.tsx:441` reload
+  remain unconfirmed destructive ops~~ — **RESOLVED 2026-08-27.** Two confirmed, one deliberately declined:
+  - **Snapshot restore** (`f0c993c7`): confirmed. The guard is a dispatch chokepoint, not a wrapper — the
+    palette has TWO run paths (Enter, click), so commands now DECLARE a `confirm` descriptor and
+    `runCommand` enforces it. Future destructive commands opt in by description rather than by the author
+    remembering which of two call sites to patch.
+  - **Sidebar re-load** (`330ed9ce`): confirmed, but gated on the dirty state rather than unconditionally.
+    This branch exists for the "stale frontend, empty backend" recovery — the case where there is nothing
+    to lose — so an unconditional prompt would be noise on the workflow it serves. Unknown fails CLOSED.
+  - **`App.tsx:441` — DECLINED, and this is a decision, not an omission.** It is not a button: it is the
+    automatic recovery effect, which returns early unless the backend's in-memory network is EMPTY, and a
+    thrown `getMeta` is caught and aborts the load. There is nothing to lose at the moment it fires and no
+    user gesture to attach a prompt to. Confirming it would interrupt a recovery with a question about work
+    that does not exist. (The separate `localStorage.clear(); location.reload()` at `App.tsx:78` is the crash
+    ErrorBoundary's escape hatch — also declined: it discards UI state only, the backend is untouched as its
+    own copy states, and rendering a React dialog inside a crashed React tree is not a guard, it is a second
+    failure.) Residual, latent only: `(meta?.bus_count ?? 0) > 0` would read a 200 whose payload lacks
+    `bus_count` as "empty". Not reachable today; noted so the `?? 0` is not mistaken for a checked value.
+
+- Unsaved-but-undoless dirt: solver results (`/api/simulation/*` not undo-captured) on a scratch network
+  remain the one dirty-state signal the confirms above cannot see — the undo depth is the input to all three
+  guards, so work that never enters the undo stack is invisible to every one of them. Still open.
 - Web deploy with auth off but not local mode would diverge from the frontend's `authEnabled` no-op keying (`frontend/src/auth/config.ts:7`). No such deployment exists today.
 - `activate` (pointer swap + eviction) and unclaimed/folder import dir-moves left unenforced this slice — they don't overwrite a locked project's content directly.
 

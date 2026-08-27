@@ -133,6 +133,41 @@ def test_read_path_cannot_reach_another_projects_upload(tmp_path):
     assert ei.value.status_code == 404
 
 
+def test_the_file_id_pattern_is_anchored_not_merely_used_anchored():
+    """
+    Pin the ANCHORING, not just the current call site.
+
+    `_FILE_ID_RE` is consumed with `.fullmatch()`, which is correct — but the
+    pattern itself carried no anchors, so its safety depended entirely on
+    every present and future caller remembering which method to use.
+    `.match()` on an unanchored pattern is a PREFIX match, and
+    `0123456789abcdef/../../etc` starts with 16 hex characters.
+
+    That is not hypothetical here: this same branch already shipped a bug of
+    exactly this class, where `$` matched before a trailing newline. A guard
+    whose correctness lives at the call site is one refactor from being no
+    guard. Anchoring moves the property into the pattern, where it holds under
+    `match`, `search`, and `fullmatch` alike.
+    """
+    from services.upload_service import _FILE_ID_RE
+
+    assert _FILE_ID_RE.fullmatch("0123456789abcdef") is not None
+
+    for escaping in (
+        "0123456789abcdef/../../etc",
+        "0123456789abcdef/blob",
+        "0123456789abcdefEXTRA",
+        "0123456789abcdef\n",
+        "junk/0123456789abcdef",
+    ):
+        assert _FILE_ID_RE.match(escaping) is None, (
+            f"{escaping!r} prefix-matched: the pattern is unanchored, so it is "
+            "safe only by the caller's choice of method"
+        )
+        assert _FILE_ID_RE.search(escaping) is None
+        assert _FILE_ID_RE.fullmatch(escaping) is None
+
+
 def test_a_real_file_id_still_works(project):
     """The sibling assertion: the guard must refuse traversal, not everything."""
     proj_dir, _victim, file_id = project

@@ -38,7 +38,7 @@ async function pickFile(name: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(saveProjectQuietly).mockResolvedValue(true)
-  vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0 })
+  vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0, unsaved: false })
   vi.mocked(ioApi.importNetcdf).mockResolvedValue({} as never)
   vi.mocked(projectsApi.importBundle).mockResolvedValue({ imported: 'Alpha', summary: {} } as never)
 })
@@ -67,13 +67,46 @@ describe('ImportZone guard', () => {
 
   it('scratch network with undo depth > 0 asks first', async () => {
     useUIStore.setState({ currentProject: null })
-    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 3 })
+    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 3, unsaved: true })
     renderZone()
     await pickFile('grid.nc')
     expect(ioApi.importNetcdf).not.toHaveBeenCalled()
     await screen.findByRole('dialog')
     await userEvent.click(screen.getByRole('button', { name: 'Import' }))
     await waitFor(() => expect(ioApi.importNetcdf).toHaveBeenCalled())
+  })
+
+  it('asks first when the dirty check could not be answered (ADR-0001)', async () => {
+    // `depth` was initialised to 0 and the failed probe fell through to it, so
+    // an unreachable/refusing backend produced the same value as a genuinely
+    // clean network — and the destructive import ran with NO confirmation.
+    // "We could not check whether you have unsaved work" is not "you have
+    // none"; on a destructive path the unknown must fail CLOSED.
+    useUIStore.setState({ currentProject: null })
+    vi.mocked(networkApi.undoInfo).mockRejectedValue(new Error('backend unreachable'))
+    renderZone()
+    await pickFile('grid.nc')
+
+    expect(ioApi.importNetcdf).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toMatch(/could not|unsaved/i)
+
+    // Confirming still imports — the guard asks, it does not block.
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }))
+    await waitFor(() => expect(ioApi.importNetcdf).toHaveBeenCalled())
+  })
+
+  it('asks when a SOLVE is unsaved, even though undo depth is 0', async () => {
+    // The defect this field exists for. Solver results never enter the undo
+    // stack, so depth reads 0 on a solved-but-unsaved project and the guard
+    // used to import straight over it.
+    useUIStore.setState({ currentProject: null })
+    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0, unsaved: true })
+    renderZone()
+    await pickFile('grid.nc')
+
+    expect(ioApi.importNetcdf).not.toHaveBeenCalled()
+    await screen.findByRole('dialog')
   })
 
   it('clean scratch network imports without any prompt', async () => {

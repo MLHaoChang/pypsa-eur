@@ -144,6 +144,19 @@ export function UnavailableCell() {
   )
 }
 
+// The BLOCK-level rendering of the same word, for the whole-tab fallback the
+// comment above names as out of scope for the cell. That exclusion was about
+// SHAPE — a `<p>` where a cell would be wrong — not about exemption from the
+// drift argument, and CompareView proved the point by carrying six verbatim
+// copies of this element.
+//
+// The classes travel with the component for the same reason the word does:
+// `text-[11px] text-muted py-2` repeated at six call sites is six chances for
+// one of them to be edited alone.
+export function UnavailableBlock() {
+  return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+}
+
 // Drop-in warning banner for the six windowing tabs — renders nothing unless
 // `isTruncatedPayload(payloads)` is true (i.e. some payload was `capped`).
 // Centralised alongside the predicate so the banner copy (and its tone)

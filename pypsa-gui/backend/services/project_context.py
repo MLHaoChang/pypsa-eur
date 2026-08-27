@@ -149,6 +149,15 @@ class ProjectContext:
     # carrying it so each resident project keeps its own undo history.
     undo: _UndoState = field(default_factory=_UndoState)
 
+    # "In-memory network differs from disk" — the question the undo stack does
+    # NOT answer. Solver results are written straight into the network and are
+    # never pushed to `undo`, so `undo` depth reports 0 on a solved-but-unsaved
+    # project. Per-context for the same reason `undo` is: a queue worker solves
+    # its own hydrated context, and two resident projects must not share dirt.
+    # Owned by `services/dirty_state.py`; a plain bool because every write is a
+    # single attribute assignment, which is atomic under the GIL.
+    results_unsaved: bool = False
+
     # LRU recency stamp (B9). `time.monotonic()` of the last time this context
     # became active, was activated, was registered, or was returned as a
     # resident path-scoped read. The eviction policy (PyPSAService._evict_if_

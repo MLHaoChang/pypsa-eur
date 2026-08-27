@@ -177,10 +177,27 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
       importMut.mutate(file)
       return
     }
-    let depth = 0
-    try { depth = (await networkApi.undoInfo()).depth } catch { /* unreachable backend: fall through */ }
-    if (depth > 0) {
-      setPendingImport({ file, message: 'The current unsaved network will be replaced.' })
+    // ADR-0001 on a DESTRUCTIVE path. `depth` used to initialise to 0 with the
+    // failed probe falling through to it, so an unreachable or refusing backend
+    // produced exactly the value a genuinely clean network produces — and the
+    // import then ran with no confirmation at all. The unknown is its own
+    // state, and on a path that replaces the user's network it must fail
+    // CLOSED: ask, rather than assume there was nothing to lose.
+    // `unsaved`, NOT `depth > 0`. Undo depth counts undoable EDITS; solver
+    // results are written straight into the network and never pushed, so a
+    // solved-but-unsaved project reports depth 0 and this guard used to let the
+    // solve be destroyed silently.
+    let unsaved = false
+    let unsavedKnown = true
+    try { unsaved = (await networkApi.undoInfo()).unsaved } catch { unsavedKnown = false }
+    if (!unsavedKnown || unsaved) {
+      setPendingImport({
+        file,
+        message: unsavedKnown
+          ? 'The current unsaved network will be replaced.'
+          : 'Could not check for unsaved changes — the backend did not answer. '
+            + 'Any unsaved work in the current network will be replaced.',
+      })
       return
     }
     importMut.mutate(file)
