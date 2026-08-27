@@ -276,6 +276,16 @@ def load_by_status(
                     "enqueued_at": r.enqueued_at,
                     "started_at": r.started_at,
                     "finished_at": r.finished_at,
+                    # For the listing's `can_dismiss`. A persisted-only row —
+                    # every `interrupted` job after a restart, and any terminal
+                    # job from before the last one — has no in-memory `SolveJob`
+                    # to read the owner off, and those are precisely the rows a
+                    # user wants to clear. Answering from `_jobs` alone would
+                    # report every one of them un-dismissable while
+                    # `POST /dismiss` accepted them. Free here: same query,
+                    # same row, no extra round trip. Boot reconciliation reads
+                    # this dict via `.get()`, so the extra key is inert to it.
+                    "enqueued_by_user_id": r.enqueued_by_user_id,
                 }
                 for r in rows
             ]

@@ -389,6 +389,25 @@ class SolveQueue:
             return [self._jobs[jid].to_public(self._position_locked(jid))
                     for jid in self._order if jid in self._jobs]
 
+    def owners(self) -> dict[str, Any]:
+        """
+        `str(job id)` -> `enqueued_by_user_id`, for every RESIDENT job.
+
+        Deliberately NOT a field on `to_public()`: that payload goes to every
+        caller who can see the queue, and another user's id in it would let a
+        plain member enumerate which colleague queued which job. The listing
+        turns this map into a per-caller `can_dismiss` boolean instead, which
+        answers the only question a client has and discloses nothing about
+        anyone else.
+
+        One lock acquisition for the whole listing rather than a lookup per
+        job — `GET /api/simulation/queue` is polled every 1.5s while a job is
+        active. Persisted-only rows are not here by construction; the listing
+        reads their owner off the row (`solve_job_store.load_by_status`).
+        """
+        with self._lock:
+            return {str(jid): job.enqueued_by_user_id for jid, job in self._jobs.items()}
+
     def get_job(self, job_id: uuid.UUID) -> dict | None:
         with self._lock:
             job = self._jobs.get(job_id)

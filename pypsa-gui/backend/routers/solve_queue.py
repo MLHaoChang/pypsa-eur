@@ -509,6 +509,44 @@ async def job_log_stream(
 _PERSISTED_HISTORY_LIMIT = 200
 
 
+# Transport key for the job owner between `_merged_jobs` and `list_queue`.
+#
+# The owner is NOT a response field. `enqueued_by_user_id` in the listing would
+# let any authenticated caller enumerate which colleague queued which job —
+# a disclosure about OTHER users, and more than any client needs. `list_queue`
+# reduces it to a per-caller `can_dismiss` boolean and pops this key, so it
+# never reaches a response.
+#
+# Leading underscore so it cannot collide with a real `to_public()` field, and
+# popped unconditionally (`pop(_OWNER_KEY, None)`) rather than conditionally,
+# so a future job dict that somehow lacks it still cannot carry it through.
+_OWNER_KEY = "_owner"
+
+
+def _can_dismiss(job: dict, owner, user: User) -> bool:
+    """
+    Whether `POST /{job_id}/dismiss` would ACCEPT this row from this caller.
+
+    Exactly the route's own precondition, not an approximation of it: terminal
+    (a live job must not be hideable from your own listing — that is how a
+    solve gets forgotten about) AND queued by this caller (dismissal is
+    per-user; keying it on project access would let two users sharing a project
+    hide each other's rows).
+
+    A NULL owner — a legacy row from before Task 13, or a hand-made one — is
+    false for everybody, which mirrors the route: it fails closed rather than
+    guessing, so such a row stays visible and un-dismissable by design.
+
+    Emitting the capability rather than the identity is what keeps this
+    disclosure-free: it is true only for rows the caller queued themselves, so
+    it says nothing about anyone else. A foreign org's redacted row is already
+    false for the same reason, which is why this needs no redaction branch.
+    """
+    if job.get("status") not in _TERMINAL:
+        return False
+    return owner is not None and str(owner) == str(user.id)
+
+
 def _persisted_job_public(row: dict) -> dict:
     """
     A `solve_jobs` row (from `solve_job_store.load_by_status`), reshaped to
@@ -538,6 +576,9 @@ def _persisted_job_public(row: dict) -> dict:
         "enqueued_at": _row_epoch(row.get("enqueued_at")),
         "started_at": _row_epoch(started_at) if started_at is not None else None,
         "finished_at": _row_epoch(finished_at) if finished_at is not None else None,
+        # PRIVATE, and `list_queue` pops it before anything is serialised —
+        # see `_OWNER_KEY`.
+        _OWNER_KEY: row.get("enqueued_by_user_id"),
     }
 
 
@@ -598,6 +639,12 @@ def _merged_jobs(project_key_prefix: str | None = None) -> list[dict]:
     from services import solve_job_store
 
     jobs = solve_queue.list_jobs()
+    # The owner rides alongside each job under `_OWNER_KEY` so `list_queue` can
+    # answer `can_dismiss` without a lookup per row. Live jobs get it from one
+    # locked read of the queue; persisted-only rows carry it on the row itself
+    # (`_persisted_job_public`), which is why `load_by_status` selects it.
+    live_owners = solve_queue.owners()
+    jobs = [{**job, _OWNER_KEY: live_owners.get(job["id"])} for job in jobs]
     live_ids = {job["id"] for job in jobs}
     rows = {
         str(row["id"]): row
@@ -683,8 +730,24 @@ def list_queue(
     running = [
         job["id"] for job, ok in zip(jobs, seen) if ok and job["status"] == "running"
     ]
+    # `_OWNER_KEY` is popped HERE, at the one boundary where a response is
+    # built, and turned into the per-caller capability. Nothing below this line
+    # can leak an owner id: the key is gone from every dict by the time the
+    # list comprehension runs.
+    owners = {job["id"]: job.pop(_OWNER_KEY, None) for job in jobs}
     return {
-        "jobs": [job if ok else _redact(job) for job, ok in zip(jobs, seen)],
+        "jobs": [
+            {
+                **(job if ok else _redact(job)),
+                # Rides through `_redact` deliberately — that helper is
+                # `{**job, **nulls}` and this key is not in `_REDACTED`. It
+                # needs no redaction branch because a foreign org's job can
+                # never have been queued by this caller, so it is already
+                # false for every redacted row.
+                "can_dismiss": _can_dismiss(job, owners.get(job["id"]), user),
+            }
+            for job, ok in zip(jobs, seen)
+        ],
         "running": running,
         "paused": solve_queue.is_paused(),
     }

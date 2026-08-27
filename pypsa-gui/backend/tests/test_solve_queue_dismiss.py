@@ -404,3 +404,164 @@ def test_a_persisted_only_job_cannot_be_dismissed_by_someone_else_fix_round_1(
         )
     finally:
         solve_queue.reset_for_tests()
+
+
+# ── the listing must say WHETHER a row is dismissible ──────────────────────
+#
+# Dismiss is owner-gated (`enqueued_by_user_id`) and terminal-only, but the
+# public job payload carried neither fact, so a client had no way to know
+# whether the control it renders would 403. The panel's own standing rule is
+# that a control must match its route exactly — the trap it documents for
+# "Clear finished" is gating on `useAuth().isAdmin`, which is ALSO true for an
+# org admin who then gets a guaranteed 403.
+#
+# A CAPABILITY is emitted, not the identity. `enqueued_by_user_id` would be a
+# real disclosure about other users (a plain member could enumerate which of
+# their colleagues queued which job) and is more than any client needs.
+# `can_dismiss` is exactly the route's precondition, computed for the asking
+# caller, and it reveals nothing about anyone else: it is true only for rows
+# the caller queued themselves.
+#
+# It rides through `_redact` untouched — that helper is `{**job, **nulls}`, so
+# an added key survives — and needs no redaction branch, because a foreign
+# org's job can never have been queued by the caller and is therefore already
+# false.
+
+
+def test_the_listing_marks_your_own_terminal_job_dismissible(
+    client, install_network, tmp_projects_dir, registry_key_for,
+):
+    install_network(build_network(), name="Mine")
+    _save_project(client, "Mine")
+    solve_queue.reset_for_tests()
+    try:
+        me = _acting_user_id(client)
+        jid = _seed("completed", "Mine", registry_key_for("Mine"), me)
+
+        row = next(
+            j for j in client.get("/api/simulation/queue").json()["jobs"]
+            if j["id"] == str(jid)
+        )
+        assert row["can_dismiss"] is True, row
+        # The claim must be true: the route agrees with the flag.
+        assert client.post(f"/api/simulation/queue/{jid}/dismiss").status_code == 200
+    finally:
+        solve_queue.reset_for_tests()
+
+
+def test_the_listing_marks_another_users_job_not_dismissible(
+    client, install_network, tmp_projects_dir, registry_key_for,
+):
+    """
+    FULLY VISIBLE and still not the caller's to dismiss. That combination is
+    the whole reason the flag exists: visibility and dismissibility are
+    different questions, and the payload previously answered only the first.
+
+    The caller has project access — so this row comes back UNREDACTED, with
+    its project name and result intact — while `enqueued_by_user_id` belongs
+    to somebody else. Same setup as
+    `test_a_user_cannot_dismiss_a_job_someone_else_queued`, which pins the 403
+    this flag exists to predict.
+
+    The redacted case is deliberately NOT the one tested here. A foreign org's
+    row is false for a second, weaker reason (the caller could not have queued
+    a job they cannot even see), so it would pass whether or not ownership was
+    actually consulted — it cannot distinguish a correct implementation from
+    one that just returns False for everything it cannot resolve.
+    """
+    install_network(build_network(), name="Theirs")
+    _save_project(client, "Theirs")
+    solve_queue.reset_for_tests()
+    try:
+        jid = _seed("completed", "Theirs", registry_key_for("Theirs"), uuid.uuid4())
+
+        row = next(
+            j for j in client.get("/api/simulation/queue").json()["jobs"]
+            if j["id"] == str(jid)
+        )
+        # Not redacted — the caller genuinely sees this job in full.
+        assert row["project_id"] == "Theirs", row
+        assert row["can_dismiss"] is False, row
+        # And the route agrees — this is the 403 the flag exists to predict.
+        assert client.post(f"/api/simulation/queue/{jid}/dismiss").status_code == 403
+    finally:
+        solve_queue.reset_for_tests()
+
+
+def test_a_live_job_is_never_marked_dismissible_even_for_its_owner(
+    client, install_network, tmp_projects_dir, registry_key_for,
+):
+    """
+    Terminal-only is the other half of the route's precondition. Owning a
+    RUNNING job does not make it dismissible — hiding live work from your own
+    listing is how a solve gets forgotten about — so the flag must track both
+    halves, not just ownership.
+    """
+    install_network(build_network(), name="Mine")
+    _save_project(client, "Mine")
+    key = registry_key_for("Mine")
+    solve_queue.reset_for_tests()
+    try:
+        me = _acting_user_id(client)
+        for status in ("queued", "running"):
+            jid = _seed(status, "Mine", key, me)
+            with solve_queue._lock:
+                solve_queue._jobs[jid].finished_at = None
+            row = next(
+                j for j in client.get("/api/simulation/queue").json()["jobs"]
+                if j["id"] == str(jid)
+            )
+            assert row["can_dismiss"] is False, (status, row)
+            assert client.post(
+                f"/api/simulation/queue/{jid}/dismiss"
+            ).status_code == 409, status
+    finally:
+        solve_queue.reset_for_tests()
+
+
+def test_a_persisted_only_job_still_answers_can_dismiss(
+    client, install_network, tmp_projects_dir, registry_key_for,
+):
+    """
+    The row-only path, and the reason `load_by_status` had to start carrying
+    `enqueued_by_user_id`.
+
+    Every `interrupted` job after a restart is served from the table rather
+    than from `_jobs` — boot reconciliation deliberately never re-admits a
+    `running` row to memory (R25's crash-loop guard) — and so is any terminal
+    job from before the last restart. Those are exactly the rows a user most
+    wants to clear. Answering `can_dismiss` from `_jobs` alone would report
+    False for every one of them while `POST /dismiss` happily returned 200,
+    which is the same "resident-only lookup" gap Task 21's fix round closed
+    inside the dismiss route itself — reintroduced one layer up, in the
+    listing, where nothing would have failed loudly.
+    """
+    from services import solve_job_store
+
+    install_network(build_network(), name="Mine")
+    _save_project(client, "Mine")
+    solve_queue.reset_for_tests()
+    try:
+        me = _acting_user_id(client)
+        jid = _seed("completed", "Mine", registry_key_for("Mine"), me)
+        with solve_queue._lock:
+            job = solve_queue._jobs[jid]
+        solve_job_store.record_enqueued(
+            job, enqueued_by_user_id=me, solver_config_json=None,
+        )
+        solve_job_store.record_status(job)
+
+        # A restart: memory is empty, the table is not.
+        solve_queue.reset_for_tests()
+
+        row = next(
+            j for j in client.get("/api/simulation/queue").json()["jobs"]
+            if j["id"] == str(jid)
+        )
+        assert row["can_dismiss"] is True, (
+            "a persisted-only job reported as un-dismissable while the dismiss "
+            "route would have accepted it — the listing answered from _jobs only"
+        )
+        assert client.post(f"/api/simulation/queue/{jid}/dismiss").status_code == 200
+    finally:
+        solve_queue.reset_for_tests()
