@@ -60,28 +60,40 @@ it is the one `_UndoState` already uses, for the same reason.
 
 API: `mark_dirty()`, `clear()`, `is_dirty() -> bool`.
 
-### 2. Two prefix lists, deliberately
+### 2. What sets it — the SINK, not the route layer
 
-```python
-_UNDO_PREFIXES  = ("/api/network/", "/api/io/")            # what undo CAN restore
-_DIRTY_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)   # what makes memory differ from disk
-```
+**Superseded design, recorded because the reason matters.** The first version of this spec
+set the flag in `undo_snapshot_middleware` under a second prefix list
+(`_DIRTY_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)`). That design does not work,
+and it fails in the unsafe direction. Three reasons, all verified before any code:
 
-Both live in `main.py` beside the existing constants, with the distinction stated in
-words next to them: *"undo can restore this" and "this differs from disk" are different
-questions; do not collapse these lists.* Collapsing them is precisely the present bug.
+1. **Queue solves never make an HTTP request.** `services/solve_queue.py::_run_job` runs
+   on a `threading.Thread` and calls `run_simulation` directly. The middleware never fires.
+   The solve queue is the primary solve path, so the guard would have stayed open for the
+   workflow users actually use.
+2. **Even the HTTP route solves in the background.** `routers/simulation.py::run` spawns
+   its own `_worker()` and returns immediately. Middleware would therefore mark dirty at
+   *request* time — before results exist, and equally if the solve subsequently failed.
+   Wrong moment, wrong answer.
+3. **`chat_tools._route` calls handlers directly**, so chat-driven mutations skip the
+   middleware too. The middleware is not the chokepoint it appears to be.
 
-### 3. What sets it
+**Corrected design: mark dirty where results are written.** Both solve paths converge on
+`services/solver_service.py::run_simulation` (:672). The flag is set there, on a
+successful results write, against the context that was solved — not the active one, since
+a queue job may hydrate its own context.
 
-`undo_snapshot_middleware` (`main.py:564`) already runs before every mutating request and
-is the single chokepoint through which `_push_undo_snapshot` is reached. It calls
-`dirty_state.mark_dirty()` for a **successful** non-GET request whose path matches
-`_DIRTY_PREFIXES`, under the same `_UNDO_EXCLUDE` exemptions.
+This is the same rule the `file_id` traversal fix followed one day earlier: put the guard
+at the boundary where the thing actually happens, not at the route layer that usually
+reaches it. A route-layer guard looks complete and leaves the direct callers open.
 
-Deliberately at the middleware, not at each route: one site to maintain, and it is the
-site that already answers "did this request mutate the network".
+**What this deletes.** No `_DIRTY_PREFIXES`, no two-list distinction, and no
+route-coverage test. Those existed to manage a hand-maintained allowlist that could fail
+open by omission; marking at the sink means there is no list to omit from. The ceremony
+that justified this spec is no longer needed *because the design got smaller* — which is
+the outcome to prefer, not to regret.
 
-### 4. What clears it
+### 3. What clears it
 
 **The rule, which matters more than the list: clear iff the operation leaves memory and
 disk equal.** Implement against the rule and check each site against it; do not clear
@@ -112,7 +124,7 @@ the other.
 results still differ from disk. This is the case that proves `depth` and `unsaved` are
 different signals rather than one signal with two spellings.
 
-### 4a. The error asymmetry, which should shape the tests
+### 3a. The error asymmetry, which should shape the tests
 
 A missed **set** under-prompts: destructive work proceeds silently. That is the bug being
 fixed, and it is unsafe.
@@ -121,10 +133,10 @@ A missed **clear** over-prompts: the user is asked about work that is already sa
 Annoying, and safe.
 
 The two are not equally bad, so they do not deserve equal test effort. Weight coverage
-toward the set path — that is what the route-coverage test below exists for — and treat
+toward the set path — assert the flag is set after a real solve on BOTH paths — and treat
 the clear sites as ordinary unit tests.
 
-### 5. The interface
+### 4. The interface
 
 `GET /api/network/undo/info` gains one field:
 
@@ -134,30 +146,24 @@ the clear sites as ordinary unit tests.
 
 Additive, so existing consumers are unaffected. Mirrored in `frontend/src/api/network.ts`.
 
-### 6. Consumers
+### 5. Consumers
 
 The three guards switch from `depth > 0` to `unsaved`. Their fail-closed unknown handling
 is untouched: a failed probe still prompts. StatusBar keeps reading `depth` for its count
 and gains `unsaved` for the dot, so a solved-but-unsaved project no longer shows green.
 
-## The fail-open problem, and the test that answers it
+## The fail-open problem
 
-A dirty flag that misses a mutating route is a guard that silently stops prompting — a
-strictly worse failure than the one being fixed, because the guards would still appear to
-work. `_DIRTY_PREFIXES` is a hand-maintained allowlist, and every hand-maintained
-allowlist in this codebase has eventually missed a member.
+The superseded middleware design needed a route-coverage test because `_DIRTY_PREFIXES`
+was a hand-maintained allowlist, and every hand-maintained allowlist in this codebase has
+eventually missed a member.
 
-**Route-coverage test.** Walk the FastAPI app's own route table and assert that every
-non-GET route is either matched by `_DIRTY_PREFIXES` or named in an explicit
-`_DIRTY_EXEMPT` set with a stated reason. The exemption set is the opt-in, and adding to
-it is a decision someone has to write down.
-
-Precedent exists: `tests/fixtures/route_inventory_phase0.txt` driven by
-`tests/test_chat_tools_endpoint_map.py` already pins the route surface this way.
-
-This test is the reason the design is worth its ceremony. It fails when someone adds a
-mutating route without considering dirt — which is the only mechanism that keeps this
-correct after everyone here has forgotten the reasoning.
+Marking at the sink removes that class of failure rather than testing around it. There is
+one write site to maintain, and it is the site that produces the thing being tracked. The
+remaining risk is a FUTURE second results-writing path that does not go through
+`run_simulation` — which is a real risk, and the mitigation is a comment at the sink
+saying so, plus the test below asserting the flag after a solve rather than asserting the
+implementation.
 
 ## Testing
 
@@ -166,8 +172,8 @@ RED before GREEN on each:
 - **Backend, the defect itself:** solve, then assert `undo_info()["unsaved"]` is true while
   `depth` is 0. Fails today — there is no field.
 - **Backend, the sibling:** save clears it; undo-to-depth-0 does NOT.
-- **Backend, coverage:** the route-coverage test flags `/api/simulation/` against today's
-  `_UNDO_PREFIXES`, proving the test can see the live bug before the fix.
+- **Backend, the queue path:** a queue-driven solve sets the flag too, not just the HTTP
+  `/run` path. This is the assertion the superseded middleware design would have failed.
 - **Frontend, per guard:** with `unsaved: true, depth: 0`, each of the three guards prompts.
   Sibling assertion per guard: with `unsaved: false`, none of them prompt — the guards must
   not become unconditional.
