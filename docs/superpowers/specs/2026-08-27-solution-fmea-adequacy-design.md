@@ -1,4 +1,4 @@
-# Design — Solution FMEA & the Cost-vs-Availability Trade-off (v3)
+# Design — Solution FMEA & the Cost-vs-Availability Trade-off (v4)
 
 **Status:** assessment / design. No feature code written.
 
@@ -8,7 +8,9 @@ review found v1's central technical proposal wrong and about a third of its "alr
 exists" inventory overstated; v2 (`41dd9c7`) recorded the corrections. **v3 scopes the
 feature** after a round of product decisions that materially shrink it: the trade-off
 curve moves from the core to an on-demand extra, and availability is scoped to
-electricity.
+electricity. **v4 pins the four second-order decisions** — cap geometry, demand response,
+VoLL structure and the occurrence statistic — each of which turned out to touch more of
+the codebase than its one-line answer suggests.
 
 **Goal.** Let a user state a reliability target, get a least-cost plan that meets it, and
 see a ranked, model-computed account of which failure modes drive the residual risk —
@@ -65,6 +67,10 @@ uniformly by construction.
 | **Cost axis** | **Total system cost — CapEx + FOM + fuel + CO₂ — excluding shed cost** (§5.2) |
 | **Product shape** | **Target first; the curve is an on-demand action, not the core loop** (§6, §8) |
 | **Carrier scope** | **Electricity only** (§4.3) |
+| **Cap geometry** | **Global cap + a looser per-zone ceiling**, zone = bus `country` (§5.1) |
+| **Demand response** | **Separated from involuntary shedding** — DSR is a resource, not unserved energy (§4.4) |
+| **VoLL structure** | **Single value now, schema shaped for segments later** (§5.5) |
+| **Occurrence statistic** | **Accept FOR or EFORd, label which was entered, never silently convert** (§5.4) |
 
 ---
 
@@ -219,17 +225,73 @@ electricity as though they were equivalent.
   at all. If that matters, the scope decision has to be revisited; it is not a gap that
   can be papered over in reporting.
 
+### 4.4 Demand response is not unserved energy
+
+Today a single VOLL slack per load-bearing bus represents *everything the model could not
+serve at normal cost* — contracted demand response and involuntary curtailment alike.
+That conflation overstates unserved energy wherever DSR is modelled and makes flexibility
+look like a liability, so the two are separated:
+
+| Tier | Carrier | Price | Counts against the target? |
+|---|---|---|---|
+| Voluntary response | `demand_response` | contracted compensation, well below VoLL | **No** — it is a resource |
+| Involuntary curtailment | `load_shedding` | VoLL | **Yes** |
+
+Only the involuntary tier feeds the availability target (§5.1) and FMEA severity (§5.4).
+
+**Two hazards this creates, both of which have bitten similar changes before:**
+
+1. **Double-counting against modelled flexibility.** If a network already represents DSR
+   as a real asset — a load-shifting Link, or a Generator with a demand-response carrier —
+   then a DSR slack tier on the same bus counts the same flexibility twice. The DSR tier
+   must be opt-in per bus (or suppressed where a flexible asset is present), with a
+   preflight warning, not switched on globally.
+2. **The slack is special-cased in ten production files.** `carrier == "load_shedding"`
+   or the `__voll_` name prefix appears in **30 non-test places** across
+   `solver_service.py`, `routers/results.py`, `routers/network.py`,
+   `services/ac_pf_service.py`, `services/asset_results/service.py`,
+   `services/project_context.py`, `services/pypsa_service.py`, and the frontend's
+   `simulation.ts`, `SolverSettings.tsx`, `LoadFlow.tsx` and `Prices.tsx`. Several of
+   those exclude the slack from price-setting and from load-flow. **Any site that
+   special-cases `load_shedding` but not `demand_response` will silently let DSR set
+   prices or appear as a real generator.**
+
+   Therefore: introduce one `SLACK_CARRIERS` constant and refactor all 30 sites to test
+   **membership** rather than equality, *before* adding the second tier. Mechanical,
+   testable, and the only way to make the change safely. This is a Phase 0 item.
+
 ---
 
 ## 5. The numbers
 
 ### 5.1 The reliability target — set either, report both
 
-**The enforced constraint is always energy-based**, because it is linear:
+**The enforced constraint is always energy-based**, because it is linear. Two of them,
+per the cap-geometry decision — a system target plus a per-zone backstop so the optimiser
+cannot satisfy the system number by sacrificing one zone:
 
 ```
-Σ_t  w_t · Σ_{b ∈ electrical}  p_shed[b,t]   ≤   Ē
+system:   Σ_t w_t · Σ_{b ∈ electrical}      p_shed[b,t]  ≤  Ē_sys
+per zone: Σ_t w_t · Σ_{b ∈ electrical ∩ z}  p_shed[b,t]  ≤  Ē_zone(z)     ∀ z
 ```
+
+Only the **involuntary** tier enters these sums (§4.4); `demand_response` dispatch does not.
+
+**Zone = the bus `country` field**, which already exists on `BusCreate`
+(`models/schemas.py:37`). Two consequences:
+
+- It **defaults to `""`**, so on a hand-built GUI network every bus lands in one unnamed
+  zone and the per-zone ceiling silently degenerates to a second copy of the system cap.
+  Preflight must warn when a per-zone ceiling is set and `country` is unpopulated —
+  otherwise the constraint appears to be doing something and is not.
+- `Ē_zone` is expressed as ‱ of **that zone's own** demand so it scales with zone size,
+  defaulting to a multiple of the system target (3× is a reasonable starting default —
+  loose enough not to bind in normal operation, tight enough to stop one zone absorbing
+  everything).
+
+Per-zone ceilings can make the problem **infeasible** where a zone genuinely cannot be
+served. That must surface as "zone X cannot meet its ceiling", naming the zone — not as a
+bare `infeasible` from the solver.
 
 A **time-based** target (shed-hours per year) is **not** enforceable as a linear
 constraint — it needs 8760×|B| binaries with a big-M whose LP relaxation is ~0
@@ -313,6 +375,25 @@ C_i  [EUR/yr]= f_i * S_i
   common-cause mode is a **separate row** with a β-factor-derived occurrence.
 - **`Δopex` excludes the `load_shedding` carrier**, or `VoLL·ΔEUE` is counted twice.
 
+**The occurrence statistic is labelled, never inferred.** The schema carries
+`outage_rate_value` plus `outage_rate_basis ∈ {FOR, EFORd}` and `mttr_hours`:
+
+- **FOR** (service-hours based) is what NERC GADS class averages publish and what a user
+  will most easily find.
+- **EFORd** (demand based) is what adequacy studies use and what makes the COPT correct.
+
+They diverge most for units with substantial reserve-shutdown hours — peakers, exactly
+the units that matter at the margin — where FOR biases availability **optimistic**.
+Converting between them needs the unit's demand factor and its service/reserve-shutdown
+split, neither of which the model carries, so **the tool must not silently convert**.
+Accept either, store which, warn when a low-capacity-factor unit is entered as FOR, and
+tag the resulting COPT metrics with the mix of bases that fed them.
+
+A consistency validator is also required: FOR and MTTR will be sourced independently
+(class averages vs a maintenance database) and are over-determined — the formula happily
+returns 36.5 outages/yr for a large thermal unit given FOR 0.10 with MTTR 24 h. Check the
+implied MTTF and flag implausible values.
+
 **No RPN and no Action Priority.** €/yr criticality is the ranking. Severity and
 Occurrence bins may be rendered for readers who expect the columns, but RPN from binned
 ordinals is a *product of sums* and is not monotone in `C = f·S` — a mode 10× more
@@ -332,6 +413,21 @@ cap allows and VoLL is the effective standard; if low, the cap binds. **Whicheve
 first is the real standard, and the user cannot see which.** The solver must emit a
 config-coherence warning naming the binding one. Left unhandled, two users with the same
 stated target get different plans for reasons neither can observe.
+
+**One value now, schema shaped for segments.** VoLL ships as a single system-wide number,
+which is adequate while it only values severity. ACER's methodology requires a
+segment-weighted value (industrial / commercial / residential), and segment weighting
+changes the criticality ranking wherever load mix varies by region — so the contract
+carries `voll: {default, by_segment?}` from the start even though only `default` is
+populated.
+
+**The blocker on segments is the slack geometry, and §4.4 is already moving it.** A single
+slack per bus cannot attribute *which* load was shed, so per-segment VoLL is impossible
+today regardless of schema. Splitting the slack into per-`(bus, load)` slacks would unlock
+per-segment *and* per-carrier attribution at once — at the cost of multiplying the slack
+count by loads-per-bus, which on a sector-coupled network is a real LP size increase.
+Since §4.4 already re-opens this code, **decide then whether the second tier is
+per-bus or per-(bus, load)**; retrofitting it later means touching those 30 sites twice.
 
 ### 5.6 The frontier (on demand)
 
@@ -413,6 +509,13 @@ preflight validation and a complete frontend surface.
   it is a **foreground module global** that background solves deliberately skip
   persisting. Holding N coincident years needs N project copies or a new dimension in
   `_user_ts` **and** the netCDF layout.
+- **Buses already carry `country`** (`models/schemas.py:37`), so the per-zone ceiling needs
+  no new grouping attribute — but it defaults to `""` and nothing enforces it, so on a
+  GUI-built network it is usually empty (§5.1).
+- **The VOLL slack is special-cased in 30 non-test places** across ten production files,
+  several of which exclude it from price-setting and load-flow. Adding a second slack tier
+  without first centralising that test is the highest-risk mechanical change in the
+  feature (§4.4).
 - **"Severity is already computed" was half true.** The full array is in the pickle, but
   `GET /results/lost_load` reads `_state` (**foreground only**), and
   `_compute_lost_load_summary` collapses to totals and **caps per-bus rows at 24**. **No
@@ -484,6 +587,8 @@ workflow.
 | Surface | Precedent in the app | v1 scope | Verdict |
 |---|---|---|---|
 | Reliability target input | `voll` field, `SolverSettings.tsx:1667` | **Required** | Small — one new section following an existing pattern |
+| Per-zone ceiling input + empty-`country` warning | None; zones are not surfaced anywhere in the UI today | **Required** | Small table keyed on `country`, but it makes zones a user-visible concept for the first time |
+| DSR tier config (price, volume, per-bus opt-in) | None | **Required** | New; needs a per-bus opt-in surface and a double-count warning where a flexible asset already exists |
 | FOR/MTTR per asset | `curtailment_cost` is the exact precedent | **Required** | ~60 mechanical edits (6 touch points × 2 attrs × 5 components) |
 | Per-carrier defaults library | None | **Required** | New, small |
 | FMEA worksheet, **editable cells** | **None** — all six result tables are read-only | **Required** | **The single biggest build** |
@@ -517,7 +622,10 @@ member of `CompareView`'s `Tab` union — alias to `'overview'`, as `asset` does
 ### 8.5 Honest summary
 
 Under "target first", the analysis and the UI are roughly balanced, and the feature is
-**one new surface plus a settings section**, not three new surfaces. The editable
+**one new surface plus a settings area**, not three new surfaces. v4's decisions grew that
+settings area — the target section now carries zone ceilings and a DSR tier alongside the
+system cap, and **zones become a user-visible concept for the first time** — but none of
+it changes the shape of the build. The editable
 worksheet remains the schedule risk and has no precedent. The deferred curve is where the
 IA question and the sweep machinery live, and deferring it is what makes v1 tractable.
 
@@ -552,20 +660,29 @@ takes.
 AdequacyReport {
   engine:   "lp_proxy" | "copt" | "pras" | "antares"
   fidelity: "deterministic_scenario" | "analytic_convolution" | "sequential_mc"
-  target:   { basis: "energy" | "shed_hours", value, achieved_ens_mwh,
-              achieved_shed_hours, binding: "cap" | "voll" }
+  target:   { basis: "energy" | "shed_hours",
+              system: { cap, achieved_ens_mwh, achieved_shed_hours },
+              zones:  [ { zone, cap, achieved_ens_mwh, binding: bool } ],
+              binding: "system_cap" | "zone_cap" | "voll",
+              zone_field_populated: bool }
   metrics:  { ens_mwh, shed_hours, lole_hours?, eue_mwh?,
               confidence_interval?, n_samples?, time_basis }
   cost:     { total_system_cost, excludes_shed_cost: true, period_basis }
-  inputs:   { weather_years, voll_eur_per_mwh, seed?, assumptions_hash }
+  inputs:   { weather_years, voll: { default, by_segment? }, seed?, assumptions_hash,
+              outage_rate_bases: { FOR: n, EFORd: n } }   # what fed the COPT
+  energy:   { involuntary_mwh, demand_response_mwh }      # only the first is unserved
   per_mode: [ FailureModeResult ]     # own provenance
   frontier: [ TradeoffPoint ]         # own provenance; absent unless the curve was run
 }
 ```
 
-`target.binding` is what §5.5 requires: the user must be able to see whether the cap or
-VoLL shaped the plan. `cost.excludes_shed_cost` is asserted in the payload so a consumer
-cannot accidentally plot a self-referential curve.
+`target.binding` is what §5.5 requires: the user must be able to see whether the system
+cap, a zone ceiling or VoLL shaped the plan. `zone_field_populated` exposes the empty-
+`country` degeneracy of §5.1 rather than letting a ceiling look enforced when it is not.
+`cost.excludes_shed_cost` is asserted in the payload so a consumer cannot accidentally
+plot a self-referential curve. `energy` splits the two slack tiers so no consumer can
+re-merge DSR into unserved energy by accident, and `outage_rate_bases` records the FOR /
+EFORd mix behind any COPT metric.
 
 **No number produced by Phases 0–4 may be compared to a statutory standard.** The LP proxy
 understates (perfect foresight, one realisation); the COPT screening is storage-blind and
@@ -577,8 +694,8 @@ network-free. The UI must say so at the point of display, not in a footnote.
 
 | Phase | Content | Ships |
 |---|---|---|
-| 0 | FOR/MTTR attributes + defaults + validator; **pin the canonical lost-load number**; **add a shed-hours metric** (none exists); `AdequacyReport` contract | Nothing user-visible |
-| 1 | ENS cap as a first-class objective wrapper; target input UI; achieved-vs-target readout incl. shed-hours; VoLL/cap coherence warning | **The core loop — set a target, get a plan** |
+| 0 | Outage-rate attributes (value + **basis** + MTTR) + defaults + consistency validator; **pin the canonical lost-load number**; **add a shed-hours metric** (none exists); **centralise the slack test behind `SLACK_CARRIERS` across all 30 sites**; `AdequacyReport` contract | Nothing user-visible |
+| 1 | Two-tier slack (`demand_response` / `load_shedding`); system ENS cap **+ per-zone ceilings** as first-class objective wrappers; target input UI; achieved-vs-target readout incl. shed-hours; empty-`country` and VoLL/cap coherence warnings | **The core loop — set a target, get a plan** |
 | 2 | COPT: convolution, screening LOLE/EUE, leave-one-out criticality for class A; side-by-side with the LP proxy | The FMECA ranking — **zero extra LP solves** |
 | 3 | The worksheet UI — computed rows + persisted manual class-D rows + mitigability; provenance badges; CSV export | **The formal deliverable** |
 | 4 | Class B (**Link** outages + existing SCLOPF); class C (bundled climate years + multi-year storage) | Full taxonomy coverage |
@@ -605,11 +722,10 @@ Capacity credit / ELCC — the actual currency of a capacity-vs-availability con
 derivable from the COPT as equivalent firm capacity at constant LOLE. Cheap once Phase 2
 exists.
 
-Also unresolved: whether the ENS cap is **global or per-bidding-zone** (a global cap lets
-the optimiser concentrate all shedding in one zone while satisfying it — exactly what a
-per-zone standard forbids); whether **DSR counts as unserved energy** (the `__voll_` slack
-conflates voluntary response with involuntary curtailment); and whether VoLL is **single
-or segment-differentiated** (ACER requires segment-weighted).
+The three items v3 left unresolved — cap geometry, DSR accounting and VoLL structure — are
+now decided (§2) and folded into Phases 0–1. What remains genuinely open is whether the
+second slack tier is per-bus or per-`(bus, load)`, which §5.5 argues should be settled
+during Phase 1 rather than retrofitted.
 
 ---
 
