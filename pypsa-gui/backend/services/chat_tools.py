@@ -1253,8 +1253,8 @@ def upload_generator_profile(csv_content_b64: str,
     data = base64.b64decode(csv_content_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     if "attribute" in _h.__code__.co_varnames:
-        return _sync(_h(upload, attribute=attribute))
-    return _sync(_h(upload))
+        return _sync(_h(attribute=attribute, file=upload))
+    return _sync(_h(file=upload))
 
 
 def upload_link_profile(csv_content_b64: str,
@@ -1268,8 +1268,8 @@ def upload_link_profile(csv_content_b64: str,
     data = base64.b64decode(csv_content_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     if "attribute" in _h.__code__.co_varnames:
-        return _sync(_h(upload, attribute=attribute))
-    return _sync(_h(upload))
+        return _sync(_h(attribute=attribute, file=upload))
+    return _sync(_h(file=upload))
 
 
 # ── Solver config (1) ───────────────────────────────────────────────────────
