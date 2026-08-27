@@ -26,7 +26,6 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { COMPONENT_QUERY_ROOTS } from '../utils/assetWrite'
-import { nk } from '../utils/queryKeys'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 
@@ -95,9 +94,12 @@ async function sendFrames(frames: Frame[]) {
   await user.click(screen.getByTestId('chat-send'))
 }
 
-/** The component-family roots (for project 'Demo') this spy saw invalidated. */
+/** The component-family roots this spy saw invalidated. */
 function invalidatedRoots(spy: ReturnType<typeof renderWithSpy>): string[] {
-  const keyOf = (root: string) => JSON.stringify(nk('Demo', root))
+  // BARE root, not `nk('Demo', root)`: invalidateAssetQueries invalidates by
+  // root alone so React Query's prefix match reaches both `[root, project]`
+  // and the legacy flat `[root]` keys (SolverSettings' global_constraints).
+  const keyOf = (root: string) => JSON.stringify([root])
   const seen = spy.mock.calls
     .map((c) => JSON.stringify((c[0] as { queryKey?: unknown })?.queryKey))
   return COMPONENT_QUERY_ROOTS.filter((root) => seen.includes(keyOf(root)))

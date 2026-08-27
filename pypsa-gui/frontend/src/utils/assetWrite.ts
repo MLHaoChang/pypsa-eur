@@ -38,6 +38,13 @@ export const COMPONENT_QUERY_ROOTS = [
   'stores',
   'loads',
   'transformers',
+  // Writable by the generic `update_component` / `delete_component` chat
+  // tools (chat_tools_schema `_COMP_UPDATE_ROUTES` / `_COMP_DELETE_ROUTES`
+  // both list it) and cached by SolverSettings, so a chat edit to a CO2 cap
+  // went stale exactly like a component edit did. Found by the derived
+  // sibling-path test, not by inspection — this list is a hand-written
+  // allowlist and could only ever contain classes someone remembered.
+  'global_constraints',
   'meta',
 ] as const
 
@@ -67,8 +74,22 @@ export function isMutatingTier(tier: string | undefined | null): boolean {
  */
 export function invalidateAssetQueries(qc: QueryClient, project: string | null): void {
   for (const root of COMPONENT_QUERY_ROOTS) {
-    qc.invalidateQueries({ queryKey: nk(project, root) })
+    // Invalidate by the BARE root, not `nk(project, root)`. `nk` produces
+    // `[root, project]` and React Query matches by PREFIX, so a
+    // project-qualified key cannot reach a flat `[root]` one — the shorter
+    // key is a prefix of ours, not the reverse. SolverSettings still caches
+    // `['global_constraints']` flat (it predates `nk`), so the qualified form
+    // left it stale after every chat edit. The bare root prefix-matches BOTH
+    // `[root]` and `[root, <any project>]`.
+    //
+    // Widening past the current project is deliberate and cheap: a chat turn
+    // can rebind the active project mid-flight (`project_rebound`), so the
+    // namespace that needs refreshing is not reliably the one passed in.
+    qc.invalidateQueries({ queryKey: [root] })
   }
+  // `project` is kept in the signature because callers legitimately know it
+  // and a future surgical mode will want it; it is intentionally unused here.
+  void project
 }
 
 /** An asset row as the chokepoint sees it: a name plus whatever the class carries. */
