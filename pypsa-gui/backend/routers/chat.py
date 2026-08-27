@@ -280,12 +280,19 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
         last_rec = turns[-1]
         last_session_id = last_rec.get("session_id")
         if last_session_id:
+            # Fix round 1 — determine this BEFORE get_or_create_session,
+            # which registers the id as a side effect: it's the only way
+            # left to tell "this GET minted a fresh session" from "this GET
+            # found an already-live one" once that call returns.
+            session_was_already_registered = (
+                chat_service.get_session(last_session_id) is not None
+            )
+
             # Task 7 — resolve the profile the LATEST turn was recorded
             # under (its `profile_id` when present, else the legacy `model`
-            # translation) and bind the minted session to it, same as a live
-            # `/stream` bind. This is the profile the WHOLE rehydrated
-            # session adopts, matching the pre-existing single `model=`
-            # rehydration below it replaces.
+            # translation). This is the profile a FRESHLY-MINTED session
+            # adopts, matching the pre-existing single `model=` rehydration
+            # this replaces.
             recorded_profile_id = last_rec.get("profile_id")
             if recorded_profile_id:
                 resolved_profile = llm_config.resolve_profile(recorded_profile_id)
@@ -296,9 +303,24 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
             sess = chat_service.get_or_create_session(
                 last_session_id, model=resolved_profile.model,
             )
-            sess.profile_id = resolved_profile.id
-            sess.bound_wire = resolved_profile.wire
-            sess.model = resolved_profile.model
+            # Fix round 1 — GET /history must stay read-only w.r.t. an
+            # ALREADY-LIVE session's profile binding, exactly like
+            # `get_or_create_session`'s own `model=` kwarg is already a
+            # documented no-op for an existing session (chat_service.py).
+            # These three lines used to run unconditionally: a GET /history
+            # racing a same-wire rebind mid-turn (two tabs sharing a
+            # session_id, or a reload — the #19 in-flight guard's own
+            # docstring anticipates exactly this) would resolve the STALE,
+            # not-yet-persisted profile from chat.jsonl and revert
+            # `session.model`/`profile_id`/`bound_wire` out from under the
+            # running turn's next outer-loop pass. Only a session that was
+            # NOT already registered (this GET minted it) adopts the
+            # resolved profile; an already-live session is left exactly as
+            # `/stream` bound it.
+            if not session_was_already_registered:
+                sess.profile_id = resolved_profile.id
+                sess.bound_wire = resolved_profile.wire
+                sess.model = resolved_profile.model
             # Rebuild the in-memory message history so the next turn can
             # thread the prior conversation into the Anthropic SDK (INT-001
             # threading fix). Best-effort: skip turns missing required keys.

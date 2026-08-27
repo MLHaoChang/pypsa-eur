@@ -405,3 +405,201 @@ def test_a8_fallback_uses_profile_fallback_model(appdata, monkeypatch):
     assert fb["to_model"] == "fallback-model"
     assert fb["profile_id"] == "custom-fb"
     assert session.model == "fallback-model"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Fix round 1 — Finding 1: GET /history must not rebind an ALREADY-LIVE
+# session's profile out from under it.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_history_does_not_rebind_an_already_live_session(
+    appdata, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    """
+    Regression for Finding 1. `chat_history` used to write
+    `sess.profile_id`/`bound_wire`/`model` UNCONDITIONALLY from the LATEST
+    persisted turn's profile, even when `session_id` already named a
+    resident, live `ChatSession` (e.g. a second tab GETting /history while
+    the first tab's turn is bound to a profile the on-disk transcript
+    doesn't reflect yet). That silently reverted a live session's binding
+    mid-conversation.
+
+    This test registers the session and binds it explicitly BEFORE calling
+    GET /history, then persists a chat.jsonl record under the SAME
+    session_id naming a DIFFERENT profile. The fix in routers/chat.py reads
+    `session_was_already_registered = chat_service.get_session(...) is not
+    None` before `get_or_create_session` (which registers the id as a side
+    effect) and only applies the three profile-binding writes when the
+    session was freshly minted by this GET.
+
+    CRITICAL: deliberately does NOT call `_reset_sessions_for_tests()`
+    between registering/binding the session and the GET call below — the
+    module's autouse `_reset_chat_sessions` fixture only resets at test
+    start/end, which is fine. The EXISTING rehydration test
+    (`test_turn_record_carries_profile_id_and_rehydration_binds`) calls
+    `_reset_sessions_for_tests()` right before its GET, which empties the
+    registry first and makes `chat_history` always take the
+    "freshly-minted" branch — that is exactly why it never caught this bug.
+    """
+    from services import llm_config
+
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="LiveSessProj")
+
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+
+    session_id = "sess-already-live"
+
+    # Persist a turn record under the SAME session_id naming the SONNET
+    # builtin profile — different from the OPUS binding the live session
+    # below will carry.
+    _write_chat_jsonl(tmp_projects_dir, "LiveSessProj", [{
+        "ts": 1.0,
+        "session_id": session_id,
+        "model": chat_service.DEFAULT_MODEL,
+        "profile_id": llm_config.BUILTIN_SONNET_ID,
+        "user": "hello from disk",
+        "assistant": [{"type": "text", "text": "hi from disk"}],
+        "usage": {},
+    }])
+
+    # Register the session and bind it explicitly to OPUS, mimicking a live
+    # `/stream` bind that ran AFTER the persisted record above (or is
+    # simply ahead of what's durable yet — the router doesn't know which).
+    live_session = chat_service.get_or_create_session(session_id)
+    live_session.profile_id = llm_config.BUILTIN_OPUS_ID
+    live_session.bound_wire = "anthropic"
+    live_session.model = chat_service.OPUS_MODEL
+
+    r = client.get("/api/chat/history")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["last_session_id"] == session_id
+
+    # The live session must be UNCHANGED — still bound to opus, not
+    # reverted to the sonnet profile named in chat.jsonl.
+    sess = chat_service.get_session(session_id)
+    assert sess is live_session
+    assert sess.profile_id == llm_config.BUILTIN_OPUS_ID
+    assert sess.bound_wire == "anthropic"
+    assert sess.model == chat_service.OPUS_MODEL
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Fix round 1 — Finding 2: the A8 fallback flag must be TURN-scoped, not
+# round-scoped (at most one downgrade per WHOLE turn, across every agentic
+# round, not just within one outer-loop pass).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_a8_fallback_is_turn_scoped_across_multiple_rounds(
+    appdata, install_network, monkeypatch,
+):
+    """
+    Regression for Finding 2. `model_fallback_used` used to be initialised
+    to `False` INSIDE the outer `while True:` loop (i.e. re-armed at the
+    top of every agentic round), so "at most one downgrade per turn" only
+    held in practice because the old hardcoded `session.model == OPUS_MODEL`
+    guard happened to go false the instant the fallback fired. Once the
+    guard reads `profile.fallback_model` instead, that coincidence is gone:
+    a SECOND `rate_limited` later in the SAME turn would fire a SECOND
+    `model_fallback` frame instead of surfacing as a terminal error.
+
+    Script (four scripted provider turns, driving three agentic rounds):
+      Round A — tool_use (read-tier, dispatched immediately) -> turn
+                continues into round B.
+      Round B, attempt 1 — rate_limited. Retries are exhausted immediately
+                (MAX_STREAM_RETRIES=0) -> fires the ONE allowed A8 fallback
+                (`model_fallback` #1), grants one extra attempt.
+      Round B, fallback attempt — another tool_use (dispatched) -> turn
+                continues into round C.
+      Round C — rate_limited AGAIN. With the flag correctly turn-scoped,
+                `model_fallback_used` is already True, so this must NOT
+                fire a second fallback; it must be TERMINAL (an `error`
+                frame, then `session_done`).
+
+    With the bug (flag re-initialised inside the outer loop), round C would
+    see `model_fallback_used == False` again and fire a second
+    `model_fallback` frame instead of terminating — this test fails on
+    exactly that difference (see the "Fix round 1" report section for the
+    scratch-copy proof).
+    """
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent, ProviderError
+
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name=None)
+
+    profile = llm_config.LLMProfile(
+        id="custom-fb-multi", label="Custom FB Multi", preset="custom",
+        wire="anthropic", base_url=None, model="primary-model", tools=True,
+        vision=False, auth="none", fallback_model="fallback-model",
+        max_output_tokens=None,
+    )
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    # Small + zero-delay retry budget, same as the single-round A8 test
+    # above, so both rate_limited failures resolve without real backoff.
+    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 0)
+    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
+
+    session = chat_service.ChatSession(model="primary-model")
+    session.profile_id = "custom-fb-multi"
+
+    fake = FakeProvider([
+        # Round A — tool_use, dispatched (read tier, no confirmation),
+        # turn continues.
+        {
+            "events": [LLMEvent(type="tool_use_start", tool_use_id="tu-1",
+                                 tool_name="list_components")],
+            "blocks": [{"type": "tool_use", "id": "tu-1",
+                        "name": "list_components",
+                        "input": {"component_class": "Bus"}}],
+            "usage": {"input_tokens": 5, "output_tokens": 5},
+        },
+        # Round B, attempt 1 — rate_limited; retries exhausted immediately
+        # -> fires the ONE allowed fallback.
+        ProviderError("rate_limited", "busy on primary"),
+        # Round B, fallback attempt — another tool_use, dispatched, turn
+        # continues.
+        {
+            "events": [LLMEvent(type="tool_use_start", tool_use_id="tu-2",
+                                 tool_name="list_components")],
+            "blocks": [{"type": "tool_use", "id": "tu-2",
+                        "name": "list_components",
+                        "input": {"component_class": "Bus"}}],
+            "usage": {"input_tokens": 4, "output_tokens": 4},
+        },
+        # Round C — rate_limited AGAIN. Must be terminal, not a second
+        # fallback.
+        ProviderError("rate_limited", "busy on fallback too"),
+    ])
+
+    events = list(chat_service.run_turn(session, "hi", provider=fake))
+    names = [n for n, _ in events]
+
+    # At most one downgrade for the WHOLE turn, across every round.
+    assert names.count("model_fallback") == 1
+    # The second rate_limited must be TERMINAL: exactly one error frame,
+    # and the turn ends via session_done (not a silent second fallback).
+    assert names.count("error") == 1
+    assert names[-1] == "session_done"
+
+    fb = next(p for n, p in events if n == "model_fallback")
+    assert fb["from_model"] == "primary-model"
+    assert fb["to_model"] == "fallback-model"
+
+    error_payload = next(p for n, p in events if n == "error")
+    assert error_payload["error_kind"] == "rate_limited"
+
+    # The fallback model is still what the turn ended up on — the second
+    # rate_limited did not trigger any further model mutation.
+    assert session.model == "fallback-model"
