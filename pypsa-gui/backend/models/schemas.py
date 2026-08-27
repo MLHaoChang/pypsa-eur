@@ -1086,6 +1086,11 @@ class LostLoadComparison(BaseModel):
     # (electrical / H2 / heat / gas etc.). Lets the Compare View answer
     # "is shedding concentrated on one carrier?" without scanning every bus.
     by_carrier: list[LostLoadByCarrier] = Field(default_factory=list)
+    # Weighted loss-of-load hours over ELECTRICAL buses only (spec §5.1's
+    # reported reliability number — see services/adequacy/metrics.shed_hours
+    # for the definition and the threshold). Additive: older consumers
+    # ignore it; None distinguishes "not computed" from a genuine 0.0.
+    shed_hours: CarrierPeriodValue | None = None
 
 
 class StorageUnitCycles(BaseModel):

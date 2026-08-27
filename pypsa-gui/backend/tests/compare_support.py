@@ -68,6 +68,7 @@ KIND: dict[str, str] = {
     "CurtailmentComparison.system_rate_pct": INTENSIVE,
     # ── LostLoadComparison ────────────────────────────────────────────────
     "LostLoadComparison.total_mwh": EXTENSIVE,
+    "LostLoadComparison.shed_hours": EXTENSIVE,
     "LostLoadComparison.total_cost_meur": EXTENSIVE,
     "LostLoadBus.energy_mwh": EXTENSIVE,
     "LostLoadBus.cost_meur": EXTENSIVE,

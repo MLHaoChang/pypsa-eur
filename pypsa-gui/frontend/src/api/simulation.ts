@@ -383,6 +383,9 @@ export const resultsApi = {
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;
     voll_eur_per_mwh: number;
+    // Weighted loss-of-load hours, electrical buses, horizon scope (not the
+    // sliced range). Absent on payloads from older backends.
+    shed_hours?: { total: number; by_period: Record<string, number> };
     // Per-bus carrier ("AC" / "H2" / "heat" / …). Solver adds VOLL slacks on
     // every bus, so lost load is captured for ALL energy carriers; this map
     // lets the frontend split the total per carrier.

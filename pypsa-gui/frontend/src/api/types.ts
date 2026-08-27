@@ -519,6 +519,9 @@ export interface LostLoadByCarrier {
 }
 
 export interface LostLoadComparison {
+  // Weighted loss-of-load hours over electrical buses (spec §5.1's reported
+  // reliability number). Optional: absent on payloads from older backends.
+  shed_hours?: CarrierPeriodValue | null
   available: boolean
   voll_eur_per_mwh: number
   total_mwh: CarrierPeriodValue

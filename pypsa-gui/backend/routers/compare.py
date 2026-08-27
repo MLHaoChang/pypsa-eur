@@ -2342,8 +2342,12 @@ def _compute_lost_load_summary(
     Reads from ``results_state.pkl`` because the VOLL slack DataFrame can't
     survive a netcdf round-trip — the slack generators are stripped right
     after capture inside solver_service. The capture format is:
-      ``{lost_load_t: DataFrame(snapshot × bus), lost_load_total_mwh: float,
-         lost_load_cost_eur: float}``
+      ``{lost_load_t: DataFrame(snapshot × bus, unweighted MW),
+         lost_load_total_mwh: float, lost_load_cost_eur: float,
+         voll_eur_per_mwh: float}``
+    The totals are SNAPSHOT-WEIGHTED (services/adequacy/metrics.py);
+    ``voll_eur_per_mwh`` is explicit — captures from older builds lack it,
+    and consumers keep the cost/energy-ratio fallback for those.
     Returns ``available=False`` when the pickle is absent, the capture key
     is missing, or the DataFrame is empty — all three are "no shedding"
     states from the user's perspective. Multi-period split uses the snapshot
@@ -2371,7 +2375,11 @@ def _compute_lost_load_summary(
 
     total_mwh_scalar = float(cap.get("lost_load_total_mwh", 0.0) or 0.0)
     total_cost_scalar = float(cap.get("lost_load_cost_eur", 0.0) or 0.0)
-    voll = total_cost_scalar / total_mwh_scalar if total_mwh_scalar > 0 else 0.0
+    # Prefer the capture's explicit VoLL (present since the weighted-totals
+    # change); older captures lack it — fall back to the cost/energy ratio.
+    voll = float(cap.get("voll_eur_per_mwh") or 0.0) or (
+        total_cost_scalar / total_mwh_scalar if total_mwh_scalar > 0 else 0.0
+    )
 
     # Align to current snapshots. The capture is keyed on the snapshot index
     # used at solve time; if the project was re-saved with a different snapshot
@@ -2486,6 +2494,14 @@ def _compute_lost_load_summary(
             ))
         by_carrier_list.sort(key=lambda e: e.energy_mwh.total, reverse=True)
 
+    # Shed-hours — spec §5.1's reported reliability number, electrical scope.
+    # Computed on the UNWEIGHTED frame with the same energy weights: the
+    # metric weights internally (a weighted frame would double-count).
+    from services.adequacy.metrics import electrical_columns, shed_hours
+    sh = shed_hours(
+        df_aligned[electrical_columns(n, list(df_aligned.columns))],
+        weights=weights,
+    )
     return LostLoadComparison(
         available=True,
         voll_eur_per_mwh=voll,
@@ -2493,6 +2509,10 @@ def _compute_lost_load_summary(
         total_cost_meur=_to_pv(total_c_bucket),
         by_bus=by_bus_list,
         by_carrier=by_carrier_list,
+        shed_hours=CarrierPeriodValue(
+            total=sh["total"],
+            by_period={str(k): v for k, v in sh["by_period"].items()},
+        ),
     )
 
 

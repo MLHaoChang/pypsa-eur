@@ -2955,7 +2955,11 @@ def get_lost_load(
     # Surface VOLL directly so the frontend doesn't infer it via division
     # (which crashes on zero-MWh edge cases). Cost / MWh recovers the
     # per-MWh VOLL price the solver used.
-    voll = (total_cost / total_mwh) if total_mwh > 0 else 0.0
+    # Prefer the capture's explicit VoLL (present since the weighted-totals
+    # change); older captures lack it — fall back to the cost/energy ratio.
+    voll = float(cap.get("voll_eur_per_mwh") or 0.0) or (
+        (total_cost / total_mwh) if total_mwh > 0 else 0.0
+    )
 
     # Per-column bus carrier. solver_service adds a VOLL slack on EVERY bus
     # (not just electricity), so `lost_load_t.columns` carries bus names
@@ -2971,13 +2975,27 @@ def get_lost_load(
             except KeyError:
                 bus_carriers[str(col)] = ""
     range_meta = None
+    full_df = df   # bind BEFORE slicing — shed-hours is horizon-scope
     if _wants_slice(from_, to_):
         df, range_meta = _slice_ts(df, from_, to_)
+    # Shed-hours (spec §5.1) — electrical buses only, weighted on the same
+    # energy basis as dispatch. Computed on the FULL frame, not the sliced
+    # range: it is a horizon reliability number, not a window statistic.
+    from services.adequacy.metrics import electrical_columns, shed_hours
+    from services.period_utils import snapshot_weights
+    sh = shed_hours(
+        full_df[electrical_columns(n, list(full_df.columns))],
+        weights=snapshot_weights(n, "generators", sns=full_df.index),
+    )
     return _ts_payload(df, extra={
         "total_mwh": total_mwh,
         "total_cost_eur": total_cost,
         "voll_eur_per_mwh": voll,
         "bus_carriers": bus_carriers,
+        "shed_hours": {
+            "total": sh["total"],
+            "by_period": {str(k): v for k, v in sh["by_period"].items()},
+        },
     }, range_meta=range_meta)
 
 

@@ -112,10 +112,10 @@ def is_slack_carrier(carrier: object) -> bool: ...
 
 **Steps:**
 
-- [ ] **Failing test first:** build a capture path with non-unit `snapshot_weightings` (e.g. weights of 3.0) and assert `lost_load_total_mwh` equals the weighted integral (it currently returns the unweighted sum → fails).
-- [ ] Weight the totals in the capture closure; update its docstring and the capture-format comment in `routers/compare.py` (~:2340).
-- [ ] Audit the two consumers; add one cross-surface assertion: capture `lost_load_cost_eur` == the economics summary's lost-load total (same network, non-unit weights).
-- [ ] Commit: `fix(gui): make the lost-load capture totals snapshot-weighted`.
+- [x] **Failing test first:** build a capture path with non-unit `snapshot_weightings` (e.g. weights of 3.0) and assert `lost_load_total_mwh` equals the weighted integral (it currently returns the unweighted sum → fails).
+- [x] Weight the totals in the capture closure; update its docstring and the capture-format comment in `routers/compare.py` (~:2340).
+- [x] Audit the two consumers; add one cross-surface assertion: capture `lost_load_cost_eur` == the economics summary's lost-load total (same network, non-unit weights).
+- [x] Commit: `fix(gui): make the lost-load capture totals snapshot-weighted`.
 
 ---
 
@@ -132,9 +132,9 @@ def is_slack_carrier(carrier: object) -> bool: ...
 
 **Steps:**
 
-- [ ] **Tests first:** synthetic `ll_df` cases — zero frame → 0 h; one snapshot shedding with weight 3.0 → 3.0 h; sub-threshold dust → 0 h; multi-period index → correct per-period split.
-- [ ] Implement `metrics.py`; surface `shed_hours` (total + by_period) in the `/results/lost_load` payload and `LostLoadComparison`. Additive schema change only — existing fields untouched, so existing consumers are unaffected.
-- [ ] Commit: `feat(gui): shed-hours metric on the lost-load surfaces`.
+- [x] **Tests first:** synthetic `ll_df` cases — zero frame → 0 h; one snapshot shedding with weight 3.0 → 3.0 h; sub-threshold dust → 0 h; multi-period index → correct per-period split.
+- [x] Implement `metrics.py`; surface `shed_hours` (total + by_period) in the `/results/lost_load` payload and `LostLoadComparison`. Additive schema change only — existing fields untouched, so existing consumers are unaffected.
+- [x] Commit: `feat(gui): shed-hours metric on the lost-load surfaces`.
 
 ---
 

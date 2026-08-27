@@ -4478,13 +4478,33 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             # Strip the slack prefix so the bus name stands
                             # alone in the result payload — friendlier to plot.
                             sub.columns = [strip_slack_prefix(c) for c in sub.columns]
-                            # Aggregate stats for the KPI tiles in the UI.
-                            # Assumes hourly snapshots (MW=MWh/h) — matches the
-                            # convention used by the curtailment KPI.
-                            total_mwh = float(sub.values.clip(min=0).sum())
+                            # Aggregate stats for the KPI tiles. SNAPSHOT-
+                            # WEIGHTED (canonical, spec §6.3): the frame stays
+                            # unweighted MW, but the totals integrate over the
+                            # snapshot weights — "generators" for energy,
+                            # "objective" for cost, matching the solve-log
+                            # decomposition and the LP objective. The previous
+                            # unweighted sum ("assumes hourly snapshots")
+                            # under-reported by the weight factor on
+                            # representative-snapshot (tsam) runs.
+                            from services.adequacy.metrics import (
+                                lost_load_totals,
+                            )
+                            totals = lost_load_totals(
+                                sub,
+                                energy_weights=_period_utils.snapshot_weights(
+                                    n, "generators", sns=sub.index),
+                                cost_weights=_period_utils.snapshot_weights(
+                                    n, "objective", sns=sub.index),
+                                voll=float(voll),
+                            )
                             captured["lost_load_t"] = sub
-                            captured["lost_load_total_mwh"] = total_mwh
-                            captured["lost_load_cost_eur"] = total_mwh * float(voll)
+                            captured["lost_load_total_mwh"] = totals["total_mwh"]
+                            captured["lost_load_cost_eur"] = totals["cost_eur"]
+                            # Explicit — consumers must not re-derive VoLL
+                            # from cost/energy, which skews whenever the two
+                            # weight columns differ.
+                            captured["voll_eur_per_mwh"] = float(voll)
                 except Exception:
                     pass
                 # Now remove the slack generators so they don't pollute
