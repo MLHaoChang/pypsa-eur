@@ -31,7 +31,7 @@ from starlette.responses import StreamingResponse
 from db.models import Session as SessionRow
 from db.models import User
 from deps import current_session, optional_user
-from services import app_secrets, chat_service
+from services import app_secrets, chat_service, llm_config
 
 
 router = APIRouter()
@@ -43,7 +43,17 @@ class StreamRequest(BaseModel):
 
     `session_id` — caller-provided so /confirm and /abort can resolve the
     same session. Server creates one if omitted.
-    `model`     — Anthropic model identifier; Phase 3 honours this.
+    `model`     — Legacy Anthropic model identifier. Still honoured (Task 7:
+                  translated via `llm_config.resolve_legacy_model`) for
+                  callers that predate profiles; `profile_id` below is
+                  preferred and wins when both are given.
+    `profile_id` — Task 7. The `LLMProfile` id (see `services/llm_config.py`)
+                  this turn should use. `None` resolves via the legacy
+                  `model` translation (itself falling back to the active
+                  profile). Switching to a profile on a DIFFERENT wire than
+                  one this session is already bound to is refused with a
+                  typed `error` frame — see `chat_service.run_turn`'s
+                  `wire_conflict` parameter.
     `script`    — Phase 2 STUB driver. Tests inject a list of frame dicts
                   (see chat_service.agent_loop_stub for the schema). Phase 3
                   ignores this field (the real LLM emits frames).
@@ -58,6 +68,7 @@ class StreamRequest(BaseModel):
 
     session_id: str | None = None
     model: str | None = None
+    profile_id: str | None = None
     script: list[dict[str, Any]] | None = None
     message: str | None = None
     attachment_file_ids: list[str] | None = None
@@ -266,28 +277,56 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
     # memory but the chat.jsonl is the durable record.
     last_session_id = None
     if turns:
-        last_session_id = turns[-1].get("session_id")
+        last_rec = turns[-1]
+        last_session_id = last_rec.get("session_id")
         if last_session_id:
+            # Task 7 — resolve the profile the LATEST turn was recorded
+            # under (its `profile_id` when present, else the legacy `model`
+            # translation) and bind the minted session to it, same as a live
+            # `/stream` bind. This is the profile the WHOLE rehydrated
+            # session adopts, matching the pre-existing single `model=`
+            # rehydration below it replaces.
+            recorded_profile_id = last_rec.get("profile_id")
+            if recorded_profile_id:
+                resolved_profile = llm_config.resolve_profile(recorded_profile_id)
+            else:
+                resolved_profile = llm_config.resolve_legacy_model(
+                    last_rec.get("model") or chat_service.DEFAULT_MODEL
+                )
             sess = chat_service.get_or_create_session(
-                last_session_id,
-                model=turns[-1].get("model") or chat_service.DEFAULT_MODEL,
+                last_session_id, model=resolved_profile.model,
             )
+            sess.profile_id = resolved_profile.id
+            sess.bound_wire = resolved_profile.wire
+            sess.model = resolved_profile.model
             # Rebuild the in-memory message history so the next turn can
             # thread the prior conversation into the Anthropic SDK (INT-001
             # threading fix). Best-effort: skip turns missing required keys.
+            # Task 7 — a transcript can carry turns recorded on a DIFFERENT
+            # wire than the one this session now resolves to (the user
+            # started a fresh chat on a new profile after this project's
+            # last turn); blocks that wire can't replay (thinking /
+            # redacted_thinking / image / document) are dropped here rather
+            # than sent and rejected.
             with sess._lock:
                 sess.messages.clear()
                 for rec in turns:
                     user_text = rec.get("user")
                     assistant_blocks = rec.get("assistant")
                     if user_text is not None:
-                        sess.append_history_message(
-                            {"role": "user", "content": user_text}
-                        )
+                        sess.append_history_message({
+                            "role": "user",
+                            "content": chat_service._filter_non_portable_blocks(
+                                user_text, resolved_profile.wire,
+                            ),
+                        })
                     if isinstance(assistant_blocks, list):
-                        sess.append_history_message(
-                            {"role": "assistant", "content": assistant_blocks}
-                        )
+                        sess.append_history_message({
+                            "role": "assistant",
+                            "content": chat_service._filter_non_portable_blocks(
+                                assistant_blocks, resolved_profile.wire,
+                            ),
+                        })
 
     return {
         "turns": turns,
@@ -555,13 +594,38 @@ async def chat_stream(
             headers={"Retry-After": str(int(retry_after) + 1)},
         )
 
-    # Honour an explicit per-turn model switch on an EXISTING session.
-    # get_or_create_session returns a known session as-is, so without this the
-    # UI's model picker would only take effect for a brand-new session and be
-    # silently ignored on every subsequent turn. Messages are model-agnostic,
-    # so switching models across turns within one session is safe.
-    if body.model:
-        session.model = body.model
+    # Task 7 — resolve the profile this turn names, and bind/rebind/refuse
+    # BEFORE branching into stub vs run_turn, so a script-driven protocol
+    # test and a real turn go through the identical binding logic.
+    # `profile_id` wins when given; otherwise the legacy `model` string is
+    # translated the same way a pre-profile session's stored model always
+    # was — `resolve_legacy_model` itself falls back to the active profile
+    # on `None`/an unrecognized string, so an old client that sends neither
+    # field keeps getting today's zero-config behaviour.
+    if body.profile_id:
+        target_profile = llm_config.resolve_profile(body.profile_id)
+    else:
+        target_profile = llm_config.resolve_legacy_model(body.model)
+
+    wire_conflict = False
+    if session.profile_id is None or session.bound_wire == target_profile.wire:
+        # Unbound session (first turn) or a same-wire rebind — both allowed.
+        # Messages are model-agnostic WITHIN a wire, so switching models
+        # across turns on the same wire (this used to be the `if body.model:`
+        # line below, now subsumed) stays safe; this also updates `model` on
+        # a same-wire rebind, which the old line only did for the legacy
+        # `model` field.
+        session.profile_id = target_profile.id
+        session.bound_wire = target_profile.wire
+        session.model = target_profile.model
+    else:
+        # Cross-wire switch on an already-bound session: prior turns may
+        # carry blocks (thinking, tool-call shape) that don't replay on the
+        # new wire. Refused — the session stays bound to its ORIGINAL
+        # profile untouched; `wire_conflict` short-circuits `run_turn` below
+        # into a typed `error` + `session_done`, never an HTTPException (a
+        # non-2xx SSE body is discarded client-side).
+        wire_conflict = True
 
     # Phase 3 routing: an EXPLICIT script in the body → Phase 2 stub path
     # (used by SSE protocol tests). Otherwise drive `run_turn` with the real
@@ -578,7 +642,13 @@ async def chat_stream(
 
     def _gen():
         try:
-            if has_explicit_script:
+            if wire_conflict:
+                # Never the stub, even if the caller also sent a script — a
+                # wire switch is refused before either path would run.
+                events = chat_service.run_turn(
+                    session, body.message or "", wire_conflict=True,
+                )
+            elif has_explicit_script:
                 events = chat_service.agent_loop_stub(session, list(body.script))
             else:
                 events = chat_service.run_turn(

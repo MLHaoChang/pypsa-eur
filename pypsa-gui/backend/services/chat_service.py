@@ -435,6 +435,18 @@ class ChatSession:
     # resolved via get_or_create_session). Drives idle eviction.
     last_activity: float = field(default_factory=time.monotonic)
     model: str = DEFAULT_MODEL
+    # Task 7 — the LLM profile this session is bound to. `None` until the
+    # router's first `/stream` call resolves + binds one (or a caller that
+    # constructs a `ChatSession` directly and never sets it — `run_turn`
+    # falls back to `llm_config.resolve_legacy_model(session.model)` in that
+    # case, so a bare `ChatSession(model=...)` keeps resolving the profile
+    # its `model` string always implied). `bound_wire` is the bound
+    # profile's `wire` ("anthropic" | "openai") — kept alongside `profile_id`
+    # rather than re-resolved on every check because it is what the
+    # cross-wire guard in `routers/chat.py` compares against, and a profile
+    # can be edited/deleted out from under a live session id.
+    profile_id: str | None = None
+    bound_wire: str | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     confirmation_decisions: dict[str, str] = field(default_factory=dict)
@@ -1325,11 +1337,19 @@ def agent_loop_stub(
 
     # session_init: tools + replay (Phase 4 polish) + model identity
     from services.chat_tools_schema import TOOLS  # local: avoid cycle at module load
+    # Task 7 — the stub is driven by `routers/chat.py`'s script path, which
+    # binds `session.profile_id`/`bound_wire` the SAME way the real run_turn
+    # path does, before branching on `has_explicit_script`. Reported here too
+    # so a script-driven SSE test can assert the binding without needing a
+    # live/fake provider at all.
+    stub_profile = _resolve_turn_profile(session)
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
         "model": session.model,
         "tool_count": len(TOOLS),
+        "profile_id": stub_profile.id,
+        "profile_label": stub_profile.label,
     }
 
     for step in script:
@@ -1555,6 +1575,64 @@ from services.llm_anthropic import (  # moved 2026-08-13 (provider seam)
 # `chat_service._build_anthropic_client` alias above, which is the actual
 # patch surface tests pin, not `llm_anthropic.build_client`.
 from services import llm_anthropic, llm_openai_compat, llm_provider
+
+
+def _resolve_turn_profile(session: ChatSession) -> Any:
+    """
+    The `LLMProfile` this turn should use for provider construction, the
+    per-turn token cap, and the A8 fallback (Task 7).
+
+    `session.profile_id` wins when the router has bound one. Otherwise falls
+    back to `llm_config.resolve_legacy_model(session.model)` — the SAME
+    translation `resolve_legacy_model` documents for a pre-profile session,
+    so a `ChatSession` built directly (every existing e2e test does this —
+    `ChatSession()` / `ChatSession(model=OPUS_MODEL)` — with no profile_id)
+    keeps resolving exactly the profile its `model` string always implied:
+    `DEFAULT_MODEL` -> the built-in sonnet profile, `OPUS_MODEL` -> the
+    built-in opus profile (fallback_model=DEFAULT_MODEL — this is what keeps
+    the pre-Task-7 A8 test, which sets `model=OPUS_MODEL` and never touches
+    `profile_id`, passing unmodified). Deliberately NOT
+    `llm_config.resolve_profile(None)` (-> the ACTIVE profile) — that would
+    let a user's active-profile choice silently override what an unbound
+    session's own `model` field says, which is a behaviour change zero-config
+    must not have.
+    """
+    from services import llm_config
+    if session.profile_id is not None:
+        return llm_config.resolve_profile(session.profile_id)
+    return llm_config.resolve_legacy_model(session.model)
+
+
+# Block types that only make sense on the wire that produced them: Anthropic
+# extended-thinking's signed `thinking`/`redacted_thinking` blocks, and
+# Anthropic's own `image`/`document` content-block shapes. None of the four
+# has an openai-wire equivalent the translation layer can replay.
+_NON_PORTABLE_BLOCK_TYPES: frozenset[str] = frozenset(
+    ["thinking", "redacted_thinking", "image", "document"]
+)
+
+
+def _filter_non_portable_blocks(content: Any, wire: str) -> Any:
+    """
+    Drop content blocks `wire` cannot replay (Task 7 history rehydration).
+
+    A chat.jsonl transcript can carry turns recorded under a DIFFERENT
+    profile than the one GET /history resolves the minted session to (the
+    user switched wires by starting a new chat — Task 7's cross-wire guard
+    is what makes that the only way). Replaying an anthropic-shaped thinking
+    block into an openai-wire session's history is not merely wasted
+    context; the openai-compat translation has no shape for it at all.
+
+    Only `wire == "openai"` filters anything, and only when `content` is a
+    list of blocks — a plain string (an ordinary text-only turn, the common
+    case) or an anthropic-wire replay passes through unchanged, same object.
+    """
+    if wire != "openai" or not isinstance(content, list):
+        return content
+    return [
+        b for b in content
+        if not (isinstance(b, dict) and b.get("type") in _NON_PORTABLE_BLOCK_TYPES)
+    ]
 
 
 def _provider_for_profile(
@@ -2259,6 +2337,7 @@ def run_turn(
     message_history: list[dict[str, Any]] | None = None,
     attachment_file_ids: list[str] | None = None,
     ui_context: dict[str, Any] | None = None,
+    wire_conflict: bool = False,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -2306,7 +2385,32 @@ def run_turn(
     the body's yielded frame ORDER (asserted byte-exact by several e2e/sse
     tests) is unchanged on EVERY exit, including the budget-refused and
     client-disconnect (GeneratorExit) paths.
+
+    `wire_conflict` (Task 7) — `routers/chat.py` sets this when the caller
+    named a profile on a different wire than the one this session is already
+    bound to. A conversation's history (thinking blocks, tool-call shape) is
+    not portable across wires mid-session, so this is NOT a turn at all: the
+    ONLY two frames emitted are a typed `error` + `session_done`, emitted
+    BEFORE anything else in this function runs (no in-flight guard, no
+    metrics, no WAL entry — there is no turn here to guard or record) and the
+    session's `messages` / `profile_id` / `bound_wire` / `model` are left
+    completely untouched. The router never raises an HTTPException for this
+    — `frontend/src/api/chat.ts` discards a non-2xx SSE body, so the typed
+    frame is the only way the guidance copy reaches the panel.
     """
+    if wire_conflict:
+        yield "error", {
+            "error_kind": "profile_switch_requires_new_chat",
+            "message": (
+                "this chat session is already bound to a different LLM "
+                "provider wire; switching providers mid-conversation isn't "
+                "supported because prior turns may not replay on the new "
+                "wire. Start a new chat to use a different provider."
+            ),
+        }
+        yield "session_done", {"reason": "profile_switch_requires_new_chat"}
+        return
+
     # Clear any aborted state from a previous turn so /abort is one-shot
     # rather than session-wide. Without this, every subsequent turn on the
     # same session_id exits immediately with session_done reason='aborted'
@@ -2448,30 +2552,52 @@ def _run_turn_body(
             }
             return
 
+    # Task 7 — the profile this turn resolves to, regardless of whether a
+    # `provider=`/`client=` seam is injected: it also drives the per-profile
+    # token cap and the A8 fallback further down, both of which apply on
+    # every path (a FakeProvider-injected test still wants its scripted A8
+    # scenario to fire off `profile.fallback_model`).
+    profile = _resolve_turn_profile(session)
+
     if provider is None:
-        if client is None:
-            client, err = _build_anthropic_client()
-            if client is None:
-                _metric_error(err or "internal_error")
-                yield "error", {
-                    "error_kind": err or "internal_error",
-                    "message": (
-                        "Anthropic client unavailable — chat is disabled until "
-                        "ANTHROPIC_API_KEY is set and the SDK is installed."
-                    ),
-                }
-                yield "session_done", {"reason": "no_client"}
-                return
-        # Module attribute (not the imported name) so a test that
-        # monkeypatches `llm_anthropic.AnthropicProvider` sees its double
-        # here too.
-        provider = llm_anthropic.AnthropicProvider(client)
+        # `_provider_for_profile` reproduces the exact priority this branch
+        # always had: an injected `client` wins (wrapped, anthropic wire
+        # only) over building one, and building one for the profile's
+        # built-in ANTHROPIC_API_KEY slot routes through the SAME
+        # `_build_anthropic_client()` call — reached through the module
+        # attribute, so a test that monkeypatches
+        # `chat_service._build_anthropic_client` still sees its double —
+        # that the zero-config path always used, so the missing_api_key /
+        # sdk_not_installed error frames stay byte-identical.
+        provider, err = _provider_for_profile(profile, client=client)
+        if provider is None:
+            _metric_error(err or "internal_error")
+            if profile.wire == "anthropic":
+                # Byte-identical to the pre-Task-7 zero-config message —
+                # this is the ONLY branch invariant 1 requires word-for-word
+                # (missing_api_key / sdk_not_installed with no llm-profiles
+                # file and only ANTHROPIC_API_KEY set).
+                message = (
+                    "Anthropic client unavailable — chat is disabled until "
+                    "ANTHROPIC_API_KEY is set and the SDK is installed."
+                )
+            else:
+                message = (
+                    f"LLM provider unavailable for profile {profile.label!r} "
+                    f"({err or 'internal_error'}) — check its endpoint and "
+                    "API key in Settings."
+                )
+            yield "error", {"error_kind": err or "internal_error", "message": message}
+            yield "session_done", {"reason": "no_client"}
+            return
 
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
         "model": session.model,
         "tool_count": len(_tools_payload()),
+        "profile_id": profile.id,
+        "profile_label": profile.label,
     }
 
     # Seed conversation history. Caller-supplied message_history wins for
@@ -2630,6 +2756,24 @@ def _run_turn_body(
         live_meta=_format_live_network_meta(turn_ctx),
     )
 
+    # A8 — at most one fallback-model downgrade after rate_limited retries
+    # are exhausted, PER TURN (public cost/availability escape hatch).
+    # Hoisted above the outer `while True:` loop (Task 7 review finding):
+    # this used to be re-initialised to False at the top of EVERY outer-loop
+    # pass (each agentic tool-use round), so the "once per turn" bound relied
+    # entirely on `session.model == OPUS_MODEL` going false the moment the
+    # fallback fired — true for the OLD hardcoded Opus/Sonnet pair, but not
+    # guaranteed once the guard below reads `profile.fallback_model` instead
+    # (a custom profile's fallback target isn't guaranteed to differ from
+    # what a later re-check would compare against). Turn-scoped here means
+    # the bound is real, not coincidental.
+    model_fallback_used = False
+
+    # Per-profile token cap (Task 7) — resolved once for the whole turn;
+    # `profile.max_output_tokens is None` means "no override", the same
+    # meaning `llm_config` documents for that field.
+    max_output_tokens = profile.max_output_tokens or MAX_OUTPUT_TOKENS_PER_TURN
+
     while True:
         if session.abort_event.is_set():
             yield "session_done", {"reason": "aborted"}
@@ -2658,7 +2802,7 @@ def _run_turn_body(
         # re-read `session.model` (A8 fallback can change it mid-turn).
         request = llm_provider.LLMRequest(
             model=session.model,
-            max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
+            max_tokens=max_output_tokens,
             system_blocks=system_blocks,
             tools=tools,
             tools_stable=True,
@@ -2673,9 +2817,6 @@ def _run_turn_body(
         # already-streamed output), so we surface the error instead. The loop
         # always either breaks (the stream completed) or returns
         # (terminal/exhausted error).
-        # A8 — at most one Opus→Sonnet downgrade after rate_limited retries
-        # are exhausted (public cost/availability escape hatch).
-        model_fallback_used = False
         attempt = 0
         # +1 slot reserved so a late Opus→Sonnet fallback can still run once
         # after the normal retry budget is spent.
@@ -2765,27 +2906,35 @@ def _run_turn_body(
                     time.sleep(delay)
                     attempt += 1
                     continue
-                # A8 — persistent rate_limited on Opus → one Sonnet attempt.
+                # A8 — persistent rate_limited on a profile that DECLARES a
+                # fallback → one attempt on that fallback model (Task 7:
+                # generalised from the old hardcoded `session.model ==
+                # OPUS_MODEL` guard to `profile.fallback_model`, which is
+                # None for a profile that doesn't opt in — the built-in
+                # sonnet profile among them, preserving the old "sonnet never
+                # falls back" behaviour exactly).
+                fallback_model = profile.fallback_model
                 if (
                     error_kind == "rate_limited"
                     and not emitted_this_attempt
-                    and session.model == OPUS_MODEL
+                    and fallback_model is not None
                     and not model_fallback_used
                     and not session.abort_event.is_set()
                 ):
                     model_fallback_used = True
                     from_model = session.model
-                    session.model = DEFAULT_MODEL
+                    session.model = fallback_model
                     logger.warning(
                         "chat: rate_limited on %s after retries — falling back to %s",
-                        from_model, DEFAULT_MODEL,
+                        from_model, fallback_model,
                     )
                     yield "model_fallback", {
                         "from_model": from_model,
-                        "to_model": DEFAULT_MODEL,
+                        "to_model": fallback_model,
                         "reason": "rate_limited",
+                        "profile_id": profile.id,
                     }
-                    # Grant exactly one extra attempt on the cheaper model.
+                    # Grant exactly one extra attempt on the fallback model.
                     max_attempts = attempt + 2
                     attempt += 1
                     continue
@@ -2861,6 +3010,14 @@ def _run_turn_body(
                     "ts": time.time(),
                     "session_id": session.session_id,
                     "model": session.model,
+                    # Task 7 — durable profile identity. `profile` was
+                    # resolved once at the top of this turn via
+                    # `_resolve_turn_profile`, so it already IS
+                    # "session.profile_id or the resolved builtin id" (that
+                    # exact fallback lives inside `_resolve_turn_profile`,
+                    # not here) — GET /history's rehydration reads this
+                    # field back through `llm_config.resolve_profile`.
+                    "profile_id": profile.id,
                     "user": _redact_for_persist(message),
                     "assistant": _redact_for_persist(assistant_blocks),
                     "usage": usage_snapshot,
