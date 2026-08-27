@@ -40,6 +40,7 @@ import logging
 import multiprocessing
 import sys
 import threading
+import uuid
 
 import webview
 
@@ -369,6 +370,19 @@ def _active_context():
 
 def _abort_everything() -> bool:
     from services import shutdown as shutdown_service
+    from services.solve_queue import solve_queue
+
+    # Gate the dispatcher BEFORE anything else, or aborting the running job
+    # frees it to pop the next queued job, flip it to `running`, and hand the
+    # process exit a fresh solve to kill — which boot then marks `interrupted`
+    # and R25 never resumes. At the top of the function, not inside
+    # `abort_queue`: with a queued-only backlog `abort_and_wait` returns on its
+    # empty-`in_flight` fast path without ever calling `abort_queue`, and the
+    # un-gated dispatcher could still start that job mid-flush. The ordering
+    # matters too: with the gate set first, a job racing it either parks as
+    # `queued` or completes its flip to `running` before the `list_jobs()`
+    # snapshot below, which then signals it (see `_run_job`'s claim block).
+    solve_queue.stop_dispatching()
 
     def abort_active() -> None:
         from routers.simulation import abort
@@ -376,19 +390,35 @@ def _abort_everything() -> bool:
         abort()
 
     def abort_queue() -> None:
-        import uuid
-
         from services.solve_queue import solve_queue
 
+        # RUNNING only. A queued job has no live thread to stop, it is persisted
+        # in `solve_jobs`, and boot reconciliation re-enqueues it — so cancelling
+        # it here would destroy work the user explicitly asked for in order to
+        # shut down a fraction of a second sooner.
+        #
         # `list_jobs()` returns `to_public()` dicts — `id` is `str(uuid.UUID)`
         # since Task 12 (R23), not the raw UUID `solve_queue.abort` expects.
         # Passing the string straight through used to look correct (both were
         # `int` pre-Task-12) but now misses every `_jobs` key: `abort()`
         # returns `None`, nothing is signalled, and the caller never learns —
-        # a silent no-op on the desktop app's quit-time abort path.
+        # a silent no-op on the desktop app's quit-time abort path. Preserve
+        # the `uuid.UUID(...)` parse.
+        #
+        # Each job's abort() call is wrapped in its own try/except: with the
+        # worker pool, `list_jobs()` can hold MORE THAN ONE running job at
+        # quit time, so an unguarded loop would let an exception on job N
+        # skip every job after it — those later jobs then die unaborted with
+        # the process instead of parking cleanly. A bug in one job's abort
+        # must not strand the rest.
         for job in solve_queue.list_jobs():
-            if job.get("status") in ("queued", "running"):
-                solve_queue.abort(uuid.UUID(job["id"]))
+            if job.get("status") == "running":
+                try:
+                    solve_queue.abort(uuid.UUID(str(job["id"])))
+                except Exception:  # noqa: BLE001 — one job's failure must not skip the rest
+                    logger.exception(
+                        "abort_queue: could not abort job %s at quit", job.get("id")
+                    )
 
     def wait(timeout: float) -> bool:
         import time

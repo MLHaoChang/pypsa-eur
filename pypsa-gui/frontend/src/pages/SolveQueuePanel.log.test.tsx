@@ -29,7 +29,7 @@ vi.mock('../store/uiStore', () => ({
   useUIStore: () => ({ currentProject: null, openTabs: [], markProjectSaved: vi.fn() }),
 }))
 vi.mock('../hooks/useSolveQueue', () => ({
-  useSolveQueue: () => ({ data: { jobs, current: null }, isLoading: false, isError: false }),
+  useSolveQueue: () => ({ data: { jobs, running: [], paused: false }, isLoading: false, isError: false }),
   useEnqueueSolve: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAbortJob: () => ({ mutate: vi.fn(), isPending: false }),
   useClearFinished: () => ({ mutate: vi.fn(), isPending: false }),
@@ -285,5 +285,57 @@ describe('SolveQueuePanel live log stream', () => {
       await Promise.resolve()
     })
     expect(screen.queryByText(/Log stream lost/)).toBeNull()
+  })
+})
+
+describe('SolveQueuePanel log viewer robustness (2026-08-14 review)', () => {
+  beforeEach(() => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('keeps already-received lines visible under an error banner instead of hiding them', async () => {
+    // A stream dying past the reconnect budget used to swap the WHOLE view
+    // for the banner: hours of received log vanished until the job went
+    // terminal and the retained log was refetched. The banner must sit above
+    // the lines, not replace them.
+    jobs = [job('running')]
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+    const es = FakeEventSource.instances[0]
+
+    act(() => { es.emitMessage('solver: iteration 1') })
+    es.readyState = FakeEventSource.CLOSED
+    act(() => { es.emitError() })
+
+    expect(screen.getByText('Log stream lost before the job finished.')).toBeTruthy()
+    expect(screen.getByText(/solver: iteration 1/)).toBeTruthy()
+  })
+
+  it('caps the live buffer so a chatty solver cannot grow it unbounded', async () => {
+    // The backend replays up to 5000 buffered lines on expand and a chatty
+    // solver keeps appending; an uncapped `[...prev, line]` re-joined into
+    // one string per message is O(n²) growth for the whole solve. Same cap
+    // as the other live-log consumer (store/simulationStore.ts: 2000).
+    jobs = [job('running')]
+    renderPanel()
+    await userEvent.click(screen.getByTitle('Show this job’s log'))
+    const es = FakeEventSource.instances[0]
+
+    act(() => {
+      for (let i = 0; i < 2050; i += 1) es.emitMessage(`line ${i}`)
+    })
+
+    // Assert on the raw <pre> content — testing-library's text matchers
+    // normalise whitespace, which collapses the joined lines into one string
+    // and made a per-line regex assertion pass vacuously.
+    const text = document.querySelector('pre')?.textContent ?? ''
+    expect(text).toContain('line 2049')
+    expect(text.split('\n').length).toBeLessThanOrEqual(2000)
+    expect(text.split('\n')[0]).toBe('line 50')
   })
 })

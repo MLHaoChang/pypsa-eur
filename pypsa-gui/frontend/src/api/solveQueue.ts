@@ -35,7 +35,11 @@ export interface SolveJob {
 
 export interface QueueList {
   jobs: SolveJob[]
-  current: string | null   // id of the running job, if any
+  // Ids of the jobs solving right now. Replaces the scalar `current`, which
+  // could not represent a pool and reported one arbitrary running job.
+  running: string[]
+  // The dispatcher is paused: running jobs finish, nothing else starts.
+  paused: boolean
 }
 
 // Standard {index, columns, data} time-series payload (NaN→null), with an
@@ -64,8 +68,13 @@ export interface ResultsBundle {
 
 export const solveQueueApi = {
   list: () => client.get<QueueList>('/simulation/queue').then(r => r.data),
+  // `already_queued: true` means the server returned the EXISTING job for an
+  // idempotent re-enqueue (200, not 409 — routers/solve_queue.py) and created
+  // nothing. Callers must not report "queued" for that case.
   enqueue: (projectId: string) =>
-    client.post<SolveJob>('/simulation/queue', { project_id: projectId }).then(r => r.data),
+    client.post<SolveJob & { already_queued: boolean }>(
+      '/simulation/queue', { project_id: projectId },
+    ).then(r => r.data),
   abort: (jobId: string) =>
     client.post<SolveJob>(`/simulation/queue/${jobId}/abort`).then(r => r.data),
   clearFinished: () =>

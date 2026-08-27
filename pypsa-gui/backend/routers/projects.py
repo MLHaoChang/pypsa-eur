@@ -2669,6 +2669,36 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
             },
         )
 
+    # Refuse while the queue holds an ACTIVE job for the project or any child.
+    # Deleting under the queue is worse than a race: a queued job fails at
+    # dispatch on the missing directory with a raw `queue_error`, and a
+    # RUNNING job's completion save (`_save_context` → `mkdir(parents=True)`)
+    # RE-CREATES the deleted directory, orphaned from any DB row and invisible
+    # to every ACL. Same `solver_in_flight` shape as the load/activate guards
+    # (`_queue_solve_conflict`), which already refuse for exactly this class
+    # of reason — delete was the asymmetric gap.
+    from services.solve_queue import solve_queue
+
+    target_keys = {project_registry.registry_key(p) for p in [project, *child_projects]}
+    active_jobs = [
+        j for j in solve_queue.list_jobs()
+        if j.get("project_key") in target_keys
+        and j.get("status") in ("queued", "running")
+    ]
+    if active_jobs:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "solver_in_flight",
+                "message": (
+                    f"Cannot delete '{project.name}' — the solve queue holds "
+                    f"{len(active_jobs)} active job(s) for it"
+                    + (" or its scenarios" if child_projects else "")
+                    + ". Abort the job(s) in the Solve Queue panel, then delete."
+                ),
+            },
+        )
+
     deleted: list[str] = []
     failed: list[str] = []
     # Leaves-first: reverse the BFS order so a child is always removed before

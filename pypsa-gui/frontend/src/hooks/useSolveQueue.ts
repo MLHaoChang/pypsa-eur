@@ -12,14 +12,31 @@ export const QUEUE_KEY = ['solveQueue'] as const
  * Shared key — the panel and the per-tab badges both read it; React Query
  * dedupes to one request, and the panel's mount is what drives the interval.
  */
+/** How often to re-probe a queue whose last fetch FAILED. Slow — this is a
+ * "is the backend back yet" probe, not the active-solve poll. */
+export const QUEUE_ERROR_RETRY_MS = 15_000
+
+/**
+ * Exported for tests. The error branch is load-bearing: returning `false`
+ * whenever there was no data — including the ERROR state — combined with
+ * `retry: 1` and the app-wide `refetchOnWindowFocus: false` left the queue
+ * permanently dead after a backend blip during the first fetch (no interval,
+ * no focus refetch, no retry affordance) until the panel was remounted. Same
+ * failure class as the App.tsx SSE-probe bug documented in CLAUDE.md.
+ */
+export function queueRefetchInterval(
+  query: { state: { status: string; data?: QueueList } },
+): number | false {
+  if (query.state.status === 'error') return QUEUE_ERROR_RETRY_MS
+  const jobs = query.state.data?.jobs ?? []
+  return jobs.some(isActive) ? 1500 : false
+}
+
 export function useSolveQueue() {
   return useQuery({
     queryKey: QUEUE_KEY,
     queryFn: solveQueueApi.list,
-    refetchInterval: (query) => {
-      const jobs = query.state.data?.jobs ?? []
-      return jobs.some(isActive) ? 1500 : false
-    },
+    refetchInterval: queueRefetchInterval,
     staleTime: 1000,
   })
 }

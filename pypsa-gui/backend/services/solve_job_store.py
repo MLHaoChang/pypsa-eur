@@ -26,6 +26,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
+# Kept in sync with `services/solve_queue._TERMINAL` by
+# `tests/test_solve_jobs_table.py` rather than imported: this module is the
+# ORM seam and deliberately imports nothing from the queue at module level.
+_TERMINAL = ("completed", "failed", "aborted", "interrupted")
+
 
 def _dt(epoch: float | None) -> datetime | None:
     """`SolveJob` timestamps are `time.time()` floats; the column is tz-aware."""
@@ -93,9 +98,18 @@ def record_enqueued(
         logger.exception("solve_job_store: could not persist job %s", getattr(job, "id", None))
 
 
-def record_status(job: Any) -> None:
+def record_status(job: Any) -> bool:
     """
     Mirror a job's current status + result onto its row. Best-effort.
+
+    Returns whether the mirror actually COMMITTED — True only on the write
+    that reaches `db.commit()`. False covers every way the mirror did not
+    land: the row is missing, the terminal→live regression guard skipped the
+    write, or the session raised. This does not change the "never fail a
+    solve" contract below — the caller still gets a plain bool back, never an
+    exception — it only gives callers that need to know (`abort()`,
+    `cancel_if_queued()`) a way to notice and log a silent divergence instead
+    of asserting success unconditionally.
 
     Broad `except Exception` here, unlike `record_enqueued`, and the asymmetry
     is deliberate rather than an oversight: this runs inside a solver worker's
@@ -116,7 +130,17 @@ def record_status(job: Any) -> None:
         with SessionLocal() as db:
             row = db.get(SolveJobRow, job.id)
             if row is None:
-                return
+                return False
+            if row.status in _TERMINAL and job.status not in _TERMINAL:
+                # A terminal row never regresses to a live status. `abort()`
+                # mirrors a job it read as `running` OUTSIDE the queue's lock,
+                # so its commit can land AFTER the worker's terminal commit —
+                # unguarded, that stale mirror left a finished job's row at
+                # `running`, and the next boot flipped it to `interrupted`,
+                # discarding the objective it actually produced. Terminal →
+                # terminal stays allowed (a re-mirror of the same state is
+                # idempotent); a genuine re-run is a NEW row by design (R31).
+                return False
             row.status = job.status
             row.objective = job.objective
             row.solve_time = job.solve_time
@@ -125,13 +149,75 @@ def record_status(job: Any) -> None:
             row.started_at = _dt(job.started_at)
             row.finished_at = _dt(job.finished_at)
             db.commit()
+            return True
     except Exception:  # noqa: BLE001 — a bookkeeping failure must not fail a solve
         logger.exception("solve_job_store: could not update job %s", getattr(job, "id", None))
+        return False
 
 
-def load_by_status(statuses: tuple[str, ...], *, limit: int | None = None) -> list[dict]:
+def load_job(job_id: uuid.UUID) -> dict | None:
+    """
+    One row by id, as the same plain dict shape `load_by_status` returns, or
+    None. Never raises — an unreadable table means "no such row", matching the
+    rest of this module.
+
+    Exists for the detail routes (`/log_history`, `/log_stream`, `/abort`):
+    the listing merges persisted-only TERMINAL rows in (Task 16a), so an id it
+    serves must also resolve when the caller clicks it — resolving through
+    `solve_queue.get_job` alone answered the existence-oracle 404 for every
+    `interrupted` job after a restart, indistinguishable from a bad id.
+
+    `enqueued_by_user_id` (Task 21 fix round 1) exists here for the same
+    reason: `routers.solve_queue.dismiss_job` needs to answer "who owns
+    this?" for a job that isn't resident in `_jobs` — every `interrupted`
+    job after a restart, and any terminal job from before the last restart —
+    and this dict is the only thing it can ask.
+    """
+    try:
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+
+        with SessionLocal() as db:
+            r = db.get(SolveJobRow, job_id)
+            if r is None:
+                return None
+            return {
+                "id": r.id,
+                "project_id": r.project_id,
+                "project_key": r.project_key,
+                "storage_dir": r.storage_dir,
+                "status": r.status,
+                "solver_config": r.solver_config,
+                "objective": r.objective,
+                "solve_time": r.solve_time,
+                "condition": r.condition,
+                "error": r.error,
+                "enqueued_at": r.enqueued_at,
+                "started_at": r.started_at,
+                "finished_at": r.finished_at,
+                "enqueued_by_user_id": r.enqueued_by_user_id,
+            }
+    except Exception:  # noqa: BLE001 — an unreadable table means "no such row"
+        logger.exception("solve_job_store: could not load job %s", job_id)
+        return None
+
+
+def load_by_status(
+    statuses: tuple[str, ...],
+    *,
+    limit: int | None = None,
+    project_key_prefix: str | None = None,
+) -> list[dict]:
     """
     Rows in any of `statuses`, as plain dicts.
+
+    `project_key_prefix`, when given, restricts rows to `project_key`s
+    starting with it — the caller's `org_uuid:` half. It exists for the
+    LISTING's capped history read: capping globally and filtering visibility
+    afterwards let one org's volume evict another org's entire history from
+    the panel (all the victim gained in exchange was rows that render fully
+    redacted for them). Boot reconciliation and `clear_finished` never pass
+    it — those are deliberately process-global.
 
     Dicts rather than ORM objects so the caller (the dispatcher, a worker
     thread — or the listing route, this module's second caller as of the
@@ -168,6 +254,8 @@ def load_by_status(statuses: tuple[str, ...], *, limit: int | None = None) -> li
 
         with SessionLocal() as db:
             stmt = select(SolveJobRow).where(SolveJobRow.status.in_(statuses))
+            if project_key_prefix is not None:
+                stmt = stmt.where(SolveJobRow.project_key.startswith(project_key_prefix))
             if limit is None:
                 stmt = stmt.order_by(SolveJobRow.enqueued_at)
             else:
@@ -230,6 +318,52 @@ def delete_jobs(ids: Iterable[uuid.UUID]) -> None:
         logger.exception("solve_job_store: could not delete jobs %s", id_list)
 
 
+def record_dismissed(job_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Persist a dismissal so it survives a restart and reaches other devices."""
+    try:
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+
+        with SessionLocal() as db:
+            row = db.get(SolveJobRow, job_id)
+            if row is None:
+                return
+            row.dismissed_by_user_id = user_id
+            db.commit()
+    except Exception:  # noqa: BLE001 — a dismissal is a view preference, not data
+        logger.exception("solve_job_store: could not record dismissal of %s", job_id)
+
+
+def load_dismissed_ids(user_id: uuid.UUID) -> set:
+    """
+    Every job id `user_id` has dismissed, straight off the table. Never
+    raises — an unreadable table means "nothing persisted", matching the rest
+    of this module.
+
+    Exists for `SolveQueue.dismissed_ids_for` (Ruling 2 of Task 21): a
+    dismissal recorded only in `_jobs` would evaporate the instant a job's id
+    fell out of memory — every `interrupted` job after a restart, or any
+    terminal job from before the last restart, is served to the listing
+    exclusively from this table (`_merged_jobs`), never re-admitted to
+    `_jobs`. Reading the persisted flag here is what keeps a dismissal in
+    effect after a restart.
+    """
+    try:
+        from sqlalchemy import select
+
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+
+        with SessionLocal() as db:
+            stmt = select(SolveJobRow.id).where(
+                SolveJobRow.dismissed_by_user_id == user_id
+            )
+            return set(db.scalars(stmt).all())
+    except Exception:  # noqa: BLE001 — an unreadable table means "nothing dismissed"
+        logger.exception("solve_job_store: could not load dismissed ids for %s", user_id)
+        return set()
+
+
 def reconcile_on_boot() -> tuple[int, int]:
     """
     Bring the persisted queue back after a restart. Returns `(interrupted, resumed)`.
@@ -269,8 +403,9 @@ def reconcile_on_boot() -> tuple[int, int]:
                 db.commit()
 
         for row in load_by_status(("queued",)):
-            solve_queue.restore(row)
-            resumed += 1
+            _job, created = solve_queue.restore(row)
+            if created:
+                resumed += 1
     except Exception:  # noqa: BLE001 — R26: this must never fail the boot
         logger.exception("solve-queue boot reconciliation failed; continuing without it")
         return interrupted, resumed
