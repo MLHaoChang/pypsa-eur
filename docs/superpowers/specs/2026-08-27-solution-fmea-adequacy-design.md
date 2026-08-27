@@ -1,44 +1,79 @@
-# Design — Solution FMEA & Capacity-vs-Availability Trade-off (v2)
+# Design — Solution FMEA & the Cost-vs-Availability Trade-off (v3)
 
-**Status:** assessment / design, revised after adversarial review. No feature code written.
+**Status:** assessment / design. No feature code written.
 
-**Supersedes v1** (commit `d445f83`). Two independent reviews — one on the reliability
-and optimisation mathematics, one verifying every claim against the codebase — found
-v1's central technical proposal wrong and roughly a third of its "this already exists"
-inventory overstated. This revision records what survived, what did not, and why.
+**Revision history.** v1 (`d445f83`) was reviewed adversarially on two axes — the
+reliability/optimisation mathematics, and every claim it made about the codebase. That
+review found v1's central technical proposal wrong and about a third of its "already
+exists" inventory overstated; v2 (`41dd9c7`) recorded the corrections. **v3 scopes the
+feature** after a round of product decisions that materially shrink it: the trade-off
+curve moves from the core to an on-demand extra, and availability is scoped to
+electricity.
 
-**Goal (unchanged):** systematically enumerate how a solved investment plan can fail to
-serve load, rank those failure modes by model-computed criticality, and expose the
-capacity-expansion vs availability trade-off as a navigable frontier.
-
-**Verdict (revised): feasible, but v1 understated the cost.** The severity *data* exists
-at full resolution in `results_state.pkl`; every API view of it is lossy, the € roll-up
-was broken, and the sweep substrate v1 assumed it could ride does not accept per-job
-variants. The feature is real; Phase 0 is bigger than "a schema tweak".
+**Goal.** Let a user state a reliability target, get a least-cost plan that meets it, and
+see a ranked, model-computed account of which failure modes drive the residual risk —
+with the cost-vs-availability curve available on demand for users who want to see the
+whole trade-off rather than one point on it.
 
 ---
 
-## 1. Decisions taken
+## 1. What this feature is, and what it is not
+
+The single most common confusion about this work, worth stating before anything else:
+
+- **The cost-vs-availability trade-off is a parametric optimisation study.** Re-solve the
+  expansion problem at a series of reliability levels; plot the results. It produces a
+  **curve**. It is not FMEA and does not require FMEA.
+- **FMEA is the diagnostic decomposition underneath a single plan.** It answers *why*
+  availability is what it is and which assets are responsible for the remainder. It
+  produces a **ranked table**. It does not produce a curve.
+
+They are complementary, and "solution FMEA" means both — but only one of them is the
+trade-off. The link between them is the point of the name: **the FMEA is conditional on
+the design.** Each point on the curve is a different plan with a different criticality
+ranking; build more storage and the ranking shifts away from thermal outage toward
+transmission. You are doing FMEA *on a solution*, so every candidate solution has its
+own.
+
+### Constraint or multi-objective? Same problem, two parameterisations
+
+- **Constraint (ε-constraint) form:** `min cost` s.t. `ENS ≤ Ē`. Set a target, get a plan.
+- **Weighted form:** `min cost + VoLL × ENS`. VoLL is the weight on the second objective.
+
+These are Lagrangian duals; sweeping either traces the same Pareto frontier. **The
+constraint form is primary**, because it is the better way to obtain multi-objective
+results: the weighted form recovers only the convex hull, and it is degenerate — VoLL
+changes the solution only at breakpoints, so ten VoLL values commonly yield four distinct
+plans, clustered, with jumps between them. The ε-constraint sweep samples the curve
+uniformly by construction.
+
+---
+
+## 2. Decisions taken
 
 | Question | Decision |
 |---|---|
 | Deliverable shape | Model-computed occurrence/severity in a formal worksheet |
-| Rigour | LP-derived proxy acceptable; heavy Monte Carlo not required to ship |
+| Rigour | LP-derived proxy acceptable; Monte Carlo not required to ship |
 | Runtime | Desktop-safe by default; PRAS/Antares handoff optional |
 | Failure modes | All four classes |
-| **Headline availability metric** | **Both LP proxy and COPT, side by side, neither headline.** Their divergence is itself the diagnostic |
-| **Worksheet conformance** | **IEC 60812 FMECA — €/yr criticality is the ranking. No RPN, no Action Priority** |
-| **Two pre-existing bugs** | **Fixed separately** on `claude/fix-lost-load-cost-and-custom-attr-drop`, off `master` — not carried by this feature |
-| **Class C data** | **Fund it** — bundle reference climate years so the class works out of the box |
+| Headline availability metric | Both LP proxy and COPT side by side, neither headline; their divergence is the diagnostic |
+| Worksheet conformance | IEC 60812 FMECA — €/yr criticality is the ranking. No RPN, no Action Priority |
+| Two pre-existing bugs | Fixed on `claude/fix-lost-load-cost-and-custom-attr-drop` (`8e2f98d`), off `master` — not carried here |
+| Class C data | Funded — bundle reference climate years |
+| **Target metric** | **Set either an energy cap or a shed-hours target; always report both** (§5.1) |
+| **Cost axis** | **Total system cost — CapEx + FOM + fuel + CO₂ — excluding shed cost** (§5.2) |
+| **Product shape** | **Target first; the curve is an on-demand action, not the core loop** (§6, §8) |
+| **Carrier scope** | **Electricity only** (§4.3) |
 
 ---
 
-## 2. What v1 got wrong
+## 3. What v1 got wrong
 
 Recorded because the errors are instructive, and because a reader of v1 needs to know
 which parts not to build.
 
-### 2.1 The COPT proposal was circular (v1 §7)
+### 3.1 The COPT proposal was circular
 
 v1 proposed convolving a Capacity Outage Probability Table against "the residual
 load-duration curve the LP already produces", and called the result a genuine LOLE.
@@ -54,16 +89,16 @@ being available. Convolving outage states over it:
 3. **nets VRE off deterministically**, destroying its variance and biasing **down** again.
 
 Three unbounded errors in two directions. The result is not a bound and cannot be called
-genuine. Worse, v1 §7 called it "probabilistic, not proxy" while v1 §8 correctly warned
-that perfect-foresight LP output understates LOLE — a direct self-contradiction, on a
-number built from that very output.
+genuine. Worse, v1 called it "probabilistic, not proxy" while elsewhere correctly warning
+that perfect-foresight LP output understates LOLE — a self-contradiction on a number
+built from that very output.
 
-**Correct construction (§6 below):** COPT over dispatchable thermal only, applied to a
+**Correct construction (§5.3):** COPT over dispatchable thermal only, applied to a
 residual curve netting **only exogenous must-take** generation at its given availability
 — no storage, no imports, no LP dispatch decisions — with VRE entered as **multi-state
 capacity**, not a deterministic subtraction.
 
-### 2.2 The affordability argument was built on the wrong constraint (v1 §3)
+### 3.2 The affordability argument was built on the wrong constraint
 
 v1 asserted solves are serialized because netCDF/HDF5 is process-global thread-unsafe,
 and concluded Monte Carlo is "categorically out of reach… forced by the process model".
@@ -74,13 +109,13 @@ around I/O only; `_run_job` holds no HDF5 lock across `run_simulation`
 (`solve_queue.py:427-431`), and the LP itself (linopy → HiGHS) touches no HDF5.
 Sequential dispatch is a design choice.
 
-The real blockers on parallelism are named in §4.2. The Monte Carlo conclusion survives
-— but on **runtime** grounds (each LP takes minutes; 10³–10⁴ replications is 3–4 orders
-of magnitude away, and 8-way parallelism buys 8×), not on the process model. v1 also
+The real blockers on parallelism are in §7.2. The Monte Carlo conclusion survives — but
+on **runtime** grounds (each LP takes minutes; 10³–10⁴ replications is 3–4 orders of
+magnitude away, and 8-way parallelism buys 8×), not on the process model. v1 also
 strawmanned SMC as replications *of the investment LP*; PRAS and Antares run a
-lightweight dispatch evaluation per replication, which is exactly why they are fast.
+lightweight dispatch evaluation per replication, which is why they are fast.
 
-### 2.3 The contingency sweep was the wrong primary engine (v1 §6, §12)
+### 3.3 The contingency sweep was the wrong primary engine
 
 v1 spent 30–60 LP re-solves computing `ΔEUE_i` per asset. That measures Birnbaum
 importance **evaluated at the all-others-available point** — the first-order term of a
@@ -96,204 +131,172 @@ high net load. Two failure modes follow:
 Once the COPT exists, the correct importance measure is **analytic and free**:
 `LOLE(COPT) − LOLE(COPT deconvolved of unit i)`, a proper Birnbaum importance over the
 **full multi-outage state space**, capturing N-2 and beyond, at one extra convolution per
-unit. This **collapses the class-A sweep to zero solves** and inverts v1's phase order.
+unit. This **collapses the class-A sweep to zero solves**.
 
-### 2.4 `s_nom → 0` is a modelling bug for AC lines (v1 §4)
+### 3.4 `s_nom → 0` is a modelling bug for AC lines
 
 Under PyPSA's KVL/cycle formulation the line's reactance still enters the cycle
 constraints, so you get a zero-capacity-but-still-present branch: susceptance handling
 degenerates, PTDFs are unchanged, and the answer is silently wrong. A line outage
 requires **removing** the branch so PyPSA recomputes `SubNetwork` cycles — or using the
-LODF/contingency machinery, which this repo already ships (§3.2).
+LODF/contingency machinery, which this repo already ships (§6.2).
 
-### 2.5 Smaller corrections
+### 3.5 Smaller corrections
 
 - **λ naming.** `8760·FOR/MTTR` is arithmetically correct as expected events per year,
   but it is the **cycle frequency**, not the failure rate `1/MTTF` that `λ` conventionally
   denotes. They differ by `(1−FOR)` — immaterial at FOR 0.05, 30% at FOR 0.3. Rename `f_i`.
 - **MTTR cancels.** `C_i = f_i·S_i = (8760·FOR_i/MTTR_i)·(MTTR_i·d) = 8760·FOR_i·d`.
-  The criticality is `unavailability × annual hours × damage rate`, and the entire
-  answer rests on **where in the year the outage window is placed** — a free parameter
-  v1 never specified. Combined with v1's "restrict to peak-risk hours", it asserts every
-  event lands on the annual peak, overstating criticality by the peak-to-mean damage
-  ratio.
+  Criticality is `unavailability × annual hours × damage rate`, so the entire answer rests
+  on **where in the year the outage window is placed** — a free parameter v1 never
+  specified. Combined with v1's "restrict to peak-risk hours", it asserted every event
+  lands on the annual peak.
 - **Group rows were a category error.** v1's "one row per (carrier × region)" inherits a
   per-unit `f_i` while zeroing a whole group — a common-cause event whose independent
-  probability is `Π p_i ≈ 0`. Inflates `C_i` by orders of magnitude.
+  probability is `Π p_i ≈ 0`.
 - **"EENS" was not an expectation.** What the LP produces is ENS for **one** weather
-  year, one availability realisation, with perfect foresight. The "E" requires an
-  expectation over outage states and weather years.
-- **The ACER conflation.** v1's first-order condition (`marginal capacity cost = VoLL ×
-  marginal EUE avoided`) is correct for `min C(x) + VoLL·E(x)`, but ACER's reliability
-  standard is `RS = CONE/VoLL` in **LOLE hours/yr**, not EUE. They coincide only if the
-  marginal peaker displaces exactly its nameplate in every loss-of-load hour.
+  year, one availability realisation, with perfect foresight.
+- **The ACER conflation.** v1's first-order condition is correct for `min C(x) +
+  VoLL·E(x)`, but ACER's reliability standard is `RS = CONE/VoLL` in **LOLE hours/yr**,
+  not EUE. They coincide only if the marginal peaker displaces exactly its nameplate in
+  every loss-of-load hour.
 - **Severity double-counting.** `S_i = ΔEUE·VoLL + Δopex` double-counts if `Δopex` is
-  taken as Δ(objective): the slack generators dispatch at marginal cost `voll` and their
-  cost already lands in the economics under `carrier == "load_shedding"`. `Δopex` must
-  **exclude** that carrier.
-- **PRAS licence risk is closed** — modified MIT (Expat), permissive. Note PRAS also
-  ships analytical convolution methods, so a DIY COPT partly duplicates it.
+  Δ(objective): the slack generators dispatch at marginal cost `voll` and their cost
+  already lands in the economics under `carrier == "load_shedding"`.
+- **PRAS licence risk is closed** — modified MIT (Expat). Note PRAS also ships analytical
+  convolution methods, so a DIY COPT partly duplicates it.
 
 ---
 
-## 3. What actually exists — corrected inventory
+## 4. Scope
 
-### 3.1 Verified, usable
-
-| Capability | Location | Note |
-|---|---|---|
-| VOLL slack generators | `services/solver_service.py:4405` | **Load-bearing buses only** — see §3.3 |
-| Lost Load results tab | `frontend/src/pages/results/LostLoadTab.tsx` | Per-carrier + per-bus, reuses the sort/search hook |
-| Per-bus × per-snapshot shed array | captured `solver_service.py:4467-4477`, persisted `routers/projects.py:1574-1580` | **Full resolution, in `results_state.pkl`** — the real severity source |
-| Solve queue | `services/solve_queue.py` | FIFO, abortable, per-project context |
-| `compare-state` | `routers/compare.py:71` | One project, from disk; A/B diff is client-side |
-| SCLOPF / N-1 contingencies | `solver_service.py:167-200, 3706-3770`; UI `SolverSettings.tsx:399-509` | **Already shipped** — see §3.2 |
-| Scenario branching | `POST /{base}/scenarios` `routers/projects.py:2299`; `ScenariosPanel.tsx` | Already enqueues onto the solve queue |
-| Representative periods (tsam) | `services/time_aggregation_service.py` | Cached per `(period, cfg-fingerprint)` |
-| Capacity freezing | `_freeze_period_capacities` `solver_service.py:4911+` | Myopic internal; **no user-facing flag** |
-
-### 3.2 v1 listed SCLOPF as an external dependency to adopt. It is already shipped.
-
-`SolverConfig` carries `sclopf`, `sclopf_include_all_lines`,
-`sclopf_include_all_transformers`, `sclopf_voltage_threshold_kv`, `sclopf_extra_lines`,
-`sclopf_extra_transformers`, `sclopf_scope`. `resolve_branch_outages` is a full
-contingency-set resolver, wired into both the full-horizon and myopic paths, with
-preflight validation and a complete frontend surface.
-
-**Failure class B therefore has a solver path and a UI already.** The two real gaps,
-which v1 missed by proposing to reinvent it:
-
-- `resolve_branch_outages` covers **Line and Transformer only — not Link.** HVDC and
-  power-to-X link outages genuinely need a `p_nom → 0` path. That is the class-B work,
-  and it is narrower than v1 assumed.
-- **SCLOPF is incompatible with `transmission_losses=True`** — hard-blocked at preflight
-  (`services/validation_service.py:624-629`). Any FMEA run wanting both is refused.
-
-### 3.3 Overstated or wrong in v1
-
-- **VOLL slacks are not "per bus, all buses".** `solver_service.py:4426-4430` builds
-  `load_bus_set` from `n.loads["bus"]` and skips every bus not in it — deliberately, with
-  a documented rationale (a slack on a transit bus lets the LP manufacture energy at VOLL
-  price). **Consequence: a contingency that starves a transit bus produces LP
-  infeasibility, not a priced ΔEUE** — which breaks the "unserved energy is priced, not
-  infeasible" premise for exactly the sector-coupled modes classes A and B care about.
-  The sweep driver must classify infeasible contingencies as a distinct outcome, not
-  discard them.
-  (Note: the docstrings at `routers/results.py:2957`, `frontend/src/api/simulation.ts:388`
-  and `LostLoadTab.tsx:21` still say "every bus" — they are stale; the code is right.)
-- **No per-load-carrier attribution.** One slack per bus, `carrier="load_shedding"`.
-  Where a bus hosts several `Load`s with different carriers — which this codebase
-  supports — the single slack cannot say which load was shed. FMEA severity *per load*
-  is not available.
-- **Links and storage get no slack at all.** A cyclic-SoC or link-capacity infeasibility
-  stays an infeasible LP.
-- **`lost_load_cost_meur` was always 0.0.** `routers/compare.py` read the capture from
-  `n.meta["last_lost_load"]`, which **nothing in the backend ever writes**. v1's claim
-  "€-denominated effect, already reconciled against the objective" was false. *Fixed on `claude/fix-lost-load-cost-and-custom-attr-drop`
-  (commit `8e2f98d`), off `master`; not this feature's work.*
-- **Two divergent lost-load numbers exist.** `solver_service.py:4477` computes
-  `total_mwh * voll` **unweighted** ("assumes hourly snapshots"); `:2452` computes it
-  **snapshot-weighted per period**. Under representative snapshots — which this repo
-  supports via tsam — these disagree. **Phase 0 must pin which is canonical**, or the
-  frontier will not match the objective.
-- **The scarcity diagnosis is not an effects taxonomy.** It is a per-(bus, snapshot)
-  explanation of high LP dual prices, gated at 2000 €/MWh and hard-capped at 200 rows
-  (`routers/results.py:2784-2790`); `transmission` is the residual "couldn't explain it"
-  bucket. Useful as a hint, not a classification to extend.
-- **TimeSeriesManager is not a multi-weather-year seam.** `_user_ts` is keyed
-  `(component, attribute, column)` (`routers/network.py:2172`) with no year dimension;
-  `PUT /timeseries/{component}/{attribute}` **replaces the entire attribute frame**; and
-  it is a **foreground module global** that background solves deliberately skip
-  persisting. Holding N coincident years needs either N project copies or a new
-  dimension in `_user_ts` **and** the netCDF layout. This is Phase 0 work, not a data
-  procurement note.
-- **"Severity is already computed" was half true.** The full array exists in the pickle,
-  but `GET /results/lost_load` reads `_state` (**foreground only** — a queued background
-  solve's capture never appears there), and `_compute_lost_load_summary` collapses to
-  totals and **caps per-bus rows at 24**. **No shed-hours / LOLE metric exists anywhere**
-  in the backend.
-- **`useFilterableTable` is not a table.** It is a 180-line sort + substring-search hook
-  plus a search box and a sortable `<th>`. No column defs, no cell rendering, **no
-  editable cells** — which the worksheet requires. Six hand-written tables already exist;
-  you will write a seventh and get free sorting. (CSV export *does* exist: `downloadCSV`
-  in `pages/results/shared.tsx`.)
-
----
-
-## 4. Constraints the sweep driver must respect
-
-### 4.1 The queue cannot express a sweep
-
-`EnqueueRequest` is `{project_id: str}` (`routers/solve_queue.py:36-37`) and `_run_job`
-reads config off the context (`solve_queue.py:389`). **There is no way to enqueue "same
-project, VOLL=3000" or "same project, generator G forced out."** v1's "the sweep driver
-rides the queue" is not implementable as written. Two options:
-
-1. add a per-job variant payload to the queue, or
-2. materialise N scenario projects first via `POST /scenarios` and enqueue those.
-
-Option 2 uses shipped machinery, but `create_scenario` snapshots the **foreground
-in-memory network**, so building N points means N sequential (mutate foreground → save →
-branch) cycles that clobber whatever the user is editing. Neither option is free; pick
-one in Phase 0.
-
-Also: the queue is **abortable but not resumable** — `_jobs`/`_order`/`_q` are in-memory
-only, so a backend restart mid-sweep loses it, with no partial-progress record. And
-`clear_finished` is **global across orgs** and super-admin-gated, so a 60–100-job
-overnight sweep sits in a shared queue an ordinary user cannot clean up.
-
-### 4.2 Do not drive the sweep through the HTTP API
-
-Every write to `/api/network/*` triggers `_push_undo_snapshot()` — a full
-`export_to_netcdf()` round-trip that "can take seconds on a large network"
-(`main.py:592-613`) — **and clears all dispatch results, resetting the solver lifecycle
-to `idle`** (`main.py:658-693`). A per-contingency sweep driven over HTTP pays a netCDF
-export *and* a results wipe per mutation. **The driver must mutate `ctx.network`
-in-process.**
-
-The real limits on parallelising solves (not HDF5, per §2.2) are: foreground module
-globals (`_user_ts`, `PyPSAService._active`, `routers.simulation._state`); one results
-slot per project directory, so N variants need N directories regardless; and a
-**documented PyInstaller + multiprocessing incident** (`desktop/gui.py:51-86`, dated
-2026-08-03) where a `resource_tracker` helper re-executed the bundle and took the
-single-instance lock. Subprocess parallelism in the packaged build is possible but has
-a scar.
-
-### 4.3 The EENS cap cannot be user code
-
-There is an `extra_functionality` seam, but `_compile_extra_functionality` **hard-refuses
-unless `PYPSA_GUI_ALLOW_USER_CODE=1`** (`solver_service.py:1458-1494`) — off by default
-because it is an unsandboxed in-process `exec()`. The cap must be a first-class wrapper
-alongside `_wrap_with_curtailment_cost` (`solver_service.py:2783`).
-
----
-
-## 5. Failure-mode taxonomy
+### 4.1 Failure-mode taxonomy
 
 | Class | Representation | Occurrence | Severity |
 |---|---|---|---|
-| **A. Generation forced outage / derating** | COPT state, **not** an LP re-solve | `forced_outage_rate` + `mttr_hours`; multi-state for derating | Analytic leave-one-out on the COPT (§6) |
+| **A. Generation forced outage / derating** | COPT state, **not** an LP re-solve | `forced_outage_rate` + `mttr_hours`; multi-state for derating | Analytic leave-one-out on the COPT (§5.3) |
 | **B. Transmission / link outage** | **Existing SCLOPF path** for Line/Transformer; new `p_nom → 0` for **Link** only | Per-branch FOR | LP re-solve — genuinely needed here |
 | **C. Correlated weather + demand extreme** | Whole-year swap: availability *and* load together | Empirical frequency of the climate year | LP re-solve per year |
 | **D. Fuel / cyber / human-operational** | Qualitative worksheet row; optional model-backed proxy | Expert-entered | Expert-entered, or the proxy re-solve |
 
-Class C is funded (§1): bundle a reference climate-year set so it works out of the box,
-rather than degrading to whatever a user uploads. Note this needs the §3.3
-multi-year storage work first — the data is useless without somewhere to put it.
+Class C is funded: bundle a reference climate-year set so it works out of the box rather
+than degrading to whatever a user uploads. It needs the §6.3 multi-year storage work
+first — the data is useless without somewhere to put it.
 
-Class D remains the reason the formal worksheet exists: these modes are not quantifiable
-from the network and must sit beside the computed rows without pretending to be them.
+Class D is why the formal worksheet exists: these modes are not quantifiable from the
+network and must sit beside the computed rows without pretending to be them.
 
-**Not yet modelled, and each materially affects the answer:** planned/maintenance
-outages (excluded from FOR by construction, yet dominant in real unavailability),
-load-forecast uncertainty, and interconnector availability — the single most contested
-input in European adequacy studies.
+**Not modelled, each materially affecting the answer:** planned/maintenance outages
+(excluded from FOR by construction, yet dominant in real unavailability), load-forecast
+uncertainty, and interconnector availability — the most contested input in European
+adequacy studies.
+
+### 4.2 What the user gets
+
+Per plan:
+
+1. **A ranked worksheet** — one row per failure mode: occurrence (events/yr), severity
+   (MWh unserved and € per event), criticality (€/yr), mitigability.
+2. **An attribution** — "of the expected unserved energy, X% traces to these N assets."
+3. **Achieved reliability** — energy unserved *and* shed-hours, against the target.
+4. **On demand:** the cost-vs-availability curve, and how the ranking reshuffles along it.
+
+### 4.3 Carrier scope: electricity only
+
+The target, the cap and the reported metrics cover **electrical load**. The ENS cap sums
+only over slack generators at buses whose carrier is electrical. This matches how
+adequacy standards are written and avoids blending a shed MWh of heat with a shed MWh of
+electricity as though they were equivalent.
+
+**Two consequences that must be visible in the UI, not buried here:**
+
+- **Sector-coupled flexible loads become adequacy *resources*.** An electrolyser or heat
+  pump outage *reduces* electrical demand, so on an electricity-only metric its failure
+  scores as an **improvement**. Such rows must be rendered as "out of scope for this
+  metric", never as negative criticality — otherwise the worksheet recommends breaking
+  the electrolyser.
+- **Non-electrical service failure is invisible.** An H₂ or heat shortfall does not appear
+  at all. If that matters, the scope decision has to be revisited; it is not a gap that
+  can be papered over in reporting.
 
 ---
 
-## 6. The two numbers, corrected
+## 5. The numbers
 
-### 6.1 Criticality — IEC 60812 FMECA, no RPN
+### 5.1 The reliability target — set either, report both
+
+**The enforced constraint is always energy-based**, because it is linear:
+
+```
+Σ_t  w_t · Σ_{b ∈ electrical}  p_shed[b,t]   ≤   Ē
+```
+
+A **time-based** target (shed-hours per year) is **not** enforceable as a linear
+constraint — it needs 8760×|B| binaries with a big-M whose LP relaxation is ~0
+(`y_t = shed_t/M`), which is numerically hopeless. So:
+
+- **Enter an energy cap** → one solve, cap enforced directly.
+- **Enter a shed-hours target** → an outer bisection on `Ē` until achieved shed-hours
+  lands within tolerance. Typically 5–8 solves. Honest caveat: shed-hours is generally
+  non-increasing as `Ē` tightens but **not strictly monotone**, so the bisection needs a
+  tolerance and may not converge exactly. Report what was achieved, not what was asked.
+
+**Both numbers are always reported**, and this is not redundant. With a binding cap the
+optimiser will use its full allowance whenever shedding is cheaper than building, so
+**achieved ENS ≈ the cap by construction** and carries little information. Shed-hours is
+*not* pinned by an energy cap — the same MWh can be concentrated in one long event or
+spread across many short ones — so it is the number that actually tells the user
+something.
+
+**Units.** The UI takes the energy target in **parts per ten thousand (‱) of annual
+electrical demand**, with a warning band showing where real standards sit. Stating it as
+a percentage invites a serious error: *99% energy availability means planning to not
+serve 1% of demand* — for a 300 TWh system, 3 TWh/yr unserved. Real standards are two to
+three orders of magnitude tighter (GB's 3 h/yr LOLE is 99.966% of **hours**; adequate
+systems run EENS around 0.001–0.01% of demand). A user who types "99%" gets a
+cheap-looking, badly under-built plan.
+
+### 5.2 The cost axis
+
+**Total system cost: CapEx + FOM + variable OpEx (fuel, VOM) + CO₂ cost — excluding
+load-shedding cost.**
+
+The exclusion is not a detail. Total cost as computed by the solver *includes*
+`VoLL × ENS`; plotting that against ENS puts the x-axis inside the y-axis and the curve
+becomes partly self-referential. This is the same trap as the `Δopex` double-count in
+§3.5, in a different place. The cost axis must be the **cost of the system**, not the
+cost of the system plus the penalty for the thing on the other axis.
+
+Total cost rather than CapEx-only matters because reliability bought through cheap
+peakers barely moves CapEx while moving fuel a lot; a CapEx-only curve would rank that
+option artificially well.
+
+In a multi-period run `investment_period_weightings.objective` discounts costs, so the
+figure is an **NPV**, and the "optimum" is an NPV optimum — not the annualised number a
+reliability standard implies. Label the axis accordingly and state the period basis.
+
+### 5.3 Availability: two numbers, side by side
+
+Neither is the headline:
+
+- **LP proxy** — storage-aware and network-aware, perfect-foresight, single realisation.
+  Right system, biased method.
+- **COPT screening** — classical convolution over dispatchable thermal, applied to a
+  residual curve netting only exogenous must-take generation, VRE as multi-state
+  capacity. Defensible method, wrong system: storage-blind, chronology-free, network-free.
+
+**Their divergence is the product.** A large gap means storage and the network are
+carrying the adequacy — precisely when the classical number misleads and when a PRAS or
+Antares export is worth doing. Presenting either alone invites misplaced trust.
+
+COPT cost is `O(N · C/Δ)` over a **rounding increment Δ**, not `2^N`, so "fast" is
+directionally right — but Δ must be named and its rounding bias handled (capacity
+apportioned probabilistically to adjacent rounded states, or the table drifts).
+Milliseconds holds for a national model (~300 units); full PyPSA-Eur (10³–10⁴ units) is
+seconds-to-minutes, and **multi-area** COPTs with transfer limits are exponential in the
+number of areas — the actual reason PRAS exists.
+
+### 5.4 Criticality — IEC 60812 FMECA, no RPN
 
 ```
 f_i  [1/yr]  = 8760 * FOR_i / MTTR_i        # cycle frequency, not failure rate
@@ -301,12 +304,10 @@ S_i  [EUR]   = E_t[ΔEUE | outage starts at t] * VoLL + Δopex_excl_load_sheddin
 C_i  [EUR/yr]= f_i * S_i
 ```
 
-Three things v1 left undefined and this version pins:
-
 - **`S_i` is an expectation over event timing**, sampled across representative start
   times — not the damage at the annual peak. Equivalently and more cheaply, compute
-  annual expected damage directly as `8760·FOR_i × mean hourly damage rate` and drop the
-  `f×S` factorisation entirely.
+  annual expected damage as `8760·FOR_i × mean hourly damage rate` and drop the `f×S`
+  factorisation.
 - **Grouped rows carry a multiplicity**, not a group-sized occurrence: severity = removing
   **one** unit of the class, occurrence = per-unit `f_i`, row carries `N`. A genuine
   common-cause mode is a **separate row** with a β-factor-derived occurrence.
@@ -317,100 +318,222 @@ Occurrence bins may be rendered for readers who expect the columns, but RPN from
 ordinals is a *product of sums* and is not monotone in `C = f·S` — a mode 10× more
 critical can rank lower, visibly, on the first worksheet. AIAG-VDA removed RPN in 2019
 for exactly this reason, and its Action Priority is a lookup over all 1,000 S/O/D
-combinations, so it is undefined without a real Detection column. Detection has no
-natural power-system meaning; the worksheet carries a **mitigability** column instead
-(is there reserve, an alternative path, a restart option).
+combinations, undefined without a real Detection column. Detection has no natural
+power-system meaning; the worksheet carries a **mitigability** column instead.
 
-### 6.2 Availability — both numbers, side by side
+### 5.5 VoLL becomes a reporting parameter, not a design parameter
 
-Per §1, neither is the headline. The tool shows:
+With the ENS cap as the enforced standard, VoLL's job changes. It is still needed to keep
+the LP feasible (the slack generators) and to value severity in €. But the **cap** is what
+shapes the plan.
 
-- **LP proxy** — storage-aware and network-aware, perfect-foresight, single realisation.
-  Right system, biased method.
-- **COPT screening** — classical convolution over dispatchable thermal, applied to a
-  residual curve netting only exogenous must-take generation, VRE as multi-state
-  capacity. Defensible method, wrong system: storage-blind, chronology-free, network-free.
+This creates a coherence hazard: if VoLL is set high enough, the LP sheds *less* than the
+cap allows and VoLL is the effective standard; if low, the cap binds. **Whichever binds
+first is the real standard, and the user cannot see which.** The solver must emit a
+config-coherence warning naming the binding one. Left unhandled, two users with the same
+stated target get different plans for reasons neither can observe.
 
-**Their divergence is the product.** A large gap means storage and network are carrying
-the adequacy, which is precisely when the classical number misleads and when PRAS or
-Antares is worth the export. Presenting one alone invites the reader to trust it.
+### 5.6 The frontier (on demand)
 
-COPT cost is `O(N · C/Δ)` over a **rounding increment Δ**, not `2^N` — so "fast" is
-directionally right, but Δ must be named and its rounding bias handled (capacity
-apportioned probabilistically to adjacent rounded states, or the table drifts).
-Milliseconds holds for a national model (~300 units); full PyPSA-Eur (10³–10⁴ units) is
-seconds-to-minutes, and **multi-area** COPTs with transfer limits are exponential in the
-number of areas — which is the actual reason PRAS exists.
+Sweep `Ē` and plot total system cost against achieved ENS and shed-hours. The economic
+knee is where marginal system cost equals `VoLL × marginal ENS avoided`.
 
-### 6.3 The frontier
-
-**Primary parameterisation: the ENS cap.** Linear (`Σ_t w_t Σ_b p_voll,b,t ≤ Ē`), samples
-the frontier uniformly by construction, and answers the regulator's question.
-
-**Secondary: the VOLL sweep**, as a *validation* that recovers the cap's shadow price —
-not as an independent frontier. v1 presented the two as interchangeable. They are
-Lagrangian duals and coincide **only if the value function `C*(Ē)` is convex**. This repo
-breaks that: `solver_service.py:939-953` switches to **MILP with a MIP gap** when
-`committable` generators are present, so `C*` is non-convex, the VOLL sweep **skips** the
+The **VOLL sweep is a validation** that recovers the cap's shadow price — not an
+independent frontier. The two are duals and coincide **only if `C*(Ē)` is convex**. This
+repo breaks that: `solver_service.py:939-953` switches to **MILP with a MIP gap** when
+`committable` generators are present, so `C*` is non-convex, the VOLL sweep **skips**
 unsupported portions, and returned points may not be on the frontier at all. The
 VOLL-frontier path must be **disabled or warned** under unit commitment or a nonzero MIP
-gap. The VOLL sweep is also **degenerate**: VoLL only changes the solution at
-breakpoints, so 10–15 samples typically recover far fewer distinct points.
-
-**An LOLE hour-count cap is not merely "a MIP".** It is 8760×|B| binaries with a big-M
-whose LP relaxation is ~0 (`y_t = shed_t/M`) — numerically hopeless. The tractable
-alternatives, both linear and both giving a conservative bound, are a per-hour shed cap
-alongside the ENS cap, or a CVaR tail constraint on hourly shed.
-
-**Naming:** the constrained quantity is **ENS (scenario)** everywhere — API, UI,
-worksheet. Not EENS. And in a multi-period run `investment_period_weightings.objective`
-discounts VOLL×ENS in the objective, so the "economic optimum" is an **NPV** optimum, not
-the annualised one a reliability standard implies. Criticality and the frontier must both
-state which period they refer to.
+gap.
 
 ---
 
-## 7. Provenance contract
+## 6. What already exists — corrected inventory
 
-```
-AdequacyReport {
-  engine:   "lp_proxy" | "copt" | "pras" | "antares"
-  fidelity: "deterministic_scenario" | "analytic_convolution" | "sequential_mc"
-  metrics:  { ens_mwh, shed_hours, lole_hours?, eue_mwh?,
-              confidence_interval?, n_samples?, time_basis }
-  inputs:   { weather_years, voll_eur_per_mwh, seed?, assumptions_hash }
-  per_mode: [ FailureModeResult ]     # own provenance
-  frontier: [ TradeoffPoint ]         # own provenance
-}
-```
+### 6.1 Verified, usable
 
-Additions over v1, each closing a way the report could mislead:
+| Capability | Location | Note |
+|---|---|---|
+| VOLL slack generators | `services/solver_service.py:4405` | **Load-bearing buses only** — see §6.3 |
+| Lost Load results tab | `frontend/src/pages/results/LostLoadTab.tsx` | Per-carrier + per-bus |
+| Per-bus × per-snapshot shed array | captured `solver_service.py:4467-4477`, persisted `routers/projects.py:1574-1580` | **Full resolution, in `results_state.pkl`** — the real severity source |
+| Solve queue | `services/solve_queue.py` | FIFO, abortable, per-project context |
+| `compare-state` | `routers/compare.py:71` | One project, from disk; A/B diff is client-side |
+| SCLOPF / N-1 contingencies | `solver_service.py:167-200, 3706-3770`; UI `SolverSettings.tsx:399-509` | **Already shipped** — §6.2 |
+| Scenario branching | `POST /{base}/scenarios` `routers/projects.py:2299`; `ScenariosPanel.tsx` | Already enqueues onto the solve queue |
+| Representative periods (tsam) | `services/time_aggregation_service.py` | Cached per `(period, cfg-fingerprint)` |
+| Capacity freezing | `_freeze_period_capacities` `solver_service.py:4911+` | Myopic internal; **no user-facing flag** |
+| Objective wrappers | `_wrap_with_curtailment_cost` `solver_service.py:2783` | The pattern the ENS cap must follow |
 
-- **`confidence_interval` / `n_samples`** — an SMC LOLE without a CI is not reportable,
-  so v1's `sequential_mc` tier was unusable as specified.
-- **`time_basis`** — LOLE in hours/yr vs days/yr differ by ~24×.
-- **`weather_years` / `voll` / `seed` / `assumptions_hash`** — without these, two reports
-  are not comparable and the Compare tab will silently diff incomparable numbers.
-- **`lolp` dropped** as an annual scalar — it is per-hour/per-state, or it is `LOLE/8760`.
-- **`per_mode` and `frontier` carry separate provenance** — they are different analyses.
+### 6.2 SCLOPF is already shipped — v1 listed it as an external dependency
 
-**No number produced by Phases 0–4 may be compared to a statutory standard.** The LP
-proxy understates (perfect foresight, one realisation); the COPT screening is
-storage-blind and network-free. The UI must say so at the point of display, not in a
-footnote.
+`SolverConfig` carries `sclopf`, `sclopf_include_all_lines`,
+`sclopf_include_all_transformers`, `sclopf_voltage_threshold_kv`, `sclopf_extra_lines`,
+`sclopf_extra_transformers`, `sclopf_scope`. `resolve_branch_outages` is a full
+contingency-set resolver, wired into both the full-horizon and myopic paths, with
+preflight validation and a complete frontend surface.
+
+**Class B therefore has a solver path and a UI already.** The two real gaps:
+
+- `resolve_branch_outages` covers **Line and Transformer only — not Link.** HVDC and
+  power-to-X link outages need a `p_nom → 0` path. That is the class-B work, and it is
+  narrower than v1 assumed.
+- **SCLOPF is incompatible with `transmission_losses=True`** — hard-blocked at preflight
+  (`services/validation_service.py:624-629`). Any FMEA run wanting both is refused.
+
+### 6.3 Overstated or wrong in v1
+
+- **VOLL slacks are not "per bus, all buses".** `solver_service.py:4426-4430` builds
+  `load_bus_set` from `n.loads["bus"]` and skips every bus not in it — deliberately (a
+  slack on a transit bus lets the LP manufacture energy at VOLL price). **A contingency
+  that starves a transit bus produces LP infeasibility, not a priced ΔEUE.** The class-B
+  driver must treat infeasible contingencies as a distinct outcome, not discard them.
+  (Docstrings at `routers/results.py:2957`, `frontend/src/api/simulation.ts:388` and
+  `LostLoadTab.tsx:21` still say "every bus" — stale; the code is right.)
+- **No per-load-carrier attribution.** One slack per bus, `carrier="load_shedding"`. Where
+  a bus hosts several `Load`s with different carriers, the single slack cannot say which
+  was shed. *Mostly neutralised by the electricity-only scope (§4.3), but it blocks any
+  future per-carrier target.*
+- **Links and storage get no slack at all.** A cyclic-SoC or link-capacity infeasibility
+  stays an infeasible LP.
+- **`lost_load_cost_meur` was always 0.0** — read from `n.meta["last_lost_load"]`, which
+  nothing writes. v1's "already reconciled against the objective" was false. *Fixed on
+  `claude/fix-lost-load-cost-and-custom-attr-drop` (`8e2f98d`).*
+- **Two divergent lost-load numbers exist.** `solver_service.py:4477` computes
+  `total_mwh * voll` **unweighted** ("assumes hourly snapshots"); `:2452` computes it
+  **snapshot-weighted per period**. Under tsam representative snapshots these disagree.
+  **Phase 0 must pin which is canonical**, or the target will not mean what it says.
+- **The scarcity diagnosis is not an effects taxonomy.** A per-(bus, snapshot) explanation
+  of high dual prices, gated at 2000 €/MWh and capped at 200 rows
+  (`routers/results.py:2784-2790`); `transmission` is the residual "couldn't explain it"
+  bucket.
+- **TimeSeriesManager is not a multi-weather-year seam.** `_user_ts` is keyed
+  `(component, attribute, column)` (`routers/network.py:2172`) with no year dimension;
+  `PUT /timeseries/{component}/{attribute}` **replaces the entire attribute frame**; and
+  it is a **foreground module global** that background solves deliberately skip
+  persisting. Holding N coincident years needs N project copies or a new dimension in
+  `_user_ts` **and** the netCDF layout.
+- **"Severity is already computed" was half true.** The full array is in the pickle, but
+  `GET /results/lost_load` reads `_state` (**foreground only**), and
+  `_compute_lost_load_summary` collapses to totals and **caps per-bus rows at 24**. **No
+  shed-hours metric exists anywhere** — and §5.1 makes it the headline reported number.
 
 ---
 
-## 8. Module layout
+## 7. Constraints on implementation
+
+### 7.1 The queue cannot express a sweep
+
+`EnqueueRequest` is `{project_id: str}` (`routers/solve_queue.py:36-37`) and `_run_job`
+reads config off the context (`solve_queue.py:389`). **There is no way to enqueue "same
+project, `Ē` = X."** Either add a per-job variant payload, or materialise N scenario
+projects first — but `create_scenario` snapshots the **foreground in-memory network**, so
+N points means N sequential (mutate foreground → save → branch) cycles that clobber
+whatever the user is editing.
+
+*The "target first" decision defers this entirely.* The core loop is one solve; only the
+on-demand curve and the shed-hours bisection need it. The bisection is the cheaper
+forcing function — 5–8 solves — and should drive the design of the variant payload.
+
+Also: the queue is **abortable but not resumable** (`_jobs`/`_order`/`_q` are in-memory,
+so a restart loses the sweep with no partial-progress record), and `clear_finished` is
+**global across orgs** and super-admin-gated.
+
+### 7.2 Do not drive the sweep through the HTTP API
+
+Every write to `/api/network/*` triggers `_push_undo_snapshot()` — a full
+`export_to_netcdf()` round-trip that "can take seconds on a large network"
+(`main.py:592-613`) — **and clears all dispatch results, resetting the lifecycle to
+`idle`** (`main.py:658-693`). **The driver must mutate `ctx.network` in-process.**
+
+The real limits on parallelising solves (not HDF5, per §3.2): foreground module globals
+(`_user_ts`, `PyPSAService._active`, `routers.simulation._state`); one results slot per
+project directory; and a **documented PyInstaller + multiprocessing incident**
+(`desktop/gui.py:51-86`, 2026-08-03) where a `resource_tracker` helper re-executed the
+bundle and took the single-instance lock.
+
+### 7.3 The ENS cap cannot be user code
+
+`_compile_extra_functionality` **hard-refuses unless `PYPSA_GUI_ALLOW_USER_CODE=1`**
+(`solver_service.py:1458-1494`) — off by default because it is an unsandboxed in-process
+`exec()`. The cap must be a first-class wrapper alongside `_wrap_with_curtailment_cost`.
+
+---
+
+## 8. UX / UI assessment
+
+v2 described this as "a new Results tab plus a frontier chart". That was wrong. Below is
+the corrected picture, and what the "target first" decision saves.
+
+### 8.1 The information-architecture problem
+
+The app's model is **project → solve → results**. A sweep is **project → N solves →
+aggregate results**. That has no slot in the current IA: a sweep is not a result, it is a
+*study that produces* results.
+
+**"Target first, curve on demand" dissolves this for v1.** The core loop is one solve
+against one target — which fits the existing IA exactly. Only the optional curve needs a
+new home, and by then the shed-hours bisection will already have forced a minimal
+multi-solve substrate. **Recommendation:** put the on-demand curve behind an action on
+the existing Scenarios surface (which already branches projects and enqueues solves)
+rather than inventing a "Studies" area. Revisit only if the curve becomes the primary
+workflow.
+
+### 8.2 Surfaces required
+
+| Surface | Precedent in the app | v1 scope | Verdict |
+|---|---|---|---|
+| Reliability target input | `voll` field, `SolverSettings.tsx:1667` | **Required** | Small — one new section following an existing pattern |
+| FOR/MTTR per asset | `curtailment_cost` is the exact precedent | **Required** | ~60 mechanical edits (6 touch points × 2 attrs × 5 components) |
+| Per-carrier defaults library | None | **Required** | New, small |
+| FMEA worksheet, **editable cells** | **None** — all six result tables are read-only | **Required** | **The single biggest build** |
+| Achieved-vs-target readout | None | **Required** | Small |
+| Provenance / fidelity badges | None | **Required** | Cross-cutting, touches every number |
+| Sweep configurator + progress | Solve-queue UI exists but is per-project FIFO | **Deferred** | New, when the curve ships |
+| Frontier explorer | None | **Deferred** | New, when the curve ships |
+
+### 8.3 The worksheet is the hard part
+
+`useFilterableTable.tsx` is a 180-line **sort + substring-search hook** plus a search box
+and a sortable `<th>`. It has no column definitions, no cell rendering, no pagination —
+and **no editable cells**. Six hand-written read-only tables already exist; the worksheet
+will be a seventh and gets only free sorting from the hook.
+
+The worksheet must be a genuine editing surface, because class D rows and the mitigability
+column are expert-entered, and those edits must persist with the project and survive a
+re-solve (the computed rows regenerate; the manual ones must not be wiped). **There is no
+precedent for a persisted, user-edited results table in this codebase.** That is the
+component to prototype first, because it carries the schedule risk.
+
+CSV export is free — `downloadCSV` in `pages/results/shared.tsx`, used by six tabs.
+
+### 8.4 Wiring cost for a new Results tab
+
+Five coupled edits in `pages/Results.tsx`: the `ResultsTab` union (`:34`), `VALID_TABS`
+(`:39`), the `TABS` array (`:55`), the render switch (`:465`), **and the exhaustive
+`Record<ResultsTab, CompareTab>` at `:72`**, which will not compile until `fmea` maps to a
+member of `CompareView`'s `Tab` union — alias to `'overview'`, as `asset` does.
+
+### 8.5 Honest summary
+
+Under "target first", the analysis and the UI are roughly balanced, and the feature is
+**one new surface plus a settings section**, not three new surfaces. The editable
+worksheet remains the schedule risk and has no precedent. The deferred curve is where the
+IA question and the sweep machinery live, and deferring it is what makes v1 tractable.
+
+---
+
+## 9. Module layout
 
 ```
 backend/services/adequacy/          # `services/adequacy/` verified free
   taxonomy.py      # the four classes + mode catalogue
   occurrence.py    # FOR/MTTR attrs, per-carrier defaults, consistency validator
   copt.py          # convolution, leave-one-out importance, rounding increment
+  target.py        # ENS cap wrapper + shed-hours bisection + coherence warning
   sweep.py         # class B/C driver — in-process on ctx.network, never over HTTP
   criticality.py   # f_i * S_i, timing expectation, multiplicity/CCF handling
-  worksheet.py     # IEC 60812 rows, computed + manual, CSV export
+  worksheet.py     # IEC 60812 rows, computed + persisted manual rows, CSV export
   engines/
     lp_proxy.py
     pras_export.py     # optional — must take PyPSAService.get_netcdf_io_lock()
@@ -418,63 +541,84 @@ backend/services/adequacy/          # `services/adequacy/` verified free
 ```
 
 `pras_export.py` writes `.pras` **HDF5**; v1 proposed adding a second HDF5 producer to a
-process it had just called HDF5-fragile without noticing. It must take the same lock
-every other HDF5 path takes.
-
-Frontend: a new `fmea` Results tab is five coupled edits in `pages/Results.tsx` — the
-`ResultsTab` union, `VALID_TABS`, the `TABS` array, the render switch, **and the
-exhaustive `Record<ResultsTab, CompareTab>` at `:72`**, which will not compile until
-`fmea` maps to a member of `CompareView`'s `Tab` union (alias to `'overview'`, as `asset`
-does).
+process it had just called HDF5-fragile. It must take the same lock every other HDF5 path
+takes.
 
 ---
 
-## 9. Phasing (reordered — COPT before the sweep)
+## 10. Provenance contract
+
+```
+AdequacyReport {
+  engine:   "lp_proxy" | "copt" | "pras" | "antares"
+  fidelity: "deterministic_scenario" | "analytic_convolution" | "sequential_mc"
+  target:   { basis: "energy" | "shed_hours", value, achieved_ens_mwh,
+              achieved_shed_hours, binding: "cap" | "voll" }
+  metrics:  { ens_mwh, shed_hours, lole_hours?, eue_mwh?,
+              confidence_interval?, n_samples?, time_basis }
+  cost:     { total_system_cost, excludes_shed_cost: true, period_basis }
+  inputs:   { weather_years, voll_eur_per_mwh, seed?, assumptions_hash }
+  per_mode: [ FailureModeResult ]     # own provenance
+  frontier: [ TradeoffPoint ]         # own provenance; absent unless the curve was run
+}
+```
+
+`target.binding` is what §5.5 requires: the user must be able to see whether the cap or
+VoLL shaped the plan. `cost.excludes_shed_cost` is asserted in the payload so a consumer
+cannot accidentally plot a self-referential curve.
+
+**No number produced by Phases 0–4 may be compared to a statutory standard.** The LP proxy
+understates (perfect foresight, one realisation); the COPT screening is storage-blind and
+network-free. The UI must say so at the point of display, not in a footnote.
+
+---
+
+## 11. Phasing
 
 | Phase | Content | Ships |
 |---|---|---|
-| 0 | FOR/MTTR attributes + defaults + validator; pin the canonical lost-load number; multi-weather-year storage; decide the sweep substrate (queue variant payload vs N scenario projects); `AdequacyReport` contract | Nothing user-visible |
-| 1 | **COPT**: convolution, screening LOLE/EUE, leave-one-out criticality for class A | The FMECA ranking — **zero LP solves** |
-| 2 | LP proxy availability + the side-by-side comparison with COPT | The divergence diagnostic |
-| 3 | Frontier: ENS cap as a first-class wrapper; VOLL sweep as dual validation | The trade-off chart |
-| 4 | Class B (**Link** outages + existing SCLOPF), class C (bundled climate years), class D manual rows; the worksheet UI | The formal deliverable |
-| 5 | *Optional:* PRAS / Antares exporters | Regulatory-grade validation |
+| 0 | FOR/MTTR attributes + defaults + validator; **pin the canonical lost-load number**; **add a shed-hours metric** (none exists); `AdequacyReport` contract | Nothing user-visible |
+| 1 | ENS cap as a first-class objective wrapper; target input UI; achieved-vs-target readout incl. shed-hours; VoLL/cap coherence warning | **The core loop — set a target, get a plan** |
+| 2 | COPT: convolution, screening LOLE/EUE, leave-one-out criticality for class A; side-by-side with the LP proxy | The FMECA ranking — **zero extra LP solves** |
+| 3 | The worksheet UI — computed rows + persisted manual class-D rows + mitigability; provenance badges; CSV export | **The formal deliverable** |
+| 4 | Class B (**Link** outages + existing SCLOPF); class C (bundled climate years + multi-year storage) | Full taxonomy coverage |
+| 5 | Shed-hours bisection; the on-demand cost-vs-availability curve; sweep substrate | The trade-off curve |
+| 6 | *Optional:* PRAS / Antares exporters; capacity credit / ELCC | Regulatory-grade validation |
+
+**Reordered from v2** by the "target first" decision: the curve moves from Phase 3 to
+Phase 5, and the sweep substrate (§7.1) moves with it. Phases 0–3 need **one solve per
+run** and no sweep machinery at all.
 
 **Phase 0 is not small.** Data persistence for custom attributes is genuinely free —
-PyPSA 1.x accepts custom columns, and the netCDF round-trip and `GET` serialisation
-require no work. The cost is elsewhere: **five Pydantic schemas** (`extra="ignore"`
-silently drops undeclared fields on POST/PUT), roughly **60 mechanical frontend edits**
-across `PropertiesPanel.tsx` and `propertyDocs.ts` (6 touch points × 2 attributes × 5
-components), plus the multi-year storage work and the sweep-substrate decision.
+PyPSA 1.x accepts custom columns, and the netCDF round-trip and `GET` serialisation need
+no work. The cost is elsewhere: **five Pydantic schemas** (`extra="ignore"` silently drops
+undeclared fields on POST/PUT), roughly **60 mechanical frontend edits**, and pinning the
+canonical lost-load number.
 
-One Phase 0 hazard is already closed: `_merge_partial_update` used to drop custom
-columns on any partial PUT, so `forced_outage_rate` would have been one stray request
-away from silent erasure. That is fixed on the branch above; Phase 0 inherits a working
-custom-attribute path rather than having to discover this the hard way.
+One Phase 0 hazard is already closed: `_merge_partial_update` used to drop custom columns
+on any partial PUT, so `forced_outage_rate` would have been one stray request from silent
+erasure. Fixed on the branch above.
 
-### Deliberately still out of scope
+### Still out of scope, and worth a decision later
 
 Capacity credit / ELCC — the actual currency of a capacity-vs-availability conversation,
-and derivable directly from the COPT as equivalent firm capacity at constant LOLE. It is
-the most obvious Phase 6, and it is cheap once Phase 1 exists.
+derivable from the COPT as equivalent firm capacity at constant LOLE. Cheap once Phase 2
+exists.
 
-Also unresolved and worth a decision before Phase 3: whether the ENS cap is **global or
-per-bidding-zone** (a global cap lets the optimiser concentrate all shedding in one zone
-while satisfying it — exactly what a per-zone standard forbids); whether **DSR is counted
-as unserved energy** (the `__voll_` slack currently conflates voluntary response with
-involuntary curtailment); and whether VoLL is **single or segment-differentiated** (ACER
-requires segment-weighted).
+Also unresolved: whether the ENS cap is **global or per-bidding-zone** (a global cap lets
+the optimiser concentrate all shedding in one zone while satisfying it — exactly what a
+per-zone standard forbids); whether **DSR counts as unserved energy** (the `__voll_` slack
+conflates voluntary response with involuntary curtailment); and whether VoLL is **single
+or segment-differentiated** (ACER requires segment-weighted).
 
 ---
 
-## 10. Open-source landscape
-
-Unchanged from v1 except where review corrected it:
+## 12. Open-source landscape
 
 - **[PRAS](https://nrel.github.io/PRAS/)** (NREL, Julia) — **modified MIT (Expat)**, so
   v1's outstanding licence risk is closed. Sequential Monte Carlo with storage and
   multi-region transfer limits, plus **analytical convolution methods** that partly
-  duplicate our COPT. `.pras` HDF5 format makes the exporter a clean seam.
+  duplicate our COPT. `.pras` HDF5 makes the exporter a clean seam.
 - **[PRAS-Linkage](https://globalpst.org/wp-content/uploads/2_MSeatle_Multi-system-co-modelling-1.pdf)**
   — Python bridge from capacity-expansion output into PRAS. Direct prior art.
 - **[Antares Simulator](https://github.com/AntaresSimulatorTeam/Antares_Simulator)**
@@ -482,11 +626,11 @@ Unchanged from v1 except where review corrected it:
   API [antares-craft](https://pypi.org/project/antares-craft/). File-level copyleft
   imposes nothing on us for writing input files.
 - **[PyPSA-Earth Monte Carlo](https://pypsa-earth.readthedocs.io/en/latest/monte_carlo.html)**
-  — an `uncertainties` + Latin-hypercube config pattern in our own ecosystem; the
-  cheapest model for the sweep config schema.
+  — an `uncertainties` + Latin-hypercube config pattern in our own ecosystem; the cheapest
+  model for the sweep config schema when Phase 5 arrives.
 - **IEEE RTS-96 / RTS-GMLC**, NERC GADS class averages, ENTSO-E ERAA availability
-  assumptions — occurrence data. **Pin whether the schema means FOR or EFORd**: GADS
-  "FOR" is service-hours-based, adequacy studies use demand-based EFORd, and they differ
+  assumptions — occurrence data. **Pin whether the schema means FOR or EFORd**: GADS "FOR"
+  is service-hours-based, adequacy studies use demand-based EFORd, and they differ
   materially for units with reserve-shutdown hours.
 - **[`reliability`](https://pypi.org/project/reliability/)** — only if fitting FOR/MTTR
   from a customer's own failure history.
@@ -494,4 +638,4 @@ Unchanged from v1 except where review corrected it:
   [`FMECA`](https://github.com/pythonasset/FMECA),
   [`LLMRiskAnalyzer`](https://github.com/YuchenXia/LLMRiskAnalyzer)) — assessed, not worth
   a dependency. Take the IEC 60812 schema; compute the numbers ourselves.
-- **PyPSA SCLOPF** — **not** an external item. Already shipped (§3.2).
+- **PyPSA SCLOPF** — **not** an external item. Already shipped (§6.2).
