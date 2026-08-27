@@ -171,6 +171,15 @@ export interface SolverConfig {
   // back to the scalar `co2_price`. Ignored on flat (single-period) networks.
   co2_price_per_period?: Record<string, number>
   voll: number                       // €/MWh — when > 0, slack gens per bus
+  // Reliability target (adequacy spec §5.1): unserved electrical energy cap
+  // in parts per ten thousand (‱) of period demand; null = off.
+  ens_cap_permyriad?: number | null
+  // Per-zone ceiling as a multiple of the target (zone = bus country).
+  ens_zone_cap_multiple?: number | null
+  // Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in.
+  dsr_price_eur_per_mwh?: number
+  dsr_share_of_load?: number
+  dsr_buses?: string[]
   investment_periods: number[]       // list of years; honoured iff multi_investment_periods
   // Per-investment-period load multiplier, keyed by period year (string).
   // 1.0 = unchanged; 1.05 = +5% load growth. Applied transiently at solve

@@ -379,6 +379,11 @@ export const resultsApi = {
   // caller (AggregatedOverview.tsx, Dispatch.tsx) has been updated to wrap
   // this in an arrow; calling with no arguments is still byte-identical to
   // before.
+  // Minimal AdequacyReport from the last target-constrained solve
+  // (GET /results/adequacy; 204 = no target / not solved). Shape:
+  // pages/results/adequacy.tsx AdequacyReportPayload.
+  getAdequacy: () => client.get('/results/adequacy')
+    .then(r => (r.status === 204 ? null : r.data)),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;

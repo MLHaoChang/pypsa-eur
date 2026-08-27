@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, AlertCircle, Leaf, ArrowRight } from 'lucide-react'
 import { simulationApi } from '../api/simulation'
+import { ensTargetWarning } from './results/adequacy'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
@@ -1678,6 +1679,66 @@ function ReliabilityAssumptions({
           Lost-load energy + cost surface in the Results → LoadFlow tab when
           this is set and the LP actually sheds.
         </p>
+
+        {/* ── Reliability target (adequacy spec §5.1) ─────────────── */}
+        <div className="mt-3 pt-3 border-t border-border">
+          <NumberField
+            label="ENS target"
+            unit="‱ of demand"
+            value={draft.ens_cap_permyriad ?? 0}
+            step={0.1}
+            onChange={v => patch({ ens_cap_permyriad: v > 0 ? v : null })}
+            hint="Caps unserved ELECTRICAL energy per investment period at this share (parts per ten thousand) of the period's demand. 0 = off. Adequate systems run ~0.1–1‱; GB's standard is 3 loss-of-load hours/yr. Requires a VOLL > 0."
+          />
+          {ensTargetWarning(draft.ens_cap_permyriad) && (
+            <p className="text-[10px] text-danger mt-1">
+              {ensTargetWarning(draft.ens_cap_permyriad)}
+            </p>
+          )}
+          <NumberField
+            label="Per-zone ceiling multiple"
+            unit="× target"
+            value={draft.ens_zone_cap_multiple ?? 0}
+            step={0.5}
+            onChange={v => patch({ ens_zone_cap_multiple: v > 0 ? v : null })}
+            hint="Optional backstop so no single zone (bus `country`) absorbs the whole allowance: each zone's unserved energy ≤ multiple × target on its OWN demand. 3× is a reasonable default. With every bus's country blank, this collapses into a second system cap (the solver log says so)."
+          />
+        </div>
+
+        {/* ── Demand-response tier (spec §4.4) — opt-in, never global ── */}
+        <div className="mt-3 pt-3 border-t border-border">
+          <NumberField
+            label="Demand-response price"
+            unit="€/MWh"
+            value={draft.dsr_price_eur_per_mwh ?? 0}
+            step={10}
+            onChange={v => patch({ dsr_price_eur_per_mwh: v })}
+            hint="Contracted compensation for voluntary load reduction — a RESOURCE, priced well below VOLL and never counted as unserved energy. 0 = off."
+          />
+          <NumberField
+            label="DSR volume"
+            unit="share of bus peak"
+            value={draft.dsr_share_of_load ?? 0}
+            step={0.05}
+            onChange={v => patch({ dsr_share_of_load: v })}
+            hint="Each opted-in bus gets DSR capacity = share × its peak load (e.g. 0.2 = 20%)."
+          />
+          <label className="flex flex-col gap-0.5 mt-1.5">
+            <span className="text-[10px] text-muted">
+              DSR buses (comma-separated; opt-in — the tier is never applied
+              globally, and preflight warns where a bus already models
+              flexibility)
+            </span>
+            <input
+              className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text focus:outline-none focus:border-accent"
+              value={(draft.dsr_buses ?? []).join(', ')}
+              onChange={e => patch({
+                dsr_buses: e.target.value.split(',').map(x => x.trim()).filter(Boolean),
+              })}
+              placeholder="bus1, bus2"
+            />
+          </label>
+        </div>
       </div>
     </section>
   )

@@ -129,9 +129,9 @@ Same as Phase 0's plan (branch `claude/solution-fmea-integration-0mx5lc`; explic
 
 **Steps:**
 
-- [ ] **Vitest first** for: the ‱ warning trips at >100; the binding badge renders each variant; 204 → no chips.
-- [ ] Types + store defaults + section + readout.
-- [ ] `tsc -b` and full vitest; commit: `feat(gui): reliability target settings + achieved-vs-target readout`.
+- [x] **Vitest first** for: the ‱ warning trips at >100; the binding badge renders each variant; 204 → no chips.
+- [x] Types + store defaults + section + readout.
+- [x] `tsc -b` and full vitest; commit: `feat(gui): reliability target settings + achieved-vs-target readout`.
 
 ---
 

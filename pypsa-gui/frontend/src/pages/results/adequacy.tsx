@@ -1,0 +1,89 @@
+// Adequacy target UI pieces (plan Phase 1 Task 5; design spec §§5.1, 7).
+// Kept as a small standalone module so the warning logic and the chips are
+// unit-testable without mounting SolverSettings or LostLoadTab.
+import { AlertTriangle, Target } from 'lucide-react'
+
+// Payload of GET /results/adequacy (models/adequacy.py, serialized). Only
+// the fields the UI renders — the backend owns the full contract.
+export interface AdequacyReportPayload {
+  engine: string
+  fidelity: string
+  target: {
+    basis: string
+    system: { cap_mwh: number; achieved_ens_mwh: number; achieved_shed_hours: number }
+    zones: Array<{ zone: string; cap_mwh: number; achieved_ens_mwh: number; binding: boolean }>
+    binding: 'system_cap' | 'zone_cap' | 'voll'
+    zone_field_populated: boolean
+  }
+  metrics: { ens_mwh: number; shed_hours: number }
+  energy: { involuntary_mwh: number; demand_response_mwh: number }
+}
+
+// The "99 % trap" (spec §5.1): the target is entered in parts per ten
+// thousand of electrical demand. Real reliability standards sit 2–3 orders
+// of magnitude below a percent-scale number — a user typing "99 %
+// availability" as 100 ‱+ is planning NOT to serve that share and gets a
+// cheap-looking, badly under-built plan. Returns the warning text, or null
+// when the value is unset/plausible.
+export function ensTargetWarning(permyriad: number | null | undefined): string | null {
+  if (permyriad == null || !isFinite(permyriad) || permyriad <= 0) return null
+  if (permyriad <= 100) return null
+  const pct = permyriad / 100
+  return (
+    `${permyriad}‱ = ${pct}% of demand deliberately unserved. Real ` +
+    'standards are far tighter (adequate systems run ~0.1–1‱ of energy; ' +
+    "GB's standard is 3 loss-of-load hours/yr). A generous target yields " +
+    'a cheap-looking, badly under-built plan.'
+  )
+}
+
+const BINDING_LABEL: Record<AdequacyReportPayload['target']['binding'], string> = {
+  system_cap: 'ENS cap',
+  zone_cap: 'zone ceiling',
+  voll: 'VoLL',
+}
+
+// Which standard actually shaped the plan (spec §5.5) — without this badge,
+// two users with the same stated target get different plans for reasons
+// neither can observe.
+export function AdequacyChips({ report }: { report: AdequacyReportPayload | null }) {
+  if (!report) return null
+  const t = report.target
+  const bindingZones = t.zones.filter(z => z.binding).map(z => z.zone || '<blank>')
+  const bindingLabel =
+    t.binding === 'zone_cap' && bindingZones.length > 0
+      ? `zone ceiling ${bindingZones.join(', ')}`
+      : BINDING_LABEL[t.binding]
+  const fidelityTip =
+    'LP proxy (deterministic, perfect foresight, one realisation) — a ' +
+    'relative diagnostic, NOT comparable to a statutory reliability standard.'
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-3" data-testid="adequacy-chips">
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-semibold"
+        title={fidelityTip}
+      >
+        <Target size={11} /> standard: {bindingLabel}
+      </span>
+      <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={fidelityTip}>
+        ENS {t.system.achieved_ens_mwh.toFixed(1)} / cap {t.system.cap_mwh.toFixed(1)} MWh
+      </span>
+      <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={fidelityTip}>
+        shed-hours {report.metrics.shed_hours.toFixed(1)} h
+      </span>
+      {report.energy.demand_response_mwh > 0 && (
+        <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={fidelityTip}>
+          DSR {report.energy.demand_response_mwh.toFixed(1)} MWh (not unserved)
+        </span>
+      )}
+      {!t.zone_field_populated && t.zones.length > 0 && (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-warn/10 text-warn text-[10px]"
+          title="Every electrical bus has a blank `country`, so the per-zone ceiling collapsed into a second system cap."
+        >
+          <AlertTriangle size={11} /> zones unpopulated
+        </span>
+      )}
+    </div>
+  )
+}

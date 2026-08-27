@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { AdequacyChips, type AdequacyReportPayload } from './adequacy'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
@@ -54,6 +55,12 @@ export default function LostLoadTab() {
     queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
     queryFn: () => resultsApi.getLostLoad(win),
     enabled: winValid,
+  })
+  // Achieved-vs-target readout (adequacy plan Phase 1 Task 5). 204 → null →
+  // AdequacyChips renders nothing. Horizon-scope, so no window params.
+  const { data: adequacy } = useQuery({
+    queryKey: nk(currentProject, 'results', 'adequacy'),
+    queryFn: () => resultsApi.getAdequacy(),
   })
   // WeightCtx + timeline from the shared hook (fetches /snapshots +
   // /investmentPeriods); refTs = the lost-load series.
@@ -157,6 +164,8 @@ export default function LostLoadTab() {
           generators on every bus.
         </p>
       </header>
+
+      <AdequacyChips report={(adequacy ?? null) as AdequacyReportPayload | null} />
 
       <div className="grid grid-cols-3 gap-3">
         <Kpi label="Total lost load" value={fmtEnergy(totals.mwh)}
