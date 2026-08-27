@@ -37,7 +37,7 @@ from db.models import User
 from db.session import get_db
 from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
-from routers.projects import _enforce_project_lock
+from routers.projects import _check_project_lock
 from services import upload_service
 from services.upload_guard import read_capped
 
@@ -48,7 +48,7 @@ router = APIRouter()
 def _lock_target(project: AuthorizedProject) -> SimpleNamespace:
     """
     Adapt an `AuthorizedProject` (an id/name/directory view built for ACL, not
-    an ORM row) into the shape `_enforce_project_lock` needs: `.id` as the
+    an ORM row) into the shape `_check_project_lock` needs: `.id` as the
     `uuid.UUID` the lock table keys on (matches `Project.id`), and `.name` for
     the error message. Mirrors `routers/snapshots.py::_lock_target` — same
     adapter, same reasoning, kept local rather than cross-imported from a
@@ -174,11 +174,11 @@ async def post_upload(
 
     A live foreign edit-lock refuses the write (409 `project_locked`) — this
     is a write edge into `project.directory` same as save/rename/delete, and
-    was missed by the sweep that added `_enforce_project_lock` elsewhere in
+    was missed by the sweep that added lock enforcement elsewhere in
     this router family. Checked after access resolution, before any bytes
     are read or written to disk.
     """
-    _enforce_project_lock(db, _lock_target(project), user)
+    _check_project_lock(db, _lock_target(project), user)
     filename = _validate_filename(file.filename)
 
     # Bound the read to 25 MB + 1 byte. read_capped from upload_guard
@@ -297,7 +297,7 @@ def delete_upload_route(
     router had: a non-holder deleting a file another session is actively
     referencing (e.g. mid multimodal turn).
     """
-    _enforce_project_lock(db, _lock_target(project), user)
+    _check_project_lock(db, _lock_target(project), user)
     resp = upload_service.delete_upload(
         project.name, file_id, project_dir=project.directory
     )

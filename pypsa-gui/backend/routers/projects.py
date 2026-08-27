@@ -663,6 +663,36 @@ def _serialize_project_lock(db: DBSession, project_id, user: User) -> dict[str, 
     )
 
 
+def _check_project_lock(db: DBSession, project, user) -> None:
+    """
+    Check-only sibling of `_enforce_project_lock`: refuses a live FOREIGN lock
+    without acquiring one for the caller.
+
+    Use this where the write is incidental rather than an act of editing — a
+    canvas layout flush, an attachment upload. Acquire-on-write is right for
+    the edges that ARE the edit (save/rename/delete/scenario/members/snapshots,
+    D4/D8), but wrong here twice over: it lets a passive caller take an idle
+    project's lock just by touching it, and it leaves a 120 s claim behind that
+    outlives the request. Free, expired, and the caller's own lock all pass.
+    """
+    if local_mode.is_local_mode():
+        return
+    if project is None or user is None:
+        return
+    from services import project_locks
+
+    lock = project_locks.get_lock(db, project.id)
+    if lock is not None and lock.holder_user_id != user.id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_locked",
+                "message": f"'{project.name}' is being edited by another user.",
+                "lock": _serialize_project_lock(db, project.id, user),
+            },
+        )
+
+
 def _enforce_project_lock(db: DBSession, project, user) -> None:
     """
     Write-edge lock gate (design D3/D4). Called from HANDLER BODIES — never a

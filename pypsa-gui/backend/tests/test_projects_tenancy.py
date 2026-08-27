@@ -923,6 +923,55 @@ def test_upload_holder_can_still_post_and_delete_under_own_lock(session_local):
         assert delete.json()["deleted"] is True
 
 
+def test_upload_does_not_acquire_the_edit_lock(session_local):
+    """
+    The uploads edges are CHECK-ONLY (`_check_project_lock`), not
+    acquire-on-write (`_enforce_project_lock`).
+
+    This is the sibling assertion to the three 409 tests above: they pin what
+    the gate must REFUSE, and nothing pinned what it must not DO. The first
+    version of this gate used `_enforce_project_lock`, passed its own 79
+    targeted tests, and still shipped a defect — an attachment upload claimed
+    a 120 s edit lock that outlived the request, so two tests in other files
+    failed in the full run while passing in isolation. The damage was
+    cross-file, which is precisely what a targeted suite cannot see.
+
+    Uploading a file is not an act of editing the project; it is incidental to
+    one, like the canvas layout flush that `put_layout` deliberately keeps
+    check-only. A passive caller must not be able to take an idle project's
+    lock just by touching it.
+    """
+    from services import project_locks
+
+    _org, _user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with session_local() as db:
+        assert project_locks.get_lock(db, project.id) is None, "precondition: unlocked"
+
+    with _client_for(user_b.email) as client_b:
+        upload = client_b.post(
+            f"/api/projects/{project.id}/uploads",
+            files={"file": ("incidental.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        assert upload.status_code == 200, upload.text
+        file_id = upload.json()["file_id"]
+
+        with session_local() as db:
+            assert project_locks.get_lock(db, project.id) is None, (
+                "POST /uploads acquired the edit lock; it must only CHECK. "
+                "A passive write left a live claim behind."
+            )
+
+        assert client_b.delete(
+            f"/api/projects/{project.id}/uploads/{file_id}"
+        ).status_code == 200
+
+        with session_local() as db:
+            assert project_locks.get_lock(db, project.id) is None, (
+                "DELETE /uploads/{file_id} acquired the edit lock; check-only."
+            )
+
+
 # ── Task 6: foreign-lock gate in the write middleware ──────────────────────
 #
 # `_enforce_project_lock` (Task 4/5) covers the /api/projects/* write edges
