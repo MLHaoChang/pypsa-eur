@@ -174,7 +174,13 @@ def _resolve_paths(
 # not literally a hash we minted. `..`, `%2e%2e` (post-decode), slashes,
 # absolute paths, uppercase and wrong lengths all fail it without being
 # enumerated.
-_FILE_ID_RE = re.compile(r"[0-9a-f]{16}")
+# `\A`/`\Z` and NOT `$`: `$` also matches immediately before a trailing
+# newline, so `"<16 hex>\n"` would pass a `$`-anchored pattern. Anchored in
+# the PATTERN rather than relying on `fullmatch` at the call site, so the
+# guard survives a later refactor to `.match()`/`.search()` — an unanchored
+# pattern under `.match()` is a PREFIX match, and `<16 hex>/../../etc`
+# begins with 16 hex characters.
+_FILE_ID_RE = re.compile(r"\A[0-9a-f]{16}\Z")
 
 
 def _safe_file_dir(
