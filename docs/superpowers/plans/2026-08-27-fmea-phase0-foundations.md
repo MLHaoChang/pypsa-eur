@@ -148,10 +148,10 @@ def is_slack_carrier(carrier: object) -> bool: ...
 
 **Steps:**
 
-- [ ] Transcribe spec §10 into Pydantic models: `AdequacyReport`, `TargetBlock` (with `binding: Literal["system_cap","zone_cap","voll"]` and `zone_field_populated: bool`), `MetricsBlock` (with `time_basis`), `CostBlock` (with `excludes_shed_cost: Literal[True]` — a literal, so a consumer can never receive a report where it is false), `InputsBlock` (with `outage_rate_bases`), `EnergyBlock` (`involuntary_mwh` / `demand_response_mwh`), `FailureModeResult`, `TradeoffPoint`. Every field gets a docstring; the spec's rationale comments come along.
-- [ ] Tests: round-trip `model_dump_json` → `model_validate_json`; assert `excludes_shed_cost` rejects `False`; assert an empty-but-valid minimal report constructs (what Phase 1 will emit before Phase 2 adds `per_mode`).
-- [ ] No endpoint, no wiring — models + tests only.
-- [ ] Commit: `feat(gui): AdequacyReport contract models`.
+- [x] Transcribe spec §10 into Pydantic models: `AdequacyReport`, `TargetBlock` (with `binding: Literal["system_cap","zone_cap","voll"]` and `zone_field_populated: bool`), `MetricsBlock` (with `time_basis`), `CostBlock` (with `excludes_shed_cost: Literal[True]` — a literal, so a consumer can never receive a report where it is false), `InputsBlock` (with `outage_rate_bases`), `EnergyBlock` (`involuntary_mwh` / `demand_response_mwh`), `FailureModeResult`, `TradeoffPoint`. Every field gets a docstring; the spec's rationale comments come along.
+- [x] Tests: round-trip `model_dump_json` → `model_validate_json`; assert `excludes_shed_cost` rejects `False`; assert an empty-but-valid minimal report constructs (what Phase 1 will emit before Phase 2 adds `per_mode`).
+- [x] No endpoint, no wiring — models + tests only.
+- [x] Commit: `feat(gui): AdequacyReport contract models`.
 
 ---
 
