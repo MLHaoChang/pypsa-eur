@@ -192,6 +192,18 @@ be recorded as one rather than discovered later.
 
 ## Open
 
+- **Chat-driven edits may never be undo-captured — found here, deliberately NOT fixed here.**
+  The only `undo_service.push` statement is reached from `undo_snapshot_middleware`, and
+  `chat_tools._route` calls router handlers DIRECTLY rather than over HTTP. If that holds,
+  a chat-driven component edit is neither undoable nor counted by `depth`, so `depth`
+  under-reports for chat edits in the same way it did for solves — and `unsaved` does not
+  cover it either, because this change marks only the solve sink.
+  Not folded in: it is wider than this spec's problem, it touches the chat seam, and it
+  deserves its own verification rather than a fix bolted onto a neighbouring one. Someone
+  should confirm the claim before designing against it; it is an inference from two
+  greps, not a reproduced behaviour.
+
+
 - Whether the prompt copy should distinguish "unsaved edits" from "unsaved results".
   One flag cannot say which; `depth > 0` alongside `unsaved` can. Deferred to the plan —
   it is a copy decision, not a structural one.
