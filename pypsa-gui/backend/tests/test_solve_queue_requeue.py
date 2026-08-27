@@ -296,6 +296,25 @@ def test_requeue_after_rename_uses_the_current_directory_and_name(
             local_mode.remove_local_identity(db)
 
 
+# A MUTATION CHECK ONLY PROVES SOMETHING IF THE MUTANT ACTUALLY RUNS THE
+# MUTATED LINE, and nothing tells you whether it did.
+#
+# A surviving mutant has two causes that look identical and need opposite
+# fixes: the assertion is vacuous, or the mutated code was never reached. The
+# test below hit the second. Its assertion was fine; a null `storage_dir` made
+# the route 404 at its "no saved network on disk" check, several statements
+# before the branch under mutation, so widening `_may_see` changed nothing that
+# could reach it. Both attempts reported "mutant survived" and only one of them
+# meant "the test is weak".
+#
+# What distinguishes them is a DIFFERENT OBSERVABLE. "Still fails" is
+# compatible with never having run; "the status went 404 -> 200" is not. Seeding
+# a real `storage_dir` gave that: the mutant reaches the branch, requeues
+# successfully, and the failure reads `200 == 404` — which simultaneously fixes
+# the test and demonstrates the branch is genuinely exploitable.
+#
+# Recorded here rather than only in the commit message because the next person
+# doing mutation checking will assume reaching the code is the easy part.
 def test_an_unkeyed_job_is_not_requeueable_under_auth(
     client, install_network, tmp_projects_dir, project_storage_dir,
 ):
