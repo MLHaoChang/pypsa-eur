@@ -809,7 +809,7 @@ def requeue_job(
     import pathlib
 
     from db.models import Project
-    from services import project_registry, solve_job_store
+    from services import project_locks, project_registry, solve_job_store
 
     project_registry.require_user(user)
     old = _visible_job_or_404(db, user, job_id)
@@ -839,6 +839,36 @@ def requeue_job(
         if project is None:
             raise not_found
         project_name = project.name
+        # HOLDER CHECK — the precondition for this route's foreign-lock
+        # exemption (`main._FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`), not an
+        # incidental extra. The middleware can only test the session's ACTIVE
+        # project, which is the wrong project for a route that names its
+        # target through the JOB, so the exemption removes that refusal — and
+        # requeue CREATES a job that solves and SAVES this project. Without
+        # the check here, exemption would mean starting a write against a
+        # project another user holds, with nothing testing that lock at any
+        # layer. `abort` and `dismiss` are exempt with no equivalent because
+        # stopping or hiding work writes nothing; `enqueue_solve` carries this
+        # same check for the same reason, and this is a port of it.
+        #
+        # A CHECK, not an acquire, and for the same reason as there: requeuing
+        # your own locked project must not steal or extend anything, and an
+        # unlocked project must stay unlocked. Placed BEFORE the `network.nc`
+        # existence test below so a held lock is reported as `project_locked`
+        # rather than masked by a missing-network 404 — the ordering
+        # `enqueue_solve` already uses.
+        lock = project_locks.get_lock(db, project.id)
+        if lock is not None and lock.holder_user_id != user.id:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "project_locked",
+                    "message": f"'{project.name}' is being edited by another user.",
+                    # I1 wire shape: the frontend reads `detail.lock` to name
+                    # the holder in its read-only banner.
+                    "lock": project_locks.serialize_lock(db, project.id, user.id),
+                },
+            )
         storage_dir = str(project_registry.project_dir(project))
     else:
         # No project_key to resolve against — a legacy unkeyed job. Every job

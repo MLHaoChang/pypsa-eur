@@ -1262,3 +1262,78 @@ def test_foreign_lock_gate_exempt_predicate_is_an_explicit_allowlist(monkeypatch
     # never an accidental bypass).
     assert exempt("/api/simulation/queue/not-a-uuid/abort") is False
     assert exempt("/api/simulation/queue/../abort") is False
+
+# ── N2: requeue writes to a project without checking who holds its lock ────
+#
+# A LIVE cross-user overwrite path, not a latent one. The foreign-lock
+# middleware resolves the SESSION'S active project
+# (`PyPSAService.get_active_context().project_uuid`) and refuses only when
+# THAT project is foreign-locked. `requeue_job` resolves its target from the
+# job's `project_key`, which is unrelated — so:
+#
+#   1. A holds the lock on project P.
+#   2. B's active project is Q, unlocked. No special setup.
+#   3. B requeues a job whose `project_key` is P.
+#   4. The gate tests Q, finds it free, and passes the request through.
+#   5. Requeue enqueues a solve that SAVES P, overwriting A's work.
+#
+# The gate fires only when B's own active project happens to be locked — a
+# condition with nothing to do with the target — so it was never the
+# protection it looked like. Requeue is authorized by `_may_see`, which its
+# own docstring notes is deliberately WEAKER than the `_may_abort` used for
+# stopping work, so the trigger set is wider than for aborting the same job.
+#
+# `enqueue_solve` has carried the matching check since Step 0a for exactly
+# this reason; requeue is the second route that creates solve-and-save work
+# and it shipped without it.
+
+
+def test_requeue_refuses_when_the_jobs_own_project_is_foreign_locked(session_local):
+    """
+    The lock is held by `user_b` while `user_a` — the project's creator, so
+    ACL access is not in question — does the requeuing, and `user_a`
+    activates NOTHING.
+
+    Activating nothing is the point rather than a shortcut: with no active
+    project there is no session lock for the middleware to test, so it cannot
+    be the source of a refusal. A 409 here can only have come from the route
+    itself, which is the guarantee that makes this test still meaningful once
+    the exemption lands and the middleware stops looking at this path at all.
+
+    Ordering mirrors `enqueue_solve`: the lock check precedes the `network.nc`
+    existence test, so a held lock is reported as `project_locked` rather than
+    masked by a missing-network 404.
+    """
+    from services import project_locks
+    from services.solve_queue import SolveJob, solve_queue
+
+    org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    solve_queue.reset_for_tests()
+    try:
+        jid = uuid.uuid4()
+        with solve_queue._lock:
+            job = SolveJob(
+                id=jid,
+                project_id=project.name,
+                enqueued_at=0.0,
+                project_key=f"{org.id}:{project.id}",
+            )
+            job.status = "completed"
+            job.enqueued_by_user_id = user_a.id
+            solve_queue._jobs[jid] = job
+            solve_queue._order.append(jid)
+
+        with session_local() as db:
+            assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+
+        with _client_for(user_a.email) as client_a:
+            r = client_a.post(f"/api/simulation/queue/{jid}/requeue")
+            assert r.status_code == 409, r.text
+            assert r.json()["detail"]["error_kind"] == "project_locked", r.text
+            # I1 wire shape: the frontend reads `detail.lock` to name the
+            # holder in its read-only banner. A refusal without it leaves the
+            # banner saying "another user".
+            assert r.json()["detail"].get("lock") is not None, r.text
+    finally:
+        solve_queue.reset_for_tests()
