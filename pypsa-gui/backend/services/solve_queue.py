@@ -7,8 +7,7 @@ project being foreground. This is the "open multiple projects and solve in a
 sequential fashion" headline value.
 
 DESIGN — per-project context (B4.3, supersedes the swap-based single slot).
-netCDF/HDF5 is process-global thread-unsafe, so the dispatcher still runs jobs
-strictly one at a time. But it no longer drains them through the foreground slot
+It no longer drains jobs through the foreground slot
 (the old `load_project(id) -> run_simulation(active) -> save_project(id)`
 pipeline, which co-opted the active `_active` context and its module-global
 `_state`). Each job is solved on ITS OWN `ProjectContext` so the foreground —
@@ -29,9 +28,17 @@ public `save_project` is a thin active-ctx wrapper over it). The netCDF I/O lock
 stays GLOBAL — it guards process-global HDF5 state, so a background save and a
 foreground save can't race on the file even though their mutation locks differ.
 
-Serialization: one persistent daemon dispatcher thread owns a `queue.Queue` of
-job ids and processes them strictly FIFO. Each job runs to completion (or abort)
-before the next is popped, so only one solve runs at a time.
+Serialization: `PYPSA_GUI_MAX_CONCURRENT_SOLVES` (default 1) dispatcher threads
+share one `queue.Queue` of job ids and pop it strictly FIFO. At the default the
+behaviour is exactly what it always was — one job runs to completion (or abort)
+before the next is popped. Above it, several run at once, which is safe because
+the protection was never "one job at a time": it is
+`PyPSAService._netcdf_io_lock`, a single process-global lock that serialises
+every netCDF read and write because netCDF4/h5py share thread-unsafe HDF5 state.
+That lock is narrower than the old claim — it guards the FILE I/O, not the
+solve — and each job already runs on its own `ProjectContext` with its own
+`mutation_lock`, which `build_context` guarantees ("that distinctness IS the
+concurrency").
 
 Known Phase-A limitation (documented, not fenced): a foreground `/run` started
 concurrently with a queued solve of the SAME project both claim that one ctx's
@@ -44,6 +51,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pathlib
 import queue
 import threading
@@ -54,6 +62,15 @@ from datetime import timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# How many jobs may solve at once. Overridable via env at import time, matching
+# the `PYPSA_GUI_RESIDENT_CAP` precedent (`services/pypsa_service.py:52`) rather
+# than the `PYPSAGUI_` prefix `app_paths` uses.
+#
+# DEFAULT 1, and the default is the contract: at 1 this module behaves exactly
+# as it did before the pool existed, which is what makes raising it an opt-in
+# rather than a silent change to everyone's queue.
+MAX_CONCURRENT_SOLVES: int = int(os.environ.get("PYPSA_GUI_MAX_CONCURRENT_SOLVES", "1"))
 
 
 def _row_epoch(value: Any) -> float:
@@ -169,15 +186,32 @@ class SolveQueue:
     """FIFO dispatcher: enqueue saved projects, solve them one at a time."""
 
     def __init__(self) -> None:
-        # Guards _jobs / _order / _current_id / _dispatcher. Held only for short
-        # bookkeeping — never across a solve (that would serialise the status
-        # endpoints behind a multi-minute LP).
+        # Guards _jobs / _order / _running_ids / _dispatchers. Held only for
+        # short bookkeeping — never across a solve (that would serialise the
+        # status endpoints behind a multi-minute LP).
         self._lock = threading.Lock()
         self._jobs: dict[uuid.UUID, SolveJob] = {}
         self._order: list[uuid.UUID] = []            # insertion order, stable listing
         self._q: queue.Queue[uuid.UUID] = queue.Queue()
-        self._current_id: uuid.UUID | None = None
-        self._dispatcher: threading.Thread | None = None
+        # The ids currently being solved. PLURAL: `_current_id` was one slot, so
+        # `reset_for_tests` could reach exactly one in-flight solve's stop event
+        # and the rest bled into the next test — the precise failure its
+        # docstring says it exists to prevent.
+        self._running_ids: set = set()
+        self._dispatchers: list[threading.Thread] = []
+        # Live admission control, wrapping `_lock` (NOT a second lock — a
+        # `Condition` bound to an existing lock shares it, so every plain
+        # `with self._lock:` critical section elsewhere is still exclusive
+        # with this one). Bounding concurrency by a LIVE count check here,
+        # rather than solely by how many dispatcher threads happen to be
+        # alive, matters because `_ensure_dispatcher_locked` only ever tops
+        # threads UP, never down: a test (or a future ops change) that raises
+        # `MAX_CONCURRENT_SOLVES` and later lowers it again leaves the extra
+        # thread(s) permanently alive (parked on `self._q.get()`), and without
+        # this check they would keep claiming jobs at the OLD, higher
+        # concurrency forever — silently breaking R33's "default behaves
+        # exactly as before" guarantee for every dispatch after that point.
+        self._slot_free = threading.Condition(self._lock)
         # Set by `stop_dispatching()` during a desktop quit. While set, a job
         # the dispatcher pops is left `queued` instead of started — see the
         # check in `_run_job`'s claim block for why it lives THERE.
@@ -580,15 +614,18 @@ class SolveQueue:
         thread parked on an empty queue (it is a daemon; killing it is neither
         possible nor necessary). Used by the pytest harness between tests.
 
-        Best-effort: signals the stop_event of any job currently mid-solve so it
-        aborts (run_simulation returns "aborted" -> no save) rather than bleeding
-        its solve into the next test. Doesn't join — a sub-second test solve will
-        unwind on its own; the next test's reset + reset_network() supersede it.
+        Best-effort: signals the stop_event of EVERY job currently mid-solve (a
+        pool can have more than one) so each aborts (run_simulation returns
+        "aborted" -> no save) rather than bleeding its solve into the next test.
+        Doesn't join — a sub-second test solve will unwind on its own; the next
+        test's reset + reset_network() supersede it.
         """
-        ev = None
+        events = []
         with self._lock:
-            cur = self._jobs.get(self._current_id) if self._current_id is not None else None
-            ev = cur.stop_event if cur is not None else None
+            for jid in self._running_ids:
+                job = self._jobs.get(jid)
+                if job is not None and job.stop_event is not None:
+                    events.append(job.stop_event)
             try:
                 while True:
                     self._q.get_nowait()
@@ -597,10 +634,15 @@ class SolveQueue:
                 pass
             self._jobs.clear()
             self._order.clear()
-            self._current_id = None
+            self._running_ids.clear()
+            # Wake any worker parked on the cap: the set just emptied, so every
+            # slot is free. `notify_all`, not `notify` — a reset can free
+            # several slots at once, and leaving extras parked would strand
+            # them for the whole next test.
+            self._slot_free.notify_all()
             self._draining.clear()
         self._resumed.set()
-        if ev is not None:
+        for ev in events:
             try:
                 ev.set()
             except Exception:
@@ -649,12 +691,22 @@ class SolveQueue:
 
     # ── internals ───────────────────────────────────────────────────────────
     def _ensure_dispatcher_locked(self) -> None:
-        """Lazily start the dispatcher on first enqueue (caller holds _lock)."""
-        if self._dispatcher is None or not self._dispatcher.is_alive():
+        """
+        Lazily start dispatcher workers on first enqueue (caller holds _lock).
+
+        Tops the pool back up to `MAX_CONCURRENT_SOLVES` live threads rather
+        than starting exactly one, so a worker lost to a fatal plumbing bug is
+        replaced on the next enqueue instead of shrinking the pool for the life
+        of the process.
+        """
+        self._dispatchers = [t for t in self._dispatchers if t.is_alive()]
+        while len(self._dispatchers) < max(1, MAX_CONCURRENT_SOLVES):
             t = threading.Thread(
-                target=self._dispatch_loop, name="solve-queue-dispatcher", daemon=True
+                target=self._dispatch_loop,
+                name=f"solve-queue-dispatcher-{len(self._dispatchers)}",
+                daemon=True,
             )
-            self._dispatcher = t
+            self._dispatchers.append(t)
             t.start()
 
     def _position_locked(self, job_id: uuid.UUID) -> int | None:
@@ -684,11 +736,19 @@ class SolveQueue:
                 # resume continues in FIFO order rather than letting a later
                 # job overtake.
                 self._resumed.wait()
-                with self._lock:
+                with self._slot_free:
+                    # Live admission control (see `_slot_free`'s docstring in
+                    # __init__) rather than relying solely on "there are only
+                    # MAX_CONCURRENT_SOLVES dispatcher threads": that invariant
+                    # holds on the normal ramp-up path (`_ensure_dispatcher_locked`
+                    # only ever tops threads UP) but not if `MAX_CONCURRENT_SOLVES`
+                    # is ever lowered at runtime with extra threads still alive.
+                    while len(self._running_ids) >= max(1, MAX_CONCURRENT_SOLVES):
+                        self._slot_free.wait()
                     job = self._jobs.get(jid)
                     if job is None or job.cancelled or job.status in _TERMINAL:
                         continue
-                    self._current_id = jid
+                    self._running_ids.add(jid)
                 self._run_job(job)
             except BaseException:
                 # A job failure is recorded inside _run_job; this only catches a
@@ -701,8 +761,20 @@ class SolveQueue:
                 # (The watcher is single-shot now, so this is belt-and-braces.)
                 logger.exception("solve_queue: dispatcher error on job %s", jid)
             finally:
-                with self._lock:
-                    self._current_id = None
+                # Discard AND notify under the SAME condition variable. The
+                # claim block above parks on `self._slot_free.wait()` when the
+                # cap is already met; without a notify here that wait is never
+                # woken and the worker hangs forever. Not hypothetical: this
+                # module's own test suite monkeypatches `MAX_CONCURRENT_SOLVES`
+                # UP for a concurrency test, and monkeypatch reverts the value
+                # at teardown while the threads it caused `_ensure_dispatcher_
+                # locked` to spawn stay alive — leaving more live workers than
+                # the (restored) cap, which is exactly the state that reaches
+                # the wait. `_slot_free` wraps `self._lock`, so this acquires
+                # the same lock the discard always took; no lock-order change.
+                with self._slot_free:
+                    self._running_ids.discard(jid)
+                    self._slot_free.notify()
                 self._q.task_done()
 
     def _run_job(self, job: SolveJob) -> None:
