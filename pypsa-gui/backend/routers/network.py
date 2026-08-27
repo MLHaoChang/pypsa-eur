@@ -2058,8 +2058,9 @@ def reset_network(
     # Atomic clear under the lock — concurrent serialise/iterate paths are safe.
     with _user_ts_lock:
         _user_ts.clear()
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
     # Step 0b: "New Project" un-binds the SESSION, not the process. Leaving the
     # pointer set would make the very next request re-resolve the old project
     # and hydrate it back on top of the network the user just cleared — the
@@ -2292,7 +2293,7 @@ def _push_undo_snapshot() -> None:
     import pathlib
     import tempfile
 
-    from services import undo_service
+    from services import dirty_state, undo_service
     try:
         with PyPSAService.get_lock():
             n = PyPSAService.get_network()
@@ -2323,9 +2324,14 @@ def undo_info():
     enough that the byte-eviction path can trim deep undo history
     invisibly otherwise.
     """
-    from services import undo_service
+    from services import dirty_state, undo_service
     return {
         "depth": undo_service.depth(),
+        # NOT `depth > 0`. Undo depth answers "how many undoable edits since the
+        # last save"; this answers "does memory differ from disk". A solved
+        # project has depth 0 and unsaved True, which is the whole reason this
+        # field exists — see the 2026-08-27 unsaved-results spec.
+        "unsaved": dirty_state.is_dirty() or undo_service.depth() > 0,
         "memory_bytes": undo_service.memory_bytes(),
         "max_bytes": undo_service.MAX_BYTES,
         "max_steps": undo_service.MAX_STEPS,
@@ -2338,7 +2344,7 @@ def undo_last():
     import pathlib
     import tempfile
 
-    from services import undo_service
+    from services import dirty_state, undo_service
     result = undo_service.pop()
     if result is None:
         raise HTTPException(409, "Nothing to undo")

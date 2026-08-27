@@ -520,6 +520,16 @@ def run():
         status, condition = run_simulation(
             config, n, lock, stop_event, log_queue, state_update=_state_update
         )
+        # Results now live in the in-memory network and are NOT on disk: this
+        # path, unlike the queue's, does not persist. They are unsaved work,
+        # they never enter the undo stack, and every destructive-action guard
+        # asks `undo/info` whether unsaved work exists — so without this the
+        # guards let a solve be destroyed silently. Marked on any terminal
+        # outcome that wrote results; an aborted or failed solve leaves the
+        # network as it was.
+        if status in ("ok", "optimal"):
+            from services import dirty_state
+            dirty_state.mark_dirty()
         elapsed = _time.time() - t0
         # Total system cost (variable objective + objective_constant, summed
         # across per-period LPs in myopic mode) — see _compute_run_objective.
