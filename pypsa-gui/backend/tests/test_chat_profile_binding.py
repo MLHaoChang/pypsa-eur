@@ -707,3 +707,268 @@ def test_a8_fallback_is_turn_scoped_across_multiple_rounds(
     # The fallback model is still what the turn ended up on — the second
     # rate_limited did not trigger any further model mutation.
     assert session.model == "fallback-model"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Task 8 — capability-honest degradation: tools/vision enforcement, prompt
+# split. Spec: .superpowers/sdd/2026-08-14-llm-provider-config-and-switching/
+# task-8-brief.md.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_toolless_profile_sends_no_tools_and_trimmed_prompt(appdata):
+    """
+    `tools: false` on the bound profile -> the request carries `tools=[]`
+    and `tools_stable=False`, the system prompt drops its tool-chaining half
+    (no "CHAIN get_results" imperative), and `session_init.tool_count`
+    reports the count ACTUALLY SENT (0), not `len(TOOLS)`.
+    """
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+
+    profile = llm_config.LLMProfile(
+        id="toolless", label="Toolless Profile", preset="custom",
+        wire="anthropic", base_url=None, model="claude-sonnet-5",
+        tools=False, vision=True, auth="none", fallback_model=None,
+        max_output_tokens=None,
+    )
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    session.profile_id = "toolless"
+
+    fake = FakeProvider([{
+        "events": [LLMEvent(type="text_delta", text="hi")],
+        "blocks": [{"type": "text", "text": "hi"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }])
+
+    events = list(chat_service.run_turn(session, "hello", provider=fake))
+    names = [n for n, _ in events]
+    assert "error" not in names
+
+    session_init = next(p for n, p in events if n == "session_init")
+    assert session_init["tool_count"] == 0
+
+    assert len(fake.requests) == 1
+    req = fake.requests[0]
+    assert req.tools == []
+    assert req.tools_stable is False
+    system_text = req.system_blocks[0]["text"]
+    assert "CHAIN get_results" not in system_text
+    assert "CHAIN get_results" not in system_text.replace("\n", " ")
+
+
+def test_vision_false_blocks_replayed_image_blocks(appdata):
+    """
+    An image attached on an EARLIER turn is replayed into `messages` via
+    session history. A `vision: false` profile must be blocked by that
+    replay too, BEFORE any provider call — a check keyed only on this
+    turn's own `attachment_file_ids` would miss it entirely.
+    """
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+
+    profile = llm_config.LLMProfile(
+        id="no-vision", label="No Vision Profile", preset="custom",
+        wire="anthropic", base_url=None, model="claude-sonnet-5",
+        tools=True, vision=False, auth="none", fallback_model=None,
+        max_output_tokens=None,
+    )
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    session.profile_id = "no-vision"
+    # Seed history with an image block from a "previous turn" — mirrors what
+    # upload_service.build_multimodal_content_blocks produces.
+    session.append_history_message({
+        "role": "user",
+        "content": [
+            {"type": "image", "source": {"type": "base64",
+                                          "media_type": "image/png",
+                                          "data": "AAAA"}},
+            {"type": "text", "text": "earlier: what is this?"},
+        ],
+    })
+    session.append_history_message({
+        "role": "assistant",
+        "content": [{"type": "text", "text": "it looks like a bus diagram"}],
+    })
+
+    fake = FakeProvider([])  # must never be reached
+
+    events = list(chat_service.run_turn(session, "and now?", provider=fake))
+    names = [n for n, _ in events]
+    assert names == ["session_init", "error", "session_done"]
+    assert fake.requests == []
+
+    error_payload = next(p for n, p in events if n == "error")
+    assert error_payload["error_kind"] == "capability_unsupported"
+    assert "No Vision Profile" in error_payload["message"]
+
+
+def test_pdf_blocks_require_anthropic_wire_even_with_vision_true(appdata):
+    """
+    PDF (`document`) blocks are Anthropic-native: even with `vision: true`,
+    a non-anthropic-wire profile can't process them -> capability_unsupported
+    with a PDF-specific fixed message, distinct from the vision-off message.
+    """
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+
+    profile = llm_config.LLMProfile(
+        id="openai-vision", label="OpenAI Vision Profile", preset="custom",
+        wire="openai", base_url="http://localhost:11434/v1", model="qwen3:8b",
+        tools=True, vision=True, auth="none", fallback_model=None,
+        max_output_tokens=None,
+    )
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    session = chat_service.ChatSession(model="qwen3:8b")
+    session.profile_id = "openai-vision"
+    session.bound_wire = "openai"
+    session.append_history_message({
+        "role": "user",
+        "content": [
+            {"type": "document", "source": {"type": "base64",
+                                             "media_type": "application/pdf",
+                                             "data": "AAAA"}},
+            {"type": "text", "text": "earlier: summarise this pdf"},
+        ],
+    })
+    session.append_history_message({
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+    })
+
+    fake = FakeProvider([])  # must never be reached
+
+    events = list(chat_service.run_turn(session, "and now?", provider=fake))
+    names = [n for n, _ in events]
+    assert names == ["session_init", "error", "session_done"]
+    assert fake.requests == []
+
+    error_payload = next(p for n, p in events if n == "error")
+    assert error_payload["error_kind"] == "capability_unsupported"
+    assert "pdf" in error_payload["message"].lower()
+    assert "OpenAI Vision Profile" in error_payload["message"]
+
+
+def test_default_prompt_bytes_unchanged():
+    """
+    `_X_FACTS + _X_CHAINING == <the pre-split constant>` for all four prompt
+    guides, so the DEFAULT (tools-enabled) assembled system prompt stays
+    byte-identical to what `test_chat_e2e.py`'s prompt pins already assert.
+
+    Hashes captured at HEAD (32a0949a, before Task 8's split) via:
+        pixi run -e test python -c "
+        import hashlib
+        from services import chat_service as cs
+        for n in ['_DOMAIN_GUIDE', '_SOLVER_ERROR_DECODER',
+                  '_PRICE_CONGESTION_GUIDE', '_NEXT_STEP_RUBRIC']:
+            print(n, hashlib.sha256(getattr(cs, n).encode()).hexdigest())"
+    This is meaningful (not tautological) because the expected hashes below
+    were computed BEFORE the split existed, against the single-piece
+    constants, independently of whatever _X_FACTS/_X_CHAINING end up being.
+    """
+    import hashlib
+
+    expected_sha256 = {
+        "_DOMAIN_GUIDE": (
+            "3e6f420d74fea27240186cc520718dd401fd7b18a6e0fef1262630f053256f8f"
+        ),
+        "_SOLVER_ERROR_DECODER": (
+            "bd4de84083da126945d36c23a0e10bb0823d157ce8befb9aecf7c1b899c029db"
+        ),
+        "_PRICE_CONGESTION_GUIDE": (
+            "a65668e11eee7e3f30007ffc91cc7f3197e2a6938c7e8ea6e1fd647b5aa25129"
+        ),
+        "_NEXT_STEP_RUBRIC": (
+            "991709d96f9cb8b42db7b03d0b28cb5bc3aeeab7e6de57ab63dff962cc79fe1b"
+        ),
+    }
+    halves = {
+        "_DOMAIN_GUIDE": (
+            chat_service._DOMAIN_GUIDE_FACTS, chat_service._DOMAIN_GUIDE_CHAINING,
+        ),
+        "_SOLVER_ERROR_DECODER": (
+            chat_service._SOLVER_ERROR_DECODER_FACTS,
+            chat_service._SOLVER_ERROR_DECODER_CHAINING,
+        ),
+        "_PRICE_CONGESTION_GUIDE": (
+            chat_service._PRICE_CONGESTION_GUIDE_FACTS,
+            chat_service._PRICE_CONGESTION_GUIDE_CHAINING,
+        ),
+        "_NEXT_STEP_RUBRIC": (
+            chat_service._NEXT_STEP_RUBRIC_FACTS,
+            chat_service._NEXT_STEP_RUBRIC_CHAINING,
+        ),
+    }
+    for name, (facts, chaining) in halves.items():
+        combined = facts + chaining
+        actual_hash = hashlib.sha256(combined.encode()).hexdigest()
+        assert actual_hash == expected_sha256[name], (
+            f"{name}_FACTS + {name}_CHAINING no longer reconstructs the "
+            f"pre-split constant byte-for-byte"
+        )
+        # The module-level `_X = _X_FACTS + _X_CHAINING` assembly itself.
+        assert combined == getattr(chat_service, name)
+
+
+def test_capability_unsupported_frames_carry_no_identifiers(appdata):
+    """
+    SECURITY (unowned finding recorded on master in b94eb245, binding here):
+    no error frame may carry an IDENTIFIER — email, user/org/project id — or
+    a full base_url (host:port maximum). Redaction is secrets-only by design
+    and deliberately passes bare emails through, so `capability_unsupported`
+    messages must be built from the capability name + profile LABEL only,
+    never from `profile.base_url` / `profile.id` / any session/user id.
+
+    The test profile's `base_url` deliberately carries a host:port an
+    accidental `f"{profile.base_url}"` slip would leak.
+    """
+    import json
+    import re
+
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+
+    profile = llm_config.LLMProfile(
+        id="no-vision-2", label="Local Test Profile", preset="custom",
+        wire="anthropic", base_url="http://internal.example.org:9999/v1",
+        model="claude-sonnet-5", tools=True, vision=False, auth="none",
+        fallback_model=None, max_output_tokens=None,
+    )
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    session.profile_id = "no-vision-2"
+    session.append_history_message({
+        "role": "user",
+        "content": [
+            {"type": "image", "source": {"type": "base64",
+                                          "media_type": "image/png",
+                                          "data": "AAAA"}},
+            {"type": "text", "text": "earlier"},
+        ],
+    })
+    session.append_history_message({
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+    })
+
+    fake = FakeProvider([])
+    events = list(chat_service.run_turn(session, "again", provider=fake))
+    assert fake.requests == []
+
+    uuid_re = re.compile(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    )
+    error_payload = next(p for n, p in events if n == "error")
+    blob = json.dumps(error_payload)
+    assert "@" not in blob, blob
+    assert not uuid_re.search(blob), blob
+    assert "internal.example.org" not in blob, blob
+    assert "9999" not in blob, blob

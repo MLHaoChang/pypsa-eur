@@ -1782,13 +1782,34 @@ def _tools_payload() -> list[dict[str, Any]]:
     return list(TOOLS)
 
 
+def _tools_payload_for_profile(profile: Any) -> list[dict[str, Any]]:
+    """
+    The `tools` field of the neutral `LLMRequest`, honouring the profile's
+    `tools` capability (Task 8).
+
+    `profile.tools is False` -> `[]`, matching what the request actually
+    carries — NOT `_tools_payload()` filtered after the fact, which would
+    leave `session_init.tool_count` reporting a catalogue size nothing was
+    sent. Single source of truth for both the `session_init` frame and the
+    `LLMRequest.tools` field below, so they can never disagree.
+    """
+    return _tools_payload() if profile.tools else []
+
+
 # Domain-intelligence guide (#1). PyPSA result definitions + plausible ranges
 # so the agent interprets numbers correctly rather than recomputing from raw
 # tables. Tool names are spelled verbatim (get_results <metric>) because the
 # agent must be able to chain them. Module-level so the system prompt stays
 # byte-stable across the per-turn cache_control:ephemeral block (retries rebuild
 # system_blocks from the same string).
-_DOMAIN_GUIDE = (
+#
+# Task 8 — split into FACTS (definitions/ranges/modes, tool-independent) +
+# CHAINING (the multi-period/upload sentences that name specific tools and
+# only make sense when tools are actually offered). `_DOMAIN_GUIDE` stays the
+# exact concatenation so the DEFAULT (tools-enabled) prompt is byte-identical
+# to pre-split — see test_default_prompt_bytes_unchanged, which pins this
+# against a hash captured at HEAD before the split.
+_DOMAIN_GUIDE_FACTS = (
     "Domain knowledge — interpret results, do not recompute from raw tables. "
     "capacity factor = time-average of p / (p_nom * p_max_pu); curtailment = "
     "available VRE energy minus dispatched VRE energy. LCOE / LCOH = annualised "
@@ -1802,7 +1823,10 @@ _DOMAIN_GUIDE = (
     "capacity factor ~0.2–0.45, solar PV ~0.1–0.25, LCOE ~€30–150/MWh, CO2 "
     "price ~€0–300/t. Foresight modes: overnight = one target year solved in "
     "perfect hindsight; myopic = rolling year-by-year with no lookahead; "
-    "perfect = all years co-optimised with full foresight. Multi-period quirk: "
+    "perfect = all years co-optimised with full foresight. "
+)
+_DOMAIN_GUIDE_CHAINING = (
+    "Multi-period quirk: "
     "n.statistics() puts (metric, period) in the COLUMNS, not the rows, and the "
     "horizon total needs investment_period_weightings applied — so to read "
     "per-period results use the by_period field from get_results, never re-sum "
@@ -1817,11 +1841,21 @@ _DOMAIN_GUIDE = (
     "generators p_max_pu). Only use upload_* when the user supplied a real "
     "file or a short series."
 )
+_DOMAIN_GUIDE = _DOMAIN_GUIDE_FACTS + _DOMAIN_GUIDE_CHAINING
 
 # Solver-error decoder (#3). Symptom→cause table seeded from CLAUDE.md so the
 # agent diagnoses failed runs instead of echoing a cryptic linopy string.
-_SOLVER_ERROR_DECODER = (
-    "Solver-error decoding. On ANY failed or aborted run, call "
+#
+# Task 8 split — see _DOMAIN_GUIDE comment above for the FACTS/CHAINING
+# doctrine. The symptom→cause table itself names no tool, but it sits AFTER
+# the "call get_simulation_log_history" imperative in the original text, so a
+# byte-identical prefix/suffix split (required for
+# test_default_prompt_bytes_unchanged) pulls it into CHAINING too.
+_SOLVER_ERROR_DECODER_FACTS = (
+    "Solver-error decoding. "
+)
+_SOLVER_ERROR_DECODER_CHAINING = (
+    "On ANY failed or aborted run, call "
     "get_simulation_log_history BEFORE answering and quote the failing "
     "TRACEBACK frame. Common causes: 'infeasible' = over-constrained bounds or "
     "a CO2 cap too tight / capacities too small to meet load; 'dim_0' in a "
@@ -1834,24 +1868,38 @@ _SOLVER_ERROR_DECODER = (
     "terms and suggest the corrective lever (loosen the bound, rebuild "
     "snapshots, re-solve)."
 )
+_SOLVER_ERROR_DECODER = _SOLVER_ERROR_DECODER_FACTS + _SOLVER_ERROR_DECODER_CHAINING
 
 # Price-driver / congestion narration (#4). LMP / marginal-unit / line-dual
 # vocabulary + the chain that explains WHY prices are high.
-_PRICE_CONGESTION_GUIDE = (
+#
+# Task 8 split — see _DOMAIN_GUIDE comment above.
+_PRICE_CONGESTION_GUIDE_FACTS = (
     "Price + congestion narration. LMP = locational marginal price at a bus = "
     "dual of that bus's nodal power balance. The marginal unit is the generator "
     "whose marginal cost sets the price at that bus and hour. A line dual / "
     "congestion rent is the shadow price of a line's flow limit — nonzero means "
     "the line is binding (congested); the congestion spread is the price "
-    "difference across that congested line. To explain why prices are high, "
+    "difference across that congested line. "
+)
+_PRICE_CONGESTION_GUIDE_CHAINING = (
+    "To explain why prices are high, "
     "CHAIN get_results prices + get_results price_drivers + get_results "
     "line_duals and narrate the marginal unit and any binding lines."
 )
+_PRICE_CONGESTION_GUIDE = _PRICE_CONGESTION_GUIDE_FACTS + _PRICE_CONGESTION_GUIDE_CHAINING
 
 # Suggest-next-step rubric (#5). Compact decision rules keyed off the network's
 # configuration, so a recommendation is grounded rather than generic.
-_NEXT_STEP_RUBRIC = (
-    "Suggesting next steps. Before recommending anything, read get_meta and "
+#
+# Task 8 split — see _DOMAIN_GUIDE comment above. The rubric itself names no
+# tool, but sits AFTER the "read get_meta and get_solver_config" imperative,
+# so the byte-identical prefix/suffix split pulls it into CHAINING too.
+_NEXT_STEP_RUBRIC_FACTS = (
+    "Suggesting next steps. "
+)
+_NEXT_STEP_RUBRIC_CHAINING = (
+    "Before recommending anything, read get_meta and "
     "get_solver_config to ground the advice in the actual setup. Rubric: if "
     "foresight is overnight but the user wants a multi-year pathway, explain "
     "the myopic vs perfect tradeoff; if the bus_count is high and solves are "
@@ -1860,6 +1908,7 @@ _NEXT_STEP_RUBRIC = (
     "is electricity-only, mention that sector coupling (heat / H2 / transport) "
     "is available. Only suggest steps the current configuration supports."
 )
+_NEXT_STEP_RUBRIC = _NEXT_STEP_RUBRIC_FACTS + _NEXT_STEP_RUBRIC_CHAINING
 
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the
 # <untrusted_data> wrapping in _result_to_anthropic_content + the attachment
@@ -2246,9 +2295,44 @@ def _format_live_network_meta(ctx: Any) -> str | None:
         return None
 
 
+# Base identity preamble, split (Task 8) so `include_tools=False` can drop
+# the confirmation-card contract paragraph — it describes the destructive-
+# action confirmation-card mechanism, which is meaningless when no tools
+# (hence no destructive tool calls) are on offer. `_CONFIRMATION_CARD_CONTRACT`
+# is a template (not a plain constant) because it embeds the per-session audit
+# prefix (`session.session6()`); `.format(session6=...)` fills it in.
+# Concatenating identity + contract.format(...) + style reproduces the
+# original single-string preamble byte-for-byte (exercised end-to-end by
+# every existing test_chat_e2e.py prompt pin, which calls _build_system_prompt
+# with the include_tools=True default); the include_tools=False trim itself
+# is exercised by test_toolless_profile_sends_no_tools_and_trimmed_prompt in
+# test_chat_profile_binding.py.
+_BASE_IDENTITY = (
+    "You are the pypsa-gui assistant, an in-app copilot embedded next to "
+    "an open energy-system optimisation model. Use the provided tools to "
+    "answer questions and make changes; do NOT hallucinate component "
+    "names or routes. "
+)
+_CONFIRMATION_CARD_CONTRACT_TEMPLATE = (
+    "Always confirm destructive / execution actions "
+    "through the confirmation card mechanism (the runtime issues a token "
+    "for you — you do NOT need to ask the user verbally). Never request "
+    "more than one destructive action in a single turn — the runtime "
+    "rejects parallel destructives. When you write to the network, every "
+    "audit entry will carry the prefix "
+    "'agent:<verb>:{session6}' automatically. "
+)
+_STYLE_GUIDANCE = (
+    "Be terse, "
+    "cite component names verbatim, prefer plain prose over markdown "
+    "headers, and end with a one-sentence summary of what changed."
+)
+
+
 def _build_system_prompt(
     session: ChatSession,
     live_meta: str | None = None,
+    include_tools: bool = True,
 ) -> str:
     """
     Build the system prompt for one turn. Kept small — the agent learns the
@@ -2259,25 +2343,30 @@ def _build_system_prompt(
 
     Optional `live_meta` (from `_format_live_network_meta`) is appended so the
     model knows the bound project + network size without a get_meta round-trip.
+
+    `include_tools` (Task 8, default True — every existing caller gets the
+    unchanged prompt): when False (a `profile.tools is False` turn, where the
+    request carries `tools=[]`), assembles only the FACTS half of each of the
+    four guide constants below and drops the confirmation-card contract
+    paragraph — both describe / invoke tools that are not being offered this
+    turn. `_ASSISTANT_STANCE` and `_UNTRUSTED_DATA_CLAUSE` are NOT trimmed:
+    they are safety/stance policy, not tool-chaining instructions, and stay
+    out of this task's named split (`_DOMAIN_GUIDE` / `_SOLVER_ERROR_DECODER`
+    / `_PRICE_CONGESTION_GUIDE` / `_NEXT_STEP_RUBRIC` only).
     """
+    base = _BASE_IDENTITY
+    if include_tools:
+        base += _CONFIRMATION_CARD_CONTRACT_TEMPLATE.format(
+            session6=session.session6(),
+        )
+    base += _STYLE_GUIDANCE
     parts = [
-        "You are the pypsa-gui assistant, an in-app copilot embedded next to "
-        "an open energy-system optimisation model. Use the provided tools to "
-        "answer questions and make changes; do NOT hallucinate component "
-        "names or routes. Always confirm destructive / execution actions "
-        "through the confirmation card mechanism (the runtime issues a token "
-        "for you — you do NOT need to ask the user verbally). Never request "
-        "more than one destructive action in a single turn — the runtime "
-        "rejects parallel destructives. When you write to the network, every "
-        "audit entry will carry the prefix "
-        f"'agent:<verb>:{session.session6()}' automatically. Be terse, "
-        "cite component names verbatim, prefer plain prose over markdown "
-        "headers, and end with a one-sentence summary of what changed.",
+        base,
         _ASSISTANT_STANCE,
-        _DOMAIN_GUIDE,
-        _SOLVER_ERROR_DECODER,
-        _PRICE_CONGESTION_GUIDE,
-        _NEXT_STEP_RUBRIC,
+        _DOMAIN_GUIDE if include_tools else _DOMAIN_GUIDE_FACTS,
+        _SOLVER_ERROR_DECODER if include_tools else _SOLVER_ERROR_DECODER_FACTS,
+        _PRICE_CONGESTION_GUIDE if include_tools else _PRICE_CONGESTION_GUIDE_FACTS,
+        _NEXT_STEP_RUBRIC if include_tools else _NEXT_STEP_RUBRIC_FACTS,
         _UNTRUSTED_DATA_CLAUSE,
     ]
     if live_meta:
@@ -2507,6 +2596,42 @@ def run_turn(
             clear_pending_turn(_wal_ctx)
 
 
+def _outbound_vision_block_kinds(
+    messages: list[dict[str, Any]],
+) -> tuple[bool, bool]:
+    """
+    Scan the OUTBOUND `messages` array (Task 8) for `image` / `document`
+    content blocks, anywhere in it — not just the newest message.
+
+    This is the vision-capability enforcement point, and it deliberately
+    reads `messages` rather than `attachment_file_ids`: an image/document
+    attached on an EARLIER turn is replayed into `messages` via session
+    history on every later turn (that is how multi-turn multimodal
+    conversations work at all), so a check keyed on this turn's own
+    `attachment_file_ids` alone would miss every replay — a `vision: false`
+    profile could keep sending an image it can't process turn after turn.
+
+    Returns `(has_image, has_document)`. A message whose `content` is a bare
+    string (the no-attachment shape) or anything else non-list contributes
+    neither.
+    """
+    has_image = False
+    has_document = False
+    for msg in messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "image":
+                has_image = True
+            elif block_type == "document":
+                has_document = True
+    return has_image, has_document
+
+
 def _run_turn_body(
     session: ChatSession,
     message: str,
@@ -2622,7 +2747,9 @@ def _run_turn_body(
         "session_id": session.session_id,
         "session6": session.session6(),
         "model": session.model,
-        "tool_count": len(_tools_payload()),
+        # Task 8 — the count actually sent this turn (0 for a `tools: false`
+        # profile), not the catalogue size. See _tools_payload_for_profile.
+        "tool_count": len(_tools_payload_for_profile(profile)),
         "profile_id": profile.id,
         "profile_label": profile.label,
     }
@@ -2771,16 +2898,72 @@ def _run_turn_body(
     history_cache_anchor: int | None = len(messages) - 1 if messages else None
 
     messages.append({"role": "user", "content": user_content})
+
+    # Task 8 — vision capability enforcement, on the OUTBOUND MESSAGE ARRAY,
+    # not on `attachment_file_ids`. Checked HERE, before this turn's message
+    # is persisted into `session.messages` and before any provider call:
+    #   * `attachment_file_ids` only names THIS turn's own attachments — an
+    #     image/document attached on an earlier turn is replayed into
+    #     `messages` via session history on every later turn, so a check
+    #     keyed on `attachment_file_ids` alone misses every replay. Scanning
+    #     `messages` (built from history + this turn, just above) catches
+    #     both a fresh attachment and a replayed one.
+    #   * Checked before `session.append_history_message` so a FRESH
+    #     attachment that gets rejected here is never persisted — the turn
+    #     never happened, so there is nothing to replay next time. A
+    #     violation already sitting in history from an earlier (differently
+    #     configured) session is still caught on replay, every turn, until
+    #     the user drops the attachment or switches to a vision-capable
+    #     profile — there is no way to "fix" already-persisted history from
+    #     here.
+    has_vision_image, has_vision_document = _outbound_vision_block_kinds(messages)
+    if (has_vision_image or has_vision_document) and not profile.vision:
+        # Fixed message: capability name + profile LABEL only — never an
+        # id/base_url (SECURITY, b94eb245 on master: redaction is
+        # secrets-only and deliberately passes bare emails/ids through, so
+        # this frame must not carry one to begin with).
+        yield "error", {
+            "error_kind": "capability_unsupported",
+            "message": (
+                f"the {profile.label!r} profile does not support image or "
+                "document attachments (vision is disabled for this "
+                "profile) — remove the attachment or switch to a "
+                "vision-capable profile."
+            ),
+        }
+        yield "session_done", {"reason": "capability_unsupported"}
+        return
+    if has_vision_document and profile.wire != "anthropic":
+        # PDF (`document`) blocks are Anthropic-native: even with
+        # `vision: true`, a non-anthropic wire can't process them.
+        yield "error", {
+            "error_kind": "capability_unsupported",
+            "message": (
+                f"the {profile.label!r} profile cannot process PDF "
+                "attachments — PDF document support requires an "
+                "Anthropic-wire profile. Remove the attachment or switch "
+                "to an Anthropic profile."
+            ),
+        }
+        yield "session_done", {"reason": "capability_unsupported"}
+        return
+
     with session._lock:
         session.append_history_message({"role": "user", "content": user_content})
 
     tool_call_count = 0
-    tools = _tools_payload()
+    # Task 8 — `[]` when the profile's `tools` capability is off; see
+    # _tools_payload_for_profile.
+    tools = _tools_payload_for_profile(profile)
     # A4 — orient the model on the P0-pinned turn context (not a later
     # active switch). Failure → omit; never abort the turn for meta.
+    # Task 8 — `include_tools=profile.tools` trims the tool-chaining half of
+    # each guide (and the confirmation-card contract paragraph) out of the
+    # prompt when no tools are being offered this turn.
     system_prompt = _build_system_prompt(
         session,
         live_meta=_format_live_network_meta(turn_ctx),
+        include_tools=profile.tools,
     )
 
     # A8 — at most one fallback-model downgrade after rate_limited retries
@@ -2832,7 +3015,11 @@ def _run_turn_body(
             max_tokens=max_output_tokens,
             system_blocks=system_blocks,
             tools=tools,
-            tools_stable=True,
+            # Task 8 — no tools sent means nothing to mark stable/cached; the
+            # cache-breakpoint site (llm_anthropic.AnthropicProvider.stream)
+            # already guards this with `if tools and request.tools_stable:`
+            # so `tools=[]` never touches `tools[-1]`, cache-marker or not.
+            tools_stable=profile.tools,
             messages=messages,
             history_stable_anchor=history_cache_anchor,
         )
