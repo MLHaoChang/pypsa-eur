@@ -188,6 +188,14 @@ def _merge_partial_update(n, attr: str, name: str, submitted: dict) -> dict:
         defaults = getattr(n.components, attr).defaults
         mask = defaults["status"].str.startswith("Input", na=False)
         input_cols = list(defaults.index[mask])
+        # AND custom GUI-added columns (curtailment_cost, etc.) — any column on
+        # the DataFrame that PyPSA's defaults don't know about. They are inputs
+        # by construction (the GUI put them there), but they never appear in
+        # `defaults`, so filtering on `defaults` alone drops them from `current`
+        # and the remove+add cycle silently resets them on every partial PUT.
+        # Mirrors the same widening in services/vintage_service.py.
+        known_defaults = set(defaults.index)
+        input_cols += [c for c in df.columns if c not in known_defaults]
     except Exception:
         input_cols = list(df.columns)
     current = {c: df.at[name, c] for c in input_cols if c in df.columns}
