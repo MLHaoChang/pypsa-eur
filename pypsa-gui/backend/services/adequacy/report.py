@@ -180,7 +180,7 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict) -> dict:
         ),
         energy=EnergyBlock(
             involuntary_mwh=involuntary_mwh,
-            demand_response_mwh=0.0,   # filled by the DSR tier (plan Task 4)
+            demand_response_mwh=float(captured.get("dsr_total_mwh", 0.0) or 0.0),
         ),
     )
     return report.model_dump()

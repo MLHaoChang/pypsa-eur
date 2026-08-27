@@ -16,7 +16,10 @@ import pypsa
 
 from services import period_utils as _period_utils
 from services.adequacy.slack import (
+    DSR_SLACK_CARRIER,
+    DSR_SLACK_PREFIX,
     INVOLUNTARY_SLACK_CARRIER,
+    INVOLUNTARY_SLACK_CARRIERS,
     VOLL_SLACK_PREFIX,
     is_slack_carrier,
     strip_slack_prefix,
@@ -128,6 +131,13 @@ class SolverConfig:
     # Per-zone ceiling as a multiple of the system target, applied to each
     # zone's OWN demand (zone = bus `country`). None = no zone ceilings.
     ens_zone_cap_multiple: float | None = None
+    # Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN per
+    # bus. price 0 = off. Never silently global — price set with an empty
+    # bus list keeps the tier off and preflight warns (double-count hazard
+    # against networks that already model DSR as a real asset).
+    dsr_price_eur_per_mwh: float = 0.0
+    dsr_share_of_load: float = 0.0      # DSR p_nom = share × bus peak load
+    dsr_buses: list = field(default_factory=list)
     investment_periods: list = field(default_factory=list)  # list[int] of years
     # Per-investment-period load scaling. Keyed by period year as str (JSON
     # object keys are always strings), value is a multiplier (1.0 = 100 %,
@@ -2404,6 +2414,7 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     period_data: dict = {
         p: {"opex_var_mc0": 0.0, "co2_surcharge": 0.0, "curt_penalty": 0.0,
             "voll_shed_cost": 0.0, "voll_shed_mwh": 0.0,
+            "dsr_cost": 0.0, "dsr_mwh": 0.0,
             "new_capex": 0.0,
             "co2_emitted_t": 0.0,
             "by_carrier_mwh": {}}
@@ -2462,7 +2473,8 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                 period_data.setdefault(p, {
                     "opex_var_mc0": 0.0, "co2_surcharge": 0.0,
                     "curt_penalty": 0.0, "voll_shed_cost": 0.0,
-                    "voll_shed_mwh": 0.0, "new_capex": 0.0,
+                    "voll_shed_mwh": 0.0, "dsr_cost": 0.0, "dsr_mwh": 0.0,
+                    "new_capex": 0.0,
                     "co2_emitted_t": 0.0, "by_carrier_mwh": {}})
                 period_data[p]["by_carrier_mwh"][carrier] = (
                     period_data[p]["by_carrier_mwh"].get(carrier, 0.0) + m
@@ -2484,16 +2496,21 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                     except (TypeError, ValueError):
                         price = float(co2_scalar)
                     period_data[p]["co2_surcharge"] += t_co2 * price
-            # VOLL load shedding — slack carriers are split out of the
-            # normal opex buckets. NOTE for Phase 1 (spec §4.4): when the
-            # demand_response tier exists it must NOT land in voll_shed_* —
-            # this is the site where that split happens.
+            # Slack carriers are split out of the normal opex buckets — and
+            # split from EACH OTHER (spec §4.4): demand response is a
+            # resource priced at its compensation, never lumped into the
+            # VOLL-shed bucket a reader treats as unserved energy.
             if is_slack_carrier(carrier):
                 mwh_p = mwh_per_period
                 cost_p = _per_period_split(p_series * mc_scalar, weights)
-                for p in mwh_p:
-                    period_data[p]["voll_shed_mwh"] += mwh_p[p]
-                    period_data[p]["voll_shed_cost"] += cost_p[p]
+                if carrier == DSR_SLACK_CARRIER:
+                    for p in mwh_p:
+                        period_data[p]["dsr_mwh"] += mwh_p[p]
+                        period_data[p]["dsr_cost"] += cost_p[p]
+                else:
+                    for p in mwh_p:
+                        period_data[p]["voll_shed_mwh"] += mwh_p[p]
+                        period_data[p]["voll_shed_cost"] += cost_p[p]
 
     # ── New CAPEX by build_year ─────────────────────────────────────────
     # Capital expenditure for assets newly built (Δp_nom_opt > 0) and built
@@ -2622,13 +2639,15 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                     key=lambda x: int(x) if isinstance(x, int) else 99999) + (
             ["ALL"] if "ALL" in period_data else []):
         d = period_data[p]
-        total = d["new_capex"] + d["opex_var_mc0"] + d["co2_surcharge"] + d["voll_shed_cost"]
+        total = (d["new_capex"] + d["opex_var_mc0"] + d["co2_surcharge"]
+                 + d["voll_shed_cost"] + d["dsr_cost"])
         # Highlight the dominant cost component so user can scan visually.
         components = [
             ("CAPEX(new)", d["new_capex"]),
             ("OPEX(mc)",   d["opex_var_mc0"]),
             ("CO2 surcharge", d["co2_surcharge"]),
             ("VOLL shed",  d["voll_shed_cost"]),
+            ("DSR",        d["dsr_cost"]),
         ]
         dominant = max(components, key=lambda x: abs(x[1]))[0]
         carrier_str = ", ".join(
@@ -2641,6 +2660,7 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
             f"CO2_surcharge={d['co2_surcharge']/1e6:.2f}M€ "
             f"({d['co2_emitted_t']/1e3:.1f} kt) | "
             f"VOLL_shed={d['voll_shed_cost']/1e6:.2f}M€ ({d['voll_shed_mwh']:.1f} MWh) | "
+            f"DSR={d['dsr_cost']/1e6:.2f}M€ ({d['dsr_mwh']:.1f} MWh) | "
             f"dispatch: {carrier_str} | "
             f"dominant={dominant}, total={total/1e6:.2f}M€"
         )
@@ -2837,10 +2857,9 @@ def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
     "electrical" via the same _canonical_load_carrier_key the load views
     use, so the target and the Results tab can never disagree on scope.
 
-    NOTE (two-tier slack, spec §4.4): the cap must sum the INVOLUNTARY tier
-    only. Today the mask selects every slack; when the demand_response tier
-    lands, this site must switch to the involuntary-only mask — the DSR
-    task's tests assert it.
+    The cap sums the INVOLUNTARY tier only (spec §4.4): demand response is a
+    resource, not unserved energy — the DSR tests assert it stays
+    unconstrained by the cap.
 
     Period restriction is done by ZERO-MASKING the weight vector rather than
     selecting snapshot subsets — sidesteps the MultiIndex .sel pitfalls the
@@ -2870,7 +2889,7 @@ def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
     def ens_cap_fn(n, snapshots):
         import xarray as xr
 
-        from services.adequacy.slack import slack_generator_mask
+        from services.adequacy.slack import involuntary_slack_mask
 
         gens = getattr(n, "generators", None)
         buses = getattr(n, "buses", None)
@@ -2887,7 +2906,7 @@ def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
         else:
             elec_buses = set(map(str, buses.index))
 
-        mask = slack_generator_mask(gens)
+        mask = involuntary_slack_mask(gens)
         slack_names = [
             str(g) for g in gens.index[mask]
             if str(gens.at[g, "bus"]) in elec_buses
@@ -4774,6 +4793,99 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         n.remove("Generator", nm)
                     PyPSAService.unmark_transient("Generator", nm)
             undo_actions.append(("call", _capture_and_remove_slacks))
+
+    # 5c) Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN
+    #    per bus. Independent of VOLL (a resource, not a failure valve).
+    #    Never silently global — an empty opt-in list keeps the tier off
+    #    (preflight warns). Same transient lifecycle as the VOLL slacks:
+    #    mark → add → capture (into its OWN keys) → remove.
+    dsr_price = float(getattr(cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0)
+    dsr_share = float(getattr(cfg, "dsr_share_of_load", 0.0) or 0.0)
+    dsr_buses = [str(b) for b in (getattr(cfg, "dsr_buses", None) or [])]
+    if dsr_price > 0 and dsr_share > 0 and dsr_buses and not n.loads.empty:
+        dsr_added = []
+        loads_by_bus = n.loads.groupby("bus") if "bus" in n.loads.columns else None
+        p_set_t = getattr(n.loads_t, "p_set", None)
+        for bus in dsr_buses:
+            if bus not in n.buses.index or loads_by_bus is None:
+                continue
+            try:
+                bus_loads = list(loads_by_bus.get_group(bus).index)
+            except KeyError:
+                continue  # opt-in bus without a load — nothing to respond with
+            # Peak load at the bus: time-varying columns override statics.
+            peak = 0.0
+            per_snap = None
+            for l in bus_loads:
+                if p_set_t is not None and l in getattr(p_set_t, "columns", []):
+                    series = p_set_t[l]
+                else:
+                    try:
+                        series = float(n.loads.at[l, "p_set"] or 0.0)
+                    except (TypeError, ValueError):
+                        series = 0.0
+                per_snap = series if per_snap is None else per_snap + series
+            try:
+                peak = float(per_snap.max()) if hasattr(per_snap, "max") else float(per_snap or 0.0)
+            except (TypeError, ValueError):
+                peak = 0.0
+            if peak <= 0:
+                continue
+            name = f"{DSR_SLACK_PREFIX}{bus}"
+            if name in n.generators.index:
+                continue
+            PyPSAService.mark_transient("Generator", name)
+            try:
+                n.add(
+                    "Generator", name,
+                    bus=bus,
+                    p_nom=dsr_share * peak,
+                    marginal_cost=dsr_price,
+                    carrier=DSR_SLACK_CARRIER,
+                )
+            except Exception:
+                PyPSAService.unmark_transient("Generator", name)
+                raise
+            dsr_added.append(name)
+        if dsr_added:
+            phase(
+                f"Added {len(dsr_added)} demand-response slack(s) at "
+                f"{dsr_price:.0f} EUR/MWh, volume {dsr_share:.0%} of each "
+                f"bus's peak load (opt-in tier — NOT counted as unserved "
+                f"energy)."
+            )
+
+            def _capture_and_remove_dsr(names=dsr_added):
+                try:
+                    df = n.generators_t.p
+                    if df is not None and not df.empty:
+                        live = [nm for nm in names if nm in df.columns]
+                        if live:
+                            sub = df[live].copy()
+                            sub.columns = [
+                                c.removeprefix(DSR_SLACK_PREFIX) for c in sub.columns
+                            ]
+                            w_energy = _period_utils.snapshot_weights(
+                                n, "generators", sns=sub.index)
+                            captured["dsr_t"] = sub
+                            captured["dsr_total_mwh"] = float(
+                                sub.clip(lower=0)
+                                .mul(w_energy.reindex(sub.index).fillna(0.0), axis=0)
+                                .to_numpy().sum()
+                            )
+                except Exception:
+                    pass
+                for nm in names:
+                    if nm in n.generators.index:
+                        n.remove("Generator", nm)
+                    PyPSAService.unmark_transient("Generator", nm)
+
+            undo_actions.append(("call", _capture_and_remove_dsr))
+    elif dsr_price > 0 and not dsr_buses:
+        phase(
+            "Demand-response price is set but no buses are opted in — the "
+            "tier stays OFF (it is never applied globally; see preflight)."
+        )
 
     # 6) Multi-period activity guard. In a multi-period run PyPSA only lets an
     #    asset dispatch in period p when build_year <= p < build_year + lifetime.

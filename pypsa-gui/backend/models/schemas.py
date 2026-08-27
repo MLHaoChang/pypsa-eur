@@ -429,6 +429,11 @@ class SolverConfigSchema(BaseModel):
     # Per-zone ceiling as a multiple of the system target (zone = bus
     # `country`); None = no zone ceilings. Requires ens_cap_permyriad.
     ens_zone_cap_multiple: float | None = None
+    # Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in per
+    # bus; 0 = off. Never applied globally.
+    dsr_price_eur_per_mwh: float = 0.0
+    dsr_share_of_load: float = 0.0
+    dsr_buses: list[str] = []
     investment_periods: list[int] = []
     # Per-investment-period load multiplier, keyed by period year (str). 1.0 =
     # unchanged. Applied transiently at solve time — see SolverConfig.load_scalers.

@@ -1431,6 +1431,58 @@ def _check_lopf(n, solver_config) -> list[Issue]:
 
 # ── public entry point ───────────────────────────────────────────────────────
 
+def _check_dsr_coherence(n, solver_config) -> list[Issue]:
+    """
+    Demand-response tier coherence (spec §4.4). Warnings only.
+    """
+    issues: list[Issue] = []
+    price = float(getattr(solver_config, "dsr_price_eur_per_mwh", 0.0) or 0.0)
+    if price <= 0:
+        return issues
+    share = float(getattr(solver_config, "dsr_share_of_load", 0.0) or 0.0)
+    buses = [str(b) for b in (getattr(solver_config, "dsr_buses", None) or [])]
+    if not buses:
+        issues.append(_warn(
+            "dsr_enabled_without_buses", "", "",
+            "A demand-response price is set but no buses are opted in — the "
+            "tier is OFF. DSR is deliberately never applied globally: on a "
+            "network that already models flexibility as a real asset it "
+            "would count the same response twice. Pick the buses under "
+            "Reliability settings.",
+        ))
+        return issues
+    if share <= 0:
+        issues.append(_warn(
+            "dsr_zero_volume", "", "",
+            "Demand response is enabled but its volume share is 0 — the "
+            "tier can never dispatch. Set 'dsr_share_of_load' > 0.",
+        ))
+    su_buses: set[str] = set()
+    if not n.storage_units.empty and "bus" in n.storage_units.columns:
+        su_buses = set(n.storage_units["bus"].astype(str))
+    link_buses: set[str] = set()
+    if not n.links.empty:
+        for col in ("bus0", "bus1"):
+            if col in n.links.columns:
+                link_buses |= set(n.links[col].astype(str))
+    for bus in buses:
+        if bus not in n.buses.index:
+            issues.append(_warn(
+                "dsr_unknown_bus", "Bus", bus,
+                f"DSR opt-in bus '{bus}' does not exist on the network.",
+            ))
+            continue
+        if bus in su_buses or bus in link_buses:
+            issues.append(_warn(
+                "dsr_double_count_risk", "Bus", bus,
+                f"Bus '{bus}' is opted into demand response but already "
+                "hosts modelled flexibility (a storage unit or link). The "
+                "DSR slack would count the same flexibility twice — either "
+                "remove the opt-in or accept the deliberate double count.",
+            ))
+    return issues
+
+
 def _check_ens_cap_coherence(solver_config) -> list[Issue]:
     """
     Reliability-target coherence (adequacy spec §5.1 / plan Phase 1 Task 1).
@@ -1536,6 +1588,8 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_outage_params(n)
     # Reliability-target coherence — pure config checks.
     issues += _check_ens_cap_coherence(solver_config)
+    # Demand-response tier coherence (spec §4.4).
+    issues += _check_dsr_coherence(n, solver_config)
 
     mode = solver_config.mode
     if mode == "pf":

@@ -98,6 +98,12 @@ _FORBIDDEN = (
     re.compile(r"""startswith\(\s*["']voll_slack_"""),
     re.compile(r"""replace\(\s*["']__voll_"""),
     re.compile(r"""f["']__voll_"""),
+    # The DSR tier's literals are owned by slack.py exactly like the VOLL
+    # tier's (spec §4.4).
+    re.compile(r"""==\s*["']demand_response["']"""),
+    re.compile(r"""startswith\(\s*["']__dsr_"""),
+    re.compile(r"""replace\(\s*["']__dsr_"""),
+    re.compile(r"""f["']__dsr_"""),
 )
 
 
@@ -116,3 +122,21 @@ def test_no_inline_slack_tests_outside_slack_py():
         "— use SLACK_CARRIERS / slack_generator_mask / is_slack_carrier / "
         "strip_slack_prefix instead:\n" + "\n".join(offenders)
     )
+
+
+def test_dsr_tier_is_slack_but_not_involuntary():
+    df = _gens({
+        "__voll_b1": "load_shedding",
+        "__dsr_b1": "demand_response",
+        "renamed_dsr": "demand_response",
+        "ocgt1": "gas",
+    })
+    both = slack.slack_generator_mask(df)
+    assert list(df.index[both]) == ["__voll_b1", "__dsr_b1", "renamed_dsr"]
+    invol = slack.involuntary_slack_mask(df)
+    assert list(df.index[invol]) == ["__voll_b1"], (
+        "demand response must never count as unserved energy"
+    )
+    assert slack.is_slack_carrier("demand_response")
+    assert slack.DSR_SLACK_CARRIER in slack.SLACK_CARRIERS
+    assert slack.DSR_SLACK_CARRIER not in slack.INVOLUNTARY_SLACK_CARRIERS

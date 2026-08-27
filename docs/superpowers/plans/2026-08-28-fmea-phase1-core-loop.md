@@ -109,9 +109,9 @@ Same as Phase 0's plan (branch `claude/solution-fmea-integration-0mx5lc`; explic
 
 **Steps:**
 
-- [ ] **Failing tests first:** live solve where `dsr_price < gen marginal cost of the expensive unit < voll` → the LP uses DSR up to its volume cap before involuntary shedding; capture separates the tiers; ENS cap counts only the involuntary tier (a run whose DSR covers the gap reports ENS 0 and `binding="voll"`); decomposition's `voll_shed_mwh` excludes DSR; opt-in warning fires on empty `dsr_buses` with price set; double-count warning fires next to a StorageUnit.
-- [ ] Extend `slack.py` (tier constants + tier-aware helpers, e.g. `involuntary_mask` vs `slack_generator_mask`), then the creation/capture/decomposition sites.
-- [ ] Commit: `feat(gui): opt-in demand-response slack tier, split from unserved energy`.
+- [x] **Failing tests first:** live solve where `dsr_price < gen marginal cost of the expensive unit < voll` → the LP uses DSR up to its volume cap before involuntary shedding; capture separates the tiers; ENS cap counts only the involuntary tier (a run whose DSR covers the gap reports ENS 0 and `binding="voll"`); decomposition's `voll_shed_mwh` excludes DSR; opt-in warning fires on empty `dsr_buses` with price set; double-count warning fires next to a StorageUnit.
+- [x] Extend `slack.py` (tier constants + tier-aware helpers, e.g. `involuntary_mask` vs `slack_generator_mask`), then the creation/capture/decomposition sites.
+- [x] Commit: `feat(gui): opt-in demand-response slack tier, split from unserved energy`.
 
 ---
 

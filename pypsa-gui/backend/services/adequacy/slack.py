@@ -33,19 +33,27 @@ import pandas as pd
 INVOLUNTARY_SLACK_CARRIER = "load_shedding"
 # Pre-restore netcdfs from older builds used this for both name and carrier.
 LEGACY_SLACK_CARRIER = "voll_slack"
+# The voluntary tier (spec §4.4): contracted demand response, priced at its
+# compensation (well below VoLL), a RESOURCE — it does NOT count as unserved
+# energy, does not enter the ENS cap, and must not land in voll_shed_*.
+DSR_SLACK_CARRIER = "demand_response"
 
-# Phase 1 adds "demand_response" here. Nothing else may grow this set without
-# auditing every is_slack_carrier() call site's intent — in particular the
-# solve-log cost decomposition must split DSR out of voll_shed_*, not lump it
-# in (spec §4.4).
-SLACK_CARRIERS: frozenset[str] = frozenset(
+# Nothing else may grow these sets without auditing every call site's intent —
+# the cost decomposition and the capture must SPLIT the tiers, and the ENS cap
+# must sum the involuntary tier only (spec §4.4).
+INVOLUNTARY_SLACK_CARRIERS: frozenset[str] = frozenset(
     {INVOLUNTARY_SLACK_CARRIER, LEGACY_SLACK_CARRIER}
 )
+SLACK_CARRIERS: frozenset[str] = INVOLUNTARY_SLACK_CARRIERS | {DSR_SLACK_CARRIER}
 
-# What current builds create slack names with (f"{VOLL_SLACK_PREFIX}{bus}").
+# What current builds create slack names with (f"{PREFIX}{bus}").
 VOLL_SLACK_PREFIX = "__voll_"
 LEGACY_SLACK_PREFIX = "voll_slack_"
-SLACK_NAME_PREFIXES: tuple[str, ...] = (VOLL_SLACK_PREFIX, LEGACY_SLACK_PREFIX)
+DSR_SLACK_PREFIX = "__dsr_"
+INVOLUNTARY_SLACK_PREFIXES: tuple[str, ...] = (VOLL_SLACK_PREFIX, LEGACY_SLACK_PREFIX)
+SLACK_NAME_PREFIXES: tuple[str, ...] = (
+    VOLL_SLACK_PREFIX, LEGACY_SLACK_PREFIX, DSR_SLACK_PREFIX,
+)
 
 
 def is_slack_carrier(carrier: object) -> bool:
@@ -64,19 +72,34 @@ def strip_slack_prefix(name: str) -> str:
     return name.removeprefix(VOLL_SLACK_PREFIX)
 
 
-def slack_generator_mask(generators: pd.DataFrame) -> pd.Series:
-    """
-    Boolean mask over ``generators`` (a ``n.generators``-shaped frame)
-    selecting every slack row: carrier in SLACK_CARRIERS OR name carrying a
-    slack prefix. Tolerates an absent ``carrier`` column (name matching still
-    applies) and an empty frame.
-    """
+def _tier_mask(generators: pd.DataFrame, carriers: frozenset[str],
+               prefixes: tuple[str, ...]) -> pd.Series:
     name_str = generators.index.astype(str)
     mask = pd.Series(
-        [n.startswith(SLACK_NAME_PREFIXES) for n in name_str],
+        [n.startswith(prefixes) for n in name_str],
         index=generators.index,
         dtype=bool,
     )
     if "carrier" in generators.columns:
-        mask |= generators["carrier"].astype(str).isin(SLACK_CARRIERS)
+        mask |= generators["carrier"].astype(str).isin(carriers)
     return mask
+
+
+def slack_generator_mask(generators: pd.DataFrame) -> pd.Series:
+    """
+    EVERY slack row, both tiers: carrier in SLACK_CARRIERS OR name carrying a
+    slack prefix. This is the mask for hide-from-results / strip-before-PF /
+    not-a-real-asset semantics. Tolerates an absent ``carrier`` column (name
+    matching still applies) and an empty frame.
+    """
+    return _tier_mask(generators, SLACK_CARRIERS, SLACK_NAME_PREFIXES)
+
+
+def involuntary_slack_mask(generators: pd.DataFrame) -> pd.Series:
+    """
+    The INVOLUNTARY tier only — what counts as unserved energy: the ENS cap
+    sums these, the lost-load capture reports these, VoLL prices these.
+    Demand response is deliberately excluded (spec §4.4).
+    """
+    return _tier_mask(
+        generators, INVOLUNTARY_SLACK_CARRIERS, INVOLUNTARY_SLACK_PREFIXES)
