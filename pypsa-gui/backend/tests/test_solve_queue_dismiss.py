@@ -565,3 +565,47 @@ def test_a_persisted_only_job_still_answers_can_dismiss(
         assert client.post(f"/api/simulation/queue/{jid}/dismiss").status_code == 200
     finally:
         solve_queue.reset_for_tests()
+
+
+def test_the_listing_never_emits_the_raw_owner_id(
+    client, install_network, tmp_projects_dir, registry_key_for,
+):
+    """
+    The owner travels from `_merged_jobs` to `list_queue` on the job dict
+    itself, under `_OWNER_KEY`, and is popped at the one point a response is
+    built. That is an efficient shape and a fragile one: the value is a real
+    user id riding inside the object that gets serialised, and exactly one
+    statement stands between it and every authenticated caller.
+
+    Losing the pop would disclose `enqueued_by_user_id` for every job in the
+    queue — letting any member enumerate which colleague queued which work,
+    including for rows that are otherwise fully REDACTED to them, since
+    `_redact` only nulls the fields in `_REDACTED`. Nothing else would break:
+    `can_dismiss` would still be correct, every other assertion in this file
+    would still pass, and the extra key would ride out as an additive JSON
+    field no client reads.
+
+    Asserted as "no private key survives", not as "`_owner` is absent", so a
+    future second transport key is covered by the same test rather than
+    needing to be remembered.
+    """
+    install_network(build_network(), name="Mine")
+    _save_project(client, "Mine")
+    solve_queue.reset_for_tests()
+    try:
+        me = _acting_user_id(client)
+        _seed("completed", "Mine", registry_key_for("Mine"), me)
+        _seed("completed", "Theirs", "some-other-org:deadbeef", uuid.uuid4())
+
+        rows = client.get("/api/simulation/queue").json()["jobs"]
+        assert rows, "no rows to check — the test would pass vacuously"
+        for row in rows:
+            private = [k for k in row if k.startswith("_")]
+            assert not private, (
+                f"the listing leaked internal key(s) {private} — the owner id "
+                "is transported on the job dict and must be popped before the "
+                "response is built"
+            )
+            assert "enqueued_by_user_id" not in row, row
+    finally:
+        solve_queue.reset_for_tests()
