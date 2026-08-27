@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
 import { useAssetDrag } from '../hooks/useAssetDrag'
 import { networkApi } from '../api/network'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ioApi } from '../api/io'
 import { projectsApi } from '../api/projects'
 import { simulationApi } from '../api/simulation'
@@ -687,6 +688,11 @@ function ProjectSectionContent({
   const [showCopyModal, setShowCopyModal] = useState(false)
   // "Open Project" picker — lists existing backend projects.
   const [showOpenModal, setShowOpenModal] = useState(false)
+  // Pending DESTRUCTIVE re-load of the already-open project. `depthKnown`
+  // rides along so the prompt can say which case the user is in — "you have
+  // unsaved edits" and "we could not find out" are different sentences and
+  // only one of them is a claim.
+  const [pendingReload, setPendingReload] = useState<{ name: string; depthKnown: boolean } | null>(null)
   // Route back to the projects home (the workspace surface that now owns
   // create / import / duplicate).
   const navigate = useNavigate()
@@ -937,7 +943,7 @@ function ProjectSectionContent({
     saveAndExportBundle(name, { setAsCurrent: false, askLocation: true, skipCache: true })
   }
 
-  const handleOpenPick = async (name: string) => {
+  const handleOpenPick = async (name: string, opts?: { confirmed?: boolean }) => {
     setShowOpenModal(false)
     const tId = toast.loading(`Opening '${name}'…`)
     setProjectSwitchInProgress(true)
@@ -948,6 +954,21 @@ function ProjectSectionContent({
       // is a DESTRUCTIVE re-load (not the instant switch) — switchToProject
       // no-ops on the same project, so it can't serve this recovery path.
       if (name === currentProject) {
+        // Gate on the dirty state, not unconditionally: the recovery case this
+        // branch exists for is the one where the backend network is EMPTY, and
+        // prompting there would be noise on the exact workflow it serves. But
+        // "clean" must mean clean — a failed probe is UNKNOWN and fails closed,
+        // because this path discards whatever it could not ask about.
+        if (!opts?.confirmed) {
+          let depth = 0
+          let depthKnown = true
+          try { depth = (await networkApi.undoInfo()).depth } catch { depthKnown = false }
+          if (!depthKnown || depth > 0) {
+            toast.dismiss(tId)
+            setPendingReload({ name, depthKnown })
+            return
+          }
+        }
         const stopped = await abortRunningSim()
         if (!stopped) {
           toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
@@ -1056,6 +1077,24 @@ function ProjectSectionContent({
           initial={slugify(`${currentProject || pn}_copy`)}
           onSave={handleCopyConfirm}
           onClose={() => setShowCopyModal(false)}
+        />
+      )}
+      {pendingReload && (
+        <ConfirmDialog
+          open
+          danger
+          title="Re-load from disk?"
+          message={pendingReload.depthKnown
+            ? `'${pendingReload.name}' will be re-read from disk. Unsaved changes in the current network are lost.`
+            : `Could not check '${pendingReload.name}' for unsaved changes — the backend did not answer. `
+              + 'Re-reading from disk will discard anything unsaved.'}
+          confirmLabel="Re-load"
+          onConfirm={() => {
+            const target = pendingReload.name
+            setPendingReload(null)
+            void handleOpenPick(target, { confirmed: true })
+          }}
+          onCancel={() => setPendingReload(null)}
         />
       )}
       {showOpenModal && (
