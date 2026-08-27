@@ -1808,7 +1808,11 @@ def _tools_payload_for_profile(profile: Any) -> list[dict[str, Any]]:
 # only make sense when tools are actually offered). `_DOMAIN_GUIDE` stays the
 # exact concatenation so the DEFAULT (tools-enabled) prompt is byte-identical
 # to pre-split — see test_default_prompt_bytes_unchanged, which pins this
-# against a hash captured at HEAD before the split.
+# against a hash captured at HEAD before the split. (`_PRICE_CONGESTION_GUIDE`
+# and `_ASSISTANT_STANCE` follow this same FACTS+CHAINING=original doctrine.
+# `_SOLVER_ERROR_DECODER` and `_NEXT_STEP_RUBRIC` do NOT — see their own
+# comments below for why a straight concatenation split isn't possible for
+# those two without changing the default prompt.)
 _DOMAIN_GUIDE_FACTS = (
     "Domain knowledge — interpret results, do not recompute from raw tables. "
     "capacity factor = time-average of p / (p_nom * p_max_pu); curtailment = "
@@ -1846,23 +1850,43 @@ _DOMAIN_GUIDE = _DOMAIN_GUIDE_FACTS + _DOMAIN_GUIDE_CHAINING
 # Solver-error decoder (#3). Symptom→cause table seeded from CLAUDE.md so the
 # agent diagnoses failed runs instead of echoing a cryptic linopy string.
 #
-# Task 8 split — see _DOMAIN_GUIDE comment above for the FACTS/CHAINING
-# doctrine. Fix round 1 (Task 8 review, finding 3): the FIRST version of this
-# split put only the bare heading in FACTS, because in the original wording
-# the "call get_simulation_log_history" imperative sits BEFORE the
-# symptom→cause table, and a straight prefix/suffix split can't pull a
-# tool-naming clause out of the MIDDLE of a string without also reordering
-# it. That earlier split threw away the entire table for a tools-off
-# profile — useful domain content unrelated to any tool. Fixed by actually
-# reordering the underlying text: the tool-dependent imperative now sits at
-# the END, so FACTS is the heading + the full symptom→cause table (every
-# original word preserved, only re-sequenced) and CHAINING is exactly the
-# one sentence that names a tool. This means the assembled default
-# `_SOLVER_ERROR_DECODER` is no longer byte-identical to the PRE-Task-8 HEAD
-# text (word order changed) — test_default_prompt_bytes_unchanged's pinned
-# hash for this constant was recomputed against the new (reordered) text;
-# `_DOMAIN_GUIDE` / `_PRICE_CONGESTION_GUIDE` did not need this and keep
-# their original HEAD-pinned hashes.
+# Fix round 2 (coordinator correction on top of Task 8 review finding 3):
+# `_SOLVER_ERROR_DECODER` is now the EXACT pre-Task-8 literal — byte-
+# identical to HEAD 32a0949a, full stop, verified directly (not built from
+# concatenating the two halves below). `_X = _X_FACTS + _X_CHAINING` was
+# dropped as a hard requirement for this constant: the ORIGINAL wording
+# puts the "call get_simulation_log_history" imperative BEFORE the
+# symptom→cause table, and a prefix/suffix concatenation cannot pull a
+# tool-naming clause out of the middle of a string without reordering it —
+# reordering changes the DEFAULT prompt every user gets, for a purely
+# structural reason, with no behavioural evidence that's harmless (fix
+# round 1 did this and got reverted for exactly that reason: see the
+# round-1/round-2 history in task-8-report.md).
+#
+# `_SOLVER_ERROR_DECODER_FACTS` / `_CHAINING` below are SEPARATE constants,
+# used ONLY by the tools-off (`include_tools=False`) assembly path — they
+# do NOT need to concatenate back to `_SOLVER_ERROR_DECODER` and are free to
+# reorder content for a genuinely coherent split (real domain content in
+# FACTS, the tool imperative in CHAINING). The risk this decouples is DRIFT
+# — someone edits `_SOLVER_ERROR_DECODER` and the halves silently go stale
+# — guarded by test_solver_and_rubric_halves_cover_the_same_words in
+# test_chat_profile_binding.py, which asserts the word MULTISET of
+# FACTS+CHAINING equals the word multiset of the original (order-independent
+# by design, so it doesn't re-impose the constraint just removed).
+_SOLVER_ERROR_DECODER = (
+    "Solver-error decoding. On ANY failed or aborted run, call "
+    "get_simulation_log_history BEFORE answering and quote the failing "
+    "TRACEBACK frame. Common causes: 'infeasible' = over-constrained bounds or "
+    "a CO2 cap too tight / capacities too small to meet load; 'dim_0' in a "
+    "linopy/xarray error = a time-series (_t) frame lost its index name "
+    "'snapshot'; \"cannot include dtype 'M' in a buffer\" = a multi-period → "
+    "flat demotion tripping a pandas MultiIndex reindex bug; an assign_duals "
+    "KeyError on a DatetimeIndex = a stale MultiIndex left on a dual _t frame "
+    "after a period change; a 500 with a short plain-text body from /results/* "
+    "= NaN or Inf leaked into JSON rendering. Explain the likely cause in plain "
+    "terms and suggest the corrective lever (loosen the bound, rebuild "
+    "snapshots, re-solve)."
+)
 _SOLVER_ERROR_DECODER_FACTS = (
     "Solver-error decoding. Common causes: 'infeasible' = over-constrained "
     "bounds or a CO2 cap too tight / capacities too small to meet load; "
@@ -1879,7 +1903,6 @@ _SOLVER_ERROR_DECODER_CHAINING = (
     "On ANY failed or aborted run, call get_simulation_log_history BEFORE "
     "answering and quote the failing TRACEBACK frame."
 )
-_SOLVER_ERROR_DECODER = _SOLVER_ERROR_DECODER_FACTS + _SOLVER_ERROR_DECODER_CHAINING
 
 # Price-driver / congestion narration (#4). LMP / marginal-unit / line-dual
 # vocabulary + the chain that explains WHY prices are high.
@@ -1903,15 +1926,24 @@ _PRICE_CONGESTION_GUIDE = _PRICE_CONGESTION_GUIDE_FACTS + _PRICE_CONGESTION_GUID
 # Suggest-next-step rubric (#5). Compact decision rules keyed off the network's
 # configuration, so a recommendation is grounded rather than generic.
 #
-# Task 8 split — see _DOMAIN_GUIDE comment above. Fix round 1 (Task 8
-# review, finding 3): same reordering fix as _SOLVER_ERROR_DECODER above —
-# the original wording put the "read get_meta and get_solver_config"
-# imperative BEFORE the rubric itself, so the first split (bare heading in
-# FACTS, everything else in CHAINING) threw the whole rubric away for a
-# tools-off profile. Reordered so FACTS carries the heading + the full
-# rubric and CHAINING is exactly the one tool-naming sentence, moved to the
-# end. Assembled default is reordered relative to pre-Task-8 HEAD (same
-# words, new sequence) — see the hash-pin note on _SOLVER_ERROR_DECODER_FACTS.
+# Fix round 2 — same correction as _SOLVER_ERROR_DECODER above:
+# `_NEXT_STEP_RUBRIC` is the EXACT pre-Task-8 literal, byte-identical to
+# HEAD 32a0949a. `_NEXT_STEP_RUBRIC_FACTS` / `_CHAINING` below are separate,
+# tools-off-only constants, not required to concatenate back to it — see the
+# full rationale on `_SOLVER_ERROR_DECODER`'s comment. Drift between this
+# constant and its halves is guarded by
+# test_solver_and_rubric_halves_cover_the_same_words (word-multiset
+# equality, order-independent).
+_NEXT_STEP_RUBRIC = (
+    "Suggesting next steps. Before recommending anything, read get_meta and "
+    "get_solver_config to ground the advice in the actual setup. Rubric: if "
+    "foresight is overnight but the user wants a multi-year pathway, explain "
+    "the myopic vs perfect tradeoff; if the bus_count is high and solves are "
+    "slow, suggest clustering to fewer nodes; if no CO2 GlobalConstraint is "
+    "present, suggest adding a CO2 cap to study decarbonisation; if the model "
+    "is electricity-only, mention that sector coupling (heat / H2 / transport) "
+    "is available. Only suggest steps the current configuration supports."
+)
 _NEXT_STEP_RUBRIC_FACTS = (
     "Suggesting next steps. Rubric: if foresight is overnight but the user "
     "wants a multi-year pathway, explain the myopic vs perfect tradeoff; if "
@@ -1925,7 +1957,6 @@ _NEXT_STEP_RUBRIC_CHAINING = (
     "Before recommending anything, read get_meta and get_solver_config to "
     "ground the advice in the actual setup."
 )
-_NEXT_STEP_RUBRIC = _NEXT_STEP_RUBRIC_FACTS + _NEXT_STEP_RUBRIC_CHAINING
 
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the
 # <untrusted_data> wrapping in _result_to_anthropic_content + the attachment
@@ -3010,6 +3041,15 @@ def _run_turn_body(
         # the original bug this review found was exactly that: a base64
         # image slipped past unmodified, but a non-base64 source is the
         # same failure mode in a different shape and must not repeat it.
+        #
+        # `wire != "anthropic"` is a DELIBERATE, STATED assumption, not an
+        # oversight: the anthropic wire (llm_anthropic.py) forwards content
+        # blocks to the SDK unchanged — no translation layer — and
+        # Anthropic's own API accepts a url image source natively, so
+        # nothing is refused there. If a THIRD wire is ever added, do not
+        # inherit this check by default: confirm whether its adapter can
+        # also carry a non-base64 image source before assuming this
+        # `!= "anthropic"` condition still means "needs refusing".
         yield "error", {
             "error_kind": "capability_unsupported",
             "message": (

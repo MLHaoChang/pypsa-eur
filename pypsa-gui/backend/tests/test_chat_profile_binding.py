@@ -857,38 +857,39 @@ def test_pdf_blocks_require_anthropic_wire_even_with_vision_true(appdata):
 
 def test_default_prompt_bytes_unchanged():
     """
-    `_X_FACTS + _X_CHAINING == <the pre-split constant>` for all five prompt
-    guides, so the DEFAULT (tools-enabled) assembled system prompt stays
-    byte-identical to what `test_chat_e2e.py`'s prompt pins already assert
-    — for `_DOMAIN_GUIDE`, `_PRICE_CONGESTION_GUIDE`, and `_ASSISTANT_STANCE`
-    (added fix round 1, finding 2; its split is a clean suffix of the
-    original, no reordering needed).
+    Fix round 2 (coordinator correction on top of Task 8 review finding 3):
+    all five DEFAULT (tools-enabled) prompt constants —  `_DOMAIN_GUIDE`,
+    `_SOLVER_ERROR_DECODER`, `_PRICE_CONGESTION_GUIDE`, `_NEXT_STEP_RUBRIC`,
+    `_ASSISTANT_STANCE` — must be byte-identical to their pre-Task-8 HEAD
+    (32a0949a) values, no exceptions. Fix round 1 repinned
+    `_SOLVER_ERROR_DECODER` / `_NEXT_STEP_RUBRIC` against a deliberately
+    REORDERED text (to get a clean FACTS/CHAINING split); the coordinator
+    correctly rejected that — the default prompt every user gets must not
+    change as a side effect of a refactor, full stop. Both constants are now
+    restored to the exact pre-Task-8 literal in chat_service.py (verified
+    directly, no longer built by concatenating halves); this test checks
+    that restoration.
 
-    `_SOLVER_ERROR_DECODER` and `_NEXT_STEP_RUBRIC` are the fix round 1
-    (Task 8 review, finding 3) exception: their pre-Task-8 wording put a
-    tool-naming imperative BEFORE the domain content (the symptom→cause
-    table / the rubric), so the original prefix/suffix split (matching HEAD
-    exactly) could only put a bare heading in FACTS — throwing away useful,
-    tool-independent content for a tools-off profile. Fixed by reordering
-    the underlying text (tool imperative moved to the end, every original
-    word kept); the hashes for these two are pinned against that NEW
-    (reordered) text, not pre-Task-8 HEAD — see the comment above each in
-    chat_service.py.
+    This test checks the five constants THEMSELVES, not
+    `_X_FACTS + _X_CHAINING` — for `_SOLVER_ERROR_DECODER` /
+    `_NEXT_STEP_RUBRIC` the halves are now separate, tools-off-only
+    constants that do NOT need to reassemble to the original (see
+    test_solver_and_rubric_halves_cover_the_same_words below for their
+    drift guard, and the comment above each constant in chat_service.py for
+    why: a straight concatenation split can't pull a tool-naming clause out
+    of the middle of the original string without reordering it, and
+    reordering is exactly what's being ruled out here).
 
-    Hashes for `_DOMAIN_GUIDE` / `_PRICE_CONGESTION_GUIDE` / `_ASSISTANT_STANCE`
-    captured at HEAD (32a0949a, before Task 8's split) via:
+    Hashes captured at HEAD (32a0949a, before Task 8's split) via:
         pixi run -e test python -c "
         import hashlib
         from services import chat_service as cs
-        for n in ['_DOMAIN_GUIDE', '_PRICE_CONGESTION_GUIDE',
+        for n in ['_DOMAIN_GUIDE', '_SOLVER_ERROR_DECODER',
+                  '_PRICE_CONGESTION_GUIDE', '_NEXT_STEP_RUBRIC',
                   '_ASSISTANT_STANCE']:
             print(n, hashlib.sha256(getattr(cs, n).encode()).hexdigest())"
-    Hashes for `_SOLVER_ERROR_DECODER` / `_NEXT_STEP_RUBRIC` captured against
-    the reordered chat_service.py (fix round 1) the same way.
-    This is meaningful (not tautological) because every expected hash below
-    was computed independently of whatever _X_FACTS/_X_CHAINING end up being
-    — either against pre-split HEAD, or against the deliberately-reordered
-    text committed alongside these hashes in the same fix.
+    Meaningful (not tautological) because every hash below was computed
+    against the pre-Task-8 literal, independently of the current module.
     """
     import hashlib
 
@@ -897,48 +898,70 @@ def test_default_prompt_bytes_unchanged():
             "3e6f420d74fea27240186cc520718dd401fd7b18a6e0fef1262630f053256f8f"
         ),
         "_SOLVER_ERROR_DECODER": (
-            "ffd6c9919a89fe3a809678857ac6a1e6b53e63c7440cecc33a7efa678b333484"
+            "bd4de84083da126945d36c23a0e10bb0823d157ce8befb9aecf7c1b899c029db"
         ),
         "_PRICE_CONGESTION_GUIDE": (
             "a65668e11eee7e3f30007ffc91cc7f3197e2a6938c7e8ea6e1fd647b5aa25129"
         ),
         "_NEXT_STEP_RUBRIC": (
-            "0f02c5356d1da6fa06ffba6c41bd39e3e311acd1ae2c8b3164c28b2402420d57"
+            "991709d96f9cb8b42db7b03d0b28cb5bc3aeeab7e6de57ab63dff962cc79fe1b"
         ),
         "_ASSISTANT_STANCE": (
             "1dd77952d0cdec42606c4d269adf31aae9d11ae8ef22cf83103ac0659028889b"
         ),
     }
-    halves = {
-        "_DOMAIN_GUIDE": (
-            chat_service._DOMAIN_GUIDE_FACTS, chat_service._DOMAIN_GUIDE_CHAINING,
-        ),
+    for name, expected_hash in expected_sha256.items():
+        value = getattr(chat_service, name)
+        actual_hash = hashlib.sha256(value.encode()).hexdigest()
+        assert actual_hash == expected_hash, (
+            f"{name} is no longer byte-identical to its pre-Task-8 HEAD "
+            f"(32a0949a) value"
+        )
+
+
+def test_solver_and_rubric_halves_cover_the_same_words():
+    """
+    Fix round 2 — `_SOLVER_ERROR_DECODER_FACTS` / `_CHAINING` and
+    `_NEXT_STEP_RUBRIC_FACTS` / `_CHAINING` are now SEPARATE from the
+    byte-identical `_SOLVER_ERROR_DECODER` / `_NEXT_STEP_RUBRIC` constants
+    above — reordered for a genuinely coherent tools-off split, no longer
+    required to concatenate back to the original. That decoupling trades
+    the old byte-identity guarantee for a DRIFT risk: someone edits the
+    original constant and the halves silently stop covering the same
+    content.
+
+    Guard it without re-imposing ordering: the word MULTISET of
+    FACTS + CHAINING must equal the word multiset of the original. This
+    catches added/dropped/changed words while permitting the legitimate
+    reordering the split needs.
+    """
+    import collections
+
+    pairs = {
         "_SOLVER_ERROR_DECODER": (
+            chat_service._SOLVER_ERROR_DECODER,
             chat_service._SOLVER_ERROR_DECODER_FACTS,
             chat_service._SOLVER_ERROR_DECODER_CHAINING,
         ),
-        "_PRICE_CONGESTION_GUIDE": (
-            chat_service._PRICE_CONGESTION_GUIDE_FACTS,
-            chat_service._PRICE_CONGESTION_GUIDE_CHAINING,
-        ),
         "_NEXT_STEP_RUBRIC": (
+            chat_service._NEXT_STEP_RUBRIC,
             chat_service._NEXT_STEP_RUBRIC_FACTS,
             chat_service._NEXT_STEP_RUBRIC_CHAINING,
         ),
-        "_ASSISTANT_STANCE": (
-            chat_service._ASSISTANT_STANCE_FACTS,
-            chat_service._ASSISTANT_STANCE_CHAINING,
-        ),
     }
-    for name, (facts, chaining) in halves.items():
-        combined = facts + chaining
-        actual_hash = hashlib.sha256(combined.encode()).hexdigest()
-        assert actual_hash == expected_sha256[name], (
-            f"{name}_FACTS + {name}_CHAINING no longer reconstructs the "
-            f"pinned constant byte-for-byte"
+    for name, (original, facts, chaining) in pairs.items():
+        original_words = collections.Counter(original.split())
+        halves_words = collections.Counter(facts.split()) + collections.Counter(
+            chaining.split()
         )
-        # The module-level `_X = _X_FACTS + _X_CHAINING` assembly itself.
-        assert combined == getattr(chat_service, name)
+        if original_words != halves_words:
+            missing = original_words - halves_words  # in original, not halves
+            extra = halves_words - original_words  # in halves, not original
+            raise AssertionError(
+                f"{name}_FACTS + {name}_CHAINING no longer covers the same "
+                f"words as {name} — missing from halves: {dict(missing)}; "
+                f"extra in halves: {dict(extra)}"
+            )
 
 
 def test_capability_unsupported_frames_carry_no_identifiers(appdata):
