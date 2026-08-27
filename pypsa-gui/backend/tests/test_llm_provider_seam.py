@@ -602,21 +602,35 @@ def test_openai_compat_idless_tool_delta_gets_synthetic_id():
 
 
 def test_openai_compat_synthetic_id_disambiguates_on_collision():
-    """Fix round 1, finding (2) — a synthetic id must never collide with a
-    real upstream id seen earlier in the stream. Here index 1's FIRST delta
-    carries the real id "__synth_0" (a pathological but possible upstream
-    value — the exact shape our own synthesis would produce for index 0).
-    When index 0 later needs synthesis, it must NOT reuse "__synth_0" (that
-    would give two tool_use blocks the same id and break tool_use_id/
-    tool_result pairing); it must disambiguate instead."""
+    """Fix round 2 — the fix-round-1 version of this test did not actually
+    discriminate: it scripted the colliding real id "__synth_0" to arrive
+    BEFORE the id-less delta needing synthesis, an order round-1's
+    immediate-synthesis code already handled correctly (its `seen_ids` check
+    only ever needed to see ids assigned SO FAR). Re-review by mutation
+    proved it: reverting the synthetic prefix back to `f"call_{idx}"` still
+    passed this test, because "call_0" trivially never equals the scripted
+    "__synth_0" regardless of whether disambiguation logic exists at all.
+
+    The real asymmetry the round-2 review found is the OPPOSITE order: a
+    synthetic id gets assigned — and its tool_use_start already emitted —
+    BEFORE a real id arrives, on a DIFFERENT index, that happens to equal
+    it. Scripted here: index 0's only delta is id-less (would naturally
+    synthesize to "__synth_0"); index 1's delta — LATER in the stream —
+    carries the literal real id "__synth_0". Round-1 code handed BOTH the
+    tool_use_start events AND both final tool_use blocks the id "__synth_0"
+    — a genuine collision (verified by hand-tracing round-1's logic against
+    this exact script, and confirmed empirically below). The round-2 fix
+    (deferred synthesis — see llm_openai_compat.stream's finalisation loop)
+    must keep every id — start events and final blocks alike — unique,
+    while index 1's real id survives on its OWN block, unchanged."""
     import httpx
     from services.llm_openai_compat import OpenAICompatProvider
 
     body = _sse_bytes(
-        b'{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"__synth_0",'
-        b'"function":{"name":"b","arguments":"{}"}}]}}]}',
         b'{"choices":[{"delta":{"tool_calls":[{"index":0,'
         b'"function":{"name":"a","arguments":"{}"}}]}}]}',
+        b'{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"__synth_0",'
+        b'"function":{"name":"b","arguments":"{}"}}]}}]}',
         b'{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}',
     )
     provider = OpenAICompatProvider(
@@ -629,24 +643,36 @@ def test_openai_compat_synthetic_id_disambiguates_on_collision():
 
     starts = [e for e in events if e.type == "tool_use_start"]
     assert len(starts) == 2
-    ids = [e.tool_use_id for e in starts]
-    assert ids[0] == "__synth_0"          # index 1's real (colliding-shaped) id
-    assert ids[1] != "__synth_0"          # index 0's synthetic, disambiguated
-    assert len(set(ids)) == 2             # never collide
+    start_ids = [e.tool_use_id for e in starts]
+    assert len(set(start_ids)) == 2           # never collide, not even transiently
+    assert "__synth_0" in start_ids           # index 1's real id, unchanged
 
     done = events[-1]
-    tool_ids = {b["id"] for b in done.blocks if b["type"] == "tool_use"}
-    assert tool_ids == set(ids)
+    tools = {b["name"]: b for b in done.blocks if b["type"] == "tool_use"}
+    assert len(tools) == 2
+    assert len({t["id"] for t in tools.values()}) == 2  # final blocks unique
+    assert tools["b"]["id"] == "__synth_0"    # real id survives verbatim,
+                                               # on its OWN block
+    assert tools["a"]["id"] != "__synth_0"    # synthetic re-disambiguated
 
 
 def test_openai_compat_late_real_id_fires_no_second_start():
     """Fix round 1, finding (3) — a regression on a previously-correct path:
-    if an index's first delta lacks an id (firing a synthetic
-    tool_use_start) and a LATER delta for that same index supplies a real
-    id, the harness must NOT see a second tool_use_start (the UI would show
-    an orphaned "preparing" frame that never resolves). The real id must
-    still be adopted onto the FINAL block, since a tool_result reply has to
-    reference whatever id upstream actually expects."""
+    if an index's first delta lacks an id and a LATER delta for that same
+    index supplies a real id, the harness must NOT see a second
+    tool_use_start (the UI would show an orphaned "preparing" frame that
+    never resolves). The real id must be carried on the FINAL block, since a
+    tool_result reply has to reference whatever id upstream actually
+    expects.
+
+    Fix round 2 changed HOW this is achieved (deferred synthesis — see
+    llm_openai_compat.stream): since this index gets a real id before the
+    stream ends, it never enters the synthetic path at all, so the single
+    tool_use_start fires with the REAL id — not a synthetic one that then
+    gets silently adopted over. The externally-observable guarantee (one
+    start, final block carries the real id) is unchanged; only the id on
+    that one start event differs from round 1's now-superseded internal
+    mechanism."""
     import httpx
     from services.llm_openai_compat import OpenAICompatProvider
 
@@ -667,7 +693,9 @@ def test_openai_compat_late_real_id_fires_no_second_start():
 
     starts = [e for e in events if e.type == "tool_use_start"]
     assert len(starts) == 1
-    assert starts[0].tool_use_id == "__synth_0"
+    assert starts[0].tool_use_id == "real123"
+    assert starts[0].tool_name == "list_projects"  # captured from the
+                                                    # earlier, id-less delta
 
     done = events[-1]
     tool = [b for b in done.blocks if b["type"] == "tool_use"][0]

@@ -125,10 +125,15 @@ class OpenAICompatProvider:
 
         text_parts: list[str] = []
         calls: dict[int, dict[str, Any]] = {}
-        # M6 fix round 1 — track which indices already got a tool_use_start
-        # (at most one per index, finding 3) and every id used so far, real
-        # or synthetic (so a synthetic id never collides with a real one
-        # seen earlier in the stream, finding 2).
+        # M6 fix round 1/2 — `started_indices`: at most one tool_use_start
+        # per index (finding 3). `seen_ids`: every id assigned so far, real
+        # or synthetic, so a NEW id never collides with one already handed
+        # out (finding 2). Synthetic ids are assigned only after the whole
+        # stream is read (see the finalisation loop below, fix round 2) —
+        # that is what makes the collision defence symmetric: a real id
+        # cannot "steal" an id already given to a synthetic tool_use_start,
+        # because no synthetic id — and no synthetic tool_use_start — exists
+        # yet while deltas are still arriving.
         started_indices: set[int] = set()
         seen_ids: set[str] = set()
         usage: dict[str, int] = {}
@@ -173,9 +178,16 @@ class OpenAICompatProvider:
                             idx = int(tc.get("index", 0))
                             slot = calls.setdefault(
                                 idx, {"id": "", "name": "", "args": ""})
+                            # Capture name/arguments BEFORE deciding whether
+                            # to fire a start, so an id arriving on a later
+                            # delta than the name still gets the right
+                            # `tool_name` in its tool_use_start (fix round 2).
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                slot["args"] += fn["arguments"]
                             real_id = tc.get("id")
-                            fn_name = (tc.get("function") or {}).get(
-                                "name", "")
                             if real_id:
                                 slot["id"] = real_id
                                 seen_ids.add(real_id)
@@ -184,46 +196,16 @@ class OpenAICompatProvider:
                                     yield LLMEvent(
                                         type="tool_use_start",
                                         tool_use_id=real_id,
-                                        tool_name=fn_name)
-                                # else: this index already got its (synthetic)
-                                # start from an earlier id-less delta — adopt
-                                # the real id onto the slot (a tool_result
-                                # must reference whatever id upstream
-                                # actually expects) WITHOUT a second start
-                                # (fix round 1, finding 3 — the naive version
-                                # fired a second tool_use_start here, leaving
-                                # the first one's UI frame orphaned).
-                            elif idx not in started_indices:
-                                # M6 — some OpenAI-compatible servers ship the
-                                # FIRST delta for a tool-call index with no id
-                                # at all (or `id: ""`). Without a synthetic
-                                # id, this call never gets a tool_use_start
-                                # and the final block ships `id: ""` — a call
-                                # the harness can't correlate a result to.
-                                # `__synth_` is a prefix upstream will not
-                                # mint; disambiguate against any real id
-                                # already seen this stream so two tool_use
-                                # blocks never end up sharing an id (fix
-                                # round 1, finding 2 — the original
-                                # `f"call_{index}"` scheme collided with real
-                                # upstream ids of that exact shape).
-                                candidate = f"__synth_{idx}"
-                                bump = 0
-                                while candidate in seen_ids:
-                                    bump += 1
-                                    candidate = f"__synth_{idx}_{bump}"
-                                slot["id"] = candidate
-                                seen_ids.add(candidate)
-                                started_indices.add(idx)
-                                yield LLMEvent(
-                                    type="tool_use_start",
-                                    tool_use_id=candidate,
-                                    tool_name=fn_name)
-                            fn = tc.get("function") or {}
-                            if fn.get("name"):
-                                slot["name"] = fn["name"]
-                            if fn.get("arguments"):
-                                slot["args"] += fn["arguments"]
+                                        tool_name=slot["name"])
+                                # else: a second real id for an
+                                # already-started index — extremely unlikely,
+                                # but `slot["id"]` above still adopts the
+                                # latest one without a second start (finding
+                                # 3's "at most one start per index").
+                            # An id-less delta for an index that hasn't
+                            # started does NOT synthesize or start here
+                            # anymore (fix round 2) — see the finalisation
+                            # loop below for why.
         except ProviderError:
             raise
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
@@ -243,6 +225,33 @@ class OpenAICompatProvider:
             blocks.append({"type": "text", "text": "".join(text_parts)})
         for idx in sorted(calls):
             slot = calls[idx]
+            if not slot["id"]:
+                # M6 fix round 2 — deferred synthesis. An index that reaches
+                # end-of-stream having NEVER received a real id gets its
+                # synthetic id (and its single tool_use_start) assigned HERE,
+                # only now that `seen_ids` holds every real id the whole
+                # stream ever produced. This is what closes the asymmetry a
+                # round-1 review found: previously a synthetic id was handed
+                # out — and its tool_use_start already emitted — the moment
+                # the first id-less delta arrived, so a real id minted LATER
+                # on a different index that happened to equal it could still
+                # collide (the `seen_ids` check only guarded against ids
+                # seen so far, and there is no event that can retroactively
+                # correct an already-emitted tool_use_start's id). Assigning
+                # synthetic ids only after the stream is fully drained means
+                # no synthetic id — and no synthetic tool_use_start — ever
+                # exists for a real id to collide with while deltas are
+                # still arriving; the two are collision-checked against the
+                # SAME final `seen_ids`, so the defence is symmetric.
+                candidate = f"__synth_{idx}"
+                bump = 0
+                while candidate in seen_ids:
+                    bump += 1
+                    candidate = f"__synth_{idx}_{bump}"
+                slot["id"] = candidate
+                seen_ids.add(candidate)
+                yield LLMEvent(type="tool_use_start", tool_use_id=candidate,
+                               tool_name=slot["name"])
             try:
                 args = json.loads(slot["args"]) if slot["args"] else {}
             except ValueError:
