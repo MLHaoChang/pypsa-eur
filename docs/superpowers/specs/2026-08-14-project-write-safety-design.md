@@ -111,7 +111,6 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
   precondition is local write access to the uploads dir — strictly more access than the bug it guards —
   so it is not worth code. Recorded so it is not rediscovered as novel.
 
-- Unsaved-but-undoless dirt: solver results (`/api/simulation/*` not undo-captured) on a scratch network won't trigger the import confirm. Accepted gap this slice; noting for slice 2.
 - ~~CommandPalette snapshot restore, Sidebar same-name destructive re-load, and `App.tsx:441` reload
   remain unconfirmed destructive ops~~ — **RESOLVED 2026-08-27.** Two confirmed, one deliberately declined:
   - **Snapshot restore** (`f0c993c7`): confirmed. The guard is a dispatch chokepoint, not a wrapper — the
