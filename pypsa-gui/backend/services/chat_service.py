@@ -1847,26 +1847,37 @@ _DOMAIN_GUIDE = _DOMAIN_GUIDE_FACTS + _DOMAIN_GUIDE_CHAINING
 # agent diagnoses failed runs instead of echoing a cryptic linopy string.
 #
 # Task 8 split — see _DOMAIN_GUIDE comment above for the FACTS/CHAINING
-# doctrine. The symptom→cause table itself names no tool, but it sits AFTER
-# the "call get_simulation_log_history" imperative in the original text, so a
-# byte-identical prefix/suffix split (required for
-# test_default_prompt_bytes_unchanged) pulls it into CHAINING too.
+# doctrine. Fix round 1 (Task 8 review, finding 3): the FIRST version of this
+# split put only the bare heading in FACTS, because in the original wording
+# the "call get_simulation_log_history" imperative sits BEFORE the
+# symptom→cause table, and a straight prefix/suffix split can't pull a
+# tool-naming clause out of the MIDDLE of a string without also reordering
+# it. That earlier split threw away the entire table for a tools-off
+# profile — useful domain content unrelated to any tool. Fixed by actually
+# reordering the underlying text: the tool-dependent imperative now sits at
+# the END, so FACTS is the heading + the full symptom→cause table (every
+# original word preserved, only re-sequenced) and CHAINING is exactly the
+# one sentence that names a tool. This means the assembled default
+# `_SOLVER_ERROR_DECODER` is no longer byte-identical to the PRE-Task-8 HEAD
+# text (word order changed) — test_default_prompt_bytes_unchanged's pinned
+# hash for this constant was recomputed against the new (reordered) text;
+# `_DOMAIN_GUIDE` / `_PRICE_CONGESTION_GUIDE` did not need this and keep
+# their original HEAD-pinned hashes.
 _SOLVER_ERROR_DECODER_FACTS = (
-    "Solver-error decoding. "
+    "Solver-error decoding. Common causes: 'infeasible' = over-constrained "
+    "bounds or a CO2 cap too tight / capacities too small to meet load; "
+    "'dim_0' in a linopy/xarray error = a time-series (_t) frame lost its "
+    "index name 'snapshot'; \"cannot include dtype 'M' in a buffer\" = a "
+    "multi-period → flat demotion tripping a pandas MultiIndex reindex bug; "
+    "an assign_duals KeyError on a DatetimeIndex = a stale MultiIndex left "
+    "on a dual _t frame after a period change; a 500 with a short "
+    "plain-text body from /results/* = NaN or Inf leaked into JSON "
+    "rendering. Explain the likely cause in plain terms and suggest the "
+    "corrective lever (loosen the bound, rebuild snapshots, re-solve). "
 )
 _SOLVER_ERROR_DECODER_CHAINING = (
-    "On ANY failed or aborted run, call "
-    "get_simulation_log_history BEFORE answering and quote the failing "
-    "TRACEBACK frame. Common causes: 'infeasible' = over-constrained bounds or "
-    "a CO2 cap too tight / capacities too small to meet load; 'dim_0' in a "
-    "linopy/xarray error = a time-series (_t) frame lost its index name "
-    "'snapshot'; \"cannot include dtype 'M' in a buffer\" = a multi-period → "
-    "flat demotion tripping a pandas MultiIndex reindex bug; an assign_duals "
-    "KeyError on a DatetimeIndex = a stale MultiIndex left on a dual _t frame "
-    "after a period change; a 500 with a short plain-text body from /results/* "
-    "= NaN or Inf leaked into JSON rendering. Explain the likely cause in plain "
-    "terms and suggest the corrective lever (loosen the bound, rebuild "
-    "snapshots, re-solve)."
+    "On ANY failed or aborted run, call get_simulation_log_history BEFORE "
+    "answering and quote the failing TRACEBACK frame."
 )
 _SOLVER_ERROR_DECODER = _SOLVER_ERROR_DECODER_FACTS + _SOLVER_ERROR_DECODER_CHAINING
 
@@ -1892,21 +1903,27 @@ _PRICE_CONGESTION_GUIDE = _PRICE_CONGESTION_GUIDE_FACTS + _PRICE_CONGESTION_GUID
 # Suggest-next-step rubric (#5). Compact decision rules keyed off the network's
 # configuration, so a recommendation is grounded rather than generic.
 #
-# Task 8 split — see _DOMAIN_GUIDE comment above. The rubric itself names no
-# tool, but sits AFTER the "read get_meta and get_solver_config" imperative,
-# so the byte-identical prefix/suffix split pulls it into CHAINING too.
+# Task 8 split — see _DOMAIN_GUIDE comment above. Fix round 1 (Task 8
+# review, finding 3): same reordering fix as _SOLVER_ERROR_DECODER above —
+# the original wording put the "read get_meta and get_solver_config"
+# imperative BEFORE the rubric itself, so the first split (bare heading in
+# FACTS, everything else in CHAINING) threw the whole rubric away for a
+# tools-off profile. Reordered so FACTS carries the heading + the full
+# rubric and CHAINING is exactly the one tool-naming sentence, moved to the
+# end. Assembled default is reordered relative to pre-Task-8 HEAD (same
+# words, new sequence) — see the hash-pin note on _SOLVER_ERROR_DECODER_FACTS.
 _NEXT_STEP_RUBRIC_FACTS = (
-    "Suggesting next steps. "
+    "Suggesting next steps. Rubric: if foresight is overnight but the user "
+    "wants a multi-year pathway, explain the myopic vs perfect tradeoff; if "
+    "the bus_count is high and solves are slow, suggest clustering to fewer "
+    "nodes; if no CO2 GlobalConstraint is present, suggest adding a CO2 cap "
+    "to study decarbonisation; if the model is electricity-only, mention "
+    "that sector coupling (heat / H2 / transport) is available. Only "
+    "suggest steps the current configuration supports. "
 )
 _NEXT_STEP_RUBRIC_CHAINING = (
-    "Before recommending anything, read get_meta and "
-    "get_solver_config to ground the advice in the actual setup. Rubric: if "
-    "foresight is overnight but the user wants a multi-year pathway, explain "
-    "the myopic vs perfect tradeoff; if the bus_count is high and solves are "
-    "slow, suggest clustering to fewer nodes; if no CO2 GlobalConstraint is "
-    "present, suggest adding a CO2 cap to study decarbonisation; if the model "
-    "is electricity-only, mention that sector coupling (heat / H2 / transport) "
-    "is available. Only suggest steps the current configuration supports."
+    "Before recommending anything, read get_meta and get_solver_config to "
+    "ground the advice in the actual setup."
 )
 _NEXT_STEP_RUBRIC = _NEXT_STEP_RUBRIC_FACTS + _NEXT_STEP_RUBRIC_CHAINING
 
@@ -1932,18 +1949,34 @@ _UNTRUSTED_DATA_CLAUSE = (
 # It belongs in the SYSTEM prompt precisely because it is stable policy —
 # identical on every turn, so it rides the `cache_control: ephemeral` block
 # for free. The per-turn context does NOT (see _format_ui_context).
-_ASSISTANT_STANCE = (
+#
+# Fix round 1 (Task 8 review, finding 2): this constant was NOT split when
+# Task 8 landed, on the claim (in _build_system_prompt's docstring) that it
+# "carries no tool-chaining instructions". That claim was false — it names
+# four UI tools verbatim (ui_open_panel, ui_select_component,
+# ui_open_asset_detail, ui_set_snapshot). With `tools: false` the rendered
+# prompt still instructed the model to call tools it did not have. Split
+# like the other four guides; the tool-naming half (plus the trailing
+# "context vs tool" sentence, which is meaningless with zero tools offered)
+# is a clean SUFFIX of the original text, so this split needs no reordering
+# and stays byte-identical to the pre-Task-8 HEAD text — see
+# test_default_prompt_bytes_unchanged.
+_ASSISTANT_STANCE_FACTS = (
     "Stance. You can see the same screen the user can. When a turn carries a "
     "context block, resolve deictic references — 'this', 'that', 'here', 'the "
     "other one' — against it instead of guessing or asking which one they "
     "mean, and name the component you took them to mean so a wrong guess is "
-    "visible. After answering, OPEN the view that supports what you just said "
+    "visible. "
+)
+_ASSISTANT_STANCE_CHAINING = (
+    "After answering, OPEN the view that supports what you just said "
     "(ui_open_panel, ui_select_component, ui_open_asset_detail, "
     "ui_set_snapshot) rather than describing where to click — you stay on "
     "screen when you navigate, so moving their view costs them nothing. Where "
     "the context and a tool disagree, the tool is right: the context says what "
     "the user is LOOKING AT, tools say what is TRUE."
 )
+_ASSISTANT_STANCE = _ASSISTANT_STANCE_FACTS + _ASSISTANT_STANCE_CHAINING
 
 # Deixis, data half.
 #
@@ -2347,12 +2380,15 @@ def _build_system_prompt(
     `include_tools` (Task 8, default True — every existing caller gets the
     unchanged prompt): when False (a `profile.tools is False` turn, where the
     request carries `tools=[]`), assembles only the FACTS half of each of the
-    four guide constants below and drops the confirmation-card contract
-    paragraph — both describe / invoke tools that are not being offered this
-    turn. `_ASSISTANT_STANCE` and `_UNTRUSTED_DATA_CLAUSE` are NOT trimmed:
-    they are safety/stance policy, not tool-chaining instructions, and stay
-    out of this task's named split (`_DOMAIN_GUIDE` / `_SOLVER_ERROR_DECODER`
-    / `_PRICE_CONGESTION_GUIDE` / `_NEXT_STEP_RUBRIC` only).
+    five guide constants below and drops the confirmation-card contract
+    paragraph — all describe / invoke tools that are not being offered this
+    turn. `_UNTRUSTED_DATA_CLAUSE` is NOT trimmed: it is a safety boundary
+    clause with no tool names in it, and stays out of the split entirely.
+    `_ASSISTANT_STANCE` WAS originally left out of the split too, on the
+    (false — fix round 1, Task 8 review finding 2) claim that it carries no
+    tool-chaining instructions; it names four UI tools verbatim and is now
+    split like the other four (`_DOMAIN_GUIDE` / `_SOLVER_ERROR_DECODER` /
+    `_PRICE_CONGESTION_GUIDE` / `_NEXT_STEP_RUBRIC`).
     """
     base = _BASE_IDENTITY
     if include_tools:
@@ -2362,7 +2398,7 @@ def _build_system_prompt(
     base += _STYLE_GUIDANCE
     parts = [
         base,
-        _ASSISTANT_STANCE,
+        _ASSISTANT_STANCE if include_tools else _ASSISTANT_STANCE_FACTS,
         _DOMAIN_GUIDE if include_tools else _DOMAIN_GUIDE_FACTS,
         _SOLVER_ERROR_DECODER if include_tools else _SOLVER_ERROR_DECODER_FACTS,
         _PRICE_CONGESTION_GUIDE if include_tools else _PRICE_CONGESTION_GUIDE_FACTS,
@@ -2598,7 +2634,7 @@ def run_turn(
 
 def _outbound_vision_block_kinds(
     messages: list[dict[str, Any]],
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, bool]:
     """
     Scan the OUTBOUND `messages` array (Task 8) for `image` / `document`
     content blocks, anywhere in it — not just the newest message.
@@ -2611,12 +2647,24 @@ def _outbound_vision_block_kinds(
     `attachment_file_ids` alone would miss every replay — a `vision: false`
     profile could keep sending an image it can't process turn after turn.
 
-    Returns `(has_image, has_document)`. A message whose `content` is a bare
-    string (the no-attachment shape) or anything else non-list contributes
-    neither.
+    Returns `(has_image, has_document, has_unsupported_image_source)`.
+    `has_unsupported_image_source` (fix round 1, Task 8 review finding 1) is
+    True when an `image` block's `source` is not `{"type": "base64", ...}`
+    — the only shape `upload_service.build_multimodal_content_blocks` ever
+    produces, and the only shape `llm_openai_compat._to_openai_messages`
+    knows how to translate into the openai wire's `image_url` part. A
+    url/other source must never reach that translator and get silently
+    dropped there — the caller uses this flag to refuse the turn up front on
+    the openai wire instead. (The anthropic wire forwards content blocks
+    through unchanged, and Anthropic's own API accepts a url image source
+    natively, so this is not refused there.)
+
+    A message whose `content` is a bare string (the no-attachment shape) or
+    anything else non-list contributes nothing to any of the three.
     """
     has_image = False
     has_document = False
+    has_unsupported_image_source = False
     for msg in messages:
         content = msg.get("content")
         if not isinstance(content, list):
@@ -2627,9 +2675,13 @@ def _outbound_vision_block_kinds(
             block_type = block.get("type")
             if block_type == "image":
                 has_image = True
+                source = block.get("source")
+                if not (isinstance(source, dict)
+                        and source.get("type") == "base64"):
+                    has_unsupported_image_source = True
             elif block_type == "document":
                 has_document = True
-    return has_image, has_document
+    return has_image, has_document, has_unsupported_image_source
 
 
 def _run_turn_body(
@@ -2916,7 +2968,8 @@ def _run_turn_body(
     #     the user drops the attachment or switches to a vision-capable
     #     profile — there is no way to "fix" already-persisted history from
     #     here.
-    has_vision_image, has_vision_document = _outbound_vision_block_kinds(messages)
+    (has_vision_image, has_vision_document,
+     has_unsupported_image_source) = _outbound_vision_block_kinds(messages)
     if (has_vision_image or has_vision_document) and not profile.vision:
         # Fixed message: capability name + profile LABEL only — never an
         # id/base_url (SECURITY, b94eb245 on master: redaction is
@@ -2943,6 +2996,27 @@ def _run_turn_body(
                 "attachments — PDF document support requires an "
                 "Anthropic-wire profile. Remove the attachment or switch "
                 "to an Anthropic profile."
+            ),
+        }
+        yield "session_done", {"reason": "capability_unsupported"}
+        return
+    if (has_vision_image and has_unsupported_image_source
+            and profile.wire != "anthropic"):
+        # Fix round 1 (Task 8 review, finding 1) — an image whose `source`
+        # isn't `{"type": "base64", ...}` is not something
+        # llm_openai_compat._to_openai_messages can translate into an
+        # `image_url` part. Refuse it HERE, before any provider call,
+        # rather than let it reach the adapter and get silently skipped —
+        # the original bug this review found was exactly that: a base64
+        # image slipped past unmodified, but a non-base64 source is the
+        # same failure mode in a different shape and must not repeat it.
+        yield "error", {
+            "error_kind": "capability_unsupported",
+            "message": (
+                f"the {profile.label!r} profile cannot process this image "
+                "attachment — its source format is not supported for this "
+                "provider; remove the attachment or switch to a profile "
+                "that supports it."
             ),
         }
         yield "session_done", {"reason": "capability_unsupported"}

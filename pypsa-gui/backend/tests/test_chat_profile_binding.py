@@ -857,20 +857,38 @@ def test_pdf_blocks_require_anthropic_wire_even_with_vision_true(appdata):
 
 def test_default_prompt_bytes_unchanged():
     """
-    `_X_FACTS + _X_CHAINING == <the pre-split constant>` for all four prompt
+    `_X_FACTS + _X_CHAINING == <the pre-split constant>` for all five prompt
     guides, so the DEFAULT (tools-enabled) assembled system prompt stays
-    byte-identical to what `test_chat_e2e.py`'s prompt pins already assert.
+    byte-identical to what `test_chat_e2e.py`'s prompt pins already assert
+    — for `_DOMAIN_GUIDE`, `_PRICE_CONGESTION_GUIDE`, and `_ASSISTANT_STANCE`
+    (added fix round 1, finding 2; its split is a clean suffix of the
+    original, no reordering needed).
 
-    Hashes captured at HEAD (32a0949a, before Task 8's split) via:
+    `_SOLVER_ERROR_DECODER` and `_NEXT_STEP_RUBRIC` are the fix round 1
+    (Task 8 review, finding 3) exception: their pre-Task-8 wording put a
+    tool-naming imperative BEFORE the domain content (the symptom→cause
+    table / the rubric), so the original prefix/suffix split (matching HEAD
+    exactly) could only put a bare heading in FACTS — throwing away useful,
+    tool-independent content for a tools-off profile. Fixed by reordering
+    the underlying text (tool imperative moved to the end, every original
+    word kept); the hashes for these two are pinned against that NEW
+    (reordered) text, not pre-Task-8 HEAD — see the comment above each in
+    chat_service.py.
+
+    Hashes for `_DOMAIN_GUIDE` / `_PRICE_CONGESTION_GUIDE` / `_ASSISTANT_STANCE`
+    captured at HEAD (32a0949a, before Task 8's split) via:
         pixi run -e test python -c "
         import hashlib
         from services import chat_service as cs
-        for n in ['_DOMAIN_GUIDE', '_SOLVER_ERROR_DECODER',
-                  '_PRICE_CONGESTION_GUIDE', '_NEXT_STEP_RUBRIC']:
+        for n in ['_DOMAIN_GUIDE', '_PRICE_CONGESTION_GUIDE',
+                  '_ASSISTANT_STANCE']:
             print(n, hashlib.sha256(getattr(cs, n).encode()).hexdigest())"
-    This is meaningful (not tautological) because the expected hashes below
-    were computed BEFORE the split existed, against the single-piece
-    constants, independently of whatever _X_FACTS/_X_CHAINING end up being.
+    Hashes for `_SOLVER_ERROR_DECODER` / `_NEXT_STEP_RUBRIC` captured against
+    the reordered chat_service.py (fix round 1) the same way.
+    This is meaningful (not tautological) because every expected hash below
+    was computed independently of whatever _X_FACTS/_X_CHAINING end up being
+    — either against pre-split HEAD, or against the deliberately-reordered
+    text committed alongside these hashes in the same fix.
     """
     import hashlib
 
@@ -879,13 +897,16 @@ def test_default_prompt_bytes_unchanged():
             "3e6f420d74fea27240186cc520718dd401fd7b18a6e0fef1262630f053256f8f"
         ),
         "_SOLVER_ERROR_DECODER": (
-            "bd4de84083da126945d36c23a0e10bb0823d157ce8befb9aecf7c1b899c029db"
+            "ffd6c9919a89fe3a809678857ac6a1e6b53e63c7440cecc33a7efa678b333484"
         ),
         "_PRICE_CONGESTION_GUIDE": (
             "a65668e11eee7e3f30007ffc91cc7f3197e2a6938c7e8ea6e1fd647b5aa25129"
         ),
         "_NEXT_STEP_RUBRIC": (
-            "991709d96f9cb8b42db7b03d0b28cb5bc3aeeab7e6de57ab63dff962cc79fe1b"
+            "0f02c5356d1da6fa06ffba6c41bd39e3e311acd1ae2c8b3164c28b2402420d57"
+        ),
+        "_ASSISTANT_STANCE": (
+            "1dd77952d0cdec42606c4d269adf31aae9d11ae8ef22cf83103ac0659028889b"
         ),
     }
     halves = {
@@ -904,13 +925,17 @@ def test_default_prompt_bytes_unchanged():
             chat_service._NEXT_STEP_RUBRIC_FACTS,
             chat_service._NEXT_STEP_RUBRIC_CHAINING,
         ),
+        "_ASSISTANT_STANCE": (
+            chat_service._ASSISTANT_STANCE_FACTS,
+            chat_service._ASSISTANT_STANCE_CHAINING,
+        ),
     }
     for name, (facts, chaining) in halves.items():
         combined = facts + chaining
         actual_hash = hashlib.sha256(combined.encode()).hexdigest()
         assert actual_hash == expected_sha256[name], (
             f"{name}_FACTS + {name}_CHAINING no longer reconstructs the "
-            f"pre-split constant byte-for-byte"
+            f"pinned constant byte-for-byte"
         )
         # The module-level `_X = _X_FACTS + _X_CHAINING` assembly itself.
         assert combined == getattr(chat_service, name)
@@ -927,6 +952,16 @@ def test_capability_unsupported_frames_carry_no_identifiers(appdata):
 
     The test profile's `base_url` deliberately carries a host:port an
     accidental `f"{profile.base_url}"` slip would leak.
+
+    Fix round 1 (Task 8 review, finding 4): the original `uuid_re` here only
+    matched the canonical HYPHENATED UUID shape. This codebase's own
+    `session.session_id` is `uuid.uuid4().hex` — 32 bare hex chars, NO
+    hyphens — so a leak of `session.session_id` into a frame message would
+    have matched neither `uuid_re` nor the `"@"` check and passed silently.
+    Broadened to also catch a bare 32-char hex run. See
+    `test_default_prompt_bytes_unchanged`'s sibling discrimination note in
+    the fix-round-1 report for the scratch-copy proof that this now catches
+    what the old version missed.
     """
     import json
     import re
@@ -962,13 +997,162 @@ def test_capability_unsupported_frames_carry_no_identifiers(appdata):
     events = list(chat_service.run_turn(session, "again", provider=fake))
     assert fake.requests == []
 
-    uuid_re = re.compile(
+    hyphenated_uuid_re = re.compile(
         r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
         r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
     )
+    # Fix round 1 (finding 4): this codebase's own identifiers
+    # (session_id, session6, and every uuid.uuid4().hex-derived id) are bare
+    # hex with NO hyphens — the hyphenated-only regex above would miss a
+    # `session.session_id` leak entirely. 32 hex chars is the id length
+    # (uuid4().hex); word-bounded so it doesn't false-positive on a longer
+    # incidental hex run.
+    bare_hex_uuid_re = re.compile(r"\b[0-9a-fA-F]{32}\b")
     error_payload = next(p for n, p in events if n == "error")
     blob = json.dumps(error_payload)
     assert "@" not in blob, blob
-    assert not uuid_re.search(blob), blob
+    assert not hyphenated_uuid_re.search(blob), blob
+    assert not bare_hex_uuid_re.search(blob), blob
     assert "internal.example.org" not in blob, blob
     assert "9999" not in blob, blob
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Task 8, fix round 1 — independent review findings (chat_service.py half).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_unsupported_image_source_shape_blocked_not_silently_dropped(appdata):
+    """
+    Finding 1: only a base64-sourced `image` block translates on the openai
+    wire (llm_openai_compat._to_openai_messages). A different source shape
+    (e.g. a url source) must never reach that translator and get silently
+    dropped there — the capability gate refuses it up front, before any
+    provider call, exactly like the vision-off and PDF-on-non-anthropic
+    checks already do.
+    """
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+
+    profile = llm_config.LLMProfile(
+        id="openai-vision-2", label="OpenAI Vision Profile 2", preset="custom",
+        wire="openai", base_url="http://localhost:11434/v1", model="qwen3:8b",
+        tools=True, vision=True, auth="none", fallback_model=None,
+        max_output_tokens=None,
+    )
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    session = chat_service.ChatSession(model="qwen3:8b")
+    session.profile_id = "openai-vision-2"
+    session.bound_wire = "openai"
+    session.append_history_message({
+        "role": "user",
+        "content": [
+            {"type": "image", "source": {"type": "url",
+                                          "url": "https://example.com/x.png"}},
+            {"type": "text", "text": "earlier: what is this?"},
+        ],
+    })
+    session.append_history_message({
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+    })
+
+    fake = FakeProvider([])  # must never be reached
+
+    events = list(chat_service.run_turn(session, "and now?", provider=fake))
+    names = [n for n, _ in events]
+    assert names == ["session_init", "error", "session_done"]
+    assert fake.requests == []
+
+    error_payload = next(p for n, p in events if n == "error")
+    assert error_payload["error_kind"] == "capability_unsupported"
+    assert "OpenAI Vision Profile 2" in error_payload["message"]
+
+
+def test_openai_vision_true_base64_image_is_not_blocked_by_the_gate(appdata):
+    """
+    The counterpart to the test above: a base64-sourced image on an
+    openai-wire vision:true profile must NOT be refused by the gate — it is
+    exactly the shape llm_openai_compat can translate. (The translation
+    itself, and that it actually reaches the outbound wire payload as an
+    `image_url` part, is proven at the provider-seam level by
+    test_openai_compat_translates_base64_image_block_to_image_url in
+    test_llm_provider_seam.py — FakeProvider here doesn't translate, it just
+    proves the gate lets the turn through.)
+    """
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+
+    profile = llm_config.LLMProfile(
+        id="openai-vision-3", label="OpenAI Vision Profile 3", preset="custom",
+        wire="openai", base_url="http://localhost:11434/v1", model="qwen3:8b",
+        tools=True, vision=True, auth="none", fallback_model=None,
+        max_output_tokens=None,
+    )
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    session = chat_service.ChatSession(model="qwen3:8b")
+    session.profile_id = "openai-vision-3"
+    session.bound_wire = "openai"
+    session.append_history_message({
+        "role": "user",
+        "content": [
+            {"type": "image", "source": {"type": "base64",
+                                          "media_type": "image/png",
+                                          "data": "AAAA"}},
+            {"type": "text", "text": "earlier: what is this?"},
+        ],
+    })
+    session.append_history_message({
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+    })
+
+    fake = FakeProvider([{
+        "events": [LLMEvent(type="text_delta", text="a diagram")],
+        "blocks": [{"type": "text", "text": "a diagram"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }])
+
+    events = list(chat_service.run_turn(session, "and now?", provider=fake))
+    names = [n for n, _ in events]
+    assert "error" not in names
+    assert len(fake.requests) == 1
+
+
+def test_toolless_prompt_omits_all_tool_names_but_keeps_domain_facts():
+    """
+    Findings 2 + 3 together: with `include_tools=False` the rendered prompt
+    must name ZERO tools — not just the four originally-split guides, but
+    `_ASSISTANT_STANCE` too (it names ui_open_panel / ui_select_component /
+    ui_open_asset_detail / ui_set_snapshot verbatim; Task 8 shipped claiming
+    it carried no tool-chaining instructions, which was false). And the
+    degenerate first split for `_SOLVER_ERROR_DECODER` /
+    `_NEXT_STEP_RUBRIC` (bare headings, with all real content — the
+    symptom→cause table, the rubric — pushed into the tools-only half) must
+    be fixed: that domain content is useful to a tools-less model and stays
+    present with tools off, even though the tool-calling imperatives that
+    reference get_simulation_log_history / get_meta / get_solver_config do
+    not.
+    """
+    prompt = chat_service._build_system_prompt(
+        chat_service.ChatSession(), include_tools=False,
+    )
+    low = prompt.lower()
+    for tool_name in (
+        "ui_open_panel", "ui_select_component", "ui_open_asset_detail",
+        "ui_set_snapshot", "get_simulation_log_history", "get_meta",
+        "get_solver_config", "carrier_kpis", "cost_breakdown",
+        "price_drivers", "line_duals", "upload_timeseries",
+        "upload_load_profile", "upload_generator_profile",
+        "generate_exemplary_timeseries",
+    ):
+        assert tool_name not in low, f"tools-off prompt leaks {tool_name!r}"
+    # Domain content this review found was wrongly dropped must survive.
+    assert "infeasible" in low
+    assert "dim_0" in low
+    assert "assign_duals" in low
+    assert "clustering" in low or "sector coupling" in low or "co2 cap" in low
+    assert "myopic" in low and "perfect" in low

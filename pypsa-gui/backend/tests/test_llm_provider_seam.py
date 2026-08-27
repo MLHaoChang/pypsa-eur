@@ -743,3 +743,143 @@ def test_provider_for_profile_custom_none_base_url_is_invalid_request(
     p, err = chat_service._provider_for_profile(profile)
     assert p is None
     assert err == "invalid_request"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Task 8, fix round 1 — independent review finding 1: an image on an
+# openai-wire vision:true profile was silently dropped by
+# _to_openai_messages/_flatten_text (kept only type=="text" blocks), so the
+# model answered about a picture it never saw. Fixed by translating a
+# base64-sourced `image` block into the chat-completions `image_url` part.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_openai_compat_translates_base64_image_block_to_image_url():
+    """
+    A base64-sourced Anthropic-shaped `image` block in a user message must
+    arrive in the outbound chat-completions payload as an `image_url` part
+    — not be silently dropped. Content becomes a parts LIST (chat-
+    completions multi-part shape) because a non-text part is present.
+    """
+    import httpx, json
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    captured = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(req.content)
+        return httpx.Response(
+            200,
+            content=_sse_bytes(
+                b'{"choices":[{"delta":{"content":"ok"}}]}',
+                b'{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider = OpenAICompatProvider(
+        "http://localhost:11434/v1", api_key="k",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    req = _seam_request(messages=[
+        {"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64",
+                                          "media_type": "image/png",
+                                          "data": "AAAA"}},
+            {"type": "text", "text": "what is this?"},
+        ]},
+    ])
+    list(provider.stream(req))
+
+    sent_messages = captured["json"]["messages"]
+    user_msg = next(m for m in sent_messages if m["role"] == "user")
+    assert isinstance(user_msg["content"], list), (
+        "a turn with a non-text part must send a parts LIST, not a string"
+    )
+    image_parts = [p for p in user_msg["content"] if p.get("type") == "image_url"]
+    assert len(image_parts) == 1
+    assert image_parts[0]["image_url"]["url"] == "data:image/png;base64,AAAA"
+    text_parts = [p for p in user_msg["content"] if p.get("type") == "text"]
+    assert any(p["text"] == "what is this?" for p in text_parts)
+
+
+def test_openai_compat_pure_text_user_message_stays_a_string():
+    """
+    Regression guard for the same change: a turn with NO image/document
+    block must keep the original plain-string `content` shape — the fix for
+    finding 1 must not touch the common (pure-text) case, which existing
+    behaviour and other seam tests already pin.
+    """
+    import httpx, json
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    captured = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(req.content)
+        return httpx.Response(
+            200,
+            content=_sse_bytes(
+                b'{"choices":[{"delta":{"content":"ok"}}]}',
+                b'{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider = OpenAICompatProvider(
+        "http://localhost:11434/v1", api_key="k",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    req = _seam_request(messages=[
+        {"role": "user", "content": [
+            {"type": "text", "text": "just text, no attachments"},
+        ]},
+    ])
+    list(provider.stream(req))
+
+    sent_messages = captured["json"]["messages"]
+    user_msg = next(m for m in sent_messages if m["role"] == "user")
+    assert user_msg["content"] == "just text, no attachments"
+
+
+def test_openai_compat_unsupported_image_source_is_skipped_not_raised():
+    """
+    Defensive layer only (the real enforcement is chat_service's capability
+    gate, tested in test_chat_profile_binding.py::
+    test_unsupported_image_source_shape_blocked_not_silently_dropped): if an
+    `image` block with a non-base64 source ever reaches this adapter, it
+    must not raise or corrupt the request — it is skipped, and any sibling
+    text part still gets through.
+    """
+    import httpx, json
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    captured = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(req.content)
+        return httpx.Response(
+            200,
+            content=_sse_bytes(
+                b'{"choices":[{"delta":{"content":"ok"}}]}',
+                b'{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider = OpenAICompatProvider(
+        "http://localhost:11434/v1", api_key="k",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    req = _seam_request(messages=[
+        {"role": "user", "content": [
+            {"type": "image", "source": {"type": "url",
+                                          "url": "https://example.com/x.png"}},
+            {"type": "text", "text": "what is this?"},
+        ]},
+    ])
+    list(provider.stream(req))  # must not raise
+
+    sent_messages = captured["json"]["messages"]
+    user_msg = next(m for m in sent_messages if m["role"] == "user")
+    image_parts = [p for p in user_msg["content"] if p.get("type") == "image_url"]
+    assert image_parts == []
+    text_parts = [p for p in user_msg["content"] if p.get("type") == "text"]
+    assert any(p["text"] == "what is this?" for p in text_parts)

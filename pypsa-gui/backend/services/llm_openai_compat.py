@@ -15,8 +15,24 @@ History translation notes (request.messages arrive Anthropic-block-shaped):
   * assistant tool_use blocks   → assistant message with tool_calls[]
   * user tool_result blocks     → one {"role": "tool"} message each
   * thinking / redacted_thinking→ dropped (no wire equivalent; never replayed)
-  * image / document blocks     → dropped here; plan 2's capability gate
-                                  refuses them before any provider call
+  * user image blocks (base64)  → translated to chat-completions
+                                  `image_url` (a `data:` URL); the message
+                                  `content` becomes a parts LIST whenever any
+                                  non-text part survives translation, and
+                                  stays a plain string otherwise (fix round 1,
+                                  Task 8 review finding 1 — the original
+                                  "dropped here" behaviour was the bug: a
+                                  vision:true openai-wire profile could get
+                                  an image attachment past the capability
+                                  gate and then silently lose it in this
+                                  function, so the model answered about a
+                                  picture it never saw)
+  * document/PDF blocks, and any image whose `source.type` isn't `base64`
+                                  → still not translated (this adapter has no
+                                  way to carry them); chat_service's
+                                  capability gate refuses those turns before
+                                  any provider call, so a well-formed request
+                                  never reaches this function carrying one
 """
 from __future__ import annotations
 
@@ -44,6 +60,47 @@ def _flatten_text(content: Any) -> str:
         return "".join(b.get("text", "") for b in content
                        if isinstance(b, dict) and b.get("type") == "text")
     return ""
+
+
+def _to_openai_content_parts(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Anthropic-shaped `text` / `image` content blocks -> chat-completions
+    `content` parts list, order preserved.
+
+    Fix round 1 (Task 8 review, finding 1): the ONLY non-text block this
+    adapter knows how to carry is a base64-sourced `image`, translated to
+    `{"type": "image_url", "image_url": {"url": "data:<media_type>;base64,
+    <data>"}}` — the chat-completions vision shape. Anything else (a
+    `document`/PDF block, or an image whose `source.type` isn't `base64` —
+    a url source, an unrecognised shape) is skipped here, not translated.
+    That is safe silence, not the bug this function used to have: by the
+    time a request reaches this adapter, chat_service's capability gate
+    (`_outbound_vision_block_kinds` + the `capability_unsupported` checks in
+    `_run_turn_body`) has already refused any turn carrying one of those —
+    a well-formed request never contains a block this function can't
+    translate.
+    """
+    parts: list[dict[str, Any]] = []
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        btype = b.get("type")
+        if btype == "text":
+            text = b.get("text", "")
+            if text:
+                parts.append({"type": "text", "text": text})
+        elif btype == "image":
+            source = b.get("source")
+            if isinstance(source, dict) and source.get("type") == "base64":
+                media_type = source.get("media_type", "")
+                data = source.get("data", "")
+                parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{data}"},
+                })
+            # else: unsupported source shape — skipped defensively; the
+            # capability gate is responsible for never letting this happen.
+    return parts
 
 
 def _to_openai_messages(request: LLMRequest) -> list[dict[str, Any]]:
@@ -75,14 +132,33 @@ def _to_openai_messages(request: LLMRequest) -> list[dict[str, Any]]:
                             "tool_call_id": b.get("tool_use_id", ""),
                             "content": _flatten_text(b.get("content", ""))
                             or json.dumps(b.get("content", ""))})
-            plain = _flatten_text(content)
-            if plain:
-                # T6 — a turn that mixes plain text with tool_result blocks
-                # (e.g. the user typed something alongside a tool reply) must
-                # emit BOTH: the tool messages above, then this user message.
-                # The old `and not results` guard dropped the text entirely
-                # whenever tool_result blocks were also present.
-                out.append({"role": "user", "content": plain})
+            # Everything else this turn carried — text plus any image /
+            # document blocks — minus the tool_result blocks peeled off
+            # above.
+            remainder = [b for b in content if isinstance(b, dict)
+                        and b.get("type") != "tool_result"]
+            has_non_text = any(b.get("type") != "text" for b in remainder)
+            if has_non_text:
+                # Fix round 1 (Task 8 review, finding 1) — a non-text part
+                # (e.g. an `image` block) survived; emit a chat-completions
+                # multi-part `content` LIST so it actually reaches the wire
+                # instead of being flattened away by _flatten_text. Pure-text
+                # turns (the common case) do NOT take this path — see the
+                # `else` below, which keeps the original plain-string shape
+                # unchanged.
+                parts = _to_openai_content_parts(remainder)
+                if parts:
+                    out.append({"role": "user", "content": parts})
+            else:
+                plain = _flatten_text(content)
+                if plain:
+                    # T6 — a turn that mixes plain text with tool_result
+                    # blocks (e.g. the user typed something alongside a tool
+                    # reply) must emit BOTH: the tool messages above, then
+                    # this user message. The old `and not results` guard
+                    # dropped the text entirely whenever tool_result blocks
+                    # were also present.
+                    out.append({"role": "user", "content": plain})
         else:
             out.append({"role": role or "user",
                         "content": _flatten_text(content)})
