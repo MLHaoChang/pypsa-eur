@@ -1431,6 +1431,59 @@ def _check_lopf(n, solver_config) -> list[Issue]:
 
 # ── public entry point ───────────────────────────────────────────────────────
 
+def _check_ens_cap_coherence(solver_config) -> list[Issue]:
+    """
+    Reliability-target coherence (adequacy spec §5.1 / plan Phase 1 Task 1).
+    Pure config checks — no network needed.
+    """
+    issues: list[Issue] = []
+    cap = getattr(solver_config, "ens_cap_permyriad", None)
+    try:
+        cap = float(cap) if cap is not None else None
+    except (TypeError, ValueError):
+        cap = None
+    zone_mult = getattr(solver_config, "ens_zone_cap_multiple", None)
+    if cap is None or cap <= 0:
+        if zone_mult is not None:
+            issues.append(_warn(
+                "ens_zone_multiple_without_cap", "", "",
+                "A per-zone ENS ceiling multiple is set but no system ENS "
+                "target is — zone ceilings are defined relative to the "
+                "target, so nothing is enforced. Set 'ens_cap_permyriad'.",
+            ))
+        return issues
+    voll = float(getattr(solver_config, "voll", 0.0) or 0.0)
+    if voll <= 0:
+        issues.append(_warn(
+            "ens_cap_without_voll", "", "",
+            f"An ENS target ({cap:g}‱) is set but VOLL is 0, so no load-"
+            "shedding slack generators exist: the LP either serves all "
+            "demand or is infeasible, and the cap constrains nothing. Set a "
+            "VOLL (typical 3 000–10 000 €/MWh) to make the target meaningful.",
+        ))
+    if cap > 100.0:
+        issues.append(_warn(
+            "ens_cap_generous", "", "",
+            f"The ENS target is {cap:g}‱ = {cap / 100.0:g}% of demand — "
+            "planning NOT to serve that share. Real reliability standards "
+            "are 2–3 orders of magnitude tighter (adequate systems run "
+            "around 0.1–1‱ of energy; GB's standard is 3 loss-of-load "
+            "hours/yr). A generous cap yields a cheap-looking, badly "
+            "under-built plan.",
+        ))
+    strategy = str(getattr(solver_config, "solve_strategy", "full") or "full")
+    if strategy in ("rolling", "myopic"):
+        issues.append(_err(
+            "ens_cap_unsupported_strategy", "", "",
+            f"The ENS target is not supported with the '{strategy}' solve "
+            "strategy yet: each LP window would need its own demand "
+            "denominator, and a per-window cap is not the per-period "
+            "standard the target promises. Use the full strategy, or unset "
+            "the target.",
+        ))
+    return issues
+
+
 def _check_outage_params(n) -> list[Issue]:
     """
     Adequacy occurrence attributes (design spec §5.4): warn on implausible
@@ -1481,6 +1534,8 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_carrier_emissions(n)
     # Adequacy occurrence data — warnings only, any mode.
     issues += _check_outage_params(n)
+    # Reliability-target coherence — pure config checks.
+    issues += _check_ens_cap_coherence(solver_config)
 
     mode = solver_config.mode
     if mode == "pf":

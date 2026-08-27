@@ -423,6 +423,12 @@ class SolverConfigSchema(BaseModel):
     # networks (warning emitted to the solver log).
     co2_price_per_period: dict[str, float] = {}
     voll: float = 0.0
+    # Reliability target (adequacy spec §5.1): unserved electrical energy cap
+    # in parts per ten thousand (‱) of period electrical demand; None = off.
+    ens_cap_permyriad: float | None = None
+    # Per-zone ceiling as a multiple of the system target (zone = bus
+    # `country`); None = no zone ceilings. Requires ens_cap_permyriad.
+    ens_zone_cap_multiple: float | None = None
     investment_periods: list[int] = []
     # Per-investment-period load multiplier, keyed by period year (str). 1.0 =
     # unchanged. Applied transiently at solve time — see SolverConfig.load_scalers.

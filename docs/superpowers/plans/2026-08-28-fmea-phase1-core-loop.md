@@ -35,16 +35,16 @@ Same as Phase 0's plan (branch `claude/solution-fmea-integration-0mx5lc`; explic
 
 **Steps:**
 
-- [ ] **Failing tests first** (live solves, mini-network from `test_adequacy_metrics.py`'s pattern — load 100 MW, gen 60 MW, weights 3):
+- [x] **Failing tests first** (live solves, mini-network from `test_adequacy_metrics.py`'s pattern — load 100 MW, gen 60 MW, weights 3):
   1. *Cap binds:* voll=3000, cap generous enough to be feasible but tighter than what pure VoLL economics would shed (add a second, expensive generator, e.g. 200 €/MWh with p_nom 40, so the LP *can* serve load at a cost; without the cap it prefers shedding at implied cost < VoLL… pick numbers so unshackled shed > cap). Assert achieved weighted ENS ≈ cap within 1e-3 relative.
   2. *Cap loose:* cap far above the VoLL-optimal shed → achieved ENS equals the un-capped optimum (VoLL binds, not the cap).
   3. *Off by default:* `ens_cap_permyriad=None` adds no constraint (assert `ens_cap_` absent from `n.model.constraints` via a probe callback, or objective unchanged vs baseline).
   4. *Electrical scope:* an H2 bus + load shedding freely must not consume the electrical cap.
   5. *Preflight:* cap without voll warns; 150 ‱ warns.
-- [ ] Add config fields (dataclass + pydantic schema — keep names identical; `SolverConfig(**merged)` does the mapping).
-- [ ] Implement `_wrap_with_ens_cap` on the `_wrap_with_capex_budget` template, `[ENS]` log lines stating cap MWh, demand denominator, and slack count per period; compose at ~:748.
-- [ ] Preflight warnings in `validation_service`.
-- [ ] Commit: `feat(gui): system ENS cap as a first-class LP constraint`.
+- [x] Add config fields (dataclass + pydantic schema — keep names identical; `SolverConfig(**merged)` does the mapping).
+- [x] Implement `_wrap_with_ens_cap` on the `_wrap_with_capex_budget` template, `[ENS]` log lines stating cap MWh, demand denominator, and slack count per period; compose at ~:748.
+- [x] Preflight warnings in `validation_service`.
+- [x] Commit: `feat(gui): system ENS cap as a first-class LP constraint`.
 
 ---
 
@@ -63,9 +63,9 @@ Same as Phase 0's plan (branch `claude/solution-fmea-integration-0mx5lc`; explic
 
 **Steps:**
 
-- [ ] **Failing tests first:** two-zone network (countries "AA"/"BB"), system cap loose, zone ceiling tight on AA → AA's achieved ENS ≈ its ceiling while BB sheds freely under the system cap; empty-country network → warning issued and constraint count == system-cap-only + the degenerate zone (assert the collapse is logged); multiple-without-cap preflight warning.
-- [ ] Implement inside `_wrap_with_ens_cap` (one wrapper owns both layers — they share the demand walk).
-- [ ] Commit: `feat(gui): per-zone ENS ceilings`.
+- [x] **Failing tests first:** two-zone network (countries "AA"/"BB"), system cap loose, zone ceiling tight on AA → AA's achieved ENS ≈ its ceiling while BB sheds freely under the system cap; empty-country network → warning issued and constraint count == system-cap-only + the degenerate zone (assert the collapse is logged); multiple-without-cap preflight warning.
+- [x] Implement inside `_wrap_with_ens_cap` (one wrapper owns both layers — they share the demand walk).
+- [x] Commit: `feat(gui): per-zone ENS ceilings`.
 
 ---
 

@@ -120,6 +120,14 @@ class SolverConfig:
     # at solve time so the user notices the silent no-op.
     co2_price_per_period: dict = field(default_factory=dict)
     voll: float = 0.0                   # €/MWh — when >0, slack gens get added per bus
+    # Reliability target (adequacy spec §5.1): unserved ELECTRICAL energy
+    # cap in parts per ten thousand (‱) of the period's weighted electrical
+    # demand. None = off. Enforced per investment period via
+    # _wrap_with_ens_cap; requires voll > 0 (preflight warns otherwise).
+    ens_cap_permyriad: float | None = None
+    # Per-zone ceiling as a multiple of the system target, applied to each
+    # zone's OWN demand (zone = bus `country`). None = no zone ceilings.
+    ens_zone_cap_multiple: float | None = None
     investment_periods: list = field(default_factory=list)  # list[int] of years
     # Per-investment-period load scaling. Keyed by period year as str (JSON
     # object keys are always strings), value is a multiplier (1.0 = 100 %,
@@ -746,6 +754,9 @@ def run_simulation(
         # so PyPSA's LP picks up the linopy constraint. Only adds work when
         # the config dict is non-empty.
         extra_fn = _wrap_with_capex_budget(network, extra_fn, config, log_queue=log_queue)
+        # Reliability target: per-period ENS cap (+ per-zone ceilings) on the
+        # involuntary slack dispatch. Adds work only when a target is set.
+        extra_fn = _wrap_with_ens_cap(network, extra_fn, config, log_queue=log_queue)
         # User-supplied numerical-conditioning scale on the LP objective.
         # Multiplies model.objective by a positive constant right before
         # solve. Adds work only when scale ≠ 1.0.
@@ -2785,6 +2796,194 @@ def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=No
         if user_fn is not None:
             user_fn(n, snapshots)
         capex_budget_fn(n, snapshots)
+
+    return wrapper
+
+
+def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
+    """
+    Compose the extra_functionality callback with the reliability target:
+    a per-investment-period cap on unserved ELECTRICAL energy (adequacy
+    spec §5.1), plus optional per-zone ceilings (zone = bus `country`).
+
+    For each period P (and, with `ens_zone_cap_multiple` set, each zone z):
+
+        Σ_{t∈P} w_gen[t] · Σ_{slack b ∈ scope} p_shed[b,t]
+            ≤ (ens_cap_permyriad / 1e4) [· multiple] × D_{P[,z]}
+
+    where D is the period's (zone's) weighted electrical demand, computed
+    INSIDE the callback from n.loads / n.loads_t.p_set at optimize time —
+    after the modelling-assumption transforms, so load scalers are already
+    applied and the cap is a fraction of the demand the LP actually serves.
+    Slack membership via services/adequacy/slack (never name literals);
+    "electrical" via the same _canonical_load_carrier_key the load views
+    use, so the target and the Results tab can never disagree on scope.
+
+    NOTE (two-tier slack, spec §4.4): the cap must sum the INVOLUNTARY tier
+    only. Today the mask selects every slack; when the demand_response tier
+    lands, this site must switch to the involuntary-only mask — the DSR
+    task's tests assert it.
+
+    Period restriction is done by ZERO-MASKING the weight vector rather than
+    selecting snapshot subsets — sidesteps the MultiIndex .sel pitfalls the
+    curtailment wrapper documents. Returns user_fn unchanged when no target
+    is set. Rolling/myopic strategies are blocked at preflight (each LP
+    window would need its own demand denominator).
+    """
+    try:
+        permyriad = cfg.ens_cap_permyriad
+        permyriad = float(permyriad) if permyriad is not None else None
+    except (TypeError, ValueError):
+        permyriad = None
+    if permyriad is None or not math.isfinite(permyriad) or permyriad <= 0:
+        return user_fn
+
+    zone_multiple = None
+    try:
+        zm = cfg.ens_zone_cap_multiple
+        if zm is not None and math.isfinite(float(zm)) and float(zm) > 0:
+            zone_multiple = float(zm)
+    except (TypeError, ValueError):
+        zone_multiple = None
+
+    def _emit(msg: str) -> None:
+        _safe_log(log_queue, f"[ENS] {msg}")
+
+    def ens_cap_fn(n, snapshots):
+        import xarray as xr
+
+        from services.adequacy.slack import slack_generator_mask
+
+        gens = getattr(n, "generators", None)
+        buses = getattr(n, "buses", None)
+        loads = getattr(n, "loads", None)
+        if gens is None or gens.empty or buses is None or loads is None:
+            return
+
+        # Electrical bus set — canonical classifier, blank counts electrical.
+        elec_buses: set[str] = set()
+        if "carrier" in buses.columns:
+            for b in buses.index:
+                if _canonical_load_carrier_key(buses.at[b, "carrier"]) == "electrical":
+                    elec_buses.add(str(b))
+        else:
+            elec_buses = set(map(str, buses.index))
+
+        mask = slack_generator_mask(gens)
+        slack_names = [
+            str(g) for g in gens.index[mask]
+            if str(gens.at[g, "bus"]) in elec_buses
+        ]
+        if not slack_names:
+            _emit(
+                f"Target {permyriad:g}‱ set but no electrical slack "
+                "generators exist (voll off?) — cap skipped."
+            )
+            return
+        if "Generator-p" not in n.model.variables:
+            _emit("Generator-p variable absent — cap skipped.")
+            return
+        p_var = n.model.variables["Generator-p"]
+
+        # Energy weights over the LP's snapshots.
+        w = _period_utils.snapshot_weights(n, "generators", sns=snapshots)
+
+        # Electrical demand per snapshot: static p_set overridden per-column
+        # by loads_t.p_set where present, restricted to electrical buses.
+        elec_loads = [
+            str(l) for l in loads.index
+            if str(loads.at[l, "bus"]) in elec_buses
+        ]
+        demand = pd.Series(0.0, index=snapshots)
+        p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+        for l in elec_loads:
+            if p_set_t is not None and l in getattr(p_set_t, "columns", []):
+                demand = demand.add(
+                    p_set_t[l].reindex(snapshots).fillna(0.0), fill_value=0.0)
+            else:
+                try:
+                    demand = demand + float(loads.at[l, "p_set"] or 0.0)
+                except (TypeError, ValueError):
+                    continue
+
+        # Period buckets: MultiIndex level 0, or one "ALL" bucket.
+        if isinstance(snapshots, pd.MultiIndex):
+            period_of = pd.Series(snapshots.get_level_values(0), index=snapshots)
+            periods = sorted(set(period_of))
+        else:
+            period_of = pd.Series("ALL", index=snapshots)
+            periods = ["ALL"]
+
+        # Zone of each slack: its bus's country (Task 2). None ⇒ system-only.
+        zone_of_slack: dict[str, str] = {}
+        if zone_multiple is not None and "country" in buses.columns:
+            for g in slack_names:
+                b = str(gens.at[g, "bus"])
+                zone_of_slack[g] = str(buses.at[b, "country"] or "") if b in buses.index else ""
+            zones = sorted(set(zone_of_slack.values()))
+            if zones == [""]:
+                _emit(
+                    "Per-zone ceiling requested but every electrical bus has "
+                    "a blank `country` — the ceiling collapses into a second "
+                    "system cap (one unnamed zone). Populate bus.country to "
+                    "make zones real."
+                )
+        else:
+            zones = []
+
+        snap_coord = p_var.coords["snapshot"]
+
+        def _add_cap(name: str, names: list[str], w_masked: pd.Series,
+                     cap_mwh: float, label: str) -> None:
+            w_xr = xr.DataArray(
+                w_masked.values, dims=["snapshot"],
+                coords={"snapshot": snap_coord},
+            )
+            expr = sum((p_var.sel(name=g) * w_xr).sum() for g in names)
+            n.model.add_constraints(expr <= cap_mwh, name=name)
+            _emit(label)
+
+        for P in periods:
+            in_p = (period_of == P)
+            w_p = w.where(in_p, 0.0)
+            demand_p = float((demand * w_p).sum())
+            cap_p = permyriad / 1e4 * demand_p
+            _add_cap(
+                f"ens_cap_{P}", slack_names, w_p, cap_p,
+                f"Period {P}: ENS cap {cap_p:,.1f} MWh "
+                f"({permyriad:g}‱ of {demand_p:,.0f} MWh electrical demand) "
+                f"on {len(slack_names)} slack(s).",
+            )
+            for z in zones:
+                z_names = [g for g in slack_names if zone_of_slack.get(g, "") == z]
+                if not z_names:
+                    continue
+                z_buses = {str(gens.at[g, "bus"]) for g in z_names}
+                z_loads = [l for l in elec_loads if str(loads.at[l, "bus"]) in z_buses]
+                z_demand = pd.Series(0.0, index=snapshots)
+                for l in z_loads:
+                    if p_set_t is not None and l in getattr(p_set_t, "columns", []):
+                        z_demand = z_demand.add(
+                            p_set_t[l].reindex(snapshots).fillna(0.0), fill_value=0.0)
+                    else:
+                        try:
+                            z_demand = z_demand + float(loads.at[l, "p_set"] or 0.0)
+                        except (TypeError, ValueError):
+                            continue
+                z_demand_p = float((z_demand * w_p).sum())
+                z_cap = zone_multiple * permyriad / 1e4 * z_demand_p
+                zlabel = z or "<blank>"
+                _add_cap(
+                    f"ens_zone_{zlabel}_{P}", z_names, w_p, z_cap,
+                    f"Period {P}, zone {zlabel}: ceiling {z_cap:,.1f} MWh "
+                    f"({zone_multiple:g}× the target on its own "
+                    f"{z_demand_p:,.0f} MWh) on {len(z_names)} slack(s).",
+                )
+
+    def wrapper(n, snapshots):
+        if user_fn is not None:
+            user_fn(n, snapshots)
+        ens_cap_fn(n, snapshots)
 
     return wrapper
 
