@@ -19,23 +19,13 @@ def test_models_are_the_current_generation():
     assert chat_service.OPUS_MODEL == "claude-opus-5"
 
 
-def test_allowed_models_is_exactly_those_two():
-    assert chat_service.ALLOWED_MODELS == frozenset(
-        {"claude-sonnet-5", "claude-opus-5"}
-    )
-
-
-def test_an_unknown_model_is_not_in_the_allow_list():
-    """
-    NOTE: this only checks set membership in `ALLOWED_MODELS`, not that a
-    request naming an unknown model is refused. `ALLOWED_MODELS` is
-    currently declarative, not enforced: `routers/chat.py` types the
-    request's `model` field as `str | None` and passes it straight through
-    to the SDK without checking it against this set. If callers need actual
-    refusal of unknown models, that enforcement does not exist yet.
-    """
-    assert "claude-sonnet-4-6" not in chat_service.ALLOWED_MODELS
-    assert "gpt-4" not in chat_service.ALLOWED_MODELS
+def test_legacy_model_strings_resolve_to_builtin_profiles():
+    from services import llm_config
+    assert llm_config.resolve_legacy_model("claude-sonnet-5").id == "anthropic-sonnet"
+    assert llm_config.resolve_legacy_model("claude-opus-5").id == "anthropic-opus"
+    # unknown → active profile, not a refusal (documented passthrough contract)
+    assert llm_config.resolve_legacy_model("gpt-4").id == llm_config.resolve_active().id
+    assert llm_config.resolve_legacy_model(None).id == llm_config.resolve_active().id
 
 
 def test_no_module_hardcodes_a_model_literal():

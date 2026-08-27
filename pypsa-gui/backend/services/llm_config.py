@@ -458,6 +458,32 @@ def resolve_active() -> LLMProfile:
     return resolve_profile(None)
 
 
+def resolve_legacy_model(model: str | None) -> LLMProfile:
+    """
+    Map a pre-profile chat session's bare model string to a profile
+    (Task 5/7's translation `resolve_profile` deliberately does not do).
+
+    `DEFAULT_MODEL` / `OPUS_MODEL` resolve to the matching built-in profile
+    so an old session that stored one of those literals keeps behaving the
+    same way it always did. `None` (no stored model) resolves to whatever is
+    active now. Anything else — an unrecognized string — ALSO resolves to
+    the active profile rather than raising: free-text `model` values are a
+    documented passthrough contract (see `test_chat_models.py`), not
+    something this layer refuses, so an unrecognized value is logged once
+    and treated the same as "no model was stored".
+    """
+    if model == DEFAULT_MODEL:
+        return resolve_profile(BUILTIN_SONNET_ID)
+    if model == OPUS_MODEL:
+        return resolve_profile(BUILTIN_OPUS_ID)
+    if model is not None:
+        logger.warning(
+            "llm profiles: unrecognized legacy model %r; falling back to the "
+            "active profile", model,
+        )
+    return resolve_active()
+
+
 def set_active(profile_id: str) -> None:
     """Persist `profile_id` as active. Raises `ProfileValidationError` if unknown."""
     profiles, current_active = load_profiles()

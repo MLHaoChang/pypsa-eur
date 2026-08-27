@@ -66,6 +66,7 @@ from typing import Any
 from collections.abc import Callable, Generator, Iterable
 
 from fastapi import HTTPException
+from services.llm_config import DEFAULT_MODEL, OPUS_MODEL
 from services.project_context import ProjectContext
 
 logger = logging.getLogger("pypsa_gui.chat")
@@ -112,18 +113,14 @@ PROJECT_REBINDING_TOOLS = frozenset([
     "restore_project_snapshot",
 ])
 
-# Default + selectable models (Phase 3 wires the Anthropic SDK using these).
-# Keep these in sync with the frontend `ChatModel` union (api/chat.ts). The
-# model string is not enforced
-# server-side (it flows straight to the SDK), so a newer model the UI offers
-# works even if this list lags — but keep it accurate as documentation.
-# No "latest" comment here on purpose. The previous pair carried
-# `# latest Sonnet` / `# latest Opus`, which read as verified and was wrong
-# for a full generation — a comment that asserts currency is how this went
-# unnoticed. The model list is checked by tests/test_chat_models.py instead.
-DEFAULT_MODEL: str = "claude-sonnet-5"
-OPUS_MODEL: str = "claude-opus-5"
-ALLOWED_MODELS: frozenset[str] = frozenset([DEFAULT_MODEL, OPUS_MODEL])
+# Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
+# above from `services.llm_config` (Task 5 moved the constants there — the
+# profile store owns what "the default model" means, not the chat harness)
+# and re-exported by that import so `chat_service.DEFAULT_MODEL` /
+# `.OPUS_MODEL` keep working for every caller and test that already pins
+# those names. `ALLOWED_MODELS` is gone — `llm_config.resolve_legacy_model`
+# replaces it with a mapping that also covers the free-text passthrough case
+# (an unrecognized model string is not refused; see `test_chat_models.py`).
 
 # Hard per-session token caps. The client shows the running token counts
 # (M10), but the server enforces a token-count ceiling so a misbehaving
