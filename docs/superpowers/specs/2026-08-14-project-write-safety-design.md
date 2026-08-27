@@ -69,7 +69,9 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
 ## Open items
 
 - A future read-only ACL tier would re-open lock-acquisition DoS (security F3, downgraded because no such tier exists today — `project_acl.py` has admin/member only) — revisit acquisition tier then; admin force-release / hold-cap deferred to slice 2.
-- **Uploads write edges are outside the lock's coverage — concurrency gap, NOT an authz hole.**
+- ~~**Uploads write edges are outside the lock's coverage**~~ — **CLOSED 2026-08-19/27.**
+  Gated by `2c2bf504`; corrected to CHECK-only by `f977c3c5` (see below). Original entry kept for the
+  reasoning, which still explains why the gap was invisible:
   `POST /{name}/uploads` (`routers/uploads.py:138`) and `DELETE /{name}/uploads/{file_id}` (`:256`), mounted at
   `/api/projects` (`main.py:1045`), both write into `project.directory`. Neither calls `_enforce_project_lock`,
   and the middleware does not reach them either: `_FOREIGN_LOCK_GATE_PREFIXES` (`main.py:115`) is
@@ -81,7 +83,11 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
   The asymmetry that hides it: `/api/projects/` IS in `_SOLVER_BLOCKING_PREFIXES` (`main.py:219`), so these
   routes are guarded against a solve-in-flight but not against another user's lock. Same path, two guards,
   one applied — which is why reading either guard alone reads as complete.
-- **Preflight failure renders as a clean bill of health — ADR-0001 violation, independent of this slice.**
+- ~~**Preflight failure renders as a clean bill of health**~~ — **CLOSED 2026-08-19** by `f0af0a63`
+  (`IssuesPanel.tsx` + `Sidebar.tsx` now distinguish "could not check" from "no issues"); ADR-0001 entry
+  `8f1f6a59`. The same defect at the StatusBar save-state dot was closed by `7cedd7a8` on 2026-08-27 —
+  worth noting that the second instance was NOT found by fixing the first, which is why the ADR matters
+  more than either fix. Original entry kept for the reasoning:
   `layout/Sidebar.tsx:1223-1224` computes `issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)`
   and never consults the query's error state; `pages/IssuesPanel.tsx` renders the same response, and its own
   comment promises "if this panel is empty the solver run will not fail on pre-checks". So a REFUSED preflight
@@ -93,6 +99,17 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
   this defect; it does not fix it. The fix is to distinguish "no issues" from "could not check" at both
   consumers. Recorded separately on purpose: folded into the gate fix, the symptom disappears and the defect
   survives. Credit: raised cross-session by the assistant-dock and coordinator sessions, 2026-08-18.
+
+- **`_enforce_project_lock` vs `_check_project_lock` (2026-08-27).** Acquire-on-write is for edges that ARE
+  the edit; CHECK-only is for incidental writes (uploads, `put_layout`). `2c2bf504` used the wrong one and
+  an attachment upload claimed a 120 s lock — caught only by the FULL suite, as cross-file pollution, with
+  79 targeted tests green. Fixed in `f977c3c5`; `a0cf3948` collapsed `put_layout`'s duplicate copy of the
+  predicate onto the shared helper. When adding a gated write edge, pick deliberately and state which.
+
+- **TOCTOU residual on the uploads guard, accepted, not a defect (2026-08-27).** `_safe_file_dir` resolves
+  and returns; `rmtree` re-walks. A symlink swapped in between would defeat the containment check. The
+  precondition is local write access to the uploads dir — strictly more access than the bug it guards —
+  so it is not worth code. Recorded so it is not rediscovered as novel.
 
 - Unsaved-but-undoless dirt: solver results (`/api/simulation/*` not undo-captured) on a scratch network won't trigger the import confirm. Accepted gap this slice; noting for slice 2.
 - CommandPalette snapshot restore (`CommandPalette.tsx:522-536`), Sidebar same-name destructive re-load (`Sidebar.tsx:950-956`), and `App.tsx:441` reload remain unconfirmed destructive ops — named out of scope (candidate follow-up: reuse ConfirmDialog).
