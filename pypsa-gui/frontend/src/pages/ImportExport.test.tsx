@@ -76,6 +76,26 @@ describe('ImportZone guard', () => {
     await waitFor(() => expect(ioApi.importNetcdf).toHaveBeenCalled())
   })
 
+  it('asks first when the dirty check could not be answered (ADR-0001)', async () => {
+    // `depth` was initialised to 0 and the failed probe fell through to it, so
+    // an unreachable/refusing backend produced the same value as a genuinely
+    // clean network — and the destructive import ran with NO confirmation.
+    // "We could not check whether you have unsaved work" is not "you have
+    // none"; on a destructive path the unknown must fail CLOSED.
+    useUIStore.setState({ currentProject: null })
+    vi.mocked(networkApi.undoInfo).mockRejectedValue(new Error('backend unreachable'))
+    renderZone()
+    await pickFile('grid.nc')
+
+    expect(ioApi.importNetcdf).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toMatch(/could not|unsaved/i)
+
+    // Confirming still imports — the guard asks, it does not block.
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }))
+    await waitFor(() => expect(ioApi.importNetcdf).toHaveBeenCalled())
+  })
+
   it('clean scratch network imports without any prompt', async () => {
     useUIStore.setState({ currentProject: null })
     renderZone()
