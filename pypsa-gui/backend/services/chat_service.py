@@ -710,15 +710,24 @@ def _evict_idle_sessions_locked(now: float) -> None:
             _SESSIONS.pop(s.session_id, None)
 
 
-def get_or_create_session(
+def get_or_create_session_reporting(
     session_id: str | None = None,
     *,
     model: str = DEFAULT_MODEL,
-) -> ChatSession:
+) -> tuple[ChatSession, bool]:
     """
-    Resolve a session by id, creating a fresh one if unknown. Use the same
-    `session_id` across `/stream` and `/confirm` calls so the LLM/UI/server
-    agree on which conversation a token belongs to.
+    Resolve-or-create a session, reporting whether THIS call minted it.
+
+    `created` is True only when this call registered a brand-new session --
+    the only safe basis for a caller (`GET /history`'s rehydration) to adopt
+    a profile onto it. Existence-check and creation happen under a SINGLE
+    `_SESSIONS_LOCK` acquisition (fix round 2): the round-1 fix read
+    "already registered?" via a standalone `get_session` call and then
+    creating/fetching via a SEPARATE `get_or_create_session` call -- two
+    critical sections with a gap between them where a concurrent `/stream`
+    could register-and-bind the session. Whoever observes it as freshly
+    created here did so atomically with the registration itself, so there's
+    no stale read to race.
 
     Touches `last_activity` (create or reuse) and opportunistically sweeps idle
     sessions so the in-memory registry can't grow unbounded.
@@ -729,13 +738,31 @@ def get_or_create_session(
         if session_id and session_id in _SESSIONS:
             sess = _SESSIONS[session_id]
             sess.last_activity = now
-            return sess
+            return sess, False
         sess = ChatSession(model=model)
         if session_id:
             sess.session_id = session_id
         sess.last_activity = now
         _SESSIONS[sess.session_id] = sess
-        return sess
+        return sess, True
+
+
+def get_or_create_session(
+    session_id: str | None = None,
+    *,
+    model: str = DEFAULT_MODEL,
+) -> ChatSession:
+    """
+    Resolve a session by id, creating a fresh one if unknown. Use the same
+    `session_id` across `/stream` and `/confirm` calls so the LLM/UI/server
+    agree on which conversation a token belongs to.
+
+    Thin wrapper over `get_or_create_session_reporting` -- kept because its
+    signature/return type is pinned by callers and tests that don't care
+    which branch fired.
+    """
+    sess, _created = get_or_create_session_reporting(session_id, model=model)
+    return sess
 
 
 def drop_session(session_id: str) -> None:

@@ -280,14 +280,6 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
         last_rec = turns[-1]
         last_session_id = last_rec.get("session_id")
         if last_session_id:
-            # Fix round 1 — determine this BEFORE get_or_create_session,
-            # which registers the id as a side effect: it's the only way
-            # left to tell "this GET minted a fresh session" from "this GET
-            # found an already-live one" once that call returns.
-            session_was_already_registered = (
-                chat_service.get_session(last_session_id) is not None
-            )
-
             # Task 7 — resolve the profile the LATEST turn was recorded
             # under (its `profile_id` when present, else the legacy `model`
             # translation). This is the profile a FRESHLY-MINTED session
@@ -300,8 +292,18 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
                 resolved_profile = llm_config.resolve_legacy_model(
                     last_rec.get("model") or chat_service.DEFAULT_MODEL
                 )
-            sess = chat_service.get_or_create_session(
-                last_session_id, model=resolved_profile.model,
+            # Fix round 2 — existence-check and creation happen under ONE
+            # `_SESSIONS_LOCK` acquisition (`get_or_create_session_reporting`),
+            # not two. The round-1 fix's separate `get_session(...) is not
+            # None` probe followed by a separate `get_or_create_session`
+            # call left a microsecond gap where a concurrent `/stream` could
+            # register-and-bind the session in between; `created` reported
+            # here is never stale because it's observed atomically with the
+            # registration itself.
+            sess, session_was_freshly_minted = (
+                chat_service.get_or_create_session_reporting(
+                    last_session_id, model=resolved_profile.model,
+                )
             )
             # Fix round 1 — GET /history must stay read-only w.r.t. an
             # ALREADY-LIVE session's profile binding, exactly like
@@ -317,7 +319,7 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
             # NOT already registered (this GET minted it) adopts the
             # resolved profile; an already-live session is left exactly as
             # `/stream` bound it.
-            if not session_was_already_registered:
+            if session_was_freshly_minted:
                 sess.profile_id = resolved_profile.id
                 sess.bound_wire = resolved_profile.wire
                 sess.model = resolved_profile.model

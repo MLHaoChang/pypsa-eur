@@ -490,6 +490,110 @@ def test_history_does_not_rebind_an_already_live_session(
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Fix round 2 — the round-1 fix still spanned TWO separate `_SESSIONS_LOCK`
+# critical sections (the `get_session` probe, then `get_or_create_session`),
+# leaving a microsecond gap where a concurrent `/stream` register-and-bind
+# lands between them and still gets clobbered by the stale-transcript
+# profile. This closes it into one critical section.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_history_closes_probe_to_create_race_window(
+    appdata, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    """
+    Regression for the round-1 fix's remaining gap. `chat_history` used to
+    read `session_was_already_registered` via a standalone
+    `chat_service.get_session(...)` call (one lock acquisition), then
+    separately call `chat_service.get_or_create_session(...)` (a SECOND lock
+    acquisition). A concurrent `POST /stream` that registers AND binds the
+    session in the gap between those two calls is invisible to the stale
+    `session_was_already_registered = False` captured before it — so the
+    guard still overwrites the freshly-bound live session with the profile
+    named in the on-disk transcript.
+
+    This can't be reproduced with real threads deterministically, so the
+    race is injected at `llm_config.resolve_profile` — the one piece of
+    work `chat_history` does, in BOTH the buggy and fixed implementations,
+    strictly between reading `last_session_id` and touching the session
+    registry. Simulating the concurrent `/stream` bind there stands in for
+    it landing anywhere in the gap between the two calls it's meant to
+    represent:
+
+      * Old code: the probe (`get_session`) already ran and captured
+        `False` BEFORE this injection point runs, so it's now stale --
+        `get_or_create_session` (called after) finds the injected,
+        already-bound session and the guard clobbers it. FAILS.
+      * Fixed code: the injection still runs before the single combined
+        call, but that call performs its OWN existence check under the
+        SAME lock acquisition it creates under -- so it sees the injected
+        session and correctly reports `created=False`, and the guard
+        leaves it untouched. PASSES.
+
+    Directly demonstrates why the fix must be ONE critical section: it is
+    the only way for the existence-check to never be stale by construction,
+    regardless of where in "between reading the transcript and touching the
+    registry" a concurrent writer lands.
+    """
+    from services import llm_config
+
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="RaceGapProj")
+
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+
+    session_id = "sess-race-gap"
+
+    # Persisted transcript names the SONNET builtin -- the profile a
+    # freshly-minted session should adopt, and the profile that must NOT
+    # land on a session a concurrent /stream already bound to OPUS.
+    _write_chat_jsonl(tmp_projects_dir, "RaceGapProj", [{
+        "ts": 1.0,
+        "session_id": session_id,
+        "model": chat_service.DEFAULT_MODEL,
+        "profile_id": llm_config.BUILTIN_SONNET_ID,
+        "user": "hello from disk",
+        "assistant": [{"type": "text", "text": "hi from disk"}],
+        "usage": {},
+    }])
+
+    real_resolve_profile = llm_config.resolve_profile
+    injected = {"fired": False}
+
+    def racing_resolve_profile(profile_id):
+        # Fires exactly once, standing in for a concurrent POST /stream
+        # that registers-and-binds `session_id` to OPUS in the gap between
+        # `chat_history` reading the transcript and it touching the
+        # session registry.
+        if not injected["fired"]:
+            injected["fired"] = True
+            live = chat_service.get_or_create_session(session_id)
+            live.profile_id = llm_config.BUILTIN_OPUS_ID
+            live.bound_wire = "anthropic"
+            live.model = chat_service.OPUS_MODEL
+        return real_resolve_profile(profile_id)
+
+    monkeypatch.setattr(llm_config, "resolve_profile", racing_resolve_profile)
+
+    r = client.get("/api/chat/history")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["last_session_id"] == session_id
+    assert injected["fired"]
+
+    # The concurrently-bound OPUS session must survive untouched -- not
+    # reverted to the SONNET profile named on disk.
+    sess = chat_service.get_session(session_id)
+    assert sess is not None
+    assert sess.profile_id == llm_config.BUILTIN_OPUS_ID
+    assert sess.bound_wire == "anthropic"
+    assert sess.model == chat_service.OPUS_MODEL
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Fix round 1 — Finding 2: the A8 fallback flag must be TURN-scoped, not
 # round-scoped (at most one downgrade per WHOLE turn, across every agentic
 # round, not just within one outer-loop pass).
