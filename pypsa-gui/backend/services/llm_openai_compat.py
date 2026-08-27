@@ -125,6 +125,12 @@ class OpenAICompatProvider:
 
         text_parts: list[str] = []
         calls: dict[int, dict[str, Any]] = {}
+        # M6 fix round 1 — track which indices already got a tool_use_start
+        # (at most one per index, finding 3) and every id used so far, real
+        # or synthetic (so a synthetic id never collides with a real one
+        # seen earlier in the stream, finding 2).
+        started_indices: set[int] = set()
+        seen_ids: set[str] = set()
         usage: dict[str, int] = {}
         client = self._client()
         try:
@@ -165,29 +171,54 @@ class OpenAICompatProvider:
                                            text=delta["content"])
                         for tc in delta.get("tool_calls") or []:
                             idx = int(tc.get("index", 0))
-                            is_first_delta_for_idx = idx not in calls
                             slot = calls.setdefault(
                                 idx, {"id": "", "name": "", "args": ""})
-                            if tc.get("id"):
-                                slot["id"] = tc["id"]
-                                yield LLMEvent(
-                                    type="tool_use_start",
-                                    tool_use_id=tc["id"],
-                                    tool_name=(tc.get("function") or {}
-                                               ).get("name", ""))
-                            elif is_first_delta_for_idx:
+                            real_id = tc.get("id")
+                            fn_name = (tc.get("function") or {}).get(
+                                "name", "")
+                            if real_id:
+                                slot["id"] = real_id
+                                seen_ids.add(real_id)
+                                if idx not in started_indices:
+                                    started_indices.add(idx)
+                                    yield LLMEvent(
+                                        type="tool_use_start",
+                                        tool_use_id=real_id,
+                                        tool_name=fn_name)
+                                # else: this index already got its (synthetic)
+                                # start from an earlier id-less delta — adopt
+                                # the real id onto the slot (a tool_result
+                                # must reference whatever id upstream
+                                # actually expects) WITHOUT a second start
+                                # (fix round 1, finding 3 — the naive version
+                                # fired a second tool_use_start here, leaving
+                                # the first one's UI frame orphaned).
+                            elif idx not in started_indices:
                                 # M6 — some OpenAI-compatible servers ship the
                                 # FIRST delta for a tool-call index with no id
                                 # at all (or `id: ""`). Without a synthetic
                                 # id, this call never gets a tool_use_start
                                 # and the final block ships `id: ""` — a call
                                 # the harness can't correlate a result to.
-                                slot["id"] = f"call_{idx}"
+                                # `__synth_` is a prefix upstream will not
+                                # mint; disambiguate against any real id
+                                # already seen this stream so two tool_use
+                                # blocks never end up sharing an id (fix
+                                # round 1, finding 2 — the original
+                                # `f"call_{index}"` scheme collided with real
+                                # upstream ids of that exact shape).
+                                candidate = f"__synth_{idx}"
+                                bump = 0
+                                while candidate in seen_ids:
+                                    bump += 1
+                                    candidate = f"__synth_{idx}_{bump}"
+                                slot["id"] = candidate
+                                seen_ids.add(candidate)
+                                started_indices.add(idx)
                                 yield LLMEvent(
                                     type="tool_use_start",
-                                    tool_use_id=slot["id"],
-                                    tool_name=(tc.get("function") or {}
-                                               ).get("name", ""))
+                                    tool_use_id=candidate,
+                                    tool_name=fn_name)
                             fn = tc.get("function") or {}
                             if fn.get("name"):
                                 slot["name"] = fn["name"]

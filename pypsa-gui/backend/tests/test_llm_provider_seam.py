@@ -560,8 +560,10 @@ def test_openai_compat_idless_tool_delta_gets_synthetic_id():
     ship the FIRST tool_calls delta for an index with `id: ""` rather than a
     real id. Pre-fix, `tc.get("id")` is falsy so no `tool_use_start` is ever
     emitted and the final block ships `id: ""` — a tool call the harness
-    cannot correlate a result back to. Fix: synthesize `f"call_{index}"` on
-    the first delta for an index that lacks an id."""
+    cannot correlate a result back to. Fix: synthesize `f"__synth_{index}"` on
+    the first delta for an index that lacks an id (fix round 1 — the original
+    `f"call_{index}"` scheme collides with real upstream ids of that exact
+    shape; `__synth_` is a prefix upstream will not mint)."""
     import httpx, json
     from services.llm_openai_compat import OpenAICompatProvider
 
@@ -586,14 +588,130 @@ def test_openai_compat_idless_tool_delta_gets_synthetic_id():
 
     starts = [e for e in events if e.type == "tool_use_start"]
     assert len(starts) == 1
-    assert starts[0].tool_use_id == "call_0"
+    assert starts[0].tool_use_id == "__synth_0"
     assert starts[0].tool_name == "list_projects"
 
     done = events[-1]
     assert done.type == "message_done"
     tool = [b for b in done.blocks if b["type"] == "tool_use"][0]
-    assert tool["id"] == "call_0"
+    assert tool["id"] == "__synth_0"
     assert tool["input"] == {"limit": 2}
 
     assert captured["json"]["max_completion_tokens"] == _seam_request().max_tokens
     assert captured["json"]["max_tokens"] == _seam_request().max_tokens
+
+
+def test_openai_compat_synthetic_id_disambiguates_on_collision():
+    """Fix round 1, finding (2) — a synthetic id must never collide with a
+    real upstream id seen earlier in the stream. Here index 1's FIRST delta
+    carries the real id "__synth_0" (a pathological but possible upstream
+    value — the exact shape our own synthesis would produce for index 0).
+    When index 0 later needs synthesis, it must NOT reuse "__synth_0" (that
+    would give two tool_use blocks the same id and break tool_use_id/
+    tool_result pairing); it must disambiguate instead."""
+    import httpx
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    body = _sse_bytes(
+        b'{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"__synth_0",'
+        b'"function":{"name":"b","arguments":"{}"}}]}}]}',
+        b'{"choices":[{"delta":{"tool_calls":[{"index":0,'
+        b'"function":{"name":"a","arguments":"{}"}}]}}]}',
+        b'{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}',
+    )
+    provider = OpenAICompatProvider(
+        "http://localhost:11434/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, content=body,
+                headers={"content-type": "text/event-stream"}))))
+    events = list(provider.stream(_seam_request()))
+
+    starts = [e for e in events if e.type == "tool_use_start"]
+    assert len(starts) == 2
+    ids = [e.tool_use_id for e in starts]
+    assert ids[0] == "__synth_0"          # index 1's real (colliding-shaped) id
+    assert ids[1] != "__synth_0"          # index 0's synthetic, disambiguated
+    assert len(set(ids)) == 2             # never collide
+
+    done = events[-1]
+    tool_ids = {b["id"] for b in done.blocks if b["type"] == "tool_use"}
+    assert tool_ids == set(ids)
+
+
+def test_openai_compat_late_real_id_fires_no_second_start():
+    """Fix round 1, finding (3) — a regression on a previously-correct path:
+    if an index's first delta lacks an id (firing a synthetic
+    tool_use_start) and a LATER delta for that same index supplies a real
+    id, the harness must NOT see a second tool_use_start (the UI would show
+    an orphaned "preparing" frame that never resolves). The real id must
+    still be adopted onto the FINAL block, since a tool_result reply has to
+    reference whatever id upstream actually expects."""
+    import httpx
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    body = _sse_bytes(
+        b'{"choices":[{"delta":{"tool_calls":[{"index":0,'
+        b'"function":{"name":"list_projects","arguments":"{\\"li"}}]}}]}',
+        b'{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"real123",'
+        b'"function":{"arguments":"mit\\":2}"}}]}}]}',
+        b'{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}',
+    )
+    provider = OpenAICompatProvider(
+        "http://localhost:11434/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, content=body,
+                headers={"content-type": "text/event-stream"}))))
+    events = list(provider.stream(_seam_request()))
+
+    starts = [e for e in events if e.type == "tool_use_start"]
+    assert len(starts) == 1
+    assert starts[0].tool_use_id == "__synth_0"
+
+    done = events[-1]
+    tool = [b for b in done.blocks if b["type"] == "tool_use"][0]
+    assert tool["id"] == "real123"
+    assert tool["input"] == {"limit": 2}
+
+
+def test_provider_for_profile_resolves_none_base_url_from_preset(
+    tmp_path, monkeypatch,
+):
+    """Fix round 1, finding (1) — llm_config's own docs say `base_url=None`
+    on a catalogued profile means "use the preset's declared endpoint" and
+    is "always fine, and always the normal case". Pre-fix,
+    `_provider_for_profile` passed `None` straight to `OpenAICompatProvider`,
+    which crashes on `None.rstrip("/")`. A profile using the `ollama` preset
+    (auth="none", so no key-related short circuit) with `base_url=None` must
+    resolve to that preset's catalogued base_url instead of crashing."""
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import chat_service, llm_config
+
+    entry = next(e for e in llm_config.load_presets() if e["id"] == "ollama")
+    profile = llm_config.LLMProfile(
+        id="ol2", label="ol2", preset="ollama", wire="openai",
+        base_url=None, model="m", tools=True, vision=False,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    p, err = chat_service._provider_for_profile(profile)
+    assert err is None
+    assert p.name == "openai-compat"
+    assert p._base == entry["base_url"].rstrip("/")
+
+
+def test_provider_for_profile_custom_none_base_url_is_invalid_request(
+    tmp_path, monkeypatch,
+):
+    """Fix round 1, finding (1) — a "custom" profile has no catalogue entry
+    to resolve `base_url=None` against, so it is genuinely unusable: this
+    must return a typed `invalid_request` error, not crash."""
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import chat_service, llm_config
+
+    profile = llm_config.LLMProfile(
+        id="cust1", label="cust1", preset="custom", wire="openai",
+        base_url=None, model="m", tools=True, vision=False,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    p, err = chat_service._provider_for_profile(profile)
+    assert p is None
+    assert err == "invalid_request"

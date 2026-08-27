@@ -1585,8 +1585,16 @@ def _provider_for_profile(
         the SDK can read the one blessed `ANTHROPIC_API_KEY` env var on its
         own; a custom slot has no such SDK-known name, so passing it
         explicitly is the only way to honour it.
-      * openai wire → `OpenAICompatProvider(profile.base_url, api_key=<slot
-        value or None>)`.
+      * openai wire → `OpenAICompatProvider(<resolved base_url>, api_key=
+        <slot value or None>)`. `llm_config` documents `base_url=None` on a
+        profile as "use the preset's own endpoint" and "always fine, always
+        the normal case" for a catalogued preset — so a `None` base_url is
+        RESOLVED here (via `llm_config.load_presets()`), never passed
+        through as-is (`OpenAICompatProvider` would crash on
+        `None.rstrip("/")`, fix round 1). A `"custom"` preset, or any preset
+        id not in the catalogue, has no endpoint to resolve `None` against —
+        that is a genuinely unusable profile, so it returns `(None,
+        "invalid_request")` rather than crashing or guessing.
       * `auth == "bearer"` with an empty/unset key slot → `(None,
         "missing_api_key")`, on either wire.
 
@@ -1628,6 +1636,26 @@ def _provider_for_profile(
         return llm_anthropic.AnthropicProvider(built), None
 
     if profile.wire == "openai":
+        base_url = profile.base_url
+        if base_url is None:
+            # Resolution, not a guard (fix round 1, finding 1): None means
+            # "use the preset's declared endpoint" for a catalogued preset,
+            # never "pass None through and let the provider crash".
+            base_url = None
+            if profile.preset != "custom":
+                from services import llm_config
+                entry = next(
+                    (e for e in llm_config.load_presets()
+                     if isinstance(e, dict) and e.get("id") == profile.preset),
+                    None,
+                )
+                if entry is not None:
+                    base_url = entry.get("base_url")
+            if not base_url:
+                # "custom" (no catalogue entry to resolve against) or an
+                # unrecognised/incomplete preset — genuinely unusable, not
+                # something to guess at.
+                return None, "invalid_request"
         key_value = (
             os.environ.get(profile.key_env) if profile.key_env else None
         )
@@ -1635,7 +1663,7 @@ def _provider_for_profile(
             return None, "missing_api_key"
         return (
             llm_openai_compat.OpenAICompatProvider(
-                profile.base_url, api_key=key_value
+                base_url, api_key=key_value
             ),
             None,
         )
