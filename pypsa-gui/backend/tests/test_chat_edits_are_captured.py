@@ -51,56 +51,93 @@ def test_http_edit_is_captured_control(client, install_network):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "REPRODUCED 2026-08-27, not yet fixed. A chat-driven edit leaves no "
-        "dirty signal: depth=0 and unsaved=False, while the control above "
-        "proves the HTTP path captures normally. Every destructive guard reads "
-        "`unsaved`, so a chat edit can be destroyed with no prompt.\n\n"
-        "FIX AT THE DISPATCHER, NOT THE CRUD HELPER. The tempting fix is "
-        "routers.network._update_component, which this test's Generator edit "
-        "goes through — but Transformer, GlobalConstraint and Bus-rename "
-        "dispatch to DEDICATED handlers (chat_tools.py:730-740) and would stay "
-        "invisible. That fix flips this test GREEN while leaving those paths "
-        "open, which is worse than the present bug because it reads as closed. "
-        "The real chokepoint is chat_service.py:2948 where every tool is "
-        "dispatched and `tier` is in scope; the mark must sit AFTER the "
-        "confirmation gate, since marking before it would mark even when the "
-        "user DECLINES.\n\n"
-        "NOTE FOR WHOEVER TAKES IT: this test calls chat_tools directly and so "
-        "does NOT exercise the dispatcher. It must be re-pointed through "
-        "chat_service dispatch as part of the fix, or it will keep xfailing "
-        "against a correct fix. Kept as-is deliberately: it documents the "
-        "defect, and moving it is the fixer's first step rather than a change "
-        "made blind now.\n\n"
-        "strict=True so this fails loudly the moment it is fixed, rather than "
-        "lingering as a stale exemption."
-    ),
-)
+def _dispatch(tool_name: str, args: dict):
+    """Drive one tool_use through the REAL dispatcher, as a chat turn does."""
+    from services import chat_service
+    session = chat_service.ChatSession()
+    collected: list[dict] = []
+    frames = list(chat_service._dispatch_real_tool_call(
+        session, {"id": "tu-1", "name": tool_name, "input": args}, collected,
+    ))
+    return frames, collected
+
+
 def test_chat_edit_is_visible_as_unsaved_work(client, install_network):
     """
-    The claim under test. A chat edit must leave SOME signal that unsaved work
-    exists — otherwise every destructive guard treats the project as clean.
+    A chat edit must leave a signal that unsaved work exists, or every
+    destructive guard treats the project as clean and can discard it.
 
-    Asserted against the field the guards actually read (`unsaved`), not against
-    `depth`, deliberately: whether a chat edit is UNDOABLE is a separate product
-    question from whether it is DIRTY, and only the second one is a data-loss
-    bug. A fix that makes chat edits dirty without making them undoable still
-    closes the hole this test guards.
+    Driven through `_dispatch_real_tool_call`, NOT by calling `chat_tools`
+    directly. That distinction is the whole point: the fix lives at the
+    dispatcher, because the tempting fix — marking in
+    `routers.network._update_component` — misses Transformer, GlobalConstraint
+    and Bus-rename, which dispatch to dedicated handlers. A test that called
+    chat_tools directly would pass against that broken fix.
     """
     install_network(_net())
-    undo_service.clear()
-    from services import dirty_state
+    from services import chat_service, dirty_state
+    chat_service._reset_sessions_for_tests()
     dirty_state.clear()
+    undo_service.clear()
 
-    chat_tools.update_component(
-        component_class="Generator", name="G1", attrs={"p_nom": 150.0},
+    _dispatch("update_component", {
+        "component_class": "Generator", "name": "G1", "attrs": {"p_nom": 150.0},
+    })
+
+    assert dirty_state.is_dirty() is True, (
+        "a chat-driven edit left no trace of unsaved work; every destructive "
+        "guard reads this, so the edit can be destroyed without a prompt"
     )
 
-    info = client.get("/api/network/undo/info").json()
-    assert info["unsaved"] is True, (
-        "a chat-driven edit left no trace of unsaved work: depth="
-        f"{info['depth']}, unsaved={info['unsaved']}. Every destructive guard "
-        "reads `unsaved`, so the edit can be destroyed without a prompt."
+
+def test_a_read_tier_chat_tool_does_not_mark_the_project_dirty(client, install_network):
+    """
+    The sibling assertion. The fix must not mark on EVERY tool — a read tool
+    that dirties the project would prompt the user about work that does not
+    exist, and a guard that always fires is one people learn to click through.
+    """
+    install_network(_net())
+    from services import chat_service, dirty_state
+    chat_service._reset_sessions_for_tests()
+    dirty_state.clear()
+
+    _dispatch("undo_status", {})
+
+    assert dirty_state.is_dirty() is False, "a read-tier tool must not mark dirty"
+
+
+def test_an_unconfirmed_destructive_tool_does_not_mark_the_project_dirty(client, install_network):
+    """
+    This is the assertion that pins the mark's PLACEMENT, and without it the
+    mark could drift above the confirmation gate and nothing would fail.
+
+    A destructive tool stops at `tool_pending_confirmation` and executes
+    nothing until a human decides. Marking dirty before that point would claim
+    the project holds unsaved work the user has not agreed to create — and on a
+    denial, that claim would outlive the refusal and prompt them about it later.
+    """
+    install_network(_net())
+    from services import chat_service, dirty_state
+    chat_service._reset_sessions_for_tests()
+    dirty_state.clear()
+
+    session = chat_service.ChatSession()
+    collected: list[dict] = []
+    gen = chat_service._dispatch_real_tool_call(
+        session,
+        {"id": "tu-deny", "name": "delete_component",
+         "input": {"component_class": "Generator", "name": "G1"}},
+        collected,
+    )
+    events = []
+    for event, _payload in gen:
+        events.append(event)
+        if event == "tool_pending_confirmation":
+            gen.close()  # nobody will decide; the tool never runs
+            break
+
+    assert "tool_pending_confirmation" in events, events
+    assert dirty_state.is_dirty() is False, (
+        "the project was marked dirty by a destructive tool that was never "
+        "confirmed and never ran — the mark is above the confirmation gate"
     )
