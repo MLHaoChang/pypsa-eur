@@ -528,3 +528,72 @@ def test_run_turn_catches_non_provider_error_stream_failures():
 
     snap = chat_service._metrics_snapshot()
     assert snap["errors_by_kind"]["internal_error"] == 1
+
+
+def test_llm_event_rejects_unknown_type():
+    import pytest
+    from services.llm_provider import LLMEvent
+    with pytest.raises(ValueError):
+        LLMEvent(type="text_deltaa")
+
+
+def test_provider_for_profile_wiring(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import chat_service, llm_config
+    ollama = llm_config.LLMProfile(
+        id="ol", label="ol", preset="custom", wire="openai",
+        base_url="http://localhost:11434/v1", model="m", tools=True,
+        vision=False, auth="none", fallback_model=None, max_output_tokens=None)
+    p, err = chat_service._provider_for_profile(ollama)
+    assert err is None and p.name == "openai-compat"
+    bearer = llm_config.LLMProfile(
+        id="oa", label="oa", preset="openai", wire="openai",
+        base_url="https://h.example/v1", model="m", tools=True, vision=False,
+        auth="bearer", fallback_model=None, max_output_tokens=None)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    p, err = chat_service._provider_for_profile(bearer)
+    assert p is None and err == "missing_api_key"
+
+
+def test_openai_compat_idless_tool_delta_gets_synthetic_id():
+    """M6 — a server (observed from some OpenAI-compatible endpoints) can
+    ship the FIRST tool_calls delta for an index with `id: ""` rather than a
+    real id. Pre-fix, `tc.get("id")` is falsy so no `tool_use_start` is ever
+    emitted and the final block ships `id: ""` — a tool call the harness
+    cannot correlate a result back to. Fix: synthesize `f"call_{index}"` on
+    the first delta for an index that lacks an id."""
+    import httpx, json
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    body = _sse_bytes(
+        b'{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"",'
+        b'"function":{"name":"list_projects","arguments":"{\\"li"}}]}}]}',
+        b'{"choices":[{"delta":{"tool_calls":[{"index":0,'
+        b'"function":{"arguments":"mit\\":2}"}}]}}]}',
+        b'{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}',
+    )
+    captured = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(req.content)
+        return httpx.Response(200, content=body,
+                              headers={"content-type": "text/event-stream"})
+
+    provider = OpenAICompatProvider(
+        "http://localhost:11434/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    events = list(provider.stream(_seam_request()))
+
+    starts = [e for e in events if e.type == "tool_use_start"]
+    assert len(starts) == 1
+    assert starts[0].tool_use_id == "call_0"
+    assert starts[0].tool_name == "list_projects"
+
+    done = events[-1]
+    assert done.type == "message_done"
+    tool = [b for b in done.blocks if b["type"] == "tool_use"][0]
+    assert tool["id"] == "call_0"
+    assert tool["input"] == {"limit": 2}
+
+    assert captured["json"]["max_completion_tokens"] == _seam_request().max_tokens
+    assert captured["json"]["max_tokens"] == _seam_request().max_tokens

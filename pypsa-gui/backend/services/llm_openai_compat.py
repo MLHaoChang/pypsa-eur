@@ -76,7 +76,12 @@ def _to_openai_messages(request: LLMRequest) -> list[dict[str, Any]]:
                             "content": _flatten_text(b.get("content", ""))
                             or json.dumps(b.get("content", ""))})
             plain = _flatten_text(content)
-            if plain and not results:
+            if plain:
+                # T6 — a turn that mixes plain text with tool_result blocks
+                # (e.g. the user typed something alongside a tool reply) must
+                # emit BOTH: the tool messages above, then this user message.
+                # The old `and not results` guard dropped the text entirely
+                # whenever tool_result blocks were also present.
                 out.append({"role": "user", "content": plain})
         else:
             out.append({"role": role or "user",
@@ -102,7 +107,12 @@ class OpenAICompatProvider:
         import httpx
         payload: dict[str, Any] = {
             "model": request.model,
+            # M6 (Task 2 live-vendor research): current GPT-5.x/o-series
+            # REQUIRE max_completion_tokens — max_tokens 400s there. Sending
+            # both keeps Ollama/LM Studio/vLLM (which want max_tokens and
+            # ignore the field they don't recognise) working unchanged.
             "max_tokens": request.max_tokens,
+            "max_completion_tokens": request.max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
             "messages": _to_openai_messages(request),
@@ -155,6 +165,7 @@ class OpenAICompatProvider:
                                            text=delta["content"])
                         for tc in delta.get("tool_calls") or []:
                             idx = int(tc.get("index", 0))
+                            is_first_delta_for_idx = idx not in calls
                             slot = calls.setdefault(
                                 idx, {"id": "", "name": "", "args": ""})
                             if tc.get("id"):
@@ -162,6 +173,19 @@ class OpenAICompatProvider:
                                 yield LLMEvent(
                                     type="tool_use_start",
                                     tool_use_id=tc["id"],
+                                    tool_name=(tc.get("function") or {}
+                                               ).get("name", ""))
+                            elif is_first_delta_for_idx:
+                                # M6 — some OpenAI-compatible servers ship the
+                                # FIRST delta for a tool-call index with no id
+                                # at all (or `id: ""`). Without a synthetic
+                                # id, this call never gets a tool_use_start
+                                # and the final block ships `id: ""` — a call
+                                # the harness can't correlate a result to.
+                                slot["id"] = f"call_{idx}"
+                                yield LLMEvent(
+                                    type="tool_use_start",
+                                    tool_use_id=slot["id"],
                                     tool_name=(tc.get("function") or {}
                                                ).get("name", ""))
                             fn = tc.get("function") or {}

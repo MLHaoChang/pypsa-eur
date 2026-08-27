@@ -1554,7 +1554,93 @@ from services.llm_anthropic import (  # moved 2026-08-13 (provider seam)
 # module reference at call time — it's invoked via the
 # `chat_service._build_anthropic_client` alias above, which is the actual
 # patch surface tests pin, not `llm_anthropic.build_client`.
-from services import llm_anthropic, llm_provider
+from services import llm_anthropic, llm_openai_compat, llm_provider
+
+
+def _provider_for_profile(
+    profile: Any, client: Any | None = None
+) -> tuple[Any, str | None]:
+    """
+    `(provider, error_kind|None)` for an `LLMProfile` (Task 6).
+
+    Generalizes the inline construction `_run_turn_body` used to do
+    (`llm_anthropic.AnthropicProvider(client)`) across both wires, keyed off
+    the profile rather than a hardcoded Anthropic assumption. Kept in
+    `chat_service` — not `llm_anthropic` — so the existing `client=`/
+    `provider=` injection seams the whole chat test suite pins stay exactly
+    where they are.
+
+    Wiring:
+      * anthropic wire + the built-in `ANTHROPIC_API_KEY` slot → the
+        EXISTING `_build_anthropic_client()` path, reached through the
+        module attribute (so a test that monkeypatches
+        `chat_service._build_anthropic_client` sees its double here too) —
+        byte-identical zero-config behaviour, including `missing_api_key`
+        and `sdk_not_installed`.
+      * anthropic wire + any OTHER key slot (a custom profile whose preset
+        is not the built-in Anthropic one) → `anthropic.Anthropic(api_key=
+        <slot value>)`. This is the ONE sanctioned explicit `api_key=` kwarg
+        use in this codebase — `llm_anthropic.build_client` never passes the
+        key explicitly (so a literal value can't land in a repr/log) because
+        the SDK can read the one blessed `ANTHROPIC_API_KEY` env var on its
+        own; a custom slot has no such SDK-known name, so passing it
+        explicitly is the only way to honour it.
+      * openai wire → `OpenAICompatProvider(profile.base_url, api_key=<slot
+        value or None>)`.
+      * `auth == "bearer"` with an empty/unset key slot → `(None,
+        "missing_api_key")`, on either wire.
+
+    `client`, when given, is an already-built Anthropic SDK client (or test
+    double) — the production/test injection seam — and wins over building
+    one, on the anthropic wire only.
+    """
+    if profile.wire == "anthropic":
+        if client is not None:
+            return llm_anthropic.AnthropicProvider(client), None
+        if profile.key_env == "ANTHROPIC_API_KEY":
+            # The built-in slot: route through the SAME call the inline
+            # construction site always used, so this branch's error
+            # behaviour (missing_api_key / sdk_not_installed / unauthorized)
+            # is byte-identical to pre-Task-6 zero-config chat, not merely
+            # equivalent.
+            built, err = _build_anthropic_client()
+            if built is None:
+                return None, err
+            return llm_anthropic.AnthropicProvider(built), None
+        key_value = (
+            os.environ.get(profile.key_env) if profile.key_env else None
+        )
+        if profile.auth == "bearer" and not key_value:
+            return None, "missing_api_key"
+        try:
+            import anthropic  # noqa: PLC0415
+        except ImportError:
+            return None, "sdk_not_installed"
+        try:
+            # Sanctioned explicit api_key= kwarg — see docstring above.
+            built = anthropic.Anthropic(api_key=key_value)
+        except Exception as exc:  # noqa: BLE001 — surface as typed error frame
+            logger.warning(
+                "chat: anthropic client init failed for profile %r: %s",
+                profile.id, _redact_for_log(exc),
+            )
+            return None, "unauthorized"
+        return llm_anthropic.AnthropicProvider(built), None
+
+    if profile.wire == "openai":
+        key_value = (
+            os.environ.get(profile.key_env) if profile.key_env else None
+        )
+        if profile.auth == "bearer" and not key_value:
+            return None, "missing_api_key"
+        return (
+            llm_openai_compat.OpenAICompatProvider(
+                profile.base_url, api_key=key_value
+            ),
+            None,
+        )
+
+    return None, "internal_error"
 
 
 def _tools_payload() -> list[dict[str, Any]]:
