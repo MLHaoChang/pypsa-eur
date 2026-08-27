@@ -56,7 +56,7 @@ vi.mock('../api/projects', () => ({
   projectsApi: { save: vi.fn().mockResolvedValue({}) },
 }))
 vi.mock('../hooks/useSolveQueue', () => ({
-  useSolveQueue: () => ({ data: { jobs, current: null }, isLoading: false, isError: false }),
+  useSolveQueue: () => ({ data: { jobs, running: [], paused: false }, isLoading: false, isError: false }),
   useEnqueueSolve: () => ({ mutateAsync: enqueueMutateAsync, isPending: false }),
   useAbortJob: () => ({ mutate: abortMutate, isPending: false }),
   useClearFinished: () => ({ mutate: clearMutate, isPending: false }),

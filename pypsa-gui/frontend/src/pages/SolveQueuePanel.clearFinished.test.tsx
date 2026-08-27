@@ -45,7 +45,7 @@ vi.mock('../store/uiStore', () => ({
 }))
 
 vi.mock('../hooks/useSolveQueue', () => ({
-  useSolveQueue: () => ({ data: { jobs: [finishedJob], current: null }, isLoading: false, isError: false }),
+  useSolveQueue: () => ({ data: { jobs: [finishedJob], running: [], paused: false }, isLoading: false, isError: false }),
   useEnqueueSolve: () => ({ mutate: vi.fn(), isPending: false }),
   useAbortJob: () => ({ mutate: vi.fn(), isPending: false }),
   useClearFinished: () => ({ mutate: vi.fn(), isPending: false }),

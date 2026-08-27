@@ -17,7 +17,7 @@ function job(status: SolveJob['status']): SolveJob {
 }
 
 function q(status: 'pending' | 'error' | 'success', jobs?: SolveJob[]) {
-  return { state: { status, data: jobs ? { jobs, current: null } : undefined } }
+  return { state: { status, data: jobs ? { jobs, running: [], paused: false } : undefined } }
 }
 
 describe('queueRefetchInterval', () => {

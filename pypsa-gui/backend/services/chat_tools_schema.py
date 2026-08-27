@@ -754,8 +754,10 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "solve_queue_list",
-        "{jobs: [...], current: job_id|None} — FIFO queue snapshot. "
-        "Safety: read.",
+        "{jobs: [...], running: [job_id], paused: bool} — FIFO queue snapshot. "
+        "`running` lists EVERY job solving right now (the pool size is "
+        "PYPSA_GUI_MAX_CONCURRENT_SOLVES, default 1), and omits jobs the caller "
+        "may not see. Job ids are UUIDs. Safety: read.",
     ),
     _t(
         "solve_queue_abort",

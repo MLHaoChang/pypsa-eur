@@ -35,7 +35,11 @@ export interface SolveJob {
 
 export interface QueueList {
   jobs: SolveJob[]
-  current: string | null   // id of the running job, if any
+  // Ids of the jobs solving right now. Replaces the scalar `current`, which
+  // could not represent a pool and reported one arbitrary running job.
+  running: string[]
+  // The dispatcher is paused: running jobs finish, nothing else starts.
+  paused: boolean
 }
 
 // Standard {index, columns, data} time-series payload (NaN→null), with an

@@ -601,8 +601,7 @@ def list_queue(
     user: User | None = Depends(optional_user),
 ):
     """
-    All jobs in FIFO order, live ones merged with persisted history
-    (`_merged_jobs`, Task 16a). `current` is the id of the running job, if any.
+    All jobs in FIFO order. `running` lists the ids solving right now.
 
     AUTHORIZATION (P-1): this REDACTS, it does not filter. `position`
     (`SolveJob.to_public`) is the 1-based place in a GLOBALLY sequential queue,
@@ -621,9 +620,10 @@ def list_queue(
     `project_key`, `error`) OR WHAT IT PRODUCED (`objective`, `solve_time`,
     `condition` — added in Task 16a's review, since a persisted row can now
     outlive the queue that used to self-clear it) are nulled for jobs the
-    caller cannot access. `current` is the true running job id only when the
-    caller may see it — otherwise null, since the id alone was enough to abort
-    it before this change.
+    caller cannot access. `running` carries the ids of the jobs solving right
+    now, and only those the caller may see — the id alone was enough to abort
+    a job before P-1, so a hidden job's id must not appear here even though
+    its redacted row does.
 
     "Cannot access" is the PROJECT ACL, resolved for the whole listing in one
     batch (`accessible_project_ids`). This endpoint is polled every 1.5s while
@@ -649,13 +649,18 @@ def list_queue(
         db, user, (_project_uuid(job, prefix) for job in jobs)
     )
     seen = [_may_see(job, prefix, allowed) for job in jobs]
-    current = next(
-        (job["id"] for job, ok in zip(jobs, seen) if ok and job["status"] == "running"),
-        None,
-    )
+    # PLURAL. `current: job_id | None` could not represent a pool, and it was
+    # never read from `_current_id` anyway — it was recomputed as the FIRST
+    # visible running job, so at a concurrency above 1 it reported one arbitrary
+    # job and hid the rest with no schema signal that it was truncating. Ids the
+    # caller may not see are omitted for the same reason `current` was nulled
+    # cross-org: the id alone was enough to abort it.
+    running = [
+        job["id"] for job, ok in zip(jobs, seen) if ok and job["status"] == "running"
+    ]
     return {
         "jobs": [job if ok else _redact(job) for job, ok in zip(jobs, seen)],
-        "current": current,
+        "running": running,
         "paused": solve_queue.is_paused(),
     }
 

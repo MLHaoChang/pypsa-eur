@@ -316,19 +316,19 @@ def test_list_error_field_is_redacted_for_another_orgs_failed_job(
     assert _by_id(payload, theirs["id"])["error"] is None, "failure detail leaked"
 
 
-def test_current_is_null_when_the_running_job_belongs_to_another_org(
+def test_running_omits_a_job_belonging_to_another_org(
     client, other_org_client, install_network, tmp_projects_dir
 ):
     theirs = _enqueue(other_org_client, install_network, "Bravo")
     _force_status(theirs["id"], "running")
 
     mine_view = client.get("/api/simulation/queue").json()
-    assert mine_view["current"] is None, "running job id leaked across orgs"
+    assert theirs["id"] not in mine_view["running"], "running job id leaked across orgs"
     assert _by_id(mine_view, theirs["id"])["status"] == "running"
 
     # The owner still sees the true running id — redaction must not blind them.
     theirs_view = other_org_client.get("/api/simulation/queue").json()
-    assert theirs_view["current"] == theirs["id"]
+    assert theirs_view["running"] == [theirs["id"]]
     assert _by_id(theirs_view, theirs["id"])["project_id"] == "Bravo"
 
 

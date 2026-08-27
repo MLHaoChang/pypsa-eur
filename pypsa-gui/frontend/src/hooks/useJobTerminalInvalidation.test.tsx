@@ -45,7 +45,7 @@ function job(id: string, project_id: string | null, status: SolveJob['status']):
 // changing on every poll response (see the deferred-minor note in the task 7
 // report: the effect re-running per-poll is intentional, not the bug here).
 function setJobs(jobs: SolveJob[]) {
-  vi.mocked(useSolveQueue).mockReturnValue({ data: { jobs, current: null } } as never)
+  vi.mocked(useSolveQueue).mockReturnValue({ data: { jobs, running: [], paused: false } } as never)
 }
 
 function wrapper(client: QueryClient) {

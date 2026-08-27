@@ -20,7 +20,7 @@ import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 
 vi.mock('../hooks/useSolveQueue', () => ({
-  useSolveQueue: () => ({ data: { jobs: [], current: null } }),
+  useSolveQueue: () => ({ data: { jobs: [], running: [], paused: false } }),
 }))
 vi.mock('../hooks/useLocalSettings', () => ({
   useLocalSettingsAvailable: () => false,
