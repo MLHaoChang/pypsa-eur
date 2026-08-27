@@ -175,25 +175,58 @@ _FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)
 # route name. `/api/simulation/run` and `/api/simulation/run_ac_pf` are
 # POSTs under the same prefix that do NOT belong here: both acquire the lock
 # and drive the network through `n.add`/`n.remove` via the LP/PF build.
+#   * `POST /api/simulation/queue/pause`
+#   * `POST /api/simulation/queue/resume`                 — these two act on
+#     the ONE process-global dispatcher and resolve no project whatsoever, so
+#     the active project's lock is not merely the wrong lock to test — there
+#     is nothing for it to be right about. Cross-org by construction and
+#     super-admin-gated (`_require_instance_scope`), exactly like
+#     clear_finished. Gated, a super-admin could not pause the instance
+#     because a colleague was editing an unrelated project they had open.
+#   * `POST /api/simulation/queue/cancel_queued`          — sweeps the
+#     caller's own QUEUED jobs, each authorized by `_may_abort` against the
+#     JOB. Like abort it only ever STOPS work, so it writes nothing to any
+#     project and needs no holder check of its own.
 _FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
     "/api/simulation/queue",
     "/api/simulation/queue/clear_finished",
+    "/api/simulation/queue/pause",
+    "/api/simulation/queue/resume",
+    "/api/simulation/queue/cancel_queued",
     "/api/simulation/preflight",
 })
 #
-# The abort pattern is anchored to the canonical dashed-UUID shape, not "any
-# non-slash segment": `_parse_job_id` (`routers/solve_queue.py`) only ever
+# The job-scoped patterns are anchored to the canonical dashed-UUID shape, not
+# "any non-slash segment": `_parse_job_id` (`routers/solve_queue.py`) only ever
 # resolves a real job from `uuid.UUID(job_id)`, so anything else can't
 # address a job regardless. Failing OUT of the exemption on a non-canonical
 # id is the safe direction — the frontend only ever sends the canonical form
 # it got back from the API, so a stray/odd-form segment just gets gated (a
-# 409 at worst), never an accidental bypass.
-_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS = (
-    re.compile(
-        r"^/api/simulation/queue/"
-        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-        r"/abort$"
-    ),
+# 409 at worst), never an accidental bypass. Anchored at BOTH ends (`$`) so a
+# suffix past the verb cannot ride the exemption either.
+#
+# `dismiss` joins `abort` on the same terms: per-user and job-scoped
+# (authorized on the job's `enqueued_by_user_id`), it hides a row from ONE
+# caller's listing and touches no project.
+#
+# `requeue` is the one that could not simply be added. Exemption and holder
+# check are a PAIR — bare `POST /api/simulation/queue` is exempt BECAUSE it
+# runs its own `project_locks.get_lock` against the project named in its body,
+# since the middleware can only ever test the session's ACTIVE project.
+# `abort`/`dismiss` need no such check because stopping or hiding work writes
+# nothing. Requeue creates a job that SOLVES AND SAVES a project, so exempting
+# it without a check would start a write against a project another user holds
+# with nothing testing that lock at any layer — the "destructive route
+# inheriting an exemption" this whole list exists to prevent, and strictly
+# worse than the wrong-project 409. `requeue_job` now carries the check
+# against the project it actually resolves from the JOB; that is the
+# precondition for the entry below, not an incidental extra.
+_JOB_ID_RE = (
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS = tuple(
+    re.compile(rf"^/api/simulation/queue/{_JOB_ID_RE}/{verb}$")
+    for verb in ("abort", "dismiss", "requeue")
 )
 
 
