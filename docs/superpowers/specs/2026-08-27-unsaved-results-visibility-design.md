@@ -192,7 +192,14 @@ be recorded as one rather than discovered later.
 
 ## Open
 
-- **Chat-driven edits may never be undo-captured — found here, deliberately NOT fixed here.**
+- **Chat-driven edits: the DIRT half is closed (`2520eaa4`), the UNDO half is not.**
+  Reproduced (`4e80be85`) and fixed at the chat dispatch site, so a chat edit now sets
+  `unsaved` and every destructive guard prompts on it. What remains is narrower and is NOT a
+  data-loss bug: a chat edit still pushes no undo entry, so `depth` stays 0 and Ctrl-Z cannot
+  reverse it. That is a product question about whether chat edits should be undoable, not a
+  guard failing open. Original note kept below for the reasoning that found it.
+
+  Original:
   The only `undo_service.push` statement is reached from `undo_snapshot_middleware`, and
   `chat_tools._route` calls router handlers DIRECTLY rather than over HTTP. If that holds,
   a chat-driven component edit is neither undoable nor counted by `depth`, so `depth`
