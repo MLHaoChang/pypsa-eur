@@ -294,3 +294,70 @@ def test_requeue_after_rename_uses_the_current_directory_and_name(
         solve_queue.reset_for_tests()
         with session_local() as db:
             local_mode.remove_local_identity(db)
+
+
+def test_an_unkeyed_job_is_not_requeueable_under_auth(
+    client, install_network, tmp_projects_dir, project_storage_dir,
+):
+    """
+    Pins the invariant that makes requeue's holder check COMPLETE.
+
+    `requeue_job` resolves its project from `old["project_key"]`. When that
+    yields nothing it falls back to whatever the job itself captured — a
+    branch that necessarily has no `project.id`, and therefore CANNOT carry
+    the `project_locks.get_lock` check the keyed branch does. If that branch
+    were reachable under auth it would be a hole straight through the fix:
+    requeue a legacy job, solve and save its project, with no lock consulted
+    at any layer.
+
+    It is not reachable, and the reason lives in a different function:
+    `_may_see` answers `local_mode.is_local_mode()` for a job with no
+    `project_key`, so under auth `_visible_job_or_404` 404s before the branch
+    is ever entered — and in local mode there is one tenant and one user, so
+    no foreign lock can exist to check.
+
+    That is a two-function argument with nothing tying the halves together, so
+    a later widening of `_may_see` (say, attributing unkeyed jobs by
+    `enqueued_by_user_id` — a plausible cleanup now that the column exists)
+    would silently open the unchecked branch. Nothing in `requeue_job` would
+    look wrong, and no existing test would fail. This one would.
+
+    Asserted through the ROUTE rather than on `_may_see` directly: what must
+    hold is "the unchecked branch is unreachable", and only the route can
+    answer that.
+    """
+    install_network(build_network(), name="Legacy")
+    _save_project(client, "Legacy")
+    solve_queue.reset_for_tests()
+    try:
+        jid = uuid.uuid4()
+        with solve_queue._lock:
+            # No project_key — the pre-Step-0a shape — but a REAL
+            # `storage_dir` holding a real `network.nc`.
+            #
+            # That detail is the whole test. A null storage_dir makes the
+            # route 404 at its "no saved network on disk" check, which is a
+            # DIFFERENT 404 arriving BEFORE the branch under test and
+            # independent of `_may_see` entirely. Verified by mutation: with
+            # `_may_see` widened to admit unkeyed jobs, the null-dir version
+            # of this test still passed — it was pinning nothing. With a real
+            # directory the mutant reaches the fallback branch, requeues
+            # successfully, and the assertion below fails as it must.
+            job = SolveJob(
+                id=jid,
+                project_id="Legacy",
+                storage_dir=str(project_storage_dir("Legacy")),
+                enqueued_at=0.0,
+            )
+            job.status = "completed"
+            solve_queue._jobs[jid] = job
+            solve_queue._order.append(jid)
+
+        r = client.post(f"/api/simulation/queue/{jid}/requeue")
+        assert r.status_code == 404, (
+            "an unkeyed job reached requeue's fallback branch under auth — that "
+            "branch cannot check the project lock, so requeue would solve and "
+            "save a project with no holder check at any layer. See _may_see."
+        )
+    finally:
+        solve_queue.reset_for_tests()
