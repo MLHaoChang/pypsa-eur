@@ -523,6 +523,39 @@ Beyond the seam spec's own gates (which land first):
     (verified absent today — the file that actually holds the live key is
     not on the forbidden list).
 
+## Merge precondition — read this before integrating this line
+
+**This branch may not be split.** Its provider wiring and its redaction
+widening are a single safety unit, and they live in different tasks.
+
+`master`'s `redact_secrets_in_str` is pattern-only (`sk-ant-*`, `key=value`,
+`bearer …`). That is safe there for one accidental reason: `llm_openai_compat`
+has no production caller on `master`, so no third-party key ever reaches a log
+or persist path. **This line removes both halves of that safety at once** — the
+provider gains a real caller (session binding / profile-constructed providers),
+*and* per-profile key slots arrive for OpenAI / Moonshot / DashScope / custom
+endpoints whose key values match none of those three patterns. The sole
+compensating control is the value-substitution widening of `redaction.py`
+(`live_secret_values()`, ≥8-char floor, substitute-before-regex, longest-first).
+
+So the hazard is **not** the merge — it is a *split*. Any cherry-pick, partial
+revert, or task-subset landing that takes the provider wiring without the
+redaction widening ships a live third-party API key into log files and
+`chat.jsonl` unscrubbed, **and every test still passes**.
+
+Inspection cannot catch this: "the redaction commit is in the diff" is equally
+true of an arrangement that dropped the caller and of one that dropped the
+redactor. The plan's close-out task therefore asserts the *property*: plant a
+managed key whose value matches no `master` pattern, drive one turn that logs
+and persists an error carrying it, then grep the log and `chat.jsonl` for the
+literal value. Absent = safe. Run that before integrating, not just before
+declaring the branch done.
+
+Related: `docs/superpowers/findings/2026-08-27-lock-holder-email-reaches-the-model.md`
+— a separate, currently unowned Medium on `master`, and the reason this spec
+also forbids new error frames from carrying identifiers (redaction is
+secrets-only by design and will not catch an email, user id, or project uuid).
+
 ## Risks
 
 | Risk | Mitigation |
