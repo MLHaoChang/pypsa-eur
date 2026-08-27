@@ -40,6 +40,8 @@ import {
   no,
   SetFS,
   NumInput,
+  OutageInputs,
+  outagePayload,
   useGlobalDiscountRate,
   useGlobalDefaultLifetime,
   useBuildYearOptions,
@@ -191,6 +193,8 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       // null ⇒ NaN on the asset ⇒ solver fills with global at solve time.
       const drPct = no(form, 'discount_rate_pct')
       payload.discount_rate = drPct === null ? null : drPct / 100
+      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
+      Object.assign(payload, outagePayload(form))
       return networkApi.updateGenerator(gen.name, payload)
     },
     onSuccess: () => {
@@ -204,7 +208,7 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(gen, ['name', 'bus', 'carrier', 'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
+    const base = toFS(gen, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
       'p_min_pu', 'p_max_pu', 'marginal_cost', 'capital_cost', 'fom_cost', 'overnight_cost',
       'curtailment_cost',
       'efficiency',
@@ -401,6 +405,8 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('generator.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('generator.lifetime')} />
+      <SectionHdr title="Adequacy" />
+      <OutageInputs fs={form} set={setForm} />
       <SectionHdr title="Unit Commitment" />
       <ChkInput label="Committable" k="committable" fs={form} set={setForm} tip={docTip('generator.committable')} />
       {/* p_min_pu (minimum stable load fraction) is a Unit Commitment concept:
@@ -491,6 +497,8 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       payload.lifetime = no(form, 'lifetime')
       const drPct = no(form, 'discount_rate_pct')
       payload.discount_rate = drPct === null ? null : drPct / 100
+      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
+      Object.assign(payload, outagePayload(form))
       return networkApi.updateStorageUnit(su.name, payload)
     },
     onSuccess: () => {
@@ -504,7 +512,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(su, ['name', 'bus', 'carrier', 'p_nom', 'p_nom_extendable',
+    const base = toFS(su, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'p_nom', 'p_nom_extendable',
       'p_nom_min', 'p_nom_max', 'max_hours',
       'efficiency_store', 'efficiency_dispatch', 'standing_loss',
       'cyclic_state_of_charge', 'state_of_charge_initial',
@@ -636,6 +644,8 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('storage_unit.fom_cost')} />
       <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('storage_unit.overnight_cost')} />
       <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
+      <SectionHdr title="Adequacy" />
+      <OutageInputs fs={form} set={setForm} />
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('storage_unit.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
@@ -700,6 +710,8 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       // blank to fall back to the solver's default_lifetime at solve time.
       payload.build_year = ni(form, 'build_year', current.build_year ?? 0)
       payload.lifetime = no(form, 'lifetime')
+      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
+      Object.assign(payload, outagePayload(form))
       return networkApi.updateStore(store.name, payload)
     },
     onSuccess: () => {
@@ -713,7 +725,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(store, ['name', 'bus', 'carrier', 'e_nom', 'e_nom_extendable', 'e_nom_min', 'e_nom_max',
+    const base = toFS(store, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'e_nom', 'e_nom_extendable', 'e_nom_min', 'e_nom_max',
       'e_min_pu', 'e_max_pu', 'e_initial', 'e_cyclic', 'capital_cost', 'marginal_cost', 'fom_cost',
       'overnight_cost', 'standing_loss', 'build_year'])
     base.lifetime = defaultLifetime(store.lifetime, globalLt)
@@ -822,6 +834,8 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('store.overnight_cost')} />
       <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
       <NumInput label="Standing loss" k="standing_loss" fs={form} set={setForm} unit="/h" tip={docTip('store.standing_loss')} />
+      <SectionHdr title="Adequacy" />
+      <OutageInputs fs={form} set={setForm} />
       <SectionHdr title="Lifecycle (multi-period)" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('store.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
@@ -1099,6 +1113,8 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       payload.overnight_cost = no(form, 'overnight_cost')
       const drPct = no(form, 'discount_rate_pct')
       payload.discount_rate = drPct === null ? null : drPct / 100
+      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
+      Object.assign(payload, outagePayload(form))
       return networkApi.updateLink(link.name, payload)
     },
     onSuccess: () => {
@@ -1112,7 +1128,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(link, ['name', 'carrier', 'bus0', 'bus1', 'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
+    const base = toFS(link, ['name', 'carrier', 'bus0', 'bus1', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
       'p_min_pu', 'p_max_pu', 'efficiency', 'marginal_cost', 'capital_cost', 'fom_cost',
       'overnight_cost', 'build_year', 'lifetime'])
     base.lifetime = defaultLifetime(link.lifetime, globalLt)
@@ -1293,6 +1309,8 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('link.fom_cost')} />
       <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('link.overnight_cost')} />
       <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
+      <SectionHdr title="Adequacy" />
+      <OutageInputs fs={form} set={setForm} />
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('link.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('link.lifetime')} />
@@ -1786,6 +1804,8 @@ function LinePanel({ name }: { name: string }) {
       } else {
         payload.lifetime = null
       }
+      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
+      Object.assign(payload, outagePayload(form))
       return networkApi.updateLine(name, payload)
     },
     onSuccess: () => {
@@ -1829,6 +1849,10 @@ function LinePanel({ name }: { name: string }) {
       // doesn't already specify one.
       build_year: String(line.build_year ?? 0),
       lifetime: defaultLifetime(line.lifetime, globalLt),
+      // Adequacy occurrence trio — blank when unset/NaN (spec §5.4).
+      outage_rate_value: line.outage_rate_value != null && Number.isFinite(line.outage_rate_value) ? String(line.outage_rate_value) : '',
+      outage_rate_basis: line.outage_rate_basis ?? '',
+      mttr_hours: line.mttr_hours != null && Number.isFinite(line.mttr_hours) ? String(line.mttr_hours) : '',
     })
     setEditing(true)
   }
@@ -1958,6 +1982,9 @@ function LinePanel({ name }: { name: string }) {
               every component class. Build year defaults to the first
               investment period when blank; lifetime falls back to the global
               default_lifetime from Solver Settings. */}
+          <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+            <OutageInputs fs={form} set={setForm} />
+          </div>
           <BuildYearSelect fs={form} set={setForm} tip={docTip('line.build_year')} />
           <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr"
             tip={docTip('line.lifetime')} />

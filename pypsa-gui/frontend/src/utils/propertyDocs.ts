@@ -90,6 +90,14 @@ export const PROPERTY_DOCS: Record<string, string> = {
     'Lump-sum construction cost (€/MW), as if built instantaneously without financing. When set, the solver recomputes capital_cost = overnight_cost × annuity(discount_rate, lifetime) + fom_cost. Leave empty to use the capital_cost you typed directly.',
   'generator.curtailment_cost':
     'Penalty added to the objective for every MWh of available-but-unused renewable energy: cost × (p_max_pu × p_nom_opt − p). Set > 0 to discourage the optimiser from spilling wind/solar. Custom attribute — not in stock PyPSA; injected via extra_functionality at solve time.',
+  // ── Adequacy occurrence attributes (shared by Gen/Storage/Store/Link/Line;
+  // custom GUI columns — design spec §5.4, services/adequacy/occurrence.py) ──
+  'adequacy.outage_rate_value':
+    'Forced-outage unavailability in [0, 1) — e.g. 0.05 = out 5% of the time. Leave empty to fall back to the per-carrier library default at analysis time. Feeds the adequacy/FMEA analysis only; the LP dispatch is unaffected.',
+  'adequacy.outage_rate_basis':
+    'What the rate IS: FOR (service-hours based — what NERC GADS class averages publish) or EFORd (demand-based — what adequacy math wants). They differ materially for peakers with reserve-shutdown hours, and the tool never converts between them — it stores and reports which one you entered.',
+  'adequacy.mttr_hours':
+    'Mean time to repair, in hours — how long one forced outage lasts on average. Together with the rate this implies an event frequency (8760 × rate / MTTR per year); preflight warns when the pair is implausible.',
   'generator.build_year':
     'First year the unit is operational. Combined with lifetime to determine availability across planning horizons.',
   'generator.lifetime':

@@ -6,6 +6,11 @@ export interface Carrier {
   name: string; co2_emissions: number; color: string; nice_name: string; unit: string
 }
 export interface Line {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus0: string; bus1: string; length: number; r: number; x: number
   b: number; s_nom: number; s_nom_extendable: boolean; s_nom_min: number
   s_nom_max: number | null; capital_cost: number; fom_cost: number
@@ -22,6 +27,11 @@ export interface Line {
   lifetime: number | null
 }
 export interface Link {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus0: string; bus1: string; carrier: string; efficiency: number
   p_nom: number; p_nom_extendable: boolean; p_nom_min: number; p_nom_max: number | null
   p_min_pu: number; p_max_pu: number
@@ -31,6 +41,11 @@ export interface Link {
   build_year: number; lifetime: number | null
 }
 export interface Generator {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus: string; carrier: string; p_nom: number; p_nom_extendable: boolean
   p_nom_min: number; p_nom_max: number | null; p_min_pu: number; p_max_pu: number
   // PyPSA AC control mode. Consumed by n.pf() in Stage 2; defaults to 'PQ'.
@@ -54,6 +69,11 @@ export interface Generator {
   build_year: number; lifetime: number | null; unit: string
 }
 export interface StorageUnit {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus: string; carrier: string; p_nom: number; p_nom_extendable: boolean
   p_nom_min: number; p_nom_max: number | null
   max_hours: number; efficiency_store: number; efficiency_dispatch: number
@@ -69,6 +89,11 @@ export interface StorageUnit {
   lifetime: number | null
 }
 export interface Store {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus: string; carrier: string; e_nom: number; e_nom_extendable: boolean
   e_nom_min: number; e_nom_max: number | null
   e_min_pu: number; e_max_pu: number; e_initial: number; e_cyclic: boolean

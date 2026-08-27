@@ -91,11 +91,11 @@ def is_slack_carrier(carrier: object) -> bool: ...
 
 **Steps:**
 
-- [ ] **Tests first:** (1) create a generator with all three fields via the API schema → present in `n.generators`; (2) netCDF export→import round-trip preserves them and NaN stays NaN; (3) partial PUT omitting them preserves them (requires Task 0); (4) `resolve_outage_params` fallback order asset → carrier default → missing; (5) validator flags the FOR 0.10/MTTR 24 h pair and passes FOR 0.05/MTTR 72 h.
-- [ ] Declare the three fields on the five create schemas, `curtailment_cost`-style (with the same "custom GUI column" comment pattern).
-- [ ] Implement `occurrence.py`; wire `validate_outage_params` into `validation_service.py` as **warnings** (never blocking — a solve without outage data is still a valid solve).
-- [ ] Frontend, per component (Generator, StorageUnit, Store, Link, Line — the 6 touch points each documented in spec §11): `types.ts` interface fields; `PropertiesPanel.tsx` save payload (~:163), `toFS` allowlist (~:209 — omission means the form never loads the value), read-only row (~:257), inputs (`NumInput` for value/MTTR, a select for basis) (~:399); `propertyDocs.ts` tooltips including the FOR-vs-EFORd caveat.
-- [ ] Run backend + frontend (`vitest`) suites; commit: `feat(gui): outage-rate attributes with labelled basis + defaults library`.
+- [x] **Tests first:** (1) create a generator with all three fields via the API schema → present in `n.generators`; (2) netCDF export→import round-trip preserves them and NaN stays NaN; (3) partial PUT omitting them preserves them (requires Task 0); (4) `resolve_outage_params` fallback order asset → carrier default → missing; (5) validator flags the FOR 0.10/MTTR 24 h pair and passes FOR 0.05/MTTR 72 h.
+- [x] Declare the three fields on the five create schemas, `curtailment_cost`-style (with the same "custom GUI column" comment pattern).
+- [x] Implement `occurrence.py`; wire `validate_outage_params` into `validation_service.py` as **warnings** (never blocking — a solve without outage data is still a valid solve).
+- [x] Frontend, per component (Generator, StorageUnit, Store, Link, Line — the 6 touch points each documented in spec §11): `types.ts` interface fields; `PropertiesPanel.tsx` save payload (~:163), `toFS` allowlist (~:209 — omission means the form never loads the value), read-only row (~:257), inputs (`NumInput` for value/MTTR, a select for basis) (~:399); `propertyDocs.ts` tooltips including the FOR-vs-EFORd caveat.
+- [x] Run backend + frontend (`vitest`) suites; commit: `feat(gui): outage-rate attributes with labelled basis + defaults library`.
 
 ---
 

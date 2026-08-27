@@ -1431,6 +1431,41 @@ def _check_lopf(n, solver_config) -> list[Issue]:
 
 # ── public entry point ───────────────────────────────────────────────────────
 
+def _check_outage_params(n) -> list[Issue]:
+    """
+    Adequacy occurrence attributes (design spec §5.4): warn on implausible
+    (rate, MTTR) pairs and malformed values. Warnings only, never blocking —
+    a solve without outage data is still a valid solve; the data only feeds
+    the adequacy/FMEA analysis. Asset names are embedded in the message
+    (the shared validator speaks in whole sentences); component_class is set
+    so the UI can group them.
+    """
+    from services.adequacy.occurrence import (
+        resolve_outage_params,
+        validate_outage_params,
+    )
+
+    issues: list[Issue] = []
+    for component, cls in (
+        ("generators", "Generator"), ("storage_units", "StorageUnit"),
+        ("stores", "Store"), ("links", "Link"), ("lines", "Line"),
+    ):
+        df = getattr(n, component, None)
+        if df is None or df.empty or "outage_rate_value" not in df.columns:
+            # Only networks where someone actually entered outage data get
+            # validated — carrier defaults alone are library values and
+            # already plausible by construction.
+            continue
+        try:
+            params = resolve_outage_params(n, component)
+            params = params[params["source"] == "asset"]
+            for msg in validate_outage_params(params):
+                issues.append(_warn("outage_params_implausible", cls, "", msg))
+        except Exception:
+            continue
+    return issues
+
+
 def validate_for_run(n, solver_config) -> list[Issue]:
     """Return all issues. Empty list = ready to run."""
     issues: list[Issue] = []
@@ -1444,6 +1479,8 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     # conditioned on co2_price or a global constraint, unlike the
     # carrier_co2_nan check further down in _check_lopf.
     issues += _check_carrier_emissions(n)
+    # Adequacy occurrence data — warnings only, any mode.
+    issues += _check_outage_params(n)
 
     mode = solver_config.mode
     if mode == "pf":

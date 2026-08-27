@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
@@ -55,6 +55,17 @@ class CarrierCreate(BaseModel):
 
 class LineCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus0: str
     bus1: str
     length: float = 1.0
@@ -99,6 +110,17 @@ class ImpedanceRescaleRequest(BaseModel):
 
 class LinkCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus0: str
     bus1: str
     bus2: str = ""
@@ -133,6 +155,17 @@ class LinkCreate(BaseModel):
 
 class GeneratorCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus: str
     carrier: str = ""
     # PyPSA control mode for power flow / unit commitment. PQ = fixed P & Q,
@@ -183,6 +216,17 @@ class GeneratorCreate(BaseModel):
 
 class StorageUnitCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus: str
     carrier: str = ""
     p_nom: float = 0.0
@@ -214,6 +258,17 @@ class StorageUnitCreate(BaseModel):
 
 class StoreCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus: str
     carrier: str = ""
     e_nom: float = 0.0

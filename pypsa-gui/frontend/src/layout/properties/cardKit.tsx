@@ -309,6 +309,50 @@ export function NumInput({ label, k, fs, set, unit, tip }: { label: string; k: s
   )
 }
 
+// ── Adequacy occurrence inputs (design spec §5.4) ─────────────────────────────
+// One shared trio for all five outage-bearing components (Generator /
+// StorageUnit / Store / Link / Line): rate + basis + MTTR. Values are
+// nullable "unset" fields — blank ⇒ null ⇒ NaN on the asset ⇒ the analysis
+// falls back to the per-carrier default library. The basis is a label the
+// backend never converts, hence a select, not free text.
+export const OUTAGE_FS_KEYS = ['outage_rate_value', 'outage_rate_basis', 'mttr_hours'] as const
+
+export function outagePayload(fs: FS): {
+  outage_rate_value: number | null
+  outage_rate_basis: 'FOR' | 'EFORd' | null
+  mttr_hours: number | null
+} {
+  const basis = (fs.outage_rate_basis ?? '').trim()
+  return {
+    outage_rate_value: no(fs, 'outage_rate_value'),
+    outage_rate_basis: basis === 'FOR' || basis === 'EFORd' ? basis : null,
+    mttr_hours: no(fs, 'mttr_hours'),
+  }
+}
+
+export function OutageInputs({ fs, set }: { fs: FS; set: SetFS }) {
+  return (
+    <>
+      <NumInput label="Outage rate" k="outage_rate_value" fs={fs} set={set}
+        unit="0–1" tip={docTip('adequacy.outage_rate_value')} />
+      <label className="flex flex-col gap-0.5">
+        <span className="text-[9px] text-muted truncate">
+          <InfoTip text={docTip('adequacy.outage_rate_basis')}>Rate basis</InfoTip>
+        </span>
+        <select value={fs.outage_rate_basis ?? ''}
+          onChange={e => set(p => ({ ...p, outage_rate_basis: e.target.value }))}
+          className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] font-mono focus:outline-none focus:border-accent w-full">
+          <option value="">unset</option>
+          <option value="FOR">FOR</option>
+          <option value="EFORd">EFORd</option>
+        </select>
+      </label>
+      <NumInput label="MTTR" k="mttr_hours" fs={fs} set={set}
+        unit="h" tip={docTip('adequacy.mttr_hours')} />
+    </>
+  )
+}
+
 // Discount rate is stored as decimal on the asset (0.07 = 7%) but typed as
 // percent in the UI ("7"). The form holds the percentage string under
 // `discount_rate_pct`; the save mutation converts to decimal before sending.
