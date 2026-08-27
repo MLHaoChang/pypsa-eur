@@ -26,7 +26,8 @@ VIEW_MODES = ("chronological", "duration", "monthly")
 def list_assets(n) -> list[dict]:
     """
     Every selectable asset, transient rows removed — same filter as every
-    other asset list, so `__voll_*` and `<name>@<year>` never appear.
+    other asset list, so `__voll_*` (see services/adequacy/slack.py) and
+    `<name>@<year>` never appear.
     """
     out: list[dict] = []
     for cls in ALL_CLASSES:

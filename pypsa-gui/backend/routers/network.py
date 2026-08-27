@@ -77,7 +77,8 @@ def _get_component(component_class: str, attr: str) -> list[dict]:
 
     Reads never acquire the PyPSA lock (per the project's read-never-locks
     policy), so during a solve the worker thread has already populated
-    `n.generators` with `__voll_<bus>` rows and `n.links` with
+    `n.generators` with `__voll_<bus>` rows (convention:
+    services/adequacy/slack.py) and `n.links` with
     `parent@<year>` vintages. Without this filter those leak into every
     /api/network/{component} response and confuse the user — they appear
     as "extra" assets that vanish once the LP completes.

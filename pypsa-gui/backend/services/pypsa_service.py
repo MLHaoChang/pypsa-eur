@@ -905,7 +905,8 @@ class PyPSAService:
     #   * Vintage expansion — one row per (parent_asset, investment_period)
     #     named `parent@<year>`. Created in vintage_service.py.
     #   * VOLL slack generators — one per bus, named `__voll_<bus>`. Created
-    #     in solver_service._apply_modelling_assumptions step 3.
+    #     in solver_service._apply_modelling_assumptions step 3; the naming/
+    #     carrier convention is owned by services/adequacy/slack.py.
     #
     # These leak into GET /api/network/{component} responses because reads
     # don't acquire the PyPSA lock (per the project's read-never-locks

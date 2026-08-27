@@ -15,6 +15,12 @@ import pandas as pd
 import pypsa
 
 from services import period_utils as _period_utils
+from services.adequacy.slack import (
+    INVOLUNTARY_SLACK_CARRIER,
+    VOLL_SLACK_PREFIX,
+    is_slack_carrier,
+    strip_slack_prefix,
+)
 from services.pypsa_service import PyPSAService
 from services.validation_service import has_errors, validate_for_run
 from services.vintage_service import apply_vintage_bounds
@@ -2449,8 +2455,11 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                     except (TypeError, ValueError):
                         price = float(co2_scalar)
                     period_data[p]["co2_surcharge"] += t_co2 * price
-            # VOLL load shedding — special-cased: carrier="load_shedding".
-            if carrier == "load_shedding":
+            # VOLL load shedding — slack carriers are split out of the
+            # normal opex buckets. NOTE for Phase 1 (spec §4.4): when the
+            # demand_response tier exists it must NOT land in voll_shed_* —
+            # this is the site where that split happens.
+            if is_slack_carrier(carrier):
                 mwh_p = mwh_per_period
                 cost_p = _per_period_split(p_series * mc_scalar, weights)
                 for p in mwh_p:
@@ -4429,7 +4438,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             if str(bus) not in load_bus_set:
                 skipped_transit += 1
                 continue
-            name = f"__voll_{bus}"
+            name = f"{VOLL_SLACK_PREFIX}{bus}"
             if name in n.generators.index:
                 continue  # don't double-add if a previous run leaked
             # Mark BEFORE n.add so a GET landing during the add window
@@ -4442,7 +4451,8 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     bus=bus,
                     p_nom=slack_pnom,
                     marginal_cost=cfg.voll,
-                    carrier="load_shedding",
+                    # The convention's owner is services/adequacy/slack.py.
+                    carrier=INVOLUNTARY_SLACK_CARRIER,
                 )
             except Exception:
                 PyPSAService.unmark_transient("Generator", name)
@@ -4465,9 +4475,9 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         live = [nm for nm in names if nm in df.columns]
                         if live:
                             sub = df[live].copy()
-                            # Strip the "__voll_" prefix so the bus name stands
+                            # Strip the slack prefix so the bus name stands
                             # alone in the result payload — friendlier to plot.
-                            sub.columns = [c.replace("__voll_", "") for c in sub.columns]
+                            sub.columns = [strip_slack_prefix(c) for c in sub.columns]
                             # Aggregate stats for the KPI tiles in the UI.
                             # Assumes hourly snapshots (MW=MWh/h) — matches the
                             # convention used by the curtailment KPI.

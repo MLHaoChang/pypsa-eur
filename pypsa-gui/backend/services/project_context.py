@@ -123,7 +123,8 @@ class ProjectContext:
     storage_dir: str | None = None
 
     # Transient LP-scaffolding rows the solver adds for the duration of one solve
-    # (vintage clones `parent@<year>`, VOLL slacks `__voll_<bus>`) and reverts in
+    # (vintage clones `parent@<year>`, VOLL slacks `__voll_<bus>` — convention
+    # owned by services/adequacy/slack.py) and reverts in
     # restore(). Keyed `{component_class: {name, …}}`. Hidden from GET reads so a
     # user never sees solver internals as asset rows. Per-network by construction
     # — each context's expansion is its own.

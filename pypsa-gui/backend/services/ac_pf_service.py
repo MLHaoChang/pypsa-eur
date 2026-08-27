@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from services.adequacy.slack import slack_generator_mask
 from services.pypsa_service import PyPSAService
 from services.solver_service import (
     _DISPATCH_FIX_ACCESSORS,
@@ -138,26 +139,16 @@ def _strip_voll_slacks(n) -> list[str]:
     different LP setup, defensively scan for the same naming convention here.
     Returns the list of removed names.
 
-    Convention: VOLL slack gens are added at every bus with
-    name=f"__voll_<bus>" and carrier="load_shedding" (see step 3 of
-    _apply_modelling_assumptions, around line 3540). Earlier versions used
-    `voll_slack` for both — kept as a fallback match so a netcdf produced
-    by an older build that crashed pre-restore still cleans up here.
-    Match on carrier OR name prefix — defence in depth against either
-    side drifting.
+    Convention: see services/adequacy/slack.py — the single owner of the
+    slack naming/carrier convention (created in step 3 of
+    _apply_modelling_assumptions), including the legacy `voll_slack`
+    spellings kept so a netcdf produced by an older build that crashed
+    pre-restore still cleans up here. The shared mask matches on carrier
+    OR name prefix — defence in depth against either side drifting.
     """
     if n.generators.empty:
         return []
-    if "carrier" not in n.generators.columns:
-        return []
-    carrier_str = n.generators["carrier"].astype(str)
-    name_str = n.generators.index.astype(str)
-    mask = (
-        (carrier_str == "load_shedding")
-        | (carrier_str == "voll_slack")
-        | name_str.str.startswith("__voll_")
-        | name_str.str.startswith("voll_slack_")
-    )
+    mask = slack_generator_mask(n.generators)
     removed = n.generators.index[mask].astype(str).tolist()
     if not removed:
         return []

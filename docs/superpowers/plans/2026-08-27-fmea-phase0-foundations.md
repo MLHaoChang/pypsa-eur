@@ -22,8 +22,8 @@
 
 Phase 0's custom attributes depend on the `_merge_partial_update` fix (partial PUTs silently reset custom columns) from `claude/fix-lost-load-cost-and-custom-attr-drop` (commit `8e2f98d`).
 
-- [ ] Check whether the fix is present: `grep -n "known_defaults" pypsa-gui/backend/routers/network.py` — a hit inside `_merge_partial_update` means it landed.
-- [ ] If absent: preferred path is that the bugfix PR merges to master first, then `git merge origin/master` into this branch. If it has not merged and Phase 0 must proceed, `git merge origin/claude/fix-lost-load-cost-and-custom-attr-drop` into this branch (a merge, not cherry-pick — it no-ops once master carries it).
+- [x] Check whether the fix is present: `grep -n "known_defaults" pypsa-gui/backend/routers/network.py` — a hit inside `_merge_partial_update` means it landed.
+- [ ] If absent: preferred path is that the bugfix PR merges to master first (PR opened: https://github.com/MLHaoChang/pypsa-eur/pull/4 — absent on this branch until it lands), then `git merge origin/master` into this branch. If it has not merged and Phase 0 must proceed, `git merge origin/claude/fix-lost-load-cost-and-custom-attr-drop` into this branch (a merge, not cherry-pick — it no-ops once master carries it).
 - [ ] Do NOT reimplement the fix inline; Task 2's partial-PUT test will simply fail until the merge is done, which is the intended forcing function.
 
 ---
@@ -64,10 +64,10 @@ def is_slack_carrier(carrier: object) -> bool: ...
 
 **Steps:**
 
-- [ ] **Write the pinning test first** (`test_adequacy_slack.py`): build a generators DataFrame containing a `__voll_X` row, a legacy `voll_slack_Y` row, a `carrier="voll_slack"` row, and normal generators; assert `slack_generator_mask` selects exactly the three slack rows. Add a source-level guard: grep the backend `services/` + `routers/` tree (excluding `tests/` and `adequacy/slack.py`) for `== "load_shedding"` / `.startswith("__voll_")` and assert zero code hits — this is the test that keeps the centralisation from regressing. (Model it on the repo's other source-grepping pin tests; match on code lines, not comments.)
-- [ ] Create `slack.py`; move the ac_pf mask logic into it; convert the table's code sites.
-- [ ] Run the affected suites: `test_lost_load_and_custom_attrs.py` (if Task 0 merged), the compare suite, and any `price_drivers` tests. Zero behaviour change expected — identical pass/fail to the pre-change tree.
-- [ ] Commit: `refactor(gui): centralise the VOLL-slack test behind SLACK_CARRIERS`.
+- [x] **Write the pinning test first** (`test_adequacy_slack.py`): build a generators DataFrame containing a `__voll_X` row, a legacy `voll_slack_Y` row, a `carrier="voll_slack"` row, and normal generators; assert `slack_generator_mask` selects exactly the three slack rows. Add a source-level guard: grep the backend `services/` + `routers/` tree (excluding `tests/` and `adequacy/slack.py`) for `== "load_shedding"` / `.startswith("__voll_")` and assert zero code hits — this is the test that keeps the centralisation from regressing. (Model it on the repo's other source-grepping pin tests; match on code lines, not comments.)
+- [x] Create `slack.py`; move the ac_pf mask logic into it; convert the table's code sites.
+- [x] Run the affected suites: `test_lost_load_and_custom_attrs.py` (if Task 0 merged), the compare suite, and any `price_drivers` tests. Zero behaviour change expected — identical pass/fail to the pre-change tree.
+- [x] Commit: `refactor(gui): centralise the VOLL-slack test behind SLACK_CARRIERS`.
 
 ---
 
