@@ -960,12 +960,14 @@ function ProjectSectionContent({
         // "clean" must mean clean — a failed probe is UNKNOWN and fails closed,
         // because this path discards whatever it could not ask about.
         if (!opts?.confirmed) {
-          let depth = 0
-          let depthKnown = true
-          try { depth = (await networkApi.undoInfo()).depth } catch { depthKnown = false }
-          if (!depthKnown || depth > 0) {
+          // `unsaved`, not `depth > 0` — see ImportExport.tsx. A solved project
+          // has depth 0 and unsaved true, and re-reading from disk discards it.
+          let unsaved = false
+          let unsavedKnown = true
+          try { unsaved = (await networkApi.undoInfo()).unsaved } catch { unsavedKnown = false }
+          if (!unsavedKnown || unsaved) {
             toast.dismiss(tId)
-            setPendingReload({ name, depthKnown })
+            setPendingReload({ name, depthKnown: unsavedKnown })
             return
           }
         }

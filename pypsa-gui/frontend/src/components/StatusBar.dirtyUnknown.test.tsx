@@ -42,7 +42,7 @@ describe('StatusBar save-state indicator', () => {
   })
 
   it('still reports a genuinely clean project as up-to-date', async () => {
-    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0 } as never)
+    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0, unsaved: false } as never)
     renderBar()
     await waitFor(() => {
       expect(screen.getByTitle('Project is up-to-date')).toBeTruthy()
@@ -50,7 +50,7 @@ describe('StatusBar save-state indicator', () => {
   })
 
   it('still reports real unsaved edits', async () => {
-    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 3 } as never)
+    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 3, unsaved: true } as never)
     renderBar()
     await waitFor(() => {
       expect(screen.getByTitle('3 unsaved edits')).toBeTruthy()

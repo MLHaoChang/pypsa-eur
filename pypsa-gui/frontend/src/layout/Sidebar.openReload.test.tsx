@@ -64,7 +64,7 @@ beforeEach(() => {
   // genuinely CLEAN project and it takes the same unprompted path it always
   // did. Previously it got that by accident: `undoInfo` was unmocked, and the
   // old code defaulted a failed probe to depth 0.
-  vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0 } as never)
+  vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0, unsaved: false } as never)
 })
 
 describe('reopening the current project while a queue job owns it', () => {

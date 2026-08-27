@@ -49,7 +49,9 @@ export default function StatusBar() {
   // the user's work is safe, made from an answer we never received. The
   // unknown state is its own state, and it is the one worth being loud about.
   const dirtyUnknown = undoErrored
-  const dirty = !dirtyUnknown && (undoInfo?.depth ?? 0) > 0
+  // `unsaved` covers solver results too; `depth` stays the count below, which
+  // is a question about EDITS and still correctly reads 0 after a solve.
+  const dirty = !dirtyUnknown && !!undoInfo?.unsaved
   const dirtyCount = undoInfo?.depth ?? 0
 
   // Stale-results detection. A topology edit on a solved network makes the

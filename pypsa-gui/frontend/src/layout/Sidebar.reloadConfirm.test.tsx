@@ -68,7 +68,7 @@ beforeEach(() => {
 
 describe('destructive re-load of the current project', () => {
   it('asks before discarding unsaved work', async () => {
-    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 3 } as never)
+    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 3, unsaved: true } as never)
     renderSidebar()
     await pickCurrentProject()
 
@@ -90,7 +90,7 @@ describe('destructive re-load of the current project', () => {
   })
 
   it('does not re-load when cancelled', async () => {
-    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 3 } as never)
+    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 3, unsaved: true } as never)
     renderSidebar()
     await pickCurrentProject()
     await screen.findByRole('dialog')
@@ -101,7 +101,7 @@ describe('destructive re-load of the current project', () => {
   })
 
   it('re-loads a genuinely clean project without prompting', async () => {
-    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0 } as never)
+    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0, unsaved: false } as never)
     renderSidebar()
     await pickCurrentProject()
 

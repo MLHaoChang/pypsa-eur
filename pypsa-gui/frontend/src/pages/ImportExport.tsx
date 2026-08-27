@@ -183,13 +183,17 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
     // import then ran with no confirmation at all. The unknown is its own
     // state, and on a path that replaces the user's network it must fail
     // CLOSED: ask, rather than assume there was nothing to lose.
-    let depth = 0
-    let depthKnown = true
-    try { depth = (await networkApi.undoInfo()).depth } catch { depthKnown = false }
-    if (!depthKnown || depth > 0) {
+    // `unsaved`, NOT `depth > 0`. Undo depth counts undoable EDITS; solver
+    // results are written straight into the network and never pushed, so a
+    // solved-but-unsaved project reports depth 0 and this guard used to let the
+    // solve be destroyed silently.
+    let unsaved = false
+    let unsavedKnown = true
+    try { unsaved = (await networkApi.undoInfo()).unsaved } catch { unsavedKnown = false }
+    if (!unsavedKnown || unsaved) {
       setPendingImport({
         file,
-        message: depthKnown
+        message: unsavedKnown
           ? 'The current unsaved network will be replaced.'
           : 'Could not check for unsaved changes — the backend did not answer. '
             + 'Any unsaved work in the current network will be replaced.',
