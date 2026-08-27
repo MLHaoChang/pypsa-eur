@@ -84,9 +84,9 @@ Same as Phase 0's plan (branch `claude/solution-fmea-integration-0mx5lc`; explic
 
 **Steps:**
 
-- [ ] **Failing tests first:** live solve with binding cap → report's `binding == "system_cap"`, `ens_mwh ≈ cap`, cost excludes shed (assert `total_system_cost_eur ≈ objective − shed_cost`); loose cap → `binding == "voll"`; endpoint 204 before solve, 200 after; round-trips through save/restore (results_state pickle).
-- [ ] Implement; wire persistence exactly like `last_lost_load` (grep its five lifecycle sites from the Phase 0 audit: `project_context.py:219/262`, `solve_queue.py:407`, `simulation.py:581`, `projects.py` restore, `snapshots.py:546` — **every one of the six needs the new key or restore silently drops the report**).
-- [ ] Commit: `feat(gui): adequacy target evaluation + /results/adequacy`.
+- [x] **Failing tests first:** live solve with binding cap → report's `binding == "system_cap"`, `ens_mwh ≈ cap`, cost excludes shed (assert `total_system_cost_eur ≈ objective − shed_cost`); loose cap → `binding == "voll"`; endpoint 204 before solve, 200 after; round-trips through save/restore (results_state pickle).
+- [x] Implement; wire persistence exactly like `last_lost_load` (grep its five lifecycle sites from the Phase 0 audit: `project_context.py:219/262`, `solve_queue.py:407`, `simulation.py:581`, `projects.py` restore, `snapshots.py:546` — **every one of the six needs the new key or restore silently drops the report**).
+- [x] Commit: `feat(gui): adequacy target evaluation + /results/adequacy`.
 
 ---
 

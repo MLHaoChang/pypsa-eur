@@ -304,6 +304,9 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/cost_breakdown", "/objective_decomposition", "/economics_by_carrier",
         "/statistics", "/lcoh", "/ac_pf/status", "/losses", "/carrier_kpis",
         "/emissions", "/line_duals", "/price_drivers", "/asset_economics",
+        # AdequacyReport — a structured report, not a time series (adequacy
+        # plan Phase 1 Task 3).
+        "/adequacy",
     }
 
     unclassified = declared - ranged - aggregates

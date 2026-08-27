@@ -579,6 +579,7 @@ def run():
             stop_event=stop_event,
             log_queue=log_queue,
             last_lost_load=None,
+            adequacy_report=None,
             lopf_results=None,
             ac_pf_results=None,
             ac_pf_convergence=None,

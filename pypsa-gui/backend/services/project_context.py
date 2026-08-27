@@ -218,6 +218,7 @@ LIFECYCLE_KEYS = (
 RESULT_STATE_KEYS = (
     "lopf_results", "ac_pf_results",
     "last_lost_load",
+    "adequacy_report",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
     "ac_pf_converged_count", "ac_pf_total_snapshots",
@@ -261,6 +262,7 @@ class ProjectSolverState:
     solver_config: Any = None
     # Result-state (persisted to results_state.pkl)
     last_lost_load: Any = None
+    adequacy_report: Any = None   # minimal AdequacyReport dict (target solves)
     lopf_results: Any = None
     ac_pf_results: Any = None
     ac_pf_convergence: Any = None        # dict[snapshot_iso, bool] (legacy)

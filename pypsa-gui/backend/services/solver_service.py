@@ -1231,6 +1231,24 @@ def run_simulation(
                         except Exception as exc:
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
+                # Adequacy report — emitted whenever a target was enforced,
+                # INCLUDING the nothing-shed case (achieved 0, binding=voll).
+                _ens_targets = getattr(network, "_ens_cap_targets", None)
+                if _ens_targets:
+                    try:
+                        from services.adequacy.report import (
+                            build_adequacy_report,
+                        )
+                        _emit_state(adequacy_report=build_adequacy_report(
+                            network, config, _ens_targets, captured))
+                        phase("Adequacy report built (target evaluation).")
+                    except Exception as exc:
+                        phase(f"Adequacy report skipped: {exc}")
+                    finally:
+                        try:
+                            delattr(network, "_ens_cap_targets")
+                        except AttributeError:
+                            pass
                 # Save captured lost-load (if any) into the simulation state
                 # so the /results/lost_load endpoint can serve it.
                 if captured.get("lost_load_t") is not None:
@@ -2933,6 +2951,20 @@ def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
 
         snap_coord = p_var.coords["snapshot"]
 
+        # Solve-time truth for the post-solve report (services/adequacy/
+        # report.py): restore reverts the load-scaling transforms, so a
+        # post-solve recomputation of these denominators would drift.
+        # Cleaned up by run_simulation after the report is built.
+        stash = {
+            "permyriad": permyriad,
+            "zone_multiple": zone_multiple,
+            "zone_of_bus": {
+                str(gens.at[g, "bus"]): z for g, z in zone_of_slack.items()
+            },
+            "periods": {},
+        }
+        n._ens_cap_targets = stash
+
         def _add_cap(name: str, names: list[str], w_masked: pd.Series,
                      cap_mwh: float, label: str) -> None:
             w_xr = xr.DataArray(
@@ -2948,6 +2980,9 @@ def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
             w_p = w.where(in_p, 0.0)
             demand_p = float((demand * w_p).sum())
             cap_p = permyriad / 1e4 * demand_p
+            stash["periods"][P] = {
+                "cap_mwh": cap_p, "demand_mwh": demand_p, "zones": {},
+            }
             _add_cap(
                 f"ens_cap_{P}", slack_names, w_p, cap_p,
                 f"Period {P}: ENS cap {cap_p:,.1f} MWh "
@@ -2972,6 +3007,7 @@ def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
                             continue
                 z_demand_p = float((z_demand * w_p).sum())
                 z_cap = zone_multiple * permyriad / 1e4 * z_demand_p
+                stash["periods"][P]["zones"][z] = z_cap
                 zlabel = z or "<blank>"
                 _add_cap(
                     f"ens_zone_{zlabel}_{P}", z_names, w_p, z_cap,
@@ -4689,10 +4725,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             from services.adequacy.metrics import (
                                 lost_load_totals,
                             )
+                            w_energy = _period_utils.snapshot_weights(
+                                n, "generators", sns=sub.index)
                             totals = lost_load_totals(
                                 sub,
-                                energy_weights=_period_utils.snapshot_weights(
-                                    n, "generators", sns=sub.index),
+                                energy_weights=w_energy,
                                 cost_weights=_period_utils.snapshot_weights(
                                     n, "objective", sns=sub.index),
                                 voll=float(voll),
@@ -4700,6 +4737,26 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             captured["lost_load_t"] = sub
                             captured["lost_load_total_mwh"] = totals["total_mwh"]
                             captured["lost_load_cost_eur"] = totals["cost_eur"]
+                            # Solve-time achieved values for the adequacy
+                            # report: per-bus-per-period weighted MWh, and
+                            # the electrical shed-hours (spec §5.1).
+                            from services.adequacy.metrics import (
+                                electrical_columns,
+                                shed_hours,
+                            )
+                            bus_e = sub.clip(lower=0).mul(
+                                w_energy.reindex(sub.index).fillna(0.0), axis=0)
+                            if isinstance(sub.index, pd.MultiIndex):
+                                bp = bus_e.groupby(
+                                    sub.index.get_level_values(0)).sum()
+                            else:
+                                bp = pd.DataFrame(
+                                    [bus_e.sum()], index=["ALL"])
+                            captured["lost_load_bus_period_mwh"] = bp
+                            captured["shed_hours_electrical"] = shed_hours(
+                                sub[electrical_columns(n, list(sub.columns))],
+                                weights=w_energy,
+                            )
                             # Explicit — consumers must not re-derive VoLL
                             # from cost/energy, which skews whenever the two
                             # weight columns differ.

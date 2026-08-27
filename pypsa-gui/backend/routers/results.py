@@ -2924,6 +2924,25 @@ def get_curtailment(
         return _not_solved()
 
 
+@results_router.get("/adequacy")
+def get_adequacy():
+    """
+    The minimal AdequacyReport from the last target-constrained solve
+    (adequacy plan Phase 1 Task 3): which standard actually bound
+    (system cap / zone ceiling / VoLL), achieved ENS + shed-hours vs the
+    target, cost excluding shed by construction, all provenance-tagged
+    (engine="lp_proxy" — a deterministic proxy, not comparable to a
+    statutory standard, and the UI must say so at the point of display).
+
+    204 = no report: the solve ran without a target, or nothing has been
+    solved. Same convention as /results/lost_load.
+    """
+    report = _state.get("adequacy_report")
+    if not report:
+        return Response(status_code=204)
+    return report
+
+
 @results_router.get("/lost_load")
 def get_lost_load(
     from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
