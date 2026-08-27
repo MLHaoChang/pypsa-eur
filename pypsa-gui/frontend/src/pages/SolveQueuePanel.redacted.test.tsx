@@ -28,6 +28,9 @@ const redactedJob: SolveJob = {
   enqueued_at: 0,
   started_at: 0,
   finished_at: 1,
+  // Not the subject of this file; false keeps the Dismiss control out of
+  // the DOM so it cannot interfere with the queries below.
+  can_dismiss: false,
 }
 
 const runningJob: SolveJob = {
@@ -47,6 +50,15 @@ vi.mock('../hooks/useSolveQueue', () => ({
   useEnqueueSolve: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAbortJob: () => ({ mutate: vi.fn(), isPending: false }),
   useClearFinished: () => ({ mutate: vi.fn(), isPending: false }),
+  // Increment 3's five routes. Stubbed here because this file mocks the hook
+  // module WHOLESALE — an absent export is `undefined` at the call site, so the
+  // panel throws on render and every test in the file fails for a reason that
+  // has nothing to do with what it asserts.
+  usePauseQueue: () => ({ mutate: vi.fn(), isPending: false }),
+  useResumeQueue: () => ({ mutate: vi.fn(), isPending: false }),
+  useCancelQueued: () => ({ mutate: vi.fn(), isPending: false }),
+  useRequeueJob: () => ({ mutate: vi.fn(), isPending: false }),
+  useDismissJob: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
 afterEach(() => cleanup())

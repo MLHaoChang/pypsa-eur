@@ -65,6 +65,65 @@ export function useClearFinished() {
   })
 }
 
+/**
+ * The five increment-3 routes.
+ *
+ * Every one invalidates QUEUE_KEY on success, and each for a reason worth
+ * stating rather than by reflex:
+ *
+ *  - pause/resume change `paused`, which nothing else in the payload reveals.
+ *  - cancelQueued flips N rows to `aborted`.
+ *  - requeue ADDS a row, and re-arms polling: `queueRefetchInterval` returns
+ *    false for an all-terminal queue, so without the invalidation a requeue
+ *    from an idle queue would sit unpolled and the new job would appear to do
+ *    nothing until something else refetched.
+ *  - dismiss REMOVES the row from this caller's listing — the listing filters
+ *    dismissed ids server-side, so the row cannot disappear without a refetch.
+ *
+ * None of them take an optimistic update: the queue is process-global and
+ * shared across users, so the server's next answer is authoritative in a way
+ * a local guess is not.
+ */
+export function usePauseQueue() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => solveQueueApi.pause(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+export function useResumeQueue() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => solveQueueApi.resume(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+export function useCancelQueued() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => solveQueueApi.cancelQueued(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+export function useRequeueJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (jobId: string) => solveQueueApi.requeue(jobId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+export function useDismissJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (jobId: string) => solveQueueApi.dismiss(jobId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
 /** The active (queued or running) job for a project, if any — drives tab badges. */
 export function activeJobForProject(list: QueueList | undefined, name: string): SolveJob | undefined {
   return list?.jobs.find(j => j.project_id === name && isActive(j))

@@ -31,6 +31,18 @@ export interface SolveJob {
   enqueued_at: number
   started_at: number | null
   finished_at: number | null
+  // Whether `POST /{id}/dismiss` would ACCEPT this row from THIS caller —
+  // terminal AND queued by them. Computed server-side (routers/solve_queue.py)
+  // because dismissal is owner-gated on `enqueued_by_user_id`, which the
+  // payload deliberately does not carry: emitting the owner id would let any
+  // caller enumerate which colleague queued which job. A capability answers
+  // the only question a client has and discloses nothing about anyone else.
+  //
+  // Render the Dismiss control from this, never from `isTerminal(job)` alone —
+  // that is the "control must match the route" rule this file's siblings apply
+  // to Clear finished, and getting it wrong here means a guaranteed 403 on
+  // every row a colleague queued.
+  can_dismiss: boolean
 }
 
 export interface QueueList {
@@ -79,6 +91,44 @@ export const solveQueueApi = {
     client.post<SolveJob>(`/simulation/queue/${jobId}/abort`).then(r => r.data),
   clearFinished: () =>
     client.post<{ removed: number }>('/simulation/queue/clear_finished').then(r => r.data),
+  // ── increment 3: the five routes that shipped without a client ──────────
+  //
+  // All five are on the foreign-lock gate's exemption allowlist
+  // (`backend/main.py`). That is load-bearing rather than incidental: they sit
+  // under the gated `/api/simulation/` prefix, and without an entry each is
+  // refused 409 `project_locked` whenever the caller's ACTIVE project happens
+  // to be held by someone else — a project none of them resolves. Adding a
+  // sixth route here means adding its allowlist entry in the same change.
+  //
+  // Pause and resume act on the ONE process-global dispatcher, so they are
+  // gated server-side on `is_super_admin` (local mode exempt, which is why the
+  // desktop app can always use them). Gate the control on the RAW flag, not on
+  // `useAuth().isAdmin` — see `can_dismiss` above for the same trap.
+  pause: () =>
+    client.post<{ paused: boolean }>('/simulation/queue/pause').then(r => r.data),
+  resume: () =>
+    client.post<{ paused: boolean }>('/simulation/queue/resume').then(r => r.data),
+  // Cancels every QUEUED job this caller could have cancelled one at a time,
+  // each authorized by the same predicate as the single-job abort. RUNNING
+  // jobs are deliberately out of scope — stopping a live solve wastes minutes
+  // of solver time and is what the per-row abort is for. `cancelled` counts
+  // only what the caller actually cancelled, so 0 is a legitimate answer and
+  // the number never hints at anyone else's work.
+  cancelQueued: () =>
+    client.post<{ cancelled: number }>('/simulation/queue/cancel_queued').then(r => r.data),
+  // Run a finished job again as a NEW queued job, inheriting the ORIGINAL
+  // config snapshot — "run that again" means that run. All four terminal
+  // statuses are eligible, `interrupted` included. 409 if the job is still
+  // queued/running, 409 `project_locked` if another user holds the project's
+  // edit lock, 404 if the project no longer has a saved network.
+  requeue: (jobId: string) =>
+    client.post<SolveJob & { already_queued: boolean }>(
+      `/simulation/queue/${jobId}/requeue`,
+    ).then(r => r.data),
+  // Hide a finished job from THIS caller's listing only; it stays in everyone
+  // else's. Gate the control on the row's `can_dismiss`.
+  dismiss: (jobId: string) =>
+    client.post<{ dismissed: true }>(`/simulation/queue/${jobId}/dismiss`).then(r => r.data),
   // Read a finished project's dispatch straight off disk — does NOT load it
   // into the active slot. 204 → null (project exists but never solved).
   resultsBundle: (name: string, source?: 'lopf' | 'ac_pf') =>

@@ -22,6 +22,9 @@ function job(id: string, project_id: string | null, status: SolveJob['status']):
     id, project_id, project_key: null, status,
     position: null, objective: null, solve_time: null, condition: null, error: null,
     enqueued_at: 0, started_at: null, finished_at: null,
+    // Not the subject of this file; false keeps the Dismiss control out of
+    // the DOM so it cannot interfere with the queries below.
+    can_dismiss: false,
   }
 }
 
