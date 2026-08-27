@@ -112,6 +112,15 @@ _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 # resident context, and the holder's next autosave persists them. It was left
 # out originally only because the undo stack does not capture it — a different
 # question from who is allowed to write.
+#
+# ADDING A PROJECT WRITE EDGE? Ask which guards apply, not which guard you had
+# in mind. This module runs several with DIFFERENT coverage sets, and three
+# separate bugs in one review came from reasoning per-guard instead of
+# per-route: sibling routes inheriting an exemption; a read-only POST caught by
+# an `is_write` test keyed on the verb; and `/api/projects/` sitting in
+# `_SOLVER_BLOCKING_PREFIXES` (below) while absent here, so the uploads
+# endpoints are guarded against a solve-in-flight but not against another
+# user's edit lock. Reading any one guard makes coverage look complete.
 _FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)
 
 # Paths exempt from the gate above. The rule is NOT "everything under

@@ -1214,12 +1214,17 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // not to thrash the backend, short enough that the badge stays roughly
   // accurate after an edit. The panel itself polls more aggressively when
   // open.
-  const { data: preflight } = useQuery({
+  const { data: preflight, isError: preflightErrored } = useQuery({
     queryKey: nk(currentProject, 'preflight'),
     queryFn: simulationApi.preflight,
     refetchInterval: 30_000,
     staleTime: 15_000,
   })
+  // ADR-0001: a failed preflight fetch must never render as "no issues" — a
+  // defaulted zero here is indistinguishable from a real clean result, so it
+  // would silently convert "we could not check" into "we checked and it's
+  // fine". `preflightErrored` (covers both isError and the resulting
+  // `data === undefined`) drives an explicit unavailable badge instead.
   const issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)
   const hasErrors = (preflight?.errors ?? 0) > 0
   // Active (queued + running) solve-queue jobs, surfaced as a badge on the
@@ -1259,7 +1264,13 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         icon={<AlertTriangle size={15} />}
         label="Issues"
         active={activeSlidePanel === 'issues'}
-        rightEl={issueCount > 0 ? (
+        rightEl={preflightErrored ? (
+          <span
+            className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
+            style={{ background: 'rgba(148,163,184,0.18)', color: '#94a3b8' }}
+            title="Could not check for issues — the preflight validation request failed"
+          >?</span>
+        ) : issueCount > 0 ? (
           <span
             className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
             style={{

@@ -69,7 +69,18 @@ Order: WS2 → WS3 (shared dialog), WS1 independent/parallel. TDD throughout per
 ## Open items
 
 - A future read-only ACL tier would re-open lock-acquisition DoS (security F3, downgraded because no such tier exists today — `project_acl.py` has admin/member only) — revisit acquisition tier then; admin force-release / hold-cap deferred to slice 2.
-- Uploads POST/DELETE handlers (`routers/uploads.py`) write into the project dir with no lock gate — fast-follow.
+- **Uploads write edges are outside the lock's coverage — concurrency gap, NOT an authz hole.**
+  `POST /{name}/uploads` (`routers/uploads.py:138`) and `DELETE /{name}/uploads/{file_id}` (`:256`), mounted at
+  `/api/projects` (`main.py:1045`), both write into `project.directory`. Neither calls `_enforce_project_lock`,
+  and the middleware does not reach them either: `_FOREIGN_LOCK_GATE_PREFIXES` (`main.py:115`) is
+  `/api/network/`, `/api/io/`, `/api/simulation/` — `/api/projects/` is absent.
+  Triage it correctly in BOTH directions: `ProjectAccessDep` still resolves within the caller's org and
+  ACL-gates the project, so there is no cross-org reach and this is not a security finding. It IS a
+  consistency bug: a non-holder can add or delete files in a project another user holds the edit lock on, and
+  DELETE is the sharp end — it can remove a file another session is actively referencing.
+  The asymmetry that hides it: `/api/projects/` IS in `_SOLVER_BLOCKING_PREFIXES` (`main.py:219`), so these
+  routes are guarded against a solve-in-flight but not against another user's lock. Same path, two guards,
+  one applied — which is why reading either guard alone reads as complete.
 - **Preflight failure renders as a clean bill of health — ADR-0001 violation, independent of this slice.**
   `layout/Sidebar.tsx:1223-1224` computes `issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)`
   and never consults the query's error state; `pages/IssuesPanel.tsx` renders the same response, and its own

@@ -8,6 +8,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
+// Vite's `?raw` gives the module's source as a string with no node types
+// (this tsconfig has none) and no cwd assumption.
+import networkApiSource from '../api/network.ts?raw'
 
 // Mock the api client BEFORE assetWrite imports it. The factory parks the
 // mock object on globalThis because vi.mock hoists above every const in
@@ -76,7 +79,9 @@ describe('invalidateAssetQueries', () => {
 
     expect(spy).toHaveBeenCalledTimes(COMPONENT_QUERY_ROOTS.length)
     for (const root of COMPONENT_QUERY_ROOTS) {
-      expect(spy).toHaveBeenCalledWith({ queryKey: nk('proj-a', root) })
+      // Bare root: prefix-matches `[root, <any project>]` AND legacy flat
+      // `[root]` keys. See the comment in invalidateAssetQueries.
+      expect(spy).toHaveBeenCalledWith({ queryKey: [root] })
     }
   })
 
@@ -84,7 +89,7 @@ describe('invalidateAssetQueries', () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     invalidateAssetQueries(qc, null)
-    expect(spy).toHaveBeenCalledWith({ queryKey: nk(null, 'generators') })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['generators'] })
   })
 })
 
@@ -145,7 +150,8 @@ describe('updateAsset — the chokepoint (Task 3)', () => {
 
     await updateAsset(qc, 'p1', 'buses', 'b1', { v_nom: 220 })
 
-    expect(spy).toHaveBeenCalledWith({ queryKey: nk('p1', 'buses') })
+    // Bare root — reaches both `[buses, p1]` and any legacy flat `[buses]`.
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['buses'] })
   })
 
   it('a failed PUT propagates and does NOT invalidate (state unchanged, cache still true)', async () => {
@@ -220,5 +226,72 @@ describe('updateAsset returns the PUT response', () => {
     const resp = await updateAsset(qc, 'p1', 'buses', 'b1', { v_nom: 220 })
 
     expect(resp).toEqual({ name: 'b1', rescale: [{ line: 'L1' }] })
+  })
+})
+
+// ── The sibling-path check (CLAUDE.md: "a green suite is not a correctness
+// claim"). COMPONENT_QUERY_ROOTS is a hand-written allowlist, so it can only
+// contain classes someone already thought of — it is structurally blind to a
+// class added to the api later, which is exactly the missing-test shape that
+// let the chat-staleness defect exist in the first place. These tests derive
+// the expectation from the REAL surface instead, so a new writable class that
+// nobody adds a root for fails here rather than going silently stale.
+describe('COMPONENT_QUERY_ROOTS covers the real write surface, not a remembered one', () => {
+  const apiSrc = () => networkApiSource
+
+  /** `updateGenerator` + `getGenerators` ⇒ a per-instance component class. */
+  function writableComponentClasses(src: string): string[] {
+    const updates = new Set(
+      [...src.matchAll(/^ {2}update([A-Z][A-Za-z]*)\b/gm)].map(m => m[1]))
+    const lists = new Set(
+      [...src.matchAll(/^ {2}get([A-Z][A-Za-z]*)s\b/gm)].map(m => m[1]))
+    // Paired singular/plural is the signal: `updateMeta` has no `getMetas`
+    // (a singleton), `updateSnapshotWeightings` no `getSnapshotWeightingss`.
+    return [...updates].filter(u => lists.has(u))
+  }
+
+  const ROOT_OF: Record<string, string> = {
+    Bus: 'buses', Carrier: 'carriers', Line: 'lines', Link: 'links',
+    Generator: 'generators', StorageUnit: 'storage_units', Store: 'stores',
+    Load: 'loads', Transformer: 'transformers',
+    GlobalConstraint: 'global_constraints',
+  }
+
+  it('finds the real classes (guards the derivation itself against a silent no-match)', () => {
+    const found = writableComponentClasses(apiSrc())
+    expect(found.length).toBeGreaterThanOrEqual(9)
+    expect(found).toContain('Generator')
+  })
+
+  it('every writable component class has an invalidation root', () => {
+    const missing = writableComponentClasses(apiSrc())
+      .map(cls => ROOT_OF[cls] ?? `UNMAPPED:${cls}`)
+      .filter(root => !(COMPONENT_QUERY_ROOTS as readonly string[]).includes(root))
+    expect(missing,
+      'a writable class with no invalidation root goes stale after every chat ' +
+      'edit — add it to COMPONENT_QUERY_ROOTS (and to ROOT_OF here)',
+    ).toEqual([])
+  })
+})
+
+describe('invalidation reaches legacy FLAT-keyed consumers too', () => {
+  it('invalidates a bare [root] cache, not just [root, project]', async () => {
+    // SolverSettings caches global constraints under a bare
+    // `['global_constraints']` — it predates `nk` and was never migrated.
+    // React Query matches by PREFIX, so invalidating `['global_constraints',
+    // 'Demo']` does NOT reach `['global_constraints']`: the shorter key is a
+    // prefix of ours, not the reverse. Adding the root to
+    // COMPONENT_QUERY_ROOTS is therefore necessary but NOT sufficient — this
+    // is the half of the gap that inspection missed.
+    const qc = new QueryClient()
+    qc.setQueryData(['global_constraints'], [{ name: 'co2', constant: 100 }])
+    qc.setQueryData(nk('Demo', 'generators'), [{ name: 'g1' }])
+
+    invalidateAssetQueries(qc, 'Demo')
+
+    expect(qc.getQueryState(['global_constraints'])?.isInvalidated,
+      'the flat-keyed SolverSettings cache went stale after a chat edit',
+    ).toBe(true)
+    expect(qc.getQueryState(nk('Demo', 'generators'))?.isInvalidated).toBe(true)
   })
 })

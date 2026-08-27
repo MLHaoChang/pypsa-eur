@@ -542,3 +542,68 @@ def test_serialize_project_lock_returns_none_on_db_error(session_local, monkeypa
 
     with session_local() as db:
         assert _serialize_project_lock(db, project.id, db.get(User, user_a.id)) is None
+
+
+# ── `_check_project_lock`: the check-only sibling (D8) ──────────────────────
+#
+# Landed with the uploads write edges but shipped without a test. The
+# distinction it encodes is the whole point and is invisible to a suite that
+# only asserts the 409: `_enforce_project_lock` ACQUIRES on write, which is
+# right for edges that ARE the edit (save/rename/delete), and wrong for
+# incidental ones (an attachment upload, a canvas layout flush) where it lets
+# a passive caller take an idle project's lock just by touching it and leaves
+# a 120 s claim behind. So the assertion that matters is the NEGATIVE one:
+# after a permitted call, no lock exists.
+
+def test_check_project_lock_does_not_acquire_on_a_free_project(session_local):
+    """The sibling-path assertion: permitted, and NO lock created."""
+    from routers.projects import _check_project_lock
+
+    _, get_lock, _, _, _ = _service()
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="checkfree@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="FreeCheck")
+
+    with session_local() as db:
+        _check_project_lock(db, project, user_a)   # must not raise
+        assert get_lock(db, project.id) is None, (
+            "check-only must not ACQUIRE — acquiring here would let a passive "
+            "upload or layout flush claim an idle project and keep renewing it"
+        )
+
+
+def test_check_project_lock_refuses_a_live_foreign_lock(session_local):
+    from fastapi import HTTPException
+
+    from routers.projects import _check_project_lock
+
+    acquire_lock, _, _, _, _ = _service()
+    org = _create_org(session_local)
+    holder = _create_user(session_local, email="holder@example.com")
+    other = _create_user(session_local, email="other@example.com")
+    for u in (holder, other):
+        _add_membership(session_local, user_id=u.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=holder, name="HeldCheck")
+
+    with session_local() as db:
+        assert acquire_lock(db, project.id, holder.id) is not None
+        with pytest.raises(HTTPException) as ei:
+            _check_project_lock(db, project, other)
+        assert ei.value.status_code == 409
+        assert ei.value.detail["error_kind"] == "project_locked"
+
+
+def test_check_project_lock_passes_the_holders_own_lock(session_local):
+    """The other sibling: your own lock must not refuse your own upload."""
+    from routers.projects import _check_project_lock
+
+    acquire_lock, _, _, _, _ = _service()
+    org = _create_org(session_local)
+    holder = _create_user(session_local, email="ownlock@example.com")
+    _add_membership(session_local, user_id=holder.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=holder, name="OwnCheck")
+
+    with session_local() as db:
+        assert acquire_lock(db, project.id, holder.id) is not None
+        _check_project_lock(db, project, holder)   # must not raise

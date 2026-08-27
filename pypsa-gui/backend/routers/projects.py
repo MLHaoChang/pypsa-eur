@@ -663,6 +663,36 @@ def _serialize_project_lock(db: DBSession, project_id, user: User) -> dict[str, 
     )
 
 
+def _check_project_lock(db: DBSession, project, user) -> None:
+    """
+    Check-only sibling of `_enforce_project_lock`: refuses a live FOREIGN lock
+    without acquiring one for the caller.
+
+    Use this where the write is incidental rather than an act of editing — a
+    canvas layout flush, an attachment upload. Acquire-on-write is right for
+    the edges that ARE the edit (save/rename/delete/scenario/members/snapshots,
+    D4/D8), but wrong here twice over: it lets a passive caller take an idle
+    project's lock just by touching it, and it leaves a 120 s claim behind that
+    outlives the request. Free, expired, and the caller's own lock all pass.
+    """
+    if local_mode.is_local_mode():
+        return
+    if project is None or user is None:
+        return
+    from services import project_locks
+
+    lock = project_locks.get_lock(db, project.id)
+    if lock is not None and lock.holder_user_id != user.id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_locked",
+                "message": f"'{project.name}' is being edited by another user.",
+                "lock": _serialize_project_lock(db, project.id, user),
+            },
+        )
+
+
 def _enforce_project_lock(db: DBSession, project, user) -> None:
     """
     Write-edge lock gate (design D3/D4). Called from HANDLER BODIES — never a
@@ -2995,24 +3025,16 @@ def put_layout(
     # gated write edge is a user act, but the canvas PUTs a layout on drag-
     # settle and on remount, so acquire-on-write here would let a passive
     # viewer take an idle project's lock — and keep renewing it — purely by
-    # looking at it. Same predicate as the write middleware: a free or expired
-    # lock, and the caller's own lock, pass; only a live foreign lock refuses.
-    from services import project_locks, project_registry
+    # looking at it.
+    #
+    # This predicate used to be spelled out inline here, and `_check_project_lock`
+    # was later factored out of it for the uploads edges — leaving two copies of
+    # one rule. That is the drift shape that produced the solve-queue abort bug:
+    # two guards that agree until somebody edits one. One definition now.
+    from services import project_registry
 
     lock_project = project_registry.find_project(db, user, name)
-    if lock_project is not None and user is not None and not local_mode.is_local_mode():
-        lock = project_locks.get_lock(db, lock_project.id)
-        if lock is not None and lock.holder_user_id != user.id:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error_kind": "project_locked",
-                    "message": (
-                        f"'{lock_project.name}' is being edited by another user."
-                    ),
-                    "lock": _serialize_project_lock(db, lock_project.id, user),
-                },
-            )
+    _check_project_lock(db, lock_project, user)
     # Compact (no indent): layout.json is a machine-written coordinate blob,
     # never hand-read — pretty-printing only inflates the on-disk size.
     serialized = json.dumps(layout, separators=(",", ":"))
