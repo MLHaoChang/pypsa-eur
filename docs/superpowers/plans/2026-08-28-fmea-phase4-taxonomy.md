@@ -27,9 +27,9 @@ Phases 0–3 constraints apply. Live-solve tests remain the standard; sweeps in 
 
 ### Task 2: class B — Link outages
 
-- [ ] **Failing tests first:** links with occurrence data become contingencies (Line/Transformer stay with SCLOPF — not this driver); rows validate (class B, lp_proxy/deterministic_scenario); criticality = q × ΔEUE_full × VoLL; a link with no occurrence data is skipped.
-- [ ] Implement `class_b_contingencies(n)` (in sweep.py) + the worker-thread runner and state key (`fmea_sweep`), routes `POST /results/fmea_sweep` (start; 409 while running) and `GET /results/fmea_sweep` (status + rows; 204 never-run) in `routers/results.py`; range-guard classification.
-- [ ] Commit: `feat(gui): class-B link-outage rows via the contingency sweep`.
+- [x] **Failing tests first:** links with occurrence data become contingencies (Line/Transformer stay with SCLOPF — not this driver); rows validate (class B, lp_proxy/deterministic_scenario); criticality = q × ΔEUE_full × VoLL; a link with no occurrence data is skipped.
+- [x] Implement `class_b_contingencies(n)` (in sweep.py) + the worker-thread runner and state key (`fmea_sweep`), routes `POST /results/fmea_sweep` (start; 409 while running) and `GET /results/fmea_sweep` (status + rows; 204 never-run) in `routers/results.py`; range-guard classification.
+- [x] Commit: `feat(gui): class-B link-outage rows via the contingency sweep`.
 
 ### Task 3: class C — stress scenarios
 

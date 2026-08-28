@@ -143,3 +143,77 @@ def test_ens_cap_is_stripped_inside_the_sweep():
                cfg=_cfg(ens_cap_permyriad=1.0))
     assert out["contingencies"]["tie_out"]["delta_eue_mwh"] == pytest.approx(
         STRANDED_MWH, rel=1e-3)
+
+
+# ── class B: link contingencies (Task 2) ──────────────────────────────────
+
+def test_class_b_contingencies_select_occurrence_bearing_links_only():
+    n = _network()
+    n.add("Bus", "bus3", carrier="AC")
+    n.add("Load", "l3", bus="bus3", p_set=1.0)
+    # A link with NO occurrence data must be skipped (nothing to price).
+    n.add("Link", "silent_tie", bus0="bus_gen", bus1="bus3", p_nom=10.0)
+    cons = S.class_b_contingencies(n)
+    assert [c["id"] for c in cons] == ["link:tie:forced_outage"]
+    assert cons[0]["meta"]["q"] == pytest.approx(LINK_Q)
+
+
+def test_class_b_rows_price_outages_first_order():
+    """criticality €/yr = q × ΔEUE_full × VoLL (the whole-horizon hold
+    integrates over event timing); occurrence = 8760·q/MTTR; severity =
+    criticality / occurrence — the f×S identity by construction."""
+    n = _network()
+    PyPSAService.set_network(n)
+    rows = S.run_class_b_sweep(n, PyPSAService.get_lock(), _cfg(),
+                               log_queue=queue.SimpleQueue())
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["delta_eue_mwh"] == pytest.approx(STRANDED_MWH, rel=1e-3)
+    fm = r["failure_mode"]
+    assert fm["failure_class"] == "B"
+    assert fm["engine"] == "lp_proxy"
+    assert fm["fidelity"] == "deterministic_scenario"
+    assert fm["criticality_eur_per_year"] == pytest.approx(
+        LINK_Q * STRANDED_MWH * VOLL, rel=1e-3)
+    assert fm["occurrence_per_year"] == pytest.approx(8760 * LINK_Q / LINK_MTTR)
+    assert fm["severity_eur"] * fm["occurrence_per_year"] == pytest.approx(
+        fm["criticality_eur_per_year"], rel=1e-9)
+    from models.adequacy import FailureModeResult
+    FailureModeResult.model_validate(fm)
+
+
+def test_class_b_zeroes_time_varying_availability_too():
+    """A links_t.p_max_pu column overrides the static — the outage must
+    zero it (and restore it) or the link keeps flowing."""
+    n = _network()
+    n.links_t.p_max_pu = pd.DataFrame({"tie": [1.0, 1.0]}, index=n.snapshots)
+    PyPSAService.set_network(n)
+    rows = S.run_class_b_sweep(n, PyPSAService.get_lock(), _cfg(),
+                               log_queue=queue.SimpleQueue())
+    assert rows[0]["delta_eue_mwh"] == pytest.approx(STRANDED_MWH, rel=1e-3)
+    assert float(n.links_t.p_max_pu["tie"].min()) == pytest.approx(1.0)
+
+
+# ── the background runner + routes ────────────────────────────────────────
+
+def test_fmea_sweep_routes_lifecycle():
+    import routers.results as R
+    from routers.simulation import _state
+    n = _network()
+    PyPSAService.set_network(n)
+    _state.pop("fmea_sweep", None)
+    _state["solver_config"] = _cfg()
+    resp = R.get_fmea_sweep()
+    assert getattr(resp, "status_code", 200) == 204
+    out = R.post_fmea_sweep()
+    assert out["status"] == "running"
+    _state["fmea_sweep"]["thread"].join(timeout=300)
+    done = R.get_fmea_sweep()
+    assert done["status"] == "done", done
+    assert done["rows"][0]["failure_mode"]["failure_class"] == "B"
+    assert "thread" not in done
+    # A second start while one is recorded as running would 409; after done
+    # it restarts cleanly.
+    out2 = R.post_fmea_sweep()
+    assert out2["status"] == "running"
+    _state["fmea_sweep"]["thread"].join(timeout=300)

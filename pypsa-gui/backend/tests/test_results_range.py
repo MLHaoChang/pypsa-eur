@@ -309,6 +309,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/adequacy",
         # COPT screening adequacy + FMECA ranking (Phase 2) — structured.
         "/copt",
+        # Contingency-sweep lifecycle (Phase 4) — status + rows, no series.
+        "/fmea_sweep",
     }
 
     unclassified = declared - ranged - aggregates

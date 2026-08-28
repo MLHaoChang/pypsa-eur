@@ -205,3 +205,139 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
         state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
     )
     return results
+
+
+# ── class B: link forced outages ──────────────────────────────────────────
+
+MAX_CLASS_B_LINKS = 20
+
+
+def class_b_contingencies(n) -> list[dict]:
+    """
+    One contingency per Link with resolvable occurrence data (asset value or
+    carrier default) and positive capacity. Lines/Transformers stay with the
+    already-shipped SCLOPF machinery (spec §6.2) — this driver covers the
+    gap SCLOPF leaves: HVDC / power-to-X links.
+
+    Outage representation: p_max_pu AND p_min_pu forced to 0, static and
+    time-varying alike, capacity intact — preflight rightly rejects a fixed
+    link with p_nom = 0, and a bidirectional link needs its negative bound
+    zeroed too. The mutation's undo re-fetches frames (see freeze note).
+    """
+    from services.adequacy.occurrence import resolve_outage_params
+
+    links = getattr(n, "links", None)
+    if links is None or links.empty:
+        return []
+    params = resolve_outage_params(n, "links")
+    out: list[dict] = []
+    for name in links.index:
+        row = params.loc[name]
+        if row["source"] == "missing":
+            continue
+        try:
+            cap = float(links.at[name, "p_nom"])
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(cap) and cap > 0):
+            continue
+
+        def mutate(nn, name=name):
+            lk = nn.links
+            orig_max = float(lk.at[name, "p_max_pu"])
+            orig_min = float(lk.at[name, "p_min_pu"])
+            lk.at[name, "p_max_pu"] = 0.0
+            lk.at[name, "p_min_pu"] = 0.0
+            t = getattr(getattr(nn, "links_t", None), "p_max_pu", None)
+            had_t = t is not None and name in getattr(t, "columns", [])
+            orig_t = t[name].copy() if had_t else None
+
+            if had_t:
+                t[name] = 0.0
+
+            def undo():
+                live = nn.links
+                if name in live.index:
+                    live.at[name, "p_max_pu"] = orig_max
+                    live.at[name, "p_min_pu"] = orig_min
+                lt = getattr(getattr(nn, "links_t", None), "p_max_pu", None)
+                if had_t and lt is not None and name in getattr(lt, "columns", []):
+                    lt[name] = orig_t
+
+            return undo
+
+        out.append({
+            "id": f"link:{name}:forced_outage",
+            "mutate": mutate,
+            "meta": {
+                "name": str(name),
+                "q": float(row["rate"]),
+                "basis": str(row["basis"]),
+                "mttr_hours": float(row["mttr_hours"]),
+            },
+        })
+    if len(out) > MAX_CLASS_B_LINKS:
+        raise SweepBudgetError(
+            f"{len(out)} occurrence-bearing links exceed the class-B budget "
+            f"of {MAX_CLASS_B_LINKS} — clear outage data on minor links or "
+            "run per region"
+        )
+    return out
+
+
+def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
+                      final_state_update=None) -> list[dict]:
+    """
+    Class-B rows: sweep every eligible link outage and price it first-order
+    (see the module docstring's severity semantics):
+
+        criticality €/yr = q × ΔEUE_full-horizon × VoLL
+        occurrence /yr   = 8760·q / MTTR   (cycle frequency, occurrence.py)
+        severity €       = criticality / occurrence   (f×S by construction)
+
+    A contingency whose re-solve is not optimal is returned with its status
+    and NO failure_mode — a distinct outcome, not a zero.
+    """
+    contingencies = class_b_contingencies(network)
+    if not contingencies:
+        return []
+    voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    swept = run_contingency_sweep(
+        network, lock, cfg, contingencies,
+        log_queue=log_queue, final_state_update=final_state_update)
+    rows: list[dict] = []
+    for c in contingencies:
+        res = swept["contingencies"][c["id"]]
+        meta = c["meta"]
+        if res["status"] not in ("ok", "optimal"):
+            rows.append({"id": c["id"], "status": res["status"],
+                         "delta_eue_mwh": None, "failure_mode": None,
+                         "meta": meta})
+            continue
+        delta = float(res["delta_eue_mwh"] or 0.0)
+        q = meta["q"]
+        crit = q * delta * voll
+        occ = (8760.0 * q / meta["mttr_hours"]
+               if meta["mttr_hours"] and math.isfinite(meta["mttr_hours"])
+               and meta["mttr_hours"] > 0 else 0.0)
+        rows.append({
+            "id": c["id"],
+            "status": res["status"],
+            "delta_eue_mwh": delta,
+            "failure_mode": {
+                "mode_id": c["id"],
+                "component_class": "Link",
+                "name": meta["name"],
+                "failure_class": "B",
+                "occurrence_per_year": occ,
+                "occurrence_basis": meta["basis"],
+                "severity_eur": (crit / occ) if occ > 0 else 0.0,
+                "criticality_eur_per_year": crit,
+                "in_metric_scope": True,
+                "engine": "lp_proxy",
+                "fidelity": "deterministic_scenario",
+            },
+            "meta": meta,
+        })
+    rows.sort(key=lambda r: (r["delta_eue_mwh"] or 0.0), reverse=True)
+    return rows

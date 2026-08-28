@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import threading as _threading
+
 from fastapi import APIRouter, Query, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
@@ -2922,6 +2924,69 @@ def get_curtailment(
     except Exception:
         logger.exception("results endpoint failed; returning 204 (see traceback)")
         return _not_solved()
+
+
+@results_router.get("/fmea_sweep")
+def get_fmea_sweep():
+    """
+    Status + rows of the last class-B/C contingency sweep (adequacy plan
+    Phase 4). 204 = never run. The stored state carries a worker-thread
+    handle that must not leak into the payload.
+    """
+    st = _state.get("fmea_sweep")
+    if not st:
+        return Response(status_code=204)
+    return {k: v for k, v in st.items() if k != "thread"}
+
+
+@results_router.post("/fmea_sweep")
+def post_fmea_sweep():
+    """
+    Start the contingency sweep (class B today; class C scenarios join via
+    the same runner) in a worker thread — a sweep is several LP solves and
+    must never block a request. 409 while a sweep or a foreground solve is
+    running. The sweep's closing base re-solve leaves the network AND the
+    foreground results in base state (the final solve writes through the
+    real state sink).
+    """
+    import time
+
+    from services.adequacy.sweep import SweepBudgetError, run_class_b_sweep
+    from routers.simulation import _state_update
+
+    st = _state.get("fmea_sweep")
+    if st and st.get("status") == "running" and st.get("thread") is not None             and st["thread"].is_alive():
+        raise HTTPException(409, "an FMEA sweep is already running")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(422, "the sweep requires a VOLL > 0 in solver settings")
+    n = PyPSAService.get_network()
+    lock = PyPSAService.get_lock()
+
+    def worker():
+        try:
+            rows = run_class_b_sweep(
+                n, lock, cfg,
+                # The closing base re-solve writes the REAL state sink, so
+                # /results/lost_load etc. reflect base afterwards.
+                final_state_update=_state_update,
+            )
+            _state["fmea_sweep"].update(
+                status="done", rows=rows, finished_at=time.time(), error=None)
+        except SweepBudgetError as exc:
+            _state["fmea_sweep"].update(
+                status="failed", rows=[], error=str(exc), finished_at=time.time())
+        except Exception as exc:  # noqa: BLE001
+            _state["fmea_sweep"].update(
+                status="failed", rows=[], error=str(exc), finished_at=time.time())
+
+    t = _threading.Thread(target=worker, daemon=True, name="fmea-sweep")
+    _state["fmea_sweep"] = {"status": "running", "rows": [], "error": None,
+                            "started_at": time.time(), "thread": t}
+    t.start()
+    return {"status": "running"}
 
 
 @results_router.get("/copt")
