@@ -34,9 +34,9 @@ Definition (spec §3.3, corrected semantics): unit *i*'s attributed risk is `ΔE
 
 ### Task 4: side-by-side surfacing
 
-- [ ] **Vitest first:** a COPT chip row renders screening LOLE/EUE with the analytic-convolution fidelity tooltip; a divergence note appears when both LP-proxy ENS and COPT EUE exist ("storage/network carry the adequacy" when COPT ≫ proxy); absent payload renders nothing.
-- [ ] Extend `pages/results/adequacy.tsx` (`CoptChips`), `api/simulation.ts` (`getCopt`), LostLoadTab render; `tsc -b` + vitest.
-- [ ] Commit: `feat(gui): COPT screening chips beside the LP proxy`.
+- [x] **Vitest first:** a COPT chip row renders screening LOLE/EUE with the analytic-convolution fidelity tooltip; a divergence note appears when both LP-proxy ENS and COPT EUE exist ("storage/network carry the adequacy" when COPT ≫ proxy); absent payload renders nothing.
+- [x] Extend `pages/results/adequacy.tsx` (`CoptChips`), `api/simulation.ts` (`getCopt`), LostLoadTab render; `tsc -b` + vitest.
+- [x] Commit: `feat(gui): COPT screening chips beside the LP proxy`.
 
 ## Done criteria
 

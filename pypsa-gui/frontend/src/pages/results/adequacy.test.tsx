@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { AdequacyChips, ensTargetWarning, type AdequacyReportPayload } from './adequacy'
+import { AdequacyChips, CoptChips, ensTargetWarning, type AdequacyReportPayload, type CoptPayload } from './adequacy'
 
 afterEach(() => cleanup())
 
@@ -66,5 +66,37 @@ describe('AdequacyChips — the binding badge', () => {
     )} />)
     expect(screen.getByText(/DSR 240\.0 MWh \(not unserved\)/)).toBeTruthy()
     expect(screen.getByText(/zones unpopulated/)).toBeTruthy()
+  })
+})
+
+
+function coptPayload(extra: Partial<CoptPayload> = {}): CoptPayload {
+  return {
+    engine: 'copt', fidelity: 'analytic_convolution',
+    metrics: { lole_hours: 1.68, eue_mwh: 33.6, lolp_max: 0.28, time_basis: 'hours_per_year' },
+    per_mode: [], fleet: { units: 2, must_take: 1, delta_mw: 1 },
+    voll_eur_per_mwh: 0,
+    ...extra,
+  }
+}
+
+describe('CoptChips — the screening row', () => {
+  it('renders nothing without a payload (endpoint 204)', () => {
+    const { container } = render(<CoptChips copt={null} proxyEnsMwh={null} />)
+    expect(container.innerHTML).toBe('')
+  })
+  it('shows the screening metrics with the fidelity label', () => {
+    render(<CoptChips copt={coptPayload()} proxyEnsMwh={null} />)
+    expect(screen.getByText(/COPT screening/)).toBeTruthy()
+    expect(screen.getByText(/LOLE 1\.7 h/)).toBeTruthy()
+    expect(screen.getByText(/EUE 33\.6 MWh/)).toBeTruthy()
+  })
+  it('flags divergence when the screening EUE dwarfs the LP proxy', () => {
+    render(<CoptChips copt={coptPayload()} proxyEnsMwh={2.0} />)
+    expect(screen.getByText(/storage\/network carry the adequacy/)).toBeTruthy()
+  })
+  it('stays quiet when the two roughly agree', () => {
+    render(<CoptChips copt={coptPayload()} proxyEnsMwh={30.0} />)
+    expect(screen.queryByText(/storage\/network carry the adequacy/)).toBeNull()
   })
 })

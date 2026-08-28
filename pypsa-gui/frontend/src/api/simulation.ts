@@ -384,6 +384,10 @@ export const resultsApi = {
   // pages/results/adequacy.tsx AdequacyReportPayload.
   getAdequacy: () => client.get('/results/adequacy')
     .then(r => (r.status === 204 ? null : r.data)),
+  // COPT screening adequacy + FMECA ranking (Phase 2; 204 = no occurrence
+  // data). Shape: pages/results/adequacy.tsx CoptPayload.
+  getCopt: () => client.get('/results/copt')
+    .then(r => (r.status === 204 ? null : r.data)),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;

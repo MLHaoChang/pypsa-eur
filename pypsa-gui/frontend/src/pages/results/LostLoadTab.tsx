@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
-import { AdequacyChips, type AdequacyReportPayload } from './adequacy'
+import { AdequacyChips, CoptChips, type AdequacyReportPayload, type CoptPayload } from './adequacy'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
@@ -61,6 +61,12 @@ export default function LostLoadTab() {
   const { data: adequacy } = useQuery({
     queryKey: nk(currentProject, 'results', 'adequacy'),
     queryFn: () => resultsApi.getAdequacy(),
+  })
+  // COPT screening — side by side with the proxy; the divergence is the
+  // diagnostic (spec §5.3). 204 → null → CoptChips renders nothing.
+  const { data: copt } = useQuery({
+    queryKey: nk(currentProject, 'results', 'copt'),
+    queryFn: () => resultsApi.getCopt(),
   })
   // WeightCtx + timeline from the shared hook (fetches /snapshots +
   // /investmentPeriods); refTs = the lost-load series.
@@ -166,6 +172,13 @@ export default function LostLoadTab() {
       </header>
 
       <AdequacyChips report={(adequacy ?? null) as AdequacyReportPayload | null} />
+      <CoptChips
+        copt={(copt ?? null) as CoptPayload | null}
+        proxyEnsMwh={
+          (adequacy as AdequacyReportPayload | null | undefined)?.metrics
+            ?.ens_mwh ?? null
+        }
+      />
 
       <div className="grid grid-cols-3 gap-3">
         <Kpi label="Total lost load" value={fmtEnergy(totals.mwh)}

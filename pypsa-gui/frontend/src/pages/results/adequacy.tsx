@@ -87,3 +87,57 @@ export function AdequacyChips({ report }: { report: AdequacyReportPayload | null
     </div>
   )
 }
+
+// Payload of GET /results/copt (Phase 2) — the analytic screening engine.
+export interface CoptPayload {
+  engine: string
+  fidelity: string
+  metrics: { lole_hours: number; eue_mwh: number; lolp_max: number; time_basis: string }
+  per_mode: Array<Record<string, unknown>>
+  fleet: { units: number; must_take: number; delta_mw: number }
+  voll_eur_per_mwh: number
+}
+
+// The screening EUE dwarfing the LP proxy's ENS means storage/network are
+// carrying the adequacy — precisely when the classical number misleads and
+// when a PRAS/Antares export is worth doing (spec §5.3). The DIVERGENCE is
+// the product; neither number alone is the headline.
+const DIVERGENCE_RATIO = 5
+
+export function CoptChips({ copt, proxyEnsMwh }: {
+  copt: CoptPayload | null
+  proxyEnsMwh: number | null
+}) {
+  if (!copt) return null
+  const tip =
+    'COPT screening (analytic convolution): thermal-only, storage-excluded, ' +
+    'network-free. NOT comparable to a statutory standard. Its divergence ' +
+    'from the LP proxy is the diagnostic.'
+  const diverges =
+    proxyEnsMwh != null && proxyEnsMwh >= 0 &&
+    copt.metrics.eue_mwh > DIVERGENCE_RATIO * Math.max(proxyEnsMwh, 1e-9)
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-3" data-testid="copt-chips">
+      <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] font-semibold" title={tip}>
+        COPT screening
+      </span>
+      <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={tip}>
+        LOLE {copt.metrics.lole_hours.toFixed(1)} h
+      </span>
+      <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={tip}>
+        EUE {copt.metrics.eue_mwh.toFixed(1)} MWh
+      </span>
+      <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted" title={tip}>
+        {copt.fleet.units} unit(s), {copt.fleet.must_take} must-take
+      </span>
+      {diverges && (
+        <span
+          className="px-2 py-0.5 rounded bg-warn/10 text-warn text-[10px]"
+          title="The storage-blind screening EUE far exceeds the storage-aware LP proxy's unserved energy: storage/network carry the adequacy here, and the classical screening number overstates the risk."
+        >
+          screening ≫ proxy — storage/network carry the adequacy
+        </span>
+      )}
+    </div>
+  )
+}
