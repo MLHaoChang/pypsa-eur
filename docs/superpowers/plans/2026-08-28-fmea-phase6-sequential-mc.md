@@ -38,7 +38,17 @@ constant LOLE. Fills the `sequential_mc` fidelity tier and the `confidence_inter
 electrical scope, slack exclusion and VRE netting are then *provably* identical across
 engines; only storage extraction is new. Any divergence between MC and COPT on a
 thermal-only system is therefore a bug in the sampling, which is exactly what test T2
-below exploits as ground truth.
+below exploits.
+
+**Validation policy — two gates, neither substitutes for the other.** The internal
+cross-check (T2) validates the *sampling machinery* against exact convolution. It is
+structurally blind to shared-substrate errors: both engines consume the same fleet
+extraction, the same FOR interpretation, the same residual netting — get any of that
+wrong and both engines are wrong identically while the cross-check passes. Only an
+**external published benchmark** validates the whole chain (data interpretation →
+fleet construction → metric definition → number). Task 7 is therefore a required
+shipping gate, not best-effort: no MC number reaches the UI until the benchmark suite
+passes.
 
 ## Global Constraints
 
@@ -169,7 +179,39 @@ firm-MW block `Δ` (perfect, `q=0`) that restores the *system's* baseline LOLE. 
 - [ ] Mount on the Lost load tab beside the COPT chips and FrontierPanel; `tsc -b`.
 - [ ] Commit: `feat(gui): MC adequacy panel — CI-bearing metrics and per-asset ELCC`.
 
-### Task 7: end-to-end + QA round
+### Task 7: the benchmark gate (required — the shipping criterion)
+
+Published test systems with published LOLE results, reproduced within a *tight* CI.
+The non-vacuity lesson from S15.7 applies directly: a wide CI makes any benchmark
+"pass", so the acceptance criterion caps the CI width as well as requiring coverage.
+
+- [ ] **Data sourcing with provenance (its own step, not an afterthought):** fetch the
+  IEEE RTS-79 generator set (32 units, FOR + MTTR) and its weekly/daily/hourly load
+  model, and the RBTS (Billinton's 6-bus educational system — small enough that large
+  draw counts are cheap), from published sources reachable in this environment
+  (RTS-GMLC repository, PRAS test data, literature reproductions). Commit as versioned
+  fixtures with a provenance header: source URL, retrieval date, and the figures
+  **cross-checked against a second independent source** before pinning — a from-memory
+  number is not a citation. Fixture units carry `basis="FOR"` explicitly, so the
+  FOR-vs-EFORd interpretation is pinned where a benchmark would catch it.
+- [ ] **Failing tests first** (`tests/test_adequacy_benchmarks.py`, `@pytest.mark.slow`):
+  - **COPT vs RTS-79:** the *analytic* engine must reproduce the published hourly LOLE
+    (≈9.4 h/yr, cited value per the sourcing step) first. If the COPT misses it, the
+    shared substrate is wrong and the MC inherits the miss — cheapest place to find out.
+  - **MC vs RTS-79 and MC vs RBTS:** published LOLE inside the MC 95% CI **and** CI
+    half-width ≤ 5% of the published value (the anti-vacuity cap; sized draws, seeded).
+  - After first green: pin the seeded result exactly as a regression anchor, so future
+    refactors diff against both the published value and the pinned draw.
+- [ ] **Storage, stated honestly:** no canonical published storage-ELCC test number
+  exists — RTS/RBTS are thermal-hydro systems and published ELCC studies report
+  method-dependent ranges, not reproducible fixtures. The storage gate therefore stays
+  the analytic ladder (T1/T4: exact deterministic cases, duration limits) **plus** a
+  recorded stretch goal: cross-tool comparison against PRAS on one identical small
+  system (needs a Julia runtime — documented manual step, not CI). This limitation goes
+  in the PR body and the panel tooltip, not a code comment.
+- [ ] Commit: `test(gui): benchmark gate — RTS-79/RBTS reproduced within capped CI`.
+
+### Task 8: end-to-end + QA round
 
 - [ ] Extend `qa_e2e.py` **S15**: MC steps over HTTP — run on the S15 network (which has
   a battery from the storage-unit case), assert CI fields present, 409 concurrency,
@@ -179,13 +221,7 @@ firm-MW block `Δ` (perfect, `q=0`) that restores the *system's* baseline LOLE. 
   drive the 3-zone system with battery, render the panel in Chromium; record runtimes
   (target: 500 draws × 168 h in seconds, 1000 × 8760 in low tens of seconds; if missed,
   that's a finding, not a footnote); budget-guard trip test.
-- [ ] **External anchor (best-effort, explicitly optional):** IEEE RTS-79 typed in from
-  the published 1979 paper (32 units with FOR/MTTR + hourly load model), expected hourly
-  LOLE within MC CI of the published value, `@pytest.mark.slow`. The task INCLUDES
-  sourcing and citing the published figure; if the data cannot be sourced verbatim in
-  the environment, record the gap in the PR body — T2's exact-convolution cross-check
-  remains the load-bearing validation either way, by design.
-- [ ] Commit: `test(gui): S15 MC steps + RTS anchor` and the QA-round fixes it forces.
+- [ ] Commit: `test(gui): S15 MC steps` and the QA-round fixes it forces.
 
 ## Open decisions (defaults chosen; flag to the user, don't block on them)
 
@@ -198,7 +234,9 @@ firm-MW block `Δ` (perfect, `q=0`) that restores the *system's* baseline LOLE. 
 
 A seeded, converged MC LOLE/EUE with CI that (a) matches the COPT's exact convolution on
 thermal-only systems, (b) is provably persistence-aware and non-anticipative under
-tests that bite, (c) prices a battery's ELCC where the COPT stays honestly silent, and
-(d) ships every number with engine/fidelity/CI/time-basis labels and the
+tests that bite, (c) **reproduces the published RTS-79 and RBTS LOLE within a
+CI whose width is itself capped** — the external gate no internal cross-check can
+replace, (d) prices a battery's ELCC where the COPT stays honestly silent, and
+(e) ships every number with engine/fidelity/CI/time-basis labels and the
 single-weather-realisation warning. Estimated ~400–600 lines engine, ~150 ELCC, ~150
 routes, ~250 panel, ~800 tests.
