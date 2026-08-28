@@ -79,15 +79,14 @@ def test_capture_totals_are_snapshot_weighted():
     assert cap["voll_eur_per_mwh"] == pytest.approx(VOLL)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="requires _compute_economics_summary's lost_load_cap parameter "
-    "from PR #4 (claude/fix-lost-load-cost-and-custom-attr-drop); this "
-    "XPASSes the moment that merge lands — then DELETE this marker",
-)
 def test_capture_cost_matches_economics_summary_cross_surface():
     """The frontier and the worksheet both hang off this number — the capture
-    and the Economics roll-up must agree under non-unit weights."""
+    and the Economics roll-up must agree under non-unit weights.
+
+    This carried a `strict=True` xfail until `_compute_economics_summary`
+    grew its `lost_load_cap` parameter on master (07b32c2, PR #4). Before
+    that the roll-up read a `n.meta` key nothing ever wrote, so it reported
+    zero VOLL cost and the two surfaces disagreed silently."""
     n = _short_network()
     cap = _solve_with_capture(n)
     from routers.compare import _compute_economics_summary

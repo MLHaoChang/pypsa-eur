@@ -68,16 +68,15 @@ def test_netcdf_round_trip_preserves_values_and_nan():
     assert unset is None or (isinstance(unset, float) and math.isnan(unset)) or unset == "" or str(unset) == "nan"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="requires the _merge_partial_update custom-column fix from PR #4 "
-    "(claude/fix-lost-load-cost-and-custom-attr-drop); this XPASSes the "
-    "moment that merge lands — then DELETE this marker",
-)
 def test_partial_put_preserves_outage_attributes():
-    """Task 0 gate. `_update_component` goes through remove+add; without the
-    PR #4 fix, a partial PUT omitting the custom columns silently resets
-    them."""
+    """Task 0 gate. `_update_component` goes through remove+add, so without
+    the `_merge_partial_update` custom-column widening a partial PUT that
+    omits the outage columns silently resets them — which would make every
+    occurrence-driven number downstream quietly wrong.
+
+    This carried a `strict=True` xfail until the fix landed on master
+    (07b32c2, PR #4). Strict was the point: an unexpected PASS is a failure,
+    so the dependency could not be forgotten once the merge made it moot."""
     import routers.network as NET
     n = _net_with_outage_gen()
     merged = NET._merge_partial_update(n, "generators", "g_set", {"p_nom": 7.0})
