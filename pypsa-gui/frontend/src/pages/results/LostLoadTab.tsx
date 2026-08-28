@@ -143,15 +143,49 @@ export default function LostLoadTab() {
     return { mwh, cost: mwh * voll, voll }
   }, [lostLoad, llMeta, weightCtx, range])
 
+  // No lost load is not the same as nothing to report, and this early
+  // return used to conflate them: it fired BEFORE the adequacy and COPT
+  // chips, so the success case — a reliability target set and MET, with
+  // zero unserved energy — rendered as an empty tab that told the user to
+  // set a VoLL they had already set. It also suppressed the COPT screening,
+  // which needs no solve at all and is meaningful whether or not the LP
+  // shed anything, along with the LP-proxy-vs-COPT divergence that the
+  // design treats as the headline diagnostic.
+  //
+  // So the chips render either way; only the lost-load table and chart
+  // below are genuinely empty, and the message now says which case it is.
   if (!lostLoad || !totals || totals.mwh <= 0) {
+    const targeted = (adequacy as AdequacyReportPayload | null | undefined)?.target != null
     return (
-      <div className="p-6 text-[12px] text-muted space-y-2">
-        <p>No lost-load data available.</p>
-        <p>
-          The LP only writes lost-load when run with <code className="font-mono">VOLL &gt; 0</code> in
-          solver settings AND the optimisation can't meet demand at any price ≤ VOLL. Set a VOLL
-          (e.g. 3000–10000 €/MWh) and re-run to populate this tab.
-        </p>
+      <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+        <header>
+          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Lost load</h3>
+        </header>
+        <AdequacyChips report={(adequacy ?? null) as AdequacyReportPayload | null} />
+        <CoptChips
+          copt={(copt ?? null) as CoptPayload | null}
+          proxyEnsMwh={
+            (adequacy as AdequacyReportPayload | null | undefined)?.metrics?.ens_mwh ?? null
+          }
+        />
+        <div className="text-[12px] text-muted space-y-2">
+          {targeted ? (
+            <p>
+              No unserved energy in this solve — the plan served all demand, so there is no
+              lost-load breakdown to chart. The reliability target above reports what actually
+              bound.
+            </p>
+          ) : (
+            <>
+              <p>No lost-load data available.</p>
+              <p>
+                The LP only writes lost-load when run with <code className="font-mono">VOLL &gt; 0</code> in
+                solver settings AND the optimisation can't meet demand at any price ≤ VOLL. Set a VOLL
+                (e.g. 3000–10000 €/MWh) and re-run to populate this tab.
+              </p>
+            </>
+          )}
+        </div>
       </div>
     )
   }

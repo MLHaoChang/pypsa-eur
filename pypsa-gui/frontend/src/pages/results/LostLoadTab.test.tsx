@@ -8,7 +8,7 @@ import LostLoadTab from './LostLoadTab'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
-  return { ...actual, resultsApi: { ...actual.resultsApi, getLostLoad: vi.fn() } }
+  return { ...actual, resultsApi: { ...actual.resultsApi, getLostLoad: vi.fn(), getAdequacy: vi.fn(), getCopt: vi.fn() } }
 })
 
 vi.mock('../../api/network', async (importOriginal) => {
@@ -45,6 +45,10 @@ beforeEach(() => {
     can_sample_weeks: false,
   })
   vi.mocked(networkApi.getInvestmentPeriods).mockReset().mockResolvedValue({ periods: [], weightings: [] })
+  // Existing tests predate the adequacy surfaces: default both to the 204
+  // (no report) case so they behave exactly as before.
+  vi.mocked(resultsApi.getAdequacy).mockReset().mockResolvedValue(null as never)
+  vi.mocked(resultsApi.getCopt).mockReset().mockResolvedValue(null as never)
 })
 
 function renderPage() {
@@ -75,4 +79,46 @@ it('renders a distinctive lost-load KPI sourced from a single mocked snapshot', 
   // text during development — see task-24-report.md).
   const matches = await screen.findAllByText((text) => text.includes('424.2'))
   expect(matches.length).toBe(3)
+})
+
+// ── The success case: a reliability target SET and MET, so ENS is 0.
+//
+// This used to render as a bare "No lost-load data available" page telling
+// the user to set a VoLL they had already set. The early return fired before
+// AdequacyChips and CoptChips, so the achieved-vs-target readout, the badge
+// naming which standard bound, and the whole COPT screening block — which
+// needs no solve at all and is meaningful whether or not the LP shed
+// anything — were all suppressed exactly when the plan had succeeded.
+//
+// Found by driving the real UI in a browser: the tab looked empty on a solve
+// that had met its target.
+it('still shows the target and COPT chips when the plan served all demand', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[0]],
+    total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 4000, bus_carriers: {},
+  } as never)
+  vi.mocked(resultsApi.getAdequacy).mockReset().mockResolvedValue({
+    engine: 'lp_proxy', fidelity: 'deterministic_scenario',
+    target: { basis: 'energy', binding: 'voll', zone_field_populated: true,
+      system: { cap_mwh: 23.76, achieved_ens_mwh: 0, achieved_shed_hours: 0 }, zones: [] },
+    metrics: { ens_mwh: 0, shed_hours: 0, lole_hours: null, eue_mwh: null,
+      confidence_interval: null, n_samples: null, time_basis: 'hours_per_year' },
+    cost: { total_system_cost_eur: 1, excludes_shed_cost: true, period_basis: 'single_period' },
+    energy: { involuntary_mwh: 0, demand_response_mwh: 0 },
+  } as never)
+  vi.mocked(resultsApi.getCopt).mockReset().mockResolvedValue({
+    engine: 'copt', fidelity: 'analytic_convolution',
+    metrics: { lole_hours: 24, eue_mwh: 1080, lolp_max: 1, time_basis: 'hours_per_year' },
+    fleet: { units: 1, must_take: 0, delta_mw: 1 },
+    voll_eur_per_mwh: 4000, per_mode: [],
+  } as never)
+
+  renderPage()
+  // the standard that actually bound, and the COPT screening beside it
+  // the chips block itself, and the badge naming the standard that bound
+  expect(await screen.findByTestId('adequacy-chips')).toBeTruthy()
+  expect(await screen.findByText(/standard:/i)).toBeTruthy()
+  expect(await screen.findByText(/COPT screening/i)).toBeTruthy()
+  // and it must NOT tell the user to set a VoLL that is already set
+  expect(screen.queryByText(/Set a VOLL/i)).toBeNull()
 })
