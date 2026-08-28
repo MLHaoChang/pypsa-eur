@@ -28,9 +28,9 @@ Definition (spec §3.3, corrected semantics): unit *i*'s attributed risk is `ΔE
 
 ### Task 3: the endpoint + report integration
 
-- [ ] **Failing tests first:** `GET /results/copt` 204 on a network with no occurrence-bearing electrical generators; 200 with `{metrics: {lole_hours, eue_mwh, lolp_max, time_basis}, per_mode: [...], fleet: {units, must_take, delta_mw}, engine, fidelity}` on a fixture network (VoLL from the live solver config; € fields zero-with-note when VoLL is 0); results-range guard classification.
-- [ ] Implement in `routers/results.py` (compute on demand from the current network — no solve required; `p_nom_opt` when fresh dispatch exists); add to the range-guard `aggregates`.
-- [ ] Commit: `feat(gui): /results/copt — screening adequacy + FMECA ranking on demand`.
+- [x] **Failing tests first:** `GET /results/copt` 204 on a network with no occurrence-bearing electrical generators; 200 with `{metrics: {lole_hours, eue_mwh, lolp_max, time_basis}, per_mode: [...], fleet: {units, must_take, delta_mw}, engine, fidelity}` on a fixture network (VoLL from the live solver config; € fields zero-with-note when VoLL is 0); results-range guard classification.
+- [x] Implement in `routers/results.py` (compute on demand from the current network — no solve required; `p_nom_opt` when fresh dispatch exists); add to the range-guard `aggregates`.
+- [x] Commit: `feat(gui): /results/copt — screening adequacy + FMECA ranking on demand`.
 
 ### Task 4: side-by-side surfacing
 

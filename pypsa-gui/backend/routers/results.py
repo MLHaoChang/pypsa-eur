@@ -2924,6 +2924,70 @@ def get_curtailment(
         return _not_solved()
 
 
+@results_router.get("/copt")
+def get_copt():
+    """
+    Screening adequacy + the class-A FMECA ranking from the COPT engine
+    (adequacy plan Phase 2), computed ON DEMAND from the current network —
+    no solve required, zero LP solves involved. fidelity =
+    "analytic_convolution": thermal-only, storage-excluded, network-free;
+    NOT comparable to a statutory standard, and its divergence from the
+    LP proxy is the diagnostic (spec §5.3).
+
+    204 = nothing to convolve: no electrical generator carries resolvable
+    occurrence data (see services/adequacy/occurrence.py).
+    """
+    from services.adequacy.copt import (
+        attribute_criticality,
+        build_copt,
+        fleet_and_residual,
+        hourly_adequacy,
+    )
+
+    n = PyPSAService.get_network()
+    units, residual, w = fleet_and_residual(n)
+    if not units:
+        return Response(status_code=204)
+    dist = build_copt(units, delta_mw=1.0)
+    metrics = hourly_adequacy(dist, residual, weights=w)
+    cfg = _state.get("solver_config")
+    voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    rows = attribute_criticality(units, dist, residual, weights=w, voll=voll)
+    # Count must-take by re-deriving membership is wasteful; infer from the
+    # generator walk instead: electrical non-slack gens minus COPT units.
+    from services.adequacy.metrics import electrical_columns
+    from services.adequacy.slack import slack_generator_mask
+    gens = n.generators
+    elec = set(electrical_columns(n, list(n.buses.index)))
+    slack = slack_generator_mask(gens)
+    n_elec_gens = sum(
+        1 for g in gens.index
+        if not bool(slack.get(g, False)) and str(gens.at[g, "bus"]) in elec
+    )
+    return {
+        "engine": "copt",
+        "fidelity": "analytic_convolution",
+        "metrics": {
+            "lole_hours": metrics["lole_hours"],
+            "eue_mwh": metrics["eue_mwh"],
+            "lolp_max": metrics["lolp_max"],
+            "by_period": metrics["by_period"],
+            "time_basis": "hours_per_year",
+        },
+        "per_mode": [
+            {**r["failure_mode"],
+             "delta_eue_mwh": r["delta_eue_mwh"]}
+            for r in rows
+        ],
+        "fleet": {
+            "units": len(units),
+            "must_take": n_elec_gens - len(units),
+            "delta_mw": 1.0,
+        },
+        "voll_eur_per_mwh": voll,
+    }
+
+
 @results_router.get("/adequacy")
 def get_adequacy():
     """

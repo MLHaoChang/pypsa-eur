@@ -307,6 +307,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # AdequacyReport — a structured report, not a time series (adequacy
         # plan Phase 1 Task 3).
         "/adequacy",
+        # COPT screening adequacy + FMECA ranking (Phase 2) — structured.
+        "/copt",
     }
 
     unclassified = declared - ranged - aggregates
