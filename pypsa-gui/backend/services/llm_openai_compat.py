@@ -37,10 +37,13 @@ History translation notes (request.messages arrive Anthropic-block-shaped):
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Iterator
 
 from services import redaction
 from services.llm_provider import LLMEvent, LLMRequest, ProviderError
+
+logger = logging.getLogger("pypsa_gui.chat")
 
 _REASONING_KEYS = ("reasoning_content", "reasoning")  # passive passthrough
 
@@ -335,6 +338,99 @@ class OpenAICompatProvider:
             blocks.append({"type": "tool_use", "id": slot["id"],
                            "name": slot["name"], "input": args})
         yield LLMEvent(type="message_done", blocks=blocks, usage=usage)
+
+    def probe(self, model: str) -> tuple[str, float | None]:
+        """
+        `(verdict, latency_ms)` for the Task 9 connection test — a real
+        `max_tokens=1` NON-streaming completion, deliberately NOT routed
+        through `stream()`.
+
+        The verdict vocabulary here is FIXED and different on purpose from
+        `_kind_for_status` (which `stream()` uses): that mapping collapses
+        every non-401/429 4xx into `invalid_request` because a mid-turn
+        retry loop only needs to know "deterministic failure, don't retry",
+        never WHICH 4xx it was. A connection test's entire job is telling
+        the operator which thing is wrong, so a 404 here gets its own
+        `model_not_found` verdict — actionable ("this model name doesn't
+        exist on that endpoint") in a way `invalid_request` is not.
+
+        SECURITY (non-negotiable, matches `routers/local_settings.py`'s own
+        probe): the return value is two fixed strings and a float — no
+        upstream exception text, no base_url, no host, ever reaches it. A
+        network failure of any kind (connect refused, DNS, timeout, TLS)
+        collapses to `unreachable`; only the exception's CLASS NAME is
+        logged, which cannot contain a credential or a hostname fragment
+        the way `str(exc)` can.
+        """
+        import time
+        import httpx
+        payload: dict[str, Any] = {
+            "model": model,
+            "max_tokens": 1,
+            "max_completion_tokens": 1,
+            "stream": False,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+        headers = {"content-type": "application/json"}
+        if self._key:
+            headers["authorization"] = f"Bearer {self._key}"
+        client = self._client()
+        start = time.monotonic()
+        try:
+            resp = client.post(f"{self._base}/chat/completions",
+                               json=payload, headers=headers)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "chat: connection test could not reach the endpoint (%s)",
+                type(exc).__name__,
+            )
+            return "unreachable", None
+        finally:
+            if self._http is None:
+                client.close()
+        elapsed_ms = (time.monotonic() - start) * 1000.0
+        if resp.status_code == 200:
+            return "ok", elapsed_ms
+        if resp.status_code == 401:
+            return "unauthorized", None
+        if resp.status_code == 404:
+            return "model_not_found", None
+        return "invalid_request", None
+
+    def probe_models(self) -> list[str] | None:
+        """
+        Best-effort `GET {base}/models` -> sorted model ids, or `None` on
+        ANY failure — network error, non-200, unparseable body, or a body
+        that isn't the expected `{"data": [{"id": ...}, ...]}` shape. This
+        is cosmetic information displayed ALONGSIDE the verdict, never a
+        second source of truth for it, so it must never raise: a vendor
+        that serves chat/completions but not /models (Ollama predates it on
+        some versions; a lot of proxies never add it) is not a connection
+        failure.
+        """
+        import httpx
+        headers: dict[str, str] = {}
+        if self._key:
+            headers["authorization"] = f"Bearer {self._key}"
+        client = self._client()
+        try:
+            resp = client.get(f"{self._base}/models", headers=headers)
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            items = data.get("data") if isinstance(data, dict) else None
+            if not isinstance(items, list):
+                return None
+            ids = sorted({
+                item["id"] for item in items
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            })
+            return ids or None
+        except Exception:  # noqa: BLE001 — best-effort, must never raise
+            return None
+        finally:
+            if self._http is None:
+                client.close()
 
 
 def _kind_for_status(status: int) -> str:

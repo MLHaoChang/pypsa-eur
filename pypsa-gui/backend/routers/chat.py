@@ -21,11 +21,12 @@ TestClient.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from starlette.responses import StreamingResponse
 
 from db.models import Session as SessionRow
@@ -33,6 +34,7 @@ from db.models import User
 from deps import current_session, optional_user
 from services import app_secrets, chat_service, llm_config
 
+logger = logging.getLogger("pypsa_gui.chat")
 
 router = APIRouter()
 
@@ -122,14 +124,56 @@ def chat_health() -> dict[str, Any]:
     """
     Cheap probe — the frontend uses this to decide whether to enable the
     ChatPanel. Never echoes the actual API key.
+
+    NOT in `main._AUTH_PUBLIC_PATHS` — an earlier draft of this task's brief
+    asserted this route was already unauthenticated and asked for that to be
+    made explicit; that premise was checked against `main.py`'s global auth
+    middleware (`undo_snapshot_middleware`, ~line 487) while implementing and
+    found FALSE: `/api/chat/health` was not, and is not, in that allow-list,
+    so a server deployment 401s an anonymous caller exactly like every other
+    `/api/*` route (`test_health_requires_authentication_on_a_server_deployment`).
+    Adding the exemption was reverted — it would have let any anonymous
+    caller on a multi-tenant server read `chat_ready`, `default_model`, and
+    the active profile's free-text `label` (an admin could name a profile
+    after internal infrastructure). The desktop build still gets a
+    login-free answer for the reason it always did: local mode's own
+    middleware branch injects the seeded local user on every request,
+    session or not (`test_health_answers_without_a_session_in_local_mode`).
+
+    Payload, for an authenticated caller:
+      * `anthropic_api_key_present` / `default_model` — unchanged, byte-for-
+        byte the same semantics as before Task 9.
+      * `active_profile` — `{id, label, wire}` ONLY. No `base_url`, no
+        `key_hint`, no key-env NAME.
+      * `chat_ready` — whether the active profile could actually be used
+        right now (a bearer profile with no key configured is not), computed
+        from `os.environ` membership only — never a network call, so this
+        route stays cheap.
+
+    Nothing else. In particular: no `profiles` list (that is
+    `GET /chat/profiles`) and no `PYPSA_GUI_LLM_KEY__*` name ever appears in
+    the body.
     """
     import os
     api_key_present = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    active_profile = llm_config.resolve_active()
+    if active_profile.auth == "bearer":
+        chat_ready = bool(
+            active_profile.key_env and os.environ.get(active_profile.key_env)
+        )
+    else:
+        chat_ready = True
     return {
         "ok": True,
         "anthropic_api_key_present": api_key_present,
         "default_model": chat_service.DEFAULT_MODEL,
         "confirmation_ttl_seconds": chat_service.CONFIRMATION_TTL_SECONDS,
+        "active_profile": {
+            "id": active_profile.id,
+            "label": active_profile.label,
+            "wire": active_profile.wire,
+        },
+        "chat_ready": chat_ready,
     }
 
 
@@ -198,6 +242,359 @@ def delete_api_key_settings(
     """Forget the stored key — from the file and from this process."""
     _require_super_admin(user)
     return app_secrets.clear_secret("ANTHROPIC_API_KEY")
+
+
+# ── Task 9 — LLM settings + profiles routes, connection test ────────────────
+#
+# Same gate as the api-key group above (`_require_super_admin`) for every
+# `/settings/llm*` route: a profile's `base_url`/`model`/capabilities are
+# process-global configuration, not per-organization data, so an ORG admin
+# has no more authority over them than over the Anthropic key itself.
+#
+# `GET /chat/profiles` (bottom of this section) is the one exception — it is
+# the read-only, no-secrets menu every chat-using member needs to pick a
+# profile for their own turn, so it is gated on "authenticated" only.
+
+_BUILTIN_PROFILE_IDS = (llm_config.BUILTIN_SONNET_ID, llm_config.BUILTIN_OPUS_ID)
+
+
+class ProfileIn(BaseModel):
+    """
+    Body for `PUT /settings/llm/profiles/{id}`.
+
+    Deliberately does NOT carry `key_env` (or a key value) — `extra="forbid"`
+    makes a client that sends one get a 422 rather than having it silently
+    ignored. `key_env` is derived server-side from `id`/`preset`
+    (`llm_config.derive_key_env`) precisely so a profile can never be saved
+    pointing an attacker-chosen `base_url` at a well-known key slot (e.g.
+    naming `ANTHROPIC_API_KEY` while `base_url` points elsewhere) — accepting
+    a client-supplied `key_env` would turn this route into an exfiltration
+    primitive for whatever secret already lives in that env var.
+
+    No per-field validation beyond typing is duplicated here on purpose:
+    `llm_config._validate_profile` (wire/auth enum membership, base_url
+    shape, the preset/base_url lock) is the single source of truth for what
+    makes a profile valid, and its `ProfileValidationError` is translated to
+    422 below — the same "don't split one rule across two layers" doctrine
+    `ApiKeyRequest`'s docstring states for `app_secrets.validate_value`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    preset: str
+    wire: str
+    base_url: str | None = None
+    model: str
+    tools: bool
+    vision: bool
+    auth: str
+    fallback_model: str | None = None
+    max_output_tokens: int | None = None
+
+
+class ProfileKeyRequest(BaseModel):
+    """Body for `PUT /settings/llm/profiles/{id}/key`."""
+
+    value: str
+
+
+class ActiveProfileRequest(BaseModel):
+    """Body for `POST /settings/llm/active`."""
+
+    profile_id: str
+
+
+def _profile_out(profile: llm_config.LLMProfile) -> dict[str, Any]:
+    """
+    `ProfileOut` — every `LLMProfile` field plus key STATUS, never a value.
+
+    `key_required` is `auth == "bearer"` (an `auth == "none"` profile, e.g.
+    a bare local endpoint, has no key concept at all — `key_present`/
+    `key_hint` are forced False/None rather than probing a `key_env` that
+    doesn't exist for it). For a bearer profile, status is read through
+    `app_secrets.status`, the SAME accessor `/settings/api-key` uses — so
+    the hint format (`"…" + last 4 chars`) and the "never the live value"
+    guarantee are identical across both surfaces, not a second
+    reimplementation that could drift.
+    """
+    key_env = profile.key_env
+    if key_env is not None:
+        status = app_secrets.status(key_env)
+        key_present = bool(status["configured"])
+        key_hint = status["hint"]
+    else:
+        key_present = False
+        key_hint = None
+    return {
+        "id": profile.id,
+        "label": profile.label,
+        "preset": profile.preset,
+        "wire": profile.wire,
+        "base_url": profile.base_url,
+        "model": profile.model,
+        "tools": profile.tools,
+        "vision": profile.vision,
+        "auth": profile.auth,
+        "fallback_model": profile.fallback_model,
+        "max_output_tokens": profile.max_output_tokens,
+        "key_required": profile.auth == "bearer",
+        "key_present": key_present,
+        "key_hint": key_hint,
+    }
+
+
+def _file_profiles_excluding(
+    profiles: list[llm_config.LLMProfile], profile_id: str
+) -> list[llm_config.LLMProfile]:
+    """Every FILE (non-built-in) profile except `profile_id` — the base a save/delete edits onto."""
+    return [
+        p for p in profiles
+        if p.id not in _BUILTIN_PROFILE_IDS and p.id != profile_id
+    ]
+
+
+def _get_llm_profile_or_404(profile_id: str) -> llm_config.LLMProfile:
+    profiles, _active_id = llm_config.load_profiles()
+    for profile in profiles:
+        if profile.id == profile_id:
+            return profile
+    raise HTTPException(
+        status_code=404, detail=f"no LLM profile named {profile_id!r}"
+    )
+
+
+@router.get("/settings/llm")
+def get_llm_settings(
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Every profile (built-in + saved), which one is active, and the preset catalogue."""
+    _require_super_admin(user)
+    profiles, active_id = llm_config.load_profiles()
+    return {
+        "profiles": [_profile_out(p) for p in profiles],
+        "active_profile_id": active_id,
+        "presets": llm_config.load_presets(),
+    }
+
+
+@router.put("/settings/llm/profiles/{profile_id}")
+def put_llm_profile(
+    profile_id: str,
+    body: ProfileIn,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """
+    Create or replace a custom profile. A built-in id (`anthropic-sonnet`,
+    `anthropic-opus`) is refused with 409 — those are synthesized in code
+    (`llm_config._builtin_profiles`) precisely so they can't be repointed by
+    editing the file this route writes to; letting this route "edit" one
+    in-place would just silently create a same-id shadow that `load_profiles`
+    already documents as impossible to distinguish from tampering.
+    """
+    _require_super_admin(user)
+    if profile_id in _BUILTIN_PROFILE_IDS:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{profile_id!r} is a built-in profile and cannot be edited",
+        )
+    profile = llm_config.LLMProfile(
+        id=profile_id,
+        label=body.label,
+        preset=body.preset,
+        wire=body.wire,
+        base_url=body.base_url,
+        model=body.model,
+        tools=body.tools,
+        vision=body.vision,
+        auth=body.auth,
+        fallback_model=body.fallback_model,
+        max_output_tokens=body.max_output_tokens,
+    )
+    profiles, active_id = llm_config.load_profiles()
+    file_profiles = _file_profiles_excluding(profiles, profile_id)
+    file_profiles.append(profile)
+    try:
+        llm_config.save_profiles(file_profiles, active_id)
+    except llm_config.ProfileValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _profile_out(profile)
+
+
+@router.delete("/settings/llm/profiles/{profile_id}")
+def delete_llm_profile(
+    profile_id: str,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """
+    Delete a custom profile and clear its key slot.
+
+    Refused (409) for a built-in id — same reasoning as the PUT route above.
+    404s for an id that names nothing. If the deleted profile was active,
+    active resets to `anthropic-sonnet` (the one profile guaranteed to
+    always exist) rather than leaving `active_profile_id` dangling.
+
+    Key-slot cleanup is scoped to a NAMESPACED slot
+    (`PYPSA_GUI_LLM_KEY__<SLUG>`) only — never a shared provider key
+    (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …). A custom profile using a
+    cataloged bearer preset shares that preset's key with every OTHER
+    profile on the same preset (including the built-ins, for
+    `ANTHROPIC_API_KEY`); wiping it here on one profile's deletion would
+    silently break every other profile still relying on it. Only
+    `preset="custom"` (or an uncatalogued preset id) gets a private,
+    per-profile slot — see `llm_config.derive_key_env` — and that is exactly
+    the case this clears.
+    """
+    _require_super_admin(user)
+    if profile_id in _BUILTIN_PROFILE_IDS:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{profile_id!r} is a built-in profile and cannot be deleted",
+        )
+    profiles, active_id = llm_config.load_profiles()
+    target = next((p for p in profiles if p.id == profile_id), None)
+    if target is None:
+        raise HTTPException(
+            status_code=404, detail=f"no LLM profile named {profile_id!r}"
+        )
+    file_profiles = _file_profiles_excluding(profiles, profile_id)
+    new_active = (
+        active_id if active_id != profile_id else llm_config.BUILTIN_SONNET_ID
+    )
+    llm_config.save_profiles(file_profiles, new_active)
+    if target.key_env is not None and target.key_env.startswith("PYPSA_GUI_LLM_KEY__"):
+        app_secrets.clear_secret(target.key_env)
+    return {"ok": True, "active_profile_id": new_active}
+
+
+@router.put("/settings/llm/profiles/{profile_id}/key")
+def put_llm_profile_key(
+    profile_id: str,
+    body: ProfileKeyRequest,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Store a profile's key and apply it to this process immediately (see `app_secrets.set_secret`)."""
+    _require_super_admin(user)
+    profile = _get_llm_profile_or_404(profile_id)
+    if profile.key_env is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"profile {profile_id!r} has auth=none and takes no key",
+        )
+    try:
+        status = app_secrets.set_secret(profile.key_env, body.value)
+    except app_secrets.SecretValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"key_present": bool(status["configured"]), "key_hint": status["hint"]}
+
+
+@router.delete("/settings/llm/profiles/{profile_id}/key")
+def delete_llm_profile_key(
+    profile_id: str,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Forget a profile's key — from the file and from this process."""
+    _require_super_admin(user)
+    profile = _get_llm_profile_or_404(profile_id)
+    if profile.key_env is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"profile {profile_id!r} has auth=none and takes no key",
+        )
+    status = app_secrets.clear_secret(profile.key_env)
+    return {"key_present": bool(status["configured"]), "key_hint": status["hint"]}
+
+
+@router.post("/settings/llm/active")
+def post_llm_active(
+    body: ActiveProfileRequest,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Switch the active profile. 404s if `profile_id` names nothing (built-in or file)."""
+    _require_super_admin(user)
+    try:
+        llm_config.set_active(body.profile_id)
+    except llm_config.ProfileValidationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"active_profile_id": body.profile_id}
+
+
+# Provider errors from `_provider_for_profile` that mean "there is no live
+# connection to test at all" (missing/unusable configuration) map to
+# `invalid_request` — the fixed vocabulary has no slot for "not configured"
+# distinct from "the configuration we have is wrong", and conflating the two
+# is honest: both mean the operator has something to fix before this profile
+# will work. `unauthorized` is the one case worth keeping distinct, since it
+# specifically means "a key IS present but was rejected".
+_NO_PROVIDER_VERDICT: dict[str, str] = {"unauthorized": "unauthorized"}
+
+
+def _connection_test_result(profile: llm_config.LLMProfile) -> dict[str, Any]:
+    """
+    Drive `chat_service._provider_for_profile` with a real `max_tokens=1`
+    completion and report a FIXED verdict — never upstream exception text,
+    never the full `base_url` (host:port at most, and only ever inside a
+    server-side log, never in the response). `test_llm_settings_api.py`
+    monkeypatches `chat_service._provider_for_profile` itself, so calling it
+    by that name (not some local alias) is what makes that seam work.
+    """
+    provider, err = chat_service._provider_for_profile(profile)
+    if provider is None:
+        return {
+            "verdict": _NO_PROVIDER_VERDICT.get(err or "", "invalid_request"),
+            "latency_ms": None,
+            "models": None,
+        }
+    try:
+        verdict, latency_ms = provider.probe(profile.model)
+    except Exception as exc:  # noqa: BLE001 — a probe must never 500 this route
+        logger.warning(
+            "chat: connection test probe raised unexpectedly (%s)",
+            type(exc).__name__,
+        )
+        verdict, latency_ms = "invalid_request", None
+    try:
+        models = provider.probe_models()
+    except Exception:  # noqa: BLE001 — best-effort only, per the contract
+        models = None
+    return {"verdict": verdict, "latency_ms": latency_ms, "models": models}
+
+
+@router.post("/settings/llm/profiles/{profile_id}/test")
+def post_llm_profile_test(
+    profile_id: str,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """
+    Connection test: a real `max_tokens=1` completion through the profile's
+    provider. Verdict is one of `ok|unreachable|unauthorized|
+    model_not_found|invalid_request` — fixed strings, never upstream text.
+    """
+    _require_super_admin(user)
+    profile = _get_llm_profile_or_404(profile_id)
+    return _connection_test_result(profile)
+
+
+@router.get("/profiles")
+def get_chat_profiles(
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """
+    The profile MENU every chat-using member can choose from — id/label/wire
+    only, never `base_url`, never key status. Gated on "authenticated", not
+    super-admin: this is what `StreamRequest.profile_id` (routers/chat.py's
+    own `/stream`) expects a caller to pick from, and every org member sends
+    chat turns.
+    """
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    profiles, active_id = llm_config.load_profiles()
+    return {
+        "profiles": [
+            {"id": p.id, "label": p.label, "wire": p.wire} for p in profiles
+        ],
+        "active_profile_id": active_id,
+    }
 
 
 def _recover_pending_turn(ctx: Any) -> dict[str, Any] | None:

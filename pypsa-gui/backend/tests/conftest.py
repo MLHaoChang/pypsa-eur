@@ -135,6 +135,29 @@ def reset_backend():
     _reset_backend_state()
 
 
+@pytest.fixture(autouse=True)
+def _clean_llm_profiles():
+    """
+    Task 9 — `llm-profiles.json` must not survive past the test that wrote it.
+
+    `PYPSAGUI_APP_DATA_DIR` is pinned ONCE, above, for the whole session — a
+    deliberate choice for most app-data files (a throwaway dir per test would
+    multiply tempdirs for no benefit). But `llm_config.profiles_path()`
+    resolves against that SAME session-wide directory for any test that
+    doesn't redirect it per-test via `monkeypatch.setenv(...)`, and
+    `load_profiles()` re-reads the file on every call with no caching — so a
+    profile written by one test is immediately visible to every OTHER test in
+    the session that reads profiles without its own redirect, including ones
+    that assert on a specific zero-config/"no profiles file" starting state.
+    Unlinking after every test (not before) means a test that crashes
+    mid-body still leaves a clean slate for the next one.
+    """
+    from services import llm_config
+
+    yield
+    llm_config.profiles_path().unlink(missing_ok=True)
+
+
 # ── Auth harness (Step 0a) ──────────────────────────────────────────────────
 # Single-user mode is gone, so EVERY /api route now requires a session and every
 # state-changing one requires a CSRF token. Rather than touch ~60 test modules,
