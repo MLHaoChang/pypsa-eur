@@ -436,3 +436,90 @@ def test_feasible_solve_still_emits_the_report():
     sink, status, _ = _solve_allowing_failure(_network(), ens_cap_permyriad=50.0)
     assert status in ("ok", "optimal")
     assert sink.get("adequacy_report") is not None
+
+
+# ---------------------------------------------------------------------------
+# Per-period visibility in the report.
+#
+# The cap is enforced PER investment period and that enforcement is correct —
+# proved below by a case where a pooled cap would have allowed strictly more
+# shedding than the per-period one does. What was missing is the reader's
+# ability to SEE it: the report summed the periods, so two periods capped at
+# 1800 MWh each, one exactly on its limit and the other at zero, rendered as
+# "ENS 1800 / cap 3600" — 50% headroom, when the binding period has none.
+#
+# Found by an end-to-end multi-period QA run. Every other test in this file is
+# single-period, where the sum and the per-period value coincide and the gap
+# is invisible.
+# ---------------------------------------------------------------------------
+
+
+def _two_period_network() -> pypsa.Network:
+    """
+    250 MW load in both periods. 150 MW exists throughout; a further 250 MW is
+    only built in 2040. So 2030 is 100 MW short every hour and 2040 is not —
+    the asymmetry that makes per-period vs pooled enforcement distinguishable.
+    """
+    n = pypsa.Network()
+    sns = pd.MultiIndex.from_product(
+        [[2030, 2040], pd.date_range("2030-01-01", periods=N_SNAPSHOTS, freq="h")])
+    n.set_snapshots(sns)
+    n.investment_periods = [2030, 2040]
+    n.snapshot_weightings.loc[:, :] = WEIGHT
+    n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=250.0)
+    n.add("Generator", "g_base", bus="b", carrier="gas", p_nom=150.0,
+          marginal_cost=10.0, build_year=0)
+    n.add("Generator", "g_2040", bus="b", carrier="gas", p_nom=250.0,
+          marginal_cost=10.0, build_year=2040)
+    # An expensive extendable escape hatch: without it a cap tighter than the
+    # 2030 shortfall is simply infeasible and the report is (correctly) never
+    # built, so the per-period rows could not be observed at all. Priced well
+    # above VOLL so the LP still prefers to shed right up to the cap.
+    n.add("Generator", "peak", bus="b", carrier="gas", p_nom=0.0,
+          p_nom_extendable=True, p_nom_max=300.0,
+          capital_cost=5_000_000.0, marginal_cost=300.0)
+    return n
+
+
+def test_report_carries_per_period_rows_that_reveal_the_binding_period():
+    # Per-period allowance = 0.3 x (250 x N x WEIGHT); pooled would be twice
+    # that, so a pooled cap would permit the full 2030 shortfall and this
+    # assertion would see no binding period at all.
+    sink, status, condition = _solve_allowing_failure(
+        _two_period_network(), ens_cap_permyriad=3000.0,
+        multi_investment_periods=True)
+    assert status in ("ok", "optimal"), (status, condition)
+    report = sink.get("adequacy_report")
+    assert report is not None
+    sysblk = report["target"]["system"]
+
+    rows = {r["period"]: r for r in sysblk["by_period"]}
+    assert set(rows) == {"2030", "2040"}, rows
+
+    # 2030 carries the whole shortfall and sits exactly on its own cap.
+    assert rows["2030"]["binding"] is True
+    assert rows["2030"]["achieved_ens_mwh"] == pytest.approx(
+        rows["2030"]["cap_mwh"], rel=1e-6)
+    # 2040 is fully served and nowhere near its cap.
+    assert rows["2040"]["binding"] is False
+    assert rows["2040"]["achieved_ens_mwh"] == pytest.approx(0.0)
+
+    # The summed headline is the thing that misleads: it reports half the
+    # allowance unused while the binding period has none left.
+    assert sysblk["cap_mwh"] == pytest.approx(
+        rows["2030"]["cap_mwh"] + rows["2040"]["cap_mwh"])
+    assert sysblk["achieved_ens_mwh"] < sysblk["cap_mwh"], (
+        "fixture no longer demonstrates the sum-vs-period gap")
+    assert report["target"]["binding"] == "system_cap"
+
+
+def test_single_period_report_carries_exactly_one_row():
+    """A consumer must never have to branch on the model being multi-period."""
+    sink, status, _ = _solve_allowing_failure(_network(), ens_cap_permyriad=50.0)
+    assert status in ("ok", "optimal")
+    rows = sink["adequacy_report"]["target"]["system"]["by_period"]
+    assert len(rows) == 1, rows
+    assert rows[0]["cap_mwh"] == pytest.approx(
+        sink["adequacy_report"]["target"]["system"]["cap_mwh"])

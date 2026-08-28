@@ -26,15 +26,37 @@ Fidelity = Literal["deterministic_scenario", "analytic_convolution",
                    "sequential_mc", "expert_judgement"]
 
 
+class PeriodTarget(BaseModel):
+    """One investment period's slice of the system target.
+
+    The cap is enforced PER PERIOD, so the summed headline can be actively
+    misleading on a multi-period run: with two periods at caps of 1800 MWh
+    each, one period exactly on its limit and the other at zero reads as
+    "ENS 1800 / cap 3600" — 50% headroom — when the binding period has none
+    at all. These rows are what let the reader see which period bound.
+
+    Single-period runs carry exactly one row, so a consumer never needs to
+    branch on the model being multi-period."""
+    period: str
+    cap_mwh: float
+    achieved_ens_mwh: float
+    binding: bool = False
+
+
 class SystemTarget(BaseModel):
     """The system-wide reliability target and what the solve achieved.
 
     With a binding cap, achieved ENS ≈ the cap by construction and carries
     little information — ``achieved_shed_hours`` is the number that still
-    tells the user something (spec §5.1), which is why both are mandatory."""
+    tells the user something (spec §5.1), which is why both are mandatory.
+
+    ``cap_mwh`` / ``achieved_ens_mwh`` are SUMS over investment periods;
+    ``by_period`` carries the per-period rows the constraint actually
+    operates on. Read the rows, not the sums, to judge headroom."""
     cap_mwh: float
     achieved_ens_mwh: float
     achieved_shed_hours: float
+    by_period: list[PeriodTarget] = []
 
 
 class ZoneTarget(BaseModel):

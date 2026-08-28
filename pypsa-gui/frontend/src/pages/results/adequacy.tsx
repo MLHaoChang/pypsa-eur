@@ -10,7 +10,18 @@ export interface AdequacyReportPayload {
   fidelity: string
   target: {
     basis: string
-    system: { cap_mwh: number; achieved_ens_mwh: number; achieved_shed_hours: number }
+    system: {
+      cap_mwh: number
+      achieved_ens_mwh: number
+      achieved_shed_hours: number
+      // The cap is enforced PER investment period, so cap_mwh /
+      // achieved_ens_mwh above are SUMS that can read as comfortable while
+      // the period that actually bound has no headroom at all. Optional so
+      // an older cached report still renders.
+      by_period?: Array<{
+        period: string; cap_mwh: number; achieved_ens_mwh: number; binding: boolean
+      }>
+    }
     zones: Array<{ zone: string; cap_mwh: number; achieved_ens_mwh: number; binding: boolean }>
     binding: 'system_cap' | 'zone_cap' | 'voll'
     zone_field_populated: boolean
@@ -54,6 +65,10 @@ export function AdequacyChips({ report }: { report: AdequacyReportPayload | null
     t.binding === 'zone_cap' && bindingZones.length > 0
       ? `zone ceiling ${bindingZones.join(', ')}`
       : BINDING_LABEL[t.binding]
+  // Multi-period only: the summed headline hides which period bound.
+  const periodRows = t.system.by_period ?? []
+  const multiPeriod = periodRows.length > 1
+  const bindingPeriods = periodRows.filter(r => r.binding).map(r => r.period)
   const fidelityTip =
     'LP proxy (deterministic, perfect foresight, one realisation) — a ' +
     'relative diagnostic, NOT comparable to a statutory reliability standard.'
@@ -74,6 +89,28 @@ export function AdequacyChips({ report }: { report: AdequacyReportPayload | null
       {report.energy.demand_response_mwh > 0 && (
         <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={fidelityTip}>
           DSR {report.energy.demand_response_mwh.toFixed(1)} MWh (not unserved)
+        </span>
+      )}
+      {multiPeriod && (
+        <span
+          className={
+            'px-2 py-0.5 rounded text-[10px] ' +
+            (bindingPeriods.length
+              ? 'bg-warn/10 text-warn'
+              : 'bg-panel border border-border')
+          }
+          title={
+            'The cap is enforced per investment period, so the ENS/cap figures ' +
+            'beside this chip are sums across periods and overstate the ' +
+            'headroom. Per period: ' +
+            periodRows
+              .map(r => `${r.period} ${r.achieved_ens_mwh.toFixed(1)}/${r.cap_mwh.toFixed(1)} MWh`)
+              .join(' · ')
+          }
+        >
+          {bindingPeriods.length
+            ? `binding period${bindingPeriods.length > 1 ? 's' : ''}: ${bindingPeriods.join(', ')}`
+            : `${periodRows.length} periods, none binding`}
         </span>
       )}
       {!t.zone_field_populated && t.zones.length > 0 && (

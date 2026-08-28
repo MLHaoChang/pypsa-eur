@@ -100,3 +100,56 @@ describe('CoptChips — the screening row', () => {
     expect(screen.queryByText(/storage\/network carry the adequacy/)).toBeNull()
   })
 })
+
+// ── Multi-period: the summed headline hides which period bound.
+//
+// The cap is enforced per investment period. With two periods capped at 1800
+// MWh each, one exactly on its limit and the other at zero, the sums render
+// "ENS 1800 / cap 3600" — 50% headroom, when the binding period has none.
+// The chip names the period so the reader is not misled by the sums beside it.
+describe('AdequacyChips per-period disclosure', () => {
+  const base = {
+    engine: 'lp_proxy', fidelity: 'deterministic_scenario',
+    metrics: { ens_mwh: 1800, shed_hours: 24 },
+    energy: { involuntary_mwh: 1800, demand_response_mwh: 0 },
+  }
+  const mk = (by_period: Array<Record<string, unknown>>) => ({
+    ...base,
+    target: {
+      basis: 'energy', binding: 'system_cap', zone_field_populated: true, zones: [],
+      system: { cap_mwh: 3600, achieved_ens_mwh: 1800, achieved_shed_hours: 24, by_period },
+    },
+  }) as never
+
+  it('names the binding period on a multi-period report', () => {
+    render(<AdequacyChips report={mk([
+      { period: '2030', cap_mwh: 1800, achieved_ens_mwh: 1800, binding: true },
+      { period: '2040', cap_mwh: 1800, achieved_ens_mwh: 0, binding: false },
+    ])} />)
+    expect(screen.getByText(/binding period: 2030/i)).toBeTruthy()
+  })
+
+  it('says so plainly when several periods bind', () => {
+    render(<AdequacyChips report={mk([
+      { period: '2030', cap_mwh: 1800, achieved_ens_mwh: 1800, binding: true },
+      { period: '2040', cap_mwh: 1800, achieved_ens_mwh: 1800, binding: true },
+    ])} />)
+    expect(screen.getByText(/binding periods: 2030, 2040/i)).toBeTruthy()
+  })
+
+  it('reports the period count when none binds, rather than staying silent', () => {
+    render(<AdequacyChips report={mk([
+      { period: '2030', cap_mwh: 1800, achieved_ens_mwh: 10, binding: false },
+      { period: '2040', cap_mwh: 1800, achieved_ens_mwh: 0, binding: false },
+    ])} />)
+    expect(screen.getByText(/2 periods, none binding/i)).toBeTruthy()
+  })
+
+  it('adds no period chip on a single-period run', () => {
+    render(<AdequacyChips report={mk([
+      { period: 'ALL', cap_mwh: 1800, achieved_ens_mwh: 1800, binding: true },
+    ])} />)
+    expect(screen.queryByText(/binding period/i)).toBeNull()
+    expect(screen.queryByText(/periods, none binding/i)).toBeNull()
+  })
+})

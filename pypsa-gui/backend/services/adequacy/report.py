@@ -28,6 +28,7 @@ from dataclasses import asdict, is_dataclass
 import pandas as pd
 
 from models.adequacy import (
+    PeriodTarget,
     AdequacyReport,
     CostBlock,
     EnergyBlock,
@@ -100,12 +101,20 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict) -> dict:
     sys_achieved_total = 0.0
     binding_system = False
     zone_rows: dict[str, dict] = {}
+    # Per-period rows are kept, not just summed. The cap binds PER PERIOD, so
+    # the totals can read as comfortable while the period that actually bound
+    # has zero headroom — "ENS 1800 / cap 3600" for two periods capped at 1800
+    # each, one of them exactly on its limit.
+    period_rows: list[dict] = []
     for P, tp in periods.items():
         cap_p = float(tp.get("cap_mwh", 0.0))
         ach_p = _achieved(P, elec_cols)
         sys_cap_total += cap_p
         sys_achieved_total += ach_p
-        if cap_p > 0 and ach_p >= cap_p * (1.0 - BINDING_TOLERANCE):
+        binding_p = bool(cap_p > 0 and ach_p >= cap_p * (1.0 - BINDING_TOLERANCE))
+        period_rows.append({"period": str(P), "cap_mwh": cap_p,
+                            "achieved_ens_mwh": ach_p, "binding": binding_p})
+        if binding_p:
             binding_system = True
         for z, z_cap in (tp.get("zones") or {}).items():
             z_cols = [c for c in elec_cols if zone_of_bus.get(c, "") == z]
@@ -154,6 +163,8 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict) -> dict:
                 cap_mwh=sys_cap_total,
                 achieved_ens_mwh=sys_achieved_total,
                 achieved_shed_hours=float(sh.get("total", 0.0)),
+                by_period=[PeriodTarget(**r) for r in
+                           sorted(period_rows, key=lambda r: r["period"])],
             ),
             zones=[
                 ZoneTarget(zone=z, cap_mwh=r["cap"], achieved_ens_mwh=r["ach"],
