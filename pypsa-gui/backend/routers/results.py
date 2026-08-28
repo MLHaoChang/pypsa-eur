@@ -848,7 +848,12 @@ def get_economics_by_carrier():
             periods = sorted(int(p) for p in n.investment_periods) if is_multi else []
         except Exception:
             periods = []
-        result = _compute_economics_summary(n, periods, is_multi, True)
+        # Foreground project: the VOLL capture lives in the live solver
+        # state, not on the network (solver_service strips the slacks).
+        result = _compute_economics_summary(
+            n, periods, is_multi, True,
+            lost_load_cap=_state.get("last_lost_load"),
+        )
         # Return just the by_carrier dict — that's what the Results tab needs.
         # Drop per_asset_lcoh (lives in /api/results/lcoh) to keep the payload small.
         return {
