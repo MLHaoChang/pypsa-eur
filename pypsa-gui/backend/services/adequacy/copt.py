@@ -239,3 +239,113 @@ def fleet_and_residual(n) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
 
     residual = demand - must_take
     return units, residual, w
+
+
+def deconvolve(dist: CapacityDistribution, *, capacity_mw: float,
+               q: float) -> CapacityDistribution:
+    """
+    Remove one two-state unit from the table: solve f = conv(g, unit) for g
+    via the stable forward recursion over the unit's apportioned states
+    ordered by index (state 0 = the outage, weight q):
+
+        g(c) = ( f(c) − Σ_{k>0} p_k · g(c − k) ) / p_0-complement structure
+
+    Concretely with states [(0, q), (k1, p1), (k2, p2)] the recursion is
+        g(c) = ( f(c) − p1·g(c−k1) − p2·g(c−k2) ) / q        …when q > 0
+
+    which is numerically stable for q < 0.5 (the usual regime — FORs are a
+    few percent). When q is 0, ~1, or the recursion loses mass, the caller
+    should rebuild without the unit instead (attribute_criticality does).
+    Raises ValueError when the recursion is unusable.
+    """
+    states = _unit_states(capacity_mw, q, dist.delta_mw)
+    # Recursion divides by the LOWEST state's probability — for a two-state
+    # unit that is the outage state (index 0, prob q).
+    base_k, base_p = states[0]
+    assert base_k == 0
+    if base_p < 1e-9 or base_p > 0.5:
+        raise ValueError("deconvolution unstable for this q — rebuild instead")
+    others = states[1:]
+    f = dist.probs
+    g = np.zeros_like(f)
+    for c in range(len(f)):
+        acc = f[c]
+        for k, p in others:
+            if c - k >= 0:
+                acc -= p * g[c - k]
+        g[c] = acc / base_p
+    # Trim to the reduced fleet's support and guard against lost mass.
+    total = float(g.sum())
+    if not (0.999 <= total <= 1.001) or (g < -1e-6).any():
+        raise ValueError("deconvolution lost probability mass — rebuild instead")
+    g = np.clip(g, 0.0, None)
+    return CapacityDistribution(g, dist.delta_mw)
+
+
+def _shift_deterministic(dist: CapacityDistribution, capacity_mw: float) -> CapacityDistribution:
+    """Convolve in a PERFECTLY AVAILABLE unit (q=0) of the given size —
+    i.e. shift the distribution up, mean-preserving apportioning included."""
+    states = _unit_states(capacity_mw, 0.0, dist.delta_mw)
+    size = len(dist.probs) + max(k for k, _ in states) + 1
+    out = np.zeros(size)
+    for k, p in states:
+        if p > 0:
+            out[k:k + len(dist.probs)] += p * dist.probs
+    return CapacityDistribution(out, dist.delta_mw)
+
+
+def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
+                          residual_load: pd.Series, *, weights: pd.Series,
+                          voll: float) -> list[dict]:
+    """
+    Leave-one-out outage attribution (spec §3.3): for each unit i,
+
+        ΔEUE_i = EUE(fleet as-is) − EUE(fleet with unit i PERFECTLY available)
+
+    computed by deconvolving i out and convolving back a deterministic
+    capacity of the same size. This prices the unit's OUTAGES over the full
+    multi-outage state space — N-2 and beyond — which a single-contingency
+    LP sweep structurally misses (its ΔEUE is zero whenever the rest of the
+    fleet covers any single loss). Zero LP solves.
+
+    Returns rows sorted by criticality, each carrying a contract-ready
+    ``failure_mode`` dict (FailureModeResult shape: engine="copt",
+    fidelity="analytic_convolution", class A). With voll ≤ 0 the € fields
+    are 0 and ΔEUE remains the ranking.
+    """
+    base = hourly_adequacy(dist, residual_load, weights=weights)
+    base_eue = base["eue_mwh"]
+    rows: list[dict] = []
+    for u in units:
+        try:
+            without = deconvolve(dist, capacity_mw=u.capacity_mw, q=u.q)
+        except ValueError:
+            without = build_copt([v for v in units if v.name != u.name],
+                                 delta_mw=dist.delta_mw)
+        perfect = _shift_deterministic(without, u.capacity_mw)
+        eue_perfect = hourly_adequacy(perfect, residual_load, weights=weights)["eue_mwh"]
+        delta_eue = max(base_eue - eue_perfect, 0.0)
+        crit_eur = delta_eue * max(float(voll), 0.0)
+        occ = (8760.0 * u.q / u.mttr_hours
+               if math.isfinite(u.mttr_hours) and u.mttr_hours > 0 else 0.0)
+        severity = crit_eur / occ if occ > 0 else 0.0
+        rows.append({
+            "name": u.name,
+            "delta_eue_mwh": delta_eue,
+            "criticality_eur_per_year": crit_eur,
+            "failure_mode": {
+                "mode_id": f"generator:{u.name}:forced_outage",
+                "component_class": "Generator",
+                "name": u.name,
+                "failure_class": "A",
+                "occurrence_per_year": occ,
+                "occurrence_basis": u.basis or "FOR",
+                "severity_eur": severity,
+                "criticality_eur_per_year": crit_eur,
+                "in_metric_scope": True,
+                "engine": "copt",
+                "fidelity": "analytic_convolution",
+            },
+        })
+    rows.sort(key=lambda r: r["delta_eue_mwh"], reverse=True)
+    return rows

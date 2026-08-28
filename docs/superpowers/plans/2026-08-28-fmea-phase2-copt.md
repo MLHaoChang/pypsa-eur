@@ -22,9 +22,9 @@ Phase 0/1 constraints apply (branch, staging, test-first with demonstrated red, 
 
 Definition (spec §3.3, corrected semantics): unit *i*'s attributed risk is `ΔEUE_i = EUE(fleet as-is) − EUE(fleet with unit i perfectly available)` — deconvolve *i* out, convolve back a **deterministic** capacity of the same size. This measures the cost of the unit's *outages* over the full multi-outage state space (N-2 and beyond included), not the value of its capacity.
 
-- [ ] **Failing tests first:** deconvolution round-trips (conv → deconv returns the original distribution within 1e-9); a q=0 unit attributes exactly 0; attribution increases in q and in capacity; criticality € = ΔEUE × VoLL; `occurrence_per_year = 8760·rate/mttr` (cycle frequency, matching `occurrence.py`); rows are valid `FailureModeResult`s (engine `copt`, fidelity `analytic_convolution`, class `A`, `in_metric_scope=True`, severity = criticality/occurrence, all ≥ 0).
-- [ ] Implement `deconvolve(copt, capacity, q, delta)` (the stable forward recursion `g(c) = (f(c) − q·g(c−cap))/(1−q)`; fall back to rebuild-without-*i* when q ≥ 0.5 or the recursion loses mass) and `attribute_criticality(n, copt_inputs, voll)` → ranked rows.
-- [ ] Commit: `feat(gui): analytic leave-one-out criticality (class A, zero solves)`.
+- [x] **Failing tests first:** deconvolution round-trips (conv → deconv returns the original distribution within 1e-9); a q=0 unit attributes exactly 0; attribution increases in q and in capacity; criticality € = ΔEUE × VoLL; `occurrence_per_year = 8760·rate/mttr` (cycle frequency, matching `occurrence.py`); rows are valid `FailureModeResult`s (engine `copt`, fidelity `analytic_convolution`, class `A`, `in_metric_scope=True`, severity = criticality/occurrence, all ≥ 0).
+- [x] Implement `deconvolve(copt, capacity, q, delta)` (the stable forward recursion `g(c) = (f(c) − q·g(c−cap))/(1−q)`; fall back to rebuild-without-*i* when q ≥ 0.5 or the recursion loses mass) and `attribute_criticality(n, copt_inputs, voll)` → ranked rows.
+- [x] Commit: `feat(gui): analytic leave-one-out criticality (class A, zero solves)`.
 
 ### Task 3: the endpoint + report integration
 

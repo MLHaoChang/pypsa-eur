@@ -148,3 +148,67 @@ def test_fleet_uses_carrier_defaults_where_asset_data_is_absent():
     from services.adequacy.occurrence import CARRIER_DEFAULTS
     coal = next(u for u in units if u.name == "coalplant")
     assert coal.q == pytest.approx(CARRIER_DEFAULTS["coal"].rate)
+
+
+# ── outage-attribution criticality (Task 2) ───────────────────────────────
+
+def test_deconvolution_round_trips():
+    units = _units()
+    dist = C.build_copt(units, delta_mw=1.0)
+    without_u2 = C.deconvolve(dist, capacity_mw=CAP2, q=Q2)
+    ref = C.build_copt([units[0]], delta_mw=1.0)
+    for k in range(len(ref.probs)):
+        assert without_u2.probs[k] == pytest.approx(ref.probs[k], abs=1e-9)
+
+
+def test_perfectly_reliable_unit_attributes_zero():
+    units = _units() + [C.CoptUnit(name="perfect", capacity_mw=30.0, q=0.0)]
+    dist = C.build_copt(units, delta_mw=1.0)
+    residual, w = _residual([LOAD, LOAD])
+    rows = C.attribute_criticality(units, dist, residual, weights=w, voll=1000.0)
+    perfect = next(r for r in rows if r["name"] == "perfect")
+    assert perfect["delta_eue_mwh"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_attribution_prices_outages_not_capacity():
+    """ΔEUE for unit i = EUE(as-is) − EUE(i perfectly available). For the
+    two-unit fixture with load 70:
+      u1 perfect: states 60(only? u1=60 always up) → cap 60+{0 or 40}:
+        {60: q2=0.2 shortfall 10, 100: 0.8} → EUE/h = 2.0 ⇒ Δu1 = 3.6
+      u2 perfect: {40: q1=0.1 shortfall 30, 100: 0.9} → EUE/h = 3.0 ⇒ Δu2 = 2.6
+    """
+    units = _units()
+    dist = C.build_copt(units, delta_mw=1.0)
+    residual, w = _residual([LOAD, LOAD])   # weight 3 × 2 snapshots = 6 h
+    rows = C.attribute_criticality(units, dist, residual, weights=w, voll=1000.0)
+    by = {r["name"]: r for r in rows}
+    assert by["u1"]["delta_eue_mwh"] == pytest.approx((EXACT_EUE_H - 2.0) * 6)
+    assert by["u2"]["delta_eue_mwh"] == pytest.approx((EXACT_EUE_H - 3.0) * 6)
+    # Ranking: u1's outages cost more → first.
+    assert rows[0]["name"] == "u1"
+    assert by["u1"]["criticality_eur_per_year"] == pytest.approx(
+        (EXACT_EUE_H - 2.0) * 6 * 1000.0)
+
+
+def test_failure_mode_rows_validate_against_the_contract():
+    from models.adequacy import FailureModeResult
+    n = _network()
+    units, residual, w = C.fleet_and_residual(n)
+    dist = C.build_copt(units, delta_mw=1.0)
+    rows = C.attribute_criticality(units, dist, residual, weights=w, voll=3000.0)
+    assert rows, "no FMECA rows produced"
+    for r in rows:
+        fm = FailureModeResult.model_validate(r["failure_mode"])
+        assert fm.engine == "copt"
+        assert fm.fidelity == "analytic_convolution"
+        assert fm.failure_class == "A"
+        assert fm.in_metric_scope is True
+        assert fm.criticality_eur_per_year >= 0
+        # occurrence = cycle frequency 8760·q/MTTR (occurrence.py semantics).
+    t1 = next(r for r in rows if r["name"] == "thermal1")
+    assert t1["failure_mode"]["occurrence_per_year"] == pytest.approx(
+        8760 * Q1 / 50.0)
+    # severity × occurrence = criticality (the f×S factorisation).
+    fm1 = t1["failure_mode"]
+    assert fm1["severity_eur"] * fm1["occurrence_per_year"] == pytest.approx(
+        fm1["criticality_eur_per_year"], rel=1e-9)
