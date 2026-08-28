@@ -6,6 +6,7 @@ import {
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import { AdequacyChips, CoptChips, type AdequacyReportPayload, type CoptPayload } from './adequacy'
+import { FrontierPanel } from './FrontierPanel'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
@@ -168,6 +169,7 @@ export default function LostLoadTab() {
             (adequacy as AdequacyReportPayload | null | undefined)?.metrics?.ens_mwh ?? null
           }
         />
+        <FrontierPanel />
         <div className="text-[12px] text-muted space-y-2">
           {targeted ? (
             <p>
@@ -213,6 +215,7 @@ export default function LostLoadTab() {
             ?.ens_mwh ?? null
         }
       />
+      <FrontierPanel />
 
       <div className="grid grid-cols-3 gap-3">
         <Kpi label="Total lost load" value={fmtEnergy(totals.mwh)}

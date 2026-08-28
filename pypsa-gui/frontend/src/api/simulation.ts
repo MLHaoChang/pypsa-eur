@@ -388,6 +388,16 @@ export const resultsApi = {
   // data). Shape: pages/results/adequacy.tsx CoptPayload.
   getCopt: () => client.get('/results/copt')
     .then(r => (r.status === 204 ? null : r.data)),
+  // Cost-vs-availability frontier (Phase 5; 204 = no study run this session).
+  // Shape: pages/results/FrontierPanel.tsx FrontierPayload.
+  getFrontier: () => client.get('/results/frontier')
+    .then(r => (r.status === 204 ? null : r.data)),
+  // Starts the epsilon-constraint study in a backend worker thread and
+  // returns immediately; poll getFrontier for progress. Omitting targets uses
+  // the backend's default spread.
+  startFrontier: (targets_permyriad?: number[]) =>
+    client.post('/results/frontier',
+      targets_permyriad ? { targets_permyriad } : {}).then(r => r.data),
   // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
   // overlays, persisted per project. Computed rows come from getCopt and
   // merge client-side (pages/results/fmea.ts).

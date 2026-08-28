@@ -3052,6 +3052,90 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
     return {"status": "running"}
 
 
+class FrontierRequest(_BaseModel):
+    # Reliability targets (‱) to sweep. Omitted → the default spread across
+    # the decade where the cost gradient is steep enough to show a knee.
+    targets_permyriad: list[float] | None = None
+
+
+@results_router.get("/frontier")
+def get_frontier():
+    """
+    Status + points of the last cost-vs-availability study (spec §5.6).
+    204 when none has been run in this session.
+    """
+    st = _state.get("frontier")
+    if not st:
+        return Response(status_code=204)
+    return {k: v for k, v in st.items() if k != "thread"}
+
+
+@results_router.post("/frontier")
+def post_frontier(body: FrontierRequest | None = None):
+    """
+    Start the ε-constraint frontier study in a worker thread: one full
+    capacity-expansion solve per target, so it must never block a request.
+    409 while a study, a sweep or a foreground solve is running.
+
+    Unlike the class-B/C sweep this does NOT freeze capacities — the study
+    asks what plan you would BUILD for each standard, so expansion has to
+    re-optimise at every point.
+    """
+    import time
+
+    from services.adequacy.frontier import (
+        DEFAULT_TARGETS_PERMYRIAD,
+        FrontierBudgetError,
+        FrontierConfigError,
+        knee_index,
+        run_frontier_sweep,
+    )
+    from routers.simulation import _state_update
+
+    st = _state.get("frontier")
+    if st and st.get("status") == "running" and st.get("thread") is not None \
+            and st["thread"].is_alive():
+        raise HTTPException(409, "a frontier study is already running")
+    sw = _state.get("fmea_sweep")
+    if sw and sw.get("status") == "running" and sw.get("thread") is not None \
+            and sw["thread"].is_alive():
+        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(422, "the frontier requires a VOLL > 0 in solver settings")
+
+    targets = list(getattr(body, "targets_permyriad", None)
+                   or DEFAULT_TARGETS_PERMYRIAD)
+    n = PyPSAService.get_network()
+    lock = PyPSAService.get_lock()
+
+    def worker():
+        try:
+            res = run_frontier_sweep(n, lock, cfg, targets,
+                                     final_state_update=_state_update)
+            voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+            _state["frontier"].update(
+                status="done", points=res["points"], warning=res["warning"],
+                knee=knee_index(res["points"], voll), voll_eur_per_mwh=voll,
+                finished_at=time.time(), error=None)
+        except (FrontierBudgetError, FrontierConfigError) as exc:
+            _state["frontier"].update(status="failed", points=[], error=str(exc),
+                                      finished_at=time.time())
+        except Exception as exc:                              # noqa: BLE001
+            _state["frontier"].update(status="failed", points=[], error=str(exc),
+                                      finished_at=time.time())
+
+    t = _threading.Thread(target=worker, daemon=True, name="adequacy-frontier")
+    _state["frontier"] = {"status": "running", "points": [], "error": None,
+                          "warning": None, "knee": None,
+                          "targets_permyriad": targets,
+                          "started_at": time.time(), "thread": t}
+    t.start()
+    return {"status": "running", "targets_permyriad": targets}
+
+
 @results_router.get("/copt")
 def get_copt():
     """
