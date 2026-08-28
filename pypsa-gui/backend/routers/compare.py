@@ -1551,7 +1551,8 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
     )
 
 
-def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True) -> EconomicsComparison:
+def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True,
+                               lost_load_cap: dict | None = None) -> EconomicsComparison:
     """
     Per-carrier economic summary for the Economics comparison tab.
 
@@ -1920,15 +1921,18 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                     continue
 
     # ── Lost-load cost per carrier (load-bearing bus → its carrier) ─────────
-    # VOLL slack dispatch lives in n.meta.last_lost_load (captured by the
-    # solver service). For each bus with non-zero slack, look up its carrier
-    # and accumulate (slack × VOLL) into the carrier's opex bucket + the
-    # dedicated lost_load_cost_eur split. Skipped silently when the
-    # capture is absent (network solved without VOLL).
-    try:
-        cap = (n.meta or {}).get("last_lost_load") if hasattr(n, "meta") else None
-    except Exception:
-        cap = None
+    # VOLL slack dispatch is passed in by the caller (`lost_load_cap`) — it is
+    # NOT on the network. The capture is persisted to results_state.pkl by the
+    # solver service, which strips the slack generators right after capturing
+    # them; nothing ever writes it to `n.meta`, so the previous read from there
+    # returned None on every code path and this whole block was dead (the
+    # lost_load_cost_meur field was always 0.0). Callers supply it from the
+    # project pickle (compare) or the live solver state (foreground results).
+    # For each bus with non-zero slack, look up its carrier and accumulate
+    # (slack × VOLL) into the carrier's opex bucket + the dedicated
+    # lost_load_cost_eur split. Skipped when the capture is absent (network
+    # solved without VOLL, or no shedding occurred).
+    cap = lost_load_cap
     if isinstance(cap, dict):
         ll_df = cap.get("lost_load_t")
         ll_total_mwh = float(cap.get("lost_load_total_mwh", 0.0) or 0.0)
@@ -2333,6 +2337,32 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
     )
 
 
+def _read_lost_load_capture(project_dir: pathlib.Path) -> dict | None:
+    """
+    Read the VOLL slack capture (``last_lost_load``) out of a project's
+    ``results_state.pkl``.
+
+    The capture cannot live on the network: solver_service strips the slack
+    generators immediately after capturing them, so the DataFrame never
+    survives a netcdf round-trip. It is persisted alongside the rest of the
+    solver state instead. Shape:
+      ``{lost_load_t: DataFrame(snapshot x bus), lost_load_total_mwh: float,
+         lost_load_cost_eur: float}``
+    Returns ``None`` for every "no capture" state (no pickle, unreadable
+    pickle, key absent) — all of which mean "this project shed nothing".
+    """
+    results_path = project_dir / "results_state.pkl"
+    if not results_path.exists():
+        return None
+    try:
+        raw = _safe_unpickle_results(results_path.read_bytes())
+    except Exception:
+        return None
+    data = _unwrap_results_state(raw)
+    cap = data.get("last_lost_load") if isinstance(data, dict) else None
+    return cap if isinstance(cap, dict) else None
+
+
 def _compute_lost_load_summary(
     project_dir: pathlib.Path, n, periods, is_multi, has_solve,
 ) -> LostLoadComparison:
@@ -2353,16 +2383,9 @@ def _compute_lost_load_summary(
 
     if not has_solve:
         return LostLoadComparison()
-    results_path = project_dir / "results_state.pkl"
-    if not results_path.exists():
-        return LostLoadComparison()
-    try:
-        raw = _safe_unpickle_results(results_path.read_bytes())
-    except Exception:
-        return LostLoadComparison()
-    # Accept both the versioned envelope and the legacy bare dict.
-    data = _unwrap_results_state(raw)
-    cap = data.get("last_lost_load") if isinstance(data, dict) else None
+    # Shared reader — the economics summary consumes the same capture, and two
+    # independent readers of one pickle key is how they drift apart.
+    cap = _read_lost_load_capture(project_dir)
     if not cap or cap.get("lost_load_t") is None:
         return LostLoadComparison()
     df = cap.get("lost_load_t")
@@ -2731,7 +2754,10 @@ def get_results_summary(
     loading = _compute_loading_summary(temp_n, periods, is_multi, has_solve)
     prices = _compute_prices_summary(temp_n, periods, is_multi, has_solve)
     emissions = _compute_emissions_summary(temp_n, periods, is_multi, has_solve)
-    economics = _compute_economics_summary(temp_n, periods, is_multi, has_solve, prices_from_state=False)
+    economics = _compute_economics_summary(
+        temp_n, periods, is_multi, has_solve, prices_from_state=False,
+        lost_load_cap=_read_lost_load_capture(src),
+    )
     curtailment = _compute_curtailment_summary(temp_n, periods, is_multi, has_solve)
     lost_load = _compute_lost_load_summary(src, temp_n, periods, is_multi, has_solve)
     storage_cycling = _compute_storage_cycling_summary(temp_n, periods, is_multi, has_solve)
