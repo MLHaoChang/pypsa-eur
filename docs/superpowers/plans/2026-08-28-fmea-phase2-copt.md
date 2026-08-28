@@ -14,9 +14,9 @@ Phase 0/1 constraints apply (branch, staging, test-first with demonstrated red, 
 
 ### Task 1: the COPT core (`services/adequacy/copt.py`)
 
-- [ ] **Failing tests first** (`tests/test_adequacy_copt.py`): exact two-unit case (60 MW q=0.1, 40 MW q=0.2, load 70 → LOLP 0.28, EUE 5.6 MWh/h; weighted over snapshots); rounding increment Δ apportions a 2.5 MW unit to adjacent states preserving the mean; must-take netting reduces residual load exactly by profile × capacity; empty fleet → LOLP 1 wherever load > 0; per-period split under a MultiIndex.
-- [ ] Implement: `build_copt(units, delta_mw)` — recursive convolution over `(capacity, q)` pairs, probabilistic apportioning to adjacent rounded states (`O(N·C/Δ)`, the spec's complexity note); `survival(copt)` (P[available ≥ x]); `hourly_adequacy(copt, residual_load, weights)` → LOLP_t, LOLE, EUE, per period; `fleet_and_residual(n)` applying the membership rule + electrical demand walk (reuse the ENS-cap walk's semantics).
-- [ ] Commit: `feat(gui): COPT core — convolution + hourly screening adequacy`.
+- [x] **Failing tests first** (`tests/test_adequacy_copt.py`): exact two-unit case (60 MW q=0.1, 40 MW q=0.2, load 70 → LOLP 0.28, EUE 5.6 MWh/h; weighted over snapshots); rounding increment Δ apportions a 2.5 MW unit to adjacent states preserving the mean; must-take netting reduces residual load exactly by profile × capacity; empty fleet → LOLP 1 wherever load > 0; per-period split under a MultiIndex.
+- [x] Implement: `build_copt(units, delta_mw)` — recursive convolution over `(capacity, q)` pairs, probabilistic apportioning to adjacent rounded states (`O(N·C/Δ)`, the spec's complexity note); `survival(copt)` (P[available ≥ x]); `hourly_adequacy(copt, residual_load, weights)` → LOLP_t, LOLE, EUE, per period; `fleet_and_residual(n)` applying the membership rule + electrical demand walk (reuse the ENS-cap walk's semantics).
+- [x] Commit: `feat(gui): COPT core — convolution + hourly screening adequacy`.
 
 ### Task 2: outage-attribution criticality
 
