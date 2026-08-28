@@ -23,7 +23,7 @@ import threading as _threading
 
 from pydantic import BaseModel as _BaseModel
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.economics import co2_intensity_map
