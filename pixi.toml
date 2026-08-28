@@ -28,6 +28,7 @@ gui          = { depends-on = ["gui-backend", "gui-frontend"] }
 gui-db-up    = { cmd = "docker compose up -d", cwd = "pypsa-gui" }
 gui-db-down  = { cmd = "docker compose down", cwd = "pypsa-gui" }
 setup-ssl-bypass = "python scripts/install_ssl_bypass.py"
+gridspine-tests = "python -m pytest tests/gridspine -v"
 
 reset = """bash -c '
     read -p "Do you really wanna continue? This will remove all contents of \
@@ -175,6 +176,7 @@ streamlit = ">=1.36"
 anthropic = ">=0.117.0"
 
 [pypi-dependencies]
+pandapower = "==3.1.2"
 pwdlib = { version = ">=0.2", extras = ["argon2"] }
 emails = ">=0.6"
 
