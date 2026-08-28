@@ -45,6 +45,12 @@ recorded here rather than silently fixed, per the spec-§3 discipline:
 6. Diagnostic-only v1, the frontier/MC target collision, the three-engine UX, and the
    single-hour-outage fine print were all undocumented decisions. Now explicit below.
 
+A second, end-to-end trace audit (UX → API → sampler → dispatch → metrics → ELCC →
+benchmarks) added findings 7–13, folded into the tasks below and marked **[e2e]**:
+the CRN stream-keying trap, per-period re-initialisation, the storage capacity basis,
+DSR's absence from the MC, weights-vs-dynamics, comparison-table metric alignment,
+and the no-mutation locking model.
+
 **Honesty constraints (v1 scope, carried into every label and warning):**
 - **Single-area (copper plate), electrical-only** — same scope as the COPT.
 - **One weather realisation** (the modelled horizon's profiles) **and independent unit
@@ -129,6 +135,15 @@ chunk.
     semi-Markov repair model would preserve stationary availability (renewal-reward)
     but break the memoryless stationary start T6 depends on (it requires equilibrium
     residual-life initialisation) — recorded as a non-goal with this reason.
+- [ ] **[e2e] Locking model:** the MC never mutates the network — unlike the sweep it
+  needs no undo machinery. Snapshot every input (units, residual, weights, storage
+  frame) into plain arrays **under the PyPSAService lock once**, release, and compute
+  lock-free. State this in the module docstring; it is the property that makes the MC
+  safe to run beside an editing user.
+- [ ] **[e2e] Weights scale accounting, not dynamics:** shortfall hours/energy are
+  weighted in the sums (as the COPT does); MTTR and sojourns live in **modelled
+  hours** — a 52×-weighted representative week is one week of chronology standing for
+  52, not a stretched year. One sentence in the docstring, one test.
 - [ ] Implement: hour loop over vectorised `(draws_chunk × units)` state transitions,
   **reduced on the fly into a `(draws_chunk × hours)` available-capacity array** —
   never materialise the `(draws × hours × units)` cube (×N_units memory: ~287 MB for
@@ -152,7 +167,15 @@ chunk.
   `efficiency_dispatch`, SoC); residual deficit = unserved. Pinned policy (documented
   as policy, not optimum): discharge descending remaining energy, charge ascending.
   Initial SoC = 100% **on full-horizon runs** (optimism ≤ one cycle at 8760 h); short-
-  horizon fixtures set SoC explicitly per test. Storage membership: electrical buses,
+  horizon fixtures set SoC explicitly per test. **[e2e] Capacity basis mirrors
+  `CoptUnit`:** `p_nom_opt` when a solve exists else `p_nom` (an extendable battery the
+  LP built must be simulated at its built size — stated for generators via
+  `fleet_and_residual`, and the new storage extraction must say it too).
+  **[e2e] Per-period re-initialisation:** on a MultiIndex horizon, hour N of period P
+  is NOT followed by hour 0 of period P+1 — SoC **and** outage states re-initialise at
+  every investment-period boundary (stationary start per block); a battery must not
+  carry charge across a ten-year gap. Test: two-period fixture where carrying SoC
+  across the boundary would change EUE. Storage membership: electrical buses,
   `slack.py`'s carrier/name tests applied to the **storage frame** (no storage slack
   mask exists today — DSR slacks are Generators, already excluded via
   `fleet_and_residual`); `Store`s excluded v1 (no power rating), loud comment.
@@ -179,8 +202,12 @@ chunk.
 - [ ] Implement: per-draw LOLE/EUE; mean + 95% CI across draws **per metric** (LOLE and
   EUE each get an interval); per-period split via shared weights; batch-until-converged
   (CoV target default 5%) under `MAX_DRAWS = 2000` (product cap — the benchmark budget
-  is separate, Task 7) and a wall-clock soft cap; the standing warning string (single
-  weather realisation + independent outages).
+  is separate, Task 7) and a wall-clock soft cap; the standing warning string — now
+  three clauses: single weather realisation, independent outages (no common-mode),
+  **[e2e] and DSR excluded as a resource** (DSR slacks are rightly excluded as slacks,
+  but in the LP they SERVE demand — an MC that ignores them attributes part of the
+  MC-vs-proxy divergence to foresight when it is actually a missing resource; the
+  warning stops that misread).
 - [ ] Commit: `feat(gui): MC adequacy metrics with per-metric CI, converged vs the COPT`.
 
 ### Task 4: ELCC (`services/adequacy/elcc.py`)
@@ -190,6 +217,13 @@ firm-MW block restoring baseline LOLE. **Predicate (finding: exact equality is
 ill-posed on finite draws — LOLE(Δ) is a monotone step function under CRN): the
 smallest Δ with LOLE(Δ) ≤ baseline, bisection tolerance in MW.**
 
+- [ ] **[e2e] CRN stream structure is a design constraint, not an option:** if a
+  `(draws × units)` matrix is sampled jointly, changing the unit count shifts every
+  other unit's draws and CRN silently dies exactly where it is load-bearing. Therefore:
+  **always sample the FULL fleet's availability; "removal" is exclusion of that unit's
+  column from the capacity aggregation** — draws identical across all ELCC evaluations
+  by construction. Test: removing unit i leaves every other unit's sampled path
+  bit-identical.
 - [ ] **Failing tests first:**
   - **CRN is load-bearing:** every candidate Δ evaluated on the *same* spawned draws;
     a perfect (`q=0`) unit's ELCC equals its capacity within tolerance — bites when
@@ -237,7 +271,11 @@ smallest Δ with LOLE(Δ) ≤ baseline, bisection tolerance in MW.**
     are shortfall-free.
   - **The cross-engine comparison table (the three-engine answer):** one row per
     engine — lp_proxy / copt / mc — columns: metric, value (+CI where it exists),
-    fidelity, storage-aware?, foresight, time-basis. The storage-silent-COPT vs
+    fidelity, storage-aware?, DSR-aware?, foresight, time-basis. **[e2e] Metric
+    alignment stated in the header tooltips:** LP-proxy ENS ↔ COPT/MC EUE are the same
+    quantity (unserved MWh) under three engines; LP shed-hours is the deterministic
+    analogue of LOLE — the rows align on those two shared metrics, they are not
+    apples-to-oranges. The storage-silent-COPT vs
     storage-priced-MC contrast is a **structural dash-vs-number in this table**, not
     prose. ELCC table below it (asset, nameplate, ELCC MW, %, status), with
     `"unidentifiable"` rows rendering the reason; non-additivity note in the copy.
