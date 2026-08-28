@@ -19,6 +19,7 @@ import {
   WORKSHEET_CSV_HEADER,
   worksheetCsvRows,
   type ModesPayload,
+  unpricedRankingWarning,
   type WorksheetRow,
   type WorksheetSidecar,
 } from './fmea'
@@ -160,6 +161,12 @@ export default function FmeaTab() {
           fidelity).
         </p>
       </header>
+
+      {unpricedRankingWarning(modes as ModesPayload | null | undefined) && (
+        <p className="text-[10px] text-danger border border-danger/40 rounded px-2 py-1">
+          {unpricedRankingWarning(modes as ModesPayload | null | undefined)}
+        </p>
+      )}
 
       <div className="flex items-center gap-2">
         <TableSearchBox value={search} onChange={setSearch} placeholder="Filter modes…" />

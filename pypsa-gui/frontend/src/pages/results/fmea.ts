@@ -4,8 +4,31 @@
 // aggregator /results/fmea_modes both satisfy it.
 export interface ModesPayload {
   per_mode: Array<Record<string, unknown>>
+  // Criticality is ΔEUE × VoLL × occurrence. With no VoLL the entire ranking
+  // is €0/yr, which reads as "these modes cost nothing" rather than "these
+  // modes cannot be priced" — the worksheet says which.
+  voll_eur_per_mwh?: number | null
   sweep_status?: string | null
   sweep_error?: string | null
+}
+
+/**
+ * The worksheet's ranking is meaningless without a VoLL: every criticality
+ * is zero and modes with very different ΔEUE tie. Returns the notice to show,
+ * or null when the ranking is priced.
+ */
+export function unpricedRankingWarning(
+  modes: ModesPayload | null | undefined,
+): string | null {
+  if (!modes || !modes.per_mode?.length) return null
+  const voll = modes.voll_eur_per_mwh
+  if (voll === undefined || voll === null) return null
+  if (voll > 0) return null
+  return (
+    'No Value of Lost Load is set, so every criticality below is €0/yr — ' +
+    'the ranking is unpriced, not harmless. Set a VoLL in Solver settings ' +
+    '(typical 3 000–10 000 €/MWh) to rank these modes.'
+  )
 }
 
 // One worksheet row after the client-side merge. Computed rows come from

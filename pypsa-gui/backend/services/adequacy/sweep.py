@@ -179,9 +179,24 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
         for c in contingencies:
             undo = c["mutate"](network)
             sink: dict = {}
+            # Tell the solver not to re-broadcast `_user_ts` over this
+            # mutation. Every contingency here works by rewriting the same
+            # `_t` tables that reapply restores, and the solve runs on the
+            # FOREGROUND network, so without this marker the uploaded
+            # profiles were reinstated before the LP was built: the
+            # contingency solved an unmutated network and reported a ΔEUE of
+            # zero. Set per-contingency and cleared in the same `finally` as
+            # the undo, so a mutation and its suppression can never outlive
+            # each other — and so the base and closing solves, which must see
+            # the real uploaded profiles, still get the reapply.
+            network._adequacy_transient_profiles = True
             try:
                 _solve_once(sweep_cfg, network, lock, log_queue, sink)
             finally:
+                try:
+                    del network._adequacy_transient_profiles
+                except AttributeError:
+                    pass
                 undo()
             status = sink.get("_status")
             eue = _electrical_eue_mwh(sink.get("last_lost_load"), network)

@@ -2951,7 +2951,20 @@ def get_fmea_modes():
         return Response(status_code=204)
     per_mode.sort(key=lambda r: float(r.get("criticality_eur_per_year", 0.0)),
                   reverse=True)
+    # VOLL travels with the rows so the worksheet can say WHY every
+    # criticality is zero. Criticality is ΔEUE × VoLL × occurrence, so with
+    # no VoLL set the whole ranking collapses to €0/yr — modes whose ΔEUE
+    # differs by 4× tie at zero, and the table reads "these failure modes
+    # cost nothing" when the truth is "these failure modes cannot be priced".
+    # The sweep already refuses outright (422) without a VoLL; this surface
+    # still has LOLE/EUE worth serving, so it reports the condition instead.
+    _cfg = _state.get("solver_config")
+    try:
+        _voll = float(getattr(_cfg, "voll", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        _voll = 0.0
     return {"per_mode": per_mode,
+            "voll_eur_per_mwh": _voll,
             "sweep_status": (sweep or {}).get("status"),
             "sweep_error": (sweep or {}).get("error")}
 

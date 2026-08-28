@@ -222,3 +222,87 @@ def test_fmea_modes_204_when_empty():
     _state.pop("fmea_sweep", None)
     resp = R.get_fmea_modes()
     assert getattr(resp, "status_code", 200) == 204
+
+
+# ---------------------------------------------------------------------------
+# A contingency mutation must survive the solver's `_user_ts` reapply.
+#
+# Found by an end-to-end QA run on a three-zone system whose load and VRE
+# profiles were uploaded through the GUI, which is the normal workflow. Every
+# test in this file builds its network in process, so `_user_ts` is empty and
+# the reapply is a no-op — the whole suite was structurally blind to this.
+#
+# What happened: `run_simulation` re-broadcasts every user-uploaded series from
+# `_user_ts` onto the live `_t` tables just before building the LP
+# (solver_service, "Re-broadcast every user-uploaded time series"). The sweep
+# runs on the FOREGROUND network, so that reapply fired inside every
+# contingency solve and restored the pristine profile OVER the mutation the
+# contingency had just made. The LP then solved an unmutated network, returned
+# "ok", and the row reported ΔEUE = 0.
+#
+# Concretely: a cold snap with load ×2.0 and renewables ×0.0 priced at exactly
+# zero criticality. The row looked like a successful measurement of "this
+# failure mode costs nothing", not like a failure to measure.
+# ---------------------------------------------------------------------------
+
+
+def _tv_network() -> pypsa.Network:
+    """Same shape as the module fixture but with a TIME-VARYING load, so the
+    profile lives in `loads_t.p_set` where `_user_ts` reapply writes."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=N, freq="h"))
+    n.snapshot_weightings.loc[:, :] = WEIGHT
+    n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=pd.Series([100.0] * N, index=n.snapshots))
+    n.add("Generator", "cheap", bus="b", carrier="gas", p_nom=90.0,
+          marginal_cost=10.0)
+    return n
+
+
+def test_contingency_mutation_survives_the_user_ts_reapply(monkeypatch):
+    from routers import network as network_router
+
+    n = _tv_network()
+    PyPSAService.set_network(n)          # makes the sweep's solves FOREGROUND
+
+    # Populate the store exactly as a GUI profile upload does, with the
+    # PRISTINE (unstressed) series — this is what used to clobber the
+    # mutation mid-sweep.
+    store = {("loads", "p_set", "l"): pd.Series([100.0] * N, index=n.snapshots)}
+    monkeypatch.setattr(network_router, "_user_ts", store, raising=False)
+
+    scenario = {"id": "coldsnap", "kind": "parametric",
+                "frequency_per_year": 2.0,
+                "electrical_load_multiplier": 1.3}
+    rows = ST.run_class_c_sweep(
+        n, PyPSAService.get_lock(), SolverConfig(solver_name="highs", voll=VOLL),
+        [scenario], log_queue=queue.SimpleQueue())
+
+    assert len(rows) == 1, rows
+    row = rows[0]
+    assert row["status"] in ("ok", "optimal"), row
+    # load ×1.3 → 130 MW against 90 MW firm → 40 MW short per snapshot.
+    # ΔEUE = (40 − 10) × N × WEIGHT = 30 × 2 × 3 = 180 MWh.
+    assert row["delta_eue_mwh"] == pytest.approx(180.0), (
+        "the stress scenario measured no degradation — the uploaded profile "
+        "was reapplied over the mutation before the LP was built"
+    )
+    assert row["failure_mode"]["criticality_eur_per_year"] > 0
+
+
+def test_the_reapply_marker_never_outlives_its_contingency():
+    """
+    The suppression marker is set per contingency and cleared in the same
+    `finally` as the undo. If it leaked, every SUBSEQUENT foreground solve
+    would silently stop honouring uploaded profiles — a far worse bug than
+    the one it fixes.
+    """
+    n = _tv_network()
+    PyPSAService.set_network(n)
+    ST.run_class_c_sweep(
+        n, PyPSAService.get_lock(), SolverConfig(solver_name="highs", voll=VOLL),
+        [{"id": "s", "kind": "parametric", "frequency_per_year": 1.0,
+          "electrical_load_multiplier": 1.3}],
+        log_queue=queue.SimpleQueue())
+    assert not getattr(n, "_adequacy_transient_profiles", False)

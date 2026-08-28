@@ -348,3 +348,91 @@ def test_solver_config_schema_rejects_nonsense_reliability_inputs(field, value):
 def test_solver_config_schema_accepts_the_meaningful_range(field, value):
     cfg = SolverConfigSchema(**{field: value})
     assert getattr(cfg, field) == value
+
+
+# ---------------------------------------------------------------------------
+# An infeasible solve must produce NO adequacy report.
+#
+# Found by an end-to-end QA run on a small three-zone system, not by the tests
+# above: every one of them asserts `status in ("ok", "optimal")` inside
+# `_solve`, so the failed-solve path was never reachable from this file.
+#
+# What the bug looked like from the outside: set an ambitious reliability
+# target, get an INFEASIBLE LP, and `/results/adequacy` still returned 200
+# with a complete report — achieved ENS 0.0, shed hours 0.0, every zone at
+# 0.0, target met. Not because nothing was shed, but because there is no
+# dispatch to measure. The cost field carried over from the previous feasible
+# solve, so the report was even internally consistent. A user reads
+# "reliability target met" off a plan that does not exist — the exact
+# inversion of the truth, and the worst direction for a reliability metric to
+# be wrong in.
+#
+# `/results/lost_load` already returned 204 after a failed solve. The two
+# surfaces disagreed and lost_load was the one that was right, so the report
+# now follows the same convention.
+# ---------------------------------------------------------------------------
+
+
+def _solve_allowing_failure(n: pypsa.Network, **cfg_kw) -> tuple[dict, str, str]:
+    """`_solve` asserts success; this one reports it instead."""
+    PyPSAService.set_network(n)
+    sink: dict = {}
+    cfg = SolverConfig(**{"voll": VOLL, **cfg_kw})
+    status, condition = run_simulation(
+        cfg, n, PyPSAService.get_lock(), threading.Event(),
+        queue.SimpleQueue(), state_update=lambda **kw: sink.update(kw),
+    )
+    return sink, status, condition
+
+
+def _infeasible_network() -> pypsa.Network:
+    """
+    Real capacity strictly below demand, nothing extendable, and a VOLL that
+    is set — so slack generators DO exist and the target IS enforced. The
+    only way to serve the gap is the involuntary slack, which the cap then
+    forbids: the LP is infeasible BECAUSE of the reliability target.
+
+    That combination is what makes this fixture bite. A version with voll=0
+    is infeasible too, but for the wrong reason: with no slack generators the
+    cap wrapper never installs a constraint, `_ens_cap_targets` is never
+    stashed, and no report would have been built with or without the guard —
+    a test that passes either way.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=N_SNAPSHOTS, freq="h"))
+    n.snapshot_weightings.loc[:, :] = WEIGHT
+    n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=LOAD_MW)
+    n.add("Generator", "small", bus="b", carrier="gas", p_nom=CHEAP_MW,
+          marginal_cost=10.0)
+    return n
+
+
+def test_infeasible_solve_emits_no_adequacy_report():
+    sink, status, condition = _solve_allowing_failure(
+        _infeasible_network(), ens_cap_permyriad=1e-4)
+    assert status not in ("ok", "optimal"), (
+        f"fixture is meant to be infeasible, got {status}/{condition}")
+    assert sink.get("adequacy_report") is None, (
+        "an infeasible solve produced an adequacy report; every number in it "
+        "reads as target-met because there is no dispatch to measure")
+
+
+def test_infeasible_solve_leaves_no_stale_target_marker():
+    """
+    The `_ens_cap_targets` marker is stashed on the network by the wrapper and
+    consumed by the report builder. On the skip path it must still be cleared,
+    or the NEXT solve — with a different target, or none — would build its
+    report against this solve's stale targets.
+    """
+    n = _infeasible_network()
+    _solve_allowing_failure(n, ens_cap_permyriad=1e-4)
+    assert getattr(n, "_ens_cap_targets", None) is None
+
+
+def test_feasible_solve_still_emits_the_report():
+    """The guard must not cost the working case."""
+    sink, status, _ = _solve_allowing_failure(_network(), ens_cap_permyriad=50.0)
+    assert status in ("ok", "optimal")
+    assert sink.get("adequacy_report") is not None

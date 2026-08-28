@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, WORKSHEET_CSV_HEADER, worksheetCsvRows } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows } from './fmea'
 import type { CoptPayload } from './adequacy'
 
 const copt: CoptPayload = {
@@ -106,5 +106,27 @@ describe('mergeWorksheet across computed classes (Phase 4)', () => {
     expect(rows.map(r => r.failure_class)).toEqual(['B', 'C', 'A'])
     // The parametric label rides in the occurrence basis for the UI.
     expect(rows[1].occurrence_basis).toContain('parametric')
+  })
+})
+
+describe('unpricedRankingWarning', () => {
+  const rows = [{ mode_id: 'g:a:forced_outage', criticality_eur_per_year: 0 }]
+
+  it('warns when VoLL is unset, because every criticality is then zero', () => {
+    const w = unpricedRankingWarning({ per_mode: rows, voll_eur_per_mwh: 0 })
+    expect(w).toContain('Value of Lost Load')
+  })
+
+  it('stays silent once the ranking is actually priced', () => {
+    expect(unpricedRankingWarning({ per_mode: rows, voll_eur_per_mwh: 3000 })).toBeNull()
+  })
+
+  it('says nothing when there are no rows to rank', () => {
+    expect(unpricedRankingWarning({ per_mode: [], voll_eur_per_mwh: 0 })).toBeNull()
+  })
+
+  it('stays silent when the payload omits VoLL, rather than guessing', () => {
+    expect(unpricedRankingWarning({ per_mode: rows })).toBeNull()
+    expect(unpricedRankingWarning(null)).toBeNull()
   })
 })

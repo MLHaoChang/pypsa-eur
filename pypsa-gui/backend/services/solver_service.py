@@ -837,7 +837,25 @@ def run_simulation(
                 _is_foreground = network is _PS.get_network()
             except Exception:
                 _is_foreground = True  # fail safe → preserve legacy reapply
-            if _is_foreground:
+            # ALSO gated on "is a deliberate transient profile mutation in
+            # force?" — the adequacy sweep (classes B and C) works by mutating
+            # the very `_t` tables this reapply restores: a class-C scenario
+            # scales loads_t.p_set / generators_t.p_max_pu, a class-B link
+            # outage zeroes links_t.p_max_pu. The sweep runs on the FOREGROUND
+            # network, so `_is_foreground` is True and the reapply overwrote
+            # every one of those mutations with the pristine uploaded profile
+            # before the LP was built.
+            #
+            # The contingency then solved an UNMUTATED network, came back
+            # "ok", and reported ΔEUE = 0 — so a cold snap + Dunkelflaute
+            # priced at exactly zero criticality. It only bit where the
+            # profiles came from `_user_ts`, i.e. anything uploaded through
+            # the GUI, which is the normal workflow; a network built in
+            # process (as every unit test does) has an empty store and was
+            # unaffected, which is why nothing caught it.
+            _transient_profiles = bool(
+                getattr(network, "_adequacy_transient_profiles", False))
+            if _is_foreground and not _transient_profiles:
                 try:
                     from routers.network import _reapply_user_ts_to_network as _reapply_ts
                     _reapply_ts(network)
@@ -845,6 +863,10 @@ def run_simulation(
                           "(_t tables aligned to current snapshots).")
                 except Exception as exc:
                     phase(f"WARN: could not re-apply user time series: {type(exc).__name__}: {exc}")
+            elif _transient_profiles:
+                phase("Skipped _user_ts reapply (adequacy sweep: a transient "
+                      "contingency mutation is in force and the uploaded "
+                      "profiles would overwrite it).")
             else:
                 phase("Skipped _user_ts reapply (background project solve — netcdf "
                       "carries baked profiles; the active _user_ts belongs to the "
@@ -1241,9 +1263,36 @@ def run_simulation(
                         except Exception as exc:
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
-                # Adequacy report — emitted whenever a target was enforced,
-                # INCLUDING the nothing-shed case (achieved 0, binding=voll).
+                # Adequacy report — emitted whenever a target was enforced
+                # AND the solve actually produced a dispatch, INCLUDING the
+                # nothing-shed case (achieved 0, binding=voll).
+                #
+                # The status guard is load-bearing, not defensive. Without it
+                # an INFEASIBLE solve still built a report, and every number
+                # in it read as the best possible outcome: achieved ENS 0.0,
+                # shed hours 0.0, every zone at 0, target met — because there
+                # is no dispatch to measure, not because nothing was shed. The
+                # cost field carried over from the previous feasible solve, so
+                # the report was even internally consistent. A user who set an
+                # ambitious target and got an unsolvable LP would read
+                # "reliability target met" off a plan that does not exist,
+                # which is the exact inversion of the truth.
+                #
+                # 204 (no report) is the same convention /results/lost_load
+                # already used after a failed solve — the two surfaces
+                # disagreed, and lost_load was the one that was right.
                 _ens_targets = getattr(network, "_ens_cap_targets", None)
+                if _ens_targets and status not in ("ok", "optimal"):
+                    phase(
+                        f"Adequacy report skipped: solve was {condition!r} — a "
+                        "target cannot be evaluated against a dispatch that "
+                        "does not exist."
+                    )
+                    try:
+                        delattr(network, "_ens_cap_targets")
+                    except AttributeError:
+                        pass
+                    _ens_targets = None
                 if _ens_targets:
                     try:
                         from services.adequacy.report import (
