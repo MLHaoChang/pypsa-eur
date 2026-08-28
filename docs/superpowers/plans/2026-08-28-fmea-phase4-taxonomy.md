@@ -21,9 +21,9 @@ Phases 0–3 constraints apply. Live-solve tests remain the standard; sweeps in 
 
 ### Task 1: the shared contingency driver
 
-- [ ] **Failing tests first** (`tests/test_adequacy_sweep.py`): a 2-bus network where a Link is the only path to a load — base EUE 0; the link-out re-solve sheds exactly the stranded load (exact arithmetic); capacities frozen (an extendable generator does NOT grow during the contingency solve); the final base re-solve restores base dispatch (network EUE state = base); the foreground `_state` is untouched (private sink); budget guard refuses > caps.
-- [ ] Implement `services/adequacy/sweep.py`: `freeze_capacities(n) -> undo`, `run_contingency_sweep(network, lock, cfg, contingencies, state_update)` where a contingency is `(id, mutate(n) -> undo, meta)`; returns per-contingency `{delta_eue_mwh, capture}` + the base.
-- [ ] Commit: `feat(gui): fixed-capacity contingency sweep driver`.
+- [x] **Failing tests first** (`tests/test_adequacy_sweep.py`): a 2-bus network where a Link is the only path to a load — base EUE 0; the link-out re-solve sheds exactly the stranded load (exact arithmetic); capacities frozen (an extendable generator does NOT grow during the contingency solve); the final base re-solve restores base dispatch (network EUE state = base); the foreground `_state` is untouched (private sink); budget guard refuses > caps.
+- [x] Implement `services/adequacy/sweep.py`: `freeze_capacities(n) -> undo`, `run_contingency_sweep(network, lock, cfg, contingencies, state_update)` where a contingency is `(id, mutate(n) -> undo, meta)`; returns per-contingency `{delta_eue_mwh, capture}` + the base.
+- [x] Commit: `feat(gui): fixed-capacity contingency sweep driver`.
 
 ### Task 2: class B — Link outages
 
