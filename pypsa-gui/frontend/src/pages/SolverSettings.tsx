@@ -1687,6 +1687,7 @@ function ReliabilityAssumptions({
             unit="‱ of demand"
             value={draft.ens_cap_permyriad ?? 0}
             step={0.1}
+            min={0}
             onChange={v => patch({ ens_cap_permyriad: v > 0 ? v : null })}
             hint="Caps unserved ELECTRICAL energy per investment period at this share (parts per ten thousand) of the period's demand. 0 = off. Adequate systems run ~0.1–1‱; GB's standard is 3 loss-of-load hours/yr. Requires a VOLL > 0."
           />
@@ -1700,6 +1701,7 @@ function ReliabilityAssumptions({
             unit="× target"
             value={draft.ens_zone_cap_multiple ?? 0}
             step={0.5}
+            min={0}
             onChange={v => patch({ ens_zone_cap_multiple: v > 0 ? v : null })}
             hint="Optional backstop so no single zone (bus `country`) absorbs the whole allowance: each zone's unserved energy ≤ multiple × target on its OWN demand. 3× is a reasonable default. With every bus's country blank, this collapses into a second system cap (the solver log says so)."
           />
@@ -1712,6 +1714,7 @@ function ReliabilityAssumptions({
             unit="€/MWh"
             value={draft.dsr_price_eur_per_mwh ?? 0}
             step={10}
+            min={0}
             onChange={v => patch({ dsr_price_eur_per_mwh: v })}
             hint="Contracted compensation for voluntary load reduction — a RESOURCE, priced well below VOLL and never counted as unserved energy. 0 = off."
           />
@@ -1720,6 +1723,8 @@ function ReliabilityAssumptions({
             unit="share of bus peak"
             value={draft.dsr_share_of_load ?? 0}
             step={0.05}
+            min={0}
+            max={1}
             onChange={v => patch({ dsr_share_of_load: v })}
             hint="Each opted-in bus gets DSR capacity = share × its peak load (e.g. 0.2 = 20%)."
           />
@@ -2205,8 +2210,14 @@ function Stage2Panel({
 // Small numeric input with label + unit + (?) tooltip. Local to this file
 // because it has slightly different sizing than the generic NumInput used
 // in the right Properties panel — denser, full-width, two-line layout.
+// `min`/`max` are OPTIONAL and clamp on the way out, not just on the input
+// element. The HTML attributes alone are cosmetic here: a typed out-of-range
+// value still fires onChange and still reaches the store, so a field with only
+// `min={0}` would happily ship -1 to the backend. Callers that pass bounds get
+// a value guaranteed inside them; callers that pass none behave exactly as
+// before.
 function NumberField({
-  label, unit, value, step, onChange, hint,
+  label, unit, value, step, onChange, hint, min, max,
 }: {
   label: string
   unit?: string
@@ -2214,6 +2225,8 @@ function NumberField({
   step?: number
   onChange: (v: number) => void
   hint?: string
+  min?: number
+  max?: number
 }) {
   return (
     <label className="flex flex-col gap-1">
@@ -2231,9 +2244,14 @@ function NumberField({
         type="number"
         value={value}
         step={step ?? 0.01}
+        min={min}
+        max={max}
         onChange={e => {
-          const v = parseFloat(e.target.value)
-          onChange(Number.isFinite(v) ? v : 0)
+          const raw = parseFloat(e.target.value)
+          let v = Number.isFinite(raw) ? raw : 0
+          if (min !== undefined) v = Math.max(min, v)
+          if (max !== undefined) v = Math.min(max, v)
+          onChange(v)
         }}
         className="px-2 py-1 border border-border rounded text-xs font-mono bg-bg focus:outline-none focus:border-accent"
       />

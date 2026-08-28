@@ -275,3 +275,76 @@ def test_preflight_zone_multiple_without_cap_warns():
                      ens_zone_cap_multiple=ZONE_MULTIPLE)
     assert any(i.code == "ens_zone_multiple_without_cap" for i in issues), \
         [i.code for i in issues]
+
+
+# ---------------------------------------------------------------------------
+# API-boundary bounds on the reliability-target and DSR inputs.
+#
+# Found by driving a LIVE backend, not by these unit tests: every test above
+# constructs `SolverConfig` directly, which is a plain dataclass and validates
+# nothing. The API boundary is `SolverConfigSchema`, and until this commit it
+# accepted values that downstream code then silently discarded.
+#
+# The sharp one is a negative `ens_cap_permyriad`. Both `_wrap_with_ens_cap`
+# and `_check_ens_cap_coherence` short-circuit on `<= 0` — correct for 0/None,
+# which mean "no target", but it made -1 mean "no target" too: the solve ran
+# with no reliability constraint, /results/adequacy returned 204, and preflight
+# emitted nothing. The user believed they had set a target and had not. That is
+# precisely the silent coercion the design forbids, so it is rejected where the
+# value is entered.
+# ---------------------------------------------------------------------------
+
+from pydantic import ValidationError  # noqa: E402
+
+from models.schemas import SolverConfigSchema  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        # A negative target is not "off" — it is a typo, and it used to be
+        # indistinguishable from having set nothing at all.
+        ("ens_cap_permyriad", -1.0),
+        ("ens_cap_permyriad", -0.0001),
+        # A negative multiple silently dropped the zone ceilings while the
+        # system cap kept applying, so the plan looked constrained and the
+        # per-zone standard the user asked for was never enforced.
+        ("ens_zone_cap_multiple", -3.0),
+        # Zero is a zero-ENS ceiling per zone, not "no ceilings"; None is how
+        # you say "no ceilings", so zero is far likelier to be a mistake.
+        ("ens_zone_cap_multiple", 0.0),
+        # A negative price pays the model to curtail: the voluntary tier would
+        # dispatch its full volume every hour and bank the revenue.
+        ("dsr_price_eur_per_mwh", -100.0),
+        # A share of load above 1 curtails more demand than exists.
+        ("dsr_share_of_load", 5.0),
+        ("dsr_share_of_load", 1.0001),
+        ("dsr_share_of_load", -0.5),
+    ],
+)
+def test_solver_config_schema_rejects_nonsense_reliability_inputs(field, value):
+    with pytest.raises(ValidationError):
+        SolverConfigSchema(**{field: value})
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        # 0 and None are the DOCUMENTED "off" for the target — bounding the
+        # field must not break turning it off.
+        ("ens_cap_permyriad", 0.0),
+        ("ens_cap_permyriad", None),
+        ("ens_cap_permyriad", 20.0),
+        ("ens_zone_cap_multiple", None),
+        ("ens_zone_cap_multiple", 1.5),
+        ("dsr_price_eur_per_mwh", 0.0),
+        ("dsr_price_eur_per_mwh", 200.0),
+        ("dsr_share_of_load", 0.0),
+        # The boundary itself: curtailing 100% of load is extreme but not
+        # incoherent, so it must remain expressible.
+        ("dsr_share_of_load", 1.0),
+    ],
+)
+def test_solver_config_schema_accepts_the_meaningful_range(field, value):
+    cfg = SolverConfigSchema(**{field: value})
+    assert getattr(cfg, field) == value

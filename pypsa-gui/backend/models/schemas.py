@@ -425,14 +425,32 @@ class SolverConfigSchema(BaseModel):
     voll: float = 0.0
     # Reliability target (adequacy spec §5.1): unserved electrical energy cap
     # in parts per ten thousand (‱) of period electrical demand; None = off.
-    ens_cap_permyriad: float | None = None
+    #
+    # Bounded at the API boundary, not merely downstream. Both the solver
+    # wrapper (`_wrap_with_ens_cap`) and the coherence validator treat a
+    # non-positive cap as "no target", which is right for 0/None and WRONG
+    # for a negative: a user who types -1 into the reliability target would
+    # otherwise get a solve with no reliability constraint at all, no report
+    # and no warning — indistinguishable from having set nothing. A nonsense
+    # value must be rejected where it is entered, never silently coerced to
+    # off (spec: nothing is silently converted).
+    ens_cap_permyriad: float | None = Field(default=None, ge=0)
     # Per-zone ceiling as a multiple of the system target (zone = bus
     # `country`); None = no zone ceilings. Requires ens_cap_permyriad.
-    ens_zone_cap_multiple: float | None = None
+    # `gt=0`, not `ge=0`: a zero multiple is a zero-ENS ceiling per zone,
+    # which is a different (and almost certainly unintended) request than
+    # "no zone ceilings" — that is what None is for.
+    ens_zone_cap_multiple: float | None = Field(default=None, gt=0)
     # Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in per
     # bus; 0 = off. Never applied globally.
-    dsr_price_eur_per_mwh: float = 0.0
-    dsr_share_of_load: float = 0.0
+    # `ge=0`: a negative DSR price pays the model to curtail, so it would
+    # dispatch the full voluntary volume every hour and report a plan built
+    # on that revenue.
+    dsr_price_eur_per_mwh: float = Field(default=0.0, ge=0)
+    # A SHARE of load, so it cannot exceed 1: you cannot curtail more demand
+    # than exists. Unbounded, a share of 5 silently invents a resource five
+    # times the load and the plan is sized against a fiction.
+    dsr_share_of_load: float = Field(default=0.0, ge=0, le=1)
     dsr_buses: list[str] = []
     investment_periods: list[int] = []
     # Per-investment-period load multiplier, keyed by period year (str). 1.0 =
