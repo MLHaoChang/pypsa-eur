@@ -133,6 +133,15 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_price_drivers"):               frozenset(),
     ("routers/results.py", "get_curtailment"):                 frozenset(),
     ("routers/results.py", "get_lost_load"):                   frozenset(),
+    # Adequacy / solution-FMEA surfaces. None of them reports an economics
+    # SURFACE id: they carry reliability metrics and failure-mode rows, whose
+    # € figures are derived from VoLL × unserved energy inside the adequacy
+    # services rather than from the economics roll-ups this allowlist tracks.
+    ("routers/results.py", "get_adequacy"):                    frozenset(),
+    ("routers/results.py", "get_copt"):                        frozenset(),
+    ("routers/results.py", "get_fmea_modes"):                  frozenset(),
+    ("routers/results.py", "get_fmea_sweep"):                  frozenset(),
+    ("routers/results.py", "post_fmea_sweep"):                 frozenset(),
     ("routers/results.py", "get_load_results"):                frozenset(),
     ("routers/results.py", "get_asset_economics"):             frozenset({"asset_economics"}),
     # ── routers/simulation.py ───────────────────────────────────────────
