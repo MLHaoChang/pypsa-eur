@@ -311,6 +311,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/copt",
         # Contingency-sweep lifecycle (Phase 4) — status + rows, no series.
         "/fmea_sweep",
+        # All computed failure-mode rows on one list (Phase 4 Task 4).
+        "/fmea_modes",
     }
 
     unclassified = declared - ranged - aggregates

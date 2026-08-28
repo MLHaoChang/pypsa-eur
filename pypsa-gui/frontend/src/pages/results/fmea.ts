@@ -1,6 +1,12 @@
 // FMEA worksheet pure logic (Phase 3 Task 2) — extracted from the tab so the
 // merge and the CSV shape are unit-testable without mounting anything.
-import type { CoptPayload } from './adequacy'
+// The merge only needs a per_mode carrier — /results/copt and the Phase 4
+// aggregator /results/fmea_modes both satisfy it.
+export interface ModesPayload {
+  per_mode: Array<Record<string, unknown>>
+  sweep_status?: string | null
+  sweep_error?: string | null
+}
 
 // One worksheet row after the client-side merge. Computed rows come from
 // /results/copt and regenerate on every view; manual rows and overlays come
@@ -36,7 +42,7 @@ export interface WorksheetSidecar {
 // criticality descending, computed and manual interleaved — the worksheet is
 // ONE table, not two (spec §4.2).
 export function mergeWorksheet(
-  copt: CoptPayload | null,
+  copt: ModesPayload | null,
   sidecar: WorksheetSidecar | null,
 ): WorksheetRow[] {
   const overlays = sidecar?.overlays ?? {}

@@ -39,9 +39,9 @@ Phases 0–3 constraints apply. Live-solve tests remain the standard; sweeps in 
 
 ### Task 4: the aggregator + worksheet integration
 
-- [ ] **Tests first:** `GET /results/fmea_modes` concatenates copt class-A rows + the last sweep's B/C rows (204 only when all empty); frontend merge consumes it unchanged (fmea.ts is already class-agnostic — assert a B row and a parametric C row interleave and badge correctly, incl. the parametric label).
-- [ ] Implement the aggregator endpoint; switch `FmeaTab` from `getCopt` to `getFmeaModes` for rows (CoptChips keeps `getCopt`); a small "Run class B/C sweep" button on the tab (POST + poll status).
-- [ ] `tsc -b` + vitest + backend sweep; commit: `feat(gui): all computed classes on one worksheet`.
+- [x] **Tests first:** `GET /results/fmea_modes` concatenates copt class-A rows + the last sweep's B/C rows (204 only when all empty); frontend merge consumes it unchanged (fmea.ts is already class-agnostic — assert a B row and a parametric C row interleave and badge correctly, incl. the parametric label).
+- [x] Implement the aggregator endpoint; switch `FmeaTab` from `getCopt` to `getFmeaModes` for rows (CoptChips keeps `getCopt`); a small "Run class B/C sweep" button on the tab (POST + poll status).
+- [x] `tsc -b` + vitest + backend sweep; commit: `feat(gui): all computed classes on one worksheet`.
 
 ## Done criteria
 

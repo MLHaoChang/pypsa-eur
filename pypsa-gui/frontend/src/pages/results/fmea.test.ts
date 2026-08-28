@@ -77,3 +77,34 @@ describe('buildManualRow', () => {
     expect(r.criticality_eur_per_year).toBe(0)
   })
 })
+
+
+describe('mergeWorksheet across computed classes (Phase 4)', () => {
+  it('interleaves A, B and parametric C rows on one ranking', () => {
+    const modes = {
+      per_mode: [
+        { mode_id: 'generator:g1:forced_outage', component_class: 'Generator',
+          name: 'g1', failure_class: 'A', occurrence_per_year: 8,
+          occurrence_basis: 'EFORd', severity_eur: 100,
+          criticality_eur_per_year: 800, in_metric_scope: true,
+          engine: 'copt', fidelity: 'analytic_convolution' },
+        { mode_id: 'link:tie:forced_outage', component_class: 'Link',
+          name: 'tie', failure_class: 'B', occurrence_per_year: 7.3,
+          occurrence_basis: 'FOR', severity_eur: 500,
+          criticality_eur_per_year: 3650, in_metric_scope: true,
+          engine: 'lp_proxy', fidelity: 'deterministic_scenario' },
+        { mode_id: 'scenario:cold_snap', component_class: 'Network',
+          name: '1-in-20 cold snap', failure_class: 'C',
+          occurrence_per_year: 0.05, occurrence_basis: 'scenario:parametric',
+          severity_eur: 40000, criticality_eur_per_year: 2000,
+          in_metric_scope: true,
+          engine: 'lp_proxy', fidelity: 'deterministic_scenario' },
+      ],
+      sweep_status: 'done',
+    }
+    const rows = mergeWorksheet(modes, null)
+    expect(rows.map(r => r.failure_class)).toEqual(['B', 'C', 'A'])
+    // The parametric label rides in the occurrence basis for the UI.
+    expect(rows[1].occurrence_basis).toContain('parametric')
+  })
+})

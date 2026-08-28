@@ -174,3 +174,51 @@ def test_sweep_route_runs_b_and_c_together():
     classes = {r["failure_mode"]["failure_class"]
                for r in done["rows"] if r["failure_mode"]}
     assert classes == {"B", "C"}, classes
+
+
+def test_fmea_modes_aggregates_all_computed_classes():
+    """GET /results/fmea_modes = COPT class-A rows + the last sweep's B/C
+    rows, one list, criticality-sorted; 204 only when every source is
+    empty. Reuses the network from the combined-sweep test plus a
+    class-A-bearing generator."""
+    import routers.results as R
+    from routers.simulation import _state
+    n = _network()
+    n.generators.at["g", "p_nom"] = 200.0
+    # Class A: give the gas unit occurrence data.
+    n.generators.at["g", "outage_rate_value"] = 0.05
+    n.generators.at["g", "outage_rate_basis"] = "EFORd"
+    n.generators.at["g", "mttr_hours"] = 50.0
+    n.add("Bus", "b2", carrier="AC")
+    n.add("Load", "l2", bus="b2", p_set=5.0)
+    n.add("Link", "tie", bus0="b", bus1="b2", p_nom=10.0,
+          outage_rate_value=0.02, outage_rate_basis="FOR", mttr_hours=24.0)
+    PyPSAService.set_network(n)
+    _state.pop("fmea_sweep", None)
+    _state["solver_config"] = SolverConfig(voll=VOLL)
+
+    # A alone (no sweep yet).
+    out = R.get_fmea_modes()
+    classes = {r["failure_class"] for r in out["per_mode"]}
+    assert classes == {"A"}
+
+    # After a B+C sweep: all three.
+    R.post_fmea_sweep(body=R.FmeaSweepRequest(scenarios=[_scenario()]))
+    _state["fmea_sweep"]["thread"].join(timeout=600)
+    out = R.get_fmea_modes()
+    classes = {r["failure_class"] for r in out["per_mode"]}
+    assert classes == {"A", "B", "C"}, classes
+    crits = [r["criticality_eur_per_year"] for r in out["per_mode"]]
+    assert crits == sorted(crits, reverse=True)
+
+
+def test_fmea_modes_204_when_empty():
+    import pypsa
+    import routers.results as R
+    from routers.simulation import _state
+    n = pypsa.Network()
+    n.add("Bus", "b", carrier="AC")
+    PyPSAService.set_network(n)
+    _state.pop("fmea_sweep", None)
+    resp = R.get_fmea_modes()
+    assert getattr(resp, "status_code", 200) == 204

@@ -2928,6 +2928,34 @@ def get_curtailment(
         return _not_solved()
 
 
+@results_router.get("/fmea_modes")
+def get_fmea_modes():
+    """
+    Every COMPUTED failure-mode row on one list (adequacy Phase 4 Task 4):
+    class A from the COPT engine (regenerated on every call — zero solves)
+    plus the last contingency sweep's class B/C rows, criticality-sorted.
+    The worksheet merges this with the per-project sidecar's expert rows
+    client-side. 204 only when every source is empty.
+    """
+    per_mode: list = []
+    copt = get_copt()
+    if isinstance(copt, dict):
+        per_mode.extend(copt["per_mode"])
+    sweep = _state.get("fmea_sweep")
+    if sweep and sweep.get("status") == "done":
+        for r in sweep.get("rows", []):
+            if r.get("failure_mode"):
+                per_mode.append({**r["failure_mode"],
+                                 "delta_eue_mwh": r.get("delta_eue_mwh")})
+    if not per_mode:
+        return Response(status_code=204)
+    per_mode.sort(key=lambda r: float(r.get("criticality_eur_per_year", 0.0)),
+                  reverse=True)
+    return {"per_mode": per_mode,
+            "sweep_status": (sweep or {}).get("status"),
+            "sweep_error": (sweep or {}).get("error")}
+
+
 @results_router.get("/fmea_sweep")
 def get_fmea_sweep():
     """

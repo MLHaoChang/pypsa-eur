@@ -7,18 +7,18 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Download, Plus, Trash2 } from 'lucide-react'
+import { Download, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV } from './shared'
 import { SortHeader, TableSearchBox, useFilterableTable } from './useFilterableTable'
-import type { CoptPayload } from './adequacy'
 import {
   buildManualRow,
   mergeWorksheet,
   WORKSHEET_CSV_HEADER,
   worksheetCsvRows,
+  type ModesPayload,
   type WorksheetRow,
   type WorksheetSidecar,
 } from './fmea'
@@ -49,9 +49,14 @@ export default function FmeaTab() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
 
-  const { data: copt } = useQuery({
-    queryKey: nk(currentProject, 'results', 'copt'),
-    queryFn: () => resultsApi.getCopt(),
+  // All computed classes (A analytic + the last sweep's B/C) on one list;
+  // polls while a sweep runs so rows land when it finishes.
+  const { data: modes, refetch: refetchModes } = useQuery({
+    queryKey: nk(currentProject, 'results', 'fmea_modes'),
+    queryFn: () => resultsApi.getFmeaModes(),
+    refetchInterval: q =>
+      (q.state.data as { sweep_status?: string } | null)?.sweep_status === 'running'
+        ? 2000 : false,
   })
   const sidecarKey = nk(currentProject, 'adequacy', 'worksheet')
   const { data: sidecar } = useQuery({
@@ -69,9 +74,24 @@ export default function FmeaTab() {
 
   const sc = (sidecar ?? null) as WorksheetSidecar | null
   const rows = useMemo(
-    () => mergeWorksheet((copt ?? null) as CoptPayload | null, sc),
-    [copt, sc],
+    () => mergeWorksheet((modes ?? null) as ModesPayload | null, sc),
+    [modes, sc],
   )
+
+  // Class B/C need LP re-solves — run on demand, budget-guarded server-side.
+  const sweep = useMutation({
+    mutationFn: async () => {
+      const reg = currentProject
+        ? await resultsApi.getStressScenarios(currentProject).catch(() => null)
+        : null
+      return resultsApi.postFmeaSweep(reg?.scenarios ?? [])
+    },
+    onSuccess: () => { void refetchModes() },
+    onError: (e: Error) => toast.error(`Sweep failed to start: ${e.message}`),
+  })
+  const sweepRunning =
+    (modes as ModesPayload | null | undefined)?.sweep_status === 'running' ||
+    sweep.isPending
   type SortK = 'name' | 'occurrence_per_year' | 'severity_eur' | 'criticality_eur_per_year'
   const { rows: filtered, search, setSearch, sortKey, sortDir, onSortClick } =
     useFilterableTable<WorksheetRow, SortK>({
@@ -143,6 +163,17 @@ export default function FmeaTab() {
 
       <div className="flex items-center gap-2">
         <TableSearchBox value={search} onChange={setSearch} placeholder="Filter modes…" />
+        <button onClick={() => sweep.mutate()} disabled={sweepRunning}
+          title="Re-solves each eligible link outage (class B) and each stress scenario (class C) with capacities frozen — several LP solves; the network ends back in its base state."
+          className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent transition-colors disabled:opacity-50">
+          <RefreshCw size={11} className={sweepRunning ? 'animate-spin' : ''} />
+          {sweepRunning ? 'Sweeping…' : 'Run B/C sweep'}
+        </button>
+        {(modes as ModesPayload | null | undefined)?.sweep_error && (
+          <span className="text-[10px] text-danger">
+            {(modes as ModesPayload).sweep_error}
+          </span>
+        )}
         <button onClick={exportCsv}
           className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent transition-colors">
           <Download size={11} /> CSV

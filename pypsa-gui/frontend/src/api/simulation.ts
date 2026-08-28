@@ -397,6 +397,16 @@ export const resultsApi = {
     manual_rows: Array<Record<string, unknown>>
     overlays: Record<string, { mitigability?: string; notes?: string }>
   }) => client.put(`/projects/${encodeURIComponent(project)}/worksheet`, body).then(r => r.data),
+  // All computed failure-mode rows (A + last sweep's B/C) on one list.
+  getFmeaModes: () => client.get('/results/fmea_modes')
+    .then(r => (r.status === 204 ? null : r.data)),
+  // Contingency sweep lifecycle (class B links + class C scenarios).
+  getFmeaSweep: () => client.get('/results/fmea_sweep')
+    .then(r => (r.status === 204 ? null : r.data)),
+  postFmeaSweep: (scenarios: Array<Record<string, unknown>>) =>
+    client.post('/results/fmea_sweep', { scenarios }).then(r => r.data),
+  getStressScenarios: (project: string) =>
+    client.get(`/projects/${encodeURIComponent(project)}/stress_scenarios`).then(r => r.data),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;
