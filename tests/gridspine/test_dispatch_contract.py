@@ -51,3 +51,36 @@ def test_nan_p_rejected():
     df.loc[1, "p_mw"] = float("nan")
     with pytest.raises(ContractError, match="NaN"):
         validate_dispatch(df)
+
+
+def test_fractional_status_rejected_not_truncated():
+    # 1.5 must NOT survive as int64 1: the guard has to see the raw value.
+    df = good()
+    df["status"] = [1.5, 1.0, 0.0, 1.0]
+    with pytest.raises(ContractError, match="exactly 0 or 1"):
+        validate_dispatch(df)
+
+
+def test_non_integral_hour_rejected_but_integral_float_passes():
+    df = good()
+    df["hour"] = [1.5, 0.0, 1.0, 1.0]  # whole-column assign: int64 would truncate 1.5
+    with pytest.raises(ContractError, match="integral"):
+        validate_dispatch(df)
+
+    ok = good()
+    ok["hour"] = [0.0, 0.0, 2.0, 2.0]  # integral floats are legal
+    assert validate_dispatch(ok)["hour"].tolist() == [0, 0, 2, 2]
+
+
+def test_null_unit_id_rejected():
+    df = good()
+    df.loc[0, "unit_id"] = None
+    with pytest.raises(ContractError, match="null unit_id"):
+        validate_dispatch(df)
+
+
+def test_inf_p_rejected():
+    df = good()
+    df.loc[1, "p_mw"] = float("inf")
+    with pytest.raises(ContractError, match="inf"):
+        validate_dispatch(df)
