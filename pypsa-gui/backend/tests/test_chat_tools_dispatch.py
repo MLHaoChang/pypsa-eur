@@ -585,4 +585,47 @@ def test_clear_chat_history_on_unbound_returns_reason():
 @pytest.mark.parametrize("tool_name", [t["name"] for t in TOOLS])
 def test_dispatcher_for_each_tool_is_callable(tool_name):
     assert tool_name in chat_tools.DISPATCHERS
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 10 — registry-wide Safety-marker resolution.
+#
+# `chat_service._safety_tier_for` is FAIL-OPEN: an unmarked / unresolvable
+# tool defaults to "read", i.e. NO confirmation card. That default is
+# documented (see its docstring) rather than changed here — this test is
+# what keeps the fail-open default safe, by asserting every TOOLS entry
+# actually resolves to the SAME tier its own description literally states.
+# `test_every_tool_has_description` (test_chat_tools_endpoint_map.py) only
+# checks the substring "Safety:" is present; it would NOT catch a marker
+# that resolves to the wrong tier, or a tool with no marker at all quietly
+# falling back to "read" — this test asserts resolution, not presence.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_KNOWN_SAFETY_TIERS = frozenset(
+    ["read", "write", "destructive", "execution", "execution_long_running"]
+)
+
+
+@pytest.mark.parametrize("tool_name", [t["name"] for t in TOOLS])
+def test_every_tool_safety_marker_resolves_to_known_tier(tool_name):
+    """
+    Every tool must carry a `Safety: <tier>` marker that `_safety_tier_for`
+    resolves to one of the five known tiers, AND that literal
+    `Safety: <tier>` substring must actually be present in the description
+    — a tool with NO marker at all would still resolve to "read" (the
+    fail-open default) without this second check, silently passing.
+    """
+    from services.chat_service import _safety_tier_for
+
+    tier = _safety_tier_for(tool_name)
+    assert tier in _KNOWN_SAFETY_TIERS, (
+        f"tool {tool_name!r} resolved to unknown tier {tier!r}"
+    )
+    desc = _tool_description(tool_name)
+    assert f"Safety: {tier}" in desc, (
+        f"tool {tool_name!r}: _safety_tier_for resolved {tier!r} but the "
+        f"description does not literally carry 'Safety: {tier}' — this is "
+        f"the fail-open default catching a missing/unrecognised marker"
+    )
     assert callable(chat_tools.DISPATCHERS[tool_name])

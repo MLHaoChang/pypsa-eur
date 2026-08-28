@@ -1559,8 +1559,24 @@ def _safety_tier_for(tool_name: str) -> str:
     """
     Resolve a tool's safety tier (read / write / destructive / execution /
     execution_long_running) by grepping the documented `Safety: <tier>`
-    marker in its description. Defaults to "read" so an unknown / undocumented
-    tool fails closed (no confirmation card).
+    marker in its description.
+
+    THIS DEFAULT IS FAIL-**OPEN**, and the docstring used to claim the
+    opposite ("fails closed"). An unknown or unmarked tool resolves to
+    "read", and "read" is precisely the tier that gets NO confirmation card
+    — so a destructive tool whose author forgot the marker would execute
+    unconfirmed. The old wording named the behaviour ("no confirmation
+    card") while mislabelling its direction, which is how it survived
+    review.
+
+    The default is left as-is deliberately: making it confirmable would
+    start gating tools that are legitimately unmarked-as-read, changing
+    behaviour for the whole registry to defend against a case that does not
+    currently exist. What keeps it safe instead is
+    `test_every_tool_safety_marker_resolves_to_known_tier`
+    (tests/test_chat_tools_dispatch.py), which asserts every TOOLS entry
+    carries a marker resolving to its own literal tier — so a missing marker
+    is a CI failure rather than a silent runtime fail-open.
     """
     # Lazy import — keeps services.chat_service import-light when only the
     # Phase 0/2 helpers are needed.
@@ -2430,6 +2446,18 @@ def _build_system_prompt(
     parts = [
         base,
         _ASSISTANT_STANCE if include_tools else _ASSISTANT_STANCE_FACTS,
+        # Task 10 — profile awareness. TOOLS-ON ONLY, and that is the whole
+        # placement rule: it names `set_active_profile`, and Task 8's
+        # invariant is that the tools-off prompt names NO tool. A tools-less
+        # model cannot switch anything, so telling it how would be an
+        # instruction to do the impossible.
+        #
+        # Built per turn rather than stored as a constant because it reads
+        # the live profile store — but byte-stable WITHIN a turn, which is
+        # what the prompt's cache_control:ephemeral breakpoint requires.
+        # LABELS only: never an id, never a base_url. Redaction is
+        # secrets-only and would scrub neither.
+        *( [_profile_awareness_block()] if include_tools else [] ),
         _DOMAIN_GUIDE if include_tools else _DOMAIN_GUIDE_FACTS,
         _SOLVER_ERROR_DECODER if include_tools else _SOLVER_ERROR_DECODER_FACTS,
         _PRICE_CONGESTION_GUIDE if include_tools else _PRICE_CONGESTION_GUIDE_FACTS,
@@ -2439,6 +2467,46 @@ def _build_system_prompt(
     if live_meta:
         parts.append(live_meta)
     return "\n\n".join(parts)
+
+
+def _profile_awareness_block() -> str:
+    """
+    Tell the model which LLM profile it is running as, and how to change it.
+
+    Answers "which model am I talking to?" truthfully instead of letting the
+    model guess from its own weights — it has no other way to know, and a
+    confident wrong answer there is worse than none.
+
+    Never raises: a broken profile store must not cost a turn. `load_profiles`
+    already falls back to the built-ins on a corrupt file, but a defensive
+    catch here keeps a future store change from turning into an outage in the
+    prompt builder.
+
+    LABELS ONLY — no profile ids, no base_urls, no identifiers. The label is
+    admin-typed and already displayed in the UI; the rest would leak
+    configuration into the model's context and, from there, into transcripts.
+    """
+    try:
+        from services import llm_config
+        profiles, active_id = llm_config.load_profiles()
+        by_id = {p.id: p for p in profiles}
+        active = by_id.get(active_id)
+        if active is None:
+            return ""
+        others = sorted(p.label for p in profiles if p.id != active_id)
+        block = f"Active model profile: {active.label}."
+        if others:
+            block += " Also configured: " + ", ".join(others) + "."
+        block += (
+            " To switch, call set_active_profile with the chosen profile's id"
+            " — it takes effect in a new chat, not this one. To add a profile"
+            " or set an API key, direct the user to Settings; you cannot do"
+            " either yourself."
+        )
+        return block
+    except Exception:  # noqa: BLE001 — prompt meta must never abort a turn
+        logger.warning("chat: profile awareness block unavailable", exc_info=True)
+        return ""
 
 
 # Thinking blocks the API will reject on replay. `thinking` requires both

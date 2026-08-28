@@ -1171,6 +1171,10 @@ def test_toolless_prompt_omits_all_tool_names_but_keeps_domain_facts():
         "price_drivers", "line_duals", "upload_timeseries",
         "upload_load_profile", "upload_generator_profile",
         "generate_exemplary_timeseries",
+        # Task 10 — the profile-awareness block is CHAINING-only (names
+        # set_active_profile verbatim) and must vanish with tools off, same
+        # as every other tool-naming guide.
+        "set_active_profile",
     ):
         assert tool_name not in low, f"tools-off prompt leaks {tool_name!r}"
     # Domain content this review found was wrongly dropped must survive.
@@ -1179,3 +1183,198 @@ def test_toolless_prompt_omits_all_tool_names_but_keeps_domain_facts():
     assert "assign_duals" in low
     assert "clustering" in low or "sector coupling" in low or "co2 cap" in low
     assert "myopic" in low and "perfect" in low
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Task 10 — `set_active_profile` tool: confirmation-gated switching + the
+# read-side profile-awareness prompt block. Spec:
+# .superpowers/sdd/2026-08-14-llm-provider-config-and-switching/
+# task-10-brief.md.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_set_active_profile_safety_tier_is_destructive():
+    """
+    `set_active_profile` must resolve to the `destructive` tier via
+    `_safety_tier_for` — asserting the TIER itself (not merely that SOME
+    confirmation card appeared) so a lost or mistyped `Safety:` marker on
+    this tool fails this test loudly instead of silently falling back to
+    the fail-open "read" default (no confirmation card at all).
+    """
+    assert chat_service._safety_tier_for("set_active_profile") == "destructive"
+
+
+def _drive_destructive_turn(session, fake, message):
+    """
+    Run `chat_service.run_turn` on a background thread and block until a
+    confirmation token appears in `session.pending_confirmations`. Mirrors
+    `test_destructive_tool_blocks_until_approve` in test_chat_e2e.py — the
+    canonical deny/approve drive pattern for a destructive-tier tool.
+
+    Returns `(thread, streamed_events, done_event, token)`; the caller
+    records a decision via `session.record_decision(token, ...)`, then
+    `done_event.wait(...)` + `thread.join()`.
+    """
+    import threading
+    import time as _t
+
+    streamed: list[tuple[str, dict]] = []
+    done = threading.Event()
+
+    def _run():
+        for event in chat_service.run_turn(session, message, provider=fake):
+            streamed.append(event)
+        done.set()
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+
+    deadline = _t.monotonic() + 3.0
+    token = None
+    while _t.monotonic() < deadline:
+        with session._lock:
+            if session.pending_confirmations:
+                token = next(iter(session.pending_confirmations))
+                break
+        _t.sleep(0.02)
+    assert token, "pending confirmation token never appeared"
+    return thread, streamed, done, token
+
+
+def test_set_active_profile_approve_switches_active(appdata, monkeypatch):
+    """Approve -> `llm_config.resolve_active().id` changes to the target."""
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+
+    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+
+    session = chat_service.ChatSession()
+    fake = FakeProvider([
+        {
+            "events": [LLMEvent(type="tool_use_start", tool_use_id="tu-sap-1",
+                                 tool_name="set_active_profile")],
+            "blocks": [{"type": "tool_use", "id": "tu-sap-1",
+                        "name": "set_active_profile",
+                        "input": {"profile_id": "anthropic-opus"}}],
+            "usage": {"input_tokens": 5, "output_tokens": 5},
+        },
+        {
+            "events": [LLMEvent(type="text_delta", text="switched.")],
+            "blocks": [{"type": "text", "text": "switched."}],
+            "usage": {"input_tokens": 3, "output_tokens": 2},
+        },
+    ])
+
+    thread, streamed, done, token = _drive_destructive_turn(
+        session, fake, "switch to opus",
+    )
+    session.record_decision(token, "approve")
+    done.wait(5.0)
+    thread.join()
+
+    names = [n for n, _ in streamed]
+    assert "tool_pending_confirmation" in names
+    assert "tool_result" in names
+    result = next(p for n, p in streamed if n == "tool_result")
+    assert result["result"]["ok"] is True
+    assert result["result"]["active_profile_id"] == "anthropic-opus"
+    assert llm_config.resolve_active().id == "anthropic-opus"
+
+
+def test_set_active_profile_deny_leaves_active_unchanged(appdata, monkeypatch):
+    """Deny -> the dispatcher never runs; the active profile is untouched."""
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+
+    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+
+    session = chat_service.ChatSession()
+    fake = FakeProvider([
+        {
+            "events": [LLMEvent(type="tool_use_start", tool_use_id="tu-sap-2",
+                                 tool_name="set_active_profile")],
+            "blocks": [{"type": "tool_use", "id": "tu-sap-2",
+                        "name": "set_active_profile",
+                        "input": {"profile_id": "anthropic-opus"}}],
+            "usage": {"input_tokens": 5, "output_tokens": 5},
+        },
+        {
+            "events": [LLMEvent(type="text_delta", text="ok, cancelled.")],
+            "blocks": [{"type": "text", "text": "ok, cancelled."}],
+            "usage": {"input_tokens": 3, "output_tokens": 2},
+        },
+    ])
+
+    thread, streamed, done, token = _drive_destructive_turn(
+        session, fake, "switch to opus",
+    )
+    session.record_decision(token, "deny")
+    done.wait(5.0)
+    thread.join()
+
+    errs = [p for n, p in streamed if n == "tool_error"]
+    assert any(e["error_kind"] == "confirmation_denied" for e in errs)
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+
+
+def test_set_active_profile_unknown_id_is_structured_tool_error(appdata, monkeypatch):
+    """
+    Unknown `profile_id` -> approve dispatches the handler, which raises a
+    structured `HTTPException`; the turn surfaces
+    `error_kind='unknown_profile_id'` as a `tool_error`, never an escaping
+    exception, and the active profile is left unchanged.
+    """
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+
+    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+
+    session = chat_service.ChatSession()
+    fake = FakeProvider([
+        {
+            "events": [LLMEvent(type="tool_use_start", tool_use_id="tu-sap-3",
+                                 tool_name="set_active_profile")],
+            "blocks": [{"type": "tool_use", "id": "tu-sap-3",
+                        "name": "set_active_profile",
+                        "input": {"profile_id": "does-not-exist"}}],
+            "usage": {"input_tokens": 5, "output_tokens": 5},
+        },
+        {
+            "events": [LLMEvent(type="text_delta", text="couldn't find that profile.")],
+            "blocks": [{"type": "text", "text": "couldn't find that profile."}],
+            "usage": {"input_tokens": 3, "output_tokens": 2},
+        },
+    ])
+
+    thread, streamed, done, token = _drive_destructive_turn(
+        session, fake, "switch to a bogus profile",
+    )
+    session.record_decision(token, "approve")
+    done.wait(5.0)
+    thread.join()
+
+    errs = [p for n, p in streamed if n == "tool_error"]
+    assert any(e["error_kind"] == "unknown_profile_id" for e in errs)
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+
+
+def test_system_prompt_names_active_profile_and_configured_labels(appdata):
+    """
+    Tools-on read-side awareness (Task 10): the rendered system prompt
+    names the ACTIVE profile's label, the OTHER configured profile's label,
+    and the `set_active_profile` switching procedure.
+    """
+    from services import llm_config
+
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+    prompt = chat_service._build_system_prompt(chat_service.ChatSession())
+    assert "Claude Sonnet" in prompt  # active builtin's label
+    assert "Claude Opus" in prompt  # the other configured profile's label
+    assert "set_active_profile" in prompt
+    assert "new chat" in prompt.lower()

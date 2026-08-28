@@ -3082,6 +3082,63 @@ def export_asset_results(
     return meta
 
 
+# ── LLM provider switching (1) — Task 10 ────────────────────────────────────
+
+
+def set_active_profile(profile_id: str) -> dict:
+    """
+    Switch the assistant to an ALREADY-CONFIGURED LLM profile.
+
+    SCOPE BOUNDARY, deliberate and load-bearing. This tool only selects among
+    profiles a super-admin has already created in Settings. It never creates
+    a profile, never edits one, and never accepts an API key — so no key
+    material ever transits the chat channel, where it would land in the
+    model's context, in `session.messages`, and (via the assistant's own
+    reply) potentially in `chat.jsonl`. Creation and key entry stay on the
+    super-admin-gated HTTP surface.
+
+    WHY THE CHANGE IS DEFERRED TO A NEW CHAT. A session is bound to the
+    profile it resolved at creation (`ChatSession.profile_id` / `bound_wire`),
+    because its message history is stored in one provider's block shapes;
+    replaying thinking or image blocks to a different wire is a 400 at best
+    and a silent capability loss at worst. So this writes the ACTIVE profile
+    for the next session and says so, rather than mutating the running one.
+
+    Returns ``{ok, active_profile_id, note}``. An unconfigured id raises a
+    structured `HTTPException` (`error_kind='unknown_profile_id'`) which the
+    harness surfaces as a `tool_error` frame — never an escaping exception.
+
+    The message names LABELS only, never an identifier or a base_url:
+    redaction is secrets-only by design and would not scrub either.
+    """
+    from services import llm_config
+
+    profiles, _active = llm_config.load_profiles()
+    known = {p.id: p for p in profiles}
+    if profile_id not in known:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_kind": "unknown_profile_id",
+                "message": (
+                    f"no configured profile {profile_id!r}. Configured: "
+                    + ", ".join(sorted(p.label for p in profiles))
+                    + ". Add one in Settings first — this tool only switches "
+                    "between profiles that already exist."
+                ),
+            },
+        )
+    llm_config.set_active(profile_id)
+    return {
+        "ok": True,
+        "active_profile_id": profile_id,
+        "note": (
+            f"{known[profile_id].label} is now the active profile. This chat "
+            "stays on the model it started with — start a new chat to use it."
+        ),
+    }
+
+
 # ── Chatbot uploads — produce (4) ───────────────────────────────────────────
 #
 # Agent-driven file exports. Each writes the bytes into the active project's
@@ -3557,4 +3614,6 @@ DISPATCHERS: dict[str, Any] = {
     "get_asset_results": get_asset_results,
     "ui_open_asset_detail": ui_open_asset_detail,
     "export_asset_results": export_asset_results,
+    # llm provider switching (1) — Task 10
+    "set_active_profile": set_active_profile,
 }
