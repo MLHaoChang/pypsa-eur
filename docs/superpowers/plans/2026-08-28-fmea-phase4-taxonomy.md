@@ -33,9 +33,9 @@ Phases 0–3 constraints apply. Live-solve tests remain the standard; sweeps in 
 
 ### Task 3: class C — stress scenarios
 
-- [ ] **Failing tests first:** scenario registry sidecar round-trips (worksheet-service pattern: JSON, atomic, caps, validation — `frequency_per_year > 0`, multipliers in sane ranges, `kind: "parametric" | "profiles"`); a parametric cold-snap scenario (electrical load ×1.3, renewable availability ×0.5) re-solves into a class-C row whose ΔEUE matches the hand-computed shortfall; parametric rows carry a `parametric` marker in their mode_id/basis so the UI can label them.
-- [ ] Implement `services/adequacy/stress.py` (registry: `GET/PUT /api/projects/{name}/stress_scenarios`) + `class_c_contingencies(n, scenarios)` (load multiplier via `loads_t/p_set` transform, availability multiplier via `p_max_pu` transform, undo-safe) wired into the same sweep runner.
-- [ ] Commit: `feat(gui): class-C stress-scenario rows + per-project scenario registry`.
+- [x] **Failing tests first:** scenario registry sidecar round-trips (worksheet-service pattern: JSON, atomic, caps, validation — `frequency_per_year > 0`, multipliers in sane ranges, `kind: "parametric" | "profiles"`); a parametric cold-snap scenario (electrical load ×1.3, renewable availability ×0.5) re-solves into a class-C row whose ΔEUE matches the hand-computed shortfall; parametric rows carry a `parametric` marker in their mode_id/basis so the UI can label them.
+- [x] Implement `services/adequacy/stress.py` (registry: `GET/PUT /api/projects/{name}/stress_scenarios`) + `class_c_contingencies(n, scenarios)` (load multiplier via `loads_t/p_set` transform, availability multiplier via `p_max_pu` transform, undo-safe) wired into the same sweep runner.
+- [x] Commit: `feat(gui): class-C stress-scenario rows + per-project scenario registry`.
 
 ### Task 4: the aggregator + worksheet integration
 

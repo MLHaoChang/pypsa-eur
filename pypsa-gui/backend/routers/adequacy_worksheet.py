@@ -16,6 +16,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from routers.deps import AuthorizedProject, ProjectAccessDep
+from services.adequacy.stress import (
+    StressValidationError,
+    load_scenarios,
+    save_scenarios,
+)
 from services.adequacy.worksheet import (
     WorksheetValidationError,
     load_worksheet,
@@ -43,4 +48,24 @@ def put_worksheet(body: WorksheetPut,
                               manual_rows=body.manual_rows,
                               overlays=body.overlays)
     except WorksheetValidationError as exc:
+        raise HTTPException(422, str(exc))
+
+
+class StressScenariosPut(BaseModel):
+    scenarios: list[dict] = Field(default_factory=list)
+
+
+@router.get("/{name}/stress_scenarios")
+def get_stress_scenarios(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """Class-C stress-scenario registry (adequacy Phase 4 Task 3) — same
+    sidecar pattern and authorization as the worksheet."""
+    return {"scenarios": load_scenarios(project.directory)}
+
+
+@router.put("/{name}/stress_scenarios")
+def put_stress_scenarios(body: StressScenariosPut,
+                         project: AuthorizedProject = ProjectAccessDep) -> dict:
+    try:
+        return {"scenarios": save_scenarios(project.directory, body.scenarios)}
+    except StressValidationError as exc:
         raise HTTPException(422, str(exc))

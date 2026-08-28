@@ -21,6 +21,8 @@ from typing import Any
 
 import threading as _threading
 
+from pydantic import BaseModel as _BaseModel
+
 from fastapi import APIRouter, Query, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
@@ -2939,18 +2941,30 @@ def get_fmea_sweep():
     return {k: v for k, v in st.items() if k != "thread"}
 
 
+class FmeaSweepRequest(_BaseModel):
+    # Class-C scenarios, passed by the client from the authorized registry
+    # GET (/api/projects/{name}/stress_scenarios) — this route operates on
+    # the FOREGROUND network and carries no project name, so the sidecar is
+    # read where authorization lives and re-validated here before running.
+    scenarios: list = []
+
+
 @results_router.post("/fmea_sweep")
-def post_fmea_sweep():
+def post_fmea_sweep(body: FmeaSweepRequest | None = None):
     """
-    Start the contingency sweep (class B today; class C scenarios join via
-    the same runner) in a worker thread — a sweep is several LP solves and
-    must never block a request. 409 while a sweep or a foreground solve is
-    running. The sweep's closing base re-solve leaves the network AND the
-    foreground results in base state (the final solve writes through the
-    real state sink).
+    Start the contingency sweep — class B (link outages) plus any class-C
+    scenarios in the body — in a worker thread: a sweep is several LP
+    solves and must never block a request. 409 while a sweep or a
+    foreground solve is running. The closing base re-solve leaves the
+    network AND the foreground results in base state (it writes through
+    the real state sink).
     """
     import time
 
+    from services.adequacy.stress import (
+        StressValidationError,
+        run_class_c_sweep,
+    )
     from services.adequacy.sweep import SweepBudgetError, run_class_b_sweep
     from routers.simulation import _state_update
 
@@ -2965,17 +2979,25 @@ def post_fmea_sweep():
     n = PyPSAService.get_network()
     lock = PyPSAService.get_lock()
 
+    scenarios = list(getattr(body, "scenarios", None) or [])
+
     def worker():
         try:
+            # Class B first with a private final sink; the LAST sweep's
+            # closing base re-solve writes the REAL state sink, so
+            # /results/lost_load etc. reflect base afterwards.
             rows = run_class_b_sweep(
                 n, lock, cfg,
-                # The closing base re-solve writes the REAL state sink, so
-                # /results/lost_load etc. reflect base afterwards.
-                final_state_update=_state_update,
+                final_state_update=None if scenarios else _state_update,
             )
+            if scenarios:
+                rows = rows + run_class_c_sweep(
+                    n, lock, cfg, scenarios,
+                    final_state_update=_state_update,
+                )
             _state["fmea_sweep"].update(
                 status="done", rows=rows, finished_at=time.time(), error=None)
-        except SweepBudgetError as exc:
+        except (SweepBudgetError, StressValidationError) as exc:
             _state["fmea_sweep"].update(
                 status="failed", rows=[], error=str(exc), finished_at=time.time())
         except Exception as exc:  # noqa: BLE001
