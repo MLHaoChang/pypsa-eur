@@ -70,6 +70,7 @@ from routers import (
     changelog,
     chat,
     clustering,
+    adequacy_worksheet,
     compare,
     io,
     local_settings,
@@ -780,6 +781,11 @@ app.include_router(project_network.router, prefix="/api/projects", tags=["projec
 # `/{name}/results-summary` paths) — registered before projects.router for
 # clarity; the extra path segment means the `/{name}` catch-all never shadows it.
 app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
+# FMEA worksheet sidecar (adequacy Phase 3) — specific `/{name}/worksheet`
+# path, registered before projects.router so the `/{name}` catch-all never
+# shadows it. Manual rows + overlays only; computed rows come from
+# /results/copt and merge client-side.
+app.include_router(adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"])
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(snapshots.router, prefix="/api/projects", tags=["snapshots"])
 # Chatbot file uploads (Phase A) — per-project file storage at

@@ -18,9 +18,9 @@ Phase 0–2 constraints apply (branch, staging, test-first with demonstrated red
 
 ### Task 1: the sidecar service + routes
 
-- [ ] **Failing tests first** (`tests/test_adequacy_worksheet.py`): round-trip save/load through the routes; overlays re-attach by `mode_id` (save overlay → "re-solve" simulated by nothing at all, since computed rows aren't stored → GET returns the overlay untouched); manual rows validate as `FailureModeResult` (engine `expert`, fidelity `expert_judgement`, class `D`) and invalid rows 422; size caps enforced; missing sidecar → empty state, not 404; atomic write (no partial file on a writer exception).
-- [ ] Add the two contract literals; implement `services/adequacy/worksheet.py` (load/save/validate) + `routers/` routes `GET`/`PUT /api/projects/{name}/worksheet` (PUT replaces the whole manual state — payloads are small; echo a monotonically increasing `version` for the UI's last-write-wins awareness).
-- [ ] Commit: `feat(gui): per-project FMEA worksheet sidecar (manual rows + overlays)`.
+- [x] **Failing tests first** (`tests/test_adequacy_worksheet.py`): round-trip save/load through the routes; overlays re-attach by `mode_id` (save overlay → "re-solve" simulated by nothing at all, since computed rows aren't stored → GET returns the overlay untouched); manual rows validate as `FailureModeResult` (engine `expert`, fidelity `expert_judgement`, class `D`) and invalid rows 422; size caps enforced; missing sidecar → empty state, not 404; atomic write (no partial file on a writer exception).
+- [x] Add the two contract literals; implement `services/adequacy/worksheet.py` (load/save/validate) + `routers/` routes `GET`/`PUT /api/projects/{name}/worksheet` (PUT replaces the whole manual state — payloads are small; echo a monotonically increasing `version` for the UI's last-write-wins awareness).
+- [x] Commit: `feat(gui): per-project FMEA worksheet sidecar (manual rows + overlays)`.
 
 ### Task 2: the worksheet tab
 

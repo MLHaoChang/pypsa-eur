@@ -18,8 +18,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Engine = Literal["lp_proxy", "copt", "pras", "antares"]
-Fidelity = Literal["deterministic_scenario", "analytic_convolution", "sequential_mc"]
+# "expert" / "expert_judgement": worksheet rows a person entered by hand
+# (class D, and any manual annotation). Honest provenance, not a loophole —
+# the UI badges them exactly like engine-computed rows (Phase 3).
+Engine = Literal["lp_proxy", "copt", "pras", "antares", "expert"]
+Fidelity = Literal["deterministic_scenario", "analytic_convolution",
+                   "sequential_mc", "expert_judgement"]
 
 
 class SystemTarget(BaseModel):
