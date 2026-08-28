@@ -187,6 +187,41 @@ than generators, the check that would catch it is `S11.generators.put_partial`
 | S14.9 | Delete without `cascade` is blocked (`409 descendants_exist`) |
 | S14.10 | Cascading delete removes both base and branch |
 
+### S15 — Solution FMEA / adequacy journey (area 15)
+
+Unlike S10–S14 this suite builds its network from scratch over the API
+rather than from the `3bus` template. Its assertions are exact arithmetic
+over particular assets — a generator carrying occurrence data, links to
+trip for class B, a load tight enough that shedding is forced — and a
+template that happened to ship no links would leave the class-B rows
+silently empty, i.e. a suite that passes because it has nothing to check.
+Building explicitly also keeps S15 runnable where template payloads are
+not installed.
+
+Two steps carry an explicit **non-vacuity** guard (`ENS > 0`,
+`shed_hours > 0`). Both first passed while checking nothing: with no
+shedding the S15.7 cost identity reduces to `0 == 0`. The fixture now
+prices the extendable peaker so that shedding beats building it under a
+deliberately loose cap, while the cap the sweep steps re-tighten stays
+feasible because that peaker remains extendable.
+
+| id | Assertion |
+|----|-----------|
+| S15.1 | Scratch project built over the API — every component call 2xx and preflight reports no errors |
+| S15.2 | The API boundary rejects nonsense reliability inputs (`422`): negative ENS cap, negative zone multiple, DSR share > 1, negative DSR price. A negative cap was previously accepted and then silently discarded downstream, making "target of −1" indistinguishable from "no target" |
+| S15.3 | The meaningful range is still accepted, `0` and `None` included — bounding the fields must not break turning the target off |
+| S15.4 | `/api/results/copt` returns a ranked COPT with **no solve at all** once one generator carries occurrence data |
+| S15.5 | Occurrence rate equals its closed form `FOR × 8760 / MTTR` exactly, so a rate conversion off by a factor cannot pass |
+| S15.6 | With a target set, a solve is optimal and `/api/results/adequacy` reports which standard actually bound |
+| S15.7 | **The cost axis excludes shed cost**: `objective − reported cost == ENS × VOLL` exactly, and `excludes_shed_cost is True`. Guarded non-vacuous by `ENS > 0` |
+| S15.8 | Shed-hours reaches `/api/results/lost_load` and agrees with the adequacy report — the two surfaces must not disagree on a metric neither had before. Guarded non-vacuous by `hours > 0` |
+| S15.9 | Worksheet sidecar round-trips manual class-D rows and mode-keyed overlays (the only persisted parts; computed rows regenerate from `/results/copt`, which is what makes annotations survive a re-solve) |
+| S15.10 | A negative criticality is rejected `422` and the previously stored rows are left intact — severity/criticality are `>= 0` by contract, so an out-of-scope P2X row can never rank as beneficial |
+| S15.11 | Stress-scenario registry round-trips; the id, frequency and cap guards each reject `422`; and a rejected write does **not** clobber the stored value |
+| S15.12 | Sweep guards: refused `422` without a VOLL, accepted `200`, and a concurrent sweep refused `409` |
+| S15.13 | Sweep completes with both class B and class C rows, and every row satisfies `criticality == occurrence × severity` (f×S by construction). Class C is additionally pinned to `ΔEUE × VoLL × frequency`. **The two classes reach f×S by genuinely different routes** — class B multiplies by the unavailability *probability* q (a link outage is a state the system sits in a fraction q of the time), class C by an annual *event frequency* — and asserting either route's formula on the other overstates class B by `8760/MTTR`, which is how this check was first written and what running it caught |
+| S15.14 | The sweep's closing base re-solve leaves the foreground results in base state (`condition == "optimal"`, report readable) |
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

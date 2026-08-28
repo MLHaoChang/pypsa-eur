@@ -1797,6 +1797,355 @@ def suite_S14():
            f"branch_gone={branch not in remaining}")
 
 
+
+def suite_S15():
+    """
+    Solution FMEA / adequacy journey (adequacy spec §5, phases 0-4).
+
+    Exists because the ~150 pytest adequacy tests construct `SolverConfig`
+    directly — a plain dataclass that validates nothing — and call route
+    handlers as functions. Neither reaches the API boundary, which is where
+    the unbounded-input defect lived and where a missing import once
+    survived every handler-level test. This suite drives the LIVE surface.
+
+    Its standard is exact arithmetic, not "a number came back": occurrence
+    rates, the shed-cost exclusion identity and sweep criticality are all
+    asserted against their closed forms, so a plausible-looking wrong
+    number fails here.
+    """
+    print("\nS15 - Solution FMEA / adequacy journey (area 15)")
+    name = "qa_e2e_fmea"
+
+    # Solver config is process-global state, not project state: restore
+    # whatever was there so a later suite (or the operator's own session)
+    # does not inherit this suite's reliability target and VOLL.
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    # Built from scratch over the API rather than from the 3bus template,
+    # unlike S10-S14. Two reasons, both specific to this suite: its
+    # assertions are exact arithmetic over particular assets (a generator
+    # carrying occurrence data, links to trip for class B, a load tight
+    # enough to matter), and a template that happens to ship no links would
+    # make the class-B rows silently empty — a suite that passes by having
+    # nothing to check. Building it here also makes S15 runnable in an
+    # environment where the template payloads are not installed.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        skip("S15.1", f"create project -> {st_c} {str(body_c)[:80]}")
+        for i in range(2, 15):
+            skip(f"S15.{i}", "no scratch project")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for carrier in ("gas", "load_shedding"):
+        built.append(http("/api/network/carriers", method="POST",
+                          body={"name": carrier})[0])
+    for bus in ("bus_a", "bus_b"):
+        built.append(http("/api/network/buses", method="POST",
+                          body={"name": bus, "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-01 23:00", "freq": "h"})[0])
+    # All firm generation at bus_a, all load at bus_b, so the links are the
+    # lifeline and class B has something that could actually bite.
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "ccgt_a", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 300.0, "marginal_cost": 60.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker_b", "bus": "bus_b", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 400.0, "capital_cost": 500_000.0,
+                            "marginal_cost": 150.0})[0])
+    for link, cap, forr, mttr in (("link_ab", 200.0, 0.02, 72.0),
+                                  ("link_ab2", 150.0, 0.03, 60.0)):
+        built.append(http("/api/network/links", method="POST",
+                          body={"name": link, "bus0": "bus_a", "bus1": "bus_b",
+                                "p_nom": cap, "efficiency": 1.0,
+                                "outage_rate_value": forr,
+                                "outage_rate_basis": "FOR",
+                                "mttr_hours": mttr})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_b", "bus": "bus_b", "p_set": 330.0})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+    st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+    errs = [i.get("code") for i in ((pf or {}).get("issues") or [])
+            if isinstance(pf, dict) and i.get("severity") == "error"]
+    record("S15.1", not bad_build and not errs,
+           f"built {name}: non-2xx={bad_build or 'none'}; "
+           f"preflight errors={errs or 'none'}")
+
+    # ── S15.2/3 — API-boundary bounds on the reliability inputs. A negative
+    # cap used to be accepted and then silently discarded downstream, which
+    # made "target of -1" indistinguishable from "no target at all".
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)[0]
+
+    nonsense = {
+        "ens_cap_permyriad=-1": {"ens_cap_permyriad": -1.0},
+        "ens_zone_cap_multiple=-3": {"ens_cap_permyriad": 20.0, "ens_zone_cap_multiple": -3.0},
+        "dsr_share_of_load=5": {"dsr_share_of_load": 5.0},
+        "dsr_price=-100": {"dsr_price_eur_per_mwh": -100.0},
+    }
+    bad = [k for k, v in nonsense.items() if put_cfg(**v) != 422]
+    record("S15.2", not bad, f"nonsense rejected 422; accepted-anyway={bad or 'none'}")
+
+    # 0 and None are the DOCUMENTED "off" — bounding must not break them.
+    meaningful = {
+        "cap=20": {"ens_cap_permyriad": 20.0},
+        "cap=0": {"ens_cap_permyriad": 0.0},
+        "cap=None": {"ens_cap_permyriad": None},
+        "share=1.0": {"dsr_share_of_load": 1.0},
+    }
+    refused = [k for k, v in meaningful.items() if put_cfg(**v) != 200]
+    record("S15.3", not refused, f"meaningful range accepted; refused={refused or 'none'}")
+
+    # ── S15.4/5 — COPT screening needs NO solve at all. Give one generator
+    # occurrence data by reading its row back and PUTting the whole row
+    # (these PUTs replace, they do not merge).
+    st_g, gens = http("/api/network/generators")
+    gen = gens[0] if isinstance(gens, list) and gens else None
+    if gen is None:
+        skip("S15.4", f"no generators on the template -> {st_g}")
+        skip("S15.5", "no generator to annotate")
+    else:
+        FOR_, MTTR = 0.06, 48.0
+        row = dict(gen)
+        row.update({"outage_rate_value": FOR_, "outage_rate_basis": "FOR",
+                    "mttr_hours": MTTR})
+        st_p, _ = http(f"/api/network/generators/{q(str(gen['name']))}",
+                       method="PUT", body=row)
+        st_copt, copt = http("/api/results/copt")
+        modes = (copt or {}).get("per_mode") or [] if isinstance(copt, dict) else []
+        record("S15.4", st_p == 200 and st_copt == 200 and len(modes) > 0,
+               f"PUT outage -> {st_p}; /results/copt -> {st_copt}; "
+               f"modes={len(modes)} (no solve required)")
+
+        # events/yr = FOR x 8760 / MTTR. Closed form, so an off-by-a-factor
+        # in the rate conversion cannot pass.
+        mine = next((m for m in modes if m.get("name") == gen["name"]), None)
+        expected = FOR_ * 8760.0 / MTTR
+        got = (mine or {}).get("occurrence_per_year")
+        near = got is not None and abs(float(got) - expected) < 1e-9
+        record("S15.5", near,
+               f"occurrence {got} == FOR*8760/MTTR = {expected:.6f}"
+               if mine else "annotated generator absent from the COPT ranking")
+
+    # ── S15.6/7/8 — set a target, solve, and read every result surface.
+    # A DELIBERATELY loose cap. Firm generation (300 MW at bus_a) is short of
+    # the 330 MW load, and the peaker is priced so that shedding beats
+    # building it, so this solve sheds ~720 MWh over the 24 h horizon. That
+    # is the point: with ENS = 0 the S15.7 cost identity reduces to 0 == 0
+    # and passes while checking nothing, which is exactly how it first
+    # passed. S15.7 now also requires ENS > 0 so it can never again be
+    # vacuous. The later sweep steps re-tighten the cap, which stays
+    # feasible because the peaker remains extendable.
+    st_cfg = put_cfg(ens_cap_permyriad=1500.0)
+    st_r, _ = http("/api/simulation/run", method="POST")
+
+    def poll():
+        for _ in range(90):                     # 180s ceiling, as S13
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(2)
+        return None
+
+    status = poll()
+    if status is None:
+        # Hazard 5: cannot distinguish stuck from slow — skip, never fail.
+        for i in (6, 7, 8):
+            skip(f"S15.{i}", "solve did not finish within the 180s ceiling")
+    else:
+        st_a, rep = http("/api/results/adequacy")
+        good = st_a == 200 and isinstance(rep, dict)
+        binding = rep.get("target", {}).get("binding") if good else None
+        record("S15.6", good and binding in ("system_cap", "zone_ceiling", "voll"),
+               f"cfg->{st_cfg} run->{st_r} cond={status.get('condition')} "
+               f"/results/adequacy -> {st_a} binding={binding}")
+
+        # The cost axis excludes shed cost BY CONSTRUCTION (typed
+        # Literal[True]), so a self-referential frontier is unconstructible.
+        # The identity that must hold: objective - reported cost == ENS x VOLL.
+        if good:
+            ens = float(rep["target"]["system"]["achieved_ens_mwh"])
+            cost = float(rep["cost"]["total_system_cost_eur"])
+            obj = float(status.get("objective") or 0.0)
+            voll = float((rep.get("inputs") or {}).get("voll_eur_per_mwh") or 3000.0)
+            gap, want = obj - cost, ens * voll
+            record("S15.7", ens > 0.0
+                   and abs(gap - want) <= max(1e-6, 1e-9 * abs(obj))
+                   and rep["cost"]["excludes_shed_cost"] is True,
+                   f"objective {obj:.4f} - cost {cost:.4f} = {gap:.6f}; "
+                   f"ENS {ens:.6f} x VOLL {voll:g} = {want:.6f}; "
+                   f"excludes_shed_cost={rep['cost']['excludes_shed_cost']}; "
+                   f"non-vacuous(ENS>0)={ens > 0.0}")
+
+            # Shed-hours is a NEW metric; it must reach the Lost Load tab,
+            # not just the adequacy report, or the two surfaces disagree.
+            st_ll, ll = http("/api/results/lost_load")
+            if st_ll == 204:
+                record("S15.8", ens == 0.0,
+                       f"/results/lost_load -> 204 with ENS={ens:g} "
+                       "(no shedding, so no capture — consistent)")
+            else:
+                sh = (ll or {}).get("shed_hours") if isinstance(ll, dict) else None
+                agree = (sh or {}).get("total") == rep["metrics"]["shed_hours"]
+                total = (sh or {}).get("total")
+                record("S15.8", st_ll == 200 and sh is not None and agree
+                       and (total or 0) > 0,
+                       f"/results/lost_load -> {st_ll} shed_hours={sh} "
+                       f"vs report {rep['metrics']['shed_hours']}; "
+                       f"non-vacuous(hours>0)={(total or 0) > 0}")
+        else:
+            skip("S15.7", "no adequacy report")
+            skip("S15.8", "no adequacy report")
+
+    # ── S15.9/10 — worksheet sidecar. Manual class-D rows and mode-keyed
+    # overlays are the ONLY persisted parts; computed rows regenerate from
+    # /results/copt, which is what makes annotations survive a re-solve.
+    row = {"mode_id": "manual:cyber:scada_loss", "component_class": "Expert",
+           "name": "SCADA loss", "failure_class": "D", "occurrence_per_year": 0.2,
+           "occurrence_basis": "expert", "severity_eur": 1_250_000.0,
+           "criticality_eur_per_year": 250_000.0, "in_metric_scope": True,
+           "mitigability": "offline dispatch fallback", "engine": "expert",
+           "fidelity": "expert_judgement"}
+    overlay_key = "generator:x:forced_outage"
+    st_w, _ = http(f"/api/projects/{q(name)}/worksheet", method="PUT",
+                   body={"manual_rows": [row],
+                         "overlays": {overlay_key: {"mitigability": "redundant start"}}})
+    st_wg, ws = http(f"/api/projects/{q(name)}/worksheet")
+    kept = (isinstance(ws, dict)
+            and len(ws.get("manual_rows") or []) == 1
+            and (ws.get("overlays") or {}).get(overlay_key, {}).get("mitigability")
+            == "redundant start")
+    record("S15.9", st_w == 200 and st_wg == 200 and kept,
+           f"worksheet PUT->{st_w} GET->{st_wg} round-tripped={kept}")
+
+    # Severity/criticality are >= 0 by contract: on an electricity-only
+    # metric a P2X outage REDUCES electrical demand, and such rows must be
+    # flagged out-of-scope, never ranked as beneficial.
+    st_neg, _ = http(f"/api/projects/{q(name)}/worksheet", method="PUT",
+                     body={"manual_rows": [dict(row, criticality_eur_per_year=-5000.0)],
+                           "overlays": {}})
+    _, ws2 = http(f"/api/projects/{q(name)}/worksheet")
+    intact = isinstance(ws2, dict) and len(ws2.get("manual_rows") or []) == 1
+    record("S15.10", st_neg == 422 and intact,
+           f"negative criticality -> {st_neg} (want 422); prior rows intact={intact}")
+
+    # ── S15.11 — stress registry: round-trip, then three validator guards,
+    # then prove a REJECTED write did not clobber the stored value.
+    good_sc = {"id": "cold_snap", "kind": "parametric", "frequency_per_year": 2.0,
+               "electrical_load_multiplier": 1.2,
+               "renewable_availability_multiplier": 0.6, "label": "Cold snap"}
+    st_ss, _ = http(f"/api/projects/{q(name)}/stress_scenarios", method="PUT",
+                    body={"scenarios": [good_sc]})
+    guards = {
+        "bad id": [{"id": "Cold Snap!", "kind": "parametric", "frequency_per_year": 2.0}],
+        "frequency 0": [{"id": "x", "kind": "parametric", "frequency_per_year": 0}],
+        "over cap": [{"id": f"s{i}", "kind": "parametric", "frequency_per_year": 1.0}
+                     for i in range(11)],
+    }
+    leaked = [k for k, v in guards.items()
+              if http(f"/api/projects/{q(name)}/stress_scenarios", method="PUT",
+                      body={"scenarios": v})[0] != 422]
+    _, ss = http(f"/api/projects/{q(name)}/stress_scenarios")
+    survived = (isinstance(ss, dict) and len(ss.get("scenarios") or []) == 1
+                and ss["scenarios"][0].get("id") == "cold_snap")
+    record("S15.11", st_ss == 200 and not leaked and survived,
+           f"stress PUT->{st_ss}; guards-that-leaked={leaked or 'none'}; "
+           f"stored value survived rejected writes={survived}")
+
+    # ── S15.12 — sweep guards. A sweep is several LP solves in a worker
+    # thread; it must refuse without a VOLL and refuse to run twice at once.
+    put_cfg(voll=0.0, ens_cap_permyriad=20.0)
+    st_novoll, _ = http("/api/results/fmea_sweep", method="POST", body={})
+    put_cfg(voll=3000.0, ens_cap_permyriad=50.0)
+    st_start, _ = http("/api/results/fmea_sweep", method="POST",
+                       body={"scenarios": [good_sc]})
+    st_dup, _ = http("/api/results/fmea_sweep", method="POST", body={})
+    record("S15.12", st_novoll == 422 and st_start == 200 and st_dup == 409,
+           f"no-VOLL->{st_novoll} (422)  start->{st_start} (200)  "
+           f"concurrent->{st_dup} (409)")
+
+    # ── S15.13/14 — sweep completion, criticality arithmetic, and the
+    # closing base re-solve that must leave foreground results in base state.
+    sweep = None
+    for _ in range(120):                        # 240s ceiling: several solves
+        st_sw, sw = http("/api/results/fmea_sweep")
+        if st_sw == 200 and isinstance(sw, dict) and sw.get("status") != "running":
+            sweep = sw
+            break
+        time.sleep(2)
+    if sweep is None:
+        skip("S15.13", "sweep did not finish within the 240s ceiling")
+        skip("S15.14", "sweep did not finish")
+    else:
+        rows = sweep.get("rows") or []
+        # The invariant BOTH classes are built to satisfy is f x S:
+        # criticality == occurrence_per_year x severity_eur. The two classes
+        # reach it by genuinely different routes, and asserting either
+        # route's formula on the other is simply wrong:
+        #
+        #   class B  criticality = q x dEUE x VoLL, where q is the
+        #            UNAVAILABILITY PROBABILITY — a link outage is a state
+        #            the system sits in a fraction q of the time. Occurrence
+        #            (8760q/MTTR) is reported separately and severity is
+        #            back-solved as criticality/occurrence.
+        #   class C  severity = dEUE x VoLL PER EVENT and criticality =
+        #            frequency_per_year x severity — a cold snap is a
+        #            discrete episode with an empirical annual frequency.
+        #
+        # Multiplying class B by its events/yr would overstate it by
+        # 8760/MTTR, which is how this check was first written and what
+        # running it caught.
+        wrong = []
+        for r in rows:
+            fm = r.get("failure_mode") or {}
+            occ, sev = fm.get("occurrence_per_year"), fm.get("severity_eur")
+            crit, d = fm.get("criticality_eur_per_year"), r.get("delta_eue_mwh")
+            if None in (occ, sev, crit):
+                continue
+            want = float(occ) * float(sev)
+            if abs(float(crit) - want) > max(1e-6, 1e-9 * abs(want)):
+                wrong.append(f"{r.get('id')}: f*S {want} != crit {crit}")
+            # Class C is additionally pinned to its closed form end to end.
+            if fm.get("failure_class") == "C" and d is not None:
+                want_c = float(d) * 3000.0 * float(occ)
+                if abs(float(crit) - want_c) > max(1e-6, 1e-9 * abs(want_c)):
+                    wrong.append(f"{r.get('id')}: dEUE*VoLL*freq {want_c} "
+                                 f"!= crit {crit}")
+        classes = sorted({(r.get("failure_mode") or {}).get("failure_class")
+                          for r in rows} - {None})
+        record("S15.13", sweep.get("status") == "done" and not sweep.get("error")
+               and rows and not wrong,
+               f"status={sweep.get('status')} rows={len(rows)} classes={classes} "
+               f"err={sweep.get('error')}; bad-arithmetic={wrong or 'none'}")
+
+        # The sweep pins capacities and mutates the live network; its closing
+        # base re-solve writes through the real state sink, so the foreground
+        # results must be readable and optimal afterwards.
+        _, st_after = http("/api/simulation/status")
+        st_a2, rep2 = http("/api/results/adequacy")
+        record("S15.14",
+               isinstance(st_after, dict) and st_after.get("condition") == "optimal"
+               and st_a2 in (200, 204),
+               f"after sweep: condition={(st_after or {}).get('condition')} "
+               f"/results/adequacy -> {st_a2}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     global BACKEND
@@ -1856,6 +2205,8 @@ def main() -> int:
         suite_S13()
     if run("S14"):
         suite_S14()
+    if run("S15"):
+        suite_S15()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
