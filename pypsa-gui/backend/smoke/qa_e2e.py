@@ -2142,6 +2142,51 @@ def suite_S15():
                f"after sweep: condition={(st_after or {}).get('condition')} "
                f"/results/adequacy -> {st_a2}")
 
+    # ── S15.15 — a class-C scenario must measure degradation when the
+    # profiles were UPLOADED, which is how the GUI supplies them.
+    #
+    # Everything above uses a static `p_set`. That is exactly the blind spot
+    # that let a real bug through: `run_simulation` re-broadcasts every
+    # user-uploaded series from `_user_ts` onto the live `_t` tables just
+    # before building the LP, which restored the pristine profile OVER the
+    # mutation each contingency had just made. The scenario then solved an
+    # unmutated network, returned "ok", and reported a ΔEUE of 0 — a cold
+    # snap priced at exactly zero criticality. Nothing in process reproduces
+    # it, because a network built in process has an empty `_user_ts`.
+    _, snaps = http("/api/network/snapshots")
+    idx = (snaps or {}).get("snapshots") or []
+    if not idx:
+        skip("S15.15", "no snapshot index to upload a profile against")
+    else:
+        st_ts, _ = http("/api/network/timeseries/loads/p_set", method="PUT",
+                        body={"index": idx, "columns": ["load_b"],
+                              "data": [[330.0] for _ in idx]})
+        put_cfg(ens_cap_permyriad=None, ens_zone_cap_multiple=None)
+        poll()
+        http("/api/results/fmea_sweep", method="POST",
+             body={"scenarios": [{"id": "coldsnap", "kind": "parametric",
+                                  "frequency_per_year": 1.0,
+                                  "electrical_load_multiplier": 2.0}]})
+        sw2 = None
+        for _ in range(120):
+            st_s, s = http("/api/results/fmea_sweep")
+            if st_s == 200 and isinstance(s, dict) and s.get("status") != "running":
+                sw2 = s
+                break
+            time.sleep(2)
+        if sw2 is None:
+            skip("S15.15", "sweep did not finish within the ceiling")
+        else:
+            crows = [r for r in (sw2.get("rows") or [])
+                     if str(r.get("id", "")).startswith("scenario:")]
+            deltas = [r.get("delta_eue_mwh") for r in crows]
+            record("S15.15",
+                   st_ts == 200 and bool(crows)
+                   and all(d is not None and d > 0 for d in deltas),
+                   f"profile upload -> {st_ts}; class-C rows={len(crows)} "
+                   f"deltas={deltas} (a doubled load MUST raise ENS; 0 means "
+                   f"the uploaded profile was reapplied over the mutation)")
+
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
     restore()
 

@@ -221,6 +221,7 @@ feasible because that peaker remains extendable.
 | S15.12 | Sweep guards: refused `422` without a VOLL, accepted `200`, and a concurrent sweep refused `409` |
 | S15.13 | Sweep completes with both class B and class C rows, and every row satisfies `criticality == occurrence × severity` (f×S by construction). Class C is additionally pinned to `ΔEUE × VoLL × frequency`. **The two classes reach f×S by genuinely different routes** — class B multiplies by the unavailability *probability* q (a link outage is a state the system sits in a fraction q of the time), class C by an annual *event frequency* — and asserting either route's formula on the other overstates class B by `8760/MTTR`, which is how this check was first written and what running it caught |
 | S15.14 | The sweep's closing base re-solve leaves the foreground results in base state (`condition == "optimal"`, report readable) |
+| S15.15 | A class-C scenario measures real degradation when the profiles were **uploaded**, which is how the GUI supplies them. Everything above uses a static `p_set`, and that blind spot let a real bug through: `run_simulation` re-broadcasts every user-uploaded series from `_user_ts` onto the live `_t` tables just before building the LP, restoring the pristine profile **over** the mutation each contingency had just made. The scenario solved an unmutated network, returned `ok`, and reported ΔEUE = 0 — a cold snap priced at exactly zero criticality. No in-process test reproduces it, because a network built in process has an empty `_user_ts` |
 
 ## Loop protocol
 
