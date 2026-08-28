@@ -117,3 +117,74 @@ def electrical_columns(n, columns) -> list[str]:
         if _canonical_load_carrier_key(buses.at[col, "carrier"]) == "electrical":
             out.append(col)
     return out
+
+
+# ── time basis ────────────────────────────────────────────────────────────
+#
+# LOLE and EUE are per-YEAR quantities by convention, and every reliability
+# standard is written that way — GB's 3 h/yr, ACER's 3–8 h/yr. But the LP and
+# the COPT both sum over whatever horizon the model actually spans, weighted
+# by `snapshot_weightings`. Those two coincide ONLY when the weights sum to a
+# year.
+#
+# `time_basis` used to be the hardcoded string "hours_per_year" at both call
+# sites, so an identical label went onto 80.86 (hours per WEEK, a 168 h
+# horizon at default weightings) and onto 4216.05 (the same system genuinely
+# annualised). The arithmetic was right in both cases — LOLE scales by exactly
+# Σ(weights) — but the label asserted a basis the number did not have, and the
+# error runs in the dangerous direction: a horizon shorter than a year makes
+# the system look FAR more reliable than it is. Read against a 3 h/yr
+# standard, 80.86 "h/yr" is 27× too lax when the truth is ~1400×.
+#
+# Deriving the label does not decide whether the NUMBER should be annualised
+# for the user — that is a product question, deliberately left open. It only
+# stops the report claiming an annual basis it cannot support.
+
+HOURS_PER_YEAR = 8760.0
+
+# ±2%: a 52.142857-weighted representative week lands on 8760.0 exactly, and
+# a 365-day year of hourly snapshots is 8760 on the nose. The tolerance is for
+# leap years (8784, +0.27%) and for the rounding a user does by hand when
+# setting weights, not for waving through a half-year horizon.
+NYEARS_TOLERANCE = 0.02
+
+
+def horizon_years(n, column: str = "generators", sns=None) -> float:
+    """
+    How much modelled time the horizon represents, in years: Σ(snapshot
+    weights) / 8760. Uses the same weighting basis as every other total
+    (`period_utils.snapshot_weights`), including the per-period `years`
+    multiplier — omitting that is the "~5× too small" bug class that module
+    exists to prevent.
+
+    Returns 0.0 rather than raising when the network has no snapshots: a
+    caller assembling a report must still be able to label its (empty)
+    numbers.
+    """
+    from services import period_utils as _period_utils
+
+    try:
+        w = _period_utils.snapshot_weights(n, column, sns=sns)
+    except Exception:                                         # noqa: BLE001
+        return 0.0
+    try:
+        total = float(w.sum())
+    except (TypeError, ValueError):
+        return 0.0
+    if not (total == total and total not in (float("inf"), float("-inf"))):
+        return 0.0
+    return total / HOURS_PER_YEAR
+
+
+def resolve_time_basis(nyears: float) -> str:
+    """
+    ``"hours_per_year"`` only when the horizon really is a year; otherwise
+    ``"hours_per_horizon"``, which is what the number actually is.
+
+    Never guesses in the user's favour: an unknown or zero horizon reports
+    per-horizon, because claiming an annual basis is the failure that lets a
+    number be compared to a statutory standard it has no relation to.
+    """
+    if nyears > 0 and abs(nyears - 1.0) <= NYEARS_TOLERANCE:
+        return "hours_per_year"
+    return "hours_per_horizon"

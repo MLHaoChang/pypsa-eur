@@ -3181,6 +3181,9 @@ def get_copt():
         1 for g in gens.index
         if not bool(slack.get(g, False)) and str(gens.at[g, "bus"]) in elec
     )
+    from services.adequacy.metrics import horizon_years, resolve_time_basis
+    _copt_nyears = horizon_years(n)
+    _copt_basis = resolve_time_basis(_copt_nyears)
     return {
         "engine": "copt",
         "fidelity": "analytic_convolution",
@@ -3189,7 +3192,13 @@ def get_copt():
             "eue_mwh": metrics["eue_mwh"],
             "lolp_max": metrics["lolp_max"],
             "by_period": metrics["by_period"],
-            "time_basis": "hours_per_year",
+            # Derived, not asserted. The COPT sums over whatever horizon the
+            # model spans, weighted; calling that "hours_per_year" on a
+            # 168 h week reported 80.86 for a system whose annual LOLE is
+            # ~4216 — and understating LOLE is the direction that gets a
+            # number compared to a 3 h/yr standard it has no relation to.
+            "time_basis": _copt_basis,
+            "horizon_years": _copt_nyears,
         },
         "per_mode": [
             {**r["failure_mode"],

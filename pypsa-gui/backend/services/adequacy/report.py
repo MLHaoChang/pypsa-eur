@@ -39,7 +39,11 @@ from models.adequacy import (
     VollBlock,
     ZoneTarget,
 )
-from services.adequacy.metrics import electrical_columns
+from services.adequacy.metrics import (
+    electrical_columns,
+    horizon_years,
+    resolve_time_basis,
+)
 
 # A cap counts as binding when achieved shed reaches this share of it —
 # LP tolerances keep the achieved value epsilon under the cap.
@@ -153,6 +157,11 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict) -> dict:
                 zone_field_populated = True
                 break
 
+    # Derive the time basis rather than asserting one — see
+    # services/adequacy/metrics.resolve_time_basis for why the hardcoded
+    # "hours_per_year" was a false claim on any horizon shorter than a year.
+    _nyears = horizon_years(n)
+    _basis = resolve_time_basis(_nyears)
     multi = bool(getattr(cfg, "multi_investment_periods", False))
     report = AdequacyReport(
         engine="lp_proxy",
@@ -177,7 +186,8 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict) -> dict:
         metrics=MetricsBlock(
             ens_mwh=sys_achieved_total,
             shed_hours=float(sh.get("total", 0.0)),
-            time_basis="hours_per_year",
+            time_basis=_basis,
+            horizon_years=_nyears,
         ),
         cost=CostBlock(
             total_system_cost_eur=total_system_cost,

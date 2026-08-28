@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { AdequacyChips, CoptChips, ensTargetWarning, type AdequacyReportPayload, type CoptPayload } from './adequacy'
+import { AdequacyChips, basisSuffix, CoptChips, ensTargetWarning, type AdequacyReportPayload, type CoptPayload } from './adequacy'
 
 afterEach(() => cleanup())
 
@@ -151,5 +151,54 @@ describe('AdequacyChips per-period disclosure', () => {
     ])} />)
     expect(screen.queryByText(/binding period/i)).toBeNull()
     expect(screen.queryByText(/periods, none binding/i)).toBeNull()
+  })
+})
+
+// LOLE is quoted per YEAR by convention and every reliability standard is
+// written that way, but the engine sums over whatever horizon the model
+// spans. A bare "h" beside a sub-annual figure invites exactly the comparison
+// that must not be made: 80.86 h on a 168 h week reads as comfortably inside
+// a 3 h/yr standard when the annualised truth is ~1400x outside it.
+describe('basisSuffix', () => {
+  it('says h/yr only when the horizon really is a year', () => {
+    expect(basisSuffix({ time_basis: 'hours_per_year', horizon_years: 1 })).toBe('h/yr')
+  })
+
+  it('names the actual horizon instead of implying a year', () => {
+    expect(basisSuffix({ time_basis: 'hours_per_horizon', horizon_years: 168 / 8760 }))
+      .toBe('h / 168 h horizon')
+  })
+
+  it('still refuses to imply a year when the horizon length is unknown', () => {
+    expect(basisSuffix({ time_basis: 'hours_per_horizon' })).toBe('h / horizon')
+    expect(basisSuffix({ time_basis: 'hours_per_horizon', horizon_years: null }))
+      .toBe('h / horizon')
+    expect(basisSuffix({})).toBe('h / horizon')
+  })
+})
+
+describe('CoptChips time basis', () => {
+  const copt = (metrics: Record<string, unknown>) => ({
+    engine: 'copt', fidelity: 'analytic_convolution',
+    fleet: { units: 2, must_take: 0, delta_mw: 1 },
+    voll_eur_per_mwh: 3000, per_mode: [],
+    metrics: { lolp_max: 0.5, ...metrics },
+  }) as never
+
+  it('labels a sub-annual LOLE by its horizon, not as h/yr', () => {
+    render(<CoptChips copt={copt({
+      lole_hours: 80.86, eue_mwh: 28330.9,
+      time_basis: 'hours_per_horizon', horizon_years: 168 / 8760,
+    })} proxyEnsMwh={null} />)
+    expect(screen.getByText(/80\.9 h \/ 168 h horizon/)).toBeTruthy()
+    expect(screen.queryByText(/80\.9 h\/yr/)).toBeNull()
+  })
+
+  it('labels a genuinely annualised LOLE as h/yr', () => {
+    render(<CoptChips copt={copt({
+      lole_hours: 4216.05, eue_mwh: 1477252.7,
+      time_basis: 'hours_per_year', horizon_years: 1,
+    })} proxyEnsMwh={null} />)
+    expect(screen.getByText(/4216\.1 h\/yr/)).toBeTruthy()
   })
 })

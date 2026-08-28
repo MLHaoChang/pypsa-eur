@@ -94,7 +94,19 @@ class MetricsBlock(BaseModel):
     confidence_interval: tuple[float, float] | None = None
     n_samples: int | None = None
     # LOLE in hours/yr vs days/yr differ by ~24x. Never implicit.
-    time_basis: Literal["hours_per_year", "days_per_year"]
+    #
+    # "hours_per_horizon" is NOT a lesser variant of "hours_per_year" — it is
+    # the honest label whenever the modelled horizon is not a year. It used to
+    # be hardcoded to hours_per_year at both call sites, so a 168 h
+    # representative week reported 80.86 "h/yr" for a system whose annual LOLE
+    # is ~4216 h. That error runs in the dangerous direction: a short horizon
+    # makes the system look far MORE reliable than it is, and the number is
+    # then one glance away from being read against a 3 h/yr standard.
+    time_basis: Literal["hours_per_year", "hours_per_horizon", "days_per_year"]
+    # Σ(snapshot weights) / 8760 — how much modelled time the numbers above
+    # cover. Present so a reader (or the UI) can say "per 168 h horizon"
+    # rather than having to trust the label alone. None when unknown.
+    horizon_years: float | None = None
 
 
 class CostBlock(BaseModel):

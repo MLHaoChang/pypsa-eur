@@ -129,7 +129,14 @@ export function AdequacyChips({ report }: { report: AdequacyReportPayload | null
 export interface CoptPayload {
   engine: string
   fidelity: string
-  metrics: { lole_hours: number; eue_mwh: number; lolp_max: number; time_basis: string }
+  metrics: {
+    lole_hours: number; eue_mwh: number; lolp_max: number
+    // "hours_per_year" only when the modelled horizon really is a year;
+    // otherwise "hours_per_horizon". Optional `horizon_years` says how long
+    // that horizon is, so the chip can name it.
+    time_basis: string
+    horizon_years?: number | null
+  }
   per_mode: Array<Record<string, unknown>>
   fleet: { units: number; must_take: number; delta_mw: number }
   voll_eur_per_mwh: number
@@ -140,6 +147,26 @@ export interface CoptPayload {
 // when a PRAS/Antares export is worth doing (spec §5.3). The DIVERGENCE is
 // the product; neither number alone is the headline.
 const DIVERGENCE_RATIO = 5
+
+/**
+ * LOLE is quoted per YEAR by convention and every standard is written that
+ * way, but the engine sums over whatever horizon the model spans. Rendering a
+ * bare "h" next to a sub-annual figure invites exactly the comparison that
+ * must not be made — 80.86 h on a 168 h week reads as a system 27x inside a
+ * 3 h/yr standard when the annualised truth is ~1400x outside it.
+ *
+ * So the unit carries the basis: "h/yr" only when the horizon is a year,
+ * otherwise "h / <N> h horizon" naming what was actually modelled.
+ */
+export function basisSuffix(
+  m: { time_basis?: string; horizon_years?: number | null },
+): string {
+  if (m.time_basis === 'hours_per_year') return 'h/yr'
+  const hours = m.horizon_years != null && isFinite(m.horizon_years)
+    ? Math.round(m.horizon_years * 8760)
+    : null
+  return hours && hours > 0 ? `h / ${hours} h horizon` : 'h / horizon'
+}
 
 export function CoptChips({ copt, proxyEnsMwh }: {
   copt: CoptPayload | null
@@ -159,7 +186,7 @@ export function CoptChips({ copt, proxyEnsMwh }: {
         COPT screening
       </span>
       <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={tip}>
-        LOLE {copt.metrics.lole_hours.toFixed(1)} h
+        LOLE {copt.metrics.lole_hours.toFixed(1)} {basisSuffix(copt.metrics)}
       </span>
       <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={tip}>
         EUE {copt.metrics.eue_mwh.toFixed(1)} MWh
