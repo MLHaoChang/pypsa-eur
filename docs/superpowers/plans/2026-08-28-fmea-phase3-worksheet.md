@@ -24,10 +24,10 @@ Phase 0–2 constraints apply (branch, staging, test-first with demonstrated red
 
 ### Task 2: the worksheet tab
 
-- [ ] **Vitest first** (`fmea.test.tsx` on extracted pure pieces): `mergeWorksheet(copt, sidecar)` — computed rows get their overlay's mitigability, manual rows append with an `editable` flag, ranking by criticality with computed/manual interleaved; `worksheetCsv(rows)` — column order per IEC 60812 shape (mode, class, occurrence+basis, severity €, criticality €/yr, mitigability, engine/fidelity), values escaped; badge variants per engine.
-- [ ] Implement `pages/results/FmeaTab.tsx`: merged table via `useFilterableTable` (sort/search), the mitigability cell as the ONE editable cell on computed rows (debounced PUT), an "add manual failure mode" form (name, description, occurrence/yr, severity € — criticality computed as the product, per the f×S identity), per-row delete for manual rows, `downloadCSV` export, provenance badge per row, the fidelity disclaimer line.
-- [ ] Register the tab: the five coupled edits in `pages/Results.tsx` (union, `VALID_TABS`, `TABS`, render switch, the exhaustive `Record<ResultsTab, CompareTab>` → alias `'overview'` like `asset`); `api/simulation.ts` `getWorksheet`/`putWorksheet`.
-- [ ] `tsc -b` + full vitest; commit: `feat(gui): the FMEA worksheet tab`.
+- [x] **Vitest first** (`fmea.test.tsx` on extracted pure pieces): `mergeWorksheet(copt, sidecar)` — computed rows get their overlay's mitigability, manual rows append with an `editable` flag, ranking by criticality with computed/manual interleaved; `worksheetCsv(rows)` — column order per IEC 60812 shape (mode, class, occurrence+basis, severity €, criticality €/yr, mitigability, engine/fidelity), values escaped; badge variants per engine.
+- [x] Implement `pages/results/FmeaTab.tsx`: merged table via `useFilterableTable` (sort/search), the mitigability cell as the ONE editable cell on computed rows (debounced PUT), an "add manual failure mode" form (name, description, occurrence/yr, severity € — criticality computed as the product, per the f×S identity), per-row delete for manual rows, `downloadCSV` export, provenance badge per row, the fidelity disclaimer line.
+- [x] Register the tab: the five coupled edits in `pages/Results.tsx` (union, `VALID_TABS`, `TABS`, render switch, the exhaustive `Record<ResultsTab, CompareTab>` → alias `'overview'` like `asset`); `api/simulation.ts` `getWorksheet`/`putWorksheet`.
+- [x] `tsc -b` + full vitest; commit: `feat(gui): the FMEA worksheet tab`.
 
 ## Done criteria
 

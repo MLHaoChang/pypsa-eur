@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair } from 'lucide-react'
+import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert} from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -18,6 +18,7 @@ import Economics from './results/Economics'
 import AggregatedOverview from './results/AggregatedOverview'
 import Curtailment from './results/Curtailment'
 import LostLoadTab from './results/LostLoadTab'
+import FmeaTab from './results/FmeaTab'
 import StorageCycling from './results/StorageCycling'
 import AssetDetail from './results/asset/AssetDetail'
 import { PageHeader } from '../components/PageKit'
@@ -33,12 +34,12 @@ import { PageHeader } from '../components/PageKit'
 
 type ResultsTab =
   | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
-  | 'economics' | 'curtailment' | 'lostload' | 'storage' | 'asset'
+  | 'economics' | 'curtailment' | 'lostload' | 'storage' | 'asset' | 'fmea'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
-  'economics', 'curtailment', 'lostload', 'storage', 'asset',
+  'economics', 'curtailment', 'lostload', 'storage', 'asset', 'fmea',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -63,6 +64,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'curtailment',label: 'Curtailment',        Icon: Scissors,         tip: 'Renewable energy rejected by the LP — total + per-carrier + time series' },
   { id: 'lostload',   label: 'Lost load',          Icon: AlertTriangle,    tip: 'VOLL slack dispatch (unserved demand) — per-carrier and per-bus breakdown' },
   { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup' },
+  { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by €/yr criticality — computed rows + expert class-D rows, mitigability, CSV export' },
   { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable' },
 ]
 
@@ -81,6 +83,8 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   lostload: 'lost_load',
   storage: 'storage_cycling',
   asset: 'overview',
+  // No FMEA compare tab exists (yet) — alias to overview like `asset`.
+  fmea: 'overview',
 }
 
 // Min px kept for BOTH the live Results pane and the comparison rail when the
@@ -474,6 +478,7 @@ export default function Results() {
                   {t === 'emissions'   && <Emissions />}
                   {t === 'curtailment' && <Curtailment />}
                   {t === 'lostload'    && <LostLoadTab />}
+                  {t === 'fmea'        && <FmeaTab />}
                   {t === 'storage'     && <StorageCycling />}
                   {t === 'asset'       && <AssetDetail />}
                 </>

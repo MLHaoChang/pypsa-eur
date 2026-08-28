@@ -388,6 +388,15 @@ export const resultsApi = {
   // data). Shape: pages/results/adequacy.tsx CoptPayload.
   getCopt: () => client.get('/results/copt')
     .then(r => (r.status === 204 ? null : r.data)),
+  // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
+  // overlays, persisted per project. Computed rows come from getCopt and
+  // merge client-side (pages/results/fmea.ts).
+  getWorksheet: (project: string) =>
+    client.get(`/projects/${encodeURIComponent(project)}/worksheet`).then(r => r.data),
+  putWorksheet: (project: string, body: {
+    manual_rows: Array<Record<string, unknown>>
+    overlays: Record<string, { mitigability?: string; notes?: string }>
+  }) => client.put(`/projects/${encodeURIComponent(project)}/worksheet`, body).then(r => r.data),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;
