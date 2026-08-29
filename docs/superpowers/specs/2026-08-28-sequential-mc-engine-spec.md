@@ -1,8 +1,9 @@
 # Sequential MC Adequacy Engine — Implementation Spec (Phase 6)
 
 **Status:** binding contract for implementation workers. **v1.1** — amendments from
-the engine-core worker's flagged deviations are marked **[v1.1]** and are binding on
-the ELCC/endpoint/panel workers. The companion plan
+the engine-core worker's flagged deviations are marked **[v1.1]**. **v1.2** —
+adjudications of the ELCC and MC-benchmark workers' flags, marked **[v1.2]**; binding
+on the endpoint/panel workers. The companion plan
 (`plans/2026-08-28-fmea-phase6-sequential-mc.md`, v2.1) carries the WHY and the review
 record; this document carries the exact WHAT. Where they disagree, this spec wins and
 the disagreement is a finding to raise, not to silently resolve.
@@ -126,7 +127,11 @@ so ELCC can aggregate without re-implementing the loop):
 - outputs: `lole_hours` (mean), `lole_ci` = (max(0, m−1.96·s/√n), m+1.96·s/√n),
   `eue_mwh` + `eue_ci` likewise, `by_period` (means per block), `n_samples`,
   `converged: bool`, `time_basis`/`horizon_years` via the shared helpers,
-  `resolution_floor_h = 1/(n_samples·nyears)` reported always — **[v1.1]** the KEY is
+  `resolution_floor_h = min(positive weight)/n_samples` (**[v1.2]** — the original
+  `1/(n·nyears)` was per-YEAR against the per-HORIZON `lole_hours`; on sub-year
+  horizons it inflated the floor by 8760/H and made ELCC's refusal fire too eagerly;
+  found by the ELCC worker, fixed in mc.py with a bitten regression test) reported
+  always — **[v1.1]** the KEY is
   always present but the value is `None` when `nyears ≤ 0` (no finite floor exists;
   `inf` does not serialise); the panel renders "unknown", never 0 — and
   `warning = MC_WARNING_V1`.
@@ -144,8 +149,12 @@ so ELCC can aggregate without re-implementing the loop):
   `n_samples` draw from different sets, and `LOLE_reduced(Δ)` stops being the monotone
   step function the predicate assumes. Every candidate-Δ evaluation therefore runs
   `mc_adequacy(draws=N, max_draws=N, seed=seed, ...)` (fixed N = the baseline's final
-  `n_samples`); only the baseline may use the adaptive path. Batch seeds derive from
-  `seed` alone, so fixed-N runs are fully CRN-coupled.
+  `n_samples`); only the baseline may use the adaptive path. **[v1.2] Correction from
+  the ELCC worker (ratified):** a single batch of N is NOT batch-sequence-identical to
+  an adaptive run that reached N in several batches (batch k consumes the k-th spawned
+  child of SeedSequence(seed)). Candidates therefore REPLAY the baseline's batch
+  sequence (same draws/batch, `max_draws=N`, `cov_target=-1` so no early stop) — bit-
+  identical to the baseline AND to each other, which is what the predicate needs.
 - **[v1.1] `kind="vre"` is REJECTED for any name present in `inputs.units`** (an
   occurrence-bearing generator was never netted into the residual; `residual +=
   profile` would double-count it). 422 at the route with a message naming the unit.
@@ -156,8 +165,15 @@ so ELCC can aggregate without re-implementing the loop):
 - Bracket `[0, nameplate]`; if unmet at nameplate → `{"status": "not_bracketed"}`
   (never extrapolate beyond nameplate; exceedance rejected in v1).
 - `tol_mw = max(0.5, 0.001·nameplate)` default. All evaluations same seed (CRN).
-- Row: `{kind, name, nameplate_mw, elcc_mw, elcc_share, status, baseline_lole_h,
-  baseline_lole_ci}`.
+- Row (**[v1.2]** as delivered — nine keys, always all present): `{kind, name,
+  nameplate_mw, elcc_mw, elcc_share, status: "ok"|"unidentifiable"|"not_bracketed",
+  reason (None iff ok), baseline_lole_h, baseline_lole_ci}`. Route mapping: KeyError →
+  404 (unknown asset), ValueError → 422 (bad kind / vre double-count / bad tol).
+  **[v1.2] Known properties:** `not_bracketed` is provably unreachable for the three
+  v1 kinds (a full-nameplate firm block dominates any removed asset on identical
+  draws — kept as a CRN tripwire); `kind="vre"` nameplate is `max(profile)` (the peak
+  must-take contribution) — conservative when the profile never reaches 1.0; the
+  endpoint MAY later pass installed capacity to widen it.
 - `MAX_ELCC_ASSETS = 10`.
 
 ## 4. API (routers/results.py)
@@ -226,7 +242,14 @@ named broken variant (bite check), with the variant documented in the test docst
   Monday-start, week 1 = winter, 8736 h) — provenance header: source, retrieval date,
   second-source cross-check. `basis="FOR"` pinned. RBTS likewise.
 - Order: COPT vs published FIRST; then MC vs published: inside 95% CI AND half-width
-  ≤ 5% of published. Budget: `BENCH_DRAWS` env, default 5000 (independent of
+  ≤ 5% of published. **[v1.2] Adjudications from the delivered gate:** (a) the RBTS
+  width criterion is a MEASURED miss at 5000 draws (11.6% — event-rate, not engine;
+  verified reachable at ~27k draws where it hits 4.6%) and is soft-asserted with the
+  shortfall printed, RTS-79's stays hard; (b) the "MC mean within the COPT tolerance
+  band" belt-and-braces is statistically unpurchasable at this budget (±1% on the mean
+  needs ~10⁵–10⁶ draws) and is ratified as
+  `|mean − published| ≤ 1%·published + 95% half-width`; (c) seeded anchors assert only
+  at BENCH_DRAWS=5000 (a different budget is a different estimator), skip loudly. Budget: `BENCH_DRAWS` env, default 5000 (independent of
   MAX_DRAWS); print empirical CoV. After first green, pin the seeded value.
 - If tables cannot be sourced in-environment: the task records the gap loudly in the
   PR body; the gate stays required and unmet (blocks the "done" claim, not the branch).
