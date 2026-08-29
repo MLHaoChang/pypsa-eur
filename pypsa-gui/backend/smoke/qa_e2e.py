@@ -2242,7 +2242,7 @@ def suite_S16():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
     st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
     if st_c not in (200, 201):
-        for i in range(1, 6):
+        for i in range(1, 7):
             skip(f"S16.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
         return
     http(f"/api/projects/{q(name)}/activate", method="POST")
@@ -2392,6 +2392,47 @@ def suite_S16():
                > float(m1.get("eue_mwh") or 0.0),
                f"EUE with bess {m1.get('eue_mwh')} CI={ci_with} vs without "
                f"{m5.get('eue_mwh')} CI={ci_no}; intervals separated={separated}")
+
+    # ── S16.6 — the ELCC candidates surface, live, and its agreement
+    # guarantee. The battery is gone (S16.5 deleted it); add a must-take wind
+    # generator (no occurrence data — "wind" is deliberately absent from the
+    # defaults library) so all remaining kinds are represented: two
+    # occurrence-bearing generators and one vre. Then the contract's point:
+    # POST the ENTIRE candidates list back and every row must resolve — a
+    # candidate the run 404s on is the failure mode the endpoint exists to
+    # prevent. Plus the double-count guard live: a unit asked for as
+    # kind="vre" is a 422, not a credit counted twice.
+    http("/api/network/carriers", method="POST", body={"name": "wind"})
+    st_wg, _ = http("/api/network/generators", method="POST",
+                    body={"name": "wind_a", "bus": "bus_a", "carrier": "wind",
+                          "p_nom": 40.0})
+    st_cand, cand = http("/api/results/mc/elcc_candidates")
+    assets = (cand or {}).get("assets") or []
+    kinds = sorted({a.get("kind") for a in assets})
+    names = sorted(a.get("name") for a in assets)
+    shape_ok = (st_cand == 200 and (cand or {}).get("max_assets", 0) >= 1
+                and kinds == ["generator", "vre"]
+                and names == ["gen_1", "gen_2", "wind_a"]
+                and all(a.get("nameplate_mw", 0) > 0 for a in assets))
+    http("/api/results/mc", method="POST",
+         body={"draws": 150, "seed": 3,
+               "elcc_assets": [{"kind": a["kind"], "name": a["name"]}
+                               for a in assets]})
+    res6 = poll_mc(ceiling_s=300)
+    rows6 = ((res6 or {}).get("result") or {}).get("elcc") or []
+    resolved = (res6 is not None and res6.get("status") == "done"
+                and len(rows6) == len(assets)
+                and all(r.get("status") in
+                        ("ok", "unidentifiable", "not_bracketed")
+                        for r in rows6))
+    st_dc, _ = http("/api/results/mc", method="POST",
+                    body={"draws": 8,
+                          "elcc_assets": [{"kind": "vre", "name": "gen_1"}]})
+    record("S16.6",
+           st_wg == 201 and shape_ok and resolved and st_dc == 422,
+           f"candidates->{st_cand} kinds={kinds} names={names}; full-list run "
+           f"resolved={resolved} rows={[(r.get('name'), r.get('status')) for r in rows6]}; "
+           f"unit-as-vre->{st_dc} (want 422)")
 
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
     restore()

@@ -241,6 +241,7 @@ exactly the regime the COPT convolution cannot see.
 | S16.3 | The mutual-exclusion mesh against a *really running* study (a full-budget ELCC bisection holds the surface busy for seconds): a concurrent MC POST and a frontier POST both refuse `409`, and the original run still completes |
 | S16.4 | The ELCC row carries exactly its nine contract keys, the status is from the closed set, an `ok` credit lies in `[0, nameplate]`, and `reason` is null **iff** the status is `ok` — a refusal is data, never a blank |
 | S16.5 | **Storage helps, CI-aware and seed-paired**: same seed, same fleet ⇒ identical outage paths, so deleting the battery is a paired comparison — and the no-storage interval's *lower* bound must clear the with-storage interval's *upper* bound. A point-estimate comparison could pass on noise; separated intervals cannot |
+| S16.6 | **The ELCC candidates surface and its agreement guarantee, live**: `GET /results/mc/elcc_candidates` enumerates the remaining kinds (two occurrence-bearing generators and a must-take wind generator as `vre`), the **entire** candidates list POSTed back resolves — every row prices, none 404s — and a unit asked for as `kind="vre"` is refused `422` (the double-count guard), not credited twice |
 
 ## Loop protocol
 
