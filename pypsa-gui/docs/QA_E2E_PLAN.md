@@ -243,6 +243,43 @@ exactly the regime the COPT convolution cannot see.
 | S16.5 | **Storage helps, CI-aware and seed-paired**: same seed, same fleet ⇒ identical outage paths, so deleting the battery is a paired comparison — and the no-storage interval's *lower* bound must clear the with-storage interval's *upper* bound. A point-estimate comparison could pass on noise; separated intervals cannot |
 | S16.6 | **The ELCC candidates surface and its agreement guarantee, live**: `GET /results/mc/elcc_candidates` enumerates the remaining kinds (two occurrence-bearing generators and a must-take wind generator as `vre`), the **entire** candidates list POSTed back resolves — every row prices, none 404s — and a unit asked for as `kind="vre"` is refused `422` (the double-count guard), not credited twice |
 
+### S17 — The adequacy-coupled planning loop (area 17)
+
+Phase 7's live surface. The controller has 22 unit tests against fake
+callables and the route has 26 through a `TestClient`, but neither drives what
+this study *is*: real HiGHS capacity expansions, re-solved under a retuned
+cap, evaluated by the real sampler on whatever plan the LP actually produced,
+in a worker thread in a server process. The mesh fixes in particular are HTTP
+facts, not unit-test facts.
+
+**Non-vacuity is self-calibrated.** The suite first runs a plain MC study to
+learn the fixture's own LOLE, then targets a *third* of it — so iterate 0 is
+guaranteed to miss and the loop cannot pass by doing nothing. A hardcoded
+target risks a fixture that meets immediately and a suite that proves nothing.
+
+| Check | What it proves |
+| --- | --- |
+| S17.1 | The whole synchronous rejection surface, live: no VoLL, no target, zero target, draws over the engine cap, budget over `MAX_LOOP_SOLVES`, an invalid `restore`, a target below the resolution floor, and the `myopic`/`rolling` strategy guard — all `422` **before** a solve is spent. The strategy guard is the one that matters most: without it every capped iterate fails validation and the loop reports "unreachable", a statement about the network, when the truth is a statement about the solve strategy |
+| S17.2 | Calibration: the baseline plan solves optimal and its measured MC-LOLE is > 0, so the target (a third of it) is one iterate 0 must miss |
+| S17.3 | The loop runs to a verdict **and the mesh holds while it runs**: a foreground solve, an MC study and a second loop are all refused `409` *during* the run — the Phase-7 hole fix, provable only here, because a solve interleaving between iterates rewrites the very `p_nom_opt` the next evaluation reads. Payload contract checked (`study` key, no top-level engine, verdict sentence, `resolution_floor_h`, warning clauses, `base_restored`, no leaked thread), every iterate row carries its full key set, and a `met` verdict must be **verified** — the final iterate's own evaluation, never an extrapolation between steps |
+| S17.4 | Abort: a study whose wall-clock promise is "minutes to tens of minutes" must be cancellable, and the closing restore must still run so the network is not left on a swept cap. (The abort is posted *immediately*, not after a sleep: the record is published under the same lock hold that starts the thread, and this loop is fast enough that any sleep long enough to "let it get going" is long enough to let it finish — a first attempt aborted a study that had already terminated) |
+| S17.5 | `restore="final"` leaves the user **holding** the certified plan (`ens_cap_permyriad == ε*` read back from the config), and on a non-met verdict falls back to base rather than applying a cap no verdict certified |
+
+**What the first live run found.** The fixture returns `unreachable`, and
+correctly: `ens_mwh = 0` and `binding = "voll"` at *every* cap, because 200 MW
+of firm capacity covers a 150 MW load and the LP models no outages — so the
+LP sheds nothing at any ceiling, no cap can change the plan, and the MC's 10.9
+hours of loss of load come entirely from outages the proxy never sees. The
+loop reached that answer in **two solves** (the informed jump crossed the
+whole slack region in one step), which is the search discipline working. But
+the verdict copy named the three mechanisms the design had anticipated —
+storage foresight, DSR, storage-for-thermal substitution — and **none of them
+was what happened**, sending the reader after causes that were not there. The
+never-bound case is diagnosable from the rows (`binding` on every solved
+iterate), so it is now diagnosed by name, with the honest next action: an
+energy cap has no leverage on outage-driven risk; firm-capacity headroom does.
+S17.3 pins the copy live.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

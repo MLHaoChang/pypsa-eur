@@ -3443,6 +3443,18 @@ MULTI_PERIOD_WARNING_V1 = (
 
 # [N6]. Three mechanisms, named, because the user's NEXT ACTION differs by
 # which one is operating and a bare "unreachable" is unactionable.
+NEVER_BOUND_COPY_V1 = (
+    "The cap never bound. On every iterate that solved, the LP's own shed "
+    "energy stayed under the ceiling (the binding column reads something "
+    "other than 'system_cap' throughout), so tightening the cap could not "
+    "change the plan — and no cap can. The loss of load the MC reports here "
+    "comes from OUTAGES the LP does not model at all, not from energy the LP "
+    "chose to shed: its deterministic view already covers demand, which is "
+    "exactly why the cap has no leverage. What would move this number is firm "
+    "capacity the LP sees no deterministic reason to build — a planning "
+    "reserve margin, or the candidate unit itself. Capping harder will not."
+)
+
 UNREACHABLE_COPY_V1 = (
     "No cap this search could reach produced a plan that met the target on "
     "the MC's own LOLE. Three mechanisms produce this, and they call for "
@@ -3866,8 +3878,20 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
             return False
         return status in ("ok", "optimal")
 
-    def _verdict_copy(status: str, eps_star) -> str:
+    def _verdict_copy(status: str, eps_star, rows=None) -> str:
         if status == "unreachable":
+            # WHICH unreachable? The three-mechanism copy assumes the cap was
+            # doing something and the MC disagreed with it. The commonest case
+            # in practice (QA round S17) is that the cap never bound at all —
+            # the LP sheds nothing at any ceiling because its outage-free view
+            # already covers demand — and telling that user to check storage
+            # foresight and DSR sends them after mechanisms that are not
+            # happening. It is diagnosable from the rows, so diagnose it.
+            solved = [r for r in (rows or [])
+                      if r.get("solve_status") in ("ok", "optimal")]
+            if solved and not any(r.get("binding") == "system_cap"
+                                  for r in solved):
+                return NEVER_BOUND_COPY_V1
             return UNREACHABLE_COPY_V1
         if status == "met" and eps_star is not None:
             if restore == "final":
@@ -3938,7 +3962,9 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
                     solves_used=int((res or {}).get("solves_used") or 0),
                     resolution_floor_h=eval_state["floor"],
                     base_restored=bool(base_restored),
-                    verdict=_verdict_copy(status, eps_star),
+                    verdict=_verdict_copy(
+                        status, eps_star,
+                        (res or {}).get("iterations")),
                     warning=warning,
                     error=err,
                     finished_at=time.time(),

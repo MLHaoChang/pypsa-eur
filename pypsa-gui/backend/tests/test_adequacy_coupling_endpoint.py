@@ -605,6 +605,51 @@ def test_an_unreachable_verdict_names_all_three_mechanisms(
     assert body["final"] is None and body["eps_star"] is None
 
 
+def test_an_unreachable_verdict_says_so_when_the_cap_never_bound(
+        client, install_network, monkeypatch):
+    """The commonest unreachable case is NOT one of the three mechanisms.
+
+    Found by driving the loop live (QA round S17): on a network whose firm
+    capacity covers demand, the LP sheds NOTHING at any cap — ens_mwh 0 and
+    binding "voll" on every iterate — so no ε changes the plan, and the MC's
+    loss-of-load comes entirely from outages the LP never models. The generic
+    three-mechanism copy sent that user hunting for storage foresight and DSR,
+    neither of which was happening. When no SUCCESSFUL iterate ever bound on
+    the cap, the verdict says that instead — it is diagnosable from the rows,
+    not a list of maybes.
+
+    Bite (verified): return UNREACHABLE_COPY_V1 unconditionally.
+    """
+    stubs = _Stubs(lole_seq=[9.0], binding="voll")
+
+    def _never_binds(cfg, n, lock, lq, sink):
+        eps = float(getattr(cfg, "ens_cap_permyriad", 0.0) or 0.0)
+        stubs.solve_eps.append(eps)
+        sink["_status"] = "ok"
+        sink["_condition"] = "optimal"
+        # cap shrinks with eps; the LP sheds nothing at any of them, and the
+        # plan (its cost) never moves — the live trajectory exactly.
+        sink["adequacy_report"] = _report(
+            cap_mwh=7200.0 * eps / 1e4, ens_mwh=0.0, cost=360000.0,
+            binding="voll")
+
+    stubs.solve_once = _never_binds
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network)
+
+    client.post(LOOP_URL, json={"target_lole_h": 3.6, "draws": DRAWS,
+                                "eps0": 100.0, "max_solves": 4})
+    body = _poll(client)
+    assert body["status"] == "unreachable", body
+    verdict = body["verdict"].lower()
+    assert "never bound" in verdict or "never binds" in verdict, body["verdict"]
+    assert "outage" in verdict, body["verdict"]
+    # And it must NOT send the user after the three mechanisms that are not
+    # happening here.
+    assert "demand response" not in verdict, body["verdict"]
+    assert all(r["binding"] != "system_cap" for r in body["iterations"]), body
+
+
 # ── the real thing ────────────────────────────────────────────────────────
 
 @pytest.mark.slow

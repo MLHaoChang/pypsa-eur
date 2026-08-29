@@ -2438,6 +2438,249 @@ def suite_S16():
     restore()
 
 
+def suite_S17():
+    """
+    The adequacy-coupled planning loop, live (Phase 7 spec §3).
+
+    The controller has 22 unit tests against fake callables and the route has
+    25 through a TestClient — but neither drives the thing this study IS: a
+    real HiGHS capacity expansion, re-solved under a retuned cap, evaluated by
+    the real sampler on whatever plan the LP actually produced, in a worker
+    thread in a server process. The mesh fixes in particular can only be
+    proven here: a foreground solve interleaving between iterates is an HTTP
+    fact, not a unit-test fact.
+
+    NON-VACUITY IS SELF-CALIBRATED. The suite first runs a plain MC study to
+    learn this fixture's LOLE, then targets a THIRD of it — so iterate 0 is
+    guaranteed to miss and the loop must genuinely move the cap. A hardcoded
+    target would risk a fixture that meets at iterate 0 and a suite that
+    passes having tested nothing.
+    """
+    print("\nS17 - The adequacy-coupled planning loop (area 17)")
+    name = "qa_e2e_loop"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)[0]
+
+    def poll(path, ceiling_s=420):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http(path)
+            if st == 200 and isinstance(s, dict) and s.get("status") != "running":
+                return s
+            time.sleep(1.0)
+        return None
+
+    # ── the fixture: firm units that fail, a load tight enough to shed, and
+    # an EXTENDABLE peaker so a tighter cap has something to buy. Without a
+    # build option the LP could only answer a tighter cap by shedding less
+    # of a fixed plan, and the loop would have no lever to pull.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in range(1, 6):
+            skip(f"S17.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-02 23:00", "freq": "h"})[0])
+    for g in ("unit_1", "unit_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": 100.0, "marginal_cost": 50.0,
+                                "outage_rate_value": 0.12,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 250.0, "capital_cost": 20_000.0,
+                            "marginal_cost": 180.0,
+                            "outage_rate_value": 0.05,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 12.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": 150.0})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+
+    # ── S17.1 — the synchronous rejection surface. Every one of these is
+    # knowable from the config and one snapshot; a loop that discovered them
+    # mid-run would burn minutes of solves to report a typo.
+    put_cfg(voll=0.0)
+    rej = {}
+    rej["no-voll"], _ = http("/api/results/coupling_loop", method="POST",
+                             body={"target_lole_h": 1.0})
+    put_cfg(voll=3000.0)
+    rej["no-target"], _ = http("/api/results/coupling_loop", method="POST",
+                               body={})
+    rej["zero-target"], _ = http("/api/results/coupling_loop", method="POST",
+                                 body={"target_lole_h": 0.0})
+    rej["draws-over-cap"], _ = http("/api/results/coupling_loop", method="POST",
+                                    body={"target_lole_h": 1.0, "draws": 5000})
+    rej["budget-over-cap"], _ = http("/api/results/coupling_loop", method="POST",
+                                     body={"target_lole_h": 1.0,
+                                           "max_solves": 99})
+    rej["bad-restore"], _ = http("/api/results/coupling_loop", method="POST",
+                                 body={"target_lole_h": 1.0,
+                                       "restore": "whatever"})
+    # Undecidable: one shed hour in one draw already exceeds this target, so
+    # no verdict could distinguish a compliant plan from a lucky sample.
+    rej["below-floor"], _ = http("/api/results/coupling_loop", method="POST",
+                                 body={"target_lole_h": 1e-6, "draws": 100})
+    put_cfg(voll=3000.0, solve_strategy="myopic")
+    rej["myopic"], _ = http("/api/results/coupling_loop", method="POST",
+                            body={"target_lole_h": 1.0})
+    put_cfg(voll=3000.0, solve_strategy="full")
+    wrong = {k: v for k, v in rej.items() if v != 422}
+    record("S17.1", not bad_build and not wrong,
+           f"build non-2xx={bad_build or 'none'}; rejections that were not 422: "
+           f"{wrong or 'none'}")
+
+    # ── S17.2 — calibrate. Solve once loosely, measure the plan's real LOLE
+    # with the MC, and target a third of it: iterate 0 MUST miss.
+    put_cfg(voll=3000.0, ens_cap_permyriad=100.0, solve_strategy="full")
+    http("/api/simulation/run", method="POST")
+    solved = poll("/api/simulation/status", ceiling_s=240)
+    http("/api/results/mc", method="POST", body={"draws": 200, "seed": 4})
+    mc0 = poll("/api/results/mc")
+    lole0 = (((mc0 or {}).get("result") or {}).get("metrics") or {}).get("lole_hours")
+    if not lole0 or lole0 <= 0:
+        for i in (2, 3, 4, 5):
+            skip(f"S17.{i}", f"fixture sheds nothing (LOLE={lole0}) — nothing to target")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        restore()
+        return
+    target = float(lole0) / 3.0
+    record("S17.2",
+           isinstance(solved, dict) and solved.get("condition") == "optimal"
+           and lole0 > 0,
+           f"baseline solved={( solved or {}).get('condition')}; baseline "
+           f"MC-LOLE={lole0:.4f} h -> target {target:.4f} h (a third: iterate 0 "
+           f"must miss, so the loop cannot pass by doing nothing)")
+
+    # ── S17.3 — the loop runs, and while it runs the mesh holds. The
+    # foreground-solve guard is the hole Phase 7 closed: a solve interleaving
+    # between iterates rewrites the very p_nom_opt the next evaluation reads.
+    st_go, _ = http("/api/results/coupling_loop", method="POST",
+                    body={"target_lole_h": target, "draws": 200, "seed": 4,
+                          "eps0": 100.0, "max_solves": 4, "restore": "base"})
+    time.sleep(1.0)
+    st_solve, _ = http("/api/simulation/run", method="POST")
+    st_mc, _ = http("/api/results/mc", method="POST", body={"draws": 8})
+    st_dup, _ = http("/api/results/coupling_loop", method="POST",
+                     body={"target_lole_h": target})
+    res = poll("/api/results/coupling_loop")
+    rows = (res or {}).get("iterations") or []
+    keys_ok = all({"eps_permyriad", "solve_status", "cost_eur", "ens_mwh",
+                   "cap_mwh", "binding", "plateau", "mc"} <= set(r) for r in rows)
+    shape_ok = (isinstance(res, dict)
+                and res.get("study") == "coupling_loop"
+                and "engine" not in res
+                and res.get("status") in ("met", "unreachable",
+                                          "budget_exhausted")
+                and isinstance(res.get("verdict"), str) and res["verdict"]
+                and res.get("resolution_floor_h") is not None
+                and "ONE weather realisation" in str(res.get("warning"))
+                and res.get("base_restored") is True
+                and "thread" not in res)
+    # If it met, the verdict must be VERIFIED: the final iterate's own
+    # evaluation, not an extrapolation between steps.
+    # An `unreachable` verdict must name the mechanism that ACTUALLY applies.
+    # This fixture is the never-bound case — 200 MW firm covers 150 MW load,
+    # so the LP sheds nothing at any ceiling and no cap can change the plan —
+    # and the generic three-mechanism copy would send the user hunting for
+    # storage foresight and DSR, neither of which is happening.
+    verdict_ok = True
+    if (res or {}).get("status") == "unreachable":
+        solved_rows = [r for r in rows if r.get("solve_status") in ("ok", "optimal")]
+        never_bound = solved_rows and not any(
+            r.get("binding") == "system_cap" for r in solved_rows)
+        v = str((res or {}).get("verdict", "")).lower()
+        verdict_ok = ("never bound" in v and "outage" in v) if never_bound else bool(v)
+
+    met_ok = True
+    if (res or {}).get("status") == "met":
+        fin = (res or {}).get("final") or {}
+        fmc = fin.get("mc") or {}
+        met_ok = (res.get("eps_star") is not None
+                  and fmc.get("lole_hours") is not None
+                  and float(fmc["lole_hours"]) <= target + 1e-9)
+    record("S17.3",
+           st_go == 200 and st_solve == 409 and st_mc == 409 and st_dup == 409
+           and res is not None and shape_ok and keys_ok and met_ok
+           and verdict_ok and len(rows) >= 2,
+           f"start->{st_go}; DURING the run: solve->{st_solve} mc->{st_mc} "
+           f"loop->{st_dup} (all 409); status={(res or {}).get('status')} "
+           f"solves={(res or {}).get('solves_used')} iterates={len(rows)} "
+           f"eps_star={(res or {}).get('eps_star')} "
+           f"confident={(res or {}).get('confident')}; shape={shape_ok} "
+           f"verified={met_ok} verdict-names-the-real-mechanism={verdict_ok}")
+
+    # ── S17.4 — abort. A study whose wall-clock promise is "minutes to tens
+    # of minutes" that cannot be cancelled is user-hostile; the restore must
+    # still run so the network is not left on a swept cap.
+    # The abort is posted IMMEDIATELY, not after a fixed sleep: the record is
+    # published under the same lock hold that starts the thread, so it exists
+    # the moment the POST returns — and this loop is FAST (the informed jump
+    # reaches its verdict in two solves), so any sleep long enough to "let it
+    # get going" is also long enough to let it finish. A first attempt slept
+    # 1.5 s and aborted a study that had already terminated.
+    http("/api/results/coupling_loop", method="POST",
+         body={"target_lole_h": target / 100.0, "draws": 1500, "seed": 4,
+               "eps0": 100.0, "max_solves": 8})
+    st_ab, _ = http("/api/results/coupling_loop/abort", method="POST")
+    res_ab = poll("/api/results/coupling_loop")
+    record("S17.4",
+           st_ab == 200 and isinstance(res_ab, dict)
+           and res_ab.get("status") == "aborted"
+           and res_ab.get("base_restored") is True,
+           f"abort->{st_ab}; final status={(res_ab or {}).get('status')} "
+           f"(want aborted); base_restored={(res_ab or {}).get('base_restored')}")
+
+    # ── S17.5 — restore="final" leaves the user HOLDING the certified plan.
+    # Without it the loop certifies a cap and then re-solves it away, and the
+    # answer survives only as a number in a record.
+    st_f, _ = http("/api/results/coupling_loop", method="POST",
+                   body={"target_lole_h": target, "draws": 200, "seed": 4,
+                         "eps0": 100.0, "max_solves": 3, "restore": "final"})
+    res_f = poll("/api/results/coupling_loop")
+    _, cfg_after = http("/api/simulation/solver_config")
+    applied = (cfg_after or {}).get("ens_cap_permyriad")
+    eps_star = (res_f or {}).get("eps_star")
+    if (res_f or {}).get("status") == "met" and eps_star is not None:
+        ok = applied is not None and abs(float(applied) - float(eps_star)) < 1e-6
+        detail = (f"met at eps*={eps_star:g}; config now carries "
+                  f"ens_cap_permyriad={applied} (want eps*)")
+    else:
+        # Not met: "final" must fall back to base rather than apply a cap no
+        # verdict certified.
+        ok = applied is None or applied == 100.0
+        detail = (f"status={(res_f or {}).get('status')} (not met) -> restore "
+                  f"fell back to base; cap={applied} (want the original 100.0)")
+    record("S17.5", st_f == 200 and res_f is not None and ok, detail)
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     global BACKEND
@@ -2501,6 +2744,8 @@ def main() -> int:
         suite_S15()
     if run("S16"):
         suite_S16()
+    if run("S17"):
+        suite_S17()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
