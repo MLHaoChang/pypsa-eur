@@ -151,6 +151,9 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_coupling_loop"):               frozenset(),
     ("routers/results.py", "post_coupling_loop"):              frozenset(),
     ("routers/results.py", "post_coupling_loop_abort"):        frozenset(),
+    ("routers/results.py", "get_margin_loop"):                 frozenset(),
+    ("routers/results.py", "post_margin_loop"):                frozenset(),
+    ("routers/results.py", "post_margin_loop_abort"):          frozenset(),
     ("routers/results.py", "get_load_results"):                frozenset(),
     ("routers/results.py", "get_asset_economics"):             frozenset({"asset_economics"}),
     # ── routers/simulation.py ───────────────────────────────────────────

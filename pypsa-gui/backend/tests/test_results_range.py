@@ -339,6 +339,14 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # both carry their ROUTE_SURFACES entries in test_golden_coverage.py,
         # which is the registry that sees every method.
         "/coupling_loop",
+        # Margin-loop lifecycle (Phase 9) — the same shape on the other
+        # lever: status, verdict and one row per ITERATE (a reserve
+        # margin and the MC metrics of the plan it produced). The axis is
+        # the search, not the horizon. The POST and the
+        # /margin_loop/abort POST are not scanned by this test at all (it
+        # reads `@results_router.get` only); both carry their
+        # ROUTE_SURFACES entries in test_golden_coverage.py.
+        "/margin_loop",
     }
 
     unclassified = declared - ranged - aggregates

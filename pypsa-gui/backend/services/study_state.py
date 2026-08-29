@@ -2,10 +2,11 @@
 The long-running-study mutual-exclusion predicate, in ONE place.
 
 Every adequacy study — the class-B/C contingency sweep, the ε-constraint
-frontier, the sequential-MC study and the coupling loop — reads the foreground
-network for minutes, and three of the four RE-SOLVE it. Two of them at once
-means one engine is sampling a network the other is mutating, and the numbers
-that come out are wrong in a way nothing downstream can detect.
+frontier, the sequential-MC study and the two planning loops (the energy cap's
+and the reserve margin's) — reads the foreground network for minutes, and four
+of the five RE-SOLVE it. Two of them at once means one engine is sampling a
+network the other is mutating, and the numbers that come out are wrong in a
+way nothing downstream can detect.
 
 WHY THIS MODULE EXISTS RATHER THAN A FUNCTION IN A ROUTER. The mesh has to be
 enforced from BOTH sides of a router boundary: ``routers/results.py`` owns the
@@ -30,7 +31,7 @@ from services.pypsa_service import PyPSAService
 # The keys under the active project's solver state that hold a long-running
 # study record. Order is the order a blocked caller is told about them, so the
 # cheapest-to-explain blocker comes first.
-STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop")
+STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop")
 
 # What each study is called in a 409 message. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and abort it.
@@ -39,6 +40,7 @@ STUDY_LABELS = {
     "frontier": "a frontier study",
     "mc": "a sequential-MC study",
     "coupling_loop": "a coupling-loop study",
+    "margin_loop": "a margin-loop study",
 }
 
 

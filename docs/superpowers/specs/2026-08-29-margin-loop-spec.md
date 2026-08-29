@@ -165,4 +165,47 @@ no worker commits.
 
 ## Amendments
 
-(none yet)
+### v1.1 — Wave A adjudications (ratified by the master)
+
+1. **The probe runs at `max(m_user, PROBE_MARGIN)` with `PROBE_MARGIN = 1e-4`.**
+   At exactly 0, `_prm_margin` reads "no standard", the wrapper installs
+   nothing, and the report carries NO `reserve_margin` block — so there is no
+   `firm_mw`/`peak_mw` to read the tight margin off. A numerically negligible
+   margin makes the block exist, and keeps one code path for both cases.
+2. **`m_tight ≤ 0` floors the start at `STEP_OVERSHOOT`**, since
+   `0·(1+overshoot)` is still 0 and margin 0 installs no standard.
+3. **The fleet ceiling stops the search through §2.5, not through a second
+   pre-solve gate in `solve_at`.** Adding one would make §2.5 dead code; as
+   built, an over-ceiling margin genuinely fails `reserve_margin_unreachable`
+   validation, the route relabels it `infeasible` only when
+   `reserve_margin_facts` confirms the margin is the cause, and the nesting
+   logic applies. Costs one validation-refused solve (no LP) and keeps the
+   mapping a live, bitable defence.
+4. **The schema's `le=5` is enforced pre-solve inside `solve_at`**, because the
+   blind step multiplies the margin ~4× per iterate and would otherwise build
+   — and under `restore="final"` persist — a margin the config schema rejects
+   on the next PUT. The refused iterate is still recorded as a row with an
+   `infeasible` condition naming the bound: the controller tried it, and the
+   payload says so.
+5. **`probe_solves`, `margin0`, `margin_tight`, `margin_ceiling`** are payload
+   keys beyond §2.6's list. The probe is outside `max_solves` (folding it in
+   would break the budget's meaning; hiding it would misreport wall-clock).
+   All are margins; no `x` anywhere.
+6. **The unpriceable 422 reuses the validator's own `Issue.message`** rather
+   than a second sentence, so the two cannot drift.
+
+**Bite-quality note (the worker's own, recorded because it is the discipline
+working):** two of the fifteen variants are weaker than they look and were
+reported as such — the `validation_failed` mapping bites on `solves_used`
+(3 vs 2) rather than on the verdict, because without it the search still
+reaches `unreachable`, one solve later and via the schema backstop; and the
+overshoot bite has to neutralise an adjacent guard to reach its defence.
+
+**Master's note on the restore, recorded because it nearly shipped a false
+green:** validating bite #2 (`cap_mwh=None` → `float(sysblk["cap_mwh"])`)
+created a SECOND copy of a line the coupling loop legitimately owns, so the
+single-replace restore hit the coupling loop's line instead and left the bite
+in place. The full gate caught it — 18 failures, and an md5 that did not match
+the pre-bite file. **A bite restore must be verified by hash, not by
+inspection**, and a `replace(..., 1)` is unsafe the moment the bitten string
+also exists elsewhere in the file.
