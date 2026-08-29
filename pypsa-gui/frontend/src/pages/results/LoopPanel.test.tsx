@@ -17,6 +17,7 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import {
   LoopPanel, targetEcho, wireTarget, loleCell, restoreSentence, entryHorizonYears,
+  CAP_LEVER, compact, leverSpelling,
 } from './LoopPanel'
 import type {
   CouplingIteration, CouplingLoopPayload, McStatus,
@@ -355,6 +356,31 @@ describe('restoreSentence', () => {
 
   it('names ε* symbolically before a run has produced one', () => {
     expect(restoreSentence('base', null)).toMatch(/ε\*/)
+  })
+
+  // ★ The cap has the SAME defect the margin loop's browser round found, and
+  // worse. The backend verdict prints `%g` (six significant figures); this
+  // sentence printed `compact` — TWO significant figures below 1. So one
+  // certified cap read `0.0347281` in the verdict and `0.035` in the sentence
+  // directly above it, and for an ENERGY CAP larger is LOOSER: the number the
+  // panel told the user to type was a weaker standard than the one the study
+  // certified, and would not reproduce its plan.
+  //
+  // Bite: `format: compact` in CAP_LEVER.
+  it('spells the certified cap the way the backend verdict spells it', () => {
+    for (const mode of ['base', 'final'] as const) {
+      expect(restoreSentence(mode, 0.0347281))
+        .toContain('ens_cap_permyriad = 0.0347281')
+    }
+  })
+
+  // The cross-language table lives once, in MarginLoopPanel.test.tsx, against
+  // the shared helper. This is the wiring: BOTH levers must reach it, or the
+  // table pins a function one of them does not use.
+  it('drives the cap lever off the SHARED spelling helper', () => {
+    expect(CAP_LEVER.format).toBe(leverSpelling)
+    expect(leverSpelling(0.034728149)).toBe('0.034728149')
+    expect(compact(0.034728149)).toBe('0.035')   // the badge, deliberately not
   })
 })
 

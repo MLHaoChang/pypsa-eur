@@ -209,9 +209,34 @@ export interface LeverCopy {
   format: (v: number) => string
 }
 
+/**
+ * How a certified lever value is SPELLED for the user to type.
+ *
+ * ★ NOT `compact`, which is what this used to be. `compact` is the BADGE
+ * formatter — two significant figures below 1 — and a certified cap of
+ * 0.034728149‱ rendered as `0.035` in a sentence whose entire purpose is to
+ * let the user reproduce the study's plan. An ENS cap is a CEILING on
+ * unserved energy, so a value rounded UP is a strictly LOOSER standard; a
+ * reserve margin is a THRESHOLD on required firm capacity, so a value rounded
+ * DOWN is. Either way the number the panel told the user to type bought a
+ * cheaper build than the one the study certified, and it disagreed with the
+ * backend verdict printed six lines below it.
+ *
+ * A display number in a table may round. An INSTRUCTION to type a value may
+ * not. The backend mirrors this exact expression in
+ * `services/adequacy/lever_text.format_lever_value`, and the same table of
+ * (value, spelling) pairs is asserted in both languages so neither side can
+ * move alone.
+ */
+export const LEVER_SIGFIGS = 12
+
+export function leverSpelling(v: number): string {
+  return String(Number(v.toPrecision(LEVER_SIGFIGS)))
+}
+
 /** The energy-cap lever — the loop this module was written for. */
 export const CAP_LEVER: LeverCopy = {
-  field: 'ens_cap_permyriad', symbol: 'ε*', format: compact,
+  field: 'ens_cap_permyriad', symbol: 'ε*', format: leverSpelling,
 }
 
 /**

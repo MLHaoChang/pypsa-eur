@@ -33,10 +33,10 @@ import pypsa
 import pytest
 
 from services.adequacy.coupling import MAX_LOOP_SOLVES
+from services.adequacy.lever_text import format_lever_value
 from services.adequacy.margin_lever import (
     MAX_MARGIN,
     STEP_OVERSHOOT,
-    format_lever_value,
     to_margin,
     to_x,
 )

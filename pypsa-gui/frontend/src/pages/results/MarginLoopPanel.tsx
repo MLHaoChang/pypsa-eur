@@ -10,8 +10,8 @@ import { nk } from '../../utils/queryKeys'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, trim } from './McPanel'
 import {
-  compact, entryHorizonYears, eur, loleCell, restoreSentence, targetEcho,
-  wireTarget, type LeverCopy,
+  compact, entryHorizonYears, eur, leverSpelling, loleCell, restoreSentence,
+  targetEcho, wireTarget, type LeverCopy,
 } from './LoopPanel'
 
 // ── The margin-driven planning loop (Phase 9, margin-loop spec §3) ──────────
@@ -57,7 +57,7 @@ export const MARGIN_LEVER: LeverCopy = {
   // `lever` (see `leverCopy`), which is the backend's word, not this file's.
   field: 'reserve_margin',
   symbol: 'm*',
-  format: (v: number) => String(Number(v.toPrecision(12))),
+  format: leverSpelling,
 }
 
 /** The restore copy for THIS payload — field name straight off the wire. */

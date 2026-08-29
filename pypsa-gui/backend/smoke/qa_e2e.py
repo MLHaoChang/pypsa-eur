@@ -2677,6 +2677,27 @@ def suite_S17():
                   f"fell back to base; cap={applied} (want the original 100.0)")
     record("S17.5", st_f == 200 and res_f is not None and ok, detail)
 
+    # ── S17.6 — the verdict names the number the PANEL tells you to type.
+    # The cap loop has had this defect since Phase 7 and worse than the margin
+    # loop did: the verdict printed `%g` (six significant figures) while the
+    # panel's restore explainer printed the BADGE formatter (two, below 1), so
+    # a certified 0.034728149‱ read "0.0347281" in one and "0.035" in the
+    # other. An ENS cap is a CEILING, so the rounded-up number is a strictly
+    # LOOSER standard than the plan the study certified.
+    from services.adequacy.lever_text import format_lever_value
+    notes, agreed = [], True
+    for payload, label in ((res_ab, "aborted run"), (res_f, "restore=final")):
+        star = (payload or {}).get("eps_star")
+        verdict = (payload or {}).get("verdict") or ""
+        if (payload or {}).get("status") != "met" or star is None:
+            notes.append(f"{label}: not met, nothing to name")
+            continue
+        want = f"ens_cap_permyriad = {format_lever_value(float(star))}"
+        hit = want in verdict
+        agreed = agreed and hit
+        notes.append(f"{label}: eps*={star!r} -> {want!r} present={hit}")
+    record("S17.6", agreed, "; ".join(notes))
+
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
     restore()
 
@@ -3103,7 +3124,7 @@ def suite_S19():
     # margin is a THRESHOLD on required firm capacity, so the shorter value is
     # a strictly LOOSER standard that need not reproduce the certified plan.
     # This is the layer that found it, so this is the layer that keeps it.
-    from services.adequacy.margin_lever import format_lever_value
+    from services.adequacy.lever_text import format_lever_value
     checked = [(mar, "restore=base"), (fin2, "restore=final")]
     agreed, notes = True, []
     for payload, label in checked:

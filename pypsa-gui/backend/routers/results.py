@@ -3581,6 +3581,7 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
     import time
 
     from services.adequacy.coupling import MAX_LOOP_SOLVES, run_coupling_loop
+    from services.adequacy.lever_text import format_lever_value
     from services.adequacy.mc import (
         MAX_DRAWS,
         MC_WARNING_V1,
@@ -3934,17 +3935,26 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
                 return NEVER_BOUND_COPY_V1
             return UNREACHABLE_COPY_V1
         if status == "met" and eps_star is not None:
+            # `format_lever_value`, never `%g` — and never the badge's two
+            # significant figures either. The panel's own restore explainer
+            # prints this same number, and the two disagreed IN THE SAME
+            # PANEL: the verdict said 0.0347281 where the explainer said
+            # 0.035. An ENS cap is a CEILING on unserved energy, so a value
+            # rounded UP is a strictly LOOSER standard that need not
+            # reproduce the certified plan. One number, spelled once.
+            cap_text = format_lever_value(eps_star)
             if restore == "final":
                 return (
                     f"A plan meeting {target:g} h was verified at ε* = "
-                    f"{eps_star:g}‱, and that cap has been APPLIED to your "
-                    "solver settings and re-solved — the network you are "
-                    "holding is the certified plan.")
+                    f"{cap_text}‱, and that cap has been APPLIED to your "
+                    f"solver settings (ens_cap_permyriad = {cap_text}) and "
+                    "re-solved — the network you are holding is the certified "
+                    "plan.")
             return (
                 f"A plan meeting {target:g} h was verified at ε* = "
-                f"{eps_star:g}‱. Your original config has been re-solved, so "
+                f"{cap_text}‱. Your original config has been re-solved, so "
                 "the network you are holding is NOT that plan: to keep it, set "
-                f"ens_cap_permyriad = {eps_star:g} and re-solve.")
+                f"ens_cap_permyriad = {cap_text} and re-solve.")
         if status == "aborted":
             return ("The study was aborted between iterates. Any iterates "
                     "already evaluated are shown; the closing restore ran, so "
@@ -4177,10 +4187,10 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
     import time
 
     from services.adequacy.coupling import MAX_LOOP_SOLVES, run_coupling_loop
+    from services.adequacy.lever_text import format_lever_value
     from services.adequacy.margin_lever import (
         MAX_MARGIN,
         STEP_OVERSHOOT,
-        format_lever_value,
         to_margin,
         to_x,
     )

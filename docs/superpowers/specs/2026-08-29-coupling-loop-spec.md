@@ -252,3 +252,28 @@ first, bite table, no commits by workers.
    same tiny window; tightening it is a cheap follow-up, not done here.
 7. The series/aggregate census scans GETs only; the POST and abort routes carry
    their coverage in `ROUTE_SURFACES` alone (noted in the census comment).
+
+### v1.4 — the sibling defect the margin loop's browser round exposed
+
+Phase 9's browser round found the margin panel printing two different numbers
+for one certified margin. **The cap loop has had the same defect since this
+phase shipped, and worse.** The verdict printed `%g` — six significant figures
+— while `restoreSentence` printed `compact`, the BADGE formatter, which is two
+significant figures below 1. One certified ε* of `0.034728149` therefore read
+`0.0347281` in the verdict and `0.035` in the sentence directly above it.
+
+Direction matters, and it is unsafe on this lever too: an ENS cap is a
+**ceiling** on unserved energy, so a value rounded UP is a strictly LOOSER
+standard. The number the panel told the user to type would not reproduce the
+plan the study certified — it would buy a cheaper one.
+
+`compact` stays the badge and column formatter. It is not a formatter for an
+instruction to type a value, and the two roles are now separate functions:
+`leverSpelling` in `LoopPanel.tsx`, mirrored by
+`services/adequacy/lever_text.format_lever_value`, used by **both** levers on
+**both** sides. The `restore="final"` cap verdict also now names the config
+field explicitly, as the margin loop's does — it previously said "that cap has
+been APPLIED to your solver settings" without saying which setting or what
+value, so the panel's own sentence was the only place the number appeared.
+
+Live coverage: **S17.6** (cap) beside **S19.6** (margin).

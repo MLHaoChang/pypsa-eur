@@ -26,6 +26,7 @@ import pypsa
 import pytest
 
 from services.adequacy.coupling import MAX_LOOP_SOLVES
+from services.adequacy.lever_text import format_lever_value
 from services.adequacy.mc import MAX_DRAWS, MC_WARNING_V1
 
 LOOP_URL = "/api/results/coupling_loop"
@@ -788,3 +789,48 @@ def test_the_real_plan_hash_probe_skips_the_mc_on_a_plateau(
     assert body["status"] == "unreachable", body
     assert body["final"] is None and body["eps_star"] is None
     assert body["base_restored"] is True
+
+
+# ── ★ the number the user is told to type ─────────────────────────────────
+
+@pytest.mark.parametrize("restore", ["base", "final"])
+def test_the_verdict_names_the_cap_the_panel_tells_you_to_type(
+        client, install_network, monkeypatch, restore):
+    """★ One certified cap, one number — not two.
+
+    The margin loop's browser round found this defect on its own panel; the
+    cap loop has had it since Phase 7, and worse. The verdict prints `%g` —
+    six significant figures — while `restoreSentence` printed `compact`, the
+    BADGE formatter, which is two significant figures below 1. A certified
+    0.034728149‱ therefore read as "0.0347281" in the verdict and "0.035" in
+    the sentence directly above it.
+
+    Direction matters: an ENS cap is a CEILING on unserved energy, so a value
+    rounded UP is a strictly LOOSER standard. The number the panel told the
+    user to type would not reproduce the plan the study certified — it would
+    buy a cheaper one.
+
+    Bite (verified): `{eps_star:g}` in either verdict branch.
+    """
+    # An eps0 that iterate 0 already meets, with EIGHT significant figures —
+    # six would round-trip through `%g` and the test would go blind.
+    eps0 = 0.034728149
+    stubs = _Stubs(lole_seq=[0.5])
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network)
+
+    r = client.post(LOOP_URL, json={"target_lole_h": 1.0, "draws": DRAWS,
+                                    "seed": SEED, "eps0": eps0,
+                                    "restore": restore})
+    assert r.status_code == 200, r.text
+    body = _poll(client)
+    assert body["status"] == "met", body
+    eps_star = float(body["eps_star"])
+    assert eps_star != float(f"{eps_star:g}"), (
+        "the fixture certified a cap that six significant figures already "
+        f"round-trip ({eps_star!r}) — this test cannot see the defect it "
+        "exists for; choose a cap with more digits")
+    panel = format_lever_value(eps_star)
+    assert f"ens_cap_permyriad = {panel}" in body["verdict"], (
+        "the verdict names a different number from the one the panel tells "
+        f"the user to type: verdict={body['verdict']!r} panel={panel!r}")
