@@ -527,8 +527,11 @@ def test_mc_adequacy_reports_two_intervals_and_the_standing_warning():
     assert elo <= out["eue_mwh"] <= ehi and elo >= 0.0
     assert out["time_basis"] == "hours_per_horizon"       # a week is not a year
     assert out["horizon_years"] == pytest.approx(168 / HOURS_PER_YEAR)
-    assert out["resolution_floor_h"] == pytest.approx(
-        1.0 / (out["n_samples"] * out["horizon_years"]))
+    # The floor lives in lole_hours' OWN units (per horizon, weight-aware):
+    # min positive weight / n. This line previously pinned 1/(n·nyears) — a
+    # per-YEAR quantity against a per-HORIZON metric, inflated 52× here —
+    # i.e. it pinned the bug the ELCC worker found (spec v1.2).
+    assert out["resolution_floor_h"] == pytest.approx(1.0 / out["n_samples"])
     assert out["warning"] == M.MC_WARNING_V1
     low = M.MC_WARNING_V1.lower()
     assert "weather" in low and "independent" in low and "demand response" in low
@@ -676,3 +679,34 @@ def test_snapshot_inputs_exports_requested_vre_profiles_only():
     # Un-netting it must give back the gross demand.
     assert inp.residual + inp.vre_profiles["windfarm"] == pytest.approx(
         [100.0, 100.0, 100.0])
+
+
+def test_resolution_floor_shares_units_with_lole_hours():
+    """The floor must live in the SAME units as ``lole_hours`` — per horizon,
+    weight-aware. The original ``1/(n·nyears)`` was per-year against a
+    per-horizon metric: on a 168 h week at unit weights it claimed a floor
+    52× too coarse, and on a weighted week it was wrong in the other
+    direction — either way ELCC's "unidentifiable" refusal fired on systems
+    whose LOLE was perfectly resolvable. Found by the ELCC worker (its
+    fixtures declared nyears=1.0 to dodge it; this pins the fix so the dodge
+    can be retired).
+
+    Bite check (documented): restore ``1/(n_total·nyears)`` — both
+    assertions below fail.
+    """
+    units = (C.CoptUnit(name="g", capacity_mw=100.0, q=0.1, mttr_hours=10.0),)
+    H, n = 24, 50
+
+    # Unit weights, sub-year horizon: smallest observable LOLE is one hour in
+    # one draw = 1/n horizon-hours. The old formula said 1/(n·(24/8760)) —
+    # 365× larger.
+    res = M.mc_adequacy(_inputs(np.full(H, 50.0), units=units),
+                        draws=n, max_draws=n, batch=n, seed=1)
+    assert res["resolution_floor_h"] == pytest.approx(1.0 / n)
+
+    # Weighted representative week: one shortfall hour in one draw carries
+    # its WEIGHT into the mean, so the floor scales with it.
+    w = 8760.0 / H
+    res_w = M.mc_adequacy(_inputs(np.full(H, 50.0), units=units, weight=w),
+                          draws=n, max_draws=n, batch=n, seed=1)
+    assert res_w["resolution_floor_h"] == pytest.approx(w / n)

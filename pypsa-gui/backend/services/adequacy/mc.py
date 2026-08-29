@@ -584,10 +584,16 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
     evaluations. ``**sim_kwargs`` forwards ELCC's removal/firm-block arguments
     to ``simulate`` unchanged.
 
-    Every payload carries ``resolution_floor_h = 1/(n·nyears)``: the smallest
-    LOLE this many draws can resolve. Reported ALWAYS, not only when the answer
-    is zero — a converged 0.0 h and "below 0.02 h" are different claims, and
-    only the second one is true.
+    Every payload carries ``resolution_floor_h``: the smallest NONZERO LOLE this
+    many draws can resolve, **in the same units as ``lole_hours``** — one
+    shortfall hour in one draw contributes that hour's weight to the mean, so
+    the floor is ``min(positive snapshot weight) / n``. The spec's original
+    ``1/(n·nyears)`` was a per-YEAR quantity compared against a per-HORIZON
+    metric; on a sub-year horizon it was inflated by 8760/H and made ELCC's
+    "unidentifiable" refusal fire far too eagerly (found by the ELCC worker,
+    spec v1.2). Reported ALWAYS, not only when the answer is zero — a converged
+    0.0 h and "below the floor" are different claims, and only the second one
+    is true. None when no positive weight exists (degenerate horizon).
     """
     seq = seed if isinstance(seed, np.random.SeedSequence) \
         else np.random.SeedSequence(seed)
@@ -643,7 +649,8 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
     nyears = float(inputs.nyears)
     # A horizon of unknown length cannot state a floor; None says so instead of
     # dividing by zero or printing an infinity into the payload.
-    floor = 1.0 / (n_total * nyears) if (nyears > 0 and n_total) else None
+    w_pos = inputs.weights[inputs.weights > 0]
+    floor = (float(w_pos.min()) / n_total) if (w_pos.size and n_total) else None
 
     return {
         "lole_hours": lole_mean,
