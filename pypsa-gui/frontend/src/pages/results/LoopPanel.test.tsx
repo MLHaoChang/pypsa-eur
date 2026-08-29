@@ -245,6 +245,30 @@ describe('targetEcho', () => {
   })
 })
 
+describe('entryHorizonYears precedence', () => {
+  it('prefers the ON-DEMAND copt horizon over a stored MC study record', () => {
+    // Found in a browser round: /results/mc serves the LAST study's record,
+    // and a study record outlives the network it was computed on — the panel
+    // read a 168 h horizon from an earlier project while the live network had
+    // 48 snapshots, so "3 h/yr" went on the wire as 0.0575 h instead of
+    // 0.0164 h. A 3.5x wrong standard, silently, with both numbers looking
+    // plausible. COPT is computed on demand from the LIVE network every time
+    // it is fetched, so for a question about THIS network's horizon it is the
+    // authority; the stored study is only a fallback for the case where no
+    // COPT has been fetched yet.
+    //
+    // Bite (verified): put the mc branch first again.
+    const mc = { status: 'done', result: { metrics: { horizon_years: 168 / 8760 } } } as never
+    const copt = { metrics: { horizon_years: 48 / 8760 } } as never
+    expect(entryHorizonYears(mc, copt)).toBeCloseTo(48 / 8760, 12)
+  })
+
+  it('falls back to a stored MC record when no copt payload has arrived', () => {
+    const mc = { status: 'done', result: { metrics: { horizon_years: 168 / 8760 } } } as never
+    expect(entryHorizonYears(mc, null)).toBeCloseTo(168 / 8760, 12)
+  })
+})
+
 describe('entryHorizonYears', () => {
   // The ENTRY field converts through the LIVE network's horizon, and the two
   // surfaces that report one without needing a coupling-loop run are the MC

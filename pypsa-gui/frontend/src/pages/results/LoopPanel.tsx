@@ -108,10 +108,19 @@ export function entryHorizonYears(
   mc: McStatus | null | undefined,
   copt: CoptPayload | null | undefined,
 ): number | null {
-  const fromMc = mc?.result?.metrics?.horizon_years
-  if (fromMc != null && isFinite(fromMc) && fromMc > 0) return fromMc
+  // COPT FIRST, and the order is the whole point. `/results/copt` is computed
+  // on demand from the LIVE network on every fetch; `/results/mc` serves the
+  // last STUDY RECORD, which outlives the network it was computed on. A
+  // browser round caught exactly that: a stored 168 h study answered for a
+  // live 48 h network, and "3 h/yr" went on the wire as 0.0575 h instead of
+  // 0.0164 h — a 3.5x wrong standard, silently, both numbers plausible. For a
+  // question about THIS network's horizon the on-demand surface is the
+  // authority; the stored study is only for the moment before any COPT has
+  // been fetched, where a stale horizon still beats assuming a year.
   const fromCopt = copt?.metrics?.horizon_years
   if (fromCopt != null && isFinite(fromCopt) && fromCopt > 0) return fromCopt
+  const fromMc = mc?.result?.metrics?.horizon_years
+  if (fromMc != null && isFinite(fromMc) && fromMc > 0) return fromMc
   return null
 }
 
