@@ -258,3 +258,52 @@ named broken variant (bite check), with the variant documented in the test docst
 
 500 draws × 168 h × ≤10 units: < 5 s. 1000 × 8760 × 32 units: low tens of seconds.
 A miss is a finding to report, not to hide.
+
+## Amendment v1.3 — the ELCC candidates surface (shipped, recorded post-hoc)
+
+**`GET /results/mc/elcc_candidates`** (routers/results.py) — synchronous,
+read-only, no worker thread, deliberately **no 409 guard** (starts nothing,
+mutates nothing; refusing to list assets while another study runs would blank
+the picker for minutes for no gain). Takes the PyPSAService lock for the
+snapshot only. Response is always **200**, never 204 — an empty list is an
+answer the panel renders ("no eligible assets"), not a "never fetched":
+
+```json
+{"assets": [{"kind": "generator"|"storage_unit"|"vre",
+             "name": "...", "nameplate_mw": 0.0}, ...],
+ "max_assets": MAX_ELCC_ASSETS}
+```
+
+Sorted by `nameplate_mw` descending, ties by `name` ascending.
+`MAX_ELCC_ASSETS` stays owned by `services/adequacy/elcc.py`; the frontend
+reads the cap from the payload and never hardcodes it.
+
+**Agreement by construction, in BOTH directions**, is the whole contract:
+
+- `elcc.elcc_candidates(n)` does not re-derive membership — it reads it off
+  the structures the run resolves against (`fleet_and_residual` units,
+  `snapshot_inputs` storage rows, and `copt.must_take_generators` for vre,
+  whose profile peak is bit-for-bit the bracket top `_resolve` prices).
+  The generator-membership decision itself is one extracted walk
+  (`copt._membership_walk`) consumed by `fleet_and_residual` and the
+  enumeration alike. A must-take generator with an all-zero profile is
+  excluded (degenerate [0, 0] bracket; nothing to price).
+- The converse held only by UI convention until it was pinned: `snapshot_inputs`
+  built a `vre_profiles` entry for WHATEVER names the request asked, so
+  `{"kind": "vre", "name": "__voll_b"}` priced a 9999 MW LP slack as wind.
+  **Closed:** the `vre_assets` loop now admits only genuinely must-take
+  generators (same walk); anything else is absent from `vre_profiles`, which
+  `_resolve` turns into the KeyError the route maps to 404. Bitten test:
+  `test_a_slack_generator_cannot_be_priced_as_vre`.
+
+Frontend (`McPanel.tsx`): candidates fetched only while the panel is open
+(`enabled: open`); checkbox picker labelled name · kind · nameplate; selection
+capped at the payload's `max_assets` with the cap named in the disable
+message; selected assets go into the POST body as `{kind, name}` pairs; an
+empty selection sends no `elcc_assets` key at all, so the bare default run
+stays bare.
+
+**Registry note for future routes:** a new `/results/*` route needs TWO test
+registry entries — `test_golden_coverage.ROUTE_SURFACES` **and**
+`test_results_range.py`'s series/aggregate census — and each gate fails
+loudly when its own entry is missing.

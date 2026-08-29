@@ -3365,6 +3365,44 @@ def post_mc(body: McRequest | None = None):
             "cov_target": cov_target, "elcc_assets": len(assets)}
 
 
+@results_router.get("/mc/elcc_candidates")
+def get_mc_elcc_candidates():
+    """
+    The assets an ELCC study may be asked for, for the panel's picker.
+
+    ``{"assets": [{kind, name, nameplate_mw}, …], "max_assets": N}``, sorted by
+    nameplate descending, ties by name. `elcc_assets` was API-only until this
+    endpoint existed: the panel could render a credit table it had no way to
+    request, and a user would have had to type asset names and kinds copied out
+    of the network editor — including the kind distinction (an occurrence-
+    bearing "generator" vs a must-take "vre") which is a property of the
+    OCCURRENCE DATA, not of anything the editor shows.
+
+    Membership AGREES BY CONSTRUCTION with what ``post_mc`` accepts — see
+    ``elcc.elcc_candidates``, which reads it off the same snapshot the run
+    resolves against. That is the whole point: a candidate this endpoint offers
+    and the run then 404s on is the failure mode it exists to prevent.
+
+    Synchronous and read-only: one snapshot, no sampling, no solve. Hence NO
+    409 guard — unlike ``post_mc`` this starts nothing and mutates nothing, and
+    refusing to list assets while some other study runs would disable the
+    picker for minutes at a time for no gain. The lock is still taken for the
+    snapshot itself (same discipline as ``post_mc``): the frames must not be
+    read half-mutated.
+
+    200 with an EMPTY list — never 204 — when nothing qualifies. "This network
+    has no asset whose capacity credit could be measured" is an answer, and the
+    panel renders an explanatory line from it; a 204 would collapse it into the
+    client's "never fetched" case and leave an empty box on screen.
+    """
+    from services.adequacy.elcc import MAX_ELCC_ASSETS, elcc_candidates
+
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        assets = elcc_candidates(n)
+    return {"assets": assets, "max_assets": MAX_ELCC_ASSETS}
+
+
 @results_router.get("/copt")
 def get_copt():
     """

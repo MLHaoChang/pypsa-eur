@@ -237,6 +237,29 @@ export interface McRequestBody {
   elcc_assets?: Array<{ kind: string; name: string }>
 }
 
+/**
+ * One row of GET /results/mc/elcc_candidates — an asset the study may be asked
+ * to price. `kind` is the ELCC kind, NOT a component class: an electrical
+ * generator is `"generator"` when it carries occurrence data and `"vre"` when
+ * it does not (must-take, netted into the residual), and the removal semantics
+ * differ. `nameplate_mw` is the bracket top the bisection actually prices —
+ * capacity for a unit, p_nom for a store, and the PEAK must-take contribution
+ * (profile × capacity) for a vre asset, which is why it can be well below the
+ * installed capacity.
+ */
+export interface ElccCandidate {
+  kind: string
+  name: string
+  nameplate_mw: number
+}
+
+export interface ElccCandidatesPayload {
+  /** Sorted by nameplate descending, ties by name. Possibly empty. */
+  assets: ElccCandidate[]
+  /** services/adequacy/elcc.py MAX_ELCC_ASSETS — never hardcode it here. */
+  max_assets: number
+}
+
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
@@ -480,6 +503,15 @@ export const resultsApi = {
   // `blockerMessage`).
   startMc: (body?: McRequestBody) =>
     client.post('/results/mc', body ?? {}).then(r => r.data),
+  // The assets an ELCC study may be asked for, for McPanel's picker. Always
+  // 200 — an EMPTY `assets` list is an answer ("nothing in this network has a
+  // capacity credit that could be measured"), not a 204, so there is no null
+  // case to unwrap here. Membership agrees by construction with what
+  // `startMc` accepts as `elcc_assets`, which is the whole reason the endpoint
+  // exists: a name the picker offers and the run 404s on would be worse than
+  // no picker at all.
+  getElccCandidates: () => client.get('/results/mc/elcc_candidates')
+    .then(r => r.data as ElccCandidatesPayload),
   // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
   // overlays, persisted per project. Computed rows come from getCopt and
   // merge client-side (pages/results/fmea.ts).

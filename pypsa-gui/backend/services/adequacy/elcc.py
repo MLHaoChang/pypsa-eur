@@ -107,6 +107,75 @@ _MAX_BISECTION_STEPS = 64
 _KINDS = ("generator", "storage_unit", "vre")
 
 
+def elcc_candidates(n) -> list[dict]:
+    """
+    Every asset in ``n`` whose capacity credit this module can price, as
+    ``[{kind, name, nameplate_mw}, …]`` sorted by nameplate DESCENDING with
+    ties broken by name.
+
+    **Agreement by construction is the entire contract.** This list is what a
+    picker offers; the names come back as ``elcc_assets`` on
+    ``POST /results/mc`` and every one of them must resolve. So membership is
+    not re-derived here — it is READ OFF the very structures the run itself
+    resolves against:
+
+    * ``kind="generator"`` — the occurrence-bearing units of
+      ``fleet_and_residual``, i.e. ``inputs.units``, which is exactly the list
+      ``_resolve`` scans for a generator name. Nameplate = ``capacity_mw``.
+    * ``kind="storage_unit"`` — the storage rows ``snapshot_inputs`` built,
+      i.e. ``inputs.storage``, the list ``_resolve`` scans by name.
+      Nameplate = ``p_nom_mw``.
+    * ``kind="vre"`` — the must-take generators (``copt.must_take_generators``,
+      the complement of the unit branch in the SAME membership walk), passed
+      straight back into ``snapshot_inputs`` as ``vre_assets`` so the profile
+      whose peak we report is bit-for-bit the profile ``_resolve`` un-nets.
+      Nameplate = the PEAK must-take contribution over the horizon — the
+      bracket top the bisection actually prices, not the installed capacity
+      (spec §3 [v1.2]).
+
+    A must-take generator whose peak contribution is ZERO is EXCLUDED: an
+    all-zero profile contributes nothing to net out, so there is no credit to
+    measure, and ``_resolve`` would hand the bisection a degenerate ``[0, 0]``
+    bracket whose only possible answer is 0 MW. Offering it would spend a
+    baseline plus a bracket probe to print a number that is a property of the
+    missing profile, not of the asset.
+
+    Cheap and read-only: one snapshot, no sampling. The caller holds the
+    PyPSAService lock for the duration (same discipline as ``post_mc``).
+    """
+    from services.adequacy.copt import must_take_generators
+    from services.adequacy.mc import snapshot_inputs
+
+    must_take = must_take_generators(n)
+    inputs = snapshot_inputs(n, vre_assets=must_take)
+
+    rows: list[dict] = [
+        {"kind": "generator", "name": str(u.name),
+         "nameplate_mw": float(u.capacity_mw)}
+        for u in inputs.units
+    ]
+    rows += [
+        {"kind": "storage_unit", "name": str(s.name),
+         "nameplate_mw": float(s.p_nom_mw)}
+        for s in inputs.storage
+    ]
+    for name in must_take:
+        profile = inputs.vre_profiles.get(name)
+        if profile is None:               # renamed between the two reads
+            continue
+        peak = float(np.asarray(profile, dtype=np.float64).max(initial=0.0))
+        if peak <= 0.0:
+            continue                      # see the docstring: nothing to price
+        rows.append({"kind": "vre", "name": str(name), "nameplate_mw": peak})
+
+    # Descending nameplate puts the assets whose credit moves the answer at the
+    # top of a list the user may only tick MAX_ELCC_ASSETS of; the name
+    # tie-break makes the order stable across requests rather than an artefact
+    # of the component frames' insertion order.
+    rows.sort(key=lambda r: (-r["nameplate_mw"], r["name"]))
+    return rows
+
+
 def default_tol_mw(nameplate_mw) -> float:
     """``max(0.5, 0.001·nameplate)`` (spec §3).
 

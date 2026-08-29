@@ -229,11 +229,26 @@ def snapshot_inputs(n, *, vre_assets=()) -> MCInputs:
     profiles: dict[str, np.ndarray] = {}
     gens = getattr(n, "generators", None)
     p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+    # Only genuinely MUST-TAKE generators may have a vre profile preserved.
+    # Without this test the loop built a profile for whatever names the
+    # request asked — a slack, a non-electrical generator — and kind="vre"
+    # then priced it: a 9999 MW VoLL slack "un-netted" into the residual as
+    # if it were wind. Membership is the same walk fleet_and_residual uses,
+    # so the run and the candidates endpoint agree in BOTH directions; a name
+    # that fails it is simply absent here, which _resolve turns into the
+    # KeyError the route maps to 404.
+    if vre_assets:
+        from services.adequacy.copt import must_take_generators
+        _must_take = set(must_take_generators(n))
+    else:
+        _must_take = set()
     for name in vre_assets:
         if gens is None or name not in gens.index:
             # Silently absent rather than raising: the route turns a missing
             # ELCC asset into a 404 (spec §3), and a snapshot must not fail
             # because a caller asked about a name that has since been renamed.
+            continue
+        if name not in _must_take:
             continue
         cap = _storage_capacity(gens.loc[name])
         if p_max_pu_t is not None and name in getattr(p_max_pu_t, "columns", []):

@@ -155,6 +155,78 @@ def hourly_adequacy(dist: CapacityDistribution, residual_load: pd.Series,
     }
 
 
+def _firm_capacity(gens: pd.DataFrame, g) -> float:
+    """Firm capacity: the solved size when a fresh solve exists, else p_nom."""
+    for col in ("p_nom_opt", "p_nom"):
+        if col in gens.columns:
+            try:
+                v = float(gens.at[g, col])
+                if math.isfinite(v) and v > 0:
+                    return v
+            except (TypeError, ValueError):
+                continue
+    return 0.0
+
+
+def _membership_walk(n, elec_buses):
+    """
+    THE generator-membership decision, in one place (spec §3.1).
+
+    Yields ``(label, capacity_mw, occurrence_row)`` for every generator that
+    clears the scope tests — non-slack, at an electrical bus, positive firm
+    capacity — in ``n.generators`` order. The branch each caller then takes is
+    the SAME one-line test on the resolved occurrence row:
+    ``row["source"] != "missing"`` is an occurrence-bearing COPT/MC unit,
+    ``== "missing"`` is must-take (netted into the residual at its hourly
+    availability).
+
+    Extracted rather than duplicated because two consumers now depend on the
+    answer and they must agree BY CONSTRUCTION: ``fleet_and_residual`` decides
+    who gets sampled, and the ELCC candidate enumeration decides who the UI may
+    ask for a capacity credit. A generator the enumeration called a unit and
+    this loop called must-take is not a cosmetic disagreement — it is a 404 on
+    a name the picker itself offered.
+    """
+    from services.adequacy.occurrence import resolve_outage_params
+    from services.adequacy.slack import slack_generator_mask
+
+    gens = getattr(n, "generators", None)
+    if gens is None or gens.empty:
+        return
+    slack = slack_generator_mask(gens)
+    params = resolve_outage_params(n, "generators")
+    for g in gens.index:
+        if bool(slack.get(g, False)):
+            continue
+        if str(gens.at[g, "bus"]) not in elec_buses:
+            continue
+        cap = _firm_capacity(gens, g)
+        if cap <= 0:
+            continue
+        yield g, cap, params.loc[g]
+
+
+def must_take_generators(n) -> list[str]:
+    """
+    The names of the MUST-TAKE generators — the exact complement of the unit
+    branch in ``fleet_and_residual``'s membership loop, taken from the same
+    walk rather than re-derived (see ``_membership_walk``).
+
+    These are the ``kind="vre"`` ELCC candidates: their output was netted into
+    the residual, so pricing them means un-netting the profile, which is
+    exactly what ``elcc._resolve`` does with the profiles
+    ``mc.snapshot_inputs(n, vre_assets=…)`` preserves.
+    """
+    from services.adequacy.metrics import electrical_columns
+
+    buses = getattr(n, "buses", None)
+    if buses is None:
+        return []
+    elec_buses = set(electrical_columns(n, list(buses.index)))
+    return [str(g) for g, _cap, row in _membership_walk(n, elec_buses)
+            if row["source"] == "missing"]
+
+
 def fleet_and_residual(n) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
     """
     Apply the membership rule to a network: returns (COPT units, residual
@@ -166,8 +238,6 @@ def fleet_and_residual(n) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
     """
     from services import period_utils as _period_utils
     from services.adequacy.metrics import electrical_columns
-    from services.adequacy.occurrence import resolve_outage_params
-    from services.adequacy.slack import slack_generator_mask
 
     gens = n.generators
     buses = n.buses
@@ -176,34 +246,12 @@ def fleet_and_residual(n) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
     w = _period_utils.snapshot_weights(n, "generators", sns=snapshots)
 
     elec_buses = set(electrical_columns(n, list(buses.index)))
-    slack = slack_generator_mask(gens) if not gens.empty else pd.Series(dtype=bool)
-    params = resolve_outage_params(n, "generators") if not gens.empty else pd.DataFrame()
-
-    # Firm capacity: the solved size when a fresh solve exists, else p_nom.
-    def _capacity(g) -> float:
-        for col in ("p_nom_opt", "p_nom"):
-            if col in gens.columns:
-                try:
-                    v = float(gens.at[g, col])
-                    if math.isfinite(v) and v > 0:
-                        return v
-                except (TypeError, ValueError):
-                    continue
-        return 0.0
 
     p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
 
     units: list[CoptUnit] = []
     must_take = pd.Series(0.0, index=snapshots)
-    for g in gens.index if not gens.empty else []:
-        if bool(slack.get(g, False)):
-            continue
-        if str(gens.at[g, "bus"]) not in elec_buses:
-            continue
-        cap = _capacity(g)
-        if cap <= 0:
-            continue
-        row = params.loc[g]
+    for g, cap, row in _membership_walk(n, elec_buses):
         if row["source"] != "missing":
             units.append(CoptUnit(
                 name=str(g), capacity_mw=cap, q=float(row["rate"]),

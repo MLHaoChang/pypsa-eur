@@ -8,7 +8,7 @@ import LostLoadTab from './LostLoadTab'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
-  return { ...actual, resultsApi: { ...actual.resultsApi, getLostLoad: vi.fn(), getAdequacy: vi.fn(), getCopt: vi.fn(), getMc: vi.fn(), startMc: vi.fn() } }
+  return { ...actual, resultsApi: { ...actual.resultsApi, getLostLoad: vi.fn(), getAdequacy: vi.fn(), getCopt: vi.fn(), getMc: vi.fn(), startMc: vi.fn(), getElccCandidates: vi.fn() } }
 })
 
 vi.mock('../../api/network', async (importOriginal) => {
@@ -52,6 +52,13 @@ beforeEach(() => {
   // Same 204 default for the sequential-MC surface: no study run this session.
   vi.mocked(resultsApi.getMc).mockReset().mockResolvedValue(null as never)
   vi.mocked(resultsApi.startMc).mockReset().mockResolvedValue({ status: 'running' } as never)
+  // The MC panel's ELCC picker fetches its candidates only while the panel is
+  // OPEN, and it ships collapsed — so this mock is not reached in this suite
+  // today. It is stubbed anyway because the alternative failure is a real
+  // axios call from a jsdom test the day the panel's default changes, which
+  // fails as a timeout somewhere else entirely.
+  vi.mocked(resultsApi.getElccCandidates).mockReset()
+    .mockResolvedValue({ assets: [], max_assets: 10 })
 })
 
 function renderPage() {

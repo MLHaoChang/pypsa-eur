@@ -15,9 +15,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import {
-  McPanel, blockerMessage, ciRange, loleStatement, elccShare,
+  McPanel, blockerMessage, ciRange, loleStatement, elccShare, capMessage,
 } from './McPanel'
-import type { McMetrics, McStatus, ElccRow } from '../../api/simulation'
+import type {
+  McMetrics, McStatus, ElccRow, ElccCandidatesPayload,
+} from '../../api/simulation'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -25,7 +27,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
     ...actual,
     resultsApi: {
       ...actual.resultsApi,
-      getMc: vi.fn(), startMc: vi.fn(),
+      getMc: vi.fn(), startMc: vi.fn(), getElccCandidates: vi.fn(),
       getAdequacy: vi.fn(), getCopt: vi.fn(),
     },
   }
@@ -107,6 +109,21 @@ const COPT = {
   voll_eur_per_mwh: 4000, per_mode: [],
 }
 
+/**
+ * GET /results/mc/elcc_candidates, verbatim key names
+ * (routers/results.py get_mc_elcc_candidates / services/adequacy/elcc.py
+ * elcc_candidates). Sorted by nameplate descending, ties by name — the order
+ * the backend guarantees, so the picker renders it as it arrives.
+ */
+const CANDIDATES: ElccCandidatesPayload = {
+  assets: [
+    { kind: 'vre', name: 'Wind-North', nameplate_mw: 160 },
+    { kind: 'generator', name: 'CCGT-1', nameplate_mw: 60 },
+    { kind: 'storage_unit', name: 'Battery-A', nameplate_mw: 50 },
+  ],
+  max_assets: 10,
+}
+
 /** An axios-shaped rejection, exactly as the client interceptor re-throws it. */
 function httpError(status: number, detail: string) {
   const e = new Error(`Request failed with status code ${status}`) as Error & {
@@ -124,6 +141,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.startMc).mockReset().mockResolvedValue({ status: 'running' })
   vi.mocked(resultsApi.getAdequacy).mockReset().mockResolvedValue(null as never)
   vi.mocked(resultsApi.getCopt).mockReset().mockResolvedValue(null as never)
+  vi.mocked(resultsApi.getElccCandidates).mockReset().mockResolvedValue(CANDIDATES)
 })
 
 function renderPanel() {
@@ -422,5 +440,123 @@ describe('EngineComparison', () => {
       .toMatch(/perfect/i)
     expect(screen.getByTestId('cmp-foresight-mc').textContent).toMatch(/none|chronolog/i)
     expect(screen.getByTestId('cmp-basis-mc').textContent).toMatch(/hours_per_year|h\/yr/)
+  })
+})
+
+// ── the ELCC asset picker ───────────────────────────────────────────────────
+//
+// The gap this closes: the panel above renders an ELCC table, but until the
+// picker landed `elcc_assets` was API-only — a user could read a credit table
+// they had no way to ask for. Requesting one meant knowing an asset's name AND
+// its ELCC kind, and the kind is a property of the OCCURRENCE DATA (an
+// outage-bearing "generator" vs a must-take "vre"), not of anything the
+// network editor shows.
+
+describe('capMessage', () => {
+  // ★ Bite: the component hardcodes 10 as the cap instead of reading
+  // `max_assets` off the payload.
+  it('names the cap it was given, whatever the backend chose', () => {
+    expect(capMessage(2)).toMatch(/\b2\b/)
+    expect(capMessage(2)).not.toMatch(/10/)
+    expect(capMessage(4)).toMatch(/\b4\b/)
+  })
+})
+
+describe('McPanel ELCC picker', () => {
+  it('fetches the candidates when the panel is opened and lists each one', async () => {
+    await openPanel()
+    await waitFor(() => expect(resultsApi.getElccCandidates).toHaveBeenCalled())
+    const picker = await screen.findByTestId('elcc-picker')
+    const text = picker.textContent ?? ''
+    // Every row says name · kind · nameplate, so the kind distinction the
+    // request needs is visible rather than guessed.
+    expect(text).toMatch(/Wind-North/)
+    expect(text).toMatch(/vre/)
+    expect(text).toMatch(/160/)
+    expect(text).toMatch(/CCGT-1/)
+    expect(text).toMatch(/generator/)
+    expect(text).toMatch(/Battery-A/)
+    expect(text).toMatch(/storage_unit/)
+    expect(text).toMatch(/50/)
+  })
+
+  // ★ Bite: send `elcc_assets` as bare names (`['Wind-North', …]`) instead of
+  // {kind, name} pairs.
+  //
+  // The name alone is NOT the asset: kind decides the removal semantics
+  // (exclude a sampled unit by position / drop a store from dispatch / un-net
+  // a must-take profile) and hence which list the backend's `_resolve` scans.
+  // A bare name is a 422 at best and, for a name that exists in two roles, the
+  // wrong credit at worst.
+  it('sends the selected assets as {kind, name} pairs', async () => {
+    const user = await openPanel()
+    await screen.findByTestId('elcc-picker')
+    await user.click(screen.getByTestId('elcc-candidate-Wind-North'))
+    await user.click(screen.getByTestId('elcc-candidate-Battery-A'))
+    await user.click(screen.getByRole('button', { name: /run study/i }))
+    await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalledWith({
+      draws: 500,
+      elcc_assets: [
+        { kind: 'vre', name: 'Wind-North' },
+        { kind: 'storage_unit', name: 'Battery-A' },
+      ],
+    }))
+  })
+
+  // ★ Bite: hardcode 10 as the cap instead of reading `max_assets`.
+  //
+  // The cap is a PRODUCT decision that lives in services/adequacy/elcc.py
+  // (MAX_ELCC_ASSETS) and the endpoint ships it in the payload for exactly
+  // this reason. A frontend copy of it drifts the day the backend re-tunes the
+  // budget, and the drift is silent in the permissive direction: the picker
+  // lets a user tick ten assets and the POST comes back 422.
+  it('stops selection at the cap the PAYLOAD names, and says so', async () => {
+    vi.mocked(resultsApi.getElccCandidates).mockResolvedValue(
+      { ...CANDIDATES, max_assets: 2 })
+    const user = await openPanel()
+    await screen.findByTestId('elcc-picker')
+    await user.click(screen.getByTestId('elcc-candidate-Wind-North'))
+    await user.click(screen.getByTestId('elcc-candidate-CCGT-1'))
+
+    const third = await screen.findByTestId('elcc-candidate-Battery-A')
+    expect((third as HTMLInputElement).disabled).toBe(true)
+    // …and the two that ARE selected stay clickable, or the user cannot
+    // change their mind without reloading.
+    expect((screen.getByTestId('elcc-candidate-Wind-North') as HTMLInputElement)
+      .disabled).toBe(false)
+
+    const msg = (await screen.findByTestId('elcc-cap-message')).textContent ?? ''
+    expect(msg).toMatch(/\b2\b/)
+    expect(msg).not.toMatch(/10/)
+  })
+
+  // ★ Bite: render nothing when the candidates list is empty.
+  //
+  // An empty list is an ANSWER — the backend serves 200 with `[]`, never 204 —
+  // and the reason is actionable: occurrence data is what makes a generator
+  // sampleable, and a user who has not entered any can go and enter it. A bare
+  // empty box reads as a broken panel.
+  it('explains an empty candidates list rather than rendering an empty box', async () => {
+    vi.mocked(resultsApi.getElccCandidates).mockResolvedValue(
+      { assets: [], max_assets: 10 })
+    await openPanel()
+    const line = await screen.findByTestId('elcc-no-candidates')
+    expect(line.textContent).toMatch(/no eligible assets/i)
+    expect(line.textContent).toMatch(/outage data/i)
+    expect((line.textContent ?? '').length).toBeGreaterThan(40)
+    expect(screen.queryByTestId('elcc-candidate-Wind-North')).toBeNull()
+  })
+
+  // A bare default run must stay bare: `elcc_assets: []` is not the same
+  // request as no key at all — the backend's default is "no ELCC study", and
+  // sending an empty list documents an intent the user never expressed.
+  it('sends no elcc_assets key at all when nothing is selected', async () => {
+    const user = await openPanel()
+    await screen.findByTestId('elcc-picker')
+    await user.click(screen.getByRole('button', { name: /run study/i }))
+    await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalled())
+    const body = vi.mocked(resultsApi.startMc).mock.calls[0][0] as Record<string, unknown>
+    expect(Object.prototype.hasOwnProperty.call(body, 'elcc_assets')).toBe(false)
+    expect(body).toEqual({ draws: 500 })
   })
 })

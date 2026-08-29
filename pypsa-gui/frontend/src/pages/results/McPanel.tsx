@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Dices } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
-import type { ElccRow, McMetrics, McStatus } from '../../api/simulation'
+import type {
+  ElccCandidate, ElccRow, McMetrics, McRequestBody, McStatus,
+} from '../../api/simulation'
 import { formatApiDetail } from '../../api/client'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -99,6 +101,62 @@ export function elccShare(share: number | null | undefined): string | null {
   if (share == null || !isFinite(share)) return null
   return `${(share * 100).toFixed(1)}%`
 }
+
+/**
+ * The identity of a candidate in the selection set.
+ *
+ * KIND AND NAME, never the name alone: kind is not decoration, it decides the
+ * removal semantics the backend applies (exclude a sampled unit by position /
+ * drop a store from the dispatch / un-net a must-take profile), and a name can
+ * legitimately appear under two of them across component classes.
+ */
+export function candidateKey(c: { kind: string; name: string }): string {
+  return `${c.kind}:${c.name}`
+}
+
+/**
+ * The message shown once the selection is full.
+ *
+ * The cap is a PRODUCT decision owned by the backend
+ * (services/adequacy/elcc.py MAX_ELCC_ASSETS: each asset costs a baseline plus
+ * roughly ten full MC evaluations) and arrives in the candidates payload. This
+ * helper takes it as an argument for exactly that reason — a literal here
+ * would drift silently the day the budget is re-tuned, and it would drift in
+ * the permissive direction: the picker would let a user tick more than the
+ * route accepts and turn a two-click study into a 422.
+ */
+export function capMessage(max: number): string {
+  return `Selection is at the cap of ${max} asset${max === 1 ? '' : 's'} per `
+    + 'study — each one costs a baseline plus about ten full MC evaluations. '
+    + 'Uncheck one to pick a different asset.'
+}
+
+/**
+ * The `elcc_assets` body field for a selection, or `undefined` for none.
+ *
+ * Two decisions live here. The pairs are emitted in CANDIDATE order rather
+ * than click order, so the same selection always produces the same request
+ * (and the same row order in the result table). And an empty selection yields
+ * `undefined`, not `[]`: the backend's default is "no ELCC study", and an
+ * empty list would document an intent the user never expressed.
+ */
+export function selectedAssets(
+  candidates: ElccCandidate[], selected: readonly string[],
+): Array<{ kind: string; name: string }> | undefined {
+  const keys = new Set(selected)
+  const picked = candidates
+    .filter(c => keys.has(candidateKey(c)))
+    .map(c => ({ kind: c.kind, name: c.name }))
+  return picked.length > 0 ? picked : undefined
+}
+
+const NO_CANDIDATES =
+  'No eligible assets — nothing in this network has a capacity credit this '
+  + 'study could measure. A generator qualifies once it carries outage data '
+  + '(an unavailability and an MTTR, per asset or from its carrier default); '
+  + 'a must-take generator qualifies on a non-zero availability profile; a '
+  + 'storage unit on a positive power rating. Slacks and non-electrical buses '
+  + 'never qualify.'
 
 const STATUS_LABEL: Record<ElccRow['status'], string> = {
   ok: 'ok',
@@ -271,6 +329,7 @@ export function McPanel() {
   const [open, setOpen] = useState(false)
   const [draws, setDraws] = useState('500')
   const [blocked, setBlocked] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
 
   const { data } = useQuery({
     queryKey: nk(currentProject, 'results', 'mc'),
@@ -292,13 +351,30 @@ export function McPanel() {
     queryFn: () => resultsApi.getCopt(),
   })
 
+  // Only while the panel is open: a collapsed panel must not spend a
+  // round-trip per project on a list nobody is looking at, and the candidates
+  // are cheap but not free (one full input snapshot under the network lock).
+  const { data: candidatePayload } = useQuery({
+    queryKey: nk(currentProject, 'results', 'mc', 'elcc_candidates'),
+    queryFn: () => resultsApi.getElccCandidates(),
+    enabled: open,
+  })
+  const candidates = candidatePayload?.assets ?? []
+  const maxAssets = candidatePayload?.max_assets ?? 0
+  const assets = selectedAssets(candidates, selected)
+  const atCap = maxAssets > 0 && (assets?.length ?? 0) >= maxAssets
+
   const run = useMutation({
     // A bare `{}` when the field is empty or unparseable: every field has an
-    // engine-side default, and inventing a frontend one would fork it.
+    // engine-side default, and inventing a frontend one would fork it. The
+    // same rule governs `elcc_assets` — the key is ABSENT, not empty, when
+    // nothing is selected, so a bare default run stays bare.
     mutationFn: () => {
       const n = Number(draws)
-      return resultsApi.startMc(
-        draws.trim() !== '' && isFinite(n) && n > 0 ? { draws: n } : {})
+      const body: McRequestBody = {}
+      if (draws.trim() !== '' && isFinite(n) && n > 0) body.draws = n
+      if (assets) body.elcc_assets = assets
+      return resultsApi.startMc(body)
     },
     onSuccess: () => {
       setBlocked(null)
@@ -362,6 +438,73 @@ export function McPanel() {
               </span>
             )}
           </div>
+
+          {/* The ELCC asset picker. Without it `elcc_assets` was API-only:
+              the table below could be rendered but never requested, and asking
+              for a credit meant knowing an asset's name AND its ELCC kind —
+              and the kind is a property of the OCCURRENCE DATA (an
+              outage-bearing "generator" vs a must-take "vre"), not of anything
+              the network editor shows. So every row states it. */}
+          {candidatePayload && (
+            <div className="flex flex-col gap-1" data-testid="elcc-picker">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                Capacity credit (ELCC) — optional
+              </span>
+              {candidates.length === 0 ? (
+                // An EMPTY list is an answer (the endpoint serves 200 with
+                // `[]`, never 204) and the reason is actionable — occurrence
+                // data is what makes a generator sampleable, and a user who
+                // has not entered any can go and enter it. An empty box would
+                // read as a broken panel.
+                <p className="text-[10px] text-muted" data-testid="elcc-no-candidates">
+                  {NO_CANDIDATES}
+                </p>
+              ) : (
+                <>
+                  <p className="text-[10px] text-muted">
+                    Pick up to {maxAssets} asset{maxAssets === 1 ? '' : 's'} to
+                    price alongside the headline metrics. Each one adds a
+                    baseline plus about ten full evaluations to the run.
+                  </p>
+                  <ul className="flex flex-col gap-0.5 max-h-40 overflow-y-auto">
+                    {candidates.map(c => {
+                      const key = candidateKey(c)
+                      const isSelected = selected.includes(key)
+                      return (
+                        <li key={key}>
+                          <label className="flex items-center gap-1.5 text-[10px] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              data-testid={`elcc-candidate-${c.name}`}
+                              checked={isSelected}
+                              // At the cap the UNCHECKED boxes go dead and the
+                              // checked ones stay live, or a user who filled
+                              // the list could not change their mind.
+                              disabled={!isSelected && atCap}
+                              onChange={() => setSelected(prev => (
+                                prev.includes(key)
+                                  ? prev.filter(k => k !== key)
+                                  : [...prev, key]
+                              ))}
+                            />
+                            <span className="font-mono">{c.name}</span>
+                            <span className="text-muted">
+                              · {c.kind} · {trim(c.nameplate_mw)} MW
+                            </span>
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                  {atCap && (
+                    <span className="text-[10px] text-warn" data-testid="elcc-cap-message">
+                      {capMessage(maxAssets)}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {warning && (
             <p

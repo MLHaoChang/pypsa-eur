@@ -61,6 +61,61 @@ def _network() -> pypsa.Network:
     return n
 
 
+def _mixed_network() -> pypsa.Network:
+    """One asset of EACH ELCC kind, plus the three things that must not appear.
+
+    * ``g1`` / ``g2`` — explicit occurrence data → occurrence-bearing units
+      (kind "generator"), 60 MW each so the tie-break by name is exercised.
+    * ``batt`` — a StorageUnit at the electrical bus → kind "storage_unit".
+    * ``wind`` — a ``p_max_pu`` SERIES and no occurrence data (carrier "wind"
+      is deliberately absent from ``occurrence.CARRIER_DEFAULTS``) → must-take,
+      kind "vre" at its PEAK contribution 0.8 × 200 = 160 MW.
+    * ``__voll_b`` — the LP's VoLL slack. A slack is not an asset, and
+      ``_resolve`` would 404 on it: it is neither in the sampled fleet nor in
+      ``vre_profiles``.
+    * ``dead`` — must-take with an all-zero profile: peak contribution 0, so
+      there is no credit to measure and the bracket [0, 0] is degenerate.
+    * ``h2gen`` — a generator on a NON-electrical bus, out of scope entirely.
+    """
+    n = _network()
+    n.add("Carrier", "wind")
+    n.add("Carrier", "load_shedding")
+    n.add("Carrier", "battery")
+    n.add("Carrier", "H2")
+
+    # Mostly becalmed, one windy hour: the residual stays deep enough for the
+    # fleet to shed, so the baseline LOLE is identifiable rather than zero.
+    profile = pd.Series(0.1, index=n.snapshots)
+    profile.iloc[12] = 0.8
+    n.add("Generator", "wind", bus="b", carrier="wind", p_nom=200.0,
+          p_max_pu=profile)
+    n.add("Generator", "dead", bus="b", carrier="wind", p_nom=90.0,
+          p_max_pu=pd.Series(0.0, index=n.snapshots))
+    n.add("Generator", "__voll_b", bus="b", carrier="load_shedding",
+          p_nom=9999.0, marginal_cost=4000.0)
+
+    n.add("StorageUnit", "batt", bus="b", carrier="battery", p_nom=50.0,
+          max_hours=4.0, efficiency_store=0.95, efficiency_dispatch=0.95)
+
+    n.add("Bus", "h2bus", carrier="H2")
+    n.add("Generator", "h2gen", bus="h2bus", carrier="gas", p_nom=500.0,
+          outage_rate_value=0.05, outage_rate_basis="EFORd", mttr_hours=12.0)
+    return n
+
+
+def _no_candidates_network() -> pypsa.Network:
+    """Load and a slack only — nothing an ELCC study could ever price."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=6, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "load_shedding")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=100.0)
+    n.add("Generator", "__voll_b", bus="b", carrier="load_shedding",
+          p_nom=9999.0, marginal_cost=4000.0)
+    return n
+
+
 def _barren_network() -> pypsa.Network:
     """The same shape with NO resolvable occurrence data — nothing to sample."""
     n = _network()
@@ -338,3 +393,160 @@ def test_elcc_row_carries_exactly_the_nine_contract_keys(
     assert row["baseline_lole_h"] == pytest.approx(
         body["result"]["metrics"]["lole_hours"])
     assert len(row["baseline_lole_ci"]) == 2
+
+
+# ── GET /results/mc/elcc_candidates — what the picker may ask for ──────────
+#
+# This endpoint exists for ONE reason: `elcc_assets` was API-only, so a user
+# could not request an ELCC study from the UI without guessing asset names and
+# kinds out of the network editor. Its whole contract is AGREEMENT — every
+# candidate it lists must be one `POST /results/mc` accepts, because a picker
+# that offers a name the run then 404s on is worse than no picker at all.
+
+CANDIDATE_KEYS = {"kind", "name", "nameplate_mw"}
+
+
+def _candidates(client) -> dict:
+    r = client.get("/api/results/mc/elcc_candidates")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_elcc_candidates_enumerate_the_three_kinds(client, install_network):
+    """★ Bite: drop the "vre" branch from the enumeration.
+
+    The must-take generators are the half of the fleet a user is MOST likely
+    to want a credit for — a wind farm's ELCC is the number the whole study
+    exists to produce — and they are also the half no other surface lists
+    (they are, by construction, absent from the COPT unit table). With the
+    branch dropped the picker silently offers thermal and storage only, and
+    the omission is invisible: the response is still well-formed.
+
+    Membership is pinned in BOTH directions here: the three assets that must
+    appear, and the three that must not (a slack, a zero-profile must-take,
+    and a generator at a non-electrical bus).
+    """
+    install_network(_mixed_network())
+    body = _candidates(client)
+    assets = body["assets"]
+    for a in assets:
+        assert set(a) == CANDIDATE_KEYS, a
+    by_name = {a["name"]: a for a in assets}
+
+    assert by_name["g1"]["kind"] == "generator"
+    assert by_name["g1"]["nameplate_mw"] == pytest.approx(60.0)
+    assert by_name["g2"]["kind"] == "generator"
+
+    assert by_name["batt"]["kind"] == "storage_unit"
+    assert by_name["batt"]["nameplate_mw"] == pytest.approx(50.0)
+
+    # The vre nameplate is the PEAK must-take contribution over the horizon
+    # (profile × capacity), exactly `elcc._resolve`'s bracket top — not the
+    # installed 200 MW, which the bisection never prices.
+    assert by_name["wind"]["kind"] == "vre"
+    assert by_name["wind"]["nameplate_mw"] == pytest.approx(0.8 * 200.0)
+
+    assert "__voll_b" not in by_name       # a slack is not an asset
+    assert "dead" not in by_name           # zero peak → no credit to measure
+    assert "h2gen" not in by_name          # non-electrical bus, out of scope
+    assert set(by_name) == {"g1", "g2", "batt", "wind"}
+
+
+def test_elcc_candidates_echo_the_cap_and_sort_by_nameplate_then_name(
+        client, install_network):
+    """The picker's cap comes FROM THE PAYLOAD, and the order is pinned.
+
+    Descending nameplate puts the assets whose credit moves the answer at the
+    top of a checkbox list the user may only tick ten of; ties break by name
+    so the list is stable across requests rather than dependent on the
+    component frames' insertion order.
+    """
+    install_network(_mixed_network())
+    body = _candidates(client)
+    assert body["max_assets"] == MAX_ELCC_ASSETS
+    assert [(a["name"], a["nameplate_mw"]) for a in body["assets"]] == [
+        ("wind", 160.0), ("g1", 60.0), ("g2", 60.0), ("batt", 50.0)]
+
+
+def test_elcc_candidates_is_200_with_an_empty_list_when_nothing_qualifies(
+        client, install_network):
+    """200 + `[]`, never 204.
+
+    An empty candidates list is an ANSWER — "this network has no asset whose
+    capacity credit could be measured" — and the panel renders an explanatory
+    line from it. A 204 collapses that into the same "no data" the client uses
+    for "never fetched", and the picker would render a bare empty box.
+    """
+    install_network(_no_candidates_network())
+    r = client.get("/api/results/mc/elcc_candidates")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["assets"] == []
+    assert body["max_assets"] == MAX_ELCC_ASSETS
+
+
+def test_a_slack_generator_cannot_be_priced_as_vre(client, install_network):
+    """kind="vre" must reject names that are not must-take generators.
+
+    The hole this pins (found during the candidates task): ``snapshot_inputs``
+    used to build a ``vre_profiles`` entry for WHATEVER names the request
+    asked, with no slack/electrical/must-take test — so ``{"kind": "vre",
+    "name": "__voll_b"}`` was accepted and a 9999 MW LP slack was priced as
+    wind: its "profile" (static p_max_pu × p_nom) un-netted into the residual
+    as if it were generation the system could count on. The candidates
+    endpoint never OFFERS it, but the run must also refuse it when asked
+    directly — agreement has to hold in both directions or the 404 is just a
+    UI convention.
+
+    Bite (verified): restore the unfiltered ``for name in vre_assets`` loop in
+    ``snapshot_inputs`` — this POST then returns 200 and the test fails.
+    """
+    install_network(_mixed_network())
+    r = client.post("/api/results/mc", json={
+        "draws": 8,
+        "elcc_assets": [{"kind": "vre", "name": "__voll_b"}]})
+    assert r.status_code == 404, r.text
+    assert "__voll_b" in r.json()["detail"]
+
+    # The non-electrical generator is equally not must-take on the electrical
+    # system, whatever its p_max_pu says.
+    r2 = client.post("/api/results/mc", json={
+        "draws": 8,
+        "elcc_assets": [{"kind": "vre", "name": "h2gen"}]})
+    assert r2.status_code == 404, r2.text
+
+
+def test_every_candidate_is_accepted_by_the_run_that_prices_it(
+        client, install_network):
+    """★ Bite: let the enumeration also list a slack generator (any asset
+    `_resolve` rejects — a slack is neither in the sampled fleet nor in
+    `vre_profiles`, so it is a KeyError → 404).
+
+    THE reason this endpoint exists. The candidates are posted back VERBATIM
+    as `elcc_assets` and the study must accept every one of them and price it:
+    a picker that offers an asset the run refuses turns a two-click study into
+    a 404 the user cannot act on, and the failure is silent until they try.
+
+    "Prices it" means the row RESOLVES — it comes back with the nine contract
+    keys and a legal status. A refusal status ("unidentifiable") is a
+    resolved row; a failed run, or a missing row, is not.
+    """
+    install_network(_mixed_network())
+    body = _candidates(client)
+    assets = [{"kind": a["kind"], "name": a["name"]} for a in body["assets"]]
+    assert 0 < len(assets) <= body["max_assets"]
+
+    r = client.post("/api/results/mc", json={
+        "draws": DRAWS, "seed": SEED, "cov_target": COV, "elcc_assets": assets})
+    assert r.status_code == 200, r.text
+
+    done = _poll(client)
+    assert done["status"] == "done", done
+    assert done["error"] is None
+    rows = done["result"]["elcc"]
+    assert [(r_["kind"], r_["name"]) for r_ in rows] == [
+        (a["kind"], a["name"]) for a in assets]
+    for row in rows:
+        assert set(row) == ELCC_ROW_KEYS, row
+        assert row["status"] in {"ok", "unidentifiable", "not_bracketed"}
+        assert row["nameplate_mw"] > 0.0

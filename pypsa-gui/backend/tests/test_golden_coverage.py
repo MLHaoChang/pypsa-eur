@@ -146,6 +146,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "post_frontier"):                   frozenset(),
     ("routers/results.py", "get_mc"):                          frozenset(),
     ("routers/results.py", "post_mc"):                         frozenset(),
+    ("routers/results.py", "get_mc_elcc_candidates"):          frozenset(),
     ("routers/results.py", "get_load_results"):                frozenset(),
     ("routers/results.py", "get_asset_economics"):             frozenset({"asset_economics"}),
     # ── routers/simulation.py ───────────────────────────────────────────
