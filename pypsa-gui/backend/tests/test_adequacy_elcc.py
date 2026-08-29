@@ -25,14 +25,15 @@ docs/superpowers/plans/2026-08-28-fmea-phase6-sequential-mc.md Task 4.
    it here would test that module twice and this one not at all.
 
 **The horizon-length knob.** Several fixtures declare ``nyears=1.0`` on a
-handful of modelled hours. That is not a claim about the calendar: the
-resolution floor is ``1/(n_samples·nyears)`` (spec §2.5) and is compared
-against a LOLE reported per HORIZON, so a 10-hour horizon at its true
-``nyears`` would put the floor above every hand-placed shed hour and every
-fixture would refuse as ``unidentifiable``. Declaring one year makes the floor
-``1/n`` and lets the shed-hour arithmetic — which is what these tests are
-about — be read directly. (That units mismatch inside ``mc_adequacy`` is
-recorded as a finding by this task; it is not this module's to fix.)
+handful of modelled hours. Historical note: this began as a dodge around a
+real units bug — the floor was ``1/(n_samples·nyears)`` (per YEAR) while
+LOLE is reported per HORIZON, so a short horizon at its true ``nyears`` put
+the floor above every hand-placed shed hour. That bug is fixed (the floor is
+now ``min positive weight / n_samples``, the same per-horizon units as
+``lole_hours`` — see ``test_resolution_floor_shares_units_with_lole_hours``
+in the MC module), which makes these ``nyears=1.0`` declarations inert for
+the floor. They stay because ``nyears ≤ 0`` still means “no floor at all”
+and the fixtures’ arithmetic was calibrated with them in place.
 
 **Stochastic assertions.** Only two tests here are stochastic (the perfect-unit
 CRN test and the fixed-draw-discipline test); both are seeded, and the
