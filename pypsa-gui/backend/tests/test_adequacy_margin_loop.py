@@ -714,7 +714,15 @@ def test_validation_failed_ends_the_search_when_the_margin_is_the_cause(
     body = _poll(client)
 
     assert body["status"] == "unreachable", body
-    assert body["solves_used"] == 2, body
+    # THREE, not two, and the third is the point. Before the ceiling clamp
+    # the loop stepped straight past `m_ceiling`, had that solve relabelled
+    # `infeasible`, and concluded `unreachable` WITHOUT ever evaluating the
+    # strictest reachable margin — a verdict about the search, dressed as a
+    # verdict about the network. It now clamps to the ceiling, evaluates
+    # there, and only then refuses anything stricter. Found live in S19.3,
+    # where the ceiling was 271%, the last evaluated margin 18%, and a plan
+    # meeting the target sat between them.
+    assert body["solves_used"] == 3, body
     assert body["iterations"][-1]["lever_value"] > 2.0
     assert "infeasible" in str(body["iterations"][-1]["condition"]).lower()
     assert body["verdict"], body

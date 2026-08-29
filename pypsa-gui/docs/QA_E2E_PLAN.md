@@ -312,6 +312,41 @@ asserts the config write returned 200**, so it cannot pass against a margin
 that was never set. The lesson generalises: a live check that configures
 something must assert the configuration took.
 
+### S19 — The margin loop (area 19)
+
+Phase 9's live surface, and the one suite whose job is a **comparative** claim
+rather than a contract: on ONE network with ONE derived target, the cap loop
+must report `unreachable` and the margin loop must report `met`. That is the
+whole reason Phase 9 exists — Phase 7's loop kept correctly answering "the cap
+never bound", and Phase 8 built the lever that moves the metric there.
+
+| Check | What it proves |
+| --- | --- |
+| S19.1 | The two loops refuse *different* things, and neither copies the other blindly: a margin loop runs on a VoLL-free network (a margin is a constraint, not a price) where the cap loop refuses `422`; `myopic` is allowed for the margin (each window is one period, which is the peak the standard is defined against) while `rolling` is refused |
+| S19.2 | Calibration: the incumbent plan's own measured MC-LOLE, targeted at a third, so neither loop can pass by doing nothing |
+| S19.3 | **The claim.** Same network, same target: cap loop `unreachable`, margin loop `met` at a certified `m*`, with the final iterate's own MC verifying it |
+| S19.4 | The payload contract, and the one thing that must never leak — the controller's internal reciprocal. Every number on the wire is a margin; every `cap_mwh` is `None` (spec §2.2); `m*` lies inside the schema bound the loop must respect |
+| S19.5 | `restore="final"` writes the **margin's** config field, never the cap's, and a user's own ENS cap survives the study untouched |
+
+**What the first live run found — a real defect in the code it was testing.**
+S19.3 reported `unreachable` from the margin loop too. The cause: the
+controller's blind step multiplies the margin ~4× per iterate, so from a small
+start it leapt clean over the fleet ceiling; the over-ceiling solve failed
+validation, was relabelled `infeasible`, and the nesting logic then concluded
+— correctly, given what it had been told — that every stricter margin was
+infeasible. The loop reported `unreachable` **having never evaluated the
+reachable region at all**: ceiling 271 %, last evaluated margin 18 %, and a
+plan meeting the target sitting between them. The route now clamps a request
+to the ceiling and evaluates *there*, refusing only once the strictest
+reachable margin has itself been tried and missed. After the fix the same run
+reports `met` at m\* = 0.672. A unit test that had pinned the old solve count
+was updated to the corrected contract, with the reason recorded in the test.
+
+A second finding was the suite's own: S19.1 initially asserted `422` from the
+cap loop and got `409`, because the margin loop it had just started was still
+running — the 409 mesh working exactly as designed, and the test reaching the
+wrong question. Ordering fixed, with the reason in the code.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

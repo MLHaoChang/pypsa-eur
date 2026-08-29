@@ -4450,7 +4450,11 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
                     f"whole fleet tops out at {reach:,.1f} MW")
         return None
 
+    _ceiling_missed = [False]
+    _last_at_ceiling = [False]
+
     def solve_at(x: float) -> dict:
+        _last_at_ceiling[0] = False
         """One capacity-expansion solve at the margin ``x`` stands for, read
         out exactly as ``run_frontier_sweep`` reads its points. Solve failures
         come back as a status — the controller is specified never to see an
@@ -4474,6 +4478,33 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
                     "run out of lever, not out of budget"))
             return out
 
+        # THE CLAMP, and it is the difference between a verdict and a guess.
+        # The controller's blind step multiplies the margin ~4x per iterate, so
+        # from a small start it can leap clean over `m_ceiling` — and an
+        # over-ceiling solve fails validation, gets relabelled `infeasible`
+        # below, and the nesting logic then (correctly, given what it was told)
+        # concludes every stricter margin is infeasible too. The loop reports
+        # `unreachable` having never evaluated the reachable region at all.
+        # Found live in S19.3: ceiling 271%, last evaluated margin 18%, verdict
+        # "unreachable" — with a plan that meets the target sitting between
+        # them. Clamping makes the strictest REACHABLE margin the thing that
+        # gets evaluated, so an `unreachable` verdict is one this study
+        # actually verified.
+        if m > m_ceiling:
+            if _ceiling_missed[0]:
+                # Already evaluated AT the ceiling and it missed. Nothing
+                # stricter exists to try, so this is a real refusal rather
+                # than another clamp to the same plan.
+                out.update(
+                    status="error",
+                    condition=(
+                        f"infeasible: the strictest reachable margin "
+                        f"({m_ceiling:.1%}) was evaluated and still missed the "
+                        "target — the candidate set, not the search, is the "
+                        "limit"))
+                return out
+            m = m_ceiling
+            _last_at_ceiling[0] = True
         sink: dict = {}
         _solve_once(dataclasses.replace(base_cfg, reserve_margin=m),
                     n, lock, None, sink)
@@ -4694,6 +4725,14 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         every second can watch its own earlier history change. A fresh list
         per iterate makes every snapshot immutable by construction.
         """
+        # Did the iterate that just finished sit AT the ceiling and miss? If
+        # so no stricter margin exists to try, and `solve_at` refuses the next
+        # request outright rather than clamping to the same plan forever.
+        mc = row.get("mc") or {}
+        lole = mc.get("lole_hours")
+        if (_last_at_ceiling[0] and lole is not None
+                and float(lole) > target):
+            _ceiling_missed[0] = True
         with PyPSAService.get_solver_state_lock():
             record["iterations"] = record["iterations"] + [_translate(row)]
 

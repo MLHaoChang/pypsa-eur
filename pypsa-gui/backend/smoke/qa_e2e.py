@@ -2884,6 +2884,223 @@ def suite_S18():
     restore()
 
 
+def suite_S19():
+    """
+    The margin loop, live (Phase 9 spec §2/§4).
+
+    Phase 7's loop tunes an energy cap; its commonest honest verdict on a
+    firm-capacity-rich network is `unreachable` — the cap never binds, so no
+    ceiling changes the plan. Phase 8 built the reserve margin that DOES move
+    the metric there. Phase 9 lets the loop drive it, by feeding the
+    controller the margin's RECIPROCAL so that larger-is-stricter becomes the
+    smaller-is-stricter ordering `coupling.py` already assumes — without a
+    line of that file changing.
+
+    The claim this suite exists to prove on a real server is the comparative
+    one: on ONE network and ONE derived target, the cap loop reports
+    `unreachable` and the margin loop reports `met`. Everything else here is
+    the surface a user touches.
+    """
+    print("\nS19 - The margin loop (area 19)")
+    name = "qa_e2e_marginloop"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs"})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll(path, ceiling_s=420):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http(path)
+            if st == 200 and isinstance(s, dict) and s.get("status") != "running":
+                return s
+            time.sleep(1.0)
+        return None
+
+    # Two firm units covering a flat load, plus an expensive extendable the LP
+    # has no economic reason to build: the shape where an energy cap has no
+    # leverage (the LP sheds nothing at any ceiling) but firm capacity does.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in range(1, 6):
+            skip(f"S19.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-02 23:00", "freq": "h"})[0])
+    for g in ("unit_1", "unit_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": 100.0, "marginal_cost": 10.0,
+                                "outage_rate_value": 0.12,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 400.0, "capital_cost": 5_000_000.0,
+                            "marginal_cost": 500.0,
+                            "outage_rate_value": 0.05,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 12.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": 150.0})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+
+    # ── S19.1 — the refusals the cap loop has and the margin loop must NOT,
+    # and vice versa. A margin is a CONSTRAINT, not a price, so a margin loop
+    # on a VoLL-free network is well defined — copying the cap loop's VoLL 422
+    # would deny a supported study. Conversely the margin's own validator
+    # allows `myopic` (each window is one period, which is the peak the
+    # standard is defined against) while refusing `rolling`.
+    put_cfg(voll=0.0, reserve_margin=None)
+    st_novoll, _ = http("/api/results/margin_loop", method="POST",
+                        body={"target_lole_h": 1.0, "draws": 100})
+    # The margin loop STARTS on this config, so it must be finished before the
+    # cap loop is asked about the same one — otherwise the 409 mesh answers
+    # first and the VoLL check is never reached. (A first draft asserted 422
+    # and got 409: the mesh working, the test wrong.)
+    if st_novoll == 200:
+        http("/api/results/margin_loop/abort", method="POST")
+        poll("/api/results/margin_loop")
+    st_cap_novoll, _ = http("/api/results/coupling_loop", method="POST",
+                            body={"target_lole_h": 1.0, "draws": 100})
+    put_cfg(voll=3000.0, solve_strategy="myopic")
+    st_myopic, _ = http("/api/results/margin_loop", method="POST",
+                        body={"target_lole_h": 1.0, "draws": 100})
+    if st_myopic == 200:
+        http("/api/results/margin_loop/abort", method="POST")
+        poll("/api/results/margin_loop")
+    put_cfg(voll=3000.0, solve_strategy="rolling")
+    st_rolling, _ = http("/api/results/margin_loop", method="POST",
+                         body={"target_lole_h": 1.0, "draws": 100})
+    put_cfg(voll=3000.0, solve_strategy="full")
+    record("S19.1",
+           not bad_build and st_novoll == 200 and st_cap_novoll == 422
+           and st_myopic == 200 and st_rolling == 422,
+           f"build non-2xx={bad_build or 'none'}; margin-loop without VoLL->"
+           f"{st_novoll} (want 200, a margin needs no price); cap-loop same "
+           f"config->{st_cap_novoll} (want 422); myopic->{st_myopic} (want "
+           f"200); rolling->{st_rolling} (want 422)")
+
+    # ── S19.2 — calibrate on the incumbent plan, exactly as S17 does: solve,
+    # measure the plan's real LOLE, target a third of it. Derived, never
+    # chosen — a margin inside the largest-unit step moves EUE but not LOLE.
+    put_cfg(voll=3000.0, ens_cap_permyriad=100.0, reserve_margin=None,
+            solve_strategy="full")
+    http("/api/simulation/run", method="POST")
+    solved = poll("/api/simulation/status", ceiling_s=240)
+    http("/api/results/mc", method="POST", body={"draws": 300, "seed": 9})
+    mc0 = poll("/api/results/mc")
+    lole0 = (((mc0 or {}).get("result") or {}).get("metrics") or {}).get("lole_hours")
+    if not lole0 or lole0 <= 0:
+        for i in (2, 3, 4, 5):
+            skip(f"S19.{i}", f"fixture sheds nothing (LOLE={lole0})")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        restore()
+        return
+    target = float(lole0) / 3.0
+    record("S19.2",
+           isinstance(solved, dict) and solved.get("condition") == "optimal"
+           and lole0 > 0,
+           f"baseline solved={(solved or {}).get('condition')}; MC-LOLE="
+           f"{lole0:.4f} h -> target {target:.4f} h (a third: the incumbent "
+           f"must miss, so neither loop can pass by doing nothing)")
+
+    # ── S19.3 — THE CLAIM. Same network, same derived target: the cap loop
+    # cannot get there and the margin loop can.
+    http("/api/results/coupling_loop", method="POST",
+         body={"target_lole_h": target, "draws": 300, "seed": 9,
+               "eps0": 100.0, "max_solves": 4})
+    cap = poll("/api/results/coupling_loop")
+    http("/api/results/margin_loop", method="POST",
+         body={"target_lole_h": target, "draws": 300, "seed": 9,
+               "max_solves": 5})
+    mar = poll("/api/results/margin_loop")
+    cap_status = (cap or {}).get("status")
+    mar_status = (mar or {}).get("status")
+    m_star = (mar or {}).get("lever_star")
+    fin = (mar or {}).get("final") or {}
+    fmc = fin.get("mc") or {}
+    verified = (mar_status != "met") or (
+        fmc.get("lole_hours") is not None
+        and float(fmc["lole_hours"]) <= target + 1e-9)
+    record("S19.3",
+           cap is not None and mar is not None
+           and cap_status == "unreachable" and mar_status == "met"
+           and m_star is not None and verified,
+           f"SAME network, SAME target {target:.4f} h: cap loop -> "
+           f"{cap_status} ({(cap or {}).get('solves_used')} solves); margin "
+           f"loop -> {mar_status} at m*={m_star} "
+           f"({(mar or {}).get('solves_used')} solves + "
+           f"{(mar or {}).get('probe_solves')} probe); final verified="
+           f"{verified}")
+
+    # ── S19.4 — the payload contract, and the one thing that must never leak:
+    # the controller's internal reciprocal. Every number on the wire is a
+    # margin.
+    rows = (mar or {}).get("iterations") or []
+    row = rows[0] if rows else {}
+    leaked = [k for k in row if k in ("eps_permyriad", "x", "lever_x")]
+    caps_none = all(r.get("cap_mwh") is None for r in rows)
+    shape_ok = (mar or {}).get("study") == "margin_loop" \
+        and (mar or {}).get("lever") == "reserve_margin" \
+        and "lever_value" in row and isinstance((mar or {}).get("verdict"), str)
+    # Margins are plausible: the certified one must be positive and within the
+    # schema bound the loop is required to respect.
+    sane = (m_star is None) or (0.0 < float(m_star) <= 5.0)
+    record("S19.4",
+           shape_ok and not leaked and caps_none and sane,
+           f"study={(mar or {}).get('study')} lever={(mar or {}).get('lever')}; "
+           f"x-leaks={leaked or 'none'}; every cap_mwh None={caps_none}; "
+           f"m*={m_star} within (0, 5]={sane}; ceiling="
+           f"{(mar or {}).get('margin_ceiling')}")
+
+    # ── S19.5 — restore="final" leaves the user holding the certified plan,
+    # and writes the MARGIN's field rather than the cap's.
+    _, cfg_mid = http("/api/simulation/solver_config")
+    cap_before = (cfg_mid or {}).get("ens_cap_permyriad")
+    http("/api/results/margin_loop", method="POST",
+         body={"target_lole_h": target, "draws": 300, "seed": 9,
+               "max_solves": 3, "restore": "final"})
+    fin2 = poll("/api/results/margin_loop")
+    _, cfg_after = http("/api/simulation/solver_config")
+    applied = (cfg_after or {}).get("reserve_margin")
+    cap_after = (cfg_after or {}).get("ens_cap_permyriad")
+    star2 = (fin2 or {}).get("lever_star")
+    if (fin2 or {}).get("status") == "met" and star2 is not None:
+        ok = applied is not None and abs(float(applied) - float(star2)) < 1e-6
+    else:
+        ok = applied is None or applied == 0 or applied == cfg_mid.get("reserve_margin")
+    # The user's own ENS cap must survive untouched either way.
+    untouched = (cap_after == cap_before)
+    record("S19.5", ok and untouched,
+           f"status={(fin2 or {}).get('status')} m*={star2}; config now "
+           f"reserve_margin={applied} (want m*); user's ens_cap_permyriad "
+           f"{cap_before} -> {cap_after} (must be untouched)={untouched}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     global BACKEND
@@ -2951,6 +3168,8 @@ def main() -> int:
         suite_S17()
     if run("S18"):
         suite_S18()
+    if run("S19"):
+        suite_S19()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
