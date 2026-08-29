@@ -50,3 +50,98 @@ describe('chatStore Track A (A1 tool_progress)', () => {
     expect(useChatStore.getState().toolProgress).toEqual({})
   })
 })
+
+// Task 13 — chatStore half of the profile-switching UX. `model: ChatModel`
+// (a closed union baked into every request) is replaced by `profileId:
+// string | null`, where `null` means "the server's active profile" rather
+// than any particular string — sending a selector every turn would re-assert
+// a stale choice over an admin's `set_active_profile` or an A8 fallback.
+describe('chatStore profile switching (Task 13)', () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      sessionId: null,
+      profileId: null,
+      suppressHydrationOnce: false,
+      messages: [],
+      pending: null,
+      toolProgress: {},
+      usage: {
+        input_tokens: 0, output_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0,
+      },
+      streaming: false,
+      error: null,
+      streamCleanup: null,
+    })
+  })
+
+  it('defaults profileId to null (server-active)', () => {
+    expect(useChatStore.getState().profileId).toBeNull()
+  })
+
+  it('setProfileId sets the selector', () => {
+    useChatStore.getState().setProfileId('openai-gpt5')
+    expect(useChatStore.getState().profileId).toBe('openai-gpt5')
+    useChatStore.getState().setProfileId(null)
+    expect(useChatStore.getState().profileId).toBeNull()
+  })
+
+  it('startNewChat nulls sessionId and clears the visible conversation', () => {
+    useChatStore.setState({
+      sessionId: 'sess-old',
+      messages: [{ id: 'm1', role: 'user', content: 'hi', ts: 1 }],
+      pending: {
+        tool_use_id: 'tu-1', tool_name: 'x', args: {}, safety_tier: 'write',
+        confirmation_token: 'tok', ttl_seconds: 30, expires_at_epoch_ms: 0,
+      },
+      toolProgress: { 'tu-1': [{ kind: 'PHASE', line: 'x' }] },
+      error: { error_kind: 'rate_limited', message: 'slow down' },
+      usage: {
+        input_tokens: 10, output_tokens: 20,
+        cache_read_tokens: 1, cache_create_tokens: 2,
+      },
+    })
+    useChatStore.getState().startNewChat()
+    const s = useChatStore.getState()
+    expect(s.sessionId).toBeNull()
+    expect(s.messages).toEqual([])
+    expect(s.pending).toBeNull()
+    expect(s.toolProgress).toEqual({})
+    expect(s.error).toBeNull()
+    expect(s.usage).toEqual({
+      input_tokens: 0, output_tokens: 0,
+      cache_read_tokens: 0, cache_create_tokens: 0,
+    })
+  })
+
+  it('startNewChat arms a ONE-SHOT hydration-suppression flag', () => {
+    useChatStore.getState().startNewChat()
+    expect(useChatStore.getState().suppressHydrationOnce).toBe(true)
+  })
+
+  it('consumeSuppressHydrationOnce reads and clears the flag exactly once', () => {
+    useChatStore.getState().startNewChat()
+    expect(useChatStore.getState().consumeSuppressHydrationOnce()).toBe(true)
+    // Consumed — the flag must not still read true, and a second consume
+    // must not report true again (that would suppress the NEXT hydration
+    // too, which is a real project switch's history replay).
+    expect(useChatStore.getState().suppressHydrationOnce).toBe(false)
+    expect(useChatStore.getState().consumeSuppressHydrationOnce()).toBe(false)
+  })
+
+  it('consumeSuppressHydrationOnce is false when nothing armed it', () => {
+    expect(useChatStore.getState().consumeSuppressHydrationOnce()).toBe(false)
+  })
+
+  it('appendThinkingDelta accumulates into the trailing assistant bubble, separate from content', () => {
+    const { appendThinkingDelta, appendTokenDelta } = useChatStore.getState()
+    appendThinkingDelta('Let me ')
+    appendThinkingDelta('think about this.')
+    appendTokenDelta('The answer is 42.')
+    const msgs = useChatStore.getState().messages
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0].role).toBe('assistant')
+    expect(msgs[0].thinking).toBe('Let me think about this.')
+    expect(msgs[0].content).toBe('The answer is 42.')
+  })
+})

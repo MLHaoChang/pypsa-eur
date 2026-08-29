@@ -13,8 +13,6 @@
  */
 import { create } from 'zustand'
 
-import type { ChatModel } from '../api/chat'
-
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system'
 
 export interface ChatMessage {
@@ -30,6 +28,11 @@ export interface ChatMessage {
   // Phase D — file_ids that were attached to this user turn (for replay).
   // Read-only chip strip renders below the message bubble.
   attachment_file_ids?: string[]
+  // Task 13 — accumulated `thinking` SSE deltas for this assistant turn.
+  // Rendered as a collapsible block above the answer; absent (not empty
+  // string) on every turn the model didn't emit extended thinking for, so
+  // the UI can gate the `<details>` on presence rather than length.
+  thinking?: string
   ts: number
 }
 
@@ -65,7 +68,22 @@ export interface ChatErrorState {
 interface ChatState {
   // Identity
   sessionId: string | null
-  model: ChatModel
+  // Task 13 — which configured profile the NEXT stream request should bind
+  // to. `null` means "the server's active profile" and is the default: the
+  // dropdown always shows a real profile (falling back to
+  // `active_profile_id` from the profiles fetch for display), but the STORE
+  // stays null until the user actually picks one, so a request never
+  // re-asserts a stale choice over an admin's `set_active_profile` or an A8
+  // fallback. See `ChatStreamRequest.profile_id` in `api/chat.ts`.
+  profileId: string | null
+  // Task 13 — one-shot flag set by `startNewChat`. The chat.jsonl hydration
+  // effect in ChatPanel consumes (reads + clears) it via
+  // `consumeSuppressHydrationOnce` before deciding whether to replay
+  // history — without this, clearing `sessionId` and `messages` for a fresh
+  // chat is immediately undone by the effect re-hydrating the OLD
+  // `last_session_id` the next time it runs (it is keyed on `sessionId`
+  // precisely so a project's real hydration-on-mount/switch still works).
+  suppressHydrationOnce: boolean
   // Conversation
   messages: ChatMessage[]
   // The single pending confirmation card. The runtime allows ONE pending
@@ -105,7 +123,7 @@ interface ChatState {
 
   // Actions
   setSessionId: (id: string | null) => void
-  setModel: (m: ChatModel) => void
+  setProfileId: (id: string | null) => void
   appendMessage: (msg: Omit<ChatMessage, 'id' | 'ts'>) => void
   /**
    * Append a streaming token delta. If the last message in the list is an
@@ -114,6 +132,13 @@ interface ChatState {
    * producing one-row-per-token spam in the message list.
    */
   appendTokenDelta: (delta: string) => void
+  /**
+   * Same accumulation shape as `appendTokenDelta`, but writes the trailing
+   * assistant bubble's `thinking` field instead of `content` — `thinking`
+   * SSE frames stream separately from `token` frames and render in their own
+   * collapsible block.
+   */
+  appendThinkingDelta: (delta: string) => void
   /**
    * Replace the entire message list (used by the mount-time chat.jsonl
    * replay so a reload doesn't lose the conversation).
@@ -164,6 +189,21 @@ interface ChatState {
 
   // Lifecycle: clear UI-side conversation state on a project switch.
   resetForProjectSwitch: () => void
+  /**
+   * Task 13 — begin a fresh conversation WITHOUT a project switch (the
+   * cross-wire profile-switch confirm, and any future explicit "New chat"
+   * affordance). Nulls `sessionId` and clears the visible conversation, same
+   * as `resetForProjectSwitch`'s conversation half, but additionally arms
+   * `suppressHydrationOnce` — a project switch WANTS the new project's
+   * chat.jsonl replayed on the next hydration pass; this does not.
+   */
+  startNewChat: () => void
+  /**
+   * Read-and-clear `suppressHydrationOnce` in one step so the hydration
+   * effect can act on the value it saw without a second render racing a
+   * fresh `startNewChat()` in between the read and the clear.
+   */
+  consumeSuppressHydrationOnce: () => boolean
 }
 
 // Phase D polish #2 — multi-file upload progress batch shapes.
@@ -211,7 +251,8 @@ function newMessageId() {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
-  model: 'claude-sonnet-5',
+  profileId: null,
+  suppressHydrationOnce: false,
   messages: [],
   pending: null,
   toolProgress: {},
@@ -230,7 +271,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   uploadBatches: {},
 
   setSessionId: (id) => set({ sessionId: id }),
-  setModel: (m) => set({ model: m }),
+  setProfileId: (id) => set({ profileId: id }),
   appendMessage: (msg) => set((s) => ({
     messages: [...s.messages, { ...msg, id: newMessageId(), ts: Date.now() }],
   })),
@@ -248,6 +289,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [...s.messages, {
         id: newMessageId(), ts: Date.now(),
         role: 'assistant', content: delta,
+      }],
+    }
+  }),
+  appendThinkingDelta: (delta) => set((s) => {
+    if (!delta) return s
+    const last = s.messages[s.messages.length - 1]
+    if (last && last.role === 'assistant') {
+      const updated: ChatMessage = { ...last, thinking: (last.thinking ?? '') + delta }
+      return { messages: [...s.messages.slice(0, -1), updated] }
+    }
+    // `thinking` frames precede `token` frames within a turn, so the first
+    // one usually creates the assistant bubble rather than joining it.
+    return {
+      messages: [...s.messages, {
+        id: newMessageId(), ts: Date.now(),
+        role: 'assistant', content: '', thinking: delta,
       }],
     }
   }),
@@ -368,5 +425,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
       unseenExportCount: 0,
       uploadBatches: {},
     })
+  },
+
+  startNewChat: () => {
+    // Unlike `resetForProjectSwitch`, this does NOT touch `streamCleanup` /
+    // `streaming` — the dropdown that triggers the cross-wire confirm is
+    // disabled while streaming, so there is no live turn to interrupt here.
+    set({
+      sessionId: null,
+      messages: [],
+      pending: null,
+      toolProgress: {},
+      error: null,
+      usage: {
+        input_tokens: 0, output_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0,
+      },
+      suppressHydrationOnce: true,
+    })
+  },
+  consumeSuppressHydrationOnce: () => {
+    const v = get().suppressHydrationOnce
+    if (v) set({ suppressHydrationOnce: false })
+    return v
   },
 }))

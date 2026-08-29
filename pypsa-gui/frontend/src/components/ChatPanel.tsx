@@ -35,6 +35,7 @@ import {
   type ChatFrame,
   type InterruptedTurn,
 } from '../api/chat'
+import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import {
@@ -240,9 +241,28 @@ function applyUiNavigate(d: {
 interface SessionInitFrame {
   session_id: string
   model?: string
+  // Task 13 — which profile actually resolved this turn. Display-only: the
+  // store's `profileId` selector is never PINNED from this frame — it stays
+  // `null` ("follow the server's active profile") unless the user picks one
+  // explicitly, or a request sent while `profileId === null` would start
+  // reasserting whatever the server last resolved instead of tracking future
+  // admin changes / A8 fallbacks.
+  profile_id?: string
+  profile_label?: string
 }
 
 interface TokenFrame {
+  delta: string
+}
+
+interface ModelFallbackFrame {
+  from_model: string
+  to_model: string
+  reason: string
+  profile_id?: string
+}
+
+interface ThinkingFrame {
   delta: string
 }
 
@@ -930,11 +950,13 @@ export default function ChatPanel() {
   const toolTierRef = useRef(new Map<string, string>())
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
-  const model = useChatStore((s) => s.model)
-  const setModel = useChatStore((s) => s.setModel)
+  const profileId = useChatStore((s) => s.profileId)
+  const setProfileId = useChatStore((s) => s.setProfileId)
+  const startNewChat = useChatStore((s) => s.startNewChat)
   const messages = useChatStore((s) => s.messages)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const appendTokenDelta = useChatStore((s) => s.appendTokenDelta)
+  const appendThinkingDelta = useChatStore((s) => s.appendThinkingDelta)
   const setMessages = useChatStore((s) => s.setMessages)
   const setPending = useChatStore((s) => s.setPending)
   const appendToolProgress = useChatStore((s) => s.appendToolProgress)
@@ -988,6 +1010,16 @@ export default function ChatPanel() {
   // this branch is a bug fix. Revisit if boot latency is ever measured to care.
   useEffect(() => {
     if (!currentProject) return
+    // Task 13 — `startNewChat()` (the cross-wire profile-switch confirm)
+    // nulls `sessionId` and clears `messages` in the same `set()` call this
+    // effect's OWN dependency array now reacts to (`sessionId`, added below).
+    // Consumed unconditionally, before the messages-length guard: without
+    // this, the freshly-cleared store (0 messages, exactly the condition the
+    // guard below lets through) would re-hydrate the OLD `last_session_id`
+    // on the very next run of this effect, undoing "start a new chat"
+    // immediately. A real project switch never sets this flag, so its
+    // hydration is untouched.
+    if (useChatStore.getState().consumeSuppressHydrationOnce()) return
     // Only seed an EMPTY conversation. Replaying chat.jsonl over a store that
     // already holds a conversation erases the turn the user just watched
     // arrive, because a turn is only persisted once it completes. The store is
@@ -997,7 +1029,8 @@ export default function ChatPanel() {
     //
     // The guard is still live even though the panel no longer remounts on
     // navigation (it is mounted for the app's lifetime inside AssistantDock).
-    // This effect re-runs whenever `currentProject` changes AND on every
+    // This effect re-runs whenever `currentProject` OR `sessionId` changes
+    // (the latter added for the `startNewChat` guard above) AND on every
     // mount, and the mounts that remain all reach it with a populated store:
     // the dock's ErrorBoundary swapping back to its children after a Retry,
     // HMR in dev, and a project switch whose reset has not landed yet. Do not
@@ -1056,7 +1089,7 @@ export default function ChatPanel() {
       setInterruptedTurn(h.pending_turn ?? null)
     }).catch(() => { /* missing chat.jsonl is fine — first time on this project */ })
     return () => { cancelled = true }
-  }, [currentProject, setMessages, setSessionId])
+  }, [currentProject, sessionId, setMessages, setSessionId])
 
   // Phase D — upload slice + send-attach wiring.
   const uploads = useChatStore((s) => s.uploads)
@@ -1525,6 +1558,13 @@ export default function ChatPanel() {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
         setSessionId(d.session_id)
+        // The dropdown's fallback display (`profileId ?? active_profile_id`)
+        // is only as fresh as its last fetch — refetch on every new session
+        // so an admin's `set_active_profile` elsewhere, or a prior turn's A8
+        // fallback, shows up without the user having to reopen the panel.
+        // Deliberately NOT `setProfileId(d.profile_id)`: the store's selector
+        // stays `null` (follow-the-server) unless the user picks one.
+        qc.invalidateQueries({ queryKey: CHAT_PROFILES_QUERY_KEY })
         break
       }
       case 'token': {
@@ -1533,6 +1573,23 @@ export default function ChatPanel() {
         // one bubble per delta — keeps the message list readable when
         // Sonnet streams 2k tokens of output.
         appendTokenDelta(d.delta)
+        break
+      }
+      case 'thinking': {
+        const d = _frame_data<ThinkingFrame>(frame)
+        appendThinkingDelta(d.delta)
+        break
+      }
+      case 'model_fallback': {
+        // A8 — the active profile hit a persistent rate limit and the
+        // backend retried once on its declared fallback model. Previously
+        // silently DROPPED by this switch's missing `default` — the turn
+        // would just finish on a different model with no visible reason.
+        const d = _frame_data<ModelFallbackFrame>(frame)
+        appendMessage({
+          role: 'system',
+          content: `${d.from_model} → ${d.to_model} (${d.reason.replace(/_/g, ' ')})`,
+        })
         break
       }
       case 'tool_preparing': {
@@ -1742,8 +1799,8 @@ export default function ChatPanel() {
         break
       }
     }
-  }, [qc, setSessionId, appendMessage, appendTokenDelta, setPending, appendToolProgress,
-      accrueUsage, setStreaming, setError, closeStream])
+  }, [qc, setSessionId, appendMessage, appendTokenDelta, appendThinkingDelta, setPending,
+      appendToolProgress, accrueUsage, setStreaming, setError, closeStream])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
@@ -1782,7 +1839,13 @@ export default function ChatPanel() {
       {
         session_id: sessionId ?? undefined,
         message: text,
-        model,
+        // Task 13 — `profile_id` is included ONLY when the user actually
+        // picked one. `profileId === null` means "the server's active
+        // profile", and OMITTING the field (never sending `model` either) is
+        // how that stays true turn after turn — sending a selector every
+        // time would re-assert a stale choice over an admin's
+        // `set_active_profile` or an A8 rate-limit fallback.
+        ...(profileId !== null ? { profile_id: profileId } : {}),
         attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
         // Built HERE, at send, not captured at mount or on a store
         // subscription: the user opens Results, selects a generator, and only
@@ -1805,7 +1868,7 @@ export default function ChatPanel() {
     if (autoUncheckAfterSend && attachIds.length > 0) {
       setAttachedFileIds([])
     }
-  }, [appendMessage, sessionId, model, handleFrame, setStreaming, setError,
+  }, [appendMessage, sessionId, profileId, handleFrame, setStreaming, setError,
       setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds])
 
   const onSend = useCallback(() => {
@@ -2023,13 +2086,60 @@ export default function ChatPanel() {
 
   const onClearHistory = useCallback(() => {
     // Clear UI state in-place (does NOT trigger the project-switch reset
-    // path). To wipe the on-disk chat.jsonl too, the user invokes the
-    // clear_chat_history tool through the agent.
+    // path, and does NOT null sessionId or call startNewChat — the server
+    // session and its profile binding are unaffected). To wipe the on-disk
+    // chat.jsonl too, the user invokes the clear_chat_history tool through
+    // the agent.
     if (!confirm('Clear the conversation view? (On-disk chat.jsonl is untouched — ask the agent to clear_chat_history to wipe disk.)')) return
     useChatStore.setState({
       messages: [], pending: null, toolProgress: {}, error: null,
     })
   }, [])
+
+  // ── Task 13 — profile dropdown + cross-wire switch confirm ───────────────
+  //
+  // `getChatProfiles()` is member-level (every authenticated user may read
+  // which profiles exist), so the query itself needs no gating — but per
+  // ADR-0001 (unresolvable data ships as a distinct state, never silently
+  // reinterpreted as "empty") a REFUSED fetch must render differently from a
+  // resolved-but-empty list. Three states before "ready", all disabled:
+  // loading (`!profilesQuery.data`), refused (`profilesQuery.isError`), and
+  // empty (`data.profiles.length === 0`).
+  const profilesQuery = useChatProfiles()
+  const chatProfiles = profilesQuery.data?.profiles ?? []
+  const activeProfileId = profilesQuery.data?.active_profile_id ?? null
+  // `profileId` (the store's explicit pick) wins; `null` falls back to
+  // whatever the server currently has active. Both are real profile ids from
+  // the SAME fetch, so this never lands on an id absent from `chatProfiles`
+  // except in the brief window before the fetch resolves — handled by the
+  // disabled placeholder below rather than by this fallback.
+  const selectedProfileId = profileId ?? activeProfileId
+  const selectedProfileMeta = chatProfiles.find((p) => p.id === selectedProfileId) ?? null
+
+  const [pendingProfilePick, setPendingProfilePick] = useState<{ id: string; label: string } | null>(null)
+
+  const onPickProfile = useCallback((id: string) => {
+    const target = chatProfiles.find((p) => p.id === id)
+    if (!target) return
+    // Cross-wire (anthropic ⇄ openai) profiles do not share a session the
+    // way two profiles on the same wire can — the confirm exists because
+    // picking one silently mid-conversation would otherwise look like the
+    // same assistant continuing when the backend has actually started over.
+    if (selectedProfileMeta && selectedProfileMeta.wire !== target.wire) {
+      setPendingProfilePick({ id: target.id, label: target.label })
+      return
+    }
+    setProfileId(id)
+  }, [chatProfiles, selectedProfileMeta, setProfileId])
+
+  const confirmProfileSwitch = useCallback(() => {
+    if (!pendingProfilePick) return
+    setProfileId(pendingProfilePick.id)
+    startNewChat()
+    setPendingProfilePick(null)
+  }, [pendingProfilePick, setProfileId, startNewChat])
+
+  const cancelProfileSwitch = useCallback(() => setPendingProfilePick(null), [])
 
   return (
     <div
@@ -2060,15 +2170,58 @@ export default function ChatPanel() {
         data-testid="chat-file-input"
       />
       <div className="flex items-center gap-2 px-3 h-8 border-b border-border bg-bg-2 shrink-0">
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value as typeof model)}
-          className="bg-bg border border-border rounded px-1 py-0.5 text-[10px]"
-          data-testid="chat-model-select"
-        >
-          <option value="claude-sonnet-5">Sonnet 5</option>
-          <option value="claude-opus-5">Opus 5</option>
-        </select>
+        {profilesQuery.isError ? (
+          // ADR-0001 — a REFUSED fetch, never rendered as "no models
+          // configured": that text means the server was reachable and said
+          // "zero profiles exist", a materially different fact from
+          // "couldn't find out".
+          <select
+            disabled
+            data-profiles-state="error"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-danger"
+            title="Could not load models — check your connection and try again"
+            data-testid="chat-model-select"
+          >
+            <option>Could not load models</option>
+          </select>
+        ) : !profilesQuery.data ? (
+          <select
+            disabled
+            data-profiles-state="loading"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
+            data-testid="chat-model-select"
+          >
+            <option>Loading models…</option>
+          </select>
+        ) : chatProfiles.length === 0 ? (
+          <select
+            disabled
+            data-profiles-state="empty"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
+            title="No profiles are configured — ask an administrator to add one in Settings"
+            data-testid="chat-model-select"
+          >
+            <option>No models configured</option>
+          </select>
+        ) : (
+          <select
+            value={selectedProfileId ?? ''}
+            onChange={(e) => onPickProfile(e.target.value)}
+            disabled={streaming}
+            data-profiles-state="ready"
+            // The dock is 380px and a native <select> sizes its closed box to
+            // its widest option — a long profile label would otherwise widen
+            // the whole header row. `truncate` + `title` keep the full label
+            // reachable on hover without that.
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px]"
+            title={selectedProfileMeta?.label ?? ''}
+            data-testid="chat-model-select"
+          >
+            {chatProfiles.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+        )}
         <UsageMeter />
         {/* Global mute for spoken answers. Beside the gear rather than inside
             it: the spec pairs reciprocity with "a global mute", and a mute
@@ -2156,6 +2309,31 @@ export default function ChatPanel() {
           </button>
         )}
       </div>
+      {/* Task 13 — cross-wire profile switch confirm. Inline rather than a
+          modal: it interrupts nothing (the dropdown pick already committed
+          nothing) and the whole decision fits in one sentence. */}
+      {pendingProfilePick && (
+        <div
+          className="flex items-center gap-2 px-3 py-1 text-[11px] bg-accent/10 border-b border-accent/30 text-text shrink-0"
+          data-testid="chat-profile-switch-confirm"
+        >
+          <span>Switching to {pendingProfilePick.label} starts a new chat</span>
+          <button
+            className="px-2 py-0.5 rounded bg-accent text-bg hover:opacity-90"
+            onClick={confirmProfileSwitch}
+            data-testid="chat-profile-switch-confirm-btn"
+          >
+            Switch
+          </button>
+          <button
+            className="px-2 py-0.5 rounded bg-bg border border-border hover:bg-bg-3"
+            onClick={cancelProfileSwitch}
+            data-testid="chat-profile-switch-cancel-btn"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       <ErrorBanner onRetry={onRetryLastTurn} />
       {historyGap > 0 && (
         <div
@@ -2248,11 +2426,25 @@ export default function ChatPanel() {
               'px-3 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] ' +
               (m.role === 'user' ? 'text-text bg-bg-2/40 border-b border-border/40' :
                m.role === 'tool' ? 'text-muted font-mono text-[11px] tracking-normal leading-snug' :
+               // Task 13 — model_fallback lines. Distinct from a plain
+               // assistant bubble (italic, muted, no markdown) without going
+               // as far as the tool row's monospace treatment.
+               m.role === 'system' ? 'text-muted italic text-[11px] tracking-normal leading-snug' :
                'text-text')
             }
             data-role={m.role}
             data-testid="chat-message"
           >
+            {/* Task 13 — accumulated `thinking` SSE deltas. Minimal collapsed-
+                by-default block, above the answer since thinking precedes the
+                model's text in the turn. Gated on presence, not truthiness of
+                content, so a turn with no thinking block renders nothing. */}
+            {m.role === 'assistant' && m.thinking && (
+              <details className="mb-1 text-muted text-[11px]" data-testid="chat-thinking-block">
+                <summary className="cursor-pointer select-none">Thinking</summary>
+                <div className="whitespace-pre-wrap pt-1">{m.thinking}</div>
+              </details>
+            )}
             {/* Assistant replies are GitHub-flavored markdown (tables, bold,
                 headers, lists) — render them. User/tool messages are plain
                 text; keep their newlines with pre-wrap so multi-line input and
