@@ -4180,6 +4180,7 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
     from services.adequacy.margin_lever import (
         MAX_MARGIN,
         STEP_OVERSHOOT,
+        format_lever_value,
         to_margin,
         to_x,
     )
@@ -4794,13 +4795,23 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
                     f"A plan meeting {target:g} h was verified at a reserve "
                     f"margin of {m_star:.1%}, and that margin has been "
                     f"APPLIED to your solver settings (reserve_margin = "
-                    f"{m_star:g}) and re-solved — the network you are holding "
+                    f"{format_lever_value(m_star)}) and re-solved — the "
+                    "network you are holding "
                     "is the certified plan." + _both_standards_clause())
             return (
                 f"A plan meeting {target:g} h was verified at a reserve "
                 f"margin of {m_star:.1%}. Your original config has been "
                 "re-solved, so the network you are holding is NOT that plan: "
-                f"to keep it, set reserve_margin = {m_star:g} and re-solve."
+                # `format_lever_value`, never `%g`: the panel's own
+                # restore explainer prints this same number two lines
+                # above, and `%g`'s six significant figures made the
+                # two disagree IN THE SAME PANEL — the verdict said
+                # 0.6716 where the explainer said 0.671600430725. A
+                # margin is a THRESHOLD on required firm capacity, so
+                # the shorter value is a strictly LOOSER standard that
+                # need not reproduce the certified plan.
+                f"to keep it, set reserve_margin = "
+                f"{format_lever_value(m_star)} and re-solve."
                 + _both_standards_clause())
         if status == "unreachable":
             ceiling = (f"{m_ceiling:.1%}" if math.isfinite(m_ceiling)

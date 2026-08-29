@@ -327,6 +327,7 @@ never bound", and Phase 8 built the lever that moves the metric there.
 | S19.3 | **The claim.** Same network, same target: cap loop `unreachable`, margin loop `met` at a certified `m*`, with the final iterate's own MC verifying it |
 | S19.4 | The payload contract, and the one thing that must never leak — the controller's internal reciprocal. Every number on the wire is a margin; every `cap_mwh` is `None` (spec §2.2); `m*` lies inside the schema bound the loop must respect |
 | S19.5 | `restore="final"` writes the **margin's** config field, never the cap's, and a user's own ENS cap survives the study untouched |
+| S19.6 | the verdict names the SAME number the panel's restore explainer tells the user to type — one certified margin, one spelling |
 
 **What the first live run found — a real defect in the code it was testing.**
 S19.3 reported `unreachable` from the margin loop too. The cause: the

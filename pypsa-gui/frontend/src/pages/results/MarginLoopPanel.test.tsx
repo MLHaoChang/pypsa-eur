@@ -267,6 +267,55 @@ describe('restoreSentence is lever-driven', () => {
   })
 })
 
+// ── ★ the SPELLING contract with the backend verdict ─────────────────────────
+
+/**
+ * The same table as `tests/test_adequacy_margin_loop.py::LEVER_SPELLINGS`.
+ *
+ * ★ Why it exists: the panel printed `reserve_margin = 0.671600430725` while
+ * the backend verdict two lines below it said `set reserve_margin = 0.6716`
+ * (`%g`, six significant figures). One certified margin, one field, two
+ * numbers — and a margin is a THRESHOLD on required firm capacity, so the
+ * shorter one is a strictly LOOSER standard that need not reproduce the plan
+ * the study certified.
+ *
+ * The backend now mirrors THIS expression (`format_lever_value` in
+ * services/adequacy/margin_lever.py). Neither side can be changed alone: the
+ * table is asserted in both languages, so a drift fails a test in whichever
+ * one moved.
+ */
+const LEVER_SPELLINGS: [number, string][] = [
+  [0, '0'],
+  [1e-9, '1e-9'],
+  [1.23456789e-7, '1.23456789e-7'],
+  [1e-6, '0.000001'],
+  [1.23456e-5, '0.0000123456'],
+  [1e-4, '0.0001'],
+  [0.05, '0.05'],
+  [0.6716004307251234, '0.671600430725'],
+  [1, '1'],
+  [1.357, '1.357'],
+  [1.4925760000000001, '1.492576'],
+  [0.1 + 0.2, '0.3'],
+  [1 / 3, '0.333333333333'],
+  [5, '5'],
+]
+
+describe('MARGIN_LEVER.format is the backend verdict\'s spelling', () => {
+  // ★ Bite: `compact` (the badge formatter — two significant figures below 1)
+  // or `String(v)` (seventeen digits of binary noise: 0.30000000000000004).
+  // Either one makes the sentence disagree with the verdict it sits above.
+  it.each(LEVER_SPELLINGS)('spells %p as %p', (value, spelled) => {
+    expect(MARGIN_LEVER.format(value)).toBe(spelled)
+  })
+
+  it('is the spelling restoreSentence actually renders', () => {
+    expect(restoreSentence('base', 0.6716004307251234, MARGIN_LEVER))
+      .toContain('reserve_margin = 0.671600430725')
+  })
+})
+
+
 describe('leverPct', () => {
   // ★ Bite: render the raw fraction (`1.357`) or reuse the cap's `‱`. A
   // margin of 1.357 is 135.7% — a fleet nearly two and a half times peak —

@@ -19,7 +19,11 @@ with.
 """
 from __future__ import annotations
 
+import json
 import math
+import random
+import shutil
+import subprocess
 import threading
 import time
 from contextlib import contextmanager
@@ -32,6 +36,7 @@ from services.adequacy.coupling import MAX_LOOP_SOLVES
 from services.adequacy.margin_lever import (
     MAX_MARGIN,
     STEP_OVERSHOOT,
+    format_lever_value,
     to_margin,
     to_x,
 )
@@ -87,6 +92,75 @@ def test_the_substitution_refuses_its_out_of_domain_inputs():
         to_x(float("nan"))
     with pytest.raises(ValueError):
         to_margin(float("nan"))
+
+
+# ── ★ the SPELLING of a certified margin, shared with the panel ───────────
+
+#: The contract between `format_lever_value` and the panel's
+#: ``String(Number(v.toPrecision(12)))``, pinned as data on BOTH sides of the
+#: wire. `MarginLoopPanel.test.tsx` asserts the same table against
+#: `MARGIN_LEVER.format`, so a change to either spelling fails a test in the
+#: language that made it. Generated from `node` and re-checked against it
+#: below wherever node is installed.
+LEVER_SPELLINGS = [
+    (0.0, "0"),
+    (1e-9, "1e-9"),                   # both exponential; only the padding
+    (1.23456789e-7, "1.23456789e-7"), # differed (`repr` writes ``e-07``)
+    (1e-6, "0.000001"),
+    (1.23456e-5, "0.0000123456"),     # JS fixed where `repr` goes exponential
+    (1e-4, "0.0001"),
+    (0.05, "0.05"),
+    (0.6716004307251234, "0.671600430725"),   # the margin that found the bug
+    (1.0, "1"),                       # JS drops the ``.0`` that `repr` keeps
+    (1.357, "1.357"),
+    (1.4925760000000001, "1.492576"),
+    (0.1 + 0.2, "0.3"),               # 12 sig figs absorbs the binary noise
+    (1 / 3, "0.333333333333"),
+    (5.0, "5"),                       # MAX_MARGIN
+]
+
+
+@pytest.mark.parametrize("value,spelled", LEVER_SPELLINGS)
+def test_a_certified_margin_is_spelled_the_way_the_panel_spells_it(
+        value, spelled):
+    """★ The verdict and the panel print ONE number for one margin.
+
+    Bite: `%g` (six significant figures) — the shipped spelling, which turned
+    0.671600430725 into 0.6716 in a verdict sitting two lines under a panel
+    printing all twelve. Also bitten by plain `repr`, which gets the integral
+    case (``1.0``), the ``1e-6 … 1e-4`` window and the exponent padding wrong.
+    """
+    assert format_lever_value(value) == spelled
+
+
+def test_the_margin_spelling_is_javascripts_spelling():
+    """★ The table above is not this module's opinion — it is `node`'s.
+
+    A pinned table can only catch a change on ONE side; this catches the day
+    the table itself is wrong. Skipped where node is absent (the table still
+    guards), because the backend suite must not require a JS runtime.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the pinned table still guards")
+    values = [v for v, _ in LEVER_SPELLINGS]
+    rng = random.Random(20260829)
+    values += [rng.uniform(0.0, MAX_MARGIN) for _ in range(300)]
+    values += [rng.uniform(0.0, 1e-4) for _ in range(100)]
+    values += [1.0 / rng.uniform(0.2, 1.0) - 1.0 for _ in range(100)]
+    proc = subprocess.run(
+        [node, "-e",
+         "const v = JSON.parse(process.argv[1]);"
+         "console.log(JSON.stringify("
+         "v.map(x => String(Number(x.toPrecision(12))))))",
+         json.dumps(values)],
+        capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    expected = json.loads(proc.stdout)
+    mismatches = [(v, format_lever_value(v), js)
+                  for v, js in zip(values, expected)
+                  if format_lever_value(v) != js]
+    assert not mismatches, mismatches[:5]
 
 
 # ══ fixtures ══════════════════════════════════════════════════════════════
@@ -1041,3 +1115,40 @@ def test_the_margin_loop_meets_a_target_the_cap_loop_calls_unreachable(
     assert body["base_restored"] is True
     assert any(row["binding"] == "system_cap" for row in body["iterations"]), (
         "no iterate ever bound on the margin")
+
+
+# ── ★ the number the user is told to type ─────────────────────────────────
+
+@pytest.mark.parametrize("restore", ["base", "final"])
+def test_the_verdict_names_the_margin_the_panel_tells_you_to_type(
+        client, install_network, monkeypatch, restore):
+    """★ One certified margin, one number — not two.
+
+    Found by RENDERING the panel, which no unit test had done: the verdict
+    said "set reserve_margin = 0.6716" while the restore explainer two lines
+    above it said "reserve_margin = 0.671600430725". Same panel, same field,
+    two instructions. A margin is a THRESHOLD on required firm capacity, so
+    the shorter value is a strictly LOOSER standard — the user would be told
+    to type a number that buys a cheaper, possibly non-compliant build than
+    the one the study certified.
+
+    Both restore modes, because both print the value and the "final" branch
+    had the same `%g`.
+
+    Bite (verified): restore either branch to `{m_star:g}`.
+    """
+    stubs = _Stubs(firm_base=123.456)
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network)
+    _start(client, max_solves=6, restore=restore)
+    body = _poll(client)
+    assert body["status"] == "met", body
+    m_star = float(body["lever_star"])
+    assert m_star != float(f"{m_star:g}"), (
+        "the fixture certified a margin that six significant figures already "
+        f"round-trip ({m_star!r}) — this test cannot see the defect it exists "
+        "for; choose a margin with more digits")
+    panel = format_lever_value(m_star)
+    assert f"reserve_margin = {panel}" in body["verdict"], (
+        "the verdict names a different number from the one the panel tells "
+        f"the user to type: verdict={body['verdict']!r} panel={panel!r}")

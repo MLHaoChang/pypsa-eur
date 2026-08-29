@@ -3097,6 +3097,27 @@ def suite_S19():
            f"reserve_margin={applied} (want m*); user's ens_cap_permyriad "
            f"{cap_before} -> {cap_after} (must be untouched)={untouched}")
 
+    # ── S19.6 — the verdict names the number the PANEL tells you to type.
+    # Found by rendering: the verdict said "set reserve_margin = 0.6716"
+    # (`%g`) under an explainer saying "reserve_margin = 0.671600430725". A
+    # margin is a THRESHOLD on required firm capacity, so the shorter value is
+    # a strictly LOOSER standard that need not reproduce the certified plan.
+    # This is the layer that found it, so this is the layer that keeps it.
+    from services.adequacy.margin_lever import format_lever_value
+    checked = [(mar, "restore=base"), (fin2, "restore=final")]
+    agreed, notes = True, []
+    for payload, label in checked:
+        star = (payload or {}).get("lever_star")
+        verdict = (payload or {}).get("verdict") or ""
+        if (payload or {}).get("status") != "met" or star is None:
+            notes.append(f"{label}: not met, nothing to name")
+            continue
+        want = f"reserve_margin = {format_lever_value(float(star))}"
+        hit = want in verdict
+        agreed = agreed and hit
+        notes.append(f"{label}: m*={star!r} -> {want!r} present={hit}")
+    record("S19.6", agreed, "; ".join(notes))
+
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
     restore()
 

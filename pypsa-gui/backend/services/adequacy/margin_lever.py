@@ -42,6 +42,7 @@ was actually solved. Pure by construction: no routes, no ``_state``, no
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 
 # The schema's own bound on `SolverConfig.reserve_margin` (`le=5`, see
 # models/schemas.py: 15 typed for 15 % is a 1500 % margin, and a plan sized
@@ -99,3 +100,57 @@ def to_margin(x: float) -> float:
             f"lever coordinate {val!r} is outside (0, 1]: x ≤ 0 is the "
             "controller's NO-TARGET sentinel and stands for no margin at all")
     return 1.0 / val - 1.0
+
+
+# How many significant figures a certified margin is quoted to, on BOTH sides
+# of the wire. Twelve, not six: `%g`'s six turned 0.671600430725 into 0.6716,
+# and a margin is a THRESHOLD on required firm capacity — a shorter value is a
+# strictly LOOSER standard that need not reproduce the plan the study
+# certified. Rounding down is the one direction that cannot be safe.
+LEVER_SIGFIGS = 12
+
+
+def format_lever_value(value: float) -> str:
+    """The certified margin AS THE USER MUST TYPE IT — JavaScript's spelling.
+
+    ★ This function exists because one panel printed two different numbers for
+    one certified margin. The frontend's restore explainer renders
+    ``String(Number(v.toPrecision(12)))`` and said ``reserve_margin =
+    0.671600430725``; the backend verdict two lines below it used ``%g`` and
+    said ``set reserve_margin = 0.6716``. Both are instructions to type a
+    number into the same field, and they disagreed by four orders of magnitude
+    of precision — with the backend's on the unsafe side.
+
+    So this is a deliberate MIRROR of that JavaScript expression, not an
+    independent formatting choice, and the tests pin the two against a shared
+    table (and against `node` itself where it is installed). The two spellings
+    diverge in three places that Python's `repr` would get wrong:
+
+    * an integral value — JS prints ``1``, `repr` prints ``1.0``;
+    * ``1e-6 ≤ v < 1e-4`` — JS still prints fixed (``0.0000123456``) where
+      `repr` has already switched to exponential;
+    * a padded exponent — JS writes ``1e-9``, `repr` writes ``1e-09``.
+
+    The digits themselves are shared: both languages print the SHORTEST
+    decimal that round-trips, so `repr`'s mantissa is JS's mantissa and
+    `Decimal` only moves the point.
+    """
+    y = float(f"{float(value):.{LEVER_SIGFIGS}g}")
+    if not math.isfinite(y):
+        # Not reachable for a margin (`to_margin` refuses non-finite inputs),
+        # but a formatter that raises is worse than one that says so.
+        return repr(y)
+    s = repr(y)
+    if s.endswith(".0"):
+        return s[:-2]
+    if "e" not in s:
+        return s
+    exponent = int(s.split("e")[1])
+    if -7 < exponent < 21:
+        # JS prints fixed across this whole range; Python gave up at 1e-4.
+        # `Decimal` re-spells the SAME shortest-round-trip digits without an
+        # exponent, so no precision is invented or lost.
+        return format(Decimal(s), "f")
+    # Outside it both print an exponent, and only the zero padding differs.
+    mantissa = s.split("e")[0]
+    return f"{mantissa}e{'-' if exponent < 0 else '+'}{abs(exponent)}"

@@ -209,3 +209,41 @@ in place. The full gate caught it — 18 failures, and an md5 that did not match
 the pre-bite file. **A bite restore must be verified by hash, not by
 inspection**, and a `replace(..., 1)` is unsafe the moment the bitten string
 also exists elsewhere in the file.
+
+### v1.2 — the browser round (master, post-implementation)
+
+Rendering the panel found what neither suite could: **one certified margin
+printed as two different numbers, in the same panel.** The verdict said
+`set reserve_margin = 0.6716` (`%g`, six significant figures); the restore
+explainer two lines above it said `reserve_margin = 0.671600430725`
+(`String(Number(v.toPrecision(12)))`). Both are instructions to type a number
+into the same config field.
+
+This is not cosmetic. A margin is a **threshold on required firm capacity**,
+so a shorter value is a strictly **looser** standard: a user who types the
+verdict's number gets a cheaper build that need not reproduce the plan the
+study certified. Rounding DOWN is the one direction that cannot be safe.
+
+The fix is a deliberate cross-language **mirror**, not two independent
+formatting choices: `margin_lever.format_lever_value` reproduces the panel's
+JavaScript expression exactly, and the verdict uses it in BOTH restore
+branches. Python's `repr` is not that expression and gets three cases wrong —
+an integral value (`1.0` vs `1`), the `1e-6 … 1e-4` window where JS still
+prints fixed, and exponent zero-padding (`1e-09` vs `1e-9`).
+
+Neither side can now move alone: **the same table of fourteen (value,
+spelling) pairs is asserted in both languages** — `LEVER_SPELLINGS` in
+`tests/test_adequacy_margin_loop.py` and in `MarginLoopPanel.test.tsx` — and
+the backend additionally re-derives the table from `node` itself where node is
+installed (819 values agreed on the first run; the test skips, and the pinned
+table still guards, where node is absent).
+
+**Fixture note, recorded because the test nearly could not see its own
+defect:** the obvious stub certifies a margin of exactly `1.63`, which six
+significant figures already round-trip — the test would have passed against
+the bug. The certified margin comes out clean because the informed step is
+`x0/2` under the substitution and `x0 = 1/(1+m_tight·1.05)`. The test now uses
+`firm_base=123.456` (certifying `1.4925760000000001`) and **asserts up front
+that `%g` does not already round-trip the value it was handed**, so the day
+someone retunes the fixture the test says it has gone blind instead of going
+quietly green.
