@@ -313,6 +313,15 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/fmea_sweep",
         # All computed failure-mode rows on one list (Phase 4 Task 4).
         "/fmea_modes",
+        # Reliability/cost frontier lifecycle (Phase 5) — status + the
+        # target→(cost, EUE) points, no per-snapshot series. Registered late:
+        # the endpoint landed without a line here, which is exactly the drift
+        # this test exists to catch.
+        "/frontier",
+        # Sequential-MC study lifecycle (Phase 6) — status + a metrics/ELCC
+        # sibling payload. `by_period` is a per-BLOCK roll-up, not a snapshot
+        # series, so a snapshot range would have nothing to slice.
+        "/mc",
     }
 
     unclassified = declared - ranged - aggregates

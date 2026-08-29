@@ -11,6 +11,12 @@ compared to a statutory standard, and the UI must be able to say so at the
 point of display.
 
 No endpoint yet (Phase 0 stub): models + serialization behaviour only.
+
+ONE recorded exception to "every engine fills this", stated in full on
+``AdequacyReport`` below: the engine-local STUDIES — the COPT screening and
+the sequential MC — answer a question this report does not ask and are served
+as sibling payloads (`/results/copt`, `/results/mc`) rather than folded in.
+They still carry the same provenance vocabulary (`engine` + `fidelity`).
 """
 from __future__ import annotations
 
@@ -21,7 +27,7 @@ from pydantic import BaseModel, Field
 # "expert" / "expert_judgement": worksheet rows a person entered by hand
 # (class D, and any manual annotation). Honest provenance, not a loophole —
 # the UI badges them exactly like engine-computed rows (Phase 3).
-Engine = Literal["lp_proxy", "copt", "pras", "antares", "expert"]
+Engine = Literal["lp_proxy", "copt", "mc", "pras", "antares", "expert"]
 Fidelity = Literal["deterministic_scenario", "analytic_convolution",
                    "sequential_mc", "expert_judgement"]
 
@@ -68,6 +74,10 @@ class ZoneTarget(BaseModel):
 
 
 class TargetBlock(BaseModel):
+    # "mc_lole" is RESERVED for Phase 7 (a target expressed against the
+    # sequential-MC LOLE rather than the LP proxy's shed hours). Not added
+    # yet: the constraint that would enforce it does not exist, and a basis a
+    # solve cannot honour would read as a standard the run met.
     basis: Literal["energy", "shed_hours"]
     system: SystemTarget
     zones: list[ZoneTarget] = Field(default_factory=list)
@@ -91,7 +101,17 @@ class MetricsBlock(BaseModel):
     eue_mwh: float | None = None
     # A sequential-MC LOLE without a confidence interval is not reportable;
     # these exist so the "sequential_mc" fidelity tier is usable at all.
+    #
+    # deprecated alias of lole_ci — kept so reports written before the MC
+    # engine landed still validate. New producers fill `lole_ci`.
     confidence_interval: tuple[float, float] | None = None
+    # The MC's own intervals, one per metric. A single `confidence_interval`
+    # could only ever describe ONE of them, and an EUE band is not derivable
+    # from a LOLE band (different per-draw statistics, different variance) —
+    # so an EUE reported beside a LOLE interval would invite reading the
+    # interval as covering both.
+    lole_ci: tuple[float, float] | None = None
+    eue_ci: tuple[float, float] | None = None
     n_samples: int | None = None
     # LOLE in hours/yr vs days/yr differ by ~24x. Never implicit.
     #
@@ -185,6 +205,20 @@ class TradeoffPoint(BaseModel):
 
 
 class AdequacyReport(BaseModel):
+    """The one shape — with one recorded exception.
+
+    ENGINE-LOCAL STUDIES RETURN SIBLING PAYLOADS AND ARE NOT FOLDED IN. The
+    COPT screening (`GET /results/copt`) and the sequential MC
+    (`GET|POST /results/mc`) each answer a question this report does not ask:
+    they are computed on demand from the current network, they carry no
+    target/cost/inputs block (no solve produced them), and the MC additionally
+    carries an ELCC table and a per-run standing warning. Folding either into
+    AdequacyReport would mean optional-everything blocks that every consumer
+    must branch on, so both stay siblings — same provenance vocabulary
+    (`engine` + `fidelity`), separate payloads. Recorded decision, spec §4: no
+    report bloat for engine-local studies.
+    """
+
     engine: Engine
     fidelity: Fidelity
     target: TargetBlock

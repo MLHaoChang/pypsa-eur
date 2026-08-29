@@ -2974,6 +2974,24 @@ def get_fmea_modes():
             "sweep_error": (sweep or {}).get("error")}
 
 
+def _study_running(key: str) -> bool:
+    """True while the long-running study stored under ``_state[key]`` is live.
+
+    One predicate for the whole mutual-exclusion mesh (sweep / frontier / mc).
+    Every one of these studies reads the foreground network for minutes, and
+    the frontier and the sweep RE-SOLVE it; two of them at once means one
+    engine is sampling a network the other is mutating, and the resulting
+    numbers are wrong in a way nothing downstream can detect. Testing
+    ``thread.is_alive()`` and not just the status string matters because a
+    crashed worker that never got to write its terminal status would
+    otherwise wedge the surface permanently.
+    """
+    st = _state.get(key)
+    return bool(st and st.get("status") == "running"
+                and st.get("thread") is not None
+                and st["thread"].is_alive())
+
+
 @results_router.get("/fmea_sweep")
 def get_fmea_sweep():
     """
@@ -3014,9 +3032,10 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
     from services.adequacy.sweep import SweepBudgetError, run_class_b_sweep
     from routers.simulation import _state_update
 
-    st = _state.get("fmea_sweep")
-    if st and st.get("status") == "running" and st.get("thread") is not None             and st["thread"].is_alive():
+    if _study_running("fmea_sweep"):
         raise HTTPException(409, "an FMEA sweep is already running")
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
     if _state.get("status") == "running":
         raise HTTPException(409, "a solve is running — wait for it to finish")
     cfg = _state.get("solver_config")
@@ -3097,14 +3116,12 @@ def post_frontier(body: FrontierRequest | None = None):
     )
     from routers.simulation import _state_update
 
-    st = _state.get("frontier")
-    if st and st.get("status") == "running" and st.get("thread") is not None \
-            and st["thread"].is_alive():
+    if _study_running("frontier"):
         raise HTTPException(409, "a frontier study is already running")
-    sw = _state.get("fmea_sweep")
-    if sw and sw.get("status") == "running" and sw.get("thread") is not None \
-            and sw["thread"].is_alive():
+    if _study_running("fmea_sweep"):
         raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
     if _state.get("status") == "running":
         raise HTTPException(409, "a solve is running — wait for it to finish")
     cfg = _state.get("solver_config")
@@ -3139,6 +3156,213 @@ def post_frontier(body: FrontierRequest | None = None):
                           "started_at": time.time(), "thread": t}
     t.start()
     return {"status": "running", "targets_permyriad": targets}
+
+
+class McElccAsset(_BaseModel):
+    # ``kind`` is a plain str rather than a Literal: the authoritative kind
+    # list lives in services/adequacy/elcc.py, and duplicating it in a pydantic
+    # Literal here would fork it — the day a fourth kind lands, the route would
+    # reject it with a schema error that names no asset. An unknown kind still
+    # ends up a 422, raised by the resolver that owns the list.
+    kind: str
+    name: str
+
+
+class McRequest(_BaseModel):
+    # All optional: the bare POST is the useful default (a headline LOLE/EUE
+    # with no ELCC study), and every field below has an engine-side default
+    # that this route must not fork.
+    draws: int | None = None
+    seed: int | None = None
+    cov_target: float | None = None
+    elcc_assets: list[McElccAsset] | None = None
+
+
+@results_router.get("/mc")
+def get_mc():
+    """
+    Status + payload of the last sequential-MC study (spec §4).
+
+    204 = never run in this session. While the worker runs this serves
+    ``{"status": "running", "result": None, ...}`` — same shape as the
+    frontier surface, so the panel polls one contract. The stored record
+    carries the worker-thread handle, which must never reach the wire.
+    """
+    st = _state.get("mc")
+    if not st:
+        return Response(status_code=204)
+    return {k: v for k, v in st.items() if k != "thread"}
+
+
+@results_router.post("/mc")
+def post_mc(body: McRequest | None = None):
+    """
+    Start a sequential-MC adequacy study — optionally with an ELCC table —
+    in a worker thread (spec §4).
+
+    ASYNCHRONOUS BY CONSTRUCTION, not as an optimisation: a ten-asset ELCC
+    run is a baseline plus ~10 bisected MC evaluations per asset, i.e. minutes
+    of arithmetic. Running it inline would hold a request open long past every
+    proxy and browser timeout, and would block the event loop for the whole
+    process while doing it.
+
+    Unlike the frontier and the class-B/C sweep this engine SOLVES NOTHING and
+    never mutates the network, so it does NOT require a VoLL (spec §4): its
+    metrics are hours and MWh, not euros. It is still in the mutual-exclusion
+    mesh — the snapshot it takes must not be a half-mutated network, and the
+    sweep/frontier re-solve the one it is reading.
+
+    Validation is deliberately SYNCHRONOUS wherever it is cheap: an empty
+    fleet, an inconsistent (q, MTTR) pair and an unknown ELCC asset are all
+    knowable from the snapshot alone, and a user who typed a wrong asset name
+    must learn that now rather than after seven minutes of spinner. The
+    in-thread KeyError/ValueError mapping stays as belt-and-braces for the
+    cases only the run can discover.
+    """
+    import time
+
+    from services.adequacy.elcc import (
+        MAX_ELCC_ASSETS,
+        elcc_for_asset,
+    )
+    # Private on purpose: it is the ONE place asset-kind resolution lives, and
+    # re-implementing the name lookup here to keep the import public would fork
+    # the very mapping (kind → removal semantics) the 404/422 split depends on.
+    from services.adequacy.elcc import _resolve as _resolve_elcc_asset
+    from services.adequacy.mc import (
+        MAX_DRAWS,
+        MC_WARNING_V1,
+        mc_adequacy,
+        snapshot_inputs,
+        transition_probs,
+    )
+
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is already running")
+    if _study_running("frontier"):
+        raise HTTPException(409, "a frontier study is running — wait for it to finish")
+    if _study_running("fmea_sweep"):
+        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+
+    draws = getattr(body, "draws", None)
+    draws = 500 if draws is None else int(draws)
+    if draws < 1:
+        raise HTTPException(422, "draws must be a positive number of samples")
+    if draws > MAX_DRAWS:
+        # A product cap, not a numerical one: the benchmark harness runs far
+        # deeper budgets by calling the engine directly (spec §7).
+        raise HTTPException(
+            422,
+            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
+            "study — the adaptive batching stops at that budget anyway")
+    seed = getattr(body, "seed", None)
+    seed = 0 if seed is None else int(seed)
+    cov_target = getattr(body, "cov_target", None)
+    cov_target = 0.05 if cov_target is None else float(cov_target)
+
+    assets = [(a.kind, a.name) for a in (getattr(body, "elcc_assets", None) or [])]
+    if len(assets) > MAX_ELCC_ASSETS:
+        raise HTTPException(
+            422,
+            f"{len(assets)} ELCC assets requested; the cap is "
+            f"{MAX_ELCC_ASSETS} (each asset costs a baseline plus ~10 full "
+            "MC evaluations)")
+
+    # The ONE snapshot, taken under the mutation lock (spec §1). Everything
+    # after this line — validation and the worker alike — reads plain arrays,
+    # so the network is free the moment the lock is released.
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        try:
+            inputs = snapshot_inputs(
+                n, vre_assets=[nm for kind, nm in assets if kind == "vre"])
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    if not inputs.units:
+        raise HTTPException(
+            422,
+            "nothing to sample: no electrical generator carries resolvable "
+            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            "empty — an empty fleet would report the entire horizon as loss of "
+            "load, which is a statement about missing input data, not about "
+            "the system")
+
+    # §2.2's inconsistent-pair rejection, pulled forward: it is a property of
+    # the (q, MTTR) pair alone, so there is no reason to discover it a batch
+    # into a background run and report it as a failed study.
+    for u in inputs.units:
+        try:
+            transition_probs(u.q, u.mttr_hours, name=u.name)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    for kind, name in assets:
+        try:
+            _resolve_elcc_asset(inputs, kind, name)
+        except KeyError as exc:
+            msg = str(exc.args[0]) if exc.args else str(exc)
+            raise HTTPException(
+                404, f"unknown ELCC asset {name!r} (kind {kind!r}): {msg}"
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    # The record is closed over by the worker rather than reached through
+    # `_state` inside it: `_state` resolves the *request-scoped* project
+    # context, and a worker thread has no request context — it would resolve a
+    # different dict and write its result where no reader looks.
+    record: dict = {"status": "running", "result": None, "error": None,
+                    "started_at": time.time(), "thread": None}
+
+    def worker():
+        try:
+            metrics = mc_adequacy(inputs, draws=draws, seed=seed,
+                                  cov_target=cov_target)
+            rows = []
+            for kind, name in assets:
+                try:
+                    rows.append(elcc_for_asset(
+                        inputs, kind, name, seed=seed, draws=draws,
+                        cov_target=cov_target))
+                except KeyError as exc:
+                    # Belt-and-braces for the 404 the POST already raised
+                    # synchronously: the only way to reach this is a name that
+                    # resolved at POST and stopped resolving mid-run. Caught
+                    # HERE rather than around the whole worker so an internal
+                    # KeyError from the sampler cannot be mislabelled as a
+                    # missing asset — and so the message names WHICH asset.
+                    msg = str(exc.args[0]) if exc.args else str(exc)
+                    record.update(
+                        status="failed", result=None, finished_at=time.time(),
+                        error=f"unknown ELCC asset {name!r} "
+                              f"(kind {kind!r}): {msg}")
+                    return
+            record.update(
+                status="done", error=None, finished_at=time.time(),
+                result={
+                    # A SIBLING payload, deliberately not folded into
+                    # AdequacyReport: the MC is an engine-local study (like the
+                    # COPT), and merging it would grow the one report shape
+                    # every other consumer parses (spec §4, recorded decision).
+                    "engine": "mc",
+                    "fidelity": "sequential_mc",
+                    "metrics": metrics,
+                    "elcc": rows,
+                    "warning": MC_WARNING_V1,
+                })
+        except Exception as exc:                              # noqa: BLE001
+            record.update(status="failed", result=None, error=str(exc),
+                          finished_at=time.time())
+
+    t = _threading.Thread(target=worker, daemon=True, name="adequacy-mc")
+    record["thread"] = t
+    _state["mc"] = record
+    t.start()
+    return {"status": "running", "draws": draws, "seed": seed,
+            "cov_target": cov_target, "elcc_assets": len(assets)}
 
 
 @results_router.get("/copt")
