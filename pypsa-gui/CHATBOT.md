@@ -1,13 +1,21 @@
 # pypsa-gui Chatbot Assistant
 
-The chatbot panel embeds an in-app copilot powered by the Anthropic Messages
-API. It can answer questions about the open network, drive every backend
-tool the GUI itself exposes, and gate destructive / execution actions
-behind explicit user confirmation.
+The chatbot panel embeds an in-app copilot. It can answer questions about the
+open network, drive every backend tool the GUI itself exposes, and gate
+destructive / execution actions behind explicit user confirmation.
+
+It runs on **Anthropic by default, and on other providers by configuration** —
+OpenAI, Moonshot (Kimi), Qwen (DashScope), or any OpenAI-compatible endpoint
+including local ones (Ollama, LM Studio, self-hosted vLLM). Which provider is
+used is a *profile*; see [Provider profiles](#provider-profiles) below. The
+zero-config path is unchanged: an install that only ever sets
+`ANTHROPIC_API_KEY` never has to meet the profile concept at all.
 
 ## Setup
 
-The assistant is **off** until two prerequisites are met:
+The default (Anthropic) path is **off** until two prerequisites are met.
+A non-Anthropic profile has its own prerequisites — see
+[Provider profiles](#provider-profiles).
 
 1. The `anthropic` Python package is installed (pulled in by
    [backend/requirements.txt](backend/requirements.txt) — runs
@@ -28,6 +36,60 @@ The assistant is **off** until two prerequisites are met:
 If either prerequisite is missing the panel surfaces
 `error_kind='missing_api_key'` or `error_kind='sdk_not_installed'` explaining
 the gap. Setting the key requires no restart of the frontend.
+
+## Provider profiles
+
+A **profile** is the unit you switch between: which provider, which model,
+which credential, and what that model can do. Profiles are **instance-wide**
+and only a super-admin edits them — on a server one API key is shared by every
+organisation, and the desktop app's single seeded user is a super-admin, so
+this never gets in the way there.
+
+Two profiles exist with no configuration at all — `anthropic-sonnet` (active)
+and `anthropic-opus` — both using the `ANTHROPIC_API_KEY` slot described
+above. Nothing is written to disk until you add a profile, and an install that
+never adds one behaves exactly as it did before profiles existed.
+
+**Adding one.** Settings → the assistant's model section → pick a preset
+(Anthropic, OpenAI, Moonshot, DashScope, Ollama, LM Studio) or *Custom
+OpenAI-compatible*, then supply the model id and — for the cloud presets — a
+key. Presets prefill the endpoint; the model id is always free text, so a
+model newer than this build still works. **Test connection** makes one
+1-token call and tells you which of *unreachable / unauthorized /
+model not found / invalid request* you have, rather than failing silently.
+
+**Where keys live.** Each profile derives its own slot in `<app-data>/user.env`
+— a known name for a preset (`OPENAI_API_KEY`, `MOONSHOT_API_KEY`,
+`DASHSCOPE_API_KEY`), or `PYPSA_GUI_LLM_KEY__<PROFILE_ID>` for a custom one.
+The slot name is derived server-side and is **not** accepted from the client:
+otherwise a profile could point its endpoint at an attacker's host while
+naming the shared Anthropic slot as its credential. Ollama and LM Studio are
+keyless. The shell-beats-file precedence above applies to every slot, so
+`export OPENAI_API_KEY=…` behaves the way you would expect.
+
+**Switching.** The chat panel's dropdown lists configured profiles. Switching
+between two profiles on the same wire applies immediately; switching to a
+different wire starts a new chat, because a conversation's stored history is
+in one provider's block format and replaying it to another is at best a 400.
+You can also ask the assistant to switch — it will show a confirmation card,
+and (like the Settings route) it refuses unless you are a super-admin.
+
+**Capabilities are declared, not assumed.** A profile says whether its model
+can call tools and accept images. A tools-less profile is sent no tools and
+gets a prompt with the tool-chaining guidance removed, and the panel says it
+can answer but not act — rather than letting the model narrate actions it
+cannot take. PDFs need the Anthropic wire; images work on either.
+
+> **Verification status.** Per
+> [ADR-0002](docs/adr/0002-chat-changes-need-a-live-api-probe.md) no test in
+> `backend/tests/` constructs a real client, so a green suite does not verify
+> a provider actually works. The live probes exist
+> (`test_live_probe_anthropic_wire`, `test_live_probe_openai_wire_through_a_saved_profile`)
+> but **skip unless explicitly enabled**, and a skip is not coverage. To run
+> them: `PYPSA_GUI_TEST_LIVE_ANTHROPIC=1` with `ANTHROPIC_API_KEY` set, and
+> `PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE=<profile id>` for a saved
+> OpenAI-compatible profile. `backend/smoke/run_chat_smoke.py --profile <id>`
+> drives a fuller end-to-end pass against a running backend.
 
 ### Supplying the key in the packaged app
 

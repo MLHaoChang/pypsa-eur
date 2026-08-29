@@ -2387,12 +2387,25 @@ def _format_live_network_meta(ctx: Any) -> str | None:
 # with the include_tools=True default); the include_tools=False trim itself
 # is exercised by test_toolless_profile_sends_no_tools_and_trimmed_prompt in
 # test_chat_profile_binding.py.
-_BASE_IDENTITY = (
+# Task 11 — split like the Task 8 constants, for the same reason one level
+# down. `_BASE_IDENTITY` names no specific tool, so it never violated the
+# "tools-off prompt names NO tool" rule — but it still told a tools-LESS model
+# to "use the provided tools", i.e. instructed it to do the one thing it
+# cannot. Task 8's review flagged it and deferred it here.
+#
+# The FACTS half must stand alone as a coherent identity, and the two halves
+# must reassemble byte-identically, because `_BASE_IDENTITY` is the opening of
+# every default prompt and the assembled default is pinned by hash.
+_BASE_IDENTITY_FACTS = (
     "You are the pypsa-gui assistant, an in-app copilot embedded next to "
-    "an open energy-system optimisation model. Use the provided tools to "
+    "an open energy-system optimisation model. "
+)
+_BASE_IDENTITY_CHAINING = (
+    "Use the provided tools to "
     "answer questions and make changes; do NOT hallucinate component "
     "names or routes. "
 )
+_BASE_IDENTITY = _BASE_IDENTITY_FACTS + _BASE_IDENTITY_CHAINING
 _CONFIRMATION_CARD_CONTRACT_TEMPLATE = (
     "Always confirm destructive / execution actions "
     "through the confirmation card mechanism (the runtime issues a token "
@@ -2437,7 +2450,7 @@ def _build_system_prompt(
     split like the other four (`_DOMAIN_GUIDE` / `_SOLVER_ERROR_DECODER` /
     `_PRICE_CONGESTION_GUIDE` / `_NEXT_STEP_RUBRIC`).
     """
-    base = _BASE_IDENTITY
+    base = _BASE_IDENTITY if include_tools else _BASE_IDENTITY_FACTS
     if include_tools:
         base += _CONFIRMATION_CARD_CONTRACT_TEMPLATE.format(
             session6=session.session6(),

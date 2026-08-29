@@ -8,7 +8,11 @@
     "key_env": "ANTHROPIC_API_KEY",
     "tools": true,
     "vision": true,
-    "suggested_models": ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"],
+    "suggested_models": [
+      "claude-sonnet-5",
+      "claude-opus-5",
+      "claude-haiku-4-5"
+    ],
     "help": "Get an API key at platform.claude.com/settings/keys and set ANTHROPIC_API_KEY."
   },
   {
@@ -20,7 +24,11 @@
     "key_env": "OPENAI_API_KEY",
     "tools": true,
     "vision": true,
-    "suggested_models": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    "suggested_models": [
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna"
+    ],
     "help": "Get an API key at platform.openai.com/api-keys and set OPENAI_API_KEY. Current models require max_completion_tokens rather than max_tokens."
   },
   {
@@ -32,20 +40,27 @@
     "key_env": "MOONSHOT_API_KEY",
     "tools": true,
     "vision": true,
-    "suggested_models": ["kimi-k3", "kimi-k2.6", "kimi-k2.5"],
+    "suggested_models": [
+      "kimi-k3",
+      "kimi-k2.6",
+      "kimi-k2.5"
+    ],
     "help": "International endpoint. Get an API key at platform.moonshot.ai and set MOONSHOT_API_KEY."
   },
   {
     "id": "dashscope",
     "label": "Alibaba Cloud (Qwen)",
     "wire": "openai",
-    "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "base_url": "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
     "auth": "bearer",
     "key_env": "DASHSCOPE_API_KEY",
     "tools": true,
     "vision": false,
-    "suggested_models": ["qwen3-max", "qwen3.7-max", "qwen-plus"],
-    "help": "International (singapore) endpoint — mainland China accounts use dashscope.aliyuncs.com instead. Get an API key at modelstudio.console.alibabacloud.com and set DASHSCOPE_API_KEY."
+    "suggested_models": [
+      "qwen3-max",
+      "qwen-plus"
+    ],
+    "help": "Alibaba Cloud Model Studio, OpenAI-compatible mode. This preset's endpoint is the Virginia (US) region. DashScope's other international regions are WORKSPACE-scoped (https://<WorkspaceId>.<region>.maas.aliyuncs.com/compatible-mode/v1 for Singapore / Hong Kong / Tokyo), so there is no single correct URL for every account — if yours differs, add it as a Custom OpenAI-compatible profile instead, which gets its own key slot. Get an API key at modelstudio.console.alibabacloud.com and set DASHSCOPE_API_KEY."
   },
   {
     "id": "ollama",
@@ -56,7 +71,11 @@
     "key_env": null,
     "tools": true,
     "vision": false,
-    "suggested_models": ["llama3.1", "qwen3", "deepseek-r1"],
+    "suggested_models": [
+      "llama3.1",
+      "qwen3",
+      "deepseek-r1"
+    ],
     "help": "Run `ollama serve` and pull a model first (e.g. `ollama pull qwen3`). No API key needed — the server only listens on localhost."
   },
   {
@@ -68,7 +87,10 @@
     "key_env": null,
     "tools": true,
     "vision": false,
-    "suggested_models": ["qwen3-8b", "llama-3.1-8b-instruct"],
+    "suggested_models": [
+      "qwen3-8b",
+      "llama-3.1-8b-instruct"
+    ],
     "help": "Start the local server from LM Studio's Developer tab first. No API key needed — the server only listens on localhost."
   }
 ]

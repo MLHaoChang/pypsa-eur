@@ -6,6 +6,22 @@ already carries the reasoning: the gate is not "admin only", it is "this
 deployment has exactly one tenant, and they own the disk". On a web deployment
 the server's API key is not something an authenticated user may replace, and
 the server's app-data path is not theirs to learn — so these routes 404 there.
+
+SCOPE, since this is no longer the only key surface (LLM provider config,
+2026-08-14). The key this pane edits is specifically the BUILT-IN ANTHROPIC
+PROFILE's slot — `ANTHROPIC_API_KEY` in `user.env`, via
+`services.app_secrets`. It is one control among several, not "the" API key:
+a profile for OpenAI, Moonshot, DashScope or a custom OpenAI-compatible
+endpoint keeps its key in its own derived slot, and those are edited from the
+assistant's model-settings section (`PUT /api/chat/settings/llm/profiles/
+{id}/key`, super-admin gated) — NOT here. The `probe_api_key` below is
+likewise Anthropic-specific by construction: it calls Anthropic's models
+endpoint, so it can only ever speak to the built-in profile's provider.
+
+Kept deliberately rather than generalised: this pane is the desktop app's
+first-run path, where the built-in Anthropic profile IS the configuration,
+and a user who never adds a second provider should not have to meet the
+profile concept at all.
 """
 from __future__ import annotations
 

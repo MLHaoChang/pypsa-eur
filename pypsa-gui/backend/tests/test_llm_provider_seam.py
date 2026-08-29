@@ -467,7 +467,13 @@ import pytest
 
 @pytest.mark.skipif(
     not os.environ.get("PYPSA_GUI_TEST_OLLAMA_URL"),
-    reason="no local OpenAI-compatible endpoint configured")
+    reason=(
+        "LIVE PROBE NOT RUN — set PYPSA_GUI_TEST_OLLAMA_URL (e.g. "
+        "http://localhost:11434/v1) to enable. Per ADR-0002 a skipped live "
+        "probe is NOT coverage: no test in this suite constructs a real "
+        "client, so a green run says nothing about whether the provider "
+        "actually works."
+    ))
 def test_seam_against_live_local_endpoint():
     from services import chat_service
     from services.llm_openai_compat import OpenAICompatProvider
@@ -883,3 +889,79 @@ def test_openai_compat_unsupported_image_source_is_skipped_not_raised():
     assert image_parts == []
     text_parts = [p for p in user_msg["content"] if p.get("type") == "text"]
     assert any(p["text"] == "what is this?" for p in text_parts)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Task 11 — ADR-0002 LIVE PROBES, one per wire.
+#
+# ADR-0002 (docs/adr/0002-chat-changes-need-a-live-api-probe.md): "No test in
+# backend/tests/ constructs a real Anthropic client... A change to the chat
+# path is therefore unverified by a green suite, and must additionally be
+# exercised against the live API before it is called done... its absence is a
+# defect in the change, not in the suite."
+#
+# The two tests below are that probe, and they differ from
+# `test_seam_against_live_local_endpoint` above in one load-bearing way: they
+# drive the FULL production path — profile store -> `_provider_for_profile`
+# -> `run_turn` — rather than handing `run_turn` a provider built by the test.
+# That is the path a user's turn actually takes, and it is the one no mocked
+# test can vouch for.
+#
+# BOTH SKIP BY DEFAULT AND THAT IS NOT COVERAGE. A skipped probe means the
+# ADR-0002 requirement is UNMET, not satisfied. The skip reasons name exactly
+# what to set, because a reason that merely says "not configured" is how a
+# skip gets read as a pass.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _live_probe_turn(profile_id: str) -> list[str]:
+    """Drive one real turn through the production resolution path."""
+    from services import chat_service
+    session = chat_service.ChatSession()
+    session.profile_id = profile_id
+    profile = __import__(
+        "services.llm_config", fromlist=["x"]
+    ).resolve_profile(profile_id)
+    session.bound_wire = profile.wire
+    session.model = profile.model
+    return [n for n, _ in chat_service.run_turn(
+        session, "Reply with the single word: ok. No tools.")]
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("PYPSA_GUI_TEST_LIVE_ANTHROPIC")
+         and os.environ.get("ANTHROPIC_API_KEY")),
+    reason=(
+        "LIVE PROBE NOT RUN (anthropic wire) — set "
+        "PYPSA_GUI_TEST_LIVE_ANTHROPIC=1 AND ANTHROPIC_API_KEY to enable. "
+        "This SPENDS REAL API CREDIT, which is why it is opt-in rather than "
+        "default. Per ADR-0002 this skip means the anthropic wire is "
+        "UNPROBED, not that it passed."
+    ))
+def test_live_probe_anthropic_wire():
+    """One real turn on the built-in Anthropic profile. Cheap by design."""
+    names = _live_probe_turn("anthropic-sonnet")
+    assert names[0] == "session_init"
+    assert "token" in names, f"no tokens streamed from a live call: {names}"
+    assert names[-1] == "turn_done"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE"),
+    reason=(
+        "LIVE PROBE NOT RUN (openai wire) — save an openai-wire profile, "
+        "then set PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE=<its profile id> (plus "
+        "its key slot in the environment, or use a keyless local endpoint "
+        "such as Ollama/LM Studio). Per ADR-0002 this skip means the "
+        "openai wire is UNPROBED, not that it passed."
+    ))
+def test_live_probe_openai_wire_through_a_saved_profile():
+    """
+    One real turn through a SAVED openai-wire profile — the whole point being
+    that the profile store, key-slot derivation and provider construction are
+    all exercised, not just the HTTP client.
+    """
+    names = _live_probe_turn(os.environ["PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE"])
+    assert names[0] == "session_init"
+    assert "token" in names, f"no tokens streamed from a live call: {names}"
+    assert names[-1] == "turn_done"

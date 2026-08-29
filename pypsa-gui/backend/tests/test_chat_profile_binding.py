@@ -909,6 +909,16 @@ def test_default_prompt_bytes_unchanged():
         "_ASSISTANT_STANCE": (
             "1dd77952d0cdec42606c4d269adf31aae9d11ae8ef22cf83103ac0659028889b"
         ),
+        # Task 11 — `_BASE_IDENTITY` joined the split for the same reason one
+        # level down: it names no specific tool (so it never broke the
+        # "tools-off names NO tool" rule) but still told a TOOLS-LESS model to
+        # "use the provided tools". Split into FACTS + CHAINING, which DO
+        # reassemble byte-identically here — unlike the solver/rubric pair,
+        # the tool clause sits at the end, so no reordering was needed.
+        # Hash captured from the pre-split literal the same way as the others.
+        "_BASE_IDENTITY": (
+            "aa4112c6f2a69e05304e044f4ed4c413545bd32ca9f76acd784282a1c10b12d2"
+        ),
     }
     for name, expected_hash in expected_sha256.items():
         value = getattr(chat_service, name)
@@ -917,6 +927,34 @@ def test_default_prompt_bytes_unchanged():
             f"{name} is no longer byte-identical to its pre-Task-8 HEAD "
             f"(32a0949a) value"
         )
+
+
+def test_tools_off_prompt_does_not_tell_the_model_to_use_tools():
+    """
+    Task 11 — `_BASE_IDENTITY` used to say "Use the provided tools to answer
+    questions and make changes" in EVERY prompt, including the tools-off one.
+    It names no specific tool, so Task 8's "tools-off names NO tool" check
+    passed it — but instructing a model with `tools=[]` to use tools is the
+    same capability-dishonesty that check exists to prevent, just phrased
+    generically. Task 8's review flagged it; this pins the fix.
+
+    The tools-ON prompt must KEEP the instruction: it is correct there.
+    """
+    from services.chat_service import _build_system_prompt
+
+    session = chat_service.ChatSession()
+    off = _build_system_prompt(session, include_tools=False)
+    on = _build_system_prompt(session, include_tools=True)
+
+    assert "provided tools" not in off, (
+        "tools-off prompt still instructs the model to use tools it does "
+        f"not have: {off[:300]!r}"
+    )
+    # The identity itself survives — only the tool clause is dropped.
+    assert "pypsa-gui assistant" in off
+    assert "energy-system optimisation model" in off
+    # And the tools-on prompt is unchanged in this respect.
+    assert "provided tools" in on
 
 
 def test_solver_and_rubric_halves_cover_the_same_words():
