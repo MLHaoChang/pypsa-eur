@@ -64,3 +64,41 @@ def to_pypsa(net, snapshots: int = 24) -> pypsa.Network:
               p_nom=EXT_GRID_P_NOM_MW, committable=False,
               marginal_cost=EXT_GRID_MARGINAL_COST)
     return n
+
+
+_STATUS_P_TOL_MW = 1e-4
+
+
+def run_uc(n: pypsa.Network) -> pypsa.Network:
+    status, condition = n.optimize(solver_name="highs")
+    if condition != "optimal":
+        raise RuntimeError(f"UC solve not optimal: {status}/{condition}")
+    return n
+
+
+def to_dispatch_table(n: pypsa.Network) -> pd.DataFrame:
+    """Solved network -> validated DispatchTable.
+
+    `q_mvar = 0.0` for every row: generators enter the load flow as PV nodes,
+    so Q is a load-flow RESULT, not a dispatch decision (ledgered assumption).
+    Non-committable units carry no `status` variable, so their commitment is
+    inferred from output: status 1 iff |p| exceeds the tolerance.
+    """
+    from gridspine.schema.dispatch import validate_dispatch
+
+    rows = []
+    p = n.generators_t.p
+    committable = n.generators["committable"]
+    status_t = getattr(n.generators_t, "status", pd.DataFrame())
+    for hour, snap in enumerate(n.snapshots):
+        for unit in n.generators.index:
+            p_mw = float(p.at[snap, unit])
+            if committable.at[unit] and unit in status_t.columns:
+                st = int(round(float(status_t.at[snap, unit])))
+            else:
+                st = 1 if abs(p_mw) > _STATUS_P_TOL_MW else 0
+            if st == 0:
+                p_mw = 0.0  # zero out solver residuals below tolerance
+            rows.append({"unit_id": unit, "hour": hour, "p_mw": p_mw,
+                         "q_mvar": 0.0, "status": st})
+    return validate_dispatch(pd.DataFrame(rows))
