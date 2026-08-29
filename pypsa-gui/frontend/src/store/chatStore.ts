@@ -81,9 +81,20 @@ interface ChatState {
   // `consumeSuppressHydrationOnce` before deciding whether to replay
   // history — without this, clearing `sessionId` and `messages` for a fresh
   // chat is immediately undone by the effect re-hydrating the OLD
-  // `last_session_id` the next time it runs (it is keyed on `sessionId`
-  // precisely so a project's real hydration-on-mount/switch still works).
+  // `last_session_id` the next time it runs.
   suppressHydrationOnce: boolean
+  // Fix round 1 (Task 13 review) — monotonic counter bumped by every
+  // `startNewChat()` call, UNCONDITIONALLY. The hydration effect used to key
+  // its rerun on `sessionId`, but `startNewChat` can fire while `sessionId`
+  // is ALREADY `null` (a fresh project with no chat.jsonl yet, or a
+  // cross-wire pick before the user's first message) — a null→null
+  // "change" that React's dependency comparison never sees, so the effect
+  // never reran to consume `suppressHydrationOnce`. The flag then survived
+  // to the NEXT real hydration trigger (a genuine project switch) and
+  // silently swallowed that project's real history. A counter that always
+  // changes on every call — regardless of what else did or didn't change —
+  // is what a one-shot flag actually needs to be one-shot-safe.
+  newChatSeq: number
   // Conversation
   messages: ChatMessage[]
   // The single pending confirmation card. The runtime allows ONE pending
@@ -253,6 +264,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
   profileId: null,
   suppressHydrationOnce: false,
+  newChatSeq: 0,
   messages: [],
   pending: null,
   toolProgress: {},
@@ -431,7 +443,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Unlike `resetForProjectSwitch`, this does NOT touch `streamCleanup` /
     // `streaming` — the dropdown that triggers the cross-wire confirm is
     // disabled while streaming, so there is no live turn to interrupt here.
-    set({
+    set((s) => ({
       sessionId: null,
       messages: [],
       pending: null,
@@ -442,7 +454,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         cache_read_tokens: 0, cache_create_tokens: 0,
       },
       suppressHydrationOnce: true,
-    })
+      // Always increments — see the field comment. This is the value the
+      // hydration effect's dependency array watches, NOT `sessionId`.
+      newChatSeq: s.newChatSeq + 1,
+    }))
   },
   consumeSuppressHydrationOnce: () => {
     const v = get().suppressHydrationOnce

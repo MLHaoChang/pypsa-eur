@@ -953,6 +953,9 @@ export default function ChatPanel() {
   const profileId = useChatStore((s) => s.profileId)
   const setProfileId = useChatStore((s) => s.setProfileId)
   const startNewChat = useChatStore((s) => s.startNewChat)
+  // Fix round 1 — the hydration effect's dependency; see that effect's
+  // comment for why this exists instead of keying on `sessionId`.
+  const newChatSeq = useChatStore((s) => s.newChatSeq)
   const messages = useChatStore((s) => s.messages)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const appendTokenDelta = useChatStore((s) => s.appendTokenDelta)
@@ -1010,15 +1013,25 @@ export default function ChatPanel() {
   // this branch is a bug fix. Revisit if boot latency is ever measured to care.
   useEffect(() => {
     if (!currentProject) return
-    // Task 13 — `startNewChat()` (the cross-wire profile-switch confirm)
-    // nulls `sessionId` and clears `messages` in the same `set()` call this
-    // effect's OWN dependency array now reacts to (`sessionId`, added below).
-    // Consumed unconditionally, before the messages-length guard: without
-    // this, the freshly-cleared store (0 messages, exactly the condition the
-    // guard below lets through) would re-hydrate the OLD `last_session_id`
-    // on the very next run of this effect, undoing "start a new chat"
-    // immediately. A real project switch never sets this flag, so its
-    // hydration is untouched.
+    // Task 13 — `startNewChat()` (the cross-wire profile-switch confirm, and
+    // the header's "New chat" button) clears `messages` and arms
+    // `suppressHydrationOnce`, consumed here unconditionally before the
+    // messages-length guard: without this, the freshly-cleared store (0
+    // messages, exactly the condition the guard below lets through) would
+    // re-hydrate the OLD `last_session_id` the next time this effect runs,
+    // undoing "start a new chat" immediately.
+    //
+    // Fix round 1 — this effect's dependency array watches `newChatSeq`, NOT
+    // `sessionId`. It used to watch `sessionId`, which broke when
+    // `startNewChat()` fired while `sessionId` was ALREADY null (a fresh
+    // project with no chat.jsonl yet, or a cross-wire pick before the user's
+    // first message): a null→null "change" that React's dependency
+    // comparison never sees, so the effect never reran to consume the flag.
+    // The flag then survived to the NEXT real trigger — a genuine project
+    // switch — and silently suppressed THAT project's real history load.
+    // `newChatSeq` is a counter `startNewChat()` bumps unconditionally on
+    // every call, so it always changes and the effect always gets a chance
+    // to consume the flag before anything else can observe it.
     if (useChatStore.getState().consumeSuppressHydrationOnce()) return
     // Only seed an EMPTY conversation. Replaying chat.jsonl over a store that
     // already holds a conversation erases the turn the user just watched
@@ -1029,7 +1042,7 @@ export default function ChatPanel() {
     //
     // The guard is still live even though the panel no longer remounts on
     // navigation (it is mounted for the app's lifetime inside AssistantDock).
-    // This effect re-runs whenever `currentProject` OR `sessionId` changes
+    // This effect re-runs whenever `currentProject` OR `newChatSeq` changes
     // (the latter added for the `startNewChat` guard above) AND on every
     // mount, and the mounts that remain all reach it with a populated store:
     // the dock's ErrorBoundary swapping back to its children after a Retry,
@@ -1089,7 +1102,7 @@ export default function ChatPanel() {
       setInterruptedTurn(h.pending_turn ?? null)
     }).catch(() => { /* missing chat.jsonl is fine — first time on this project */ })
     return () => { cancelled = true }
-  }, [currentProject, sessionId, setMessages, setSessionId])
+  }, [currentProject, newChatSeq, setMessages, setSessionId])
 
   // Phase D — upload slice + send-attach wiring.
   const uploads = useChatStore((s) => s.uploads)
@@ -2096,6 +2109,16 @@ export default function ChatPanel() {
     })
   }, [])
 
+  // Fix round 1 (product gap) — `startNewChat()` was reachable ONLY from the
+  // cross-wire profile-switch confirm. A deployment where every configured
+  // profile shares one wire had NO path at all to a fresh session short of
+  // switching projects. This is the deliberate affordance for it — same
+  // action the cross-wire confirm's "Switch" button takes, just without a
+  // profile change attached.
+  const onNewChat = useCallback(() => {
+    startNewChat()
+  }, [startNewChat])
+
   // ── Task 13 — profile dropdown + cross-wire switch confirm ───────────────
   //
   // `getChatProfiles()` is member-level (every authenticated user may read
@@ -2125,7 +2148,16 @@ export default function ChatPanel() {
     // way two profiles on the same wire can — the confirm exists because
     // picking one silently mid-conversation would otherwise look like the
     // same assistant continuing when the backend has actually started over.
-    if (selectedProfileMeta && selectedProfileMeta.wire !== target.wire) {
+    //
+    // Fix round 1 — FAIL SAFE when the current selection's wire is UNKNOWN
+    // (`selectedProfileMeta === null`, e.g. an admin deleted the profile
+    // `profileId` still points at). The old guard required a known
+    // same-wire baseline to trigger the confirm, so an unknown baseline
+    // short-circuited straight to `setProfileId` — a silent wire change
+    // wearing the same-wire path. Treat "cannot prove it's same-wire" as
+    // cross-wire: one extra confirm click costs less than a session
+    // continuing under a provider it never agreed to switch to.
+    if (!selectedProfileMeta || selectedProfileMeta.wire !== target.wire) {
       setPendingProfilePick({ id: target.id, label: target.label })
       return
     }
@@ -2290,8 +2322,24 @@ export default function ChatPanel() {
             New exports ({unseenExportCount})
           </button>
         )}
+        {/* Fix round 1 — the only other path to `startNewChat()` was the
+            cross-wire confirm's "Switch" button, which a same-wire-only
+            deployment never surfaces. `title`/`aria-label` carry the meaning
+            so a compact icon button fits the 380px dock header alongside the
+            dropdown, UsageMeter, gear, and exports badge without widening
+            the row. */}
         <button
-          className="ml-auto px-2 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+          className="ml-auto px-1.5 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+          onClick={onNewChat}
+          disabled={streaming}
+          data-testid="chat-new-chat"
+          title="Start a new chat (new session; the on-screen conversation and current profile binding reset)"
+          aria-label="Start a new chat"
+        >
+          🆕
+        </button>
+        <button
+          className="px-2 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
           onClick={onClearHistory}
           disabled={streaming || messages.length === 0}
           data-testid="chat-clear-history"

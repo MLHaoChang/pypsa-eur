@@ -114,6 +114,26 @@ describe('chatStore profile switching (Task 13)', () => {
     })
   })
 
+  // Fix round 1 — a review reproduced this: `startNewChat()` can fire while
+  // `sessionId` is ALREADY null (fresh project, no chat.jsonl yet; or a
+  // cross-wire pick before the user's first message). The hydration effect
+  // used to key its rerun on `sessionId` changing, so a null→null "change"
+  // never triggered it, `suppressHydrationOnce` stayed armed, and the NEXT
+  // real hydration (a genuine project switch) silently ate the stale flag
+  // instead of the new project's real history. `newChatSeq` exists so the
+  // effect has something to watch that ALWAYS changes on every call.
+  it('startNewChat bumps newChatSeq on every call, even when sessionId is already null', () => {
+    useChatStore.setState({ sessionId: null, newChatSeq: 0 })
+    useChatStore.getState().startNewChat()
+    expect(useChatStore.getState().sessionId).toBeNull()
+    expect(useChatStore.getState().newChatSeq).toBe(1)
+    // A second call with sessionId STILL null must bump it again — this is
+    // exactly the case a sessionId-keyed effect dependency cannot see.
+    useChatStore.getState().startNewChat()
+    expect(useChatStore.getState().sessionId).toBeNull()
+    expect(useChatStore.getState().newChatSeq).toBe(2)
+  })
+
   it('startNewChat arms a ONE-SHOT hydration-suppression flag', () => {
     useChatStore.getState().startNewChat()
     expect(useChatStore.getState().suppressHydrationOnce).toBe(true)

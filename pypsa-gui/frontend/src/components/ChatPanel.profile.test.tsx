@@ -16,7 +16,7 @@
 //   * `model_fallback` and `thinking` SSE frames, previously dropped by a
 //     `default`-less switch, now render.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
@@ -74,9 +74,19 @@ afterEach(() => cleanup())
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(getChatProfiles).mockResolvedValue(profiles())
+  // `vi.clearAllMocks()` only resets call history, not a mock's
+  // resolved-value implementation — a test that calls `mockResolvedValue`
+  // (persistent, not `...Once`) on a shared mock otherwise leaks its payload
+  // into every later test that doesn't set its own. Restoring the factory's
+  // own default here every time closes that off regardless of what any one
+  // test does.
+  vi.mocked(getChatHistory).mockResolvedValue({
+    turns: [], last_session_id: null, bound_project: null,
+    history_gap: 0, pending_turn: null,
+  })
   useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: null, assistantDockOpen: false })
   useChatStore.setState({
-    sessionId: null, profileId: null, suppressHydrationOnce: false,
+    sessionId: null, profileId: null, suppressHydrationOnce: false, newChatSeq: 0,
     pending: null, messages: [], streaming: false, streamCleanup: null,
     error: null,
   })
@@ -242,7 +252,13 @@ it('confirming a cross-wire switch calls setProfileId + startNewChat (nulls sess
 })
 
 it('a startNewChat from the cross-wire switch suppresses the next chat.jsonl hydration', async () => {
-  vi.mocked(getChatHistory).mockResolvedValue({
+  // `mockResolvedValueOnce`, not `mockResolvedValue`: this test asserts
+  // `getChatHistory` is called exactly once total, so a PERSISTENT override
+  // here would otherwise leak into every later test in this file that
+  // doesn't set its own (`vi.clearAllMocks()` in `beforeEach` clears call
+  // history, not a mock's resolved-value implementation) — silently handing
+  // them a stale `sess-old` session.
+  vi.mocked(getChatHistory).mockResolvedValueOnce({
     turns: [{
       ts: 1, session_id: 'sess-old', model: 'claude-sonnet-5',
       user: 'old question', assistant: [{ type: 'text', text: 'old answer' }],
@@ -305,4 +321,94 @@ it('accumulates thinking frames into a collapsible details block', async () => {
   expect(details.tagName.toLowerCase()).toBe('details')
   expect(details.textContent).toMatch(/Let me work through the numbers\./)
   expect(await screen.findByText('The answer is 42.')).toBeTruthy()
+})
+
+// ── Fix round 1 — review-reproduced regressions ─────────────────────────────
+//
+// An independent review live-reproduced two defects and flagged a product
+// gap. All three are covered here.
+
+// (1) CRITICAL — the one-shot suppression flag relied on `sessionId`
+// CHANGING to retrigger the hydration effect. `startNewChat()` can fire
+// while `sessionId` is ALREADY null (a fresh project with no chat.jsonl, or
+// a cross-wire pick before the user's first message) — a null→null
+// "change" the effect's dependency array never sees, so the flag stays
+// armed and is consumed by the WRONG hydration: the next genuine project
+// switch, silently eating that project's real history.
+it('a startNewChat with an already-null sessionId does not swallow the NEXT project\'s real history (regression)', async () => {
+  // ProjectA: no history at all — sessionId never leaves null.
+  vi.mocked(getChatHistory).mockResolvedValueOnce({
+    turns: [], last_session_id: null, bound_project: 'ProjectA',
+    history_gap: 0, pending_turn: null,
+  })
+  useUIStore.setState({ currentProject: 'ProjectA', activeSlidePanel: null, assistantDockOpen: false })
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  await waitFor(() => expect(vi.mocked(getChatHistory)).toHaveBeenCalledTimes(1))
+  expect(useChatStore.getState().sessionId).toBeNull()
+
+  // Cross-wire pick + confirm while sessionId is ALREADY null — this is the
+  // exact condition a sessionId-keyed effect dependency cannot observe.
+  const user = userEvent.setup()
+  await user.selectOptions(screen.getByTestId('chat-model-select'), 'openai-main')
+  await user.click(await screen.findByTestId('chat-profile-switch-confirm-btn'))
+  expect(useChatStore.getState().sessionId).toBeNull()
+  expect(useChatStore.getState().profileId).toBe('openai-main')
+
+  // Genuine project switch to ProjectB, which HAS real history.
+  vi.mocked(getChatHistory).mockResolvedValueOnce({
+    turns: [{
+      ts: 1, session_id: 'sess-b', model: 'claude-sonnet-5',
+      user: 'projectB question', assistant: [{ type: 'text', text: 'projectB answer' }],
+      usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_create_tokens: 0 },
+    }],
+    last_session_id: 'sess-b',
+    bound_project: 'ProjectB',
+    history_gap: 0,
+    pending_turn: null,
+  })
+  act(() => {
+    useUIStore.setState({ currentProject: 'ProjectB' })
+  })
+
+  // ProjectB's history must load — the earlier startNewChat's suppression
+  // flag must NOT still be armed by the time this runs.
+  await waitFor(() => expect(screen.getByText('projectB question')).toBeTruthy())
+  expect(useChatStore.getState().sessionId).toBe('sess-b')
+})
+
+// (2) IMPORTANT — a stale/deleted profileId (e.g. an admin removed the
+// profile the user had explicitly picked) resolves to an UNKNOWN current
+// wire. The old guard `selectedProfileMeta && meta.wire !== target.wire`
+// short-circuits to `false` on an unknown baseline, applying the pick
+// directly — no confirm, no startNewChat — silently changing the wire
+// under a session that continues believing it's on the old provider.
+it('treats a pick as cross-wire (fail-safe) when the current profileId no longer exists in the fetched list', async () => {
+  useChatStore.setState({ profileId: 'deleted-anthropic-profile' })
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  const user = userEvent.setup()
+  await user.selectOptions(screen.getByTestId('chat-model-select'), 'openai-main')
+
+  const confirm = await screen.findByTestId('chat-profile-switch-confirm')
+  expect(confirm.textContent).toMatch(/GPT-5/)
+  // Not committed — same discipline as any other cross-wire pick.
+  expect(useChatStore.getState().profileId).toBe('deleted-anthropic-profile')
+  expect(useChatStore.getState().sessionId).toBeNull()
+})
+
+// (3) Product gap — `startNewChat()` was reachable ONLY from the cross-wire
+// confirm. A deployment where every profile shares one wire had no way at
+// all to start a fresh session short of switching projects.
+it('a "New chat" control starts a fresh conversation (nulls sessionId, clears messages)', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  useChatStore.setState({
+    sessionId: 'sess-live',
+    messages: [{ id: 'm1', role: 'user', content: 'hi', ts: 1 }],
+  })
+  const user = userEvent.setup()
+  await user.click(screen.getByTestId('chat-new-chat'))
+  expect(useChatStore.getState().sessionId).toBeNull()
+  expect(useChatStore.getState().messages).toEqual([])
 })
