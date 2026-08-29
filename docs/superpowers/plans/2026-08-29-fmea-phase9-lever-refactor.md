@@ -1,162 +1,172 @@
-# Phase 9 — the loop's lever, generalised (plan, v1)
+# Phase 9 — the margin loop (plan, v2 post-review)
 
-## Why
+**v1 proposed the wrong shape and got one of its own premises backwards.** The
+review's verdict — *"not as scoped"* — is accepted in full, and v2 is a
+different design, not a patched one. What changed:
 
-Phase 7 built a loop that tunes the ENS cap until the plan meets an MC-LOLE
-target. Phase 8 built the reserve margin because that loop's commonest honest
-verdict was **`unreachable` — the cap never bound**: on a network whose firm
-capacity already covers demand the LP sheds nothing at any ceiling, so no cap
-changes the plan and the MC's loss of load comes entirely from outages the
-proxy never models. Phase 8's acceptance run measured what the margin does on
-exactly that shape of network: **LOLE 12.41 h → 1.32 h**, intervals separated.
+- **v1's §1 row 3 was INVERTED.** I wrote *"with no ENS cap set, `cap_mwh` is
+  None and the test never fires."* It is `0.0`, not `None`: on a margin-only
+  run `targets={}`, the per-period loop never executes, and `SystemTarget.
+  cap_mwh` is emitted as its initialised `0.0`. So `0.0 < ENERGY_FLOOR_MWH`
+  fires on the **first miss** and every margin run would end `unreachable`
+  after one solve — indistinguishable in the payload from the real thing. The
+  break is not "never fires", it is "always fires, immediately".
+- **The generalised `Lever` does not earn its keep.** Of the eight breaks
+  between today's code and a working margin loop, only three live in the
+  controller's comparison operators. The rest are report, route, validator and
+  frontend — a shared dataclass merely relocates them, while adding six members
+  (`miss_is_final`, `sort_sign`, `midpoint`, `is_final_refusal`, a
+  total-over-missing-result `stricter`, a new row field) that must all be
+  regression-proved against a working Phase-7 suite. v1 named that risk itself
+  ("refactors go wrong silently") and then took it anyway.
 
-So the tool now has a lever that works and a loop that cannot pull it. Phase 9
-connects them.
+## 1. The shape: make the margin LOOK like a cap
 
-**This was explicitly NOT a Phase-8 bolt-on.** The Phase-7 review (finding
-[B5]) walked the controller line by line against a margin lever and found
-seven independent breaks; the Phase-8 plan cut the lever into this phase on
-that evidence. What follows is that list, re-verified against the code as it
-stands today, with one item already resolved by Phase 8.
+`POST /results/margin_loop`, a second route, reusing **`run_coupling_loop`
+unchanged** via a monotone substitution:
 
-## 1. What actually breaks (verified against `services/adequacy/coupling.py`)
-
-| # | Code today | Why a margin breaks it |
-|---|---|---|
-| 1 | `_tighten`: `step = eps/4.0` … `max(step, EPS_FLOOR_PERMYRIAD)` | Strictly **decreasing**. A stricter margin is a **larger** one, so the loop would walk `m` toward zero — toward *no standard* — while believing it was tightening. |
-| 2 | `informed = 0.5 * eps * (ens/cap)` | Divides by `cap_mwh`. There is no cap for a margin lever; the term is dimensionally meaningless. |
-| 3 | `cap_mwh < ENERGY_FLOOR_MWH ⇒ unreachable` | An energy floor. With no ENS cap set, `cap_mwh` is None and the test never fires. |
-| 4 | `eps = max(eps0, EPS_FLOOR_PERMYRIAD)`, `assert e > 0` | `EPS_FLOOR_PERMYRIAD = 0.01` is 1e-6 *of demand* as a cap; as a margin it is 1 %. **`m = 0` is a legitimate request** and would be silently converted. |
-| 5 | infeasible ⇒ `unreachable` | The nesting is still valid (larger `m` ⇒ strictly smaller feasible set) but the loop must be moving toward larger `m` for it to mean anything. |
-| 6 | refinement `if not miss > met * (1+1e-9): break` | For a margin the **met** end is the larger value, so this is false on the first pass and refinement silently never runs. |
-| 7 | tie-break `key=(cost, -eps_permyriad)`; the field name itself | Prefers the larger value (right for a cap, backwards for a margin), and `eps_permyriad` is **wire-visible** in `LoopPanel.tsx` and `api/simulation.ts`. |
-
-**Resolved by Phase 8, verified:** the report no longer fires only on the ENS
-stash — `solver_service.py` reads both and the comment says so ("the report
-fires when EITHER standard was enforced"). Without that, every margin iterate
-would have returned `no_report` and the loop would have ground the margin to
-zero. It is worth naming as the one break that closed itself, because it means
-the remaining work is a controller refactor and not a plumbing rescue.
-
-**Route-level, all currently hard-coded to the cap:** `solve_at` builds
-`dataclasses.replace(cfg, ens_cap_permyriad=eps)`; `_restore_closing` writes
-`ens_cap_permyriad = eps_star`; `_verdict_copy` tells the user to "set
-ens_cap_permyriad = …"; the record keys are `eps0` / `eps_star`.
-
-## 2. The shape: a `Lever`, injected
-
-The controller stops knowing what it is tuning. A `Lever` supplies:
-
-```python
-@dataclass(frozen=True)
-class Lever:
-    name: str                    # "ens_cap" | "reserve_margin"
-    apply: Callable              # (cfg, value) -> cfg
-    stricter: Callable           # (value, SolveResult) -> next value  (informed)
-    limit: float                 # the value beyond which the search stops
-    at_limit: Callable           # (value) -> bool
-    start: Callable              # (cfg) -> the default starting value
-    label: str                   # what the verdict tells the user to set
+```
+x = 1 / (1 + m)        m ∈ [0, ∞)  ⇒  x ∈ (0, 1]
 ```
 
-- **Direction lives in `stricter`**, not in the controller. For the cap,
-  stricter is smaller; for the margin, larger. Every `<`/`>` in the search that
-  today encodes "smaller is stricter" becomes a comparison **through the
-  lever's own ordering**, so bracketing, refinement and tie-breaks are
-  direction-agnostic by construction rather than by two parallel code paths.
-- **`at_limit` replaces the energy floor** (#3). The cap's limit stays the
-  `≤ 0` no-target sentinel; the margin's is the schema ceiling *and* —
-  better — the point where Phase 8's stash already proves the case hopeless.
+Smaller `x` is a larger margin is stricter — which is exactly the ordering the
+controller already assumes. Verified line by line against `coupling.py`:
 
-### 2.1 The margin's informed step — and why Phase 8 makes it exact
+| controller site | under `x` |
+|---|---|
+| `_tighten`: multiplicative shrink toward 0 | correct — and `m = 0` is `x = 1`, a legitimate loose end with no clamp problem |
+| `assert e > 0` | correct by construction: `x > 0` for all finite `m` |
+| `mid = sqrt(met·miss)` | **valid again** — both endpoints strictly positive. This is v1's hardest unseen problem (an arithmetic midpoint would have been needed, and `sqrt(0·miss) = 0` would have collapsed the bracket at the exact place it matters) |
+| `if not miss > met·(1+1e-9)` | correct: the miss is the looser (larger) `x` |
+| tie-break `key=(cost, -x)` | correct: prefers the larger `x`, i.e. the **smallest margin** among equal-cost met plans — the cheapest certified standard |
+| `cap_mwh < ENERGY_FLOOR_MWH` | the new route's `solve_at` returns `cap_mwh=None`, which makes the test a genuine no-op (this is what v1 wrongly believed was already true) |
 
-The cap's informed step used `achieved_ens / cap` to cross a slack region in
-one solve. The margin has a **sharper** analogue, and it is free: Phase 8's
-report block publishes `required_mw` and `firm_mw` per period. When the margin
-is not binding, the plan already carries `firm_mw`, so the smallest margin that
-would bind is `firm_mw / peak_mw − 1`. Jump there and add the step, instead of
-creeping. A non-binding margin costs exactly one wasted solve, never a
-geometric walk.
+Cost: one substitution and a per-route payload shape. Benefit: `coupling.py`
+is **not touched**, so the Phase-7 suite is a regression oracle rather than a
+risk. If a unified controller is ever wanted, build it after this works, from
+evidence about which hooks are actually needed rather than from a re-read.
 
-### 2.2 The margin's limit — `max_achievable_mw`
+**`EPS_FLOOR_PERMYRIAD` as an `x`-floor** is `x ≥ 0.01`, i.e. `m ≤ 99` — far
+above the schema's `le=5`, so the route's own limit binds first and the
+backstop never distorts the search.
 
-Phase 8 stashes `max_achievable_mw` (derated fixed + derated `p_nom_max` of
-active extendables) precisely so preflight can refuse an unreachable margin.
-The loop gets it for free: `limit = max_achievable_mw / peak_mw − 1`. Above
-that no plan exists, so the loop stops and reports `unreachable` **without
-spending a solve to discover it** — and the verdict can say "your candidate set
-tops out at m = X", which is a different and far more useful statement than
-"the search did not reach it".
+## 2. What the route must do that the controller cannot
 
-## 3. Wire compatibility — the part that must not break
+### 2.1 Refuse up front, in three cases the loop would otherwise burn solves on
 
-`eps_permyriad` is read by `LoopPanel.tsx` and typed in `api/simulation.ts`.
-The rename is therefore additive, not a swap:
+`reserve_margin_facts(n, cfg)` is explicitly preflight-callable (*"Nothing in
+this function touches `n.model`"*), so all three cost zero solves:
 
-- Rows carry **`lever_value`** and **`lever`** (the discriminator), and keep
-  **`eps_permyriad` as a deprecated alias** populated only when
-  `lever == "ens_cap"`. Same for `eps0`/`eps_star` beside `lever_start` /
-  `lever_star`.
-- `POST /results/coupling_loop` gains `lever: "ens_cap" | "reserve_margin"`,
-  **defaulting to `"ens_cap"`** — an existing caller sees no change at all.
-  ★ bitten test: a body with no `lever` produces a payload byte-identical in
-  its cap fields to the Phase-7 behaviour.
-- `restore: "final"` writes **the lever's own config field**, and the verdict
-  names it. A loop that certified a margin and then told the user to set an ENS
-  cap would be worse than no advice.
+- **Unreachable margin** [B4]. An out-of-reach margin surfaces as
+  `validation_failed`, **not** `infeasible` — `_is_infeasible` matches neither,
+  so the controller treats it as a transient failure, keeps stepping, and ends
+  `budget_exhausted` advising *"raise max_solves"*, which can never work. The
+  route computes the ceiling itself (below) and refuses before starting.
+- **Unpriceable assets** [S5]. `reserve_margin_unpriceable_assets` is a
+  blocking error, but the loop's own gate only needs *one* priceable unit — so
+  such a network passes the 422 and then fails **every** iterate identically.
+  Reuse the validator's sentence verbatim.
+- **`rolling`** only [S4]. The margin's validator refuses `rolling` and
+  downgrades `myopic` to a warning, with a stated reason (each myopic window is
+  one period, which is the peak the standard is defined against). The cap
+  loop's blanket refusal of both would deny a supported configuration.
+  **And the cap loop's VoLL requirement does not apply**: the margin is a
+  constraint, not a price, so a margin loop on a VoLL-free network is well
+  defined. (The MC still needs no VoLL either.)
 
-## 4. What the loop can now say that it could not before
+### 2.2 The ceiling is `min` over periods, not `max` [B3, corrected]
 
-The Phase-7 `NEVER_BOUND` verdict — "the cap never bound; the loss of load
-comes from outages the LP does not model; an energy cap has no leverage" — has
-a next action for the first time. When the cap lever ends `unreachable` with
-that diagnosis, the verdict should name the margin lever explicitly. **Not
-auto-switch**: the two levers buy different things (a cap constrains energy, a
-margin buys firm capacity), the cost consequences differ, and silently changing
-which standard a study enforced is exactly the kind of thing this program does
-not do. Recommend, don't act.
+The constraint is installed **per period**. A margin is achievable iff
+`max_achievable_P ≥ (1+m)·peak_P` for **every** P, so the binding period is the
+one that fails first:
 
-## 5. Acceptance (self-calibrated, per Phase 8's lesson)
+```
+m_max = min over P of (max_achievable_P / peak_P) − 1     (non-finite ⇒ +∞)
+```
 
-★ **A1 — the margin lever reaches `met` where the cap lever reports
-`unreachable`, on the same network.** This is the phase's whole claim and the
-fixture is already known: S17's, where Phase 7 measured `unreachable` in two
-solves and Phase 8's acceptance measured LOLE 12.41 → 1.32 at a derived margin.
-The target is derived, never chosen (a margin inside the largest-unit step
-moves EUE but not LOLE).
-★ **A2 — the informed step does not creep.** On a non-binding start the loop
-reaches a binding margin in ONE solve, using `firm_mw / peak_mw − 1`. Bite:
-geometric stepping.
-★ **A3 — the limit is respected without spending solves.** A target that needs
-more than `max_achievable_mw` reports `unreachable` naming the ceiling, with
-`solves_used` strictly less than the budget. Bite: search to the budget.
-★ **A4 — the cap lever is unchanged.** The whole Phase-7 controller suite must
-pass untouched, and a no-`lever` request must be byte-identical in its cap
-fields. This is the regression that matters most: Phase 9 is a refactor of
-working code, and the way refactors go wrong is silently.
+v1 said "max over periods, presumably" — exactly backwards; `max` lets the loop
+search past a margin one period already makes impossible. And `max_achievable`
+is **`inf` on the ordinary network** (PyPSA's `p_nom_max` default), where the
+sanitizer nulls it — so the ceiling degrades to the schema's `le=5`, and any
+acceptance test that exercises the ceiling needs a fixture with a **finite**
+`p_nom_max`. v1's A3 could not have failed.
+
+### 2.3 The informed step must strictly exceed the tight margin [S3]
+
+`firm_mw / peak_mw − 1` is the smallest margin at which the incumbent plan is
+*tight* — at exactly that value the plan is feasible, unchanged, same hash,
+same LOLE, and flagged `binding` while nothing moved. It is the smallest tight
+margin, not the smallest plan-changing one, so the step must strictly exceed
+it. Aggregate by `min` over periods, for the same reason as §2.2.
+
+Since `_row` discards `res["report"]`, the route computes this in its own
+`solve_at` closure (it holds the report there) and returns it through the
+substitution, rather than asking the controller to carry a new field.
+
+## 3. The `binding` misdiagnosis is a LIVE bug, and is fixed first [B2]
+
+`report.binding` is computed purely from ENS caps, so it is `"voll"` on every
+margin run. Two consequences, one of which is shipped today:
+
+- **Today, on the cap loop:** a user with a margin set runs the cap loop; the
+  margin shapes the plan, the cap never binds, and `_verdict_copy` emits
+  `NEVER_BOUND_COPY_V1` — *"what would move this number is firm capacity … a
+  planning reserve margin"* — to someone who **already has one**. The
+  diagnosis is not wrong about the cap, but its advice is stale.
+- **On the margin loop:** the same copy would recommend the lever in use.
+
+Fix, and it is small: the reserve-margin block already publishes a per-period
+`binding` flag. `_verdict_copy` consults it, and when a margin was in force the
+copy says so and names the margin's own binding state instead of recommending
+it. This lands as its own commit **before** the loop, because it is a
+correctness fix to shipped behaviour, not Phase 9 scope.
+
+## 4. Frontend: a discriminator, no nullable alias [B5]
+
+v1's additive alias **crashes the panel**: `compact()` is typed `number`, and
+`isFinite(null)` is `true` in JS, so `null.toPrecision(2)` throws inside
+`rows.map` and takes the whole panel down. Omitting the key instead leaves an
+`ε ‱` column of em-dashes.
+
+And v1 missed a second hard-coded site: `restoreSentence` writes
+`ens_cap_permyriad = …` in **both** branches, rendered unconditionally — so on
+a margin run the UI would tell the user to set the wrong config field
+regardless of what the backend verdict says.
+
+So: the payload carries `lever` (`"ens_cap"` | `"reserve_margin"`),
+`lever_value`, `lever_label`, `lever_unit`; the panel drives its column header,
+badge suffix (`‱` vs `%`) and `restoreSentence`'s field name off them. No
+alias. Same session, one panel, three call sites.
+
+## 5. Acceptance (self-calibrated — Phase 8's lesson, kept)
+
+★ **A1 — the margin loop reaches `met` where the cap loop reports
+`unreachable`, on the same network.** The phase's whole claim, on the fixture
+where both prior phases already measured their halves.
+★ **A2 — the informed step does not creep**: a non-binding start reaches a
+binding margin in one solve.
+★ **A3 — the ceiling refuses without spending solves**, on a fixture with a
+**finite** `p_nom_max` (v1's omission), reporting the ceiling by name.
+★ **A4 — `coupling.py` is untouched and the Phase-7 suite passes verbatim.**
+Under this design that is a `git diff` assertion, not a test-suite hope.
+★ **A5 — the substitution is monotone**: a property test over the mapping, so
+the one piece of new math is pinned.
 
 ## 6. Non-goals
 
-- Auto-selecting or auto-switching levers (§4).
-- Tuning both levers jointly — a two-dimensional search whose Pareto surface
-  needs its own design.
-- ELCC-weighted derating (still the Phase-8 seam).
-- Per-zone margins.
+- A generalised `Lever` / unified controller (§1 — revisit from evidence).
+- Auto-switching levers; the loop recommends, never acts.
+- Tuning both standards jointly.
+- ELCC-weighted derating; per-zone margins.
 
-## 7. Open decisions for review
+## 7. Open decisions, answered by the review
 
-1. Should `Lever` live in `coupling.py` or its own module? (It is data + three
-   callables; `coupling.py` keeps the controller's purity argument intact, but
-   the route owns the config-writing halves.)
-2. `eps_permyriad` as a deprecated alias forever, or removed once the panel
-   reads `lever_value`? (Same session, so a swap is cheap — but the payload is
-   also what a user's saved study record contains.)
-3. Is `firm_mw / peak_mw − 1` right when several periods disagree? (Take the
-   max over periods, presumably — the binding period is the one that matters —
-   but state it.)
-4. Should the loop refuse a margin lever when preflight would error anyway
-   (unpriceable assets), or let the first solve surface it?
-5. Does `restore: "final"` on a margin need to clear any ENS cap the user had
-   set, or leave both standards in place? (Leave both, presumably: the user set
-   the cap deliberately. But then the certified plan met *both*, and the verdict
-   must say so.)
+1. `1/(1+m)` over `limit − m`: the latter needs a finite limit, and the limit
+   is `inf` on the ordinary network.
+2. No alias — remove and discriminate [B5].
+3. `min` over periods, not `max` [B3/S3].
+4. Refuse unpriceable assets up front [S5].
+5. A margin run leaves a user-set ENS cap untouched (`solve_at` and
+   `_restore_closing` both build from `base_cfg`), so the certified plan met
+   **both** standards and the verdict must say so — which needs §3's binding
+   flag.
