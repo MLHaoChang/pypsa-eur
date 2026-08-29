@@ -53,3 +53,40 @@ def test_unit_registry_rejects_gen_colliding_with_ext_grid():
             gen_names=pd.Series(["SLK_B1"]), gen_buses=pd.Series(["B1"]),
             ext_names=pd.Series(["SLK_B1"]), ext_buses=pd.Series(["B1"]),
         )
+
+
+def test_name_with_quote_rejected():
+    """raw_writer emits NAME unescaped into the .raw record stream, so a quote
+    in a canonical ID splits one record into two. Rejected at ingest, per the
+    module docstring, rather than escaped at the writer."""
+    with pytest.raises(ContractError, match="characters outside"):
+        validate_canonical(pd.Series(["B1", "B1'X"]), pd.Series(["G1"]))
+
+
+def test_name_with_comma_rejected():
+    with pytest.raises(ContractError, match="characters outside"):
+        validate_canonical(pd.Series(["B1", "B1,X"]), pd.Series(["G1"]))
+
+
+def test_name_with_newline_rejected():
+    with pytest.raises(ContractError, match="characters outside"):
+        validate_canonical(pd.Series(["B1", "B1\nX"]), pd.Series(["G1"]))
+
+
+def test_unit_name_with_leading_equals_rejected():
+    """A leading '=' makes the name a formula when a downstream CSV is opened
+    in a spreadsheet. Checked on the unit series too, not just buses."""
+    with pytest.raises(ContractError, match="characters outside"):
+        validate_canonical(pd.Series(["B1"]), pd.Series(["=1+1"]))
+
+
+def test_hyphen_and_underscore_names_accepted():
+    validate_canonical(pd.Series(["BUS_01", "G_BUS-2"]), pd.Series(["SLK_BUS_01"]))
+
+
+def test_trailing_newline_rejected():
+    """Anchoring regression: `$` matches just before a final newline, so a
+    `re.match(r"[A-Za-z0-9_-]+$", ...)` spelling accepts "B1\\n" and lets a
+    forged .raw record through. Only a full match rejects it."""
+    with pytest.raises(ContractError, match="characters outside"):
+        validate_canonical(pd.Series(["B1", "B2\n"]), pd.Series(["G1"]))

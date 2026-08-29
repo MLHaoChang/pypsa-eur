@@ -55,3 +55,12 @@ def test_non_converged_lf_rejected(tmp_path):
     csv.write_text("bus_name,vm_pu,va_degree\nBUS_01,1.03,0.0\nBUS_02,0.985,-5.2\n")
     with pytest.raises(ContractError, match="not converged"):
         compare_lf(LFResult(converged=False), csv)
+
+
+def test_missing_required_columns_rejected(tmp_path):
+    """A hand-exported CSV with the wrong header raised a bare KeyError naming
+    one column; the contract names all of the ones that are actually missing."""
+    csv = tmp_path / "pf.csv"
+    csv.write_text("name,vm_pu\nBUS_01,1.03\n")
+    with pytest.raises(ContractError, match="missing required columns"):
+        compare_lf(lf_result(), csv)

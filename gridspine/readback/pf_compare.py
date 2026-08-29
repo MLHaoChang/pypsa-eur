@@ -12,7 +12,13 @@ def compare_lf(lf, pf_csv, vm_tol=0.01, va_tol_deg=0.5) -> pd.DataFrame:
     # below as a bus-set mismatch and blame the fixture.
     if not lf.converged:
         raise ContractError("LF result not converged — nothing to compare")
-    pf = pd.read_csv(pf_csv).set_index("bus_name")
+    pf = pd.read_csv(pf_csv)
+    missing = [c for c in ("bus_name", "vm_pu", "va_degree") if c not in pf.columns]
+    if missing:
+        # A hand-exported CSV with the wrong header otherwise fails as a bare
+        # KeyError naming only the first column pandas happened to reach.
+        raise ContractError(f"PowerFactory CSV missing required columns: {missing}")
+    pf = pf.set_index("bus_name")
     if set(pf.index) != set(lf.bus.index):
         raise ContractError(
             f"bus set mismatch: only-pandapower={sorted(set(lf.bus.index) - set(pf.index))} "

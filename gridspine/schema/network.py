@@ -2,11 +2,19 @@
 PyPSA bus name == pandapower bus name == .raw NAME == PowerFactory name.
 The 12-char cap is the PSS/E v33 NAME field width — enforced here so an
 illegal ID fails at ingest, not at export."""
+import re
+
 import pandas as pd
 
 from .contracts import ContractError
 
 MAX_NAME_LEN = 12
+
+# Names are emitted unescaped into the .raw record stream and into CSVs, so the
+# charset is an allowlist, not a denylist: a quote or comma splits a .raw
+# record, a newline forges one, and a leading "=" makes the cell a spreadsheet
+# formula. Widening this set is a decision, not a convenience.
+NAME_CHARSET = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def _check_series(s: pd.Series, what: str) -> None:
@@ -23,6 +31,11 @@ def _check_series(s: pd.Series, what: str) -> None:
         )
     if (s.str.len() == 0).any():
         raise ContractError(f"{what} contains empty names")
+    offenders = sorted(s[~s.str.fullmatch(NAME_CHARSET)])
+    if offenders:
+        raise ContractError(
+            f"{what} names contain characters outside [A-Za-z0-9_-]: {offenders}"
+        )
 
 
 def validate_canonical(buses: pd.Series, unit_names: pd.Series) -> None:
