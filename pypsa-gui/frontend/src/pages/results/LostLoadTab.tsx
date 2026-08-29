@@ -5,9 +5,7 @@ import {
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
-import { AdequacyChips, CoptChips, type AdequacyReportPayload, type CoptPayload } from './adequacy'
-import { FrontierPanel } from './FrontierPanel'
-import { McPanel } from './McPanel'
+import { type AdequacyReportPayload } from './adequacy'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
@@ -25,6 +23,23 @@ import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableT
 // lost-load by bus carrier (electrical / hydrogen / heat / …). All
 // computation reuses /api/results/lost_load which now ships a `bus_carriers`
 // map exposing each column's bus carrier.
+//
+// PHASE 7 IA SPLIT: the adequacy surfaces that used to ride here — the
+// achieved-vs-target chips, the COPT screening chips, FrontierPanel and
+// McPanel — moved to Results → Adequacy when the coupling loop landed and
+// tipped the tab (the revisit condition recorded in McPanel.tsx). What stays
+// is the lost-load EVIDENCE: what was shed, where, at what price. The ★ mount
+// invariant those panels carried moved with them to AdequacyTab.test.tsx,
+// where it is stronger (that tab has no early return at all) — it was not
+// dropped, because "a reliable system is exactly where the adequacy surfaces
+// must still render" is the lesson this tab learned the hard way.
+
+// One line, both branches: a user who reaches this tab looking for the
+// reliability readout must be told where it went. Without it the no-lost-load
+// copy would still point "above" at chips that are now on another tab.
+const ADEQUACY_CROSSLINK =
+  'Adequacy studies — targets, screening, the frontier, Monte Carlo and the '
+  + 'coupling loop — moved to the Adequacy tab.'
 
 const ACCENT = '#dc2626'   // danger red — VOLL slack = LP failure to serve demand
 
@@ -58,17 +73,16 @@ export default function LostLoadTab() {
     queryFn: () => resultsApi.getLostLoad(win),
     enabled: winValid,
   })
-  // Achieved-vs-target readout (adequacy plan Phase 1 Task 5). 204 → null →
-  // AdequacyChips renders nothing. Horizon-scope, so no window params.
+  // The achieved-vs-target READOUT moved to the Adequacy tab, but this tab
+  // still asks whether a target existed at all: "no unserved energy under a
+  // stated standard" and "no unserved energy because nothing could ever be
+  // shed" are different answers to an empty table, and only the second one
+  // means "set a VoLL". 204 → null → the untargeted copy. Horizon-scope, so
+  // no window params; same query key the Adequacy tab uses, so this is a
+  // cache read rather than a second round-trip.
   const { data: adequacy } = useQuery({
     queryKey: nk(currentProject, 'results', 'adequacy'),
     queryFn: () => resultsApi.getAdequacy(),
-  })
-  // COPT screening — side by side with the proxy; the divergence is the
-  // diagnostic (spec §5.3). 204 → null → CoptChips renders nothing.
-  const { data: copt } = useQuery({
-    queryKey: nk(currentProject, 'results', 'copt'),
-    queryFn: () => resultsApi.getCopt(),
   })
   // WeightCtx + timeline from the shared hook (fetches /snapshots +
   // /investmentPeriods); refTs = the lost-load series.
@@ -145,17 +159,18 @@ export default function LostLoadTab() {
     return { mwh, cost: mwh * voll, voll }
   }, [lostLoad, llMeta, weightCtx, range])
 
-  // No lost load is not the same as nothing to report, and this early
-  // return used to conflate them: it fired BEFORE the adequacy and COPT
-  // chips, so the success case — a reliability target set and MET, with
-  // zero unserved energy — rendered as an empty tab that told the user to
-  // set a VoLL they had already set. It also suppressed the COPT screening,
-  // which needs no solve at all and is meaningful whether or not the LP
-  // shed anything, along with the LP-proxy-vs-COPT divergence that the
-  // design treats as the headline diagnostic.
+  // No lost load is not the same as nothing to report. This early return used
+  // to conflate them AND to fire before the adequacy surfaces, so the success
+  // case — a reliability target set and MET, with zero unserved energy —
+  // rendered as an empty tab telling the user to set a VoLL they had already
+  // set. The surfaces now live on the Adequacy tab (they render there
+  // unconditionally, which is the same lesson enforced more strongly), so what
+  // this branch owes the user is an honest statement of WHICH empty case this
+  // is, plus the cross-link.
   //
-  // So the chips render either way; only the lost-load table and chart
-  // below are genuinely empty, and the message now says which case it is.
+  // The `targeted` branch's old copy said "the reliability target ABOVE
+  // reports what actually bound" — there is no longer anything above, so it
+  // points at the tab that now carries it.
   if (!lostLoad || !totals || totals.mwh <= 0) {
     const targeted = (adequacy as AdequacyReportPayload | null | undefined)?.target != null
     return (
@@ -163,21 +178,16 @@ export default function LostLoadTab() {
         <header>
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Lost load</h3>
         </header>
-        <AdequacyChips report={(adequacy ?? null) as AdequacyReportPayload | null} />
-        <CoptChips
-          copt={(copt ?? null) as CoptPayload | null}
-          proxyEnsMwh={
-            (adequacy as AdequacyReportPayload | null | undefined)?.metrics?.ens_mwh ?? null
-          }
-        />
-        <FrontierPanel />
-        <McPanel />
-        <div className="text-[12px] text-muted space-y-2">
+        <p className="text-[11px] text-muted" data-testid="lostload-adequacy-crosslink">
+          {ADEQUACY_CROSSLINK}
+        </p>
+        <div className="text-[12px] text-muted space-y-2" data-testid="lostload-empty-copy">
           {targeted ? (
             <p>
               No unserved energy in this solve — the plan served all demand, so there is no
-              lost-load breakdown to chart. The reliability target above reports what actually
-              bound.
+              lost-load breakdown to chart. A reliability target WAS applied: what it bound,
+              and how the plan scores under the screening and sampling engines, is on the
+              Adequacy tab.
             </p>
           ) : (
             <>
@@ -209,16 +219,9 @@ export default function LostLoadTab() {
         </p>
       </header>
 
-      <AdequacyChips report={(adequacy ?? null) as AdequacyReportPayload | null} />
-      <CoptChips
-        copt={(copt ?? null) as CoptPayload | null}
-        proxyEnsMwh={
-          (adequacy as AdequacyReportPayload | null | undefined)?.metrics
-            ?.ens_mwh ?? null
-        }
-      />
-      <FrontierPanel />
-      <McPanel />
+      <p className="text-[11px] text-muted" data-testid="lostload-adequacy-crosslink">
+        {ADEQUACY_CROSSLINK}
+      </p>
 
       <div className="grid grid-cols-3 gap-3">
         <Kpi label="Total lost load" value={fmtEnergy(totals.mwh)}

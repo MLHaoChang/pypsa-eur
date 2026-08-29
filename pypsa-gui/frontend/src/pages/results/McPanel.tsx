@@ -19,12 +19,22 @@ import {
 // battery is worth when outages persist. Plus the ELCC table — the marginal,
 // last-in capacity credit of one asset at a time.
 //
-// IA DECISION, recorded here rather than taken silently: v1 stays on the Lost
-// load tab. The engines belong beside the lost-load evidence they are read
-// against, and a mid-phase Results.tsx re-wiring (five coupled edits) buys no
-// analysis. REVISIT CONDITION, recorded verbatim from the phase plan: "when
-// the Phase-7 coupling loop or a fourth study lands, this tab has tipped and
-// the adequacy surfaces split into a dedicated Results→Adequacy tab."
+// IA DECISION — RESOLVED IN PHASE 7, recorded here because the condition was
+// recorded here. v1 kept this panel on the Lost load tab, with the revisit
+// condition stated verbatim from the phase plan: "when the Phase-7 coupling
+// loop or a fourth study lands, this tab has tipped and the adequacy surfaces
+// split into a dedicated Results→Adequacy tab."
+//
+// The coupling loop landed, so the condition FIRED and the split happened:
+// this panel now lives on Results → Adequacy (pages/results/AdequacyTab.tsx)
+// beside the chips, the COPT screening, the frontier and LoopPanel, and the
+// Lost load tab keeps only the lost-load evidence plus a cross-link. The
+// split was counted honestly at six coupled edits (ResultsTab union,
+// VALID_TABS, TABS, RESULTS_TO_COMPARE_TAB, the tab body switch, and
+// LostLoadTab.tsx) — and the ★ mount-invariant tests MOVED with the surfaces
+// rather than being deleted: AdequacyTab has NO early return at all, which is
+// a stronger statement of the same invariant (a reliable system is exactly
+// where the adequacy surfaces must still render).
 //
 // No SVG is drawn here on purpose — the study's product is numbers with
 // intervals and a table of refusals, and a chart of two scalars would be
@@ -45,8 +55,15 @@ export function blockerMessage(err: unknown): string {
   return String((err as Error)?.message ?? err)
 }
 
-/** Compact number for display: 2 dp above 1, 3 significant figures below. */
-function trim(v: number): string {
+/**
+ * Compact number for display: 2 dp above 1, 3 significant figures below.
+ *
+ * Exported for LoopPanel, which renders the same quantities (LOLE, a
+ * resolution floor) in a table beside this panel's headline. Two copies of a
+ * rounding rule would drift, and the day they diverge the same study reads as
+ * two different numbers on one screen.
+ */
+export function trim(v: number): string {
   if (!isFinite(v)) return '—'
   const s = Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3)
   return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s

@@ -260,6 +260,99 @@ export interface ElccCandidatesPayload {
   max_assets: number
 }
 
+// ── GET/POST /results/coupling_loop — the adequacy-coupled planning loop ────
+//
+// Phase 7. Solve the LP under an energy cap, run the sequential MC on the PLAN
+// it produced, retune the cap, re-solve — until the plan meets the user's
+// target on the MC's own LOLE rather than on the LP proxy's shed energy.
+//
+// Keys are copied VERBATIM from routers/results.py `post_coupling_loop`'s
+// record and services/adequacy/coupling.py's `_row` / `_mc_block`. Renaming
+// one here would fork the contract silently, and this payload is the only
+// place several of these quantities exist at all.
+//
+// NOTE the deliberate absence of a top-level `engine` / `fidelity` pair
+// ([N4]): the study's product is a CAP and a VERDICT, not a metric, so the
+// sibling convention would misdescribe it. The engine labels live on each
+// iterate's own `mc` block, which is where a metric actually is.
+
+/** One iterate's MC evaluation — a PROJECTION of mc_adequacy's dict. */
+export interface CouplingMcBlock {
+  engine: string
+  fidelity: string
+  lole_hours: number
+  /** [lo, hi] — an INTERVAL, not a half-width. May be asymmetric. */
+  lole_ci: [number, number] | null
+  eue_mwh: number
+  eue_ci: [number, number] | null
+  n_samples: number
+  /** Rides on every evaluated iterate: on a multi-period network it is the
+   *  only way to see WHICH period drives a miss ([N4]/[N5]). */
+  by_period: Record<string, { lole_hours: number; eue_mwh: number }>
+}
+
+/** One row of `iterations` — services/adequacy/coupling.py `_row`. */
+export interface CouplingIteration {
+  eps_permyriad: number
+  solve_status: string
+  condition: string | null
+  /** null on every non-solved iterate — an infeasible solve has no cost. */
+  cost_eur: number | null
+  ens_mwh: number | null
+  cap_mwh: number | null
+  binding: string | null
+  /** true when the plan hash repeated and the metrics were REUSED, not sampled. */
+  plateau: boolean
+  /** null when the iterate was never evaluated (failed / infeasible solve). */
+  mc: CouplingMcBlock | null
+}
+
+export type CouplingLoopStatus =
+  | 'running' | 'met' | 'unreachable' | 'budget_exhausted' | 'aborted' | 'failed'
+
+export interface CouplingLoopPayload {
+  study: 'coupling_loop'
+  status: CouplingLoopStatus
+  /** HORIZON-basis hours — the panel converts the user's h/yr entry. */
+  target_lole_h: number
+  /** "hours_per_year" | "hours_per_horizon" — feeds `basisSuffix`. */
+  basis: string
+  horizon_years?: number | null
+  draws: number
+  seed: number
+  eps0: number
+  max_solves: number
+  restore: 'base' | 'final'
+  base_restored: boolean
+  /** 95% CI upper bound cleared the target. Reported, never iterated for. */
+  confident: boolean
+  eps_star: number | null
+  /** Smallest NONZERO LOLE these draws can resolve; null when unknowable. */
+  resolution_floor_h: number | null
+  solves_used: number
+  /** REBOUND by the worker between iterates, so a mid-run GET sees a prefix
+   *  of the next one — the list GROWS while the study runs. */
+  iterations: CouplingIteration[]
+  final: CouplingIteration | null
+  /** A ready sentence ([N6]/v1.3 §4) — RENDER IT, never re-word it here. */
+  verdict: string | null
+  warning: string
+  error: string | null
+  started_at?: number
+  finished_at?: number | null
+}
+
+export interface CouplingLoopRequestBody {
+  /** REQUIRED and horizon-basis. The h/yr → horizon conversion is the
+   *  panel's job (plan [S12]); the wire stays unit-safe. */
+  target_lole_h: number
+  draws?: number
+  seed?: number
+  eps0?: number
+  max_solves?: number
+  restore?: 'base' | 'final'
+}
+
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
@@ -512,6 +605,28 @@ export const resultsApi = {
   // no picker at all.
   getElccCandidates: () => client.get('/results/mc/elcc_candidates')
     .then(r => r.data as ElccCandidatesPayload),
+  // The adequacy-coupled planning loop (Phase 7; 204 = no loop has been run in
+  // this session). While the worker runs, the SAME record is served with
+  // `status: "running"` and an `iterations` list that GROWS between polls —
+  // that is the whole point of the surface, since a run is up to eight full
+  // capacity expansions plus an MC evaluation each.
+  getCouplingLoop: () => client.get('/results/coupling_loop')
+    .then(r => (r.status === 204 ? null : r.data as CouplingLoopPayload)),
+  // Starts the loop in a backend worker thread and returns immediately; poll
+  // getCouplingLoop for progress. `target_lole_h` is REQUIRED and is the
+  // horizon-basis number (LoopPanel's `wireTarget` does the conversion) —
+  // every other field has an engine-side default this client must not fork.
+  // Rejects with the axios error on 409 (a solve/sweep/frontier/MC/loop is
+  // running) and on the route's 422 set; the detail string NAMES the blocker
+  // and the panel renders it through McPanel's `blockerMessage`.
+  startCouplingLoop: (body: CouplingLoopRequestBody) =>
+    client.post('/results/coupling_loop', body).then(r => r.data),
+  // Asks a running loop to stop. IDEMPOTENT and 200 even when the run is
+  // already finishing: the controller checks the stop event between iterates,
+  // so an abort costs at most the iterate in flight and the closing restore
+  // still runs. 404 only when no loop has ever been recorded.
+  abortCouplingLoop: () => client.post('/results/coupling_loop/abort')
+    .then(r => r.data),
   // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
   // overlays, persisted per project. Computed rows come from getCopt and
   // merge client-side (pages/results/fmea.ts).
