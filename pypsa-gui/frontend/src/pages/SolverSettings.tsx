@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, AlertCircle, Leaf, ArrowRight } from 'lucide-react'
 import { simulationApi } from '../api/simulation'
-import { ensTargetWarning } from './results/adequacy'
+import { ensTargetWarning, RESERVE_MARGIN_CAVEAT } from './results/adequacy'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
@@ -1652,7 +1652,10 @@ function Co2PricePerPeriod({
 // ReliabilityAssumptions lives under the Network tab. Single field (VOLL) —
 // when > 0 the backend injects a slack 'load_shedding' generator on every bus,
 // so the LP can drop demand instead of failing when supply is tight.
-function ReliabilityAssumptions({
+// Exported so the reserve-margin field and its ★ caveat can be rendered (and
+// tested) without mounting the whole settings page: this component is pure
+// `(draft, patch)` with no hooks of its own.
+export function ReliabilityAssumptions({
   draft, patch,
 }: {
   draft: SolverConfig
@@ -1705,6 +1708,35 @@ function ReliabilityAssumptions({
             onChange={v => patch({ ens_zone_cap_multiple: v > 0 ? v : null })}
             hint="Optional backstop so no single zone (bus `country`) absorbs the whole allowance: each zone's unserved energy ≤ multiple × target on its OWN demand. 3× is a reasonable default. With every bus's country blank, this collapses into a second system cap (the solver log says so)."
           />
+          {/* ── Firm capacity (planning reserve margin), Phase 8 §1 ── */}
+          <NumberField
+            label="Reserve margin"
+            unit="fraction of peak"
+            // `?? 0` and the `> 0 ? v : null` below mirror the ENS target
+            // exactly: an unset knob is null on the wire (the backend's
+            // `reserve_margin: float | None`), and 0 is the same thing said
+            // out loud — the wrapper returns `user_fn` unchanged at ≤ 0.
+            value={draft.reserve_margin ?? 0}
+            step={0.05}
+            // The schema's own bounds (`ge=0, le=5`). Clamping here is not a
+            // duplicate of the backend check but its complement: an entry of
+            // 9 is a typo, and a 422 three clicks later is a worse way to
+            // learn that than a field that will not hold the number.
+            min={0}
+            max={5}
+            onChange={v => patch({ reserve_margin: v > 0 ? v : null })}
+            hint="Derated firm capacity must cover (1 + margin) x each active period's peak demand. 0.15 = 15%. 0 = off. Thermal units are credited at (1 - outage rate) x availability, must-take renewables at their mean output over the period's peak hours, storage with a duration haircut; a unit with neither outage data nor an availability profile is not credited at all and preflight says so."
+          />
+          {/* ★ The caveat is not decoration. A margin field with no caveat
+              sells its own output as a reliability result: the standard is
+              met by arithmetic over derating factors the user mostly did not
+              enter, and nothing on this path samples an outage. */}
+          <p
+            className="text-[10px] text-muted mt-1"
+            data-testid="reserve-margin-caveat-setting"
+          >
+            {RESERVE_MARGIN_CAVEAT}
+          </p>
         </div>
 
         {/* ── Demand-response tier (spec §4.4) — opt-in, never global ── */}

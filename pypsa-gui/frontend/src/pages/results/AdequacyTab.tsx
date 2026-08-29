@@ -7,6 +7,7 @@ import {
   type AdequacyReportPayload, type CoptPayload,
 } from './adequacy'
 import { FrontierPanel } from './FrontierPanel'
+import { ReserveMarginPanel } from './ReserveMarginPanel'
 import { McPanel } from './McPanel'
 import { LoopPanel } from './LoopPanel'
 
@@ -30,9 +31,14 @@ import { LoopPanel } from './LoopPanel'
 // unconditionally and states its own empty case in its own words.
 //
 // Reading order is the ANALYSIS order: what standard actually bound, the
-// storage-blind screening beside it, the cost-vs-availability curve the two
-// points sit on, the sampler that answers what the convolution cannot, and
-// finally the loop that drives the sampler's verdict back into the plan.
+// storage-blind screening beside it, the firm-capacity standard that is the
+// OTHER thing the last solve may have been held to, the cost-vs-availability
+// curve those points sit on, the sampler that answers what the convolution
+// cannot, and finally the loop that drives the sampler's verdict back into
+// the plan. The reserve margin sits with the standards rather than with the
+// studies because it is one: it shaped the plan every study below is measured
+// on, and reading a Monte-Carlo LOLE without knowing a margin forced 200 MW
+// of peaker into the fleet is reading half the answer.
 
 export default function AdequacyTab() {
   const currentProject = useUIStore(s => s.currentProject)
@@ -86,6 +92,7 @@ export default function AdequacyTab() {
         proxyEnsMwh={report?.metrics?.ens_mwh ?? null}
       />
 
+      <ReserveMarginPanel />
       <FrontierPanel />
       <McPanel />
       <LoopPanel />

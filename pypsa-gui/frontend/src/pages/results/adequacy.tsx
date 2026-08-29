@@ -48,6 +48,26 @@ export function ensTargetWarning(permyriad: number | null | undefined): string |
   )
 }
 
+/**
+ * ★ What a met reserve margin does and does not certify (Phase 8 §6).
+ *
+ * Shared by the SETTINGS field (where the number is entered) and by the
+ * results panel (where it is read back), deliberately as one string: two
+ * copies of a caveat drift, and the one that drifts is always the one the
+ * user is looking at. The claim it blocks is the natural reading of a green
+ * "margin met" badge — that the plan has been shown to be reliable. It has
+ * not. The LP meets this standard by ARITHMETIC over derating factors, most
+ * of which are carrier class averages nobody entered; no outage is ever drawn
+ * on this path, so it can neither confirm nor refute a loss-of-load target.
+ */
+export const RESERVE_MARGIN_CAVEAT =
+  'A met margin is NOT a met reliability target. It is a proxy standard '
+  + 'justified by convention (a fixed percentage over the peak) and by the '
+  + 'derating factors it is computed from — not by a sampler: nothing on this '
+  + 'path draws an outage, so a met margin can neither confirm nor refute a '
+  + 'loss-of-load standard. Run the sequential Monte Carlo on the resulting '
+  + 'plan for a number that can.'
+
 const BINDING_LABEL: Record<AdequacyReportPayload['target']['binding'], string> = {
   system_cap: 'ENS cap',
   zone_cap: 'zone ceiling',

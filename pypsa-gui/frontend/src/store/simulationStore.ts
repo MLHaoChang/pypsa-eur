@@ -67,6 +67,7 @@ const defaultConfig: SolverConfig = {
   voll: 0,
   ens_cap_permyriad: null,
   ens_zone_cap_multiple: null,
+  reserve_margin: null,
   dsr_price_eur_per_mwh: 0,
   dsr_share_of_load: 0,
   dsr_buses: [],

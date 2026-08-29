@@ -28,7 +28,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getFrontier: vi.fn(), startFrontier: vi.fn(),
       getMc: vi.fn(), startMc: vi.fn(), getElccCandidates: vi.fn(),
       getCouplingLoop: vi.fn(), startCouplingLoop: vi.fn(),
-      abortCouplingLoop: vi.fn(),
+      abortCouplingLoop: vi.fn(), getReserveMargin: vi.fn(),
     },
   }
 })
@@ -54,6 +54,23 @@ const COPT = {
   voll_eur_per_mwh: 4000, per_mode: [],
 }
 
+// Shape-accurate to `sanitize_reserve_margin_payload`'s output.
+const RESERVE_MARGIN = {
+  margin: 0.15, horizon_wide: true,
+  by_period: [{
+    period: 'ALL', peak_mw: 150, required_mw: 172.5, firm_mw: 180,
+    margin_achieved: 0.2, met: true, binding: false, n_peak_hours: 1,
+    peak_snapshots: ['2030-01-01 00:00:00'],
+    max_achievable_mw: 220, max_achievable_unbounded: false,
+  }],
+  assets: [{
+    name: 'coal_a', period: 'ALL', kind: 'generator', capacity_mw: 100,
+    derate: 0.9, basis: 'EFORd', source: 'asset', extendable: false,
+    firm_mw: 90, energy_limited: false,
+  }],
+  derating_bases: { EFORd: 1 },
+}
+
 afterEach(() => cleanup())
 
 beforeEach(() => {
@@ -73,6 +90,9 @@ beforeEach(() => {
     .mockResolvedValue({ status: 'running' })
   vi.mocked(resultsApi.abortCouplingLoop).mockReset()
     .mockResolvedValue({ status: 'done', aborting: false })
+  // The firm-capacity readout serves 204 before any margin-set solve, and the
+  // tab must still mount it — that is the invariant this file exists for.
+  vi.mocked(resultsApi.getReserveMargin).mockReset().mockResolvedValue(null)
 })
 
 function renderTab() {
@@ -81,8 +101,14 @@ function renderTab() {
     <QueryClientProvider client={client}><AdequacyTab /></QueryClientProvider>)
 }
 
-/** Every study surface this tab is responsible for hosting, in tab order. */
-const PANELS = ['frontier-panel', 'mc-panel', 'loop-panel'] as const
+/** Every study surface this tab is responsible for hosting, in tab order.
+ *  `reserve-margin-panel` joined the list in Phase 8: it is a STANDARD
+ *  readout, so it is hosted above the studies that are read against it, and
+ *  it mounts on the same terms as the rest — including in the 204 state, its
+ *  ordinary condition before anything has been solved with a margin. */
+const PANELS = [
+  'reserve-margin-panel', 'frontier-panel', 'mc-panel', 'loop-panel',
+] as const
 
 describe('AdequacyTab — the ★ mount invariant, no-data state', () => {
   it('mounts EVERY adequacy panel when nothing has been run', async () => {
@@ -103,6 +129,7 @@ describe('AdequacyTab — the ★ mount invariant, data state', () => {
   beforeEach(() => {
     vi.mocked(resultsApi.getAdequacy).mockResolvedValue(ADEQUACY as never)
     vi.mocked(resultsApi.getCopt).mockResolvedValue(COPT as never)
+    vi.mocked(resultsApi.getReserveMargin).mockResolvedValue(RESERVE_MARGIN as never)
   })
 
   it('mounts EVERY adequacy panel when the studies have data', async () => {
@@ -131,7 +158,8 @@ describe('AdequacyTab — the ★ mount invariant, data state', () => {
     await screen.findByTestId('copt-chips')
     const html = document.body.innerHTML
     const seq = [
-      'adequacy-chips', 'copt-chips', 'frontier-panel', 'mc-panel', 'loop-panel',
+      'adequacy-chips', 'copt-chips', 'reserve-margin-panel', 'frontier-panel',
+      'mc-panel', 'loop-panel',
     ]
     const idx = seq.map(id => html.indexOf(`data-testid="${id}"`))
     expect(Math.min(...idx)).toBeGreaterThan(-1)
@@ -152,7 +180,8 @@ describe('AdequacyTab ordering', () => {
     const order = PANELS.map(
       id => body.innerHTML.indexOf(`data-testid="${id}"`))
     expect(order[0]).toBeGreaterThan(-1)
-    expect(order[1]).toBeGreaterThan(order[0])
-    expect(order[2]).toBeGreaterThan(order[1])
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i]).toBeGreaterThan(order[i - 1])
+    }
   })
 })

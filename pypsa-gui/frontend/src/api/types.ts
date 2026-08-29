@@ -176,6 +176,10 @@ export interface SolverConfig {
   ens_cap_permyriad?: number | null
   // Per-zone ceiling as a multiple of the target (zone = bus country).
   ens_zone_cap_multiple?: number | null
+  // Firm-capacity (planning reserve margin) standard, Phase 8 §1: a FRACTION
+  // (0.15 = 15%) of each active period's peak that derated firm capacity must
+  // cover; null = off. Schema bounds are ge=0, le=5.
+  reserve_margin?: number | null
   // Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in.
   dsr_price_eur_per_mwh?: number
   dsr_share_of_load?: number

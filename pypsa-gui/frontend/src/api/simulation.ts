@@ -353,6 +353,86 @@ export interface CouplingLoopRequestBody {
   restore?: 'base' | 'final'
 }
 
+// ── The firm-capacity (planning reserve margin) standard, Phase 8 §4 ────────
+//
+// KEY NAMES ARE VERBATIM from the backend and must stay that way: they come
+// from `services/adequacy/report.py::reserve_margin_payload` and its
+// `sanitize_reserve_margin_payload` wire pass, and the identical shape is
+// published a second time as `AdequacyReport.reserve_margin` (amendment
+// v1.2(7)) so the two surfaces cannot drift. The panel is the only reader, so
+// a rename here would fork the contract with nothing going red.
+
+/** One derating row — per (asset, PERIOD): a must-take credit is measured over
+ *  that period's peak hours, so the same unit derates differently per period
+ *  (amendment v1.1(3)). */
+export interface ReserveMarginAsset {
+  name: string
+  period: string
+  kind: 'generator' | 'storage'
+  /** The BUILT capacity in the solved plan — `p_nom_opt` for an extendable
+   *  (which is the point of the standard: the capacity it forced into being),
+   *  the fixed constant otherwise. `null` when the solve has no number for it. */
+  capacity_mw: number | null
+  /** (1 − outage rate) × availability, clamped to [0, 1]. A PROXY — see
+   *  `basis`/`source`, which are what make it inspectable. */
+  derate: number
+  /** "FOR" | "EFORd" — never silently converted. `1 − FOR` is not a UCAP
+   *  derate: FOR excludes reserve-shutdown hours and is optimistic exactly
+   *  for the peakers that sit at the margin. */
+  basis: string
+  /** "asset" (the user entered it) | "carrier_default" (a class average they
+   *  did not) | "missing". */
+  source: string
+  extendable: boolean
+  /** derate × capacity_mw. */
+  firm_mw: number
+  /** A reservoir takes full POWER credit while its ENERGY limit is what binds
+   *  it — recorded, not fixed (plan §1.4). */
+  energy_limited: boolean
+}
+
+/** One investment period's standard and what met it. */
+export interface ReserveMarginPeriod {
+  period: string
+  /** Unweighted MW maximum of electrical demand — never a weighted sum. */
+  peak_mw: number
+  required_mw: number
+  firm_mw: number
+  /** firm_mw / peak_mw − 1; null when the period has no demand. */
+  margin_achieved: number | null
+  /** The plan REACHES the standard. */
+  met: boolean
+  /** The standard SHAPED the plan — firm capacity on the bound. SEPARATE from
+   *  `met` (amendment v1.2(5)): a margin the fixed fleet already satisfies is
+   *  met and NOT binding, and reporting it as binding would credit the margin
+   *  for capacity that was always there. */
+  binding: boolean
+  /** N, the number of peak hours the must-take credit was measured over. */
+  n_peak_hours: number
+  /** The selected timestamps — longer than N when snapshots tie. Published
+   *  because a proxy nobody can inspect is a number nobody can check. */
+  peak_snapshots: string[]
+  /** null when an active extendable has an unbounded `p_nom_max`: "unbounded"
+   *  is not a number and `inf` is not JSON (amendment v1.2(4)). The flag below
+   *  says which case the null is — a clamp would have invented a ceiling
+   *  nobody entered. */
+  max_achievable_mw: number | null
+  max_achievable_unbounded: boolean
+}
+
+export interface ReserveMarginPayload {
+  /** Fraction: 0.15 == 15 %. */
+  margin: number
+  /** True when the periods share ONE `Generator-p_nom` variable set and the
+   *  system degenerates to a single standard at `max_P peak_P`. Calling that
+   *  "per period" would be a claim the constraint does not support. */
+  horizon_wide: boolean
+  by_period: ReserveMarginPeriod[]
+  assets: ReserveMarginAsset[]
+  /** basis → how many credited assets carried it. */
+  derating_bases: Record<string, number>
+}
+
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
@@ -573,6 +653,14 @@ export const resultsApi = {
   // data). Shape: pages/results/adequacy.tsx CoptPayload.
   getCopt: () => client.get('/results/copt')
     .then(r => (r.status === 204 ? null : r.data)),
+  // The firm-capacity (planning reserve margin) standard the last solve
+  // enforced (Phase 8 §4; 204 = nothing solved, no margin set, or no dispatch
+  // to judge one against). The endpoint serves the PERSISTED solve-time stash
+  // and never a recomputation — the wrapper measured its peaks with the
+  // load-scaling transforms applied and the restore has since reverted them.
+  // Shape: `ReserveMarginPayload` above.
+  getReserveMargin: () => client.get('/results/reserve_margin')
+    .then(r => (r.status === 204 ? null : r.data as ReserveMarginPayload)),
   // Cost-vs-availability frontier (Phase 5; 204 = no study run this session).
   // Shape: pages/results/FrontierPanel.tsx FrontierPayload.
   getFrontier: () => client.get('/results/frontier')
