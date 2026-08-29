@@ -103,6 +103,40 @@ export function maxAchievableText(
  * a substring test would print this warning over every default fleet (the
  * defaults library is 9/10 EFORd) and the warning would stop meaning anything.
  */
+/**
+ * ★ The peak-hour list, SUMMARISED when it is long.
+ *
+ * Found by rendering the panel in a browser: on a flat-demand network the tie
+ * rule (correctly) pulls in every snapshot, so this cell became 48 timestamps
+ * inline — and on an 8760-hour horizon it would be 8760. The list is published
+ * so the peak-coincidence proxy is CHECKABLE, and a wall of text is not
+ * checkable. Beyond four entries, report the count and the span; the full list
+ * stays in the cell's `title`.
+ */
+export function peakHoursCell(stamps: string[], n: number): string {
+  if (!stamps || stamps.length === 0) return '—'
+  if (stamps.length <= 4) return stamps.join(', ')
+  const first = stamps[0]
+  const last = stamps[stamps.length - 1]
+  return `${stamps.length} hours (N = ${n}) · ${first} … ${last}`
+}
+
+/**
+ * ★ The basis label for one derating row.
+ *
+ * A MUST-TAKE asset has no outage basis at all: its derate is a
+ * peak-coincidence availability, not `1 − q`. Rendering that as an em-dash (or
+ * `<blank>` in the roll-up) reads as data the user forgot to enter and sends
+ * them hunting for an outage rate that should not exist. Name what it is.
+ */
+export function basisLabel(basis: string | null | undefined,
+                           source?: string | null): string {
+  const b = (basis ?? '').trim()
+  if (b) return b
+  if ((source ?? '').trim() === 'missing') return 'must-take (availability)'
+  return '—'
+}
+
 export function forOptimisticNote(
   bases: Record<string, number> | null | undefined,
 ): string | null {
@@ -184,7 +218,7 @@ function PeriodTable({ rows }: { rows: ReserveMarginPeriod[] }) {
                 data-testid={`rm-peak-hours-${r.period}`}
                 title={r.peak_snapshots.join(', ')}
               >
-                {r.peak_snapshots.length ? r.peak_snapshots.join(', ') : '—'}
+                {peakHoursCell(r.peak_snapshots, r.n_peak_hours)}
               </td>
             </tr>
           ))}
@@ -248,7 +282,7 @@ function DeratingTable({ assets }: { assets: ReserveMarginAsset[] }) {
                   {a.derate.toFixed(3)}
                 </td>
                 <td className="py-1 pr-3 font-mono" data-testid={`rm-asset-basis-${id}`}>
-                  {a.basis || '—'}
+                  {basisLabel(a.basis, a.source)}
                 </td>
                 <td className="py-1 pr-3 font-mono" data-testid={`rm-asset-source-${id}`}>
                   {a.source || '—'}
@@ -352,7 +386,7 @@ export function ReserveMarginPanel() {
                     className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] font-mono"
                     data-testid={`rm-basis-${basis}`}
                   >
-                    {basis || '<blank>'} × {n}
+                    {basisLabel(basis, basis ? undefined : 'missing')} × {n}
                   </span>
                 ))}
               </div>

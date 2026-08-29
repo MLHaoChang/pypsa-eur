@@ -22,7 +22,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import type { ReserveMarginPayload } from '../../api/simulation'
-import { ReserveMarginPanel, forOptimisticNote, maxAchievableText, scopeSentence } from './ReserveMarginPanel'
+import { ReserveMarginPanel, basisLabel, forOptimisticNote, maxAchievableText, peakHoursCell, scopeSentence } from './ReserveMarginPanel'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -308,5 +308,44 @@ describe('ReserveMarginPanel — what the standard is NOT', () => {
     expect(s).toMatch(/convention/i)
     expect(s).toMatch(/derating/i)
     expect(s).toMatch(/sampler|Monte.?Carlo/i)
+  })
+})
+
+describe('ReserveMarginPanel — findings from the browser round', () => {
+  it('★ summarises a long peak-hour list instead of dumping every timestamp', () => {
+    // Found by rendering the panel: on a FLAT-demand network the tie rule
+    // (correctly) pulls in every snapshot, so "Peak hours used" became 48
+    // timestamps inline in one table cell — and on an 8760-hour horizon it
+    // would be 8760. The list exists so the peak-coincidence proxy is
+    // CHECKABLE; a wall of text is not checkable, it is noise. Summarise,
+    // and keep the full list reachable in the title.
+    //
+    // Bite (verified): render `peak_snapshots.join(', ')` again.
+    const many = Array.from({ length: 48 }, (_, k) => `2030-01-0${1 + Math.floor(k / 24)} ${String(k % 24).padStart(2, '0')}:00:00`)
+    const text = peakHoursCell(many, 48)
+    expect(text).toMatch(/48/)
+    expect(text.length).toBeLessThan(120)
+    expect(text).toContain(many[0])
+    expect(text).toContain(many[many.length - 1])
+  })
+
+  it('keeps a short peak-hour list verbatim', () => {
+    const few = ['2030-01-01 17:00:00', '2030-01-01 18:00:00']
+    expect(peakHoursCell(few, 2)).toContain('17:00:00')
+    expect(peakHoursCell(few, 2)).toContain('18:00:00')
+  })
+
+  it('★ labels a must-take asset\'s missing basis, never as blank data', () => {
+    // Also found by rendering: a must-take unit has NO outage basis — its
+    // derate is a peak-coincidence availability, not 1 - q — so the panel
+    // showed "—" in the Basis column and "<blank> x 1" in the roll-up. That
+    // reads as data the user forgot to enter, and would send them looking for
+    // an outage rate that should not exist. Name what it actually is.
+    //
+    // Bite (verified): return `basis || '<blank>'`.
+    expect(basisLabel('', 'missing')).toMatch(/must-take/i)
+    expect(basisLabel('', 'missing')).not.toContain('blank')
+    expect(basisLabel('EFORd', 'asset')).toBe('EFORd')
+    expect(basisLabel('FOR', 'carrier_default')).toBe('FOR')
   })
 })
