@@ -405,6 +405,7 @@ class SolveQueue:
                 stop_event=stop_event, log_queue=log_queue,
                 thread=me,
                 last_lost_load=None, adequacy_report=None,
+                last_reserve_margin=None,
                 lopf_results=None, ac_pf_results=None,
                 ac_pf_convergence=None, ac_pf_convergence_list=None,
                 ac_pf_slack_bus_used=None, ac_pf_stripped_voll_slacks=None,

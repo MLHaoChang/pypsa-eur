@@ -138,6 +138,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     # € figures are derived from VoLL × unserved energy inside the adequacy
     # services rather than from the economics roll-ups this allowlist tracks.
     ("routers/results.py", "get_adequacy"):                    frozenset(),
+    ("routers/results.py", "get_reserve_margin"):              frozenset(),
     ("routers/results.py", "get_copt"):                        frozenset(),
     ("routers/results.py", "get_fmea_modes"):                  frozenset(),
     ("routers/results.py", "get_fmea_sweep"):                  frozenset(),

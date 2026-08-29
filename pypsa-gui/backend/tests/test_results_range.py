@@ -309,6 +309,12 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/adequacy",
         # COPT screening adequacy + FMECA ranking (Phase 2) — structured.
         "/copt",
+        # The firm-capacity (reserve-margin) result (Phase 8 §4) — the
+        # PERSISTED solve-time stash: one row per investment period plus the
+        # derating table. `peak_snapshots` names the hours the credit was
+        # measured over, but the payload carries no per-snapshot series, so a
+        # snapshot range would have nothing to slice.
+        "/reserve_margin",
         # Contingency-sweep lifecycle (Phase 4) — status + rows, no series.
         "/fmea_sweep",
         # All computed failure-mode rows on one list (Phase 4 Task 4).

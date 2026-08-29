@@ -632,18 +632,27 @@ def test_stash_is_cleaned_up_after_a_solve():
 
 def test_stash_is_cleaned_up_after_a_failed_solve():
     """
-    The fixture must be infeasible with the margin CONSTRAINT INSTALLED, not
-    merely unreachable: an unreachable fleet has no extendable term, so no
-    constraint is added, the LP is feasible and the cleanup path under test
-    is never reached. Here the peaker exists (so `reserve_margin_ALL` is a
-    real constraint) but tops out at 100 MW against a 750 MW requirement.
+    The fixture must be infeasible with the margin CONSTRAINT INSTALLED, and
+    infeasible for a reason §3's preflight cannot decide.
+
+    Its first form (a peaker capped at 100 MW against a 750 MW requirement)
+    stopped testing anything the moment §3 shipped: an unreachable fleet is
+    now a PREFLIGHT ERROR, so that network never reaches the LP at all and the
+    cleanup path under test is never entered — the test would have passed
+    while asserting nothing. `_transmission_limited_network` keeps the claim
+    real: the fleet CAN reach the margin (a system-wide power standard has no
+    network in it), so preflight passes and `reserve_margin_ALL` is a live
+    constraint, but the load sits behind a 10 MW line and the dispatch is
+    infeasible.
     """
-    n = _network()
-    n.loads.at["l", "p_set"] = 500.0
-    n.generators.at["peaker", "p_nom_max"] = 100.0
+    n = _transmission_limited_network()
     _sink, status, condition = _solve(n, reserve_margin=MARGIN)
     assert status not in ("ok", "optimal"), (
         f"fixture is meant to be infeasible, got {status}/{condition}")
+    assert condition != "validation_failed", (
+        "the fixture must fail in the LP, not at preflight — otherwise the "
+        "cleanup path this test exists for is never reached")
+    assert "reserve_margin_ALL" in n.model.constraints
     assert getattr(n, "_reserve_margin_targets", None) is None
 
 
@@ -765,3 +774,424 @@ def test_solver_config_carries_the_margin_defaults():
     assert cfg.reserve_margin is None
     assert cfg.prm_peak_hours is None
     assert cfg.prm_storage_duration_h == pytest.approx(4.0)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# §3 — preflight / validation, and the infeasibility diagnosis
+# ══════════════════════════════════════════════════════════════════════════
+#
+# The unreachable-fleet ERROR is what REPLACES "let the LP go infeasible":
+# linopy raises `TypeError` on a constant constraint and `Generator-p_nom`
+# does not exist when nothing extendable is active, so the only place that
+# answer can be given is BEFORE the solve — where it is also the more useful
+# one ("no plan built from your candidate set can reach this margin").
+
+from services.validation_service import validate_for_run  # noqa: E402
+
+
+def _issues(n: pypsa.Network, **cfg_kw):
+    return validate_for_run(n, SolverConfig(**cfg_kw))
+
+
+def _by_code(issues, code: str):
+    return [i for i in issues if i.code == code]
+
+
+def _unpriceable_network() -> pypsa.Network:
+    """`geo` has no outage data (carrier outside the defaults library) and no
+    availability profile — the wrapper excludes it, so 1000 MW of nameplate
+    silently vanishes from the standard unless preflight says so."""
+    n = _network()
+    n.add("Carrier", "geothermal")
+    n.add("Generator", "geo", bus="b", carrier="geothermal", p_nom=1000.0,
+          marginal_cost=5.0)
+    return n
+
+
+def _must_take_network() -> pypsa.Network:
+    """The other half of the evidence split: no outage data, but a profile."""
+    n = _network()
+    n.add("Carrier", "wind")
+    n.add("Generator", "wind1", bus="b", carrier="wind", p_nom=100.0,
+          marginal_cost=0.0,
+          p_max_pu=pd.Series(0.4, index=n.snapshots))
+    return n
+
+
+def test_preflight_errors_on_generators_it_cannot_price():
+    """
+    ★ §3 — an excluded unit is a silent 1000 MW hole in the standard. The
+    wrapper logs it, but a log line is not a decision point: the user is
+    committing to a plan built against a fleet the tool could not price.
+    """
+    issues = _issues(_unpriceable_network(), reserve_margin=MARGIN)
+    errs = _by_code(issues, "reserve_margin_unpriceable_assets")
+    assert len(errs) == 1, [i.code for i in issues]
+    e = errs[0]
+    assert e.severity == "error"
+    assert "geo" in e.message, e.message
+    assert "1" in e.message, e.message
+
+
+def test_preflight_does_not_error_on_a_must_take_profile():
+    """The evidence split, at the preflight boundary: a unit with a
+    `p_max_pu` series IS priceable (§2.3 credits it at its peak-coincidence
+    mean). Erroring here would block every VRE network."""
+    issues = _issues(_must_take_network(), reserve_margin=MARGIN)
+    assert not _by_code(issues, "reserve_margin_unpriceable_assets")
+
+
+def test_preflight_is_silent_without_a_margin():
+    """No margin ⇒ no standard ⇒ nothing to say. A network the margin would
+    reject must still solve when nobody asked for a margin."""
+    for iss in _issues(_unpriceable_network()):
+        assert not iss.code.startswith("reserve_margin_"), iss.message
+
+
+def test_preflight_errors_when_no_plan_can_reach_the_margin():
+    """
+    ★ §3 / plan §2 — the fixed fleet tops out at 190 MW derated against a
+    900 MW requirement and nothing extendable is active. Both numbers must be
+    in the message: "unreachable" without them is a slogan.
+    """
+    issues = _issues(_network(peaker=False), reserve_margin=5.0)
+    errs = _by_code(issues, "reserve_margin_unreachable")
+    assert len(errs) == 1, [i.code for i in issues]
+    msg = errs[0].message
+    assert errs[0].severity == "error"
+    assert "900" in msg, msg
+    assert "190" in msg, msg
+
+
+def test_preflight_accepts_a_margin_an_extendable_can_reach():
+    """The peaker's `p_nom_max` is part of what the fleet can reach — an
+    error here would block the exact case the phase exists to serve."""
+    assert not _by_code(
+        _issues(_network(), reserve_margin=MARGIN), "reserve_margin_unreachable")
+
+
+def test_preflight_never_calls_an_unbounded_fleet_unreachable():
+    """Amendment 6: an unbounded `p_nom_max` makes `max_achievable_mw` `inf`,
+    so the comparison is always False. Pinned because the alternative (a
+    clamp to some large number) would make the test fire by accident."""
+    n = _network()
+    n.generators.at["peaker", "p_nom_max"] = float("inf")
+    assert not _by_code(
+        _issues(n, reserve_margin=5.0), "reserve_margin_unreachable")
+
+
+def test_preflight_warns_on_carrier_default_derating():
+    """★ [S2] The derate is a hidden assumption that changes what gets BUILT,
+    and `source` in the post-solve table is visible too late to act on."""
+    warns = _by_code(
+        _issues(_network(), reserve_margin=MARGIN),
+        "reserve_margin_carrier_default_derating")
+    assert len(warns) == 1
+    assert warns[0].severity == "warning"
+    assert "2" in warns[0].message, warns[0].message
+    assert "base" in warns[0].message and "peaker" in warns[0].message
+
+
+def test_preflight_does_not_warn_when_the_user_entered_the_rates():
+    n = _network()
+    for g in ("base", "peaker"):
+        n.generators.at[g, "outage_rate_value"] = 0.07
+        n.generators.at[g, "outage_rate_basis"] = "EFORd"
+        n.generators.at[g, "mttr_hours"] = 24.0
+    assert not _by_code(
+        _issues(n, reserve_margin=MARGIN),
+        "reserve_margin_carrier_default_derating")
+
+
+def test_preflight_blocks_the_run_it_rejects():
+    """The error is only worth anything if `run_simulation` refuses on it."""
+    n = _network(peaker=False)
+    _sink, status, condition = _solve(n, reserve_margin=5.0)
+    assert (status, condition) == ("error", "validation_failed")
+
+
+# ── the rolling / myopic adjudication (§3, last bullet) ───────────────────
+#
+# ADJUDICATED: rolling is an ERROR (mirroring `_check_ens_cap_coherence`),
+# myopic is a WARNING (diverging from it), and the reason is the DENOMINATOR.
+# `optimize_with_rolling_horizon` calls `extra_functionality` once per WINDOW
+# with that window's snapshots, so the standard silently becomes
+# "(1+m) x the window peak" — a weaker standard than the one asked for, and
+# reported as met. A myopic iteration's snapshots ARE one investment period,
+# which is exactly the denominator §2.5 specifies, so the standard is enforced
+# correctly; what breaks is only the REPORT (each iteration overwrites the
+# stash, so the published block covers the last period solved). A correct
+# standard with an incomplete report is a warning, not a refusal.
+
+def test_margin_under_rolling_horizon_is_an_error():
+    errs = _by_code(
+        _issues(_network(), reserve_margin=MARGIN, solve_strategy="rolling"),
+        "reserve_margin_unsupported_strategy")
+    assert len(errs) == 1 and errs[0].severity == "error"
+    assert "window" in errs[0].message.lower()
+
+
+def test_margin_under_myopic_foresight_warns_but_does_not_block():
+    issues = _issues(
+        _two_period_network(), reserve_margin=MARGIN, solve_strategy="myopic",
+        multi_investment_periods=True)
+    assert not _by_code(issues, "reserve_margin_unsupported_strategy")
+    warns = _by_code(issues, "reserve_margin_myopic_report_is_partial")
+    assert len(warns) == 1 and warns[0].severity == "warning"
+
+
+# ── §3: `_diagnose_infeasibility` can see this constraint ─────────────────
+
+def _diagnose(n, stash, **cfg_kw) -> list[str]:
+    from services.solver_service import _diagnose_infeasibility
+    q: queue.SimpleQueue = queue.SimpleQueue()
+    _diagnose_infeasibility(n, SolverConfig(**cfg_kw), q, margin_targets=stash)
+    out: list[str] = []
+    while True:
+        try:
+            out.append(str(q.get_nowait()))
+        except queue.Empty:
+            return out
+
+
+def test_diagnosis_names_the_margin_and_both_numbers():
+    """
+    ★ [S11] Today a PRM-infeasible run says "No obvious structural cause
+    found. Check binding capacity bounds, ramp limits, or a too-tight global
+    constraint" — three wrong places. Its peak-vs-buildable hint is gated on
+    `voll <= 0`, so with a VoLL set it never fires at all.
+    """
+    n = _network(peaker=False)
+    n, _ = _apply(n, reserve_margin=5.0)
+    lines = _diagnose(n, _stash(n), voll=3000.0)
+    joined = "\n".join(lines)
+    assert "reserve margin requires" in joined.lower(), joined
+    assert "900" in joined and "190" in joined, joined
+    assert "No obvious structural cause" not in joined, (
+        "the fallback fired even though the margin explained the infeasibility")
+
+
+def _transmission_limited_network() -> pypsa.Network:
+    """
+    Infeasible for a reason the PREFLIGHT cannot decide: the fleet can reach
+    the margin (a system-wide power standard has no network in it), but the
+    load sits behind a 10 MW line. So the margin constraint IS installed, the
+    LP IS infeasible, and the diagnoser must still be able to read the stash —
+    which it can only do if `run_simulation` captures it before the cleanup
+    `delattr`.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=N_SNAPSHOTS, freq="h"))
+    n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Bus", "b2", carrier="AC")
+    n.add("Line", "l1", bus0="b", bus1="b2", x=0.1, r=0.01, s_nom=10.0)
+    n.add("Load", "l", bus="b2", p_set=500.0)
+    n.add("Generator", "base", bus="b", carrier="gas", p_nom=BASE_MW,
+          marginal_cost=10.0)
+    n.add("Generator", "peaker", bus="b", carrier="gas", p_nom=0.0,
+          p_nom_extendable=True, p_nom_max=1000.0,
+          capital_cost=5_000_000.0, marginal_cost=500.0)
+    return n
+
+
+def test_an_infeasible_solve_diagnoses_the_margin_end_to_end():
+    """
+    ★ The ordering trap: the stash is deleted in the report step, and
+    `_diagnose_infeasibility` runs AFTER it. Reading the attribute off the
+    network there finds nothing, and the user gets the three-wrong-places
+    fallback on a run whose margin is a live constraint.
+    """
+    n = _transmission_limited_network()
+    log_q: queue.SimpleQueue = queue.SimpleQueue()
+    PyPSAService.set_network(n)
+    status, condition = run_simulation(
+        SolverConfig(reserve_margin=MARGIN), n, PyPSAService.get_lock(),
+        threading.Event(), log_q, state_update=lambda **kw: None,
+    )
+    assert status not in ("ok", "optimal"), (status, condition)
+    lines = []
+    while True:
+        try:
+            lines.append(str(log_q.get_nowait()))
+        except queue.Empty:
+            break
+    joined = "\n".join(lines)
+    assert "[INFEASIBLE]" in joined, joined[-2000:]
+    assert "reserve margin requires" in joined.lower(), joined[-2000:]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# §4 — the report block
+# ══════════════════════════════════════════════════════════════════════════
+
+import json  # noqa: E402
+import typing  # noqa: E402
+
+from models.adequacy import AdequacyReport, TargetBlock  # noqa: E402
+
+
+def _report(sink: dict) -> AdequacyReport:
+    raw = sink.get("adequacy_report")
+    assert raw is not None, (
+        "a solve that enforced a standard emitted no adequacy_report")
+    return AdequacyReport.model_validate(raw)
+
+
+def test_a_margin_only_run_produces_a_report():
+    """
+    ★ [B5/6.5] `build_adequacy_report` fires only when `_ens_cap_targets` is
+    set, so a margin-only run produces NO report at all — the margin
+    invisible exactly when it is the only standard, and every Phase-9 iterate
+    reading `no_report` → failed.
+    """
+    sink, status, _ = _solve(_network(), reserve_margin=MARGIN)
+    assert status in ("ok", "optimal")
+    r = _report(sink)
+    assert r.reserve_margin is not None, (
+        "the report fired but carries no reserve-margin block")
+    assert r.reserve_margin.margin == pytest.approx(MARGIN)
+    assert [p.period for p in r.reserve_margin.by_period] == ["ALL"]
+
+
+def test_the_margin_block_reports_achieved_against_required():
+    sink, _s, _c = _solve(_network(), reserve_margin=MARGIN)
+    row = _report(sink).reserve_margin.by_period[0]
+    assert row.peak_mw == pytest.approx(LOAD_MW)
+    assert row.required_mw == pytest.approx(REQUIRED_MW)
+    # The LP builds exactly enough peaker to reach the standard, so the
+    # constraint sits on its bound: met AND binding.
+    assert row.firm_mw == pytest.approx(REQUIRED_MW, rel=1e-6)
+    assert row.met is True
+    assert row.binding is True
+    assert row.margin_achieved == pytest.approx(MARGIN, rel=1e-6)
+
+
+def test_a_margin_the_fixed_fleet_already_meets_is_not_binding():
+    """`binding` must mean "this standard shaped the plan", not "a margin was
+    set" — otherwise the panel credits the margin for capacity that was
+    always there."""
+    sink, _s, _c = _solve(_network(peaker=False), reserve_margin=0.2)
+    row = _report(sink).reserve_margin.by_period[0]
+    assert row.met is True
+    assert row.binding is False
+    assert row.firm_mw == pytest.approx(FIRM_FIXED_MW)
+
+
+def test_the_margin_block_carries_the_derating_table():
+    sink, _s, _c = _solve(_network(), reserve_margin=MARGIN)
+    block = _report(sink).reserve_margin
+    rows = {a.name: a for a in block.assets}
+    assert set(rows) == {"base", "peaker"}
+    assert rows["base"].basis == "EFORd"
+    assert rows["base"].source == "carrier_default"
+    # The BUILT capacity, not the LP-time `None`: a table that reports the
+    # variable rather than its solution cannot be checked against the plan.
+    assert rows["peaker"].capacity_mw == pytest.approx(
+        FORCED_PEAKER_MW, rel=1e-6)
+    assert rows["peaker"].firm_mw == pytest.approx(
+        GAS_DERATE * FORCED_PEAKER_MW, rel=1e-6)
+    assert block.derating_bases == {"EFORd": 2}
+    assert block.horizon_wide is True
+
+
+def test_the_ens_cap_report_still_fires_and_gains_a_margin_block():
+    """The trigger became an OR — the AND it replaced must not have been
+    broken in the process, and BOTH standards must be reportable at once
+    (which is why the margin is a sibling block, not a fourth `binding`)."""
+    sink, status, _ = _solve(
+        _network(), reserve_margin=MARGIN, voll=3000.0, ens_cap_permyriad=10.0)
+    assert status in ("ok", "optimal")
+    r = _report(sink)
+    assert r.target.system.cap_mwh > 0
+    assert r.reserve_margin is not None
+
+
+def test_target_block_binding_is_still_three_valued():
+    """★ §4 — the frontend re-declares this `Literal` with an exhaustive label
+    `Record` and `NEVER_BOUND_COPY_V1` tests `binding == "system_cap"`; a
+    fourth value renders `undefined` and misdiagnoses the loop."""
+    assert set(typing.get_args(
+        TargetBlock.model_fields["binding"].annotation)) == {
+            "system_cap", "zone_cap", "voll"}
+
+
+def test_a_margin_only_report_leaves_the_energy_target_at_voll():
+    """With no ENS cap there is no energy standard to report; `binding`
+    falls to its only admissible value rather than growing a fourth."""
+    sink, _s, _c = _solve(_network(), reserve_margin=MARGIN)
+    r = _report(sink)
+    assert r.target.binding == "voll"
+    assert r.target.system.cap_mwh == 0.0
+
+
+def test_the_margin_block_is_not_published_on_a_failed_solve():
+    """
+    ★ The identical guard the ENS cap got after QA round 2, which found an
+    infeasible solve publishing a "target met" report. Without it an
+    infeasible run republishes the PREVIOUS solve's margin as if this plan
+    had met it.
+    """
+    from services.adequacy.report import (
+        build_adequacy_report,
+        reserve_margin_payload,
+    )
+
+    n = _network()
+    n2, _ = _apply(n, reserve_margin=MARGIN)
+    payload = reserve_margin_payload(n2, _stash(n2))
+    ok = build_adequacy_report(n2, SolverConfig(reserve_margin=MARGIN), {}, {},
+                               margin_payload=payload, status="ok")
+    assert ok["reserve_margin"] is not None
+    bad = build_adequacy_report(n2, SolverConfig(reserve_margin=MARGIN), {}, {},
+                                margin_payload=payload, status="infeasible")
+    assert bad["reserve_margin"] is None
+
+
+def test_an_unbounded_extendable_leaves_a_json_serialisable_report():
+    """
+    ★ Amendment 6 — `max_achievable_mw` is `inf` for an unbounded
+    `p_nom_max`. Mathematically right, and NOT JSON-serialisable: Starlette
+    dumps with `allow_nan=False`, so the report endpoint 500s on it.
+    """
+    from services.adequacy.report import (
+        build_adequacy_report,
+        reserve_margin_payload,
+    )
+
+    n = _network()
+    n.generators.at["peaker", "p_nom_max"] = float("inf")
+    n2, _ = _apply(n, reserve_margin=MARGIN)
+    stash = _stash(n2)
+    assert stash["periods"]["ALL"]["max_achievable_mw"] == float("inf"), (
+        "the fixture no longer produces the unbounded case it exists to pin")
+    rep = build_adequacy_report(
+        n2, SolverConfig(reserve_margin=MARGIN), {}, {},
+        margin_payload=reserve_margin_payload(n2, stash), status="ok")
+    row = rep["reserve_margin"]["by_period"][0]
+    assert row["max_achievable_mw"] is None
+    assert row["max_achievable_unbounded"] is True
+    json.dumps(rep, allow_nan=False)   # what Starlette does to it
+
+
+def test_the_margin_result_is_a_persisted_state_key():
+    from services.project_context import RESULT_STATE_KEYS, ProjectSolverState
+
+    assert "last_reserve_margin" in RESULT_STATE_KEYS
+    assert hasattr(ProjectSolverState(), "last_reserve_margin")
+
+
+def test_a_solve_emits_the_margin_result_into_solver_state():
+    """Emitted like `last_lost_load` — the endpoint serves the PERSISTED
+    payload, so a solve that does not write it leaves the panel empty."""
+    sink, _s, _c = _solve(_network(), reserve_margin=MARGIN)
+    payload = sink.get("last_reserve_margin")
+    assert payload is not None
+    assert payload["by_period"][0]["required_mw"] == pytest.approx(REQUIRED_MW)
+
+
+def test_a_failed_solve_emits_no_margin_result():
+    n = _transmission_limited_network()
+    sink, status, _c = _solve(n, reserve_margin=MARGIN)
+    assert status not in ("ok", "optimal")
+    assert not sink.get("last_reserve_margin")

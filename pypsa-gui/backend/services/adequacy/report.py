@@ -34,6 +34,7 @@ from models.adequacy import (
     EnergyBlock,
     InputsBlock,
     MetricsBlock,
+    ReserveMarginBlock,
     SystemTarget,
     TargetBlock,
     VollBlock,
@@ -77,14 +78,155 @@ def _outage_basis_counts(n) -> dict[str, int]:
     return counts
 
 
-def build_adequacy_report(n, cfg, targets: dict, captured: dict) -> dict:
+def reserve_margin_payload(n, targets: dict) -> dict:
+    """
+    The firm-capacity result: the solve-time stash (§2.6) joined to what the
+    solve actually BUILT.
+
+    ``targets`` is ``n._reserve_margin_targets`` — peaks, requirements and
+    derating factors measured at LP-build time, when the load-scaling
+    transforms were still applied. Only the CAPACITIES are read back off the
+    network here (``p_nom_opt`` is the solve's answer and the restore step
+    does not touch it); every demand-derived number comes from the stash,
+    because recomputing a peak after restore reads different loads and drifts
+    from the standard the LP enforced.
+
+    ``max_achievable_mw`` is left EXACTLY as stashed, ``inf`` included — the
+    honest value, and not JSON-serialisable. ``sanitize_reserve_margin_payload``
+    is what makes it wire-safe, at the two surfaces that put it on the wire.
+    """
+    stash = targets or {}
+    opt: dict[str, dict[str, float]] = {}
+    for comp, kind in (("generators", "generator"), ("storage_units", "storage")):
+        df = getattr(n, comp, None)
+        if df is None or getattr(df, "empty", True):
+            continue
+        col = "p_nom_opt" if "p_nom_opt" in df.columns else "p_nom"
+        opt[kind] = {str(k): float(v or 0.0) for k, v in df[col].items()}
+
+    def _built(row) -> float | None:
+        """The asset's capacity in the SOLVED plan. For a fixed asset that is
+        the stash's constant; for an extendable it is `p_nom_opt`, which is
+        the whole point of the standard — the capacity it forced into being."""
+        if not row.get("extendable"):
+            cap = row.get("capacity_mw")
+            return None if cap is None else float(cap)
+        table = opt.get(str(row.get("kind")), {})
+        val = table.get(str(row.get("name")))
+        return None if val is None else float(val)
+
+    assets: list[dict] = []
+    firm_built: dict[str, float] = {}
+    bases: dict[str, set] = {}
+    for row in (stash.get("assets") or []):
+        cap = _built(row)
+        derate = float(row.get("derate", 0.0) or 0.0)
+        firm = derate * cap if cap is not None else 0.0
+        period = str(row.get("period", "ALL"))
+        if row.get("extendable"):
+            firm_built[period] = firm_built.get(period, 0.0) + firm
+        bases.setdefault(str(row.get("basis") or ""), set()).add(str(row.get("name")))
+        assets.append({
+            "name": str(row.get("name")),
+            "period": period,
+            "kind": str(row.get("kind")),
+            "capacity_mw": cap,
+            "derate": derate,
+            "basis": str(row.get("basis") or ""),
+            "source": str(row.get("source") or ""),
+            "extendable": bool(row.get("extendable")),
+            "firm_mw": firm,
+            "energy_limited": bool(row.get("energy_limited")),
+        })
+
+    by_period: list[dict] = []
+    for P, per in sorted((stash.get("periods") or {}).items()):
+        peak = float(per.get("peak_mw", 0.0) or 0.0)
+        required = float(per.get("required_mw", 0.0) or 0.0)
+        firm = float(per.get("firm_fixed_mw", 0.0) or 0.0) + firm_built.get(str(P), 0.0)
+        met = required > 0 and firm >= required * (1.0 - BINDING_TOLERANCE)
+        by_period.append({
+            "period": str(P),
+            "peak_mw": peak,
+            "required_mw": required,
+            "firm_mw": firm,
+            "margin_achieved": (firm / peak - 1.0) if peak > 0 else None,
+            "met": bool(met),
+            # Binding = the standard SHAPED the plan: firm capacity sitting on
+            # the constraint's bound. A margin the fixed fleet already meets is
+            # met and NOT binding, and saying otherwise would credit the margin
+            # for capacity that was always there.
+            "binding": bool(met and firm <= required * (1.0 + BINDING_TOLERANCE)),
+            "n_peak_hours": int(per.get("n_peak_hours", 0) or 0),
+            "peak_snapshots": [str(x) for x in (per.get("peak_snapshots") or [])],
+            "max_achievable_mw": float(per.get("max_achievable_mw", 0.0) or 0.0),
+        })
+
+    return {
+        "margin": float(stash.get("margin", 0.0) or 0.0),
+        "horizon_wide": bool(stash.get("horizon_wide", False)),
+        "by_period": by_period,
+        "assets": assets,
+        "derating_bases": {b: len(names) for b, names in sorted(bases.items())},
+    }
+
+
+def sanitize_reserve_margin_payload(payload: dict) -> dict:
+    """
+    Make a reserve-margin payload safe to put on the wire (amendment 6).
+
+    ``max_achievable_mw`` is ``inf`` whenever an active extendable has an
+    unbounded ``p_nom_max``. That is the mathematically right value — and
+    Starlette serialises responses with ``allow_nan=False``, so an untouched
+    ``inf`` raises inside the response and the panel gets a 500 instead of a
+    report. It is NULLED rather than clamped: "unbounded" is not a number, and
+    a clamp would invent a ceiling nobody entered and make §3's
+    ``max_achievable < required`` test fire by accident. The companion flag is
+    what tells a reader which case the null is.
+    """
+    out = dict(payload or {})
+    rows: list[dict] = []
+    for row in (out.get("by_period") or []):
+        r = dict(row)
+        val = r.get("max_achievable_mw")
+        try:
+            fval = float(val) if val is not None else None
+        except (TypeError, ValueError):
+            fval = None
+        unbounded = fval is not None and math.isinf(fval)
+        r["max_achievable_unbounded"] = bool(unbounded)
+        r["max_achievable_mw"] = (
+            None if fval is None or not math.isfinite(fval) else fval)
+        for key in ("peak_mw", "required_mw", "firm_mw", "margin_achieved"):
+            v = r.get(key)
+            try:
+                if v is not None and not math.isfinite(float(v)):
+                    r[key] = None
+            except (TypeError, ValueError):
+                r[key] = None
+        rows.append(r)
+    out["by_period"] = rows
+    return out
+
+
+def build_adequacy_report(n, cfg, targets: dict, captured: dict,
+                          margin_payload: dict | None = None,
+                          status: str = "ok") -> dict:
     """
     Returns the report as a plain dict (``model_dump``) — the solver state is
     pickled, and a dict keeps the pickle free of model-class coupling.
 
     ``targets``: ``{"permyriad", "zone_multiple", "zone_of_bus": {bus: zone},
     "periods": {P: {"cap_mwh", "demand_mwh", "zones": {z: cap_mwh}}}}``.
-    ``captured`` may be empty (target on, nothing shed).
+    ``captured`` may be empty (target on, nothing shed). Both may be EMPTY on
+    a margin-only run: the report fires when EITHER standard was enforced, or
+    the margin is invisible exactly when it is the only one (plan §3).
+
+    ``margin_payload`` is ``reserve_margin_payload``'s output;
+    ``status`` gates it. That guard is the one QA round 2 forced onto the ENS
+    cap after an infeasible solve published a "target met" report: with no
+    dispatch to measure, a republished margin block would describe the
+    PREVIOUS solve's plan under this one's name.
     """
     periods: dict = targets.get("periods", {})
     zone_of_bus: dict = targets.get("zone_of_bus", {}) or {}
@@ -163,9 +305,15 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict) -> dict:
     _nyears = horizon_years(n)
     _basis = resolve_time_basis(_nyears)
     multi = bool(getattr(cfg, "multi_investment_periods", False))
+    reserve_margin = None
+    if margin_payload and str(status) in ("ok", "optimal"):
+        reserve_margin = ReserveMarginBlock.model_validate(
+            sanitize_reserve_margin_payload(margin_payload))
+
     report = AdequacyReport(
         engine="lp_proxy",
         fidelity="deterministic_scenario",
+        reserve_margin=reserve_margin,
         target=TargetBlock(
             basis="energy",
             system=SystemTarget(

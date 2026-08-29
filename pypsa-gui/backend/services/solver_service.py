@@ -828,6 +828,12 @@ def run_simulation(
             phase(f"Validation passed ({warn_count} warning{'s' if warn_count != 1 else ''}).")
             _check_stop(stop_event, phase, "after validation, before modelling assumptions")
 
+            # The reserve-margin stash, once the LP build has written one. Bound
+            # here rather than inside the lopf branch because
+            # `_diagnose_infeasibility` (outside it) reads it: the report step
+            # deletes the network attribute, so an infeasible PRM run would
+            # otherwise get the generic "no obvious structural cause" hint.
+            _margin_targets = None
             t_solve = time.time()
             # Clean up stale `transformer.type` strings that don't match any
             # row in n.transformer_types. The GUI's presets are display
@@ -1307,6 +1313,45 @@ def run_simulation(
                 # already used after a failed solve — the two surfaces
                 # disagreed, and lost_load was the one that was right.
                 _ens_targets = getattr(network, "_ens_cap_targets", None)
+                # The reserve-margin stash follows `_ens_cap_targets`'s
+                # lifecycle exactly: it is SOLVE-TIME truth (the peaks were
+                # measured against the load-scaling transforms, which restore
+                # has since reverted), so it must never outlive the solve that
+                # produced it — otherwise the next run's report would be built
+                # against this run's targets.
+                #
+                # It is read and deleted HERE, before the report, and kept in a
+                # local: `_diagnose_infeasibility` runs after this block and
+                # needs it, and the report fires when EITHER standard was
+                # enforced.
+                _margin_targets = getattr(network, "_reserve_margin_targets", None)
+                try:
+                    delattr(network, "_reserve_margin_targets")
+                except AttributeError:
+                    pass
+                # Published only on a solve that produced a dispatch — the
+                # identical guard the ENS cap carries below, for the identical
+                # reason: with no plan to measure, a margin block would report
+                # the previous solve's firm capacity as this one's.
+                _margin_payload = None
+                if _margin_targets and status in ("ok", "optimal"):
+                    try:
+                        from services.adequacy.report import (
+                            reserve_margin_payload,
+                        )
+                        _margin_payload = reserve_margin_payload(
+                            network, _margin_targets)
+                        # Emitted into solver state like `last_lost_load`, so
+                        # /results/reserve_margin serves the PERSISTED stash
+                        # rather than recomputing peaks from restored loads.
+                        _emit_state(last_reserve_margin=_margin_payload)
+                        phase(
+                            "Reserve margin: firm-capacity result captured for "
+                            f"{len(_margin_payload.get('by_period') or [])} "
+                            "period(s)."
+                        )
+                    except Exception as exc:
+                        phase(f"Reserve-margin result skipped: {exc}")
                 if _ens_targets and status not in ("ok", "optimal"):
                     phase(
                         f"Adequacy report skipped: solve was {condition!r} — a "
@@ -1318,13 +1363,17 @@ def run_simulation(
                     except AttributeError:
                         pass
                     _ens_targets = None
-                if _ens_targets:
+                # EITHER standard, not just the energy cap: a margin-only run
+                # used to produce no report at all, leaving the margin
+                # invisible exactly when it was the only standard in force.
+                if _ens_targets or _margin_payload:
                     try:
                         from services.adequacy.report import (
                             build_adequacy_report,
                         )
                         _emit_state(adequacy_report=build_adequacy_report(
-                            network, config, _ens_targets, captured))
+                            network, config, _ens_targets or {}, captured,
+                            margin_payload=_margin_payload, status=status))
                         phase("Adequacy report built (target evaluation).")
                     except Exception as exc:
                         phase(f"Adequacy report skipped: {exc}")
@@ -1333,16 +1382,6 @@ def run_simulation(
                             delattr(network, "_ens_cap_targets")
                         except AttributeError:
                             pass
-                # The reserve-margin stash follows `_ens_cap_targets`'s
-                # lifecycle exactly: it is SOLVE-TIME truth (the peaks were
-                # measured against the load-scaling transforms, which restore
-                # has since reverted), so it must never outlive the solve that
-                # produced it — otherwise the next run's report would be built
-                # against this run's targets.
-                try:
-                    delattr(network, "_reserve_margin_targets")
-                except AttributeError:
-                    pass
                 # Save captured lost-load (if any) into the simulation state
                 # so the /results/lost_load endpoint can serve it.
                 if captured.get("lost_load_t") is not None:
@@ -1369,7 +1408,9 @@ def run_simulation(
             # block. Gurobi additionally gets its native infeasibility report.
             if status not in ("ok", "optimal") and "infeasible" in str(condition).lower():
                 try:
-                    _diagnose_infeasibility(network, config, log_queue)
+                    _diagnose_infeasibility(
+                        network, config, log_queue,
+                        margin_targets=_margin_targets)
                 except Exception as _dexc:
                     phase(f"Infeasibility diagnosis skipped: {_dexc}")
 
@@ -1623,7 +1664,8 @@ def _compile_extra_functionality(code_str: str):
     return fn
 
 
-def _diagnose_infeasibility(network, config, log_queue) -> None:
+def _diagnose_infeasibility(network, config, log_queue,
+                            margin_targets: dict | None = None) -> None:
     """
     Heuristic "why is it infeasible?" hints, emitted as ``[INFEASIBLE]`` lines.
 
@@ -1631,7 +1673,14 @@ def _diagnose_infeasibility(network, config, log_queue) -> None:
     (IIS), so on a CONFIRMED-infeasible LP we point at the common structural
     causes a modeller can act on: a bus carrying load with no way to serve it; a
     peak demand that exceeds all available + buildable generation with no VOLL;
-    and any active global constraint (CO2 cap, …) that may be infeasibly tight.
+    the firm-capacity standard, when one was enforced; and any active global
+    constraint (CO2 cap, …) that may be infeasibly tight.
+
+    ``margin_targets`` is the reserve-margin stash (§2.6), handed in rather
+    than read off the network: ``run_simulation`` deletes the attribute in the
+    report step, which runs BEFORE this. Reading it here would find nothing on
+    every run that has one — the failure mode is invisible, because the
+    diagnoser would simply fall through to the generic hint.
     Read-only, and it runs ONLY after the solver already returned infeasible — so
     every hint is a safe pointer, never a false block. When the solver is Gurobi,
     also surface its native infeasibility report.
@@ -1712,6 +1761,38 @@ def _diagnose_infeasibility(network, config, log_queue) -> None:
                  "Load is set. Add capacity, raise an extendable p_nom_max, or set a VOLL "
                  "to price unserved demand.")
             hints += 1
+    except Exception:
+        pass
+
+    # 2b) The firm-capacity standard, when one was enforced. Without this the
+    #     user of a PRM-infeasible run gets "check binding capacity bounds,
+    #     ramp limits, or a too-tight global constraint" — three wrong places
+    #     — and hint 2 above cannot help: it is gated on `voll <= 0`, so with a
+    #     VoLL set (the configuration a reliability study is most likely to be
+    #     in) it never fires at all.
+    try:
+        periods = (margin_targets or {}).get("periods") or {}
+        margin = float((margin_targets or {}).get("margin", 0.0) or 0.0)
+        for P, per in periods.items():
+            required = float(per.get("required_mw", 0.0) or 0.0)
+            reachable = float(per.get("max_achievable_mw", 0.0) or 0.0)
+            if required <= 0:
+                continue
+            where = "" if str(P) == "ALL" else f" in period {P}"
+            emit(
+                f"[INFEASIBLE]   • The reserve margin requires "
+                f"{required:,.1f} MW of derated capacity{where} "
+                f"({margin:.1%} above a {float(per.get('peak_mw', 0.0)):,.1f} MW "
+                f"peak); the maximum buildable derated capacity is "
+                f"{reachable:,.1f} MW."
+            )
+            hints += 1
+            if reachable + 1e-9 < required:
+                emit(
+                    "[INFEASIBLE]     No plan built from this candidate set "
+                    "can meet that standard — raise a p_nom_max, add "
+                    "candidate capacity, or lower the margin."
+                )
     except Exception:
         pass
 
@@ -3127,6 +3208,362 @@ def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
     return wrapper
 
 
+def _prm_margin(cfg) -> float | None:
+    """The configured reserve margin, or None when no standard is asked for.
+
+    ``<= 0``/non-finite reads as "no margin" in exactly one place so the
+    wrapper, the preflight (§3) and the report (§4) can never disagree about
+    whether a standard is in force.
+    """
+    try:
+        margin = getattr(cfg, "reserve_margin", None)
+        margin = float(margin) if margin is not None else None
+    except (TypeError, ValueError):
+        return None
+    if margin is None or not math.isfinite(margin) or margin <= 0:
+        return None
+    return margin
+
+
+def reserve_margin_facts(n, cfg, snapshots=None, emit=None) -> dict | None:
+    """
+    Everything the firm-capacity standard knows BEFORE an LP exists (§2, §3).
+
+    Returns ``None`` when no margin is set. Otherwise::
+
+        {"stash":   <the §2.6 stash, exactly the four contract keys>,
+         "terms":   {period: [(member, derate), …]},   # active extendables
+         "unpriceable":     [names excluded for lack of evidence],
+         "carrier_default": [names credited off a carrier class average]}
+
+    This is deliberately ONE function rather than two, because §3's preflight
+    must answer "can any plan built from this candidate set reach the margin?"
+    from the config and the network alone — the LP cannot answer it (linopy
+    raises ``TypeError`` on a constant constraint, and ``Generator-p_nom``
+    does not exist when nothing extendable is active). Two implementations of
+    the derating chain would be two standards: the one the preflight blocks
+    on and the one the LP enforces, drifting silently apart on the first
+    change to either. The wrapper adds the LP terms; every NUMBER comes from
+    here.
+
+    Nothing in this function touches ``n.model``, so it is callable at
+    preflight time. It does not write the stash either — the wrapper owns
+    that, because the stash is solve-time truth and its lifetime is the
+    solve's.
+    """
+    from services.adequacy.copt import _membership_walk
+    from services.adequacy.occurrence import resolve_outage_params
+    from services.adequacy.slack import slack_generator_mask
+
+    margin = _prm_margin(cfg)
+    if margin is None:
+        return None
+
+    # Reference duration for the storage haircut. Bounded on the schema; the
+    # dataclass validates nothing, so a nonsense value falls back rather than
+    # dividing by zero inside the LP build.
+    try:
+        duration_ref = float(getattr(cfg, "prm_storage_duration_h", 4.0))
+    except (TypeError, ValueError):
+        duration_ref = 4.0
+    if not math.isfinite(duration_ref) or duration_ref <= 0:
+        duration_ref = 4.0
+
+    try:
+        peak_hours_override = getattr(cfg, "prm_peak_hours", None)
+        peak_hours_override = (
+            int(peak_hours_override) if peak_hours_override is not None else None)
+        if peak_hours_override is not None and peak_hours_override < 1:
+            peak_hours_override = None
+    except (TypeError, ValueError):
+        peak_hours_override = None
+
+    def _finite(v, default=float("nan")) -> float:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return default
+        return f if math.isfinite(f) else default
+
+    buses = getattr(n, "buses", None)
+    loads = getattr(n, "loads", None)
+    gens = getattr(n, "generators", None)
+    if buses is None or loads is None:
+        return None
+    if snapshots is None:
+        snapshots = n.snapshots
+
+    # Electrical bus set — the SAME canonical classifier the ENS cap and
+    # the load views use, so the standard and the Results tab can never
+    # disagree on scope. Blank counts electrical.
+    elec_buses: set[str] = set()
+    if "carrier" in buses.columns:
+        for b in buses.index:
+            if _canonical_load_carrier_key(buses.at[b, "carrier"]) == "electrical":
+                elec_buses.add(str(b))
+    else:
+        elec_buses = set(map(str, buses.index))
+
+    # ── the demand series, built EXACTLY as _wrap_with_ens_cap builds it
+    #    (electrical buses; loads_t.p_set overriding the static value per
+    #    column) — the two standards must read the same demand.
+    elec_loads = [
+        str(l) for l in loads.index
+        if str(loads.at[l, "bus"]) in elec_buses
+    ]
+    demand = pd.Series(0.0, index=snapshots)
+    p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+    for l in elec_loads:
+        if p_set_t is not None and l in getattr(p_set_t, "columns", []):
+            demand = demand.add(
+                p_set_t[l].reindex(snapshots).fillna(0.0), fill_value=0.0)
+        else:
+            try:
+                demand = demand + float(loads.at[l, "p_set"] or 0.0)
+            except (TypeError, ValueError):
+                continue
+
+    # Period buckets: MultiIndex level 0, or one "ALL" bucket — the ENS
+    # cap's convention, so the two stashes key alike.
+    if isinstance(snapshots, pd.MultiIndex):
+        period_of = pd.Series(snapshots.get_level_values(0), index=snapshots)
+        periods = sorted(set(period_of))
+    else:
+        period_of = pd.Series("ALL", index=snapshots)
+        periods = ["ALL"]
+
+    # ── membership + classification ──────────────────────────────────
+    members: list[dict] = []
+    unpriceable: list[str] = []
+
+    p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+    profile_cols = set(map(str, list(getattr(p_max_pu_t, "columns", []))))
+
+    if gens is not None and not gens.empty:
+        slack = slack_generator_mask(gens)
+        has_ext = "p_nom_extendable" in gens.columns
+        has_pmp = "p_max_pu" in gens.columns
+        has_pmax = "p_nom_max" in gens.columns
+        for g, _cap_unused, occ in _membership_walk(
+                n, elec_buses, keep_zero_capacity=True):
+            # The walk already applies `slack_generator_mask`; re-stating
+            # it here is deliberate. This is the one exclusion whose
+            # WRONG version (`involuntary_slack_mask`, which keeps the
+            # DSR tier) is a live, plausible mistake — the ENS cap next
+            # door uses exactly that one — and a DSR slack sized at
+            # `share × bus peak load` can satisfy a margin by itself.
+            if bool(slack.get(g, False)):
+                continue
+            name = str(g)
+            source = str(occ["source"])
+            basis = str(occ["basis"] or "")
+            profile = p_max_pu_t[name] if name in profile_cols else None
+            if source == "missing":
+                # Split by EVIDENCE, not by absence (§2.2).
+                if profile is None:
+                    unpriceable.append(name)
+                    continue
+                q = 0.0          # no outage data — the profile is all we know
+            else:
+                q = _finite(occ["rate"])
+                if math.isnan(q):
+                    unpriceable.append(name)
+                    continue
+            # Availability: the profile when the unit has one (PyPSA caps
+            # dispatch at p_max_pu × p_nom, and a time series overrides
+            # the static column), else the static column. NEVER an
+            # unconditional 1.0.
+            avail_static = _finite(
+                gens.at[g, "p_max_pu"], 1.0) if has_pmp else 1.0
+            members.append({
+                "name": name,
+                "kind": "generator",
+                "comp": "generators",
+                "var": "Generator-p_nom",
+                "extendable": bool(gens.at[g, "p_nom_extendable"]) if has_ext else False,
+                "p_nom": _finite(gens.at[g, "p_nom"], 0.0),
+                "p_nom_max": _finite(
+                    gens.at[g, "p_nom_max"], float("inf")) if has_pmax else float("inf"),
+                "q": q,
+                "basis": basis,
+                "source": source,
+                "profile": profile,
+                "avail_static": max(0.0, min(1.0, avail_static)),
+                "energy_limited": False,
+            })
+
+    # ── storage: the duration haircut (§2.4). `Store` is excluded — no
+    #    power rating, so no firm-power credit (the MC's rationale).
+    sus = getattr(n, "storage_units", None)
+    if sus is not None and not sus.empty:
+        sparams = resolve_outage_params(n, "storage_units")
+        inflow_t = getattr(getattr(n, "storage_units_t", None), "inflow", None)
+        inflow_cols = set(map(str, list(getattr(inflow_t, "columns", []))))
+        has_ext = "p_nom_extendable" in sus.columns
+        has_pmax = "p_nom_max" in sus.columns
+        for s in sus.index:
+            name = str(s)
+            if str(sus.at[s, "bus"]) not in elec_buses:
+                continue
+            row = sparams.loc[s]
+            if str(row["source"]) == "missing":
+                # Same rule as a generator with no evidence: a storage
+                # unit has no availability profile to fall back on, so
+                # crediting it would mean defaulting its derate to 1.0.
+                unpriceable.append(name)
+                continue
+            q = _finite(row["rate"])
+            if math.isnan(q):
+                unpriceable.append(name)
+                continue
+            max_hours = _finite(sus.at[s, "max_hours"], 0.0) \
+                if "max_hours" in sus.columns else 0.0
+            haircut = min(1.0, max_hours / duration_ref) if max_hours > 0 else 0.0
+            energy_limited = False
+            if name in inflow_cols:
+                try:
+                    energy_limited = bool(
+                        float(inflow_t[name].abs().max()) > 0.0)
+                except (TypeError, ValueError):
+                    energy_limited = False
+            if not energy_limited and "inflow" in sus.columns:
+                energy_limited = _finite(sus.at[s, "inflow"], 0.0) != 0.0
+            members.append({
+                "name": name,
+                "kind": "storage",
+                "comp": "storage_units",
+                "var": "StorageUnit-p_nom",
+                "extendable": bool(sus.at[s, "p_nom_extendable"]) if has_ext else False,
+                "p_nom": _finite(sus.at[s, "p_nom"], 0.0),
+                "p_nom_max": _finite(
+                    sus.at[s, "p_nom_max"], float("inf")) if has_pmax else float("inf"),
+                "q": q,
+                "basis": str(row["basis"] or ""),
+                "source": str(row["source"]),
+                "profile": None,
+                "avail_static": haircut,
+                "energy_limited": energy_limited,
+            })
+
+    if unpriceable and emit is not None:
+        emit(
+            f"Reserve margin cannot price {len(unpriceable)} asset(s) — no "
+            f"outage data and no availability profile: "
+            f"{', '.join(sorted(unpriceable)[:20])}"
+            f"{' …' if len(unpriceable) > 20 else ''}. They are EXCLUDED "
+            "from the firm-capacity total (never credited at 1.0)."
+        )
+
+    stash: dict = {
+        "margin": margin,
+        "horizon_wide": True,
+        "periods": {},
+        "assets": [],
+    }
+    terms: dict[str, list] = {}
+    carrier_default: list[str] = []
+
+    def _active(comp: str, P) -> pd.Series:
+        """Activity mask for one component frame in period P. Masks BOTH
+        sides: a fixed asset not yet built is not a constant either."""
+        df = getattr(n, comp, None)
+        try:
+            c = getattr(n.components, comp)
+            if isinstance(P, str):
+                return c.get_active_assets()
+            return c.get_active_assets(int(P))
+        except Exception:
+            idx = df.index if df is not None else pd.Index([])
+            return pd.Series(True, index=idx, dtype=bool)
+
+    ext_sets: list[frozenset] = []
+
+    for P in periods:
+        in_p = (period_of == P)
+        demand_p = demand[in_p]
+        peak = float(demand_p.max()) if len(demand_p) else 0.0
+        required = (1.0 + margin) * peak
+
+        # Peak-coincidence window (§2.3). N scales with the horizon and
+        # EVERY snapshot tied with the Nth-highest demand is included —
+        # on a flat-demand fixture that is the whole period, not the
+        # first N by index order, which is what `nlargest` would give.
+        n_snaps = int(len(demand_p))
+        if n_snaps:
+            n_target = peak_hours_override or min(
+                100, max(1, int(round(0.01 * n_snaps))))
+            n_target = max(1, min(n_target, n_snaps))
+            threshold = float(
+                demand_p.sort_values(ascending=False).iloc[n_target - 1])
+            peak_idx = demand_p.index[demand_p >= threshold]
+        else:
+            peak_idx = demand_p.index
+
+        active = {c: _active(c, P) for c in ("generators", "storage_units")}
+
+        firm_fixed = 0.0
+        max_achievable = 0.0
+        ext_here: list = []
+
+        for mem in members:
+            if not bool(active[mem["comp"]].get(mem["name"], False)):
+                continue
+            if mem["profile"] is not None and len(peak_idx):
+                avail = _finite(
+                    mem["profile"].reindex(peak_idx).mean(), 0.0)
+            else:
+                avail = mem["avail_static"]
+            d = (1.0 - mem["q"]) * avail
+            d = max(0.0, min(1.0, d if math.isfinite(d) else 0.0))
+
+            capacity_mw: float | None
+            if mem["extendable"]:
+                capacity_mw = None
+                if d > 0:
+                    ext_here.append((mem, d))
+                max_achievable += d * mem["p_nom_max"]
+            else:
+                capacity_mw = mem["p_nom"]
+                firm_fixed += d * mem["p_nom"]
+                max_achievable += d * mem["p_nom"]
+
+            if mem["source"] == "carrier_default" and mem["name"] not in carrier_default:
+                carrier_default.append(mem["name"])
+            stash["assets"].append({
+                "name": mem["name"],
+                "period": str(P),
+                "kind": mem["kind"],
+                "capacity_mw": capacity_mw,
+                "derate": d,
+                "basis": mem["basis"],
+                "source": mem["source"],
+                "extendable": bool(mem["extendable"]),
+                "energy_limited": bool(mem["energy_limited"]),
+            })
+
+        terms[str(P)] = ext_here
+        ext_sets.append(frozenset(m["name"] for m, _d in ext_here))
+        stash["periods"][str(P)] = {
+            "peak_mw": peak,
+            "peak_snapshots": [str(s) for s in peak_idx],
+            "n_peak_hours": int(len(peak_idx)),
+            "required_mw": required,
+            "firm_fixed_mw": firm_fixed,
+            "max_achievable_mw": max_achievable,
+        }
+
+    # One horizon-wide variable set ⇒ one horizon-wide standard at the
+    # maximum peak, NOT a per-period one. Say which it is (§2.1).
+    stash["horizon_wide"] = len(set(ext_sets)) <= 1
+
+    return {
+        "stash": stash,
+        "terms": terms,
+        "unpriceable": unpriceable,
+        "carrier_default": carrier_default,
+    }
+
+
 def _wrap_with_reserve_margin(network: "pypsa.Network", user_fn, cfg, log_queue=None):
     """
     Compose the extra_functionality callback with the FIRM-CAPACITY standard
@@ -3196,322 +3633,45 @@ def _wrap_with_reserve_margin(network: "pypsa.Network", user_fn, cfg, log_queue=
     The margin is a CONSTRAINT, never a price (plan §1.6): a standard the LP
     can buy its way out of is not a standard.
     """
-    try:
-        margin = cfg.reserve_margin
-        margin = float(margin) if margin is not None else None
-    except (TypeError, ValueError):
-        margin = None
-    if margin is None or not math.isfinite(margin) or margin <= 0:
+    if _prm_margin(cfg) is None:
         return user_fn
-
-    # Reference duration for the storage haircut. Bounded on the schema; the
-    # dataclass validates nothing, so a nonsense value falls back rather than
-    # dividing by zero inside the LP build.
-    try:
-        duration_ref = float(getattr(cfg, "prm_storage_duration_h", 4.0))
-    except (TypeError, ValueError):
-        duration_ref = 4.0
-    if not math.isfinite(duration_ref) or duration_ref <= 0:
-        duration_ref = 4.0
-
-    try:
-        peak_hours_override = getattr(cfg, "prm_peak_hours", None)
-        peak_hours_override = (
-            int(peak_hours_override) if peak_hours_override is not None else None)
-        if peak_hours_override is not None and peak_hours_override < 1:
-            peak_hours_override = None
-    except (TypeError, ValueError):
-        peak_hours_override = None
 
     def _emit(msg: str) -> None:
         _safe_log(log_queue, f"[PRM] {msg}")
 
-    def _finite(v, default=float("nan")) -> float:
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return default
-        return f if math.isfinite(f) else default
-
     def reserve_margin_fn(n, snapshots):
-        from services.adequacy.copt import _membership_walk
-        from services.adequacy.occurrence import resolve_outage_params
-        from services.adequacy.slack import slack_generator_mask
-
-        buses = getattr(n, "buses", None)
-        loads = getattr(n, "loads", None)
-        gens = getattr(n, "generators", None)
-        if buses is None or loads is None:
+        # Every number below comes from `reserve_margin_facts`, which knows
+        # nothing about the LP — the same function §3's preflight calls, so
+        # the standard it blocks on and the standard this installs cannot
+        # drift apart. All this loop adds is the LP terms.
+        facts = reserve_margin_facts(n, cfg, snapshots, emit=_emit)
+        if facts is None:
             return
-
-        # Electrical bus set — the SAME canonical classifier the ENS cap and
-        # the load views use, so the standard and the Results tab can never
-        # disagree on scope. Blank counts electrical.
-        elec_buses: set[str] = set()
-        if "carrier" in buses.columns:
-            for b in buses.index:
-                if _canonical_load_carrier_key(buses.at[b, "carrier"]) == "electrical":
-                    elec_buses.add(str(b))
-        else:
-            elec_buses = set(map(str, buses.index))
-
-        # ── the demand series, built EXACTLY as _wrap_with_ens_cap builds it
-        #    (electrical buses; loads_t.p_set overriding the static value per
-        #    column) — the two standards must read the same demand.
-        elec_loads = [
-            str(l) for l in loads.index
-            if str(loads.at[l, "bus"]) in elec_buses
-        ]
-        demand = pd.Series(0.0, index=snapshots)
-        p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
-        for l in elec_loads:
-            if p_set_t is not None and l in getattr(p_set_t, "columns", []):
-                demand = demand.add(
-                    p_set_t[l].reindex(snapshots).fillna(0.0), fill_value=0.0)
-            else:
-                try:
-                    demand = demand + float(loads.at[l, "p_set"] or 0.0)
-                except (TypeError, ValueError):
-                    continue
-
-        # Period buckets: MultiIndex level 0, or one "ALL" bucket — the ENS
-        # cap's convention, so the two stashes key alike.
-        if isinstance(snapshots, pd.MultiIndex):
-            period_of = pd.Series(snapshots.get_level_values(0), index=snapshots)
-            periods = sorted(set(period_of))
-        else:
-            period_of = pd.Series("ALL", index=snapshots)
-            periods = ["ALL"]
-
-        # ── membership + classification ──────────────────────────────────
-        members: list[dict] = []
-        unpriceable: list[str] = []
-
-        p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
-        profile_cols = set(map(str, list(getattr(p_max_pu_t, "columns", []))))
-
-        if gens is not None and not gens.empty:
-            slack = slack_generator_mask(gens)
-            has_ext = "p_nom_extendable" in gens.columns
-            has_pmp = "p_max_pu" in gens.columns
-            has_pmax = "p_nom_max" in gens.columns
-            for g, _cap_unused, occ in _membership_walk(
-                    n, elec_buses, keep_zero_capacity=True):
-                # The walk already applies `slack_generator_mask`; re-stating
-                # it here is deliberate. This is the one exclusion whose
-                # WRONG version (`involuntary_slack_mask`, which keeps the
-                # DSR tier) is a live, plausible mistake — the ENS cap next
-                # door uses exactly that one — and a DSR slack sized at
-                # `share × bus peak load` can satisfy a margin by itself.
-                if bool(slack.get(g, False)):
-                    continue
-                name = str(g)
-                source = str(occ["source"])
-                basis = str(occ["basis"] or "")
-                profile = p_max_pu_t[name] if name in profile_cols else None
-                if source == "missing":
-                    # Split by EVIDENCE, not by absence (§2.2).
-                    if profile is None:
-                        unpriceable.append(name)
-                        continue
-                    q = 0.0          # no outage data — the profile is all we know
-                else:
-                    q = _finite(occ["rate"])
-                    if math.isnan(q):
-                        unpriceable.append(name)
-                        continue
-                # Availability: the profile when the unit has one (PyPSA caps
-                # dispatch at p_max_pu × p_nom, and a time series overrides
-                # the static column), else the static column. NEVER an
-                # unconditional 1.0.
-                avail_static = _finite(
-                    gens.at[g, "p_max_pu"], 1.0) if has_pmp else 1.0
-                members.append({
-                    "name": name,
-                    "kind": "generator",
-                    "comp": "generators",
-                    "var": "Generator-p_nom",
-                    "extendable": bool(gens.at[g, "p_nom_extendable"]) if has_ext else False,
-                    "p_nom": _finite(gens.at[g, "p_nom"], 0.0),
-                    "p_nom_max": _finite(
-                        gens.at[g, "p_nom_max"], float("inf")) if has_pmax else float("inf"),
-                    "q": q,
-                    "basis": basis,
-                    "source": source,
-                    "profile": profile,
-                    "avail_static": max(0.0, min(1.0, avail_static)),
-                    "energy_limited": False,
-                })
-
-        # ── storage: the duration haircut (§2.4). `Store` is excluded — no
-        #    power rating, so no firm-power credit (the MC's rationale).
-        sus = getattr(n, "storage_units", None)
-        if sus is not None and not sus.empty:
-            sparams = resolve_outage_params(n, "storage_units")
-            inflow_t = getattr(getattr(n, "storage_units_t", None), "inflow", None)
-            inflow_cols = set(map(str, list(getattr(inflow_t, "columns", []))))
-            has_ext = "p_nom_extendable" in sus.columns
-            has_pmax = "p_nom_max" in sus.columns
-            for s in sus.index:
-                name = str(s)
-                if str(sus.at[s, "bus"]) not in elec_buses:
-                    continue
-                row = sparams.loc[s]
-                if str(row["source"]) == "missing":
-                    # Same rule as a generator with no evidence: a storage
-                    # unit has no availability profile to fall back on, so
-                    # crediting it would mean defaulting its derate to 1.0.
-                    unpriceable.append(name)
-                    continue
-                q = _finite(row["rate"])
-                if math.isnan(q):
-                    unpriceable.append(name)
-                    continue
-                max_hours = _finite(sus.at[s, "max_hours"], 0.0) \
-                    if "max_hours" in sus.columns else 0.0
-                haircut = min(1.0, max_hours / duration_ref) if max_hours > 0 else 0.0
-                energy_limited = False
-                if name in inflow_cols:
-                    try:
-                        energy_limited = bool(
-                            float(inflow_t[name].abs().max()) > 0.0)
-                    except (TypeError, ValueError):
-                        energy_limited = False
-                if not energy_limited and "inflow" in sus.columns:
-                    energy_limited = _finite(sus.at[s, "inflow"], 0.0) != 0.0
-                members.append({
-                    "name": name,
-                    "kind": "storage",
-                    "comp": "storage_units",
-                    "var": "StorageUnit-p_nom",
-                    "extendable": bool(sus.at[s, "p_nom_extendable"]) if has_ext else False,
-                    "p_nom": _finite(sus.at[s, "p_nom"], 0.0),
-                    "p_nom_max": _finite(
-                        sus.at[s, "p_nom_max"], float("inf")) if has_pmax else float("inf"),
-                    "q": q,
-                    "basis": str(row["basis"] or ""),
-                    "source": str(row["source"]),
-                    "profile": None,
-                    "avail_static": haircut,
-                    "energy_limited": energy_limited,
-                })
-
-        if unpriceable:
-            _emit(
-                f"Reserve margin cannot price {len(unpriceable)} asset(s) — no "
-                f"outage data and no availability profile: "
-                f"{', '.join(sorted(unpriceable)[:20])}"
-                f"{' …' if len(unpriceable) > 20 else ''}. They are EXCLUDED "
-                "from the firm-capacity total (never credited at 1.0)."
-            )
-
+        stash = facts["stash"]
+        margin = stash["margin"]
         # Solve-time truth for §4's report and §3's diagnoser: restore reverts
         # the load-scaling transforms, so a post-solve recomputation of these
         # peaks would drift. Cleaned up by run_simulation, like
         # `_ens_cap_targets`.
-        stash: dict = {
-            "margin": margin,
-            "horizon_wide": True,
-            "periods": {},
-            "assets": [],
-        }
         n._reserve_margin_targets = stash
 
-        def _active(comp: str, P) -> pd.Series:
-            """Activity mask for one component frame in period P. Masks BOTH
-            sides: a fixed asset not yet built is not a constant either."""
-            df = getattr(n, comp, None)
-            try:
-                c = getattr(n.components, comp)
-                if isinstance(P, str):
-                    return c.get_active_assets()
-                return c.get_active_assets(int(P))
-            except Exception:
-                idx = df.index if df is not None else pd.Index([])
-                return pd.Series(True, index=idx, dtype=bool)
-
-        ext_sets: list[frozenset] = []
-
-        for P in periods:
-            in_p = (period_of == P)
-            demand_p = demand[in_p]
-            peak = float(demand_p.max()) if len(demand_p) else 0.0
-            required = (1.0 + margin) * peak
-
-            # Peak-coincidence window (§2.3). N scales with the horizon and
-            # EVERY snapshot tied with the Nth-highest demand is included —
-            # on a flat-demand fixture that is the whole period, not the
-            # first N by index order, which is what `nlargest` would give.
-            n_snaps = int(len(demand_p))
-            if n_snaps:
-                n_target = peak_hours_override or min(
-                    100, max(1, int(round(0.01 * n_snaps))))
-                n_target = max(1, min(n_target, n_snaps))
-                threshold = float(
-                    demand_p.sort_values(ascending=False).iloc[n_target - 1])
-                peak_idx = demand_p.index[demand_p >= threshold]
-            else:
-                peak_idx = demand_p.index
-
-            active = {c: _active(c, P) for c in ("generators", "storage_units")}
+        for P, per in stash["periods"].items():
+            peak = per["peak_mw"]
+            required = per["required_mw"]
+            firm_fixed = per["firm_fixed_mw"]
+            max_achievable = per["max_achievable_mw"]
 
             terms: list = []
-            firm_fixed = 0.0
-            max_achievable = 0.0
-            ext_here: set[str] = set()
-
-            for mem in members:
-                if not bool(active[mem["comp"]].get(mem["name"], False)):
+            for mem, d in facts["terms"].get(P, ()):
+                vname = mem["var"]
+                if vname not in n.model.variables:
                     continue
-                if mem["profile"] is not None and len(peak_idx):
-                    avail = _finite(
-                        mem["profile"].reindex(peak_idx).mean(), 0.0)
-                else:
-                    avail = mem["avail_static"]
-                d = (1.0 - mem["q"]) * avail
-                d = max(0.0, min(1.0, d if math.isfinite(d) else 0.0))
-
-                capacity_mw: float | None
-                if mem["extendable"]:
-                    vname = mem["var"]
-                    if vname not in n.model.variables:
-                        continue
-                    var = n.model.variables[vname]
-                    # Coord membership BEFORE `.sel` — an inactive extendable
-                    # is in the frame and not in the variable's coords.
-                    if mem["name"] not in var.indexes["name"]:
-                        continue
-                    capacity_mw = None
-                    if d > 0:
-                        terms.append(d * var.sel(name=mem["name"]))
-                        ext_here.add(mem["name"])
-                    max_achievable += d * mem["p_nom_max"]
-                else:
-                    capacity_mw = mem["p_nom"]
-                    firm_fixed += d * mem["p_nom"]
-                    max_achievable += d * mem["p_nom"]
-
-                stash["assets"].append({
-                    "name": mem["name"],
-                    "period": str(P),
-                    "kind": mem["kind"],
-                    "capacity_mw": capacity_mw,
-                    "derate": d,
-                    "basis": mem["basis"],
-                    "source": mem["source"],
-                    "extendable": bool(mem["extendable"]),
-                    "energy_limited": bool(mem["energy_limited"]),
-                })
-
-            ext_sets.append(frozenset(ext_here))
-            stash["periods"][str(P)] = {
-                "peak_mw": peak,
-                "peak_snapshots": [str(s) for s in peak_idx],
-                "n_peak_hours": int(len(peak_idx)),
-                "required_mw": required,
-                "firm_fixed_mw": firm_fixed,
-                "max_achievable_mw": max_achievable,
-            }
+                var = n.model.variables[vname]
+                # Coord membership BEFORE `.sel` — an inactive extendable
+                # is in the frame and not in the variable's coords.
+                if mem["name"] not in var.indexes["name"]:
+                    continue
+                terms.append(d * var.sel(name=mem["name"]))
 
             if not terms:
                 # Linopy raises TypeError on a constant constraint, and the
@@ -3544,7 +3704,7 @@ def _wrap_with_reserve_margin(network: "pypsa.Network", user_fn, cfg, log_queue=
                     f"Period {P}: reserve margin {margin:.1%} — "
                     f"{required:,.1f} MW of derated firm capacity required "
                     f"against a {peak:,.1f} MW peak "
-                    f"(over {len(peak_idx)} peak snapshot(s)); "
+                    f"(over {per['n_peak_hours']} peak snapshot(s)); "
                     f"{firm_fixed:,.1f} MW fixed, {len(terms)} extendable "
                     f"term(s) must supply the remaining "
                     f"{max(0.0, required - firm_fixed):,.1f} MW."
@@ -3554,10 +3714,6 @@ def _wrap_with_reserve_margin(network: "pypsa.Network", user_fn, cfg, log_queue=
                     f"Period {P}: failed to add the reserve-margin constraint: "
                     f"{exc}. Skipping this period's margin."
                 )
-
-        # One horizon-wide variable set ⇒ one horizon-wide standard at the
-        # maximum peak, NOT a per-period one. Say which it is (§2.1).
-        stash["horizon_wide"] = len(set(ext_sets)) <= 1
 
     def wrapper(n, snapshots):
         if user_fn is not None:

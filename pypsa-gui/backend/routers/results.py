@@ -4088,6 +4088,41 @@ def get_adequacy():
     return report
 
 
+@results_router.get("/reserve_margin")
+def get_reserve_margin():
+    """
+    The firm-capacity (planning reserve margin) standard the last solve
+    enforced, and what met it (Phase 8 §4): one row per investment period —
+    peak, requirement, achieved firm MW, `met`, `binding` — plus the derating
+    table (name, kind, built capacity, derate, basis, source, energy_limited)
+    and the `derating_bases` roll-up.
+
+    Serves the PERSISTED solve-time stash, emitted into solver state like
+    `last_lost_load`, and NEVER a recomputation: the wrapper measured its
+    peaks with the load-scaling transforms applied, and the post-solve restore
+    has since reverted them — recomputing here would report a standard the LP
+    never enforced.
+
+    A met margin is NOT a met reliability target. It is a proxy standard
+    justified by convention and by the derating factors, not by a sampler, and
+    the panel says so at the point of display.
+
+    204 = no margin result: nothing solved yet, the last solve set no margin,
+    or it did not produce a dispatch to judge one against. Same convention as
+    /results/lost_load and /results/adequacy.
+    """
+    from services.adequacy.report import sanitize_reserve_margin_payload
+
+    payload = _state.get("last_reserve_margin")
+    if not payload:
+        return Response(status_code=204)
+    # `max_achievable_mw` is `inf` whenever an active extendable has an
+    # unbounded `p_nom_max` — the honest value, and not JSON: Starlette dumps
+    # with `allow_nan=False`, so serving it untouched raises inside the
+    # response and the panel gets a 500 instead of a report.
+    return sanitize_reserve_margin_payload(payload)
+
+
 @results_router.get("/lost_load")
 def get_lost_load(
     from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),

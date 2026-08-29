@@ -1536,6 +1536,140 @@ def _check_ens_cap_coherence(solver_config) -> list[Issue]:
     return issues
 
 
+def _check_reserve_margin(n, solver_config) -> list[Issue]:
+    """
+    Firm-capacity (reserve-margin) coherence — Phase 8 spec §3.
+
+    Three findings, all of which have to be made BEFORE the solve because
+    after it they are either unsayable or too late:
+
+    * **unpriceable assets (ERROR).** A generator with no outage data AND no
+      availability profile is EXCLUDED from the standard's left-hand side
+      (§2.2 — crediting it would mean defaulting its derate to 1.0, giving a
+      unit the tool knows nothing about MORE firm credit than a gas unit on a
+      class average). The wrapper logs the exclusion, but a log line is not a
+      decision point: the user would be committing to a plan built against a
+      fleet the tool silently shrank.
+    * **an unreachable margin (ERROR).** This is the answer that REPLACES
+      "let the LP go infeasible", which is not implementable: linopy raises
+      ``TypeError`` on a constant constraint and ``Generator-p_nom`` does not
+      exist when nothing extendable is active. Every term of
+      ``max_achievable < required`` is a constant before the solve, so the
+      question is fully decidable here — and the answer here is the more
+      useful one ("no plan built from your candidate set can reach this
+      margin", with both numbers) than an infeasible LP.
+    * **carrier-default derating (WARNING).** Publishing ``source`` in the
+      post-solve table is necessary but not sufficient: a class average the
+      user never entered changes what gets BUILT, and by the time the table
+      exists the plan is already built around it.
+
+    Every number comes from ``solver_service.reserve_margin_facts`` — the
+    SAME function the wrapper builds its constraint from. A second
+    implementation of the derating chain here would be a second standard: the
+    one this blocks on and the one the LP enforces.
+    """
+    from services.solver_service import _prm_margin, reserve_margin_facts
+
+    margin = _prm_margin(solver_config)
+    if margin is None:
+        return []
+    issues: list[Issue] = []
+
+    # ── the rolling/myopic question, adjudicated (spec §3, last bullet).
+    #
+    # `_check_ens_cap_coherence` refuses BOTH strategies for the energy cap.
+    # The margin mirrors that for ROLLING and diverges for MYOPIC, and the
+    # reason is the denominator. `optimize_with_rolling_horizon` calls
+    # `extra_functionality` once per WINDOW with that window's snapshots, so
+    # §2.5's `peak_P` silently becomes the window's peak: a weaker standard
+    # than the one asked for, enforced under its name, and re-stashed by every
+    # window so the report describes only the last one. A myopic iteration's
+    # snapshots, by contrast, ARE one investment period — exactly the
+    # denominator the standard is defined against — so the constraint it
+    # installs is the right one. What breaks under myopic is only the REPORT:
+    # each iteration overwrites `_reserve_margin_targets`, so the published
+    # block covers the final period alone. A correct standard with an
+    # incomplete report is a warning; a silently different standard is not.
+    strategy = str(getattr(solver_config, "solve_strategy", "full") or "full")
+    if strategy == "rolling":
+        issues.append(_err(
+            "reserve_margin_unsupported_strategy", "", "",
+            "The reserve margin is not supported with the 'rolling' solve "
+            "strategy: PyPSA solves each window independently and the "
+            "constraint would be built against that WINDOW's peak demand, "
+            "not the period's — a weaker standard than the one you set, "
+            "enforced under its name. Use the full strategy, or unset the "
+            "margin.",
+        ))
+    elif strategy == "myopic":
+        issues.append(_warn(
+            "reserve_margin_myopic_report_is_partial", "", "",
+            "With myopic foresight the reserve margin IS enforced in every "
+            "investment period (each iteration's snapshots are exactly one "
+            "period, which is the peak the standard is defined against), but "
+            "each iteration overwrites the solve-time record: the adequacy "
+            "report and /results/reserve_margin will describe only the LAST "
+            "period solved. Read the [PRM] log lines for the earlier ones.",
+        ))
+
+    try:
+        facts = reserve_margin_facts(n, solver_config)
+    except Exception:
+        # A diagnosis that crashed must never block a run it cannot judge.
+        return issues
+    if facts is None:
+        return issues
+
+    unpriceable = list(facts.get("unpriceable") or [])
+    if unpriceable:
+        names = ", ".join(sorted(unpriceable)[:20])
+        more = " …" if len(unpriceable) > 20 else ""
+        issues.append(_err(
+            "reserve_margin_unpriceable_assets", "", "",
+            f"The reserve margin cannot price {len(unpriceable)} asset(s) "
+            f"(no outage data, no availability profile): {names}{more}. They "
+            "are excluded from the firm-capacity total — never credited at "
+            "1.0 — so the margin would be enforced against a fleet smaller "
+            "than the one you built. Enter an outage rate and basis, or an "
+            "availability profile, or unset the margin.",
+        ))
+
+    for P, per in (facts["stash"].get("periods") or {}).items():
+        required = float(per.get("required_mw", 0.0))
+        reachable = float(per.get("max_achievable_mw", 0.0))
+        if required <= 0 or not math.isfinite(required):
+            continue
+        if reachable < required:
+            where = "" if P == "ALL" else f" in period {P}"
+            issues.append(_err(
+                "reserve_margin_unreachable", "", "",
+                f"No plan built from your candidate set can reach the "
+                f"{margin:.1%} reserve margin{where}: it requires "
+                f"{required:,.1f} MW of derated firm capacity against a "
+                f"{float(per.get('peak_mw', 0.0)):,.1f} MW peak, and the "
+                f"whole fleet — every extendable at its p_nom_max, derated — "
+                f"tops out at {reachable:,.1f} MW. Raise a p_nom_max, add "
+                "candidate capacity, or lower the margin. (This is a "
+                "preflight error rather than an infeasible LP because every "
+                "term of it is a constant before the solve.)",
+            ))
+
+    defaults = list(facts.get("carrier_default") or [])
+    if defaults:
+        names = ", ".join(sorted(defaults)[:20])
+        more = " …" if len(defaults) > 20 else ""
+        issues.append(_warn(
+            "reserve_margin_carrier_default_derating", "", "",
+            f"The reserve margin derates {len(defaults)} asset(s) using "
+            f"carrier class averages you did not enter: {names}{more}. Those "
+            "numbers change what gets built — a unit credited at 0.95 buys "
+            "5 % less firm capacity than one credited at 1.0. Enter "
+            "asset-level outage rates for anything the plan turns on.",
+        ))
+
+    return issues
+
+
 def _check_outage_params(n) -> list[Issue]:
     """
     Adequacy occurrence attributes (design spec §5.4): warn on implausible
@@ -1615,6 +1749,11 @@ def validate_for_run(n, solver_config) -> list[Issue]:
         # accidentally request the strategy when it doesn't apply.
         if getattr(solver_config, "solve_strategy", "full") == "myopic":
             issues += _check_myopic_foresight(n, solver_config)
+        # Firm-capacity standard (Phase 8 §3). LOPF-only on purpose: the
+        # margin is an LP constraint, and a `pf` run enforces nothing — so a
+        # margin left in the config cannot make an AC power flow wrong, and
+        # blocking one on it would be a refusal with no standard behind it.
+        issues += _check_reserve_margin(n, solver_config)
     else:
         issues.append(_err("unknown_mode", "", "",
             f"Solver mode '{mode}' not recognised (expected lopf/pf)."))

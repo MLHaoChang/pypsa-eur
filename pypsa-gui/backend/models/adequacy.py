@@ -101,6 +101,95 @@ class TargetBlock(BaseModel):
     zone_field_populated: bool
 
 
+class ReserveMarginAsset(BaseModel):
+    """One row of the derating table: what this asset was credited with, and
+    on what evidence.
+
+    ``derate`` is never 1.0 by default (spec §2.2): it is
+    ``(1 − q) × availability``, where availability is the unit's
+    peak-coincidence mean ``p_max_pu`` when it has a profile and its static
+    ``p_max_pu`` otherwise. ``basis`` rides with the number because
+    ``1 − FOR`` is not a UCAP derate and is optimistic exactly for peakers —
+    the units that matter at the margin — and ``source`` because a carrier
+    class average the user never entered is an assumption that changed the
+    plan.
+
+    Rows are per (asset, PERIOD): a must-take derate is period-dependent, so
+    one row per asset could only ever report one period's credit."""
+    name: str
+    period: str
+    kind: Literal["generator", "storage"]
+    # None on the LP-time stash (an extendable's capacity is a variable);
+    # filled with the BUILT capacity once the solve has one.
+    capacity_mw: float | None = None
+    derate: float
+    basis: str
+    source: str
+    extendable: bool = False
+    firm_mw: float = 0.0
+    # A reservoir with `max_hours = 2000` takes full power credit while its
+    # energy limit is what actually binds it — the mirror of the failure the
+    # duration haircut exists to prevent. Recorded, not fixed (plan §1.4).
+    energy_limited: bool = False
+
+
+class ReserveMarginPeriod(BaseModel):
+    """One investment period's firm-capacity standard and what met it.
+
+    ``binding`` is per ROW and deliberately NOT folded into
+    ``TargetBlock.binding``: that field is a three-value ``Literal`` the
+    frontend re-declares with an exhaustive label map, and one field cannot
+    report two standards when the energy cap and the margin both bind.
+
+    ``met`` and ``binding`` are separate questions. ``met`` is "the plan
+    reaches the standard"; ``binding`` is "the standard SHAPED the plan" —
+    firm capacity sitting on its lower bound. A margin the existing fleet
+    already satisfies is met and not binding, and calling it binding would
+    credit the margin for capacity that was always there."""
+    period: str
+    peak_mw: float
+    required_mw: float
+    firm_mw: float
+    # firm_mw / peak_mw − 1, i.e. the margin the plan actually carries. None
+    # when the period has no demand to take a margin over.
+    margin_achieved: float | None = None
+    met: bool = False
+    binding: bool = False
+    n_peak_hours: int = 0
+    # The hours the must-take credit was measured over — a proxy nobody can
+    # inspect is a number nobody can check (plan §1.3).
+    peak_snapshots: list[str] = Field(default_factory=list)
+    # None when an active extendable has an unbounded `p_nom_max`: "unbounded"
+    # is not a number, and `inf` is not JSON (amendment 6). The flag below
+    # says which case the null is.
+    max_achievable_mw: float | None = None
+    max_achievable_unbounded: bool = False
+
+
+class ReserveMarginBlock(BaseModel):
+    """The firm-capacity (planning reserve margin) standard — a SIBLING of
+    ``TargetBlock``, never a fourth value of its ``binding`` field.
+
+    ``horizon_wide`` is the honest label for what the LP can express:
+    ``Generator-p_nom`` is ONE variable for the whole horizon, so when the
+    active extendable set is the same in every period the per-period
+    constraints share it and the system degenerates to a single standard at
+    ``max_P peak_P``. Calling that "per period" would be a claim the
+    constraint does not support.
+
+    A met margin is NOT a met reliability target: it is a proxy standard
+    justified by convention and by the derating factors, not by a sampler."""
+    margin: float
+    horizon_wide: bool
+    by_period: list[ReserveMarginPeriod] = Field(default_factory=list)
+    assets: list[ReserveMarginAsset] = Field(default_factory=list)
+    # How many credited assets carried each basis — the same
+    # never-silently-converted discipline `InputsBlock.outage_rate_bases`
+    # applies to the COPT's metrics, with more force: here a wrong basis
+    # moves the built plan, not a diagnostic.
+    derating_bases: dict[str, int] = Field(default_factory=dict)
+
+
 class MetricsBlock(BaseModel):
     ens_mwh: float
     shed_hours: float
@@ -231,6 +320,11 @@ class AdequacyReport(BaseModel):
     engine: Engine
     fidelity: Fidelity
     target: TargetBlock
+    # The firm-capacity standard, when one was enforced AND the solve produced
+    # a dispatch to judge it against. A SIBLING block rather than a fourth
+    # `TargetBlock.binding` value: the two standards can bind at once, and one
+    # field cannot report both (plan §3).
+    reserve_margin: ReserveMarginBlock | None = None
     metrics: MetricsBlock
     cost: CostBlock
     inputs: InputsBlock

@@ -222,6 +222,62 @@ no worker commits.
    is kept deliberately — both-tier exclusion is normative for THIS constraint,
    while the walk's default is a shared-module decision that could change.
 
+### v1.2 — Wave B adjudications (ratified by the master)
+
+1. **Rolling = ERROR, myopic = WARNING** (§3's open question, settled by the
+   denominator). `optimize_with_rolling_horizon` calls `extra_functionality`
+   once per WINDOW, so §2.5's `peak_P` silently becomes the window peak — a
+   weaker standard enforced under the right name, the same class of defect that
+   made the ENS cap refuse rolling. A myopic iteration's snapshots ARE one
+   investment period, so the constraint it installs is the correct one; what
+   breaks is only the report (each iteration overwrites the stash). A correct
+   standard with an incomplete report is a warning; a silently different
+   standard is an error. Codes `reserve_margin_unsupported_strategy` /
+   `reserve_margin_myopic_report_is_partial`.
+2. **One shared core, not two derating chains.** The classification/peak/derate
+   computation is extracted to `solver_service.reserve_margin_facts(...)`, used
+   by both the wrapper and preflight. Duplicating it would have created two
+   standards — the one preflight blocks on and the one the LP enforces.
+3. **Preflight is LOPF-only** (unlike `_check_ens_cap_coherence`, which runs
+   unconditionally): a `pf` run enforces no margin, so blocking it would be a
+   refusal with no standard behind it.
+4. **Amendment v1.1(6) resolved as NULL, not clamp.** `max_achievable_mw`
+   becomes `None` plus `max_achievable_unbounded: bool` at the two wire
+   surfaces; the stash keeps the honest `inf`. Clamping would invent a ceiling
+   nobody entered, which §3's `max_achievable < required` test could then fire
+   on by accident.
+5. **`met` and `binding` are separate fields.** `met` = the plan reaches the
+   standard; `binding` = firm capacity sits on the bound. A margin the fixed
+   fleet already satisfies is met and NOT binding — calling it binding would
+   credit the margin for capacity that was always there.
+6. **A margin-only report keeps `TargetBlock.binding == "voll"` and
+   `cap_mwh == 0`** — the Literal is not widened (a new test pins it to exactly
+   three values).
+7. **Both surfaces publish the identical shape** so the endpoint payload and
+   `AdequacyReport.reserve_margin` cannot drift; asset rows carry BUILT capacity
+   (`p_nom_opt`) on the wire while the stash keeps LP-time truth.
+8. **`_diagnose_infeasibility` takes the stash as a PARAMETER**, captured before
+   the cleanup `delattr` — the diagnoser runs after the report step, so reading
+   the attribute there finds nothing (a bite proved it).
+9. **New solver-state key `last_reserve_margin`**, registered for persistence
+   and reset at BOTH per-solve reset sites — without the reset a stale margin
+   republishes onto the next plan (a bite proved it).
+
+**Findings from Wave B worth keeping:**
+- The `inf` path is currently unreachable through a live solve
+  (`_check_extendable_bounds` already refuses an infinite `p_nom_max`), so
+  amendment v1.1(6) is defence for a restored payload or a relaxed bound. The
+  tests therefore seed a payload built by the REAL wrapper rather than a
+  hand-written dict, and assert `json.dumps(..., allow_nan=False)` — what
+  Starlette actually does.
+- **Wave B's own preflight made a Wave-A test vacuous** and it was repointed:
+  `test_stash_is_cleaned_up_after_a_failed_solve` used a fixture that preflight
+  now blocks, so the LP — and the cleanup path the test exists for — was never
+  reached while its assertions still passed. It now uses a transmission-limited
+  fixture (preflight passes, the constraint is live, the dispatch is infeasible
+  behind a 10 MW line) and additionally asserts
+  `condition != "validation_failed"` so it cannot go vacuous the same way again.
+
 **Bite-quality note, recorded because it is the process working:** three of the
 worker's first-draft bite variants did not bite — the coord-membership test
 (masked by the activity mask), the slack re-check (masked by the walk), and the

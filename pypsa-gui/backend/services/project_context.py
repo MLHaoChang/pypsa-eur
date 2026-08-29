@@ -219,6 +219,7 @@ RESULT_STATE_KEYS = (
     "lopf_results", "ac_pf_results",
     "last_lost_load",
     "adequacy_report",
+    "last_reserve_margin",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
     "ac_pf_converged_count", "ac_pf_total_snapshots",
@@ -263,6 +264,11 @@ class ProjectSolverState:
     # Result-state (persisted to results_state.pkl)
     last_lost_load: Any = None
     adequacy_report: Any = None   # minimal AdequacyReport dict (target solves)
+    # The firm-capacity (reserve-margin) result of the last solve that
+    # enforced one — the PERSISTED solve-time stash `/results/reserve_margin`
+    # serves. Reset with the rest each solve, so a margin can never outlive
+    # the plan that met it.
+    last_reserve_margin: Any = None
     lopf_results: Any = None
     ac_pf_results: Any = None
     ac_pf_convergence: Any = None        # dict[snapshot_iso, bool] (legacy)

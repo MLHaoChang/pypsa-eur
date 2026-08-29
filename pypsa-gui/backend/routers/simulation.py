@@ -594,6 +594,7 @@ def run():
             log_queue=log_queue,
             last_lost_load=None,
             adequacy_report=None,
+            last_reserve_margin=None,
             lopf_results=None,
             ac_pf_results=None,
             ac_pf_convergence=None,
