@@ -307,6 +307,14 @@ export default function DispatchStack({
       genNames, hasGenFilter,
       genCarriers, stackOrder, range.from, range.to])
 
+  // Above the early return, unconditionally: a hook below it is called only
+  // on data-bearing renders, so the first render after dispatch data arrives
+  // calls one MORE hook than the empty render before it — React #310, and the
+  // whole Results panel dies in its error boundary. That is how this actually
+  // failed in a browser: nondeterministic, only when the empty state rendered
+  // first.
+  const chartRef = useRef<HTMLDivElement | null>(null)
+
   if (!gensTS || rows.length === 0) {
     return (
       <ChartCard title="Generation Dispatch Stack">
@@ -318,8 +326,6 @@ export default function DispatchStack({
   }
 
   const hasStorage = stackOrder.includes('storage_discharge')
-
-  const chartRef = useRef<HTMLDivElement | null>(null)
   const exportCSV = () => {
     // Build wide CSV: snapshot + every carrier column + storage_charge +
     // link_inflows / link_outflows (when present, otherwise electrolyzer_consume) + load_total.
