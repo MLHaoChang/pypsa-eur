@@ -247,3 +247,30 @@ the bug. The certified margin comes out clean because the informed step is
 that `%g` does not already round-trip the value it was handed**, so the day
 someone retunes the fixture the test says it has gone blind instead of going
 quietly green.
+
+### v1.3 — the seam Phase 9 created and did not close
+
+Phase 9 built the lever the cap loop's commonest honest answer calls for, and
+then **left the cap loop's verdict unable to name it.** Both never-bound
+copies diagnosed correctly and handed the user manual work: one said *"what
+would move this number is … a planning reserve margin"*, the other *"raise
+the margin"*. Neither said the tool will now search for that margin and
+certify it on the same MC-LOLE target. A user reaching the dead end was told
+the lever and not the tool.
+
+Both copies now name the margin panel by **its own heading**, so the pointer
+can be followed rather than guessed at, and the heading is a cross-file
+contract: `routers/results.py::MARGIN_LOOP_PANEL_LABEL` and a
+`MarginLoopPanel.test.tsx` assertion carry the same string. A verdict naming a
+control that does not exist under that name is worse than no pointer at all.
+
+**`UNREACHABLE_COPY_V1` is deliberately NOT changed, and a test pins that.**
+That branch is reached only when the cap DID bind and the MC disagreed anyway;
+its three mechanisms — storage foresight, DSR exclusion, storage-for-thermal
+substitution — are not ones a firm-capacity margin is known to answer.
+Recommending the loop there would turn a diagnosis into a guess and would
+devalue the pointer in the one branch where it is load-bearing. The pointer is
+conditional on the evidence, exactly as the never-bound branch itself is.
+
+Live: S17.3 asserts the pointer on the fixture that reaches the never-bound
+verdict.

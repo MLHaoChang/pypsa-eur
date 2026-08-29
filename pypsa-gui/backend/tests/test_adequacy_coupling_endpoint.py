@@ -26,6 +26,7 @@ import pypsa
 import pytest
 
 from services.adequacy.coupling import MAX_LOOP_SOLVES
+from routers.results import MARGIN_LOOP_PANEL_LABEL
 from services.adequacy.lever_text import format_lever_value
 from services.adequacy.mc import MAX_DRAWS, MC_WARNING_V1
 
@@ -702,6 +703,82 @@ def test_never_bound_does_not_recommend_a_margin_the_user_already_set(
         "the verdict prescribes a margin to a user who has one: "
         + body["verdict"])
     assert "reserve margin is already in force" in verdict, body["verdict"]
+    # …and it must still hand the user the study that SEARCHES for the right
+    # margin rather than leaving "raise the margin" as manual work.
+    assert MARGIN_LOOP_PANEL_LABEL.lower() in verdict, body["verdict"]
+
+
+@pytest.mark.parametrize("with_margin", [False, True])
+def test_never_bound_names_the_study_that_can_move_the_number(
+        client, install_network, monkeypatch, with_margin):
+    """★ A dead end must name the way out, and name it clickably.
+
+    Both never-bound verdicts diagnose correctly — the cap has no leverage,
+    firm capacity does — and then leave the user to act on it BY HAND: one
+    says "what would move this number is … a planning reserve margin", the
+    other says "raise the margin". Phase 9 built the study that finds that
+    margin and certifies it on the sampler's own LOLE, and neither sentence
+    mentions it exists. A user who reaches the commonest honest answer this
+    loop gives is told the lever and not the tool.
+
+    The pointer names the panel's OWN heading, so it can be followed rather
+    than guessed at; `MarginLoopPanel.test.tsx` pins the panel to the same
+    string, because a verdict naming a control that does not exist under that
+    name is worse than no pointer at all.
+
+    NOT changed, deliberately: `UNREACHABLE_COPY_V1`. That branch is reached
+    only when the cap DID bind and the MC still disagreed, and its three
+    mechanisms (storage foresight, DSR exclusion, storage substitution) are
+    not ones a firm-capacity margin is known to answer. Pointing there would
+    be a guess wearing a recommendation's clothes.
+
+    Bite (verified): drop the clause from either copy.
+    """
+    stubs = _Stubs(lole_seq=[9.0], binding="voll")
+
+    def _never_binds(cfg, n, lock, lq, sink):
+        eps = float(getattr(cfg, "ens_cap_permyriad", 0.0) or 0.0)
+        stubs.solve_eps.append(eps)
+        sink["_status"] = "ok"
+        sink["_condition"] = "optimal"
+        rep = _report(cap_mwh=7200.0 * eps / 1e4, ens_mwh=0.0, cost=360000.0,
+                      binding="voll")
+        if with_margin:
+            rep["reserve_margin"] = {
+                "margin": 0.15,
+                "by_period": [{"period": "ALL", "binding": True, "met": True}],
+            }
+        sink["adequacy_report"] = rep
+
+    stubs.solve_once = _never_binds
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network)
+
+    client.post(LOOP_URL, json={"target_lole_h": 3.6, "draws": DRAWS,
+                                "eps0": 100.0, "max_solves": 4})
+    body = _poll(client)
+    assert body["status"] == "unreachable", body
+    verdict = body["verdict"]
+    assert "never bound" in verdict.lower(), verdict
+    assert MARGIN_LOOP_PANEL_LABEL.lower() in verdict.lower(), (
+        "the verdict diagnoses a dead end the margin loop exists to answer "
+        f"and never names it: {verdict!r}")
+
+
+def test_the_unreachable_copy_does_NOT_point_at_the_margin_loop():
+    """★ The pointer is conditional on the evidence, not decoration.
+
+    `UNREACHABLE_COPY_V1` is the branch where the cap DID bind and the MC
+    disagreed anyway. Its three mechanisms are about storage foresight, DSR
+    exclusion and storage-for-thermal substitution — none of which a
+    firm-capacity margin is known to fix. Recommending the margin loop there
+    would turn a diagnosis into a guess, and would make the pointer worthless
+    in the one branch where it IS load-bearing.
+
+    Bite: append the same clause to UNREACHABLE_COPY_V1.
+    """
+    from routers.results import MARGIN_LOOP_PANEL_LABEL, UNREACHABLE_COPY_V1
+    assert MARGIN_LOOP_PANEL_LABEL.lower() not in UNREACHABLE_COPY_V1.lower()
 
 
 # ── the real thing ────────────────────────────────────────────────────────

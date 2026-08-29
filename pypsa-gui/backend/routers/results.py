@@ -3449,6 +3449,16 @@ MULTI_PERIOD_WARNING_V1 = (
 
 # [N6]. Three mechanisms, named, because the user's NEXT ACTION differs by
 # which one is operating and a bare "unreachable" is unactionable.
+# The margin-loop panel's OWN heading, verbatim.
+#
+# ★ A verdict that diagnoses a dead end and names the way out is only useful
+# if the way out can be FOUND: "a planning reserve margin" is a lever, and the
+# user still has to know the tool will search for one. This names the control
+# they must click. `MarginLoopPanel.test.tsx` pins the panel to the same
+# string, because a verdict naming a control that does not exist under that
+# name is worse than no pointer at all.
+MARGIN_LOOP_PANEL_LABEL = "Reliability-targeted reserve margin loop"
+
 NEVER_BOUND_WITH_MARGIN_COPY_V1 = (
     "The cap never bound. On every iterate that solved, the LP's own shed "
     "energy stayed under the ceiling, so tightening the cap could not change "
@@ -3457,7 +3467,10 @@ NEVER_BOUND_WITH_MARGIN_COPY_V1 = (
     "the cap's failure, not the margin's. The loss of load the MC still sees "
     "comes from outages beyond what that margin buys. Raise the margin (or "
     "lower the target) rather than capping harder; the cap has no leverage "
-    "here either way."
+    "here either way. HOW MUCH to raise it by is what the \""
+    + MARGIN_LOOP_PANEL_LABEL + "\" on this tab searches for: the same "
+    "target and the same sampler, on the lever that is actually shaping "
+    "this plan."
 )
 
 NEVER_BOUND_COPY_V1 = (
@@ -3469,7 +3482,11 @@ NEVER_BOUND_COPY_V1 = (
     "chose to shed: its deterministic view already covers demand, which is "
     "exactly why the cap has no leverage. What would move this number is firm "
     "capacity the LP sees no deterministic reason to build — a planning "
-    "reserve margin, or the candidate unit itself. Capping harder will not."
+    "reserve margin, or the candidate unit itself. Capping harder will not. "
+    "You do not have to size that margin by hand: the \""
+    + MARGIN_LOOP_PANEL_LABEL + "\" on this tab runs this same search on "
+    "that lever and certifies what it finds against this same MC-LOLE "
+    "target."
 )
 
 UNREACHABLE_COPY_V1 = (

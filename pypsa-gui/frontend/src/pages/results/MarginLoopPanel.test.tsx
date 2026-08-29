@@ -267,6 +267,25 @@ describe('restoreSentence is lever-driven', () => {
   })
 })
 
+// ── ★ the panel heading the CAP loop's verdict points at ─────────────────────
+
+describe('the panel heading is a cross-file contract', () => {
+  // ★ When the cap loop reaches its commonest honest answer — the cap never
+  // bound, so no cap can help — its verdict now names THIS panel by heading,
+  // so the user can find the study that searches the lever that does help.
+  // `routers/results.py::MARGIN_LOOP_PANEL_LABEL` carries the same string.
+  //
+  // Bite: rename the heading. A verdict pointing at a control that does not
+  // exist under that name is worse than no pointer at all, and nothing else
+  // in either suite would notice.
+  it('renders exactly the heading the backend verdict names', async () => {
+    renderPanel()
+    expect((await screen.findByTestId('margin-loop-toggle')).textContent)
+      .toContain('Reliability-targeted reserve margin loop')
+  })
+})
+
+
 // ── ★ the SPELLING contract with the backend verdict ─────────────────────────
 
 /**

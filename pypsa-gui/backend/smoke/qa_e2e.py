@@ -2614,7 +2614,15 @@ def suite_S17():
         never_bound = solved_rows and not any(
             r.get("binding") == "system_cap" for r in solved_rows)
         v = str((res or {}).get("verdict", "")).lower()
-        verdict_ok = ("never bound" in v and "outage" in v) if never_bound else bool(v)
+        # …and a dead end must name the way OUT, by the heading of the panel
+        # the user has to click. This fixture reaches the commonest honest
+        # answer the cap loop gives, and until Phase 9 that answer named the
+        # lever ("a planning reserve margin") without naming the study that
+        # now searches for it.
+        from routers.results import MARGIN_LOOP_PANEL_LABEL
+        verdict_ok = (("never bound" in v and "outage" in v
+                       and MARGIN_LOOP_PANEL_LABEL.lower() in v)
+                      if never_bound else bool(v))
 
     met_ok = True
     if (res or {}).get("status") == "met":
