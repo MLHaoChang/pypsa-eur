@@ -130,7 +130,7 @@ def _toy_net_with_trafo(tap_pos=2):
         vn_hv_kv=345.0, vn_lv_kv=138.0,
         vkr_percent=1.0, vk_percent=10.0, pfe_kw=0.0, i0_percent=0.0,
         shift_degree=0.0, tap_side="hv", tap_neutral=0, tap_pos=tap_pos,
-        tap_step_percent=1.25, name="T1",
+        tap_step_percent=1.25, tap_changer_type="Ratio", name="T1",
     )
     return net
 
@@ -226,3 +226,57 @@ def test_case39_section_counts_and_terminators(tmp_path):
     assert len(_records(text, 4)) == len(net.line)
     assert text.rstrip().splitlines()[-1] == "Q"
     assert "END OF INDUCTION MACHINE DATA" in text
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 additions
+# ---------------------------------------------------------------------------
+
+def test_out_of_service_bus_ide4(tmp_path):
+    net = toy_net()
+    b3 = pp.create_bus(net, vn_kv=345.0, name="BUS_03")  # no gen, no slack
+    net.bus.at[b3, "in_service"] = False
+    write_raw(net, tmp_path / "t.raw")
+    buses = _records((tmp_path / "t.raw").read_text(), 0)
+    assert buses[2][1] == "BUS_03"
+    assert buses[2][3] == "4"                           # IDE=4: isolated
+
+
+def test_lv_tapped_trafo_impedance_matches_pandapower(tmp_path):
+    # pandapower convention (probed via net._ppc): with tap_side="lv" the
+    # impedance base uses the TAP-ADJUSTED LV nominal voltage, i.e. r/x on
+    # system base scale by n**2; with tap_side="hv" they do not.
+    net = pp.create_empty_network(sn_mva=100.0)
+    b1 = pp.create_bus(net, vn_kv=345.0, name="BUS_01")
+    b2 = pp.create_bus(net, vn_kv=138.0, name="BUS_02")
+    pp.create_ext_grid(net, bus=b1, vm_pu=1.0, name="SLK_BUS_01")
+    pp.create_load(net, bus=b2, p_mw=50.0, q_mvar=10.0)
+    pp.create_transformer_from_parameters(
+        net, hv_bus=b1, lv_bus=b2, sn_mva=200.0,
+        vn_hv_kv=345.0, vn_lv_kv=138.0,
+        vkr_percent=1.0, vk_percent=10.0, pfe_kw=0.0, i0_percent=0.0,
+        shift_degree=0.0, tap_side="lv", tap_neutral=0, tap_pos=2,
+        tap_step_percent=1.25, tap_changer_type="Ratio", name="T1",
+    )
+    write_raw(net, tmp_path / "t.raw")
+    trafo = _records((tmp_path / "t.raw").read_text(), 5)
+    l2, l3, l4 = trafo[1], trafo[2], trafo[3]
+    n = 1.025
+    r_exp = 0.01 * (100.0 / 200.0) * n ** 2             # 0.005253125
+    z_exp = 0.10 * (100.0 / 200.0) * n ** 2
+    assert float(l2[0]) == pytest.approx(r_exp, rel=1e-3)
+    assert float(l2[1]) == pytest.approx(np.sqrt(z_exp**2 - r_exp**2), rel=1e-3)
+    # tap ratio lands on winding 2; WINDV1/WINDV2 == pandapower ppc ratio 1/n
+    assert float(l3[0]) == pytest.approx(1.0)           # WINDV1
+    assert float(l4[0]) == pytest.approx(1.025)         # WINDV2 carries lv tap
+    assert float(l4[1]) == pytest.approx(138.0)         # NOMV2 stays nameplate
+
+
+def test_tap_ignored_without_ratio_changer_type(tmp_path):
+    # pandapower ignores tap_pos unless tap_changer_type == "Ratio"
+    # (probed: ppc ratio stays 1.0); the writer must match.
+    net = _toy_net_with_trafo()
+    net.trafo.loc[:, "tap_changer_type"] = None
+    write_raw(net, tmp_path / "t.raw")
+    trafo = _records((tmp_path / "t.raw").read_text(), 5)
+    assert float(trafo[2][0]) == pytest.approx(1.0)      # WINDV1: tap inert

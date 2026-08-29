@@ -39,7 +39,17 @@ def _bus_numbers(net):
 
 
 def _tap_ratio(tr):
-    """Off-nominal ratio from pandapower tap columns; 1.0 when no tap set."""
+    """Off-nominal ratio from pandapower tap columns; 1.0 when no tap set.
+
+    pandapower (probed via net._ppc) applies tap_pos only when
+    tap_changer_type == "Ratio"; otherwise the tap is inert and the ratio
+    is 1.0. The writer mirrors that. (Other changer types — e.g. "Ideal"
+    phase shifters via tap_step_degree — are not modelled here.)
+    """
+    if "tap_changer_type" in tr.index:
+        tct = tr["tap_changer_type"]
+        if not (isinstance(tct, str) and tct == "Ratio"):
+            return 1.0
     pos = tr.get("tap_pos", np.nan)
     neutral = tr.get("tap_neutral", np.nan)
     step = tr.get("tap_step_percent", np.nan)
@@ -77,7 +87,7 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
         else:
             ide = 3 if i in slack_buses else (2 if i in gen_buses else 1)
         lines.append(
-            f"{nums[name_of.at[i]]},'{name_of.at[i]:<12s}',{net.bus.at[i, 'vn_kv']:9.4f},"
+            f"{nums[name_of.at[i]]},'{name_of.at[i][:12]:<12s}',{net.bus.at[i, 'vn_kv']:9.4f},"
             f"{ide}, 1, 1, 1,1.00000, 0.00000,1.10000,0.90000,1.10000,0.90000"
         )
     lines.append("0 / END OF BUS DATA, BEGIN LOAD DATA")
@@ -142,24 +152,30 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
         bus_vn_hv = net.bus.at[hv_bus, "vn_kv"]
         bus_vn_lv = net.bus.at[lv_bus, "vn_kv"]
         # pandapower vk/vkr are on (sn_mva, vn_lv) base; CZ=1 wants p.u. on
-        # system SBASE at the winding's bus voltage base.
-        conv = (SBASE_MVA / sn) * (tr["vn_lv_kv"] / bus_vn_lv) ** 2 / par
+        # system SBASE at the winding's bus voltage base. Probed against
+        # net._ppc: with tap_side=="lv" pandapower uses the TAP-ADJUSTED lv
+        # nominal voltage as the impedance base (r/x scale by tap**2); with
+        # tap_side=="hv" it does not.
+        tap = _tap_ratio(tr)
+        vn_hv_eff, vn_lv_eff = tr["vn_hv_kv"], tr["vn_lv_kv"]
+        if str(tr.get("tap_side", "hv")) == "lv":
+            vn_lv_eff *= tap
+        else:
+            vn_hv_eff *= tap
+        conv = (SBASE_MVA / sn) * (vn_lv_eff / bus_vn_lv) ** 2 / par
         r_pu = (tr["vkr_percent"] / 100.0) * conv
         z_pu = (tr["vk_percent"] / 100.0) * conv
         x_pu = np.sqrt(max(z_pu ** 2 - r_pu ** 2, 1e-12))
-        windv1 = tr["vn_hv_kv"] / bus_vn_hv
-        windv2 = tr["vn_lv_kv"] / bus_vn_lv
-        tap = _tap_ratio(tr)
-        if str(tr.get("tap_side", "hv")) == "lv":
-            windv2 *= tap
-        else:
-            windv1 *= tap
+        windv1 = vn_hv_eff / bus_vn_hv
+        windv2 = vn_lv_eff / bus_vn_lv
         shift = float(tr.get("shift_degree", 0.0) or 0.0)
         hv, lv = nums[name_of.at[hv_bus]], nums[name_of.at[lv_bus]]
         ckt = trafo_ckts.next((min(hv, lv), max(hv, lv)))
         stat = 1 if tr["in_service"] else 0
         rate = sn * par
         xname = f"TR_{hv}_{lv}"[:12]
+        # MAG1/MAG2 = 0: deliberate case39-scope simplification — case39 has
+        # pfe_kw == i0_percent == 0 everywhere, so zero is exact, not lossy.
         lines.append(
             f"{hv},{lv},0,'{ckt:<2s}',1,1,1, 0.00000, 0.00000,2,'{xname:<12s}',{stat},1,1.0000"
         )
