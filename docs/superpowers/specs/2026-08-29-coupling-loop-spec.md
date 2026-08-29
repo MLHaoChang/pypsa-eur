@@ -172,4 +172,25 @@ first, bite table, no commits by workers.
 
 ## Amendments
 
-(none yet)
+### v1.1 — Wave A adjudications (ratified by the master)
+
+1. **Unsolved networks read extendable rows as 0 MW.** PyPSA 1.3.0 materialises
+   `p_nom_opt` at its 0.0 default on `n.add`, so an unsolved extendable row is
+   indistinguishable by value from a declined one; §1.1's literal reading stands
+   (the engines score a solved PLAN — unsized capacity is not capacity), and the
+   consequence is documented on `solved_capacity`.
+2. **Non-extendable rows keep the historic `first finite (p_nom_opt, p_nom) > 0`
+   chain verbatim** — PyPSA writes `p_nom_opt = p_nom` for them post-solve, so the
+   chain and `p_nom` agree wherever data is sane, and byte-identical behaviour is
+   what held the benchmark anchors.
+3. **§1.3 mechanics:** on a mid-sweep exception the partial record rides on the
+   exception as `exc.frontier_result` (nothing is returned); a restore that ITSELF
+   fails is reported (`base_restored=False`, normal return) instead of propagating —
+   the only way the "False when the restore failed" clause is observable.
+4. **Negative solved sizes clamp to 0** on the extendable path.
+5. **`must_take_generators` always takes the default walk** so the ELCC
+   `kind="vre"` candidate list can never gain an unbuilt asset (bitten).
+6. **Known hazard, out of scope here:** `copt.deconvolve` is degenerate for a 0 MW
+   two-state unit (raises; `attribute_criticality` falls back to a rebuild — safe
+   but wasteful). No caller routes a superset fleet there today; the loop's
+   `evaluate` is MC-only. Do not route one without revisiting.

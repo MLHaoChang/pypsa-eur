@@ -155,20 +155,78 @@ def hourly_adequacy(dist: CapacityDistribution, residual_load: pd.Series,
     }
 
 
-def _firm_capacity(gens: pd.DataFrame, g) -> float:
-    """Firm capacity: the solved size when a fresh solve exists, else p_nom."""
+def _finite_at(row, col) -> float | None:
+    """``row[col]`` as a finite float, or None when it is absent, unparseable
+    or NaN/inf. One accessor so the capacity rule below reads as the rule."""
+    try:
+        v = float(row[col])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _is_extendable(row) -> bool:
+    """``p_nom_extendable`` on a component row (the column name is the same on
+    ``generators`` and on ``storage_units``). Missing/NaN is NOT extendable —
+    ``bool(nan)`` is True, which is exactly the wrong default here."""
+    try:
+        v = row["p_nom_extendable"]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+    if v is None:
+        return False
+    if isinstance(v, float) and math.isnan(v):
+        return False
+    return bool(v)
+
+
+def solved_capacity(row) -> float:
+    """
+    THE capacity of one component row for the adequacy engines, in ONE place
+    (coupling-loop spec §1.1; plan finding [B2]). Generators and storage share
+    it because they shared the bug.
+
+    For an **extendable** row whose frame carries a **finite** ``p_nom_opt``,
+    that value is AUTHORITATIVE — **including 0.0**. An extendable asset the
+    LP declined to build has zero capacity; the previous rule took the first
+    finite value ``> 0`` from ``("p_nom_opt", "p_nom")``, so a declined asset
+    fell through to its pre-solve NAMEPLATE and the COPT/MC scored a plan
+    containing capacity that does not exist. The bias is optimistic and worst
+    for an extendable battery, which was simulated at full power AND full
+    energy.
+
+    ``p_nom`` remains the fallback for NON-extendable rows, for frames with no
+    ``p_nom_opt`` column, and for non-finite values. On that path the historic
+    ``first finite value > 0`` chain is kept VERBATIM: PyPSA writes
+    ``p_nom_opt = p_nom`` for a non-extendable row after a solve and leaves it
+    at its 0.0 default before one, so the chain and ``p_nom`` already agree
+    wherever the data is sane — and keeping it agreeing bit-for-bit is what
+    leaves the pinned RTS-79/RBTS anchors untouched.
+
+    Note the consequence, which is intended: on an UNSOLVED network PyPSA's
+    ``p_nom_opt`` default is 0.0, so an extendable row reads as 0 MW until a
+    solve writes a size. These engines score a solved PLAN; an extendable
+    asset that no solve has sized is not capacity anyone can count on.
+    """
+    if _is_extendable(row):
+        v = _finite_at(row, "p_nom_opt")
+        if v is not None:
+            # Clamp: a negative solved size is data noise, not a claim.
+            return max(v, 0.0)
     for col in ("p_nom_opt", "p_nom"):
-        if col in gens.columns:
-            try:
-                v = float(gens.at[g, col])
-                if math.isfinite(v) and v > 0:
-                    return v
-            except (TypeError, ValueError):
-                continue
+        v = _finite_at(row, col)
+        if v is not None and v > 0:
+            return v
     return 0.0
 
 
-def _membership_walk(n, elec_buses):
+def _firm_capacity(gens: pd.DataFrame, g) -> float:
+    """Firm capacity of generator ``g`` — ``solved_capacity``'s rule, applied
+    to a row of ``n.generators``."""
+    return solved_capacity(gens.loc[g])
+
+
+def _membership_walk(n, elec_buses, *, keep_zero_capacity: bool = False):
     """
     THE generator-membership decision, in one place (spec §3.1).
 
@@ -186,6 +244,19 @@ def _membership_walk(n, elec_buses):
     ask for a capacity credit. A generator the enumeration called a unit and
     this loop called must-take is not a cosmetic disagreement — it is a 404 on
     a name the picker itself offered.
+
+    ``keep_zero_capacity`` (coupling-loop spec §1.2, plan finding [B1]) is the
+    ONE test this walk relaxes: with it, a generator that clears every scope
+    test EXCEPT ``cap > 0`` is still yielded, at 0.0 MW. ``sample_capacity``
+    keys each unit's RNG substream to its POSITION in the fleet tuple, so a
+    unit entering or leaving between two solves shifts every downstream unit's
+    entire outage path — and building previously-unbuilt firm capacity is the
+    canonical LP response to a tighter cap. Holding the zero-capacity row in
+    the fleet keeps membership (the name set AND its order) invariant across
+    those solves at no cost: the unit draws its chain, consumes its substream
+    and contributes 0 MW, exactly the exclude-but-consume discipline
+    ``elcc`` already uses. Default ``False`` — every existing surface (COPT,
+    the MC study, ELCC, the pinned benchmark anchors) is unchanged.
     """
     from services.adequacy.occurrence import resolve_outage_params
     from services.adequacy.slack import slack_generator_mask
@@ -201,7 +272,7 @@ def _membership_walk(n, elec_buses):
         if str(gens.at[g, "bus"]) not in elec_buses:
             continue
         cap = _firm_capacity(gens, g)
-        if cap <= 0:
+        if cap <= 0 and not keep_zero_capacity:
             continue
         yield g, cap, params.loc[g]
 
@@ -216,6 +287,14 @@ def must_take_generators(n) -> list[str]:
     the residual, so pricing them means un-netting the profile, which is
     exactly what ``elcc._resolve`` does with the profiles
     ``mc.snapshot_inputs(n, vre_assets=…)`` preserves.
+
+    The walk is taken at the DEFAULT ``keep_zero_capacity=False`` on purpose,
+    and the candidate list is therefore the same under either value of the
+    flag: a zero-capacity row has no profile worth un-netting (``profile × 0``
+    is the zero series), and offering it as a VRE candidate would price a
+    capacity credit for an asset that does not exist. The superset fleet is a
+    SAMPLING-stability device (§1.2); it is not a change to who the UI may ask
+    about.
     """
     from services.adequacy.metrics import electrical_columns
 
@@ -227,7 +306,8 @@ def must_take_generators(n) -> list[str]:
             if row["source"] == "missing"]
 
 
-def fleet_and_residual(n) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
+def fleet_and_residual(n, *, keep_zero_capacity: bool = False
+                       ) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
     """
     Apply the membership rule to a network: returns (COPT units, residual
     electrical load MW per snapshot, energy weights).
@@ -235,6 +315,13 @@ def fleet_and_residual(n) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
     Electrical scope and slack exclusion use the same classifiers as the
     ENS cap; occurrence resolution the same fallback chain as preflight —
     the engine and the target can never disagree on who counts.
+
+    ``keep_zero_capacity`` is the superset-fleet flag (spec §1.2): see
+    ``_membership_walk``. Default ``False`` changes nothing anywhere; ``True``
+    admits occurrence-bearing generators at ``capacity_mw=0.0`` so that
+    positional CRN substreams stay stable across networks that differ only in
+    what the LP built. It is the coupling loop's flag — the COPT table, the MC
+    study endpoint and ELCC all take the default.
     """
     from services import period_utils as _period_utils
     from services.adequacy.metrics import electrical_columns
@@ -251,7 +338,8 @@ def fleet_and_residual(n) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
 
     units: list[CoptUnit] = []
     must_take = pd.Series(0.0, index=snapshots)
-    for g, cap, row in _membership_walk(n, elec_buses):
+    for g, cap, row in _membership_walk(n, elec_buses,
+                                        keep_zero_capacity=keep_zero_capacity):
         if row["source"] != "missing":
             units.append(CoptUnit(
                 name=str(g), capacity_mw=cap, q=float(row["rate"]),

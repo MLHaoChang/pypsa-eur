@@ -90,7 +90,7 @@ class StorageSpec:
     would let them behave as unlimited-power energy. Revisit with H2.
     """
     name: str
-    p_nom_mw: float          # p_nom_opt when finite & > 0, else p_nom
+    p_nom_mw: float          # copt.solved_capacity's rule (spec §1.1)
     e_nom_mwh: float         # max_hours × p_nom_mw
     eff_store: float         # efficiency_store, default 1.0
     eff_dispatch: float      # efficiency_dispatch, default 1.0
@@ -113,19 +113,19 @@ class MCInputs:
 
 
 def _storage_capacity(row) -> float:
-    """The CoptUnit capacity rule, applied to a store: the solved size when a
-    fresh solve exists, else the nameplate. An extendable battery the LP built
-    must be simulated at its BUILT size — stated for generators inside
-    ``fleet_and_residual``, and the new storage extraction must say it too
-    (plan [e2e] finding on the storage capacity basis)."""
-    for col in ("p_nom_opt", "p_nom"):
-        try:
-            v = float(row[col])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if math.isfinite(v) and v > 0:
-            return v
-    return 0.0
+    """The CoptUnit capacity rule, applied to a store — literally the same
+    function (``copt.solved_capacity``), not a parallel copy of it.
+
+    An extendable battery the LP BUILT must be simulated at its built size,
+    and one the LP DECLINED must not be simulated at all: the rule's zero
+    clause matters most here, because a phantom store carried full POWER and
+    full ENERGY (``max_hours × p_nom``) into the dispatch (spec §1.1, plan
+    finding [B2]). Sharing the function is what makes the generator side and
+    the storage side unable to drift.
+    """
+    from services.adequacy.copt import solved_capacity
+
+    return solved_capacity(row)
 
 
 def _efficiency(row, col: str) -> float:
@@ -172,10 +172,22 @@ def _period_blocks(snapshots) -> tuple:
     return tuple(blocks)
 
 
-def snapshot_inputs(n, *, vre_assets=()) -> MCInputs:
+def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False) -> MCInputs:
     """
     Freeze a network into MCInputs. Call this ONCE under the PyPSAService lock;
     everything downstream is lock-free (spec §1).
+
+    ``keep_zero_capacity`` is threaded straight through to
+    ``fleet_and_residual`` and applied to the storage extraction too
+    (coupling-loop spec §1.2): with ``True``, generators and storage rows that
+    clear every scope test except a positive capacity stay in the snapshot at
+    0.0 — the units draw their outage chains and contribute 0 MW, the stores
+    are dispatch-inert (``p_nom_mw = e_nom_mwh = 0.0``, so ``_dispatch``
+    gives and takes exactly nothing). What that buys is a fleet whose
+    MEMBERSHIP is invariant across solves that differ only in what was built,
+    which is what keeps ``sample_capacity``'s positional substreams — and
+    therefore common random numbers — alive across a coupling loop's iterates.
+    Default ``False`` changes nothing: the MC study endpoint and ELCC take it.
 
     Units/residual/weights come from ``fleet_and_residual`` unchanged — see the
     module docstring on the membership invariant. Storage rows are the new
@@ -189,7 +201,8 @@ def snapshot_inputs(n, *, vre_assets=()) -> MCInputs:
     from services.adequacy.metrics import electrical_columns, horizon_years
     from services.adequacy.slack import is_slack_carrier, is_slack_name
 
-    units, residual, weights = fleet_and_residual(n)
+    units, residual, weights = fleet_and_residual(
+        n, keep_zero_capacity=keep_zero_capacity)
     snapshots = n.snapshots
 
     # np.ascontiguousarray on .to_numpy(copy=True): no view onto a pandas block
@@ -210,7 +223,7 @@ def snapshot_inputs(n, *, vre_assets=()) -> MCInputs:
             if str(row.get("bus")) not in elec_buses:
                 continue
             p_nom = _storage_capacity(row)
-            if p_nom <= 0:
+            if p_nom <= 0 and not keep_zero_capacity:
                 continue
             try:
                 max_hours = float(row["max_hours"])

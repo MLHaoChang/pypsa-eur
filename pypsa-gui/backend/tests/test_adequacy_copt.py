@@ -150,6 +150,126 @@ def test_fleet_uses_carrier_defaults_where_asset_data_is_absent():
     assert coal.q == pytest.approx(CARRIER_DEFAULTS["coal"].rate)
 
 
+# ── solved-capacity semantics (coupling-loop spec §1.1) ───────────────────
+
+def _solved_network(p_nom_opt: float, *, extendable: bool = True) -> pypsa.Network:
+    """The two-unit fixture plus ONE candidate whose nameplate and solved size
+    disagree — the whole point of §1.1. ``thermal1``/``thermal2`` are the
+    untouched control group."""
+    n = _network()
+    n.add("Generator", "peaker", bus="b", carrier="gas", p_nom=100.0,
+          p_nom_extendable=extendable, p_nom_max=200.0,
+          outage_rate_value=0.08, outage_rate_basis="EFORd", mttr_hours=20.0)
+    n.generators.loc["peaker", "p_nom_opt"] = p_nom_opt
+    return n
+
+
+def test_an_extendable_asset_the_lp_declined_is_not_in_the_fleet():
+    """★ §1.1 (plan [B2]). ``p_nom_opt = 0.0`` on an EXTENDABLE row is the LP
+    saying "I declined to build this" — the capacity does not exist and the
+    COPT must not convolve it in. The old rule took the first finite value
+    ``> 0`` from ``(p_nom_opt, p_nom)``, so the zero fell through to the
+    pre-solve nameplate and the engine scored a plan containing 100 MW of
+    imaginary capacity (optimistic bias, silently).
+
+    BROKEN VARIANT (bite): restore the ``> 0`` fallthrough in
+    ``copt._firm_capacity`` (i.e. drop the extendable branch of
+    ``solved_capacity``) — ``peaker`` reappears in the fleet at 100 MW.
+    """
+    units = C.fleet_and_residual(_solved_network(0.0))[0]
+    assert sorted(u.name for u in units) == ["thermal1", "thermal2"], \
+        [(u.name, u.capacity_mw) for u in units]
+
+
+def test_a_built_extendable_asset_is_sized_by_the_solve_not_the_nameplate():
+    """★ §1.1, the other side of the same rule: a finite ``p_nom_opt`` is
+    AUTHORITATIVE, not merely a positivity-gated preference. 37.5 MW built
+    against a 100 MW nameplate must be simulated at 37.5.
+
+    BROKEN VARIANT (bite): the same ``> 0`` fallthrough — here it still
+    returns 37.5 (it is positive), so this clause alone does not bite; it is
+    the ``p_nom_opt = 0.0`` clause above that does. Kept as the pin that the
+    fix did not invert the rule.
+    """
+    units = C.fleet_and_residual(_solved_network(37.5))[0]
+    peaker = next(u for u in units if u.name == "peaker")
+    assert peaker.capacity_mw == pytest.approx(37.5)
+
+
+def test_a_non_extendable_row_keeps_the_nameplate_fallback():
+    """The ``p_nom`` fallback survives exactly where the plan says it must:
+    a NON-extendable row (PyPSA leaves ``p_nom_opt`` at its 0.0 default until
+    a solve writes it) must still be its nameplate, or every unsolved network
+    would report an empty fleet."""
+    units = C.fleet_and_residual(_solved_network(0.0, extendable=False))[0]
+    peaker = next(u for u in units if u.name == "peaker")
+    assert peaker.capacity_mw == pytest.approx(100.0)
+
+
+# ── superset fleet (coupling-loop spec §1.2) ──────────────────────────────
+
+def test_keep_zero_capacity_defaults_to_false_and_changes_nothing():
+    """§1.2's standing obligation: the flag is opt-in. The default call and
+    the explicit ``False`` call must produce the SAME fleet, or every existing
+    surface (COPT, MC study, ELCC, the pinned benchmark anchors) is at risk."""
+    n = _solved_network(0.0)
+    a = C.fleet_and_residual(n)
+    b = C.fleet_and_residual(n, keep_zero_capacity=False)
+    assert [(u.name, u.capacity_mw, u.q) for u in a[0]] == \
+           [(u.name, u.capacity_mw, u.q) for u in b[0]]
+    assert list(a[1].values) == pytest.approx(list(b[1].values))
+
+
+def test_keep_zero_capacity_keeps_the_declined_unit_in_the_fleet_at_zero():
+    """★ §1.2 (plan [B1]). ``sample_capacity`` keys each unit's RNG substream
+    to its POSITION in the fleet tuple, so a unit entering or leaving between
+    iterates shifts every downstream unit's whole outage path. With the flag
+    the occurrence-bearing generator that clears every scope test EXCEPT
+    ``cap > 0`` stays in the fleet at 0.0 MW — same names, same order,
+    stable positions.
+
+    BROKEN VARIANT (bite): revert to dropping ``cap <= 0`` under the flag
+    (``if cap <= 0: continue`` unconditionally in ``_membership_walk``) —
+    ``peaker`` vanishes and membership is no longer invariant.
+    """
+    units = C.fleet_and_residual(_solved_network(0.0), keep_zero_capacity=True)[0]
+    assert [u.name for u in units] == ["thermal1", "thermal2", "peaker"]
+    peaker = next(u for u in units if u.name == "peaker")
+    assert peaker.capacity_mw == 0.0
+    # It is a real unit, not a placeholder: its outage params came through, so
+    # it draws its chain normally and consumes its substream.
+    assert peaker.q == pytest.approx(0.08)
+    assert peaker.mttr_hours == pytest.approx(20.0)
+    # and the untouched units are byte-for-byte the ones the default produces
+    built = C.fleet_and_residual(_solved_network(80.0), keep_zero_capacity=True)[0]
+    assert [u.name for u in built] == [u.name for u in units]
+
+
+def test_a_zero_capacity_generator_is_never_a_vre_candidate():
+    """★ §1.2's trap. ``must_take_generators`` feeds the ELCC candidate
+    picker's ``kind="vre"`` list, so whatever it names the UI may ask for a
+    capacity credit on. Two clauses:
+
+    * the zero-capacity OCCURRENCE-BEARING ``peaker`` is a sampled unit, never
+      must-take, under EITHER flag value — that one is structural (the
+      ``source == "missing"`` branch excludes it whatever the walk yields);
+    * ``unbuilt_wind`` is the biteable one: an extendable must-take generator
+      the LP declined. Under the superset walk it would be offered as a VRE
+      candidate whose profile × 0 MW is the zero series — a capacity credit
+      priced on an asset that does not exist. The superset fleet is a SAMPLING
+      device; it must not leak into who the UI may ask about.
+
+    BROKEN VARIANT (bite): take the walk at ``keep_zero_capacity=True`` inside
+    ``must_take_generators`` — ``unbuilt_wind`` joins the candidate list.
+    """
+    for opt in (0.0, 80.0):
+        n = _solved_network(opt)
+        n.add("Generator", "unbuilt_wind", bus="b", carrier="wind", p_nom=40.0,
+              p_nom_extendable=True, p_nom_max=200.0)
+        n.generators.loc["unbuilt_wind", "p_nom_opt"] = 0.0
+        assert C.must_take_generators(n) == ["windfarm"]
+
+
 # ── outage-attribution criticality (Task 2) ───────────────────────────────
 
 def test_deconvolution_round_trips():

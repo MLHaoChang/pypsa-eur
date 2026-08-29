@@ -127,6 +127,125 @@ def test_the_study_leaves_the_foreground_on_the_users_own_config():
     assert sink.get("adequacy_report") is None
 
 
+# ── restore exception-safety (coupling-loop spec §1.3, plan [S8-b]) ───────
+
+def _fake_report() -> dict:
+    """The shape ``run_frontier_sweep`` reads out of a solved sink — enough of
+    it to build a point, no HiGHS involved. These tests are about the CONTROL
+    FLOW around the sweep, so a live solve would only make them slow and
+    make the injected failure harder to place exactly on point 2."""
+    return {
+        "engine": "lp_proxy",
+        "fidelity": "deterministic_scenario",
+        "target": {"binding": "system_cap",
+                   "system": {"cap_mwh": 10.0, "achieved_ens_mwh": 1.0,
+                              "achieved_shed_hours": 1.0}},
+        "cost": {"total_system_cost_eur": 42.0, "period_basis": "horizon"},
+    }
+
+
+def _patched_sweep(monkeypatch, *, fail_on=None, restore_raises=False):
+    """Instrument both halves of the sweep: the per-point solve and the
+    closing base re-solve. Returns the call-record dict."""
+    from services.adequacy import sweep as _sweep
+    from services import solver_service as _solver
+
+    calls = {"solves": 0, "restores": 0}
+
+    def fake_solve_once(cfg, network, lock, log_queue, sink):
+        calls["solves"] += 1
+        if fail_on is not None and calls["solves"] == fail_on:
+            raise RuntimeError("solver process died mid-sweep")
+        sink["_status"] = "ok"
+        sink["adequacy_report"] = _fake_report()
+
+    def fake_run_simulation(*args, **kwargs):
+        calls["restores"] += 1
+        if restore_raises:
+            raise RuntimeError("the closing base re-solve failed too")
+
+    monkeypatch.setattr(_sweep, "_solve_once", fake_solve_once)
+    monkeypatch.setattr(_solver, "run_simulation", fake_run_simulation)
+    return calls
+
+
+def test_an_exception_mid_sweep_still_attempts_the_base_restore(monkeypatch):
+    """★ §1.3 (plan [S8-b]). Without a try/finally, an exception on point 2
+    leaves the NETWORK on whichever ε was swept last while the foreground
+    results still describe the pre-study solve — the study silently rewrites
+    the user's plan and says nothing. The restore must be attempted on every
+    path, and the record that travels with the failure must state truthfully
+    whether it worked.
+
+    BROKEN VARIANT (bite): drop the ``try``/``finally`` (put the closing
+    re-solve back on the straight-line path after the loop) — ``restores``
+    stays 0 and no record reaches the caller at all.
+    """
+    calls = _patched_sweep(monkeypatch, fail_on=2)
+    n = _network()
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(solver_name="highs", voll=VOLL)
+    with pytest.raises(RuntimeError) as exc:
+        run_frontier_sweep(n, PyPSAService.get_lock(), cfg, [200.0, 50.0, 20.0],
+                           log_queue=queue.SimpleQueue())
+    assert calls["solves"] == 2, calls          # stopped where it blew up
+    assert calls["restores"] == 1, calls        # …and the restore still ran
+    rec = getattr(exc.value, "frontier_result", None)
+    assert rec is not None, "the failed record never reached the caller"
+    assert rec["base_restored"] is True         # the restore itself succeeded
+    assert len(rec["points"]) == 1              # point 1 survived the failure
+
+
+def test_a_failed_restore_is_reported_rather_than_claimed(monkeypatch):
+    """★ §1.3, second clause: ``base_restored`` is FALSE when the closing
+    re-solve itself failed. Hardcoding ``True`` asserts the foreground is the
+    user's own solve when it demonstrably is not.
+
+    BROKEN VARIANT (bite): return the literal ``"base_restored": True`` —
+    the assertion below reads True on a run whose restore raised.
+    """
+    calls = _patched_sweep(monkeypatch, restore_raises=True)
+    n = _network()
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(solver_name="highs", voll=VOLL)
+    res = run_frontier_sweep(n, PyPSAService.get_lock(), cfg, [200.0, 50.0],
+                             log_queue=queue.SimpleQueue())
+    assert calls["restores"] == 1
+    assert res["base_restored"] is False
+    # The sweep's own answer is not thrown away because the restore failed.
+    assert [p["status"] for p in res["points"]] == ["ok", "ok"]
+
+
+def test_a_clean_sweep_still_reports_a_successful_restore(monkeypatch):
+    """The truthful-on-all-paths clause in the ordinary direction."""
+    calls = _patched_sweep(monkeypatch)
+    n = _network()
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(solver_name="highs", voll=VOLL)
+    res = run_frontier_sweep(n, PyPSAService.get_lock(), cfg, [200.0, 50.0],
+                             log_queue=queue.SimpleQueue())
+    assert calls == {"solves": 2, "restores": 1}
+    assert res["base_restored"] is True
+
+
+def test_a_refused_config_never_touches_the_network(monkeypatch):
+    """Validation failures happen BEFORE any solve, so there is nothing to
+    restore — the try/finally must not fire a re-solve the user did not ask
+    for on a request that was rejected out of hand."""
+    calls = _patched_sweep(monkeypatch)
+    n = _network()
+    PyPSAService.set_network(n)
+    with pytest.raises(FrontierConfigError):
+        run_frontier_sweep(n, PyPSAService.get_lock(),
+                           SolverConfig(solver_name="highs", voll=VOLL), [],
+                           log_queue=queue.SimpleQueue())
+    with pytest.raises(FrontierConfigError):
+        run_frontier_sweep(n, PyPSAService.get_lock(),
+                           SolverConfig(solver_name="highs", voll=0.0), [50.0],
+                           log_queue=queue.SimpleQueue())
+    assert calls == {"solves": 0, "restores": 0}
+
+
 def test_targets_are_validated_rather_than_coerced():
     n = _network()
     with pytest.raises(FrontierConfigError):

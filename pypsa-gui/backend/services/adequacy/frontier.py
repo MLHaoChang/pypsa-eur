@@ -32,9 +32,12 @@ could drift.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import math
 import queue
 import threading
+
+logger = logging.getLogger(__name__)
 
 # A frontier point costs one full capacity-expansion solve. Twelve is already
 # a minute-scale study on a real network; beyond that the user wants a queued
@@ -117,6 +120,35 @@ def non_convexity_warning(network, cfg) -> str | None:
     )
 
 
+def _restore_base(network, lock, cfg, log_queue, final_state_update) -> bool:
+    """
+    The closing re-solve with the user's ORIGINAL config, through the real
+    state sink — the study must leave the foreground results exactly as the
+    user's own solve would, not on whichever target happened to be swept last.
+
+    Returns whether it actually succeeded. A restore that raises is REPORTED
+    (``base_restored=False``), not propagated: the sweep's own answer is still
+    a valid answer, and the one thing the caller must not be told is that the
+    foreground is the user's plan when it demonstrably is not.
+    """
+    from services.solver_service import run_simulation
+
+    final_sink: dict = {}
+    try:
+        run_simulation(
+            cfg, network, lock, threading.Event(),
+            log_queue if log_queue is not None else queue.SimpleQueue(),
+            state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
+        )
+    except Exception:                                         # noqa: BLE001
+        logger.exception(
+            "frontier: the closing base re-solve FAILED — the network is left "
+            "on the last swept target and the foreground results do not "
+            "describe the user's own config")
+        return False
+    return True
+
+
 def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
                        log_queue=None, final_state_update=None) -> dict:
     """
@@ -126,6 +158,18 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
     numbers — an unreachable target is a real and interesting answer ("no
     plan meets this standard"), not a gap in the chart to be interpolated
     over.
+
+    THE RESTORE IS EXCEPTION-SAFE (coupling-loop spec §1.3, plan [S8-b]).
+    The sweep MUTATES the network — every point re-solves it under a different
+    cap — so a mid-sweep exception without a ``finally`` leaves it on the last
+    swept ε while the foreground results still describe the pre-study solve:
+    the study silently rewrites the user's plan and says nothing. The closing
+    re-solve therefore runs on every path, and ``base_restored`` states what
+    actually happened rather than asserting success. When the sweep itself
+    raises, the partial record travels with the exception as
+    ``exc.frontier_result`` so the caller can report the restore truthfully
+    instead of guessing. Validation failures raise BEFORE the try — nothing
+    has been solved yet, so there is nothing to restore.
     """
     from services.adequacy.sweep import _solve_once
 
@@ -138,48 +182,53 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
 
     warning = non_convexity_warning(network, cfg)
     points: list[dict] = []
-    for e in eps:
-        sweep_cfg = dataclasses.replace(cfg, ens_cap_permyriad=e)
-        sink: dict = {}
-        _solve_once(sweep_cfg, network, lock, log_queue, sink)
-        status = sink.get("_status")
-        if status not in ("ok", "optimal"):
-            points.append({"target_permyriad": e, "status": sink.get("_condition")
-                           or status or "failed", "point": None})
-            continue
-        rep = sink.get("adequacy_report")
-        if not rep:
-            # A target was set and the solve succeeded, so the report is the
-            # contract. Its absence is a defect, not an empty result.
-            points.append({"target_permyriad": e, "status": "no_report", "point": None})
-            continue
-        sysblk = rep["target"]["system"]
-        points.append({
-            "target_permyriad": e,
-            "status": "ok",
-            "point": {
-                "cap_mwh": float(sysblk["cap_mwh"]),
-                "achieved_ens_mwh": float(sysblk["achieved_ens_mwh"]),
-                "achieved_shed_hours": float(sysblk["achieved_shed_hours"]),
-                "total_system_cost_eur": float(rep["cost"]["total_system_cost_eur"]),
-                "engine": rep["engine"],
-                "fidelity": rep["fidelity"],
-            },
-            "binding": rep["target"]["binding"],
-            "period_basis": rep["cost"]["period_basis"],
-        })
-
-    # Closing re-solve with the user's ORIGINAL config, through the real state
-    # sink — the study must leave the foreground results exactly as the user's
-    # own solve would, not on whichever target happened to be swept last.
-    from services.solver_service import run_simulation
-    final_sink: dict = {}
-    run_simulation(
-        cfg, network, lock, threading.Event(),
-        log_queue if log_queue is not None else queue.SimpleQueue(),
-        state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
-    )
-    return {"points": points, "warning": warning, "base_restored": True}
+    # Built up front and MUTATED in place so the record the exception path
+    # hands back and the record the happy path returns are the same object.
+    result = {"points": points, "warning": warning, "base_restored": False}
+    try:
+        for e in eps:
+            sweep_cfg = dataclasses.replace(cfg, ens_cap_permyriad=e)
+            sink: dict = {}
+            _solve_once(sweep_cfg, network, lock, log_queue, sink)
+            status = sink.get("_status")
+            if status not in ("ok", "optimal"):
+                points.append({"target_permyriad": e, "status": sink.get("_condition")
+                               or status or "failed", "point": None})
+                continue
+            rep = sink.get("adequacy_report")
+            if not rep:
+                # A target was set and the solve succeeded, so the report is
+                # the contract. Its absence is a defect, not an empty result.
+                points.append({"target_permyriad": e, "status": "no_report",
+                               "point": None})
+                continue
+            sysblk = rep["target"]["system"]
+            points.append({
+                "target_permyriad": e,
+                "status": "ok",
+                "point": {
+                    "cap_mwh": float(sysblk["cap_mwh"]),
+                    "achieved_ens_mwh": float(sysblk["achieved_ens_mwh"]),
+                    "achieved_shed_hours": float(sysblk["achieved_shed_hours"]),
+                    "total_system_cost_eur": float(rep["cost"]["total_system_cost_eur"]),
+                    "engine": rep["engine"],
+                    "fidelity": rep["fidelity"],
+                },
+                "binding": rep["target"]["binding"],
+                "period_basis": rep["cost"]["period_basis"],
+            })
+    except BaseException as exc:
+        # The record rides along so the caller can report base_restored
+        # truthfully; the `finally` below fills it in before this propagates.
+        try:
+            exc.frontier_result = result
+        except AttributeError:                                # pragma: no cover
+            pass
+        raise
+    finally:
+        result["base_restored"] = _restore_base(
+            network, lock, cfg, log_queue, final_state_update)
+    return result
 
 
 def knee_index(points: list[dict], voll: float) -> int | None:

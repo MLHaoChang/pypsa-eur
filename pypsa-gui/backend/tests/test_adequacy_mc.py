@@ -681,6 +681,156 @@ def test_snapshot_inputs_exports_requested_vre_profiles_only():
         [100.0, 100.0, 100.0])
 
 
+# ── solved-capacity semantics + the superset fleet (coupling-loop spec §1) ─
+
+def _capacity_network(*, store_opt: float, store_extendable: bool = True,
+                      peaker_opt: float = 80.0) -> pypsa.Network:
+    """Two networks that differ ONLY in what the LP built. ``peaker`` is FIRST
+    in generator order so that dropping it (the pre-§1.2 behaviour) shifts
+    ``base``'s position — and with it ``base``'s whole RNG substream."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=16, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "gas")
+    n.add("Carrier", "battery")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=100.0)
+    n.add("Generator", "peaker", bus="b", carrier="gas", p_nom=80.0,
+          p_nom_extendable=True, p_nom_max=200.0,
+          outage_rate_value=0.08, outage_rate_basis="EFORd", mttr_hours=20.0)
+    n.generators.loc["peaker", "p_nom_opt"] = peaker_opt
+    n.add("Generator", "base", bus="b", carrier="gas", p_nom=60.0,
+          outage_rate_value=0.1, outage_rate_basis="EFORd", mttr_hours=50.0)
+    n.add("StorageUnit", "cand_batt", bus="b", carrier="battery", p_nom=50.0,
+          p_nom_extendable=store_extendable, max_hours=4.0)
+    n.storage_units.loc["cand_batt", "p_nom_opt"] = store_opt
+    return n
+
+
+def test_an_extendable_store_the_lp_declined_is_absent_from_the_snapshot():
+    """★ §1.1 for storage (plan [B2]). The bug is worst here: an extendable
+    battery the LP DECLINED fell through to its nameplate and was simulated at
+    full POWER and full ENERGY (``max_hours × p_nom``) — 50 MW / 200 MWh of
+    storage that does not exist, in the optimistic direction.
+
+    BROKEN VARIANT (bite): restore the ``> 0`` fallthrough in
+    ``mc._storage_capacity`` (drop the extendable branch of
+    ``copt.solved_capacity``) — ``cand_batt`` reappears at 50 MW / 200 MWh.
+    """
+    inp = M.snapshot_inputs(_capacity_network(store_opt=0.0))
+    assert [s.name for s in inp.storage] == [], \
+        [(s.name, s.p_nom_mw, s.e_nom_mwh) for s in inp.storage]
+
+
+def test_a_built_extendable_store_is_sized_by_the_solve_not_the_nameplate():
+    """★ §1.1, the other side: a finite ``p_nom_opt`` is AUTHORITATIVE.
+    37.5 MW built against a 50 MW nameplate → 37.5 MW and 150 MWh."""
+    inp = M.snapshot_inputs(_capacity_network(store_opt=37.5))
+    batt = next(s for s in inp.storage if s.name == "cand_batt")
+    assert batt.p_nom_mw == pytest.approx(37.5)
+    assert batt.e_nom_mwh == pytest.approx(150.0)
+
+
+def test_a_non_extendable_store_keeps_the_nameplate_fallback():
+    """PyPSA leaves ``p_nom_opt`` at its 0.0 default until a solve writes it,
+    so a NON-extendable row must still be its nameplate — otherwise every
+    unsolved network reports no storage at all."""
+    inp = M.snapshot_inputs(
+        _capacity_network(store_opt=0.0, store_extendable=False))
+    batt = next(s for s in inp.storage if s.name == "cand_batt")
+    assert batt.p_nom_mw == pytest.approx(50.0)
+    assert batt.e_nom_mwh == pytest.approx(200.0)
+
+
+def test_keep_zero_capacity_defaults_to_false_across_the_whole_snapshot():
+    """§1.2's standing obligation: the flag is opt-in and the default call is
+    the explicit-``False`` call. Everything the MC reads is compared, not just
+    the unit names."""
+    n = _capacity_network(store_opt=0.0)
+    a = M.snapshot_inputs(n)
+    b = M.snapshot_inputs(n, keep_zero_capacity=False)
+    assert a.units == b.units
+    assert a.storage == b.storage
+    assert np.array_equal(a.residual, b.residual)
+    assert np.array_equal(a.weights, b.weights)
+    assert a.periods == b.periods
+
+
+def test_keep_zero_capacity_holds_the_crn_substreams_across_a_rebuilt_plan():
+    """★ §1.2 (plan [B1]) — the reason the flag exists.
+
+    ``sample_capacity`` keys each unit's RNG substream to its POSITION in the
+    fleet tuple. Building previously-unbuilt firm capacity is the canonical LP
+    response to a tighter cap, and under the old ``cap > 0`` membership test
+    that unit ENTERS the tuple mid-fleet, shifting every downstream unit's
+    entire outage path — common random numbers die exactly where the coupling
+    loop leans on them. With ``keep_zero_capacity=True`` the declined unit
+    stays at 0.0 MW, so membership (the NAME SET and its ORDER) is invariant
+    and an untouched unit's SAMPLED ARRAY is bit-identical across the two
+    plans. Arrays, not metrics: metrics would agree by luck long after the
+    streams had diverged.
+
+    BROKEN VARIANT (bite): revert to dropping ``cap <= 0`` under the flag —
+    ``declined.units`` loses ``peaker``, ``base`` slides to position 0 and
+    ``np.array_equal`` on its path fails.
+    """
+    H, draws, seed = 16, 64, 4
+    declined = M.snapshot_inputs(_capacity_network(store_opt=0.0, peaker_opt=0.0),
+                                 keep_zero_capacity=True)
+    built = M.snapshot_inputs(_capacity_network(store_opt=0.0, peaker_opt=80.0),
+                              keep_zero_capacity=True)
+
+    # Membership is invariant; only the capacity moved.
+    assert [u.name for u in declined.units] == ["peaker", "base"]
+    assert [u.name for u in built.units] == ["peaker", "base"]
+    assert declined.units[0].capacity_mw == 0.0
+    assert built.units[0].capacity_mw == pytest.approx(80.0)
+
+    # The untouched unit's own sampled availability array: isolate it by
+    # excluding every other slot (the sampler still GENERATES their paths, so
+    # this is the unit's real path, not a re-seeded one).
+    def _path(inputs, i):
+        others = set(range(len(inputs.units))) - {i}
+        return M.sample_capacity(inputs.units, H, draws, seed, exclude=others,
+                                 periods=inputs.periods)
+
+    path_declined = _path(declined, 1)
+    path_built = _path(built, 1)
+    assert np.array_equal(path_declined, path_built)
+    # …and the array is a real two-state path, not a degenerate all-up one.
+    assert set(np.unique(path_declined)) == {0.0, np.float32(60.0)}
+
+    # The contrast that makes the flag necessary: at the DEFAULT the two
+    # fleets do not even have the same members, and `base`'s path moves.
+    d0 = M.snapshot_inputs(_capacity_network(store_opt=0.0, peaker_opt=0.0))
+    b0 = M.snapshot_inputs(_capacity_network(store_opt=0.0, peaker_opt=80.0))
+    assert [u.name for u in d0.units] == ["base"]
+    assert [u.name for u in b0.units] == ["peaker", "base"]
+    assert not np.array_equal(_path(d0, 0), _path(b0, 1))
+
+
+def test_keep_zero_capacity_admits_a_declined_store_as_a_dispatch_inert_row():
+    """§1.2 for storage: the zero-capacity row joins ``inputs.storage`` at
+    ``p_nom_mw = 0.0`` and ``e_nom_mwh = 0.0`` — present so the fleet vector
+    (and the plan hash over it) keeps a stable shape, and provably unable to
+    move a single MWh."""
+    declined = M.snapshot_inputs(_capacity_network(store_opt=0.0),
+                                 keep_zero_capacity=True)
+    assert [s.name for s in declined.storage] == ["cand_batt"]
+    assert declined.storage[0].p_nom_mw == 0.0
+    assert declined.storage[0].e_nom_mwh == 0.0
+
+    # Dispatch-inert: identical LOLE/EUE with and without the phantom store.
+    units = (C.CoptUnit(name="g", capacity_mw=100.0, q=0.1, mttr_hours=10.0),)
+    res = np.array([120.0, 130.0, 90.0, 140.0])
+    empty = _inputs(res, units=units)
+    with_zero = _inputs(res, units=units, storage=declined.storage)
+    l0, e0 = M.simulate(empty, draws=32, seed=3)
+    l1, e1 = M.simulate(with_zero, draws=32, seed=3)
+    assert np.array_equal(l0, l1)
+    assert np.array_equal(e0, e1)
+
+
 def test_resolution_floor_shares_units_with_lole_hours():
     """The floor must live in the SAME units as ``lole_hours`` — per horizon,
     weight-aware. The original ``1/(n·nyears)`` was per-year against a
