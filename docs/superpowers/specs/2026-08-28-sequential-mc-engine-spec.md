@@ -1,6 +1,8 @@
 # Sequential MC Adequacy Engine — Implementation Spec (Phase 6)
 
-**Status:** binding contract for implementation workers. The companion plan
+**Status:** binding contract for implementation workers. **v1.1** — amendments from
+the engine-core worker's flagged deviations are marked **[v1.1]** and are binding on
+the ELCC/endpoint/panel workers. The companion plan
 (`plans/2026-08-28-fmea-phase6-sequential-mc.md`, v2.1) carries the WHY and the review
 record; this document carries the exact WHAT. Where they disagree, this spec wins and
 the disagreement is a finding to raise, not to silently resolve.
@@ -79,7 +81,11 @@ unit i is excluded**. A `q == 0` unit still occupies its slot (stream never adva
 that is fine: identity is positional, consumption is per-stream, so other units'
 draws are unaffected either way).
 
-`sample_capacity(units, H, draws, seed, *, exclude=frozenset()) -> np.ndarray (draws, H) float32`:
+`sample_capacity(units, H, draws, seed, *, exclude=frozenset(), periods=None) -> np.ndarray (draws, H) float32`:
+- **[v1.1]** `periods` (block boundaries) lives HERE, not in `simulate`: per-block
+  stationary restarts must happen on each unit's OWN substream, or per-period
+  re-initialisation would need per-block seeds and destroy the CRN bit-identity.
+  Default `None` = one block.
 - accumulator (draws, H) float32, zero-initialised;
 - for each unit i **in the full fleet**: generate its (draws, H) availability path
   from `children[i]` (state vector (draws,) bool, hour loop, initial state stationary);
@@ -113,12 +119,16 @@ Weights scale ACCOUNTING only; MTTR/sojourns/SoC evolve in modelled hours.
 ### 2.5 Aggregation & convergence
 
 `mc_adequacy(inputs, *, draws=500, seed=0, cov_target=0.05, max_draws=2000,
-batch=250) -> dict`:
+batch=250, **sim_kwargs) -> dict`  (**[v1.1]** `sim_kwargs` forwarded to the
+simulation — `exclude` / `extra_firm_mw` / `exclude_storage` / `initial_soc_frac` —
+so ELCC can aggregate without re-implementing the loop):
 - run batches until `CoV(mean LOLE) ≤ cov_target` or `max_draws`;
 - outputs: `lole_hours` (mean), `lole_ci` = (max(0, m−1.96·s/√n), m+1.96·s/√n),
   `eue_mwh` + `eue_ci` likewise, `by_period` (means per block), `n_samples`,
   `converged: bool`, `time_basis`/`horizon_years` via the shared helpers,
-  `resolution_floor_h = 1/(n_samples·nyears)` reported **always**, and
+  `resolution_floor_h = 1/(n_samples·nyears)` reported always — **[v1.1]** the KEY is
+  always present but the value is `None` when `nyears ≤ 0` (no finite floor exists;
+  `inf` does not serialise); the panel renders "unknown", never 0 — and
   `warning = MC_WARNING_V1`.
 - `MC_WARNING_V1` (module constant, one string, three clauses): single weather
   realisation; independent unit outages (no common-mode); DSR excluded as a resource.
@@ -129,6 +139,16 @@ batch=250) -> dict`:
 - kinds: `"generator"` (exclude its unit index), `"storage_unit"`
   (exclude from dispatch), `"vre"` (residual += `inputs.vre_profiles[name]`; KeyError
   → the route's 404).
+- **[v1.1] CRN requires FIXED draw counts for candidate evaluations.** The adaptive
+  batching in `mc_adequacy` is CRN-hostile: two Δ evaluations stopping at different
+  `n_samples` draw from different sets, and `LOLE_reduced(Δ)` stops being the monotone
+  step function the predicate assumes. Every candidate-Δ evaluation therefore runs
+  `mc_adequacy(draws=N, max_draws=N, seed=seed, ...)` (fixed N = the baseline's final
+  `n_samples`); only the baseline may use the adaptive path. Batch seeds derive from
+  `seed` alone, so fixed-N runs are fully CRN-coupled.
+- **[v1.1] `kind="vre"` is REJECTED for any name present in `inputs.units`** (an
+  occurrence-bearing generator was never netted into the residual; `residual +=
+  profile` would double-count it). 422 at the route with a message naming the unit.
 - baseline = `mc_adequacy` on full inputs at (seed, draws). If
   `baseline lole ≤ resolution floor` → `{"status": "unidentifiable", "reason": ...}`.
 - Predicate: **smallest Δ with LOLE_reduced(Δ) ≤ LOLE_baseline** (LOLE_reduced is a
@@ -201,7 +221,8 @@ named broken variant (bite check), with the variant documented in the test docst
 ## 7. Benchmarks (`tests/test_adequacy_benchmarks.py`, `@pytest.mark.slow`)
 
 - Fixtures under `tests/benchmark_data/`: `rts79_units.csv` (32 units: name, MW, FOR,
-  MTTR), `rts79_load_model.py` (the 1979 percentage tables + reconstruction:
+  MTTR), `rts79_load.py` (**[v1.1]** delivered name; the plan's `rts79_load_model.py`
+  is superseded) (the 1979 percentage tables + reconstruction:
   Monday-start, week 1 = winter, 8736 h) — provenance header: source, retrieval date,
   second-source cross-check. `basis="FOR"` pinned. RBTS likewise.
 - Order: COPT vs published FIRST; then MC vs published: inside 95% CI AND half-width
