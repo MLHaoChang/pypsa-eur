@@ -280,6 +280,38 @@ iterate), so it is now diagnosed by name, with the honest next action: an
 energy cap has no leverage on outage-driven risk; firm-capacity headroom does.
 S17.3 pins the copy live.
 
+### S18 — The firm-capacity reserve margin (area 18)
+
+Phase 8's live surface. The constraint has 55 unit tests, the
+preflight/report/endpoint 31 more, and three self-calibrated acceptance tests
+prove the lever moves MC-LOLE (12.41 h → 1.32 h with separated intervals) — but
+none of them crosses HTTP. This suite drives what a user touches: the config
+field at the API boundary, the preflight refusals that replace an
+unimplementable "let the LP go infeasible", and the derating table that makes
+the phase's proxies inspectable.
+
+**The margin is derived from the fixture, never chosen** — the same discipline
+the Phase-8 review forced onto the acceptance tests, for the same reason: a
+value inside the largest-unit step buys real megawatts and moves LOLE not at
+all.
+
+| Check | What it proves |
+| --- | --- |
+| S18.1 | The margin is bounded **at the API boundary** — `-1` and `600 %` refused `422`, `0` / `None` / `0.15` accepted. The Phase-1 QA round found four reliability fields accepted and then silently discarded; a margin that never reaches the solver is indistinguishable from no margin at all |
+| S18.2 | An unreachable margin is refused **before the solve**, as an error naming both numbers. This is the check that replaces "let the LP go infeasible", which was never implementable: linopy raises on a constant constraint and `Generator-p_nom` does not exist when nothing extendable is active |
+| S18.3 | At the derived `m*` the constraint **binds and builds**: 50 MW of peaker the LP had no economic reason to build, `required == firm == 223.5 MW` against a 150 MW peak, the `horizon_wide` label true (one `p_nom` variable, so one standard at the maximum peak), and **every credited asset carries its `basis` and `source`** — a derating proxy nobody can trace is a number nobody can check |
+| S18.4 | `met` and `binding` are different questions: at a margin the fixed fleet already satisfies, the standard is met and **not** binding, and nothing is built. Conflating them would credit the margin for capacity that was always there |
+| S18.5 | The margin does not leak into the contingency sweep. Without the strip, `freeze_capacities` pins the peaker and every contingency that removes derated capacity violates the standard — so the sweep dies infeasible and every severity would read as the standard rather than the outage |
+
+**What the first live run found:** nothing in the product — but S18.2 was
+initially **vacuous in a way worth recording**. It set a 900 % margin, which the
+schema correctly refuses (`le=5`), so the config never took and the preflight
+had nothing to complain about while the check reported a clean pass. It now
+uses 400 % (unreachable against a 651 MW maximum, inside the bound) **and
+asserts the config write returned 200**, so it cannot pass against a margin
+that was never set. The lesson generalises: a live check that configures
+something must assert the configuration took.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

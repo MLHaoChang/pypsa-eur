@@ -2681,6 +2681,209 @@ def suite_S17():
     restore()
 
 
+def suite_S18():
+    """
+    The firm-capacity reserve margin, live (Phase 8 spec §3/§4/§6).
+
+    The constraint has 55 unit tests, the preflight/report/endpoint 31 more,
+    and three self-calibrated acceptance tests prove the lever moves MC-LOLE.
+    None of them crosses HTTP. This suite drives the surfaces a user actually
+    touches: the config field at the API boundary, the preflight refusals that
+    replace an unimplementable "let the LP go infeasible", and the derating
+    table that makes the phase's proxies inspectable.
+
+    The margin is DERIVED from the fixture, never chosen — the Phase-8 review
+    killed a hardcoded margin by arithmetic (a value inside the largest-unit
+    step buys real megawatts and moves LOLE not at all). Same discipline here.
+    """
+    print("\nS18 - The firm-capacity reserve margin (area 18)")
+    name = "qa_e2e_prm"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    # Two 100 MW firm units (EFORd 0.12 -> derate 0.88) covering a 150 MW load,
+    # plus an expensive extendable peaker (EFORd 0.05) the LP has no economic
+    # reason to build. The margin is the only thing that can put it in.
+    UNIT, LOAD, EFORD_U, EFORD_P = 100.0, 150.0, 0.12, 0.05
+    firm_fixed = 2 * UNIT * (1 - EFORD_U)                  # 176.0
+    needed = LOAD + UNIT - 2 * UNIT                        # 50.0 (one-out gap)
+    m_star = (firm_fixed + needed * (1 - EFORD_P)) / LOAD - 1.0   # ~0.49
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in range(1, 6):
+            skip(f"S18.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-02 23:00", "freq": "h"})[0])
+    for g in ("unit_1", "unit_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": UNIT, "marginal_cost": 10.0,
+                                "outage_rate_value": EFORD_U,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 500.0, "capital_cost": 5_000_000.0,
+                            "marginal_cost": 500.0,
+                            "outage_rate_value": EFORD_P,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 12.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": LOAD})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+
+    # ── S18.1 — the config field is bounded AT THE BOUNDARY. The Phase-1 QA
+    # round found four reliability fields accepted then silently discarded;
+    # a margin of -1 or 600% must never reach the solver.
+    bad = []
+    for label, val in (("-1", -1.0), ("6", 6.0)):
+        if put_cfg(reserve_margin=val)[0] != 422:
+            bad.append(label)
+    refused = [label for label, val in (("0", 0.0), ("None", None),
+                                        ("0.15", 0.15))
+               if put_cfg(reserve_margin=val)[0] != 200]
+    record("S18.1", not bad_build and not bad and not refused,
+           f"build non-2xx={bad_build or 'none'}; nonsense accepted="
+           f"{bad or 'none'}; meaningful refused={refused or 'none'}")
+
+    # ── S18.2 — preflight REFUSES what the LP cannot express. Linopy raises on
+    # a constant constraint and Generator-p_nom does not exist when nothing
+    # extendable is active, so "let it go infeasible" was never implementable:
+    # an unreachable margin has to be caught before the solve, and it has to
+    # name both numbers rather than say "check your capacity bounds".
+    # 400%: unreachable (max firm = 176 + 500x0.95 = 651 MW against a 750 MW
+    # requirement) but INSIDE the schema's le=5 bound. A first draft used 900%,
+    # which the boundary correctly refused — so the config never took and the
+    # check passed against a margin that was never set. The set is asserted
+    # here precisely so this cannot go vacuous again.
+    st_set, _ = put_cfg(reserve_margin=4.0)
+    st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+    issues = (pf or {}).get("issues") or []
+    codes = {i.get("code") for i in issues if isinstance(i, dict)}
+    unreachable = [i for i in issues
+                   if isinstance(i, dict)
+                   and i.get("code") == "reserve_margin_unreachable"]
+    msg = str(unreachable[0].get("message", "")) if unreachable else ""
+    # The message must carry the arithmetic, not just a verdict.
+    has_numbers = sum(ch.isdigit() for ch in msg) >= 4
+    record("S18.2",
+           st_set == 200 and st_pf == 200 and bool(unreachable)
+           and unreachable[0].get("severity") == "error" and has_numbers,
+           f"cfg-set->{st_set}; preflight->{st_pf}; "
+           f"unreachable-error={bool(unreachable)} "
+           f"severity={(unreachable[0].get('severity') if unreachable else None)}; "
+           f"names-both-numbers={has_numbers}; codes={sorted(codes)[:6]}")
+
+    # ── S18.3 — the derived margin BINDS, and the endpoint reports it.
+    # m* is computed from the fixture (see the header): the smallest margin
+    # whose plan survives losing the largest unit.
+    put_cfg(reserve_margin=m_star)
+    http("/api/simulation/run", method="POST")
+    solved = poll_solve()
+    st_rm, rm = http("/api/results/reserve_margin")
+    rows = (rm or {}).get("by_period") or []
+    row = rows[0] if rows else {}
+    assets = {a.get("name"): a for a in ((rm or {}).get("assets") or [])}
+    peaker = assets.get("peaker") or {}
+    built_mw = peaker.get("capacity_mw")
+    shape_ok = (st_rm == 200 and rows
+                and {"peak_mw", "required_mw", "firm_mw", "met", "binding"}
+                <= set(row)
+                and (rm or {}).get("horizon_wide") is True
+                and row.get("met") is True)
+    # Every credited asset must carry its provenance — the proxies are only
+    # defensible if a user can see which number came from a class average.
+    prov_ok = all(a.get("basis") and a.get("source") for a in assets.values())
+    record("S18.3",
+           isinstance(solved, dict) and solved.get("condition") == "optimal"
+           and shape_ok and prov_ok
+           and built_mw is not None and float(built_mw) > 1.0,
+           f"m*={m_star:.4f} solved={(solved or {}).get('condition')}; "
+           f"/results/reserve_margin->{st_rm} peak={row.get('peak_mw')} "
+           f"required={row.get('required_mw')} firm={row.get('firm_mw')} "
+           f"met={row.get('met')} binding={row.get('binding')}; peaker built="
+           f"{built_mw} MW; every asset carries basis+source={prov_ok}")
+
+    # ── S18.4 — met and BINDING are different questions. At a margin the fixed
+    # fleet already satisfies, the standard is met and NOT binding; conflating
+    # them would credit the margin for capacity that was always there.
+    put_cfg(reserve_margin=0.05)         # 157.5 MW required vs 176 MW fixed
+    http("/api/simulation/run", method="POST")
+    solved2 = poll_solve()
+    _, rm2 = http("/api/results/reserve_margin")
+    row2 = ((rm2 or {}).get("by_period") or [{}])[0]
+    pk2 = {a.get("name"): a for a in ((rm2 or {}).get("assets") or [])}
+    built2 = (pk2.get("peaker") or {}).get("capacity_mw")
+    record("S18.4",
+           isinstance(solved2, dict) and solved2.get("condition") == "optimal"
+           and row2.get("met") is True and row2.get("binding") is False
+           and (built2 is None or float(built2) < 1.0),
+           f"slack margin: met={row2.get('met')} binding={row2.get('binding')} "
+           f"(want met+not-binding); peaker built={built2} (want ~0)")
+
+    # ── S18.5 — the margin does not leak into the contingency sweep. Without
+    # the strip, freeze_capacities pins the peaker and every contingency that
+    # removes derated capacity violates the standard, so the whole sweep dies
+    # infeasible and every severity reads as the standard rather than the
+    # outage.
+    put_cfg(reserve_margin=m_star, voll=3000.0)
+    st_sw, _ = http("/api/results/fmea_sweep", method="POST",
+                    body={"scenarios": [{"id": "cold", "kind": "parametric",
+                                         "frequency_per_year": 1.0,
+                                         "electrical_load_multiplier": 1.2}]})
+    sweep = None
+    for _ in range(150):
+        st_s, s = http("/api/results/fmea_sweep")
+        if st_s == 200 and isinstance(s, dict) and s.get("status") != "running":
+            sweep = s
+            break
+        time.sleep(2)
+    srows = (sweep or {}).get("rows") or []
+    record("S18.5",
+           st_sw == 200 and sweep is not None
+           and sweep.get("status") == "done" and not sweep.get("error")
+           and bool(srows),
+           f"sweep with a margin set -> start {st_sw} status="
+           f"{(sweep or {}).get('status')} rows={len(srows)} err="
+           f"{str((sweep or {}).get('error'))[:60]}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     global BACKEND
@@ -2746,6 +2949,8 @@ def main() -> int:
         suite_S16()
     if run("S17"):
         suite_S17()
+    if run("S18"):
+        suite_S18()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
