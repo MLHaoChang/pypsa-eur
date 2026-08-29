@@ -2685,18 +2685,28 @@ def suite_S17():
     # other. An ENS cap is a CEILING, so the rounded-up number is a strictly
     # LOOSER standard than the plan the study certified.
     from services.adequacy.lever_text import format_lever_value
-    notes, agreed = [], True
+    notes, agreed, seen = [], True, 0
     for payload, label in ((res_ab, "aborted run"), (res_f, "restore=final")):
         star = (payload or {}).get("eps_star")
         verdict = (payload or {}).get("verdict") or ""
         if (payload or {}).get("status") != "met" or star is None:
             notes.append(f"{label}: not met, nothing to name")
             continue
+        seen += 1
         want = f"ens_cap_permyriad = {format_lever_value(float(star))}"
         hit = want in verdict
         agreed = agreed and hit
         notes.append(f"{label}: eps*={star!r} -> {want!r} present={hit}")
-    record("S17.6", agreed, "; ".join(notes))
+    if seen == 0:
+        # SKIP, not PASS. This suite's fixture is the one where the cap is
+        # UNREACHABLE by construction (that is Phase 9's whole claim), so no
+        # run here certifies a cap and there is no number to check. Recording
+        # a PASS would read as live coverage this suite cannot provide; the
+        # bitten unit tests and S19.6 carry it.
+        skip("S17.6", "no run reached `met`, so no cap was certified to name: "
+             + "; ".join(notes))
+    else:
+        record("S17.6", agreed, "; ".join(notes))
 
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
     restore()
@@ -3136,7 +3146,10 @@ def suite_S19():
         want = f"reserve_margin = {format_lever_value(float(star))}"
         hit = want in verdict
         agreed = agreed and hit
-        notes.append(f"{label}: m*={star!r} -> {want!r} present={hit}")
+        notes.append(f"{label}: m*={star!r} -> {want!r} present={hit}"
+                     + ("" if hit else " | said=" + repr(
+                         verdict.split("reserve_margin = ")[1][:30]
+                         if "reserve_margin = " in verdict else "ABSENT")))
     record("S19.6", agreed, "; ".join(notes))
 
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")

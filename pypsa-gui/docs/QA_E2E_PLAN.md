@@ -264,7 +264,7 @@ target risks a fixture that meets immediately and a suite that proves nothing.
 | S17.3 | The loop runs to a verdict **and the mesh holds while it runs**: a foreground solve, an MC study and a second loop are all refused `409` *during* the run — the Phase-7 hole fix, provable only here, because a solve interleaving between iterates rewrites the very `p_nom_opt` the next evaluation reads. Payload contract checked (`study` key, no top-level engine, verdict sentence, `resolution_floor_h`, warning clauses, `base_restored`, no leaked thread), every iterate row carries its full key set, and a `met` verdict must be **verified** — the final iterate's own evaluation, never an extrapolation between steps |
 | S17.4 | Abort: a study whose wall-clock promise is "minutes to tens of minutes" must be cancellable, and the closing restore must still run so the network is not left on a swept cap. (The abort is posted *immediately*, not after a sleep: the record is published under the same lock hold that starts the thread, and this loop is fast enough that any sleep long enough to "let it get going" is long enough to let it finish — a first attempt aborted a study that had already terminated) |
 | S17.5 | `restore="final"` leaves the user **holding** the certified plan (`ens_cap_permyriad == ε*` read back from the config), and on a non-met verdict falls back to base rather than applying a cap no verdict certified |
-| S17.6 | the verdict names the SAME number the panel's restore explainer tells the user to type — one certified cap, one spelling |
+| S17.6 | the verdict names the SAME number the panel's restore explainer tells the user to type — one certified cap, one spelling. **SKIPs on this fixture**, and says so: S17's network is the one where the cap is unreachable by construction, so no run here certifies a cap and there is no number to check. Recording a PASS would read as live coverage this suite cannot provide; the bitten unit tests and S19.6 carry it |
 
 **What the first live run found.** The fixture returns `unreachable`, and
 correctly: `ens_mwh = 0` and `binding = "voll"` at *every* cap, because 200 MW
@@ -329,6 +329,22 @@ never bound", and Phase 8 built the lever that moves the metric there.
 | S19.4 | The payload contract, and the one thing that must never leak — the controller's internal reciprocal. Every number on the wire is a margin; every `cap_mwh` is `None` (spec §2.2); `m*` lies inside the schema bound the loop must respect |
 | S19.5 | `restore="final"` writes the **margin's** config field, never the cap's, and a user's own ENS cap survives the study untouched |
 | S19.6 | the verdict names the SAME number the panel's restore explainer tells the user to type — one certified margin, one spelling |
+
+**What S19.6 found on its first run — and the near-miss that nearly hid it.**
+The check failed live while passing every unit test: the verdict said
+`reserve_margin = 0.6716` where the panel said `0.671600430725`. The cause was
+not the code — it was the **server**. A `uvicorn` started for this run had
+failed to bind (`address already in use`) behind a `nohup ... &`, and an older
+process from a previous session answered every request. Every "live" result in
+that run described code from before the fix.
+
+Two lessons, both cheap. **Starting the backend is not the same as answering
+on 8000**: after `uvicorn` starts, grep its log for `Application startup
+complete` AND for `address already in use` before running a single suite — a
+`curl /docs` returning 200 proves only that *some* process is listening. And a
+live check that cannot distinguish "passed" from "nothing to check" must
+**SKIP** rather than PASS, which is why S17.6 does.
+
 
 **What the first live run found — a real defect in the code it was testing.**
 S19.3 reported `unreachable` from the margin loop too. The cause: the
