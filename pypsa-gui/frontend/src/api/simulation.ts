@@ -168,6 +168,75 @@ export interface LcohPeriodEntry {
   lcoh_eur_per_kg_h2: number | null
 }
 
+// ── GET/POST /results/mc — the sequential-MC study (adequacy spec §4/§5) ────
+//
+// A SIBLING payload, deliberately not folded into AdequacyReport: the MC is an
+// engine-local study like the COPT, so its keys mirror
+// `services/adequacy/mc.py`'s metrics dict and `services/adequacy/elcc.py`'s
+// nine-key row VERBATIM. Renaming anything here would fork the contract.
+
+/** §2.5 metrics dict. Both intervals arrive as 2-element lists over JSON. */
+export interface McMetrics {
+  lole_hours: number
+  /** [lo, hi] — an INTERVAL, not a half-width. May be asymmetric. */
+  lole_ci: [number, number] | null
+  eue_mwh: number
+  eue_ci: [number, number] | null
+  by_period?: Record<string, { lole_hours: number; eue_mwh: number }>
+  n_samples: number
+  converged?: boolean
+  /** "hours_per_year" only when the modelled horizon really is a year. */
+  time_basis: string
+  horizon_years?: number | null
+  /**
+   * Smallest NONZERO LOLE this many draws can resolve, in the SAME units as
+   * `lole_hours`. `null` when the horizon carries no positive weight — a
+   * horizon of unknown length cannot state a floor, and saying so beats
+   * printing an infinity.
+   */
+  resolution_floor_h: number | null
+  warning?: string
+}
+
+/** One ELCC row — nine keys, always all present (spec §3, [v1.2]). */
+export interface ElccRow {
+  kind: string
+  name: string
+  nameplate_mw: number
+  /** null on every non-"ok" status; `reason` carries the refusal instead. */
+  elcc_mw: number | null
+  elcc_share: number | null
+  status: 'ok' | 'unidentifiable' | 'not_bracketed'
+  /** null iff status === "ok". */
+  reason: string | null
+  baseline_lole_h: number
+  baseline_lole_ci: [number, number]
+}
+
+export interface McResult {
+  engine: string
+  fidelity: string
+  metrics: McMetrics
+  elcc: ElccRow[]
+  /** MC_WARNING_V1, shipped with every payload — render it, never inline it. */
+  warning: string
+}
+
+export interface McStatus {
+  status: 'running' | 'done' | 'failed'
+  result: McResult | null
+  error: string | null
+  started_at?: number
+  finished_at?: number
+}
+
+export interface McRequestBody {
+  draws?: number
+  seed?: number
+  cov_target?: number
+  elcc_assets?: Array<{ kind: string; name: string }>
+}
+
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
@@ -398,6 +467,19 @@ export const resultsApi = {
   startFrontier: (targets_permyriad?: number[]) =>
     client.post('/results/frontier',
       targets_permyriad ? { targets_permyriad } : {}).then(r => r.data),
+  // Sequential Monte-Carlo adequacy study, optionally with an ELCC table
+  // (Phase 6; 204 = no study run this session). Shape: `McStatus` below.
+  getMc: () => client.get('/results/mc')
+    .then(r => (r.status === 204 ? null : r.data as McStatus)),
+  // Starts the sampler in a backend worker thread and returns immediately;
+  // poll getMc for progress. A bare POST is the useful default — every field
+  // has an engine-side default this client must not fork, so `{}` is sent
+  // rather than a hand-rolled set of frontend defaults. Rejects with the
+  // axios error on 409 (a solve/sweep/frontier/MC is running); the detail
+  // string NAMES the blocker and the panel renders it (see McPanel's
+  // `blockerMessage`).
+  startMc: (body?: McRequestBody) =>
+    client.post('/results/mc', body ?? {}).then(r => r.data),
   // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
   // overlays, persisted per project. Computed rows come from getCopt and
   // merge client-side (pages/results/fmea.ts).

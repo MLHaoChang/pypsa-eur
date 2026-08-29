@@ -8,7 +8,7 @@ import LostLoadTab from './LostLoadTab'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
-  return { ...actual, resultsApi: { ...actual.resultsApi, getLostLoad: vi.fn(), getAdequacy: vi.fn(), getCopt: vi.fn() } }
+  return { ...actual, resultsApi: { ...actual.resultsApi, getLostLoad: vi.fn(), getAdequacy: vi.fn(), getCopt: vi.fn(), getMc: vi.fn(), startMc: vi.fn() } }
 })
 
 vi.mock('../../api/network', async (importOriginal) => {
@@ -49,6 +49,9 @@ beforeEach(() => {
   // (no report) case so they behave exactly as before.
   vi.mocked(resultsApi.getAdequacy).mockReset().mockResolvedValue(null as never)
   vi.mocked(resultsApi.getCopt).mockReset().mockResolvedValue(null as never)
+  // Same 204 default for the sequential-MC surface: no study run this session.
+  vi.mocked(resultsApi.getMc).mockReset().mockResolvedValue(null as never)
+  vi.mocked(resultsApi.startMc).mockReset().mockResolvedValue({ status: 'running' } as never)
 })
 
 function renderPage() {
@@ -121,4 +124,29 @@ it('still shows the target and COPT chips when the plan served all demand', asyn
   expect(await screen.findByText(/COPT screening/i)).toBeTruthy()
   // and it must NOT tell the user to set a VoLL that is already set
   expect(screen.queryByText(/Set a VOLL/i)).toBeNull()
+})
+
+// ── ★ The MC panel is mounted in BOTH branches of this tab.
+//
+// The zero-lost-load early return is precisely where a reliable system lands,
+// and where the MC's CI-bearing zero and the ELCC refusals are the whole
+// story — the same Phase-QA chips lesson the adequacy/COPT chips learned the
+// hard way, applied in advance. Mounting only in the data branch would hide
+// the study exactly when it matters most.
+//
+// ★ Bite variant: delete `<McPanel />` from the early (no-lost-load) return in
+// LostLoadTab.tsx — the first of these two tests must go red.
+it('mounts the MC panel in the no-lost-load branch', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[0]],
+    total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 4000, bus_carriers: {},
+  } as never)
+  renderPage()
+  expect(await screen.findByTestId('mc-panel')).toBeTruthy()
+})
+
+it('mounts the MC panel in the data branch too', async () => {
+  // default beforeEach payload has 424.24 MWh of lost load → data branch
+  renderPage()
+  expect(await screen.findByTestId('mc-panel')).toBeTruthy()
 })
