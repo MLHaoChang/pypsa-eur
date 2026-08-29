@@ -194,3 +194,32 @@ first, bite table, no commits by workers.
    two-state unit (raises; `attribute_criticality` falls back to a rebuild — safe
    but wasteful). No caller routes a superset fleet there today; the loop's
    `evaluate` is MC-only. Do not route one without revisiting.
+
+### v1.2 — Wave B adjudications (ratified by the master)
+
+1. **The MC-skip on a plateau uses a duck-typed `evaluate.plan_hash` attribute.**
+   §2's binding signature (`evaluate() -> (hash, metrics)`) cannot yield a hash
+   before the MC runs, so a genuine skip needs the hash separately: when the
+   callable carries a `plan_hash` attribute the controller probes it first and
+   skips the MC on a match; without it, the MC runs and the STORED metrics are
+   reused on a hash match, with a logged cross-check that turns the CRN invariant
+   into a self-report. **The route MUST implement `evaluate.plan_hash`** (the hash
+   comes from the snapshot, which is cheap without sampling) — §3 is amended
+   accordingly.
+2. **`budget_exhausted` means "never met".** Refinement's hash-equality stop
+   provably cannot fire on a well-behaved LP (a looser cap reproduces the met plan
+   only when that plan is unconstrained-optimal, in which case the looser endpoint
+   would itself have met), so refinement runs to the budget on essentially every
+   real network; the literal reading would stamp `budget_exhausted` on nearly
+   every successful study. A verified met iterate ⇒ verdict `met` (final valid,
+   possibly un-refined — [S5]/[N8]: a broken bracket degrades optimality, never
+   validity). `budget_exhausted` is reserved for runs with `final: None`.
+3. **`resolution_floor_h`** is not in the iterate `mc` block; the ROUTE lifts it
+   from the final evaluation's metrics into the study payload (top level,
+   `resolution_floor_h`) so the panel can render `< floor`.
+4. Defensive extensions ratified: `_is_infeasible` also reads `status`;
+   raising `solve_at`/`evaluate`/unreadable metrics → recorded iterate + verdict
+   `failed` (never an exception out of the worker); raising `on_iteration` logged,
+   not fatal; `max_solves` clamped to `MAX_LOOP_SOLVES`, `eps0 ≤ 0` clamped to the
+   floor; a non-infeasible failure at the ε backstop reports `budget_exhausted`,
+   never `unreachable`.
