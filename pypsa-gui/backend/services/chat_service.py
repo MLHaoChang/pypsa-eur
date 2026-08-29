@@ -2466,7 +2466,13 @@ def _build_system_prompt(
     ]
     if live_meta:
         parts.append(live_meta)
-    return "\n\n".join(parts)
+    # Drop empties before joining. `_profile_awareness_block()` returns "" when
+    # the profile store is unreadable or its active id does not resolve, and an
+    # unfiltered "" becomes a doubled blank line in the assembled prompt for
+    # every user whenever the store hiccups — a silent, store-state-dependent
+    # change to the prompt everyone gets. Filtering keeps the prompt identical
+    # to the no-block case instead.
+    return "\n\n".join(p for p in parts if p)
 
 
 def _profile_awareness_block() -> str:
@@ -2485,6 +2491,17 @@ def _profile_awareness_block() -> str:
     LABELS ONLY — no profile ids, no base_urls, no identifiers. The label is
     admin-typed and already displayed in the UI; the rest would leak
     configuration into the model's context and, from there, into transcripts.
+
+    STATED TRUST ASSUMPTION, because "labels only" is not leak-proof on its
+    own: a label is free text with no content validation, so a super-admin
+    who types an email or an internal hostname into one has put it here. This
+    block widens that label's audience — before Task 10 it was shown only to
+    admins in Settings; now it also reaches every chatting user's model
+    context and the provider's servers. That is accepted deliberately (the
+    label is the only human-meaningful way to say WHICH model is active, and
+    a synthetic name would make the answer useless), not overlooked. If label
+    content ever needs constraining, constrain it at the PUT route where it
+    is authored, not here where it is read.
     """
     try:
         from services import llm_config

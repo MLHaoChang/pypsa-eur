@@ -1215,6 +1215,7 @@ def _drive_destructive_turn(session, fake, message):
     records a decision via `session.record_decision(token, ...)`, then
     `done_event.wait(...)` + `thread.join()`.
     """
+    import contextvars
     import threading
     import time as _t
 
@@ -1226,7 +1227,18 @@ def _drive_destructive_turn(session, fake, message):
             streamed.append(event)
         done.set()
 
-    thread = threading.Thread(target=_run)
+    # Carry the acting-user contextvar across the thread boundary.
+    #
+    # conftest's autouse `_acting_user` fixture sets `_ACTING_USER_ID` on the
+    # PYTEST thread. A manually-created `threading.Thread` starts with a FRESH
+    # context, so without this copy any tool that calls `_acting()` sees no
+    # acting user and fails closed with 401 `no_acting_user` — which is what
+    # `set_active_profile`'s authorization check does, correctly. Production
+    # has the same hazard and solves it the same way: `chat_service`'s tool
+    # dispatch does `contextvars.copy_context()` before submitting to its
+    # executor (see the comment there naming the identical failure).
+    _ctx = contextvars.copy_context()
+    thread = threading.Thread(target=lambda: _ctx.run(_run))
     thread.start()
 
     deadline = _t.monotonic() + 3.0
@@ -1241,8 +1253,84 @@ def _drive_destructive_turn(session, fake, message):
     return thread, streamed, done, token
 
 
-def test_set_active_profile_approve_switches_active(appdata, monkeypatch):
-    """Approve -> `llm_config.resolve_active().id` changes to the target."""
+@pytest.fixture()
+def acting_super_admin(seeded_identity, _auth_db):
+    """
+    Promote the seeded acting user to super-admin for one test, then restore.
+
+    The seeded identity is `is_super_admin=False` (conftest.py) — deliberately,
+    since most tools are member-level. `set_active_profile` is NOT: it changes
+    an INSTANCE-WIDE setting, so it carries the same super-admin gate as its
+    HTTP twin `POST /chat/settings/llm/active`. Tests that exercise a
+    SUCCESSFUL switch therefore have to say so explicitly, which is the point —
+    the first cut of this tool had no role check at all and these very tests
+    passed as a non-admin, which is exactly the privilege escalation review
+    caught.
+    """
+    from db.models import User
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        user = db.get(User, seeded_identity["user_id"])
+        was = user.is_super_admin
+        user.is_super_admin = True
+        db.commit()
+    try:
+        yield
+    finally:
+        with session_local() as db:
+            user = db.get(User, seeded_identity["user_id"])
+            user.is_super_admin = was
+            db.commit()
+
+
+def test_set_active_profile_refused_for_a_non_super_admin(appdata, monkeypatch):
+    """
+    THE AUTHORIZATION BOUNDARY. A plain member must not be able to change an
+    instance-wide setting by asking the model and approving their own card.
+
+    Confirmation-gating is not a role check: it stops the MODEL acting
+    unintendedly, and `POST /{session_id}/confirm` validates only a
+    session-scoped token — not who is clicking. Without the handler's own
+    `is_super_admin` check this test passes a switch through, which is how
+    the escalation existed.
+    """
+    from services import llm_config
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+
+    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+
+    session = chat_service.ChatSession(model=llm_config.DEFAULT_MODEL)
+    fake = FakeProvider([
+        {"events": [LLMEvent(type="tool_use_start", tool_use_id="t1",
+                             tool_name="set_active_profile")],
+         "blocks": [{"type": "tool_use", "id": "t1",
+                     "name": "set_active_profile",
+                     "input": {"profile_id": "anthropic-opus"}}],
+         "usage": {}},
+        {"events": [], "blocks": [{"type": "text", "text": "refused"}],
+         "usage": {}},
+    ])
+    thread, streamed, done, token = _drive_destructive_turn(
+        session, fake, "switch to opus",
+    )
+    session.record_decision(token, "approve")
+    done.wait(5.0)
+    thread.join()
+
+    errs = [p for n, p in streamed if n == "tool_error"]
+    assert any(e["error_kind"] == "not_authorized" for e in errs), (
+        f"expected a not_authorized tool_error, got {errs!r}"
+    )
+    # The boundary held: the instance-wide setting is untouched.
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+
+
+def test_set_active_profile_approve_switches_active(
+    appdata, monkeypatch, acting_super_admin,
+):
+    """Approve (as a super-admin) -> `llm_config.resolve_active().id` changes."""
     from services import llm_config
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
@@ -1321,7 +1409,9 @@ def test_set_active_profile_deny_leaves_active_unchanged(appdata, monkeypatch):
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
 
-def test_set_active_profile_unknown_id_is_structured_tool_error(appdata, monkeypatch):
+def test_set_active_profile_unknown_id_is_structured_tool_error(
+    appdata, monkeypatch, acting_super_admin,
+):
     """
     Unknown `profile_id` -> approve dispatches the handler, which raises a
     structured `HTTPException`; the turn surfaces

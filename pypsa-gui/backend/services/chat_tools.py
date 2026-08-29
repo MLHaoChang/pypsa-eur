@@ -3113,6 +3113,35 @@ def set_active_profile(profile_id: str) -> dict:
     """
     from services import llm_config
 
+    # AUTHORIZATION — super-admin only, matching the HTTP surface.
+    #
+    # `POST /chat/settings/llm/active` is `_require_super_admin`-gated because
+    # the active profile is INSTANCE-WIDE: it decides which provider every
+    # organization's chat runs on, and whose API key pays for it. This tool
+    # reaches the same store, so without this check an ordinary member could
+    # flip it by asking the model and approving their own confirmation card.
+    #
+    # Confirmation-gating is NOT a substitute. It exists to stop the MODEL
+    # taking a destructive action the user did not intend; it says nothing
+    # about whether that user is entitled to the action, and the confirm
+    # endpoint itself only validates a session-scoped token. Caught in review
+    # after the first cut of this tool shipped with no role check at all.
+    #
+    # Local mode is unaffected: its single seeded identity is a super-admin.
+    with _acting() as (_db, user):
+        if not user.is_super_admin:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error_kind": "not_authorized",
+                    "message": (
+                        "Switching the model profile changes it for everyone "
+                        "on this instance, so only a super-admin can do it. "
+                        "Ask an administrator to change it in Settings."
+                    ),
+                },
+            )
+
     profiles, _active = llm_config.load_profiles()
     known = {p.id: p for p in profiles}
     if profile_id not in known:
