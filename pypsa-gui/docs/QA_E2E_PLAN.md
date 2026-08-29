@@ -223,6 +223,25 @@ feasible because that peaker remains extendable.
 | S15.14 | The sweep's closing base re-solve leaves the foreground results in base state (`condition == "optimal"`, report readable) |
 | S15.15 | A class-C scenario measures real degradation when the profiles were **uploaded**, which is how the GUI supplies them. Everything above uses a static `p_set`, and that blind spot let a real bug through: `run_simulation` re-broadcasts every user-uploaded series from `_user_ts` onto the live `_t` tables just before building the LP, restoring the pristine profile **over** the mutation each contingency had just made. The scenario solved an unmutated network, returned `ok`, and reported ΔEUE = 0 — a cold snap priced at exactly zero criticality. No in-process test reproduces it, because a network built in process has an empty `_user_ts` |
 
+### S16 — Sequential-MC adequacy study (area 16)
+
+Phase 6's live surface. The ~40 MC/ELCC unit tests and the 10 endpoint tests
+run in-process against constructed `MCInputs` or a `TestClient`; S16 is the
+only place the study runs in a genuine worker thread in a server process,
+with occurrence data resolved through the real defaults chain and the payload
+crossing real HTTP. Fixture: two 100 MW units (EFORd 0.10, MTTR 24 h) against
+a flat 120 MW load with a 60 MW / 4 h battery — any single outage is a 20 MW
+deficit the battery bridges until a persistent outage drains it, which is
+exactly the regime the COPT convolution cannot see.
+
+| Check | What it proves |
+| --- | --- |
+| S16.1 | The bare study completes with **VoLL = 0** (the MC prices nothing and must run without one, where the frontier and sweep both 422), the payload carries the full §2.5 metrics contract (`lole_ci`/`eue_ci` as 2-element intervals, `resolution_floor_h`, `time_basis`), all three clauses of the standing warning, no leaked `thread` — and `EUE > 0`, because persistent outages MUST shed on this fixture |
+| S16.2 | The synchronous rejection surface, live: draws over the engine cap `422`, eleven ELCC assets `422`, an unknown asset `404`, an unknown kind `422`, and an inconsistent (q, MTTR) pair `422` **at POST time** — a user with a wrong asset name or contradictory unit data learns now, not after minutes of spinner |
+| S16.3 | The mutual-exclusion mesh against a *really running* study (a full-budget ELCC bisection holds the surface busy for seconds): a concurrent MC POST and a frontier POST both refuse `409`, and the original run still completes |
+| S16.4 | The ELCC row carries exactly its nine contract keys, the status is from the closed set, an `ok` credit lies in `[0, nameplate]`, and `reason` is null **iff** the status is `ok` — a refusal is data, never a blank |
+| S16.5 | **Storage helps, CI-aware and seed-paired**: same seed, same fleet ⇒ identical outage paths, so deleting the battery is a paired comparison — and the no-storage interval's *lower* bound must clear the with-storage interval's *upper* bound. A point-estimate comparison could pass on noise; separated intervals cannot |
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

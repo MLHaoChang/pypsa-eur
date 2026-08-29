@@ -2191,6 +2191,212 @@ def suite_S15():
     restore()
 
 
+def suite_S16():
+    """
+    Sequential-MC adequacy study journey (adequacy spec §4/§5, Phase 6).
+
+    The ~40 MC/ELCC unit tests and the 10 endpoint tests all run in-process
+    against constructed MCInputs or a TestClient. None of them proves the
+    LIVE surface: a network built over the API, occurrence data resolved
+    through the real defaults chain, the study running in a genuine worker
+    thread in a server process, and the payload crossing real HTTP — the
+    layer where an unbounded input and a missing import have each survived
+    every handler-level test in this repo before.
+
+    Standard of proof: fixed seeds and CI-aware assertions. The
+    storage-helps check compares INTERVALS, not point estimates — the same
+    seed drives both runs (the fleet is unchanged, so the outage paths are
+    common random numbers) and the no-storage lower bound must clear the
+    with-storage upper bound; two overlapping blobs would prove nothing.
+    """
+    print("\nS16 - Sequential-MC adequacy study (area 16)")
+    name = "qa_e2e_mc"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs"})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)[0]
+
+    def poll_mc(ceiling_s: int = 120):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/results/mc")
+            if st == 200 and isinstance(s, dict) and s.get("status") != "running":
+                return s
+            time.sleep(0.5)
+        return None
+
+    # ── S16.1 — fixture where storage is DECISIVE, and the bare study. Two
+    # 100 MW units against a flat 120 MW load: any single outage is a 20 MW
+    # deficit the 60 MW / 4 h battery bridges until it drains; MTTR 24 h makes
+    # outages persistent, so draining is the norm, not the tail — exactly the
+    # regime the COPT convolution cannot see and this engine exists for.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in range(1, 6):
+            skip(f"S16.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-07 23:00", "freq": "h"})[0])
+    for g in ("gen_1", "gen_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": 100.0, "marginal_cost": 50.0,
+                                "outage_rate_value": 0.10,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/storage_units", method="POST",
+                      body={"name": "bess", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 60.0, "max_hours": 4.0,
+                            "efficiency_store": 0.95,
+                            "efficiency_dispatch": 0.95})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": 120.0})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+
+    # VoLL 0 on purpose: the MC study prices nothing and must run without one
+    # (spec §4) — the frontier and the sweep both 422 in this exact state.
+    st_cfg = put_cfg(voll=0.0)
+    st_post, _ = http("/api/results/mc", method="POST",
+                      body={"draws": 400, "seed": 7})
+    res1 = poll_mc()
+    m1 = ((res1 or {}).get("result") or {}).get("metrics") or {}
+    r1 = (res1 or {}).get("result") or {}
+    need = {"lole_hours", "lole_ci", "eue_mwh", "eue_ci", "n_samples",
+            "resolution_floor_h", "time_basis"}
+    missing = sorted(need - set(m1))
+    # The warning's three clauses, pinned by their load-bearing phrases.
+    warn = str(r1.get("warning") or "")
+    clauses_ok = ("ONE weather realisation" in warn
+                  and "INDEPENDENT" in warn and "EXCLUDED" in warn)
+    ci1 = m1.get("eue_ci")
+    shape_ok = (r1.get("engine") == "mc"
+                and r1.get("fidelity") == "sequential_mc"
+                and isinstance(ci1, list) and len(ci1) == 2
+                and "thread" not in (res1 or {}))
+    record("S16.1",
+           not bad_build and st_cfg == 200 and st_post == 200
+           and res1 is not None and res1.get("status") == "done"
+           and not missing and clauses_ok and shape_ok
+           and float(m1.get("eue_mwh") or 0.0) > 0.0,
+           f"build non-2xx={bad_build or 'none'}; voll=0 POST->{st_post}; "
+           f"status={(res1 or {}).get('status')}; missing-keys={missing or 'none'}; "
+           f"warning-clauses={clauses_ok}; eue={m1.get('eue_mwh')} "
+           f"ci={ci1} (persistent outages MUST shed on this fixture)")
+
+    # ── S16.2 — the synchronous rejection surface, live. Every one of these
+    # is knowable from the snapshot alone and must fail the POST, not the run.
+    rejects = {}
+    rejects["draws-over-cap"], _ = http("/api/results/mc", method="POST",
+                                        body={"draws": 5000})
+    rejects["11-elcc-assets"], _ = http(
+        "/api/results/mc", method="POST",
+        body={"draws": 8, "elcc_assets": [
+            {"kind": "generator", "name": f"gen_{i}"} for i in range(11)]})
+    rejects["unknown-asset"], _ = http(
+        "/api/results/mc", method="POST",
+        body={"draws": 8,
+              "elcc_assets": [{"kind": "generator", "name": "no_such_gen"}]})
+    rejects["unknown-kind"], _ = http(
+        "/api/results/mc", method="POST",
+        body={"draws": 8, "elcc_assets": [{"kind": "store", "name": "bess"}]})
+    # An implied MTTF below one timestep is a contradiction in the unit data
+    # (q = 0.99 with MTTR 1 h ⇒ MTTF ≈ 0.01 h): rejected at POST time, so the
+    # user is not told seven minutes later that their study "failed".
+    http("/api/network/generators", method="POST",
+         body={"name": "flaky", "bus": "bus_a", "carrier": "gas",
+               "p_nom": 10.0, "outage_rate_value": 0.99,
+               "outage_rate_basis": "EFORd", "mttr_hours": 1.0})
+    rejects["inconsistent-pair"], _ = http("/api/results/mc", method="POST",
+                                           body={"draws": 8})
+    http("/api/network/generators/flaky", method="DELETE")
+    want = {"draws-over-cap": 422, "11-elcc-assets": 422, "unknown-asset": 404,
+            "unknown-kind": 422, "inconsistent-pair": 422}
+    wrong = {k: f"{rejects[k]} (want {want[k]})"
+             for k in want if rejects[k] != want[k]}
+    record("S16.2", not wrong, f"rejection surface: wrong={wrong or 'none'}")
+
+    # ── S16.3 — the mutual-exclusion mesh against a REAL running study. An
+    # ELCC bisection at the full 2000-draw budget holds the surface busy for
+    # seconds, long enough that the immediate concurrent POSTs are
+    # deterministic, not a race won by luck.
+    st_go, _ = http("/api/results/mc", method="POST",
+                    body={"draws": 2000, "seed": 11, "cov_target": 0.0001,
+                          "elcc_assets": [
+                              {"kind": "storage_unit", "name": "bess"}]})
+    st_dup, _ = http("/api/results/mc", method="POST", body={"draws": 8})
+    st_fr, _ = http("/api/results/frontier", method="POST", body={})
+    res3 = poll_mc(ceiling_s=300)
+    record("S16.3",
+           st_go == 200 and st_dup == 409 and st_fr == 409
+           and res3 is not None and res3.get("status") == "done",
+           f"start->{st_go}; concurrent mc->{st_dup} (409) "
+           f"frontier->{st_fr} (409); final={(res3 or {}).get('status')}")
+
+    # ── S16.4 — the ELCC row from that run: nine keys, always all present,
+    # and a refusal carries its reason as data rather than a blank.
+    rows = ((res3 or {}).get("result") or {}).get("elcc") or []
+    row = rows[0] if rows else {}
+    keys_want = {"kind", "name", "nameplate_mw", "elcc_mw", "elcc_share",
+                 "status", "reason", "baseline_lole_h", "baseline_lole_ci"}
+    ok_status = row.get("status") in ("ok", "unidentifiable", "not_bracketed")
+    credit_sane = True
+    if row.get("status") == "ok":
+        credit_sane = (row.get("elcc_mw") is not None
+                       and -1e-9 <= float(row["elcc_mw"]) <= 60.0 + 1e-6)
+    reason_rule = ((row.get("reason") is None) == (row.get("status") == "ok"))
+    record("S16.4",
+           len(rows) == 1 and set(row) == keys_want and ok_status
+           and credit_sane and reason_rule,
+           f"rows={len(rows)}; keys-delta={sorted(set(row) ^ keys_want) or 'none'}; "
+           f"status={row.get('status')} elcc_mw={row.get('elcc_mw')} "
+           f"reason={str(row.get('reason'))[:60]}")
+
+    # ── S16.5 — storage helps, CI-aware and seed-paired. Same seed, same
+    # fleet ⇒ identical outage paths; dropping the battery can only raise
+    # every draw's shortfall. The intervals must SEPARATE — the no-storage
+    # lower bound above the with-storage upper bound — which a vacuous
+    # assertion on overlapping point estimates would never establish.
+    ci_with = m1.get("eue_ci")
+    st_del, _ = http("/api/network/storage_units/bess", method="DELETE")
+    http("/api/results/mc", method="POST", body={"draws": 400, "seed": 7})
+    res5 = poll_mc()
+    m5 = ((res5 or {}).get("result") or {}).get("metrics") or {}
+    ci_no = m5.get("eue_ci")
+    if not (isinstance(ci_with, list) and isinstance(ci_no, list)):
+        record("S16.5", False,
+               f"missing intervals: with={ci_with} without={ci_no}")
+    else:
+        separated = float(ci_no[0]) > float(ci_with[1])
+        record("S16.5",
+               st_del in (200, 204) and separated
+               and float(m5.get("eue_mwh") or 0.0)
+               > float(m1.get("eue_mwh") or 0.0),
+               f"EUE with bess {m1.get('eue_mwh')} CI={ci_with} vs without "
+               f"{m5.get('eue_mwh')} CI={ci_no}; intervals separated={separated}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 def main() -> int:
     global BACKEND
@@ -2252,6 +2458,8 @@ def main() -> int:
         suite_S14()
     if run("S15"):
         suite_S15()
+    if run("S16"):
+        suite_S16()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
