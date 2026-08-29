@@ -441,6 +441,23 @@ class SolverConfigSchema(BaseModel):
     # which is a different (and almost certainly unintended) request than
     # "no zone ceilings" — that is what None is for.
     ens_zone_cap_multiple: float | None = Field(default=None, gt=0)
+    # ── Planning reserve margin (Phase 8 spec §1) ─────────────────────────
+    # Firm-capacity standard as a FRACTION (0.15 == 15 %); None/0 = off.
+    #
+    # `ge=0` for the same reason the ENS target has it: the wrapper reads a
+    # non-positive margin as "no margin", which is right for 0/None and WRONG
+    # for a negative — a user who types -1 would otherwise get a solve with no
+    # standard at all, no report and no warning, indistinguishable from having
+    # set nothing. `le=5` catches the units mistake: 15 typed for 15 % is a
+    # 1500 % margin, which is not a margin, and a plan sized against it is a
+    # fiction the LP would spend an hour building.
+    reserve_margin: float | None = Field(default=None, ge=0, le=5)
+    # Peak-coincidence window (snapshots) for must-take VRE credit; None ⇒ the
+    # spec §2.3 scaling rule. `ge=1`: a window of zero snapshots has no mean.
+    prm_peak_hours: int | None = Field(default=None, ge=1)
+    # Reference duration (hours) for the storage capacity haircut. `gt=0`:
+    # `min(1, max_hours / duration)` divides by it.
+    prm_storage_duration_h: float = Field(default=4.0, gt=0)
     # Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in per
     # bus; 0 = off. Never applied globally.
     # `ge=0`: a negative DSR price pays the model to curtail, so it would

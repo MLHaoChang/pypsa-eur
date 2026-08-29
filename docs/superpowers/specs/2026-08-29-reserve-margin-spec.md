@@ -186,4 +186,46 @@ no worker commits.
 
 ## Amendments
 
-(none yet)
+### v1.1 — Wave A adjudications (ratified by the master)
+
+1. **A unit with BOTH occurrence data and a `p_max_pu` profile** takes its
+   availability from the profile's peak-coincidence mean × `(1 − q)`. §2.2's
+   `static_p_max_pu` path applies only where there is no profile. This is the
+   only reading under which "nothing in `d_g` may default to 1.0" actually
+   holds — PyPSA's static `p_max_pu` default IS 1.0, so a wind unit with a
+   user-entered outage rate would otherwise be credited at nameplate.
+2. **Storage with `source == "missing"` is EXCLUDED** and named in the `[PRM]`
+   log — the direct analogue of the generator evidence split, since storage has
+   no profile to fall back to. A blank- or exotic-carrier `StorageUnit` gets no
+   credit; `battery`/`hydro` resolve from the defaults library and do.
+3. **`assets` rows are per (asset, period)** with an added `"period"` key, since
+   a must-take derate is period-dependent. All eight spec-named keys remain on
+   every row, so §4's reader is unaffected on single-period runs.
+4. **`horizon_wide` is true iff the active EXTENDABLE set contributing an LP
+   term is identical in every period** — precisely when the periods share one
+   variable set and the system degenerates to `max_P peak_P`. Trivially true on
+   single-period networks.
+5. **The flat-network period key is `"ALL"`**, matching `_wrap_with_ens_cap`'s
+   stash convention so the two stashes key alike.
+6. **`max_achievable_mw` is `inf`** when an active extendable has an unbounded
+   `p_nom_max`. Mathematically right and it makes §3's `max_achievable <
+   required` test behave (always False), but it is NOT JSON-serialisable —
+   **§4's endpoint MUST clamp or null it**. Recorded as a Wave-C obligation.
+7. **A period whose margin is already met, or unreachable with no extendable
+   term, adds no constraint** and emits a `[PRM]` line saying which way it fell
+   (linopy raises `TypeError` on a constant constraint, and the nominal
+   variable does not exist when nothing extendable is active). `required_mw` and
+   `max_achievable_mw` are stashed regardless so §3 can error and
+   `_diagnose_infeasibility` can speak.
+8. **The wrapper's explicit `slack_generator_mask` re-check is redundant** with
+   the walk's own filtering (proven: biting the wrapper alone did not bite) and
+   is kept deliberately — both-tier exclusion is normative for THIS constraint,
+   while the walk's default is a shared-module decision that could change.
+
+**Bite-quality note, recorded because it is the process working:** three of the
+worker's first-draft bite variants did not bite — the coord-membership test
+(masked by the activity mask), the slack re-check (masked by the walk), and the
+`Store` exclusion (masked by the activity mask). Each was replaced by a variant
+that reaches the real defence (the full capex-wrapper mirror; both membership
+call sites; stores repointed as a power rating). A test whose first bite fails
+is not a passing test — it is an untested one.

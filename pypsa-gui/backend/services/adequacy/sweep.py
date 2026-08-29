@@ -17,9 +17,10 @@ driver powers class B (Link outages) and class C (stress scenarios):
   (this one may write to a caller-supplied sink) leaves the network's
   dispatch tables exactly where the user's own solve left them, not at the
   last contingency.
-* **The user's ENS target is stripped inside the sweep.** A binding cap
-  would make every severity read as "the cap" (or go infeasible); the
-  contingency question is what the OUTAGE costs, unconstrained.
+* **The user's ENS target and reserve margin are stripped inside the sweep.**
+  A binding standard would make every severity read as "the standard" (or go
+  infeasible); the contingency question is what the OUTAGE costs,
+  unconstrained.
 * **Budget guard**: at most ``MAX_CONTINGENCIES`` per run — the sweep is
   tens of solves at most, never a Monte Carlo (spec §3.2).
 
@@ -161,9 +162,17 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
             "the contingency sweep requires VOLL > 0 — without slack "
             "generators, severity is an infeasibility, not a number"
         )
-    # Strip the reliability target inside the sweep; keep everything else.
+    # Strip the reliability target AND the firm-capacity standard inside the
+    # sweep; keep everything else. Same rationale for both: a binding standard
+    # would make every severity read as the standard rather than as the
+    # outage's own damage. The margin is the sharper case — `freeze_capacities`
+    # pins bounds while KEEPING `p_nom_extendable=True`, so the nominal
+    # variable still exists and stays pinned: any contingency that removes
+    # derated capacity violates a surviving margin, the re-solve goes
+    # infeasible, and the WHOLE sweep fails on the base solve.
     sweep_cfg = dataclasses.replace(
-        cfg, ens_cap_permyriad=None, ens_zone_cap_multiple=None)
+        cfg, ens_cap_permyriad=None, ens_zone_cap_multiple=None,
+        reserve_margin=None)
 
     unfreeze = freeze_capacities(network)
     results: dict = {"base": {}, "contingencies": {}}
