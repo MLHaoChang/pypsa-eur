@@ -29,6 +29,8 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getMc: vi.fn(), startMc: vi.fn(), getElccCandidates: vi.fn(),
       getCouplingLoop: vi.fn(), startCouplingLoop: vi.fn(),
       abortCouplingLoop: vi.fn(), getReserveMargin: vi.fn(),
+      getMarginLoop: vi.fn(), startMarginLoop: vi.fn(),
+      abortMarginLoop: vi.fn(),
     },
   }
 })
@@ -90,6 +92,13 @@ beforeEach(() => {
     .mockResolvedValue({ status: 'running' })
   vi.mocked(resultsApi.abortCouplingLoop).mockReset()
     .mockResolvedValue({ status: 'done', aborting: false })
+  // The MARGIN loop is a SECOND study surface with its own record and its own
+  // 204: nothing has been run, and the tab must mount it anyway.
+  vi.mocked(resultsApi.getMarginLoop).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.startMarginLoop).mockReset()
+    .mockResolvedValue({ status: 'running' })
+  vi.mocked(resultsApi.abortMarginLoop).mockReset()
+    .mockResolvedValue({ status: 'done', aborting: false })
   // The firm-capacity readout serves 204 before any margin-set solve, and the
   // tab must still mount it — that is the invariant this file exists for.
   vi.mocked(resultsApi.getReserveMargin).mockReset().mockResolvedValue(null)
@@ -102,12 +111,17 @@ function renderTab() {
 }
 
 /** Every study surface this tab is responsible for hosting, in tab order.
+ *  `margin-loop-panel` joined in Phase 9: the SECOND lever on the same
+ *  coupled search — it drives the planning reserve margin instead of the
+ *  energy cap, has its own record and its own 204, and mounts on exactly the
+ *  same terms as the rest, including before anything has been run.
  *  `reserve-margin-panel` joined the list in Phase 8: it is a STANDARD
  *  readout, so it is hosted above the studies that are read against it, and
  *  it mounts on the same terms as the rest — including in the 204 state, its
  *  ordinary condition before anything has been solved with a margin. */
 const PANELS = [
   'reserve-margin-panel', 'frontier-panel', 'mc-panel', 'loop-panel',
+  'margin-loop-panel',
 ] as const
 
 describe('AdequacyTab — the ★ mount invariant, no-data state', () => {
@@ -159,7 +173,7 @@ describe('AdequacyTab — the ★ mount invariant, data state', () => {
     const html = document.body.innerHTML
     const seq = [
       'adequacy-chips', 'copt-chips', 'reserve-margin-panel', 'frontier-panel',
-      'mc-panel', 'loop-panel',
+      'mc-panel', 'loop-panel', 'margin-loop-panel',
     ]
     const idx = seq.map(id => html.indexOf(`data-testid="${id}"`))
     expect(Math.min(...idx)).toBeGreaterThan(-1)
@@ -175,7 +189,7 @@ describe('AdequacyTab ordering', () => {
   // the sampler's verdict back into the plan.
   it('renders the panels in the order the plan records', async () => {
     renderTab()
-    await screen.findByTestId('loop-panel')
+    await screen.findByTestId('margin-loop-panel')
     const body = document.body
     const order = PANELS.map(
       id => body.innerHTML.indexOf(`data-testid="${id}"`))

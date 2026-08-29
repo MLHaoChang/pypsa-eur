@@ -32,16 +32,28 @@ import { blockerMessage, ciRange, trim } from './McPanel'
 // (Were one added: literal hex only. `var(--…)` does not resolve inside SVG
 // attributes, a bug this directory has already paid for twice.)
 
-/** Compact euro figure — same ladder FrontierPanel uses for the same axis. */
-function eur(v: number): string {
+/** Compact euro figure — same ladder FrontierPanel uses for the same axis.
+ *  Exported for MarginLoopPanel, which prints the same cost column: two
+ *  copies of a rounding ladder drift, and the day they do, one study reads as
+ *  two different numbers on one tab. */
+export function eur(v: number): string {
   if (!isFinite(v)) return '—'
   return v >= 1e9 ? `€${(v / 1e9).toFixed(2)}bn`
     : v >= 1e6 ? `€${(v / 1e6).toFixed(1)}m`
       : `€${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 }
 
-/** Display number: 2 dp above 1, 2 significant figures below, zeros trimmed. */
-function compact(v: number): string {
+/**
+ * Display number: 2 dp above 1, 2 significant figures below, zeros trimmed.
+ *
+ * ★ TYPED `number`, AND THAT IS LOAD-BEARING. `isFinite(null)` is TRUE in JS
+ * — null coerces to 0 — so the guard below waves a null straight through to
+ * `.toPrecision(2)`, which throws. Inside a `rows.map` that throw is not one
+ * empty cell: React unmounts the whole panel, mid-study, with no partial
+ * render. This is why the margin loop has its own non-nullable `lever_value`
+ * (see `MarginIteration`) rather than a nullable alias onto `eps_permyriad`.
+ */
+export function compact(v: number): string {
   if (!isFinite(v)) return '—'
   const s = Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(2)
   return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s
@@ -176,32 +188,64 @@ export function loleCell(
 }
 
 /**
+ * Which LEVER a loop drives, in the words the restore sentence needs.
+ *
+ * ★ The whole reason this type exists: `restoreSentence` used to hard-code
+ * `ens_cap_permyriad` in BOTH branches, and it renders UNCONDITIONALLY —
+ * before any run, on both modes, whatever the payload says. On a margin study
+ * that sentence told the user to set the energy-cap field, with a MARGIN as
+ * its value: a number four orders of magnitude off, in a field that does not
+ * hold margins, regardless of the backend verdict sitting two lines below it.
+ * The field name is now data, and it comes from the payload's own `lever`.
+ */
+export interface LeverCopy {
+  /** The solver-config field this study writes — VERBATIM from the payload
+   *  (`lever` on the margin loop; the cap loop predates the discriminator). */
+  field: string
+  /** How the certified value is named before a run has produced one. */
+  symbol: string
+  /** The value AS IT MUST BE TYPED into that config field — not as it is
+   *  badged. The margin badge reads "135.7%"; the field takes 1.357. */
+  format: (v: number) => string
+}
+
+/** The energy-cap lever — the loop this module was written for. */
+export const CAP_LEVER: LeverCopy = {
+  field: 'ens_cap_permyriad', symbol: 'ε*', format: compact,
+}
+
+/**
  * ★ [S9] What each restore mode leaves the user holding.
  *
  * The loop mutates the network once per iterate, so SOMETHING has to be
  * re-solved at the end, and which one is a real decision with no safe
  * default-by-omission: "base" hands back the user's own config (and the
  * certified plan is then only a number they must apply themselves), "final"
- * writes ε* into solver settings and re-solves there.
+ * writes the certified value into solver settings and re-solves there.
  *
  * One sentence each, both shown, because the choice is made BEFORE the run
  * and a user cannot pick between two options when only the selected one is
  * described. The base sentence names the exact setting to apply — once a run
- * has produced ε* it names the value, and before that it names the symbol.
+ * has produced a value it names the value, and before that it names the
+ * symbol. WHICH setting comes from `lever`, never from this file's memory of
+ * which loop called it.
  */
 export function restoreSentence(
-  mode: 'base' | 'final', epsStar: number | null | undefined,
+  mode: 'base' | 'final', leverStar: number | null | undefined,
+  lever: LeverCopy = CAP_LEVER,
 ): string {
-  const eps = epsStar != null && isFinite(epsStar) ? compact(epsStar) : 'ε*'
+  const v = leverStar != null && isFinite(leverStar)
+    ? lever.format(leverStar) : lever.symbol
   if (mode === 'final') {
-    return 'Keep the certified plan: ε* is written into your solver settings '
-      + `(ens_cap_permyriad = ${eps}) and the closing re-solve runs at that `
-      + 'cap, so the network you are left holding IS the plan the verdict is '
-      + 'about. Applied only on a met verdict — anything else falls back.'
+    return `Keep the certified plan: ${lever.symbol} is written into your `
+      + `solver settings (${lever.field} = ${v}) and the closing re-solve `
+      + 'runs at that value, so the network you are left holding IS the plan '
+      + 'the verdict is about. Applied only on a met verdict — anything else '
+      + 'falls back.'
   }
   return 'Leave your settings alone: the closing re-solve uses your original '
     + 'config, so the network you are left holding is NOT the certified plan '
-    + `— to keep that plan, set ens_cap_permyriad = ${eps} and re-solve.`
+    + `— to keep that plan, set ${lever.field} = ${v} and re-solve.`
 }
 
 /** Status chip colouring — a verdict is not a mood, but it is a signal. */
@@ -404,11 +448,11 @@ export function LoopPanel() {
             >
               <span className={restore === 'base' ? 'text-text' : 'text-muted'}>
                 <span className="font-semibold">base</span>
-                {' — '}{restoreSentence('base', payload?.eps_star)}
+                {' — '}{restoreSentence('base', payload?.eps_star, CAP_LEVER)}
               </span>
               <span className={restore === 'final' ? 'text-text' : 'text-muted'}>
                 <span className="font-semibold">final</span>
-                {' — '}{restoreSentence('final', payload?.eps_star)}
+                {' — '}{restoreSentence('final', payload?.eps_star, CAP_LEVER)}
               </span>
             </div>
           </div>

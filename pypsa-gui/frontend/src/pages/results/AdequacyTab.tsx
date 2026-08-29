@@ -10,6 +10,7 @@ import { FrontierPanel } from './FrontierPanel'
 import { ReserveMarginPanel } from './ReserveMarginPanel'
 import { McPanel } from './McPanel'
 import { LoopPanel } from './LoopPanel'
+import { MarginLoopPanel } from './MarginLoopPanel'
 
 // ── Results → Adequacy ──────────────────────────────────────────────────────
 //
@@ -34,8 +35,9 @@ import { LoopPanel } from './LoopPanel'
 // storage-blind screening beside it, the firm-capacity standard that is the
 // OTHER thing the last solve may have been held to, the cost-vs-availability
 // curve those points sit on, the sampler that answers what the convolution
-// cannot, and finally the loop that drives the sampler's verdict back into
-// the plan. The reserve margin sits with the standards rather than with the
+// cannot, and finally the two loops that drive the sampler's verdict back
+// into the plan — the energy cap first, then the reserve margin, which is the
+// lever to reach for when the cap loop reports that no cap can get there. The reserve margin sits with the standards rather than with the
 // studies because it is one: it shaped the plan every study below is measured
 // on, and reading a Monte-Carlo LOLE without knowing a margin forced 200 MW
 // of peaker into the fleet is reading half the answer.
@@ -96,6 +98,14 @@ export default function AdequacyTab() {
       <FrontierPanel />
       <McPanel />
       <LoopPanel />
+      {/* The SAME coupled search on the other lever (Phase 9). It sits last
+          because it is read against the one above it: where the cap loop
+          reports `unreachable` — no energy cap this search could reach met the
+          target — the margin loop is the question "then how much firm capacity
+          would?", and the two verdicts are only comparable in that order. It
+          mounts unconditionally like everything else on this tab; its 204 is
+          its ordinary state before anything has been run. */}
+      <MarginLoopPanel />
     </div>
   )
 }

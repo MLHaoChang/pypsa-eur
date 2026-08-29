@@ -353,6 +353,114 @@ export interface CouplingLoopRequestBody {
   restore?: 'base' | 'final'
 }
 
+// ── GET/POST /results/margin_loop — the SAME loop on the OTHER lever ────────
+//
+// Phase 9 (margin-loop spec §2.6). The controller is `coupling.py`, unchanged
+// and unmodifiable; only the lever differs. The route substitutes
+// `x = 1/(1+m)` so the controller's "smaller is stricter" ordering holds for a
+// reserve MARGIN, and translates every row back to a margin before storing it
+// — so the controller's internal `x` never reaches this file at all.
+//
+// ★ THE PAYLOADS ARE NOT THE SAME SHAPE and no alias joins them. The cap loop
+// carries `eps_permyriad` / `eps0` / `eps_star`; this one carries
+// `lever_value` / `margin0` / `lever_star` plus `probe_solves`, `margin_tight`
+// and `margin_ceiling` (amendment v1.1(5)). A "nullable alias" that let one
+// row type stand for both would put a `null` where the panel's `compact()` is
+// typed `number` — and `isFinite(null)` is TRUE in JS, so the guard passes it
+// through to `.toPrecision(2)`, which throws inside `rows.map` and unmounts
+// the panel. Both value types below are NON-NULLABLE for that reason.
+//
+// Keys are copied VERBATIM from routers/results.py `post_margin_loop`'s
+// record and its `_translate`.
+
+/** One row of `iterations` — routers/results.py `post_margin_loop._translate`.
+ *
+ *  The controller's `_row` with `eps_permyriad` REPLACED by `lever_value`.
+ *  There is no `eps_permyriad` key on the wire and there must be none here. */
+export interface MarginIteration {
+  /** The planning reserve margin as a FRACTION (0.15 = 15%), never `x` and
+   *  never a per-myriad cap. Always a number: the route translates every row
+   *  it stores, so a row without one is a row that does not exist. */
+  lever_value: number
+  solve_status: string
+  condition: string | null
+  /** null on every non-solved iterate — an infeasible solve has no cost. */
+  cost_eur: number | null
+  ens_mwh: number | null
+  /** ALWAYS null for this lever (spec §2.2): the margin has no energy cap,
+   *  and the route returns `cap_mwh=None` deliberately so the controller's
+   *  ENERGY_FLOOR test stays a genuine no-op instead of ending every run
+   *  `unreachable` after one solve. */
+  cap_mwh: number | null
+  binding: string | null
+  /** true when the plan hash repeated and the metrics were REUSED. */
+  plateau: boolean
+  /** null when the iterate was never evaluated (failed / refused solve). */
+  mc: CouplingMcBlock | null
+}
+
+export type MarginLoopStatus = CouplingLoopStatus
+
+export interface MarginLoopPayload {
+  study: 'margin_loop'
+  /** ★ THE DISCRIMINATOR (spec §3). The solver-config FIELD this study
+   *  writes — `restoreSentence` takes its field name from here, so a margin
+   *  run can never tell the user to set the energy cap's field. */
+  lever: string
+  /** Human copy for the column header, e.g. "planning reserve margin". */
+  lever_label: string
+  /** The badge/column suffix — "%" here, "‱" on the cap loop. */
+  lever_unit: string
+  status: MarginLoopStatus
+  /** HORIZON-basis hours — the panel converts the user's h/yr entry. */
+  target_lole_h: number
+  basis: string
+  horizon_years?: number | null
+  draws: number
+  seed: number
+  /** The margin the search STARTED from — measured by the probing solve
+   *  (spec §2.3), never a user parameter. Null until the probe lands. */
+  margin0: number | null
+  /** The smallest margin at which the incumbent plan is already tight. */
+  margin_tight: number | null
+  /** The largest margin the fleet can reach; null = unbounded. */
+  margin_ceiling: number | null
+  max_solves: number
+  restore: 'base' | 'final'
+  base_restored: boolean
+  confident: boolean
+  /** The CERTIFIED MARGIN (a fraction), not `x` and not a cap. */
+  lever_star: number | null
+  resolution_floor_h: number | null
+  solves_used: number
+  /** The probing solve is OUTSIDE the controller's budget (amendment
+   *  v1.1(5)): folding it into `solves_used` would break the budget's
+   *  meaning, hiding it would misreport the wall-clock. */
+  probe_solves: number
+  /** REBOUND by the worker between iterates — the list GROWS mid-run. */
+  iterations: MarginIteration[]
+  final: MarginIteration | null
+  /** A ready sentence — RENDER IT, never re-word it here. */
+  verdict: string | null
+  warning: string
+  error: string | null
+  started_at?: number
+  finished_at?: number | null
+}
+
+export interface MarginLoopRequestBody {
+  /** REQUIRED and horizon-basis; the h/yr conversion is the panel's job. */
+  target_lole_h: number
+  draws?: number
+  seed?: number
+  max_solves?: number
+  restore?: 'base' | 'final'
+  // NO `m0`. The starting margin is a MEASUREMENT, not a parameter
+  // (`MarginLoopRequest` in routers/results.py refuses to take one): too
+  // small and the search walks a region where the plan does not change, too
+  // large and it overshoots the bracket entirely.
+}
+
 // ── The firm-capacity (planning reserve margin) standard, Phase 8 §4 ────────
 //
 // KEY NAMES ARE VERBATIM from the backend and must stay that way: they come
@@ -714,6 +822,28 @@ export const resultsApi = {
   // so an abort costs at most the iterate in flight and the closing restore
   // still runs. 404 only when no loop has ever been recorded.
   abortCouplingLoop: () => client.post('/results/coupling_loop/abort')
+    .then(r => r.data),
+  // The MARGIN-driven loop (Phase 9; 204 = no margin loop has been run in
+  // this session). A SEPARATE study key from the coupling loop — both are in
+  // the 409 mesh in both directions — serving its own record with its own
+  // growing `iterations` list.
+  getMarginLoop: () => client.get('/results/margin_loop')
+    .then(r => (r.status === 204 ? null : r.data as MarginLoopPayload)),
+  // Starts the margin loop in a backend worker thread and returns
+  // immediately; poll getMarginLoop for progress. `target_lole_h` is REQUIRED
+  // and horizon-basis. Rejects with the axios error on 409 (a
+  // solve/sweep/frontier/MC/coupling-loop/margin-loop is running) and on the
+  // route's 422 set — the unreachable ceiling and the unpriceable-asset
+  // refusal both name themselves in the detail, which the panel renders
+  // through McPanel's `blockerMessage`.
+  startMarginLoop: (body: MarginLoopRequestBody) =>
+    client.post('/results/margin_loop', body).then(r => r.data),
+  // Asks a running margin loop to stop. IDEMPOTENT and 200 even when the run
+  // is already finishing; 404 only when no margin loop has ever been
+  // recorded. NOT folded into the coupling loop's abort: that route's stop
+  // event belongs to a different record, and pressing it would report success
+  // while this loop kept solving.
+  abortMarginLoop: () => client.post('/results/margin_loop/abort')
     .then(r => r.data),
   // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
   // overlays, persisted per project. Computed rows come from getCopt and
