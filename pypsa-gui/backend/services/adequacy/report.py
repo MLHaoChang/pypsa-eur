@@ -330,9 +330,18 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict,
             ],
             binding=binding,
             zone_field_populated=zone_field_populated,
+            energy_target_set=bool(periods),
         ),
         metrics=MetricsBlock(
-            ens_mwh=sys_achieved_total,
+            # `sys_achieved_total` accumulates INSIDE the loop over the ENS
+            # cap's target periods, so on a margin-only run (no periods) it
+            # stays 0.0 — and the report shipped `ens_mwh = 0.0` beside a
+            # non-zero `shed_hours`: the system shed in every hour and shed no
+            # energy. The capture's own total is the truth in that case; the
+            # targeted path keeps its arithmetic untouched, because there the
+            # two agree and its identity (objective − cost == ENS × VoLL) is
+            # pinned live in S15.7.
+            ens_mwh=(sys_achieved_total if periods else involuntary_mwh),
             shed_hours=float(sh.get("total", 0.0)),
             time_basis=_basis,
             horizon_years=_nyears,

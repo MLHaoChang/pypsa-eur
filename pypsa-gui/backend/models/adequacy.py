@@ -94,6 +94,13 @@ class TargetBlock(BaseModel):
     # which without this (spec §5.5): a high VoLL sheds less than the cap
     # allows and quietly becomes the effective standard.
     binding: Literal["system_cap", "zone_cap", "voll"]
+    # FALSE when no ENERGY target was set — a margin-only run still produces a
+    # report (Phase 8 made it fire on either standard), and without this flag
+    # its zeroed `system.cap_mwh` / `achieved_ens_mwh` / `met=True` read as a
+    # target that was comfortably met. They are not a target at all. Consumers
+    # that quote a cap must check this first; `metrics.ens_mwh` is the honest
+    # number in that case and is populated from the capture regardless.
+    energy_target_set: bool = True
     # Exposes the empty-`country` degeneracy: on a GUI-built network every
     # bus lands in one unnamed zone and a per-zone ceiling silently collapses
     # into a second copy of the system cap. A ceiling must never LOOK

@@ -1195,3 +1195,58 @@ def test_a_failed_solve_emits_no_margin_result():
     sink, status, _c = _solve(n, reserve_margin=MARGIN)
     assert status not in ("ok", "optimal")
     assert not sink.get("last_reserve_margin")
+
+
+# ── a margin-only run must not report zero unserved energy ────────────────
+
+def test_a_margin_only_run_reports_the_energy_it_actually_shed():
+    """★ The report's headline ENS must be true when no ENS TARGET is set.
+
+    Found by the Phase-9 review and confirmed live: `build_adequacy_report`
+    accumulates `sys_achieved_total` INSIDE the loop over the ENS cap's target
+    periods. Phase 8 made the report fire when either standard was enforced —
+    so on a margin-only solve that loop never runs, and the report shipped
+    `metrics.ens_mwh = 0.0` beside `metrics.shed_hours = 24.0`: the system shed
+    in every hour and shed no energy. That is not a rounding disagreement, it
+    is a self-contradiction, and it is the same class QA round 2 caught when an
+    infeasible solve published a "target met" report.
+
+    The cap's own numbers stay zero and are FLAGGED (`energy_target_set`) —
+    a cap of 0.0 must never read as a target that was met — but the metrics
+    block, which is what every consumer quotes, tells the truth.
+
+    Bite (verified): compute `ens_mwh` from `sys_achieved_total` again.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=24, freq="h"))
+    n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=200.0)
+    n.add("Generator", "g", bus="b", carrier="gas", p_nom=120.0,
+          marginal_cost=10.0, outage_rate_value=0.05,
+          outage_rate_basis="EFORd", mttr_hours=12.0)
+    # Buildable enough to satisfy the margin, but priced ABOVE VoLL so the LP
+    # builds it and still sheds — the state that exposes the bug.
+    n.add("Generator", "cand", bus="b", carrier="gas", p_nom=0.0,
+          p_nom_extendable=True, p_nom_max=300.0, capital_cost=1e6,
+          marginal_cost=5000.0, outage_rate_value=0.05,
+          outage_rate_basis="EFORd", mttr_hours=12.0)
+
+    sink, status, condition = _solve(
+        n, solver_name="highs", voll=3000.0,
+        ens_cap_permyriad=None,          # NO energy target
+        reserve_margin=0.05)
+    assert condition == "optimal", (status, condition)
+    rep = sink.get("adequacy_report")
+    assert rep is not None, "the margin alone must still produce a report"
+
+    shed_hours = float(rep["metrics"]["shed_hours"])
+    ens = float(rep["metrics"]["ens_mwh"])
+    assert shed_hours > 0, (
+        "vacuous fixture: nothing was shed, so the contradiction cannot show")
+    assert ens > 0, (
+        f"the report claims {shed_hours} shed hours and {ens} MWh of unserved "
+        "energy — a system cannot lose load for hours without losing energy")
+
+    # And the cap's own block must not masquerade as a target that was met.
+    assert rep["target"]["energy_target_set"] is False
