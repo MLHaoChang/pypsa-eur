@@ -131,6 +131,7 @@ from services.solver_service import (
     run_simulation,
     user_code_enabled,
 )
+from services import study_state as _study_state
 from services.ac_pf_service import run_ac_pf_stage
 from services.validation_service import has_errors, validate_for_run
 from starlette.responses import StreamingResponse
@@ -496,6 +497,19 @@ def run():
     from fastapi import HTTPException
     import time as _time
 
+    # MESH HOLE, fixed in Phase 7 (coupling-loop spec §3, plan [S7]). The
+    # adequacy studies guard each other, but nothing stopped a FOREGROUND
+    # solve from landing between two of a study's own iterates. The frontier,
+    # the sweep and the coupling loop all mutate the network by re-solving it,
+    # and the loop's `evaluate` then samples whatever plan the network happens
+    # to be holding — so an interleaved /run silently re-solves under the
+    # user's config and the loop certifies a cap against a plan it never
+    # produced. Refused BEFORE the claim, so the study is never left racing a
+    # half-started worker.
+    _blocked = _study_state.blocking_study_detail()
+    if _blocked:
+        raise HTTPException(409, _blocked)
+
     stop_event = threading.Event()
     log_queue = BufferedLogQueue()
 
@@ -738,6 +752,19 @@ def run_ac_pf():
     import time as _time
 
     from fastapi import HTTPException
+
+    # The SECOND foreground entrypoint, guarded for the same reason as /run
+    # (spec §3 asks for "both solve entrypoints if two exist"). Stage 2 is not
+    # an LP, but it holds the PyPSA lock for its whole run and overwrites
+    # `lines_t.p0/p1` and `buses_t.v_mag_pu` in place — so a study's next
+    # re-solve queues behind it and the foreground results a study restores to
+    # are no longer the ones it measured. Checked FIRST, before the
+    # solved/dispatch pre-conditions: "a study is running" is the actionable
+    # answer, and a 400 about stale dispatch would send the user to re-run the
+    # very solve this refuses.
+    _blocked = _study_state.blocking_study_detail()
+    if _blocked:
+        raise HTTPException(409, _blocked)
 
     n = PyPSAService.get_network()
     stop_event = threading.Event()

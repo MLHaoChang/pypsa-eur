@@ -74,10 +74,19 @@ class ZoneTarget(BaseModel):
 
 
 class TargetBlock(BaseModel):
-    # "mc_lole" is RESERVED for Phase 7 (a target expressed against the
-    # sequential-MC LOLE rather than the LP proxy's shed hours). Not added
-    # yet: the constraint that would enforce it does not exist, and a basis a
-    # solve cannot honour would read as a standard the run met.
+    # "mc_lole" stays RESERVED and UNADDED, and Phase 7 ratified that rather
+    # than spending it (plan [N3]). A target expressed against the
+    # sequential-MC LOLE has no constraint that could enforce it — the LP
+    # still enforces an ENERGY cap — and a basis the solve cannot honour would
+    # read, on this very report, as a standard the run met.
+    #
+    # What Phase 7 built instead is the SEAM, realised at
+    # /results/coupling_loop: the loop drives this energy cap until the plan it
+    # produces meets an MC-LOLE target, and reports the certified cap as
+    # `eps_star` with an affordance (`restore: "final"`) that applies it to the
+    # solver config. So the MC-LOLE standard is reachable end-to-end while
+    # every report this module types still says, truthfully, which energy cap
+    # the solve enforced.
     basis: Literal["energy", "shed_hours"]
     system: SystemTarget
     zones: list[ZoneTarget] = Field(default_factory=list)

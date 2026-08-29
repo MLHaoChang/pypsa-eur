@@ -17,8 +17,10 @@ header.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
+import contextvars as _contextvars
 import threading as _threading
 
 from pydantic import BaseModel as _BaseModel
@@ -62,6 +64,7 @@ from services.period_utils import (
 )
 
 from routers.simulation import _state, _state_snapshot
+from services import study_state as _study_state
 from services.adequacy import slack as _slack
 
 logger = logging.getLogger("pypsa_gui.results")
@@ -2974,22 +2977,13 @@ def get_fmea_modes():
             "sweep_error": (sweep or {}).get("error")}
 
 
-def _study_running(key: str) -> bool:
-    """True while the long-running study stored under ``_state[key]`` is live.
-
-    One predicate for the whole mutual-exclusion mesh (sweep / frontier / mc).
-    Every one of these studies reads the foreground network for minutes, and
-    the frontier and the sweep RE-SOLVE it; two of them at once means one
-    engine is sampling a network the other is mutating, and the resulting
-    numbers are wrong in a way nothing downstream can detect. Testing
-    ``thread.is_alive()`` and not just the status string matters because a
-    crashed worker that never got to write its terminal status would
-    otherwise wedge the surface permanently.
-    """
-    st = _state.get(key)
-    return bool(st and st.get("status") == "running"
-                and st.get("thread") is not None
-                and st["thread"].is_alive())
+# One predicate for the whole mutual-exclusion mesh (sweep / frontier / mc /
+# coupling loop), MOVED to services/study_state.py so the foreground solve
+# entrypoints in routers/simulation.py can enforce the same mesh without a
+# circular import (this module already imports `_state` from that one). The
+# alias is kept because every guard below reads better with it, and because a
+# second definition here is exactly how the two sides of a mesh drift apart.
+_study_running = _study_state.study_running
 
 
 @results_router.get("/fmea_sweep")
@@ -3034,8 +3028,17 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
 
     if _study_running("fmea_sweep"):
         raise HTTPException(409, "an FMEA sweep is already running")
+    # MESH HOLE, fixed in Phase 7: this guard was simply missing. The frontier
+    # re-solves the foreground network once per target while the sweep freezes
+    # capacities and re-solves it once per contingency — whichever lost the
+    # race was measuring a network the other was rebuilding, and both reported
+    # numbers with no sign of it.
+    if _study_running("frontier"):
+        raise HTTPException(409, "a frontier study is running — wait for it to finish")
     if _study_running("mc"):
         raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
     if _state.get("status") == "running":
         raise HTTPException(409, "a solve is running — wait for it to finish")
     cfg = _state.get("solver_config")
@@ -3122,6 +3125,8 @@ def post_frontier(body: FrontierRequest | None = None):
         raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
     if _study_running("mc"):
         raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
     if _state.get("status") == "running":
         raise HTTPException(409, "a solve is running — wait for it to finish")
     cfg = _state.get("solver_config")
@@ -3243,6 +3248,8 @@ def post_mc(body: McRequest | None = None):
         raise HTTPException(409, "a frontier study is running — wait for it to finish")
     if _study_running("fmea_sweep"):
         raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
     if _state.get("status") == "running":
         raise HTTPException(409, "a solve is running — wait for it to finish")
 
@@ -3401,6 +3408,566 @@ def get_mc_elcc_candidates():
     with PyPSAService.get_lock():
         assets = elcc_candidates(n)
     return {"assets": assets, "max_assets": MAX_ELCC_ASSETS}
+
+
+# ── the coupling loop (Phase 7) ───────────────────────────────────────────
+#
+# The route BINDS the pure controller in services/adequacy/coupling.py to this
+# process's network, config and solver: `solve_at` is one capped
+# capacity-expansion solve, `evaluate` is one sequential-MC run over the plan
+# that solve produced, and everything about storage, locking, aborting and
+# restoring lives here rather than in the controller (spec §§2–3).
+
+# The loop's own caveats, appended to the MC's standing warning. Not a
+# restatement of it: these three are properties of the SEARCH, and each one is
+# a way a reader could over-read the answer.
+LOOP_WARNING_V1 = (
+    "The map from the energy cap to MC-LOLE is a step function, not a curve: "
+    "a range of caps produces the identical plan and therefore the identical "
+    "LOLE, so ε* is the cheapest cap this search VERIFIED, not the largest cap "
+    "that would still pass. Every iterate is a genuine optimum of its own "
+    "constrained problem, but only iterates whose own MC evaluation met the "
+    "target are answers — the bracket is a search heuristic, and tightening ε "
+    "can raise MC-LOLE."
+)
+
+# [N5]. Stated where the number is read, because the mismatch is structural
+# and no choice of ε can remove it.
+MULTI_PERIOD_WARNING_V1 = (
+    "This network has more than one period: the energy cap is enforced per "
+    "period against each period's own demand, while the target is a horizon "
+    "SUM of LOLE — a single scalar ε cannot say 'fix period 3 only', so an "
+    "unreachable or budget-exhausted verdict is structurally likelier here. "
+    "The per-iterate by_period rows are the diagnostic."
+)
+
+# [N6]. Three mechanisms, named, because the user's NEXT ACTION differs by
+# which one is operating and a bare "unreachable" is unactionable.
+UNREACHABLE_COPY_V1 = (
+    "No cap this search could reach produced a plan that met the target on "
+    "the MC's own LOLE. Three mechanisms produce this, and they call for "
+    "different responses: (a) the LP has perfect FORESIGHT over storage while "
+    "the MC dispatches greedily, so a plan that leans on storage looks "
+    "adequate to the solver and is not; (b) demand response serves the LP's "
+    "cap but is EXCLUDED as a resource in the MC, so tightening ε buys cost "
+    "without buying MC-LOLE and the plan stops changing; (c) tightening ε can "
+    "substitute storage for thermal capacity and RAISE MC-LOLE. Check the "
+    "per-iterate binding column and by_period rows before raising the target."
+)
+
+
+class CouplingLoopRequest(_BaseModel):
+    # `target_lole_h` is the only required field, and it is HORIZON-basis
+    # hours (the panel does the h/yr conversion so the wire stays unit-safe).
+    # Optional here rather than required-by-pydantic so a missing target is
+    # refused with the route's own sentence instead of a schema dump.
+    target_lole_h: float | None = None
+    draws: int | None = None
+    seed: int | None = None
+    eps0: float | None = None
+    max_solves: int | None = None
+    restore: str | None = None
+
+
+@results_router.get("/coupling_loop")
+def get_coupling_loop():
+    """
+    Status + payload of the last coupling-loop study (spec §3).
+
+    204 = never run in this session. While the worker runs, this serves the
+    SAME record with ``status: "running"`` and an ``iterations`` list that
+    grows between polls — that is the whole point of the surface, since a run
+    is minutes long and the panel renders each iterate as it lands.
+
+    The record carries a worker-thread handle AND the abort stop-event, and
+    neither may reach the wire: both are unserialisable, and the stop event in
+    particular is the abort route's only handle on a live run.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("coupling_loop")
+        if not st:
+            return Response(status_code=204)
+        # Shallow copy under the lock; `iterations` is REBOUND by the worker,
+        # never mutated, so the list this copy captures is frozen for ever.
+        return {k: v for k, v in st.items()
+                if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/coupling_loop/abort")
+def post_coupling_loop_abort():
+    """
+    Ask a running coupling loop to stop (spec §3, plan [S8]).
+
+    200 sets the record's stop event; the controller checks it before each
+    solve, so an abort costs at most the iterate already in flight and the
+    closing restore still runs. IDEMPOTENT and 200 even when the run is
+    already finishing or finished: "stop" on something that has stopped is
+    satisfied, and a 409 there would make the button flicker into an error at
+    exactly the moment it worked. 404 only when no run has ever been recorded
+    — that is a client bug, not a race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the loop kept solving.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("coupling_loop")
+        if not st:
+            raise HTTPException(
+                404, "no coupling-loop study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/coupling_loop")
+def post_coupling_loop(body: CouplingLoopRequest | None = None):
+    """
+    Start the adequacy-coupled planning loop in a worker thread (spec §3).
+
+    Solve the LP under an energy cap, run the sequential MC on the PLAN it
+    produced, retune the cap, re-solve — until the plan meets the user's
+    target on the MC's own LOLE rather than on the LP proxy's shed energy.
+    The two are not the same standard: the LP has perfect foresight over
+    storage and no outages at all, so a plan that sheds exactly its cap in the
+    LP can lose load for tens of hours in the MC.
+
+    ASYNCHRONOUS BY CONSTRUCTION: up to ``max_solves`` full capacity-expansion
+    solves plus an MC evaluation each, plus the closing restore — minutes to
+    tens of minutes.
+
+    VALIDATION IS SYNCHRONOUS WHEREVER IT IS CHEAP, and here that is the whole
+    set. Every refusal below is knowable from the config and one snapshot, and
+    the alternative is not "a slower error" but a WRONG ANSWER: under a
+    rolling or myopic strategy every capped solve fails validation, so the
+    loop would burn its budget and report ``unreachable`` — "no plan meets
+    this standard" — when the truth is "this strategy cannot enforce a cap".
+    """
+    import dataclasses
+    import hashlib
+    import queue as _queue
+    import time
+
+    from services.adequacy.coupling import MAX_LOOP_SOLVES, run_coupling_loop
+    from services.adequacy.mc import (
+        MAX_DRAWS,
+        MC_WARNING_V1,
+        mc_adequacy,
+        snapshot_inputs,
+    )
+    from services.adequacy.metrics import horizon_years, resolve_time_basis
+    from services.adequacy.sweep import _solve_once
+    from routers.simulation import _state_update
+
+    # ── the 409 mesh ──────────────────────────────────────────────────────
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is already running")
+    if _study_running("frontier"):
+        raise HTTPException(409, "a frontier study is running — wait for it to finish")
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
+    if _study_running("fmea_sweep"):
+        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+
+    # ── the synchronous 422 set ───────────────────────────────────────────
+    target = getattr(body, "target_lole_h", None)
+    try:
+        target = float(target) if target is not None else None
+    except (TypeError, ValueError):
+        target = None
+    if target is None or not (target > 0):
+        raise HTTPException(
+            422,
+            "target_lole_h is required and must be > 0: the loop searches for "
+            "the cheapest cap whose plan meets a RELIABILITY STANDARD, and a "
+            "target of zero (or none) is not a standard — it is the demand "
+            "that no draw ever sheds an hour, which no finite plan can buy")
+
+    draws = getattr(body, "draws", None)
+    draws = 500 if draws is None else int(draws)
+    if draws < 1:
+        raise HTTPException(422, "draws must be a positive number of samples")
+    if draws > MAX_DRAWS:
+        raise HTTPException(
+            422,
+            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
+            "evaluation — and the loop pays that cost once per iterate")
+    seed = getattr(body, "seed", None)
+    seed = 0 if seed is None else int(seed)
+
+    max_solves = getattr(body, "max_solves", None)
+    max_solves = MAX_LOOP_SOLVES if max_solves is None else int(max_solves)
+    if not (1 <= max_solves <= MAX_LOOP_SOLVES):
+        raise HTTPException(
+            422,
+            f"max_solves must be between 1 and {MAX_LOOP_SOLVES} (got "
+            f"{max_solves}) — each solve is a full capacity expansion, so the "
+            "budget is the wall-clock promise this request makes")
+
+    restore = getattr(body, "restore", None) or "base"
+    if restore not in ("base", "final"):
+        raise HTTPException(
+            422,
+            f"restore must be 'base' or 'final' (got {restore!r}): 'base' "
+            "re-solves with your original config, 'final' leaves you holding "
+            "the certified plan at ε*")
+
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(
+            422, "the coupling loop requires a VOLL > 0 in solver settings — "
+                 "with no load-shedding slacks the cap constrains nothing and "
+                 "every iterate collapses to the same unconstrained plan")
+
+    strategy = str(getattr(cfg, "solve_strategy", "full") or "full")
+    if strategy in ("rolling", "myopic"):
+        raise HTTPException(
+            422,
+            f"the reliability target is not supported with the {strategy!r} "
+            "solve strategy: each LP window would need its own demand "
+            "denominator, so every capped solve fails validation. The loop "
+            "would spend its whole budget on failed iterates and report "
+            "'unreachable' — which is a statement about the strategy, not "
+            "about the network. Use the full strategy, or unset the target.")
+
+    # The ONE snapshot the validation reads, taken under the mutation lock.
+    # `keep_zero_capacity=True` from the very first call (spec §1.2): the
+    # sampled fleet's MEMBERSHIP must be invariant across iterates or the
+    # positional CRN substreams shift under it, and a fleet that is empty here
+    # would be empty for every evaluation too.
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        try:
+            inputs = snapshot_inputs(n, keep_zero_capacity=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        nyears = float(horizon_years(n))
+
+    if not inputs.units:
+        raise HTTPException(
+            422,
+            "nothing to sample: no electrical generator carries resolvable "
+            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            "empty — an empty fleet would report the entire horizon as loss of "
+            "load, which is a statement about missing input data, not about "
+            "the system")
+
+    # [S11] the up-front resolution floor. One shortfall hour in one draw
+    # contributes that hour's WEIGHT to the mean, so the smallest non-zero
+    # LOLE these draws can resolve is `min positive weight / draws`. A target
+    # under it is undecidable: every verdict the run could reach — met or
+    # missed — would be an artefact of the sample size, and the study would
+    # answer with a confident number that means nothing.
+    _w = inputs.weights[inputs.weights > 0]
+    floor_h = (float(_w.min()) / draws) if _w.size else None
+    if floor_h is not None and target < floor_h:
+        need = int(math.ceil(float(_w.min()) / target))
+        raise HTTPException(
+            422,
+            f"target_lole_h={target:g} h is below this study's resolution "
+            f"floor of {floor_h:g} h at {draws} draws: a single shortfall "
+            "hour in a single draw already exceeds it, so no verdict here "
+            "could distinguish a compliant plan from a lucky sample. About "
+            f"{need} draws would resolve it.")
+
+    eps0 = getattr(body, "eps0", None)
+    if eps0 is None:
+        eps0 = getattr(cfg, "ens_cap_permyriad", None)
+    try:
+        eps0 = float(eps0) if eps0 is not None else None
+    except (TypeError, ValueError):
+        eps0 = None
+    # An unset cap reaches the loop as the ≤ 0 NO-TARGET sentinel, which the
+    # controller would clamp to its hard backstop and start the search two
+    # decades tighter than any real plan needs. 100‱ is the loose end of the
+    # frontier's own default spread — the cheap side, where a solve is fast.
+    if eps0 is None or not (eps0 > 0):
+        eps0 = 100.0
+
+    lock = PyPSAService.get_lock()
+    base_cfg = cfg
+    basis = resolve_time_basis(nyears)
+
+    # ── the bindings (spec §3) ────────────────────────────────────────────
+
+    def _snapshot():
+        with lock:
+            return snapshot_inputs(n, keep_zero_capacity=True)
+
+    def _hash(mc_inputs) -> str:
+        """sha256 over exactly what the MC reads — the sorted
+        ``(name, capacity_mw)`` unit vector, the sorted
+        ``(name, p_nom_mw, e_nom_mwh)`` storage vector, and the residual bytes.
+
+        NOT the objective (plan [B3]): degenerate optima give equal cost for
+        different plans, and with DSR configured the objective moves (variable
+        cost) while the plan stands still. Equal hash ⇒ bit-identical MC under
+        the same seed and draw count, so reuse is exact where cost equality
+        was a guess.
+        """
+        h = hashlib.sha256()
+        for name, cap in sorted((str(u.name), float(u.capacity_mw))
+                                for u in mc_inputs.units):
+            h.update(f"{name}\x1f{cap!r}\x1e".encode())
+        h.update(b"\x1d")
+        for row in sorted((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh))
+                          for s in mc_inputs.storage):
+            h.update(("\x1f".join(repr(v) for v in row) + "\x1e").encode())
+        h.update(b"\x1d")
+        h.update(mc_inputs.residual.tobytes())
+        return h.hexdigest()
+
+    def solve_at(eps: float) -> dict:
+        """One capped capacity-expansion solve into a PRIVATE sink, read out
+        exactly as ``run_frontier_sweep`` reads its points. Solve failures
+        come back as a status — the controller is specified never to see an
+        exception from here, and a raise would cost the whole study."""
+        sink: dict = {}
+        _solve_once(dataclasses.replace(base_cfg, ens_cap_permyriad=float(eps)),
+                    n, lock, None, sink)
+        status = sink.get("_status")
+        out = {"status": status, "condition": sink.get("_condition"),
+               "cost_eur": None, "ens_mwh": None, "cap_mwh": None,
+               "binding": None, "report": None}
+        if status not in ("ok", "optimal"):
+            return out
+        rep = sink.get("adequacy_report")
+        if not rep:
+            # A target WAS set and the solve succeeded, so the report is the
+            # contract. Its absence is a defect, and reporting it as a failed
+            # iterate keeps the loop from evaluating a plan it cannot describe.
+            out["status"] = "no_report"
+            out["condition"] = "the solve returned no adequacy report"
+            return out
+        sysblk = rep["target"]["system"]
+        out.update(
+            report=rep,
+            cost_eur=float(rep["cost"]["total_system_cost_eur"]),
+            ens_mwh=float(sysblk["achieved_ens_mwh"]),
+            cap_mwh=float(sysblk["cap_mwh"]),
+            binding=rep["target"]["binding"],
+        )
+        return out
+
+    # The floor the payload reports, refreshed by every evaluation so the
+    # value that ships is the FINAL evaluation's own (spec v1.2 §3) rather
+    # than the up-front estimate. With `draws == max_draws` the sample count
+    # is pinned, so the two agree — which is the point: a drifting n_samples
+    # would mean the floor under the verdict was not the floor that was
+    # validated.
+    eval_state: dict = {"floor": floor_h}
+
+    def evaluate():
+        mc_inputs = _snapshot()
+        # §3's normative call. `max_draws=N` is what PINS the sample count:
+        # merely ignoring cov_target leaves the adaptive 2000-draw cap in play
+        # and n_samples drifts between iterates, which breaks the common
+        # random numbers the plateau reuse rests on.
+        metrics = mc_adequacy(mc_inputs, draws=draws, seed=seed,
+                              max_draws=draws)
+        try:
+            eval_state["floor"] = metrics.get("resolution_floor_h")
+        except AttributeError:                                # noqa: BLE001
+            pass
+        return _hash(mc_inputs), metrics
+
+    def _plan_hash():
+        """The duck-typed probe of spec v1.2 §1. The hash comes from the
+        snapshot alone, so the controller can skip an MC on a plateau instead
+        of running one and throwing the result away."""
+        return _hash(_snapshot())
+
+    evaluate.plan_hash = _plan_hash
+
+    # ── the record (closed over, never reached through `_state`) ──────────
+    stop_event = _threading.Event()
+    record: dict = {
+        "study": "coupling_loop",
+        "status": "running",
+        "target_lole_h": target,
+        "basis": basis,
+        "horizon_years": nyears,
+        "draws": draws,
+        "seed": seed,
+        "eps0": eps0,
+        "max_solves": max_solves,
+        "restore": restore,
+        "base_restored": False,
+        "confident": False,
+        "eps_star": None,
+        "resolution_floor_h": floor_h,
+        "solves_used": 0,
+        "iterations": [],
+        "final": None,
+        "verdict": None,
+        "warning": MC_WARNING_V1 + " " + LOOP_WARNING_V1,
+        "error": None,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": stop_event,
+    }
+
+    def on_iteration(row: dict) -> None:
+        """Grow the record by REBINDING, never by appending in place.
+
+        ``get_coupling_loop`` serves a shallow copy, so an in-place append
+        hands the serializer the very list this thread is mutating: a mid-run
+        GET can then be written half-way through an append, and a client
+        polling every second can watch its own earlier history change. A fresh
+        list per iterate makes every snapshot immutable by construction — each
+        GET's list is a prefix of the next, permanently.
+        """
+        with PyPSAService.get_solver_state_lock():
+            record["iterations"] = record["iterations"] + [row]
+
+    def _restore_closing(met: bool, eps_star) -> bool:
+        """The closing re-solve — the route's job, on EVERY path (spec §3,
+        §1.3's pattern). The loop mutates the network once per iterate, so
+        without this it is left on whichever ε happened to be last while the
+        foreground results still describe the pre-study solve: the study
+        silently rewrites the user's plan and says nothing.
+
+        ``"final"`` is only meaningful on a met verdict — there is no
+        certified cap otherwise — so it falls back to base rather than
+        applying a cap nothing verified.
+        """
+        from services.solver_service import run_simulation
+
+        use_final = (restore == "final" and met and eps_star is not None)
+        if use_final:
+            final_cfg = dataclasses.replace(
+                base_cfg, ens_cap_permyriad=float(eps_star))
+            # Persisted through the normal config path (read-modify-write
+            # under the solver-state lock, exactly as PUT /solver_config
+            # does) BEFORE the solve: the user asked to hold ε*, and a
+            # restore whose solve fails must still leave the setting they
+            # will re-run with, with `base_restored` reporting the failure.
+            with PyPSAService.get_solver_state_lock():
+                _state["solver_config"] = dataclasses.replace(
+                    _state["solver_config"],
+                    ens_cap_permyriad=float(eps_star))
+        else:
+            final_cfg = base_cfg
+        try:
+            status, _condition = run_simulation(
+                final_cfg, n, lock, _threading.Event(), _queue.SimpleQueue(),
+                state_update=_state_update)
+        except Exception:                                     # noqa: BLE001
+            logger.exception(
+                "coupling loop: the closing re-solve FAILED — the network is "
+                "left on the last iterate's cap and the foreground results do "
+                "not describe the plan the verdict is about")
+            return False
+        return status in ("ok", "optimal")
+
+    def _verdict_copy(status: str, eps_star) -> str:
+        if status == "unreachable":
+            return UNREACHABLE_COPY_V1
+        if status == "met" and eps_star is not None:
+            if restore == "final":
+                return (
+                    f"A plan meeting {target:g} h was verified at ε* = "
+                    f"{eps_star:g}‱, and that cap has been APPLIED to your "
+                    "solver settings and re-solved — the network you are "
+                    "holding is the certified plan.")
+            return (
+                f"A plan meeting {target:g} h was verified at ε* = "
+                f"{eps_star:g}‱. Your original config has been re-solved, so "
+                "the network you are holding is NOT that plan: to keep it, set "
+                f"ens_cap_permyriad = {eps_star:g} and re-solve.")
+        if status == "aborted":
+            return ("The study was aborted between iterates. Any iterates "
+                    "already evaluated are shown; the closing restore ran, so "
+                    "the network is back on your own config.")
+        if status == "budget_exhausted":
+            return (
+                f"The solve budget ({max_solves}) was spent without verifying "
+                "a plan that meets the target. Nothing here says the target is "
+                "unreachable — only that this search did not reach it. Raise "
+                "max_solves, or start from a tighter eps0.")
+        return ("The study did not complete. The iterates recorded below are "
+                "what it managed before it stopped.")
+
+    def worker():
+        res: dict | None = None
+        err: str | None = None
+        try:
+            try:
+                res = run_coupling_loop(
+                    solve_at, evaluate, target_lole_h=target, eps0=eps0,
+                    max_solves=max_solves, stop_event=stop_event,
+                    on_iteration=on_iteration)
+            except BaseException as exc:                      # noqa: BLE001
+                # The controller is total by construction; this is the belt
+                # for a broken binding above, and it must never leave the
+                # record stuck on "running" for the rest of the session.
+                logger.exception("coupling loop: the controller raised")
+                err = str(exc)
+        finally:
+            status = (res or {}).get("status") or "failed"
+            eps_star = (res or {}).get("eps_star")
+            try:
+                base_restored = _restore_closing(status == "met", eps_star)
+            except BaseException:                             # noqa: BLE001
+                logger.exception("coupling loop: the restore itself raised")
+                base_restored = False
+            iterations = (res or {}).get("iterations")
+            if iterations is None:
+                iterations = record["iterations"]
+            warning = MC_WARNING_V1 + " " + LOOP_WARNING_V1
+            if any(len((r.get("mc") or {}).get("by_period") or {}) > 1
+                   for r in iterations):
+                warning += " " + MULTI_PERIOD_WARNING_V1
+            # ONE atomic apply, under the same lock `on_iteration` rebinds
+            # under: a GET landing between the status flip and the verdict
+            # would otherwise serve a finished study with a running study's
+            # empty final, which is the one shape the panel cannot render.
+            with PyPSAService.get_solver_state_lock():
+                record.update(
+                    status=status,
+                    iterations=iterations,
+                    final=(res or {}).get("final"),
+                    confident=bool((res or {}).get("confident")),
+                    eps_star=eps_star,
+                    solves_used=int((res or {}).get("solves_used") or 0),
+                    resolution_floor_h=eval_state["floor"],
+                    base_restored=bool(base_restored),
+                    verdict=_verdict_copy(status, eps_star),
+                    warning=warning,
+                    error=err,
+                    finished_at=time.time(),
+                )
+
+    # The worker carries the REQUEST's context (the /simulation/run pattern):
+    # the active project lives in a ContextVar and a bare Thread does not
+    # inherit it, so without this the closing restore's `_state_update` and
+    # the `restore="final"` config write would land in the PROCESS foreground
+    # — a different project's state from the one the caller is polling. The
+    # study record itself is CLOSED OVER rather than reached through `_state`
+    # (post_mc's pattern), so it cannot be redirected by a context switch at
+    # all; post_frontier's in-thread `_state["frontier"].update(...)` is the
+    # anti-pattern this deliberately does not copy.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-coupling-loop")
+    record["thread"] = t
+    # Publish and START under one lock hold. `_study_running` tests
+    # `thread.is_alive()`, and a registered-but-not-yet-started thread reports
+    # False — so a second POST arriving in that window would read the record as
+    # stale state, claim the surface, and put two loops on the same network.
+    with PyPSAService.get_solver_state_lock():
+        _state["coupling_loop"] = record
+        t.start()
+    return {"status": "running", "target_lole_h": target, "draws": draws,
+            "seed": seed, "eps0": eps0, "max_solves": max_solves,
+            "restore": restore, "basis": basis,
+            "resolution_floor_h": floor_h}
 
 
 @results_router.get("/copt")

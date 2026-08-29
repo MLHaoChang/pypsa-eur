@@ -325,6 +325,14 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # The ELCC candidate list for the panel's asset picker (Phase 6) — one
         # row per eligible asset with its nameplate, no snapshot axis at all.
         "/mc/elcc_candidates",
+        # Coupling-loop lifecycle (Phase 7) — status, verdict and one row per
+        # ITERATE (an ε and the MC metrics of the plan it produced). The axis
+        # is the search, not the horizon, so a snapshot range would have
+        # nothing to slice. The POST and the /coupling_loop/abort POST are not
+        # scanned by this test at all (it reads `@results_router.get` only);
+        # both carry their ROUTE_SURFACES entries in test_golden_coverage.py,
+        # which is the registry that sees every method.
+        "/coupling_loop",
     }
 
     unclassified = declared - ranged - aggregates

@@ -223,3 +223,32 @@ first, bite table, no commits by workers.
    not fatal; `max_solves` clamped to `MAX_LOOP_SOLVES`, `eps0 ≤ 0` clamped to the
    floor; a non-infeasible failure at the ε backstop reports `budget_exhausted`,
    never `unreachable`.
+
+### v1.3 — Wave C adjudications (ratified by the master)
+
+1. **`POST /simulation/run_ac_pf` is the second guarded solve entrypoint** — not an
+   LP, but it holds the lock for its whole run and rewrites result frames in place;
+   the guard sits before its own preconditions so a blocked user is told "a study
+   is running", not "re-run LOPF".
+2. **The shared mesh predicate lives in `services/study_state.py`** — results.py
+   imports from simulation.py already, so neither router can host it without a
+   cycle; both alias one definition (`STUDY_KEYS`, `STUDY_LABELS`,
+   `blocking_study_detail`).
+3. **`resolution_floor_h` = the last evaluation's value** (refreshed per evaluate;
+   up-front `min positive weight / draws` as the fallback) — identical to "the
+   final's" under the pinned draws call, which is what makes the ambiguity inert.
+4. **The [N6] three-mechanism text ships as `verdict`** (a sentence beside the
+   machine-readable `status`); `warning` remains the caveat string. The frontend
+   renders `verdict` directly.
+5. **`restore="final"` persists `ens_cap_permyriad = eps_star` BEFORE the closing
+   re-solve**, so a failed closing solve still leaves the user holding the ε* they
+   asked for, with `base_restored=False` telling the truth about the network.
+   "final" on a non-met verdict falls back to base — never applies an unverified
+   cap.
+6. **Record publish + thread start happen under one solver-state-lock hold**
+   (claim atomicity: `_study_running` tests `is_alive()`, and a registered-but-
+   unstarted thread reads as stale — a second POST in that window would put two
+   loops on one network). Note: `post_mc` predates this discipline and carries the
+   same tiny window; tightening it is a cheap follow-up, not done here.
+7. The series/aggregate census scans GETs only; the POST and abort routes carry
+   their coverage in `ROUTE_SURFACES` alone (noted in the census comment).
