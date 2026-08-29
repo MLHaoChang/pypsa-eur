@@ -650,6 +650,59 @@ def test_an_unreachable_verdict_says_so_when_the_cap_never_bound(
     assert all(r["binding"] != "system_cap" for r in body["iterations"]), body
 
 
+def test_never_bound_does_not_recommend_a_margin_the_user_already_set(
+        client, install_network, monkeypatch):
+    """The never-bound advice must not name a lever already in force.
+
+    Live today (found by the Phase-9 review): `report.binding` is computed
+    purely from the ENS caps, so it reads "voll" whenever the cap does not
+    bind — INCLUDING when a reserve margin is what actually shaped the plan.
+    The verdict then tells a user who already set a margin that "what would
+    move this number is firm capacity … a planning reserve margin", which is
+    advice they have already taken. The cap genuinely never bound, so the
+    diagnosis is right and only the recommendation is stale — but a
+    recommendation to do the thing you are already doing reads as the tool not
+    knowing what you configured.
+
+    Bite (verified): drop the margin clause and return NEVER_BOUND_COPY_V1
+    unconditionally.
+    """
+    stubs = _Stubs(lole_seq=[9.0], binding="voll")
+
+    def _never_binds(cfg, n, lock, lq, sink):
+        eps = float(getattr(cfg, "ens_cap_permyriad", 0.0) or 0.0)
+        stubs.solve_eps.append(eps)
+        sink["_status"] = "ok"
+        sink["_condition"] = "optimal"
+        rep = _report(cap_mwh=7200.0 * eps / 1e4, ens_mwh=0.0, cost=360000.0,
+                      binding="voll")
+        # A margin WAS enforced on this solve, and its own block says so.
+        rep["reserve_margin"] = {
+            "margin": 0.15,
+            "by_period": [{"period": "ALL", "binding": True, "met": True}],
+        }
+        sink["adequacy_report"] = rep
+
+    stubs.solve_once = _never_binds
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network)
+
+    client.post(LOOP_URL, json={"target_lole_h": 3.6, "draws": DRAWS,
+                                "eps0": 100.0, "max_solves": 4})
+    body = _poll(client)
+    assert body["status"] == "unreachable", body
+    verdict = body["verdict"].lower()
+    assert "never bound" in verdict, body["verdict"]
+    # It must ACKNOWLEDGE the margin rather than PRESCRIBE it. Asserting on
+    # the word "already" alone was vacuous — the base copy contains "already
+    # covers demand" — so pin the prescription's absence and the
+    # acknowledgement's presence, both verbatim.
+    assert "a planning reserve margin, or the candidate" not in verdict, (
+        "the verdict prescribes a margin to a user who has one: "
+        + body["verdict"])
+    assert "reserve margin is already in force" in verdict, body["verdict"]
+
+
 # ── the real thing ────────────────────────────────────────────────────────
 
 @pytest.mark.slow

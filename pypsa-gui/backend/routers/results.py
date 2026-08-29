@@ -3443,6 +3443,17 @@ MULTI_PERIOD_WARNING_V1 = (
 
 # [N6]. Three mechanisms, named, because the user's NEXT ACTION differs by
 # which one is operating and a bare "unreachable" is unactionable.
+NEVER_BOUND_WITH_MARGIN_COPY_V1 = (
+    "The cap never bound. On every iterate that solved, the LP's own shed "
+    "energy stayed under the ceiling, so tightening the cap could not change "
+    "the plan — and no cap can. What DID shape this plan is the firm-capacity "
+    "standard: a reserve margin is already in force, and the loop is reporting "
+    "the cap's failure, not the margin's. The loss of load the MC still sees "
+    "comes from outages beyond what that margin buys. Raise the margin (or "
+    "lower the target) rather than capping harder; the cap has no leverage "
+    "here either way."
+)
+
 NEVER_BOUND_COPY_V1 = (
     "The cap never bound. On every iterate that solved, the LP's own shed "
     "energy stayed under the ceiling (the binding column reads something "
@@ -3734,6 +3745,8 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
         h.update(mc_inputs.residual.tobytes())
         return h.hexdigest()
 
+    _margin_bound_flag = [False]
+
     def solve_at(eps: float) -> dict:
         """One capped capacity-expansion solve into a PRIVATE sink, read out
         exactly as ``run_frontier_sweep`` reads its points. Solve failures
@@ -3756,6 +3769,15 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
             out["status"] = "no_report"
             out["condition"] = "the solve returned no adequacy report"
             return out
+        # Did a reserve margin shape this iterate? The controller's row keeps
+        # nine fixed keys and drops the report, and `coupling.py` is
+        # deliberately not touched (it is the regression oracle for the margin
+        # loop), so the answer is captured HERE, where the report is in hand.
+        # `binding` itself can never say this: it is computed purely from the
+        # ENS caps and reads "voll" even when a margin is what bound.
+        _rm = (rep.get("reserve_margin") or {}).get("by_period") or []
+        if any(bool(p.get("binding")) for p in _rm):
+            _margin_bound_flag[0] = True
         sysblk = rep["target"]["system"]
         out.update(
             report=rep,
@@ -3879,6 +3901,7 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
         return status in ("ok", "optimal")
 
     def _verdict_copy(status: str, eps_star, rows=None) -> str:
+        _margin_bound = _margin_bound_flag[0]
         if status == "unreachable":
             # WHICH unreachable? The three-mechanism copy assumes the cap was
             # doing something and the MC disagreed with it. The commonest case
@@ -3891,6 +3914,15 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
                       if r.get("solve_status") in ("ok", "optimal")]
             if solved and not any(r.get("binding") == "system_cap"
                                   for r in solved):
+                # WHICH never-bound? `report.binding` is computed purely from
+                # the ENS caps, so it reads "voll" even when a reserve margin
+                # is what actually shaped the plan. Prescribing a margin to a
+                # user who already set one reads as the tool not knowing what
+                # they configured — the diagnosis is right, only the
+                # recommendation is stale. The margin's own block says whether
+                # it was in force, so ask it.
+                if _margin_bound:
+                    return NEVER_BOUND_WITH_MARGIN_COPY_V1
                 return NEVER_BOUND_COPY_V1
             return UNREACHABLE_COPY_V1
         if status == "met" and eps_star is not None:
