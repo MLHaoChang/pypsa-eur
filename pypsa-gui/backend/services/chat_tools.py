@@ -1254,8 +1254,8 @@ def upload_generator_profile(csv_content_b64: str,
     data = base64.b64decode(csv_content_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     if "attribute" in _h.__code__.co_varnames:
-        return _sync(_h(upload, attribute=attribute))
-    return _sync(_h(upload))
+        return _sync(_h(attribute=attribute, file=upload))
+    return _sync(_h(file=upload))
 
 
 def upload_link_profile(csv_content_b64: str,
@@ -1269,8 +1269,8 @@ def upload_link_profile(csv_content_b64: str,
     data = base64.b64decode(csv_content_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     if "attribute" in _h.__code__.co_varnames:
-        return _sync(_h(upload, attribute=attribute))
-    return _sync(_h(upload))
+        return _sync(_h(attribute=attribute, file=upload))
+    return _sync(_h(file=upload))
 
 
 # ── Solver config (1) ───────────────────────────────────────────────────────
@@ -1961,14 +1961,21 @@ def compare_scenarios(
 
 def create_project_snapshot(name: str, label: str, message: str | None = None) -> dict:
     # Handler is create_snapshot(req: CreateSnapshotRequest, project:
-    # AuthorizedProject = ProjectAccessDep) and reads req.label / req.message —
-    # pass the model, not a dict (a direct call doesn't get FastAPI's body
-    # parsing, so a dict would AttributeError on req.label). The `project`
-    # default is an unresolved `Depends`, so it has to be supplied too; these
-    # four take a resolved AuthorizedProject rather than db=/user=, so
-    # `_authorized_project` is the right helper and `_route` is NOT.
-    from routers.snapshots import create_snapshot, CreateSnapshotRequest
-    return create_snapshot(
+    # AuthorizedProject = ProjectAccessDep, db, user) and reads req.label /
+    # req.message — pass the model, not a dict (a direct call doesn't get
+    # FastAPI's body parsing, so a dict would AttributeError on req.label).
+    #
+    # `_route`, NOT a positional call. The handler grew `db`/`user` Depends
+    # when `_enforce_project_lock` landed in its body; called positionally,
+    # both arrived as raw `Depends` sentinels and `user.id` raised
+    # AttributeError inside the lock check in auth mode — so the gate this
+    # tool is supposed to pass through could never fire. `project` is still
+    # resolved here (it is an `AuthorizedProject`, which `_route` cannot
+    # supply) and handed over as a positional; `_route` injects the rest.
+    # Same treatment `restore_project_snapshot` already had.
+    from routers.snapshots import create_snapshot as _h, CreateSnapshotRequest
+    return _route(
+        _h,
         CreateSnapshotRequest(label=label, message=message or ""),
         _authorized_project(name),
     )
@@ -1994,8 +2001,10 @@ def restore_project_snapshot(name: str, snapshot_id: str) -> dict:
 
 
 def delete_project_snapshot(name: str, snapshot_id: str) -> None:
+    # `_route` for the same reason as `create_project_snapshot` above:
+    # `delete_snapshot` declares `db`/`user` and calls `_enforce_project_lock`.
     from routers.snapshots import delete_snapshot as _h
-    _h(snapshot_id, _authorized_project(name))
+    _route(_h, snapshot_id, _authorized_project(name))
 
 
 # ── Import / Export (8) ─────────────────────────────────────────────────────
@@ -3646,3 +3655,200 @@ DISPATCHERS: dict[str, Any] = {
     # llm provider switching (1) — Task 10
     "set_active_profile": set_active_profile,
 }
+
+
+# ── Foreign-lock gate at the dispatch seam (fix-wave F1) ────────────────────
+#
+# The write middleware in `main.py` refuses a non-holder's write to
+# `/api/network/*`, `/api/io/*` and `/api/simulation/*` while another user
+# holds the ACTIVE project's edit lock. Chat never goes through it: every tool
+# above calls its route handler as a plain Python function, inside the SSE
+# generator, long after any middleware ran. So the same component edit that a
+# non-holder cannot make from the canvas was making it through the chat panel
+# and landing in the holder's shared resident network, where the holder's next
+# autosave persisted it.
+#
+# The gate is applied by WRAPPING the entries in `DISPATCHERS` rather than
+# each tool body: `DISPATCHERS` is the single seam `chat_service` dispatches
+# through, and a per-body check would have to be remembered ~40 times. The
+# module-level functions stay unwrapped, so in-process callers that deliberately
+# bypass the chat surface (tests, smoke harnesses) are unaffected.
+
+_LOCK_GATE_PREFIXES = ("/api/network/", "/api/io/", "/api/simulation/")
+# Explicit allowlist, not a prefix — mirrors `main.py`'s
+# `_FOREIGN_LOCK_GATE_EXEMPT_EXACT` / `_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`.
+# A queue route is exempt only when it acts on a JOB or names its project in
+# the body; a hypothetical future sibling under `/api/simulation/queue/`
+# that acts on the active project must stay gated by default, so this is
+# spelled out per-route rather than `path.startswith("/api/simulation/queue")`.
+#
+#   * `/api/simulation/queue`                      (`solve_queue_enqueue`)
+#     — names its project in the body, runs its own holder check.
+#   * `/api/simulation/queue/clear_finished`       (`solve_queue_clear_finished`)
+#     — cross-org by construction, super-admin-gated; never touches the
+#       active project.
+#   * `/api/simulation/queue/{job_id}/abort`       (`solve_queue_abort`)
+#     — job-scoped; carries its own authorization keyed on the job. This is
+#       `TOOL_ROUTES`'s literal template string (never a real job id at this
+#       seam), so an exact match on the template is correct and does not need
+#       the regex `main.py` uses against real request paths.
+_LOCK_GATE_EXEMPT_PATHS = frozenset({
+    "/api/simulation/queue",
+    "/api/simulation/queue/clear_finished",
+    "/api/simulation/queue/{job_id}/abort",
+})
+_LOCK_GATE_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+# Tools with no HTTP route (`_service_call_` in TOOL_ROUTES) that nonetheless
+# mutate the resident network. The route-derived rule below cannot see them,
+# and they are exactly as capable of overwriting a lock holder's work as the
+# routed ones — `batch_delete_components` more so than most.
+_LOCK_GATE_SERVICE_CALL_MUTATORS = frozenset({
+    "batch_create_components",
+    "batch_delete_components",
+    "generate_exemplary_timeseries",
+    "apply_demand_from_excel",
+    "reconstruct_network_from_image",
+})
+
+
+def _lock_gated_tool_names() -> frozenset[str]:
+    """
+    The tools the seam gates: middleware parity, derived — not a hand list.
+
+    A tool is gated when its safety tier is not "read" AND it either maps to a
+    write route under a gated prefix (`chat_tools_schema.TOOL_ROUTES` is the
+    tool→route map the endpoint-map test already keeps honest) or is one of the
+    routeless network mutators above.
+
+    Deriving it has a second payoff: a tool added later against a new
+    `/api/network/*` route is gated the day it lands, with nothing to remember.
+
+    Everything else is deliberately NOT gated:
+      * `/api/projects/*` write tools (save / rename / delete / layout /
+        snapshots) already call `_enforce_project_lock` in the handler body,
+        and its 409 is the richer one — it names the TARGET project, which for
+        a tool like `save_project('Other')` is not the active one this seam
+        would have tested.
+      * `solve_queue_enqueue` names its project in the body and runs its own
+        check, exactly as `/api/simulation/queue` is exempt in the middleware.
+      * `load_project` / `activate_project` are how a user gets AWAY from a
+        locked project; gating them would trap them there. The middleware
+        likewise gates neither (one is a GET, the other is an exempt suffix).
+      * Upload / export / chat-history tools write artifacts, not network
+        state, on surfaces the middleware does not gate either.
+    """
+    from services.chat_tools_schema import TOOL_ROUTES, safety_tier_for
+
+    gated: set[str] = set()
+    for name in DISPATCHERS:
+        if safety_tier_for(name) == "read":
+            continue
+        if name in _LOCK_GATE_SERVICE_CALL_MUTATORS:
+            gated.add(name)
+            continue
+        for route in TOOL_ROUTES.get(name, ()):
+            if not isinstance(route, tuple):
+                continue  # a `_service_call_` / `_ui_event_` sentinel
+            method, path = route
+            if (
+                method.upper() in _LOCK_GATE_WRITE_METHODS
+                and any(path.startswith(p) for p in _LOCK_GATE_PREFIXES)
+                and path not in _LOCK_GATE_EXEMPT_PATHS
+            ):
+                gated.add(name)
+                break
+    return frozenset(gated)
+
+
+def _check_foreign_lock(tool_name: str) -> None:
+    """
+    Raise 409 `project_locked` when another user holds the active project's
+    edit lock. Same predicate as the middleware gate in `main.py`.
+
+    CHECK ONLY — never an acquire. A free or expired lock, the acting user's
+    own lock, local mode, an unbound scratch context and a tool call with no
+    acting identity all pass through untouched.
+    """
+    import local_mode
+
+    if local_mode.is_local_mode():
+        return  # D7 — one identity, no lock semantics
+    user_id = _ACTING_USER_ID.get()
+    if user_id is None:
+        return  # nothing to compare a holder against; `_acting()` owns the 401
+    try:
+        acting_uuid = uuid.UUID(str(user_id))
+    except (TypeError, ValueError):
+        return
+    try:
+        binding_uuid = PyPSAService.get_active_context().project_uuid
+    except Exception:  # noqa: BLE001
+        return  # unbound scratch context — nothing to guard
+    if not binding_uuid:
+        return
+    try:
+        lock_project_id = uuid.UUID(str(binding_uuid))
+    except (TypeError, ValueError):
+        return
+
+    from db.session import SessionLocal
+    from services import project_locks
+
+    try:
+        with SessionLocal() as gate_db:
+            lock = project_locks.get_lock(gate_db, lock_project_id)
+            if lock is None or lock.holder_user_id == acting_uuid:
+                return
+            detail = {
+                "error_kind": "project_locked",
+                "message": (
+                    "This project is being edited by another user, so "
+                    f"{tool_name!r} was not run. Their edit lock must expire "
+                    "or be released first."
+                ),
+                "lock": project_locks.serialize_lock(
+                    gate_db, lock_project_id, acting_uuid
+                ),
+            }
+    except Exception:  # noqa: BLE001
+        # FAIL CLOSED, matching the middleware gate (F4): `get_lock` prunes an
+        # expired row (DELETE + commit), so a race can raise here, and a DB
+        # error means the lock is UNKNOWN rather than absent. Dispatching
+        # anyway would wave through precisely the write the gate exists to
+        # stop, at the moment the check broke.
+        logger.exception(
+            "chat dispatch seam: lock check failed for %r; refusing the tool",
+            tool_name,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_kind": "project_lock_unavailable",
+                "message": (
+                    "Could not verify this project's edit lock, so "
+                    f"{tool_name!r} was not run. Retry in a moment."
+                ),
+            },
+        ) from None
+    raise HTTPException(status_code=409, detail=detail)
+
+
+def _lock_gated(tool_name: str, handler):
+    """Wrap one dispatcher with the foreign-lock check."""
+    import functools
+
+    @functools.wraps(handler)
+    def _wrapped(*args, **kwargs):
+        _check_foreign_lock(tool_name)
+        return handler(*args, **kwargs)
+
+    return _wrapped
+
+
+# Applied in place so anything already holding a reference to DISPATCHERS
+# (chat_service imports the dict itself) sees the gated callables.
+DISPATCHERS.update({
+    name: _lock_gated(name, DISPATCHERS[name])
+    for name in _lock_gated_tool_names()
+})

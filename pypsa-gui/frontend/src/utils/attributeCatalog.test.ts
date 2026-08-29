@@ -81,6 +81,17 @@ describe('resolveEditability', () => {
       .toEqual({ editable: false, reason: 'override' })
   })
 
+  it('refuses Link.committable for the same reason as Generator.committable', () => {
+    // _bulk writes df.loc directly, and its header names flipping
+    // `committable` as unsupported through that path — for every class that
+    // carries the flag, not just Generator. Links carry it too.
+    const links = toCatalogMap([attr({ name: 'committable', dtype: 'bool', type: 'boolean' })])
+    expect(resolveEditability({
+      componentClass: 'Link', column: 'committable', rowName: 'L1',
+      catalog: links, series: NO_SERIES,
+    })).toEqual({ editable: false, reason: 'override' })
+  })
+
   it('allows Bus.control despite its Output status (override)', () => {
     const buses = toCatalogMap([attr({ name: 'control', dtype: 'object', status: 'Output' })])
     expect(resolveEditability({
@@ -115,10 +126,11 @@ describe('resolveEditability', () => {
       .toEqual({ editable: true })
   })
 
-  it('documents both override entries with a reason', () => {
+  it('documents every override entry with a reason', () => {
     expect(EDITABILITY_OVERRIDES['Bus.control']).toBe('editable')
     expect(EDITABILITY_OVERRIDES['Generator.committable']).toBe('readonly')
-    expect(Object.keys(EDITABILITY_OVERRIDES).length).toBe(2)
+    expect(EDITABILITY_OVERRIDES['Link.committable']).toBe('readonly')
+    expect(Object.keys(EDITABILITY_OVERRIDES).length).toBe(3)
   })
 })
 
@@ -153,6 +165,15 @@ describe('resolveEditor — D4 rows 1 to 6, in order', () => {
     expect(resolveEditor('Generator', 'control', GEN)).toBe('closedSet')
     expect(CLOSED_SETS['Bus.control']).toEqual(['PQ', 'PV', 'Slack'])
     expect(CLOSED_SETS['Generator.control']).toEqual(['PQ', 'PV', 'Slack'])
+  })
+
+  it('row 1b: StorageUnit.control is the same closed set', () => {
+    // PyPSA declares control on StorageUnit too (Input, same AC-PF vocabulary).
+    // Without this entry the grid fell through to the free-text editor and a
+    // paste wrote e.g. "Swing" where only PQ/PV/Slack are meaningful.
+    const sus = toCatalogMap([attr({ name: 'control', dtype: 'object', type: 'string' })])
+    expect(resolveEditor('StorageUnit', 'control', sus)).toBe('closedSet')
+    expect(CLOSED_SETS['StorageUnit.control']).toEqual(['PQ', 'PV', 'Slack'])
   })
 
   it('row 2: every bus terminal column gets the bus picker', () => {

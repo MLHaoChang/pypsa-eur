@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
 import { useAssetDrag } from '../hooks/useAssetDrag'
 import { networkApi } from '../api/network'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ioApi } from '../api/io'
 import { projectsApi } from '../api/projects'
 import { simulationApi } from '../api/simulation'
@@ -687,6 +688,11 @@ function ProjectSectionContent({
   const [showCopyModal, setShowCopyModal] = useState(false)
   // "Open Project" picker — lists existing backend projects.
   const [showOpenModal, setShowOpenModal] = useState(false)
+  // Pending DESTRUCTIVE re-load of the already-open project. `depthKnown`
+  // rides along so the prompt can say which case the user is in — "you have
+  // unsaved edits" and "we could not find out" are different sentences and
+  // only one of them is a claim.
+  const [pendingReload, setPendingReload] = useState<{ name: string; depthKnown: boolean } | null>(null)
   // Route back to the projects home (the workspace surface that now owns
   // create / import / duplicate).
   const navigate = useNavigate()
@@ -937,7 +943,7 @@ function ProjectSectionContent({
     saveAndExportBundle(name, { setAsCurrent: false, askLocation: true, skipCache: true })
   }
 
-  const handleOpenPick = async (name: string) => {
+  const handleOpenPick = async (name: string, opts?: { confirmed?: boolean }) => {
     setShowOpenModal(false)
     const tId = toast.loading(`Opening '${name}'…`)
     setProjectSwitchInProgress(true)
@@ -948,6 +954,23 @@ function ProjectSectionContent({
       // is a DESTRUCTIVE re-load (not the instant switch) — switchToProject
       // no-ops on the same project, so it can't serve this recovery path.
       if (name === currentProject) {
+        // Gate on the dirty state, not unconditionally: the recovery case this
+        // branch exists for is the one where the backend network is EMPTY, and
+        // prompting there would be noise on the exact workflow it serves. But
+        // "clean" must mean clean — a failed probe is UNKNOWN and fails closed,
+        // because this path discards whatever it could not ask about.
+        if (!opts?.confirmed) {
+          // `unsaved`, not `depth > 0` — see ImportExport.tsx. A solved project
+          // has depth 0 and unsaved true, and re-reading from disk discards it.
+          let unsaved = false
+          let unsavedKnown = true
+          try { unsaved = (await networkApi.undoInfo()).unsaved } catch { unsavedKnown = false }
+          if (!unsavedKnown || unsaved) {
+            toast.dismiss(tId)
+            setPendingReload({ name, depthKnown: unsavedKnown })
+            return
+          }
+        }
         const stopped = await abortRunningSim()
         if (!stopped) {
           toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
@@ -1056,6 +1079,24 @@ function ProjectSectionContent({
           initial={slugify(`${currentProject || pn}_copy`)}
           onSave={handleCopyConfirm}
           onClose={() => setShowCopyModal(false)}
+        />
+      )}
+      {pendingReload && (
+        <ConfirmDialog
+          open
+          danger
+          title="Re-load from disk?"
+          message={pendingReload.depthKnown
+            ? `'${pendingReload.name}' will be re-read from disk. Unsaved changes in the current network are lost.`
+            : `Could not check '${pendingReload.name}' for unsaved changes — the backend did not answer. `
+              + 'Re-reading from disk will discard anything unsaved.'}
+          confirmLabel="Re-load"
+          onConfirm={() => {
+            const target = pendingReload.name
+            setPendingReload(null)
+            void handleOpenPick(target, { confirmed: true })
+          }}
+          onCancel={() => setPendingReload(null)}
         />
       )}
       {showOpenModal && (
@@ -1214,12 +1255,17 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // not to thrash the backend, short enough that the badge stays roughly
   // accurate after an edit. The panel itself polls more aggressively when
   // open.
-  const { data: preflight } = useQuery({
+  const { data: preflight, isError: preflightErrored } = useQuery({
     queryKey: nk(currentProject, 'preflight'),
     queryFn: simulationApi.preflight,
     refetchInterval: 30_000,
     staleTime: 15_000,
   })
+  // ADR-0001: a failed preflight fetch must never render as "no issues" — a
+  // defaulted zero here is indistinguishable from a real clean result, so it
+  // would silently convert "we could not check" into "we checked and it's
+  // fine". `preflightErrored` (covers both isError and the resulting
+  // `data === undefined`) drives an explicit unavailable badge instead.
   const issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)
   const hasErrors = (preflight?.errors ?? 0) > 0
   // Active (queued + running) solve-queue jobs, surfaced as a badge on the
@@ -1259,7 +1305,13 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         icon={<AlertTriangle size={15} />}
         label="Issues"
         active={activeSlidePanel === 'issues'}
-        rightEl={issueCount > 0 ? (
+        rightEl={preflightErrored ? (
+          <span
+            className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
+            style={{ background: 'rgba(148,163,184,0.18)', color: '#94a3b8' }}
+            title="Could not check for issues — the preflight validation request failed"
+          >?</span>
+        ) : issueCount > 0 ? (
           <span
             className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
             style={{

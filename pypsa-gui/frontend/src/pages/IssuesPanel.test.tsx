@@ -159,3 +159,58 @@ describe('IssuesPanel — carrier_zero_co2 fix button', () => {
     expect(networkApi.updateCarrier).not.toHaveBeenCalled()
   })
 })
+
+// ADR-0001 ("Unresolvable figures ship as null, never as a defaulted zero"):
+// a preflight fetch that FAILS must render as its own "could not check"
+// state, never as the same "no issues found" picture a genuine clean result
+// produces. Before this fix, `data` was simply `undefined` on error and the
+// panel fell through to the `!data` branch ("Loading validation…" forever)
+// rather than surfacing the failure — worse, a consumer reading only
+// `errors`/`warnings` off the query would see them coerced to falsy/absent
+// and could mistake that for "clean". These tests pin the distinction.
+describe('IssuesPanel — preflight fetch failure vs. a genuine clean result (ADR-0001)', () => {
+  it('shows a could-not-check state, not "no issues found", when the preflight fetch errors', async () => {
+    vi.mocked(simulationApi.preflight).mockRejectedValue(new Error('Network unreachable'))
+    vi.mocked(networkApi.getCarriers).mockResolvedValue([])
+
+    renderPanel()
+
+    await screen.findByText('Could not run the validation check')
+    expect(screen.getByText(/Network unreachable/)).toBeTruthy()
+    // The clean-result copy must NOT appear — that would be exactly the
+    // "defaulted zero" ADR-0001 forbids: a failure reads as success.
+    expect(screen.queryByText('All checks passed')).toBeNull()
+  })
+
+  it('still renders the genuine clean state on a real zero-issue success (regression guard)', async () => {
+    // Proves the fix above did not just make every state "unknown" — a real
+    // successful response with zero issues must still read as clean.
+    vi.mocked(simulationApi.preflight).mockResolvedValue({ ok: true, errors: 0, warnings: 0, issues: [] })
+    vi.mocked(networkApi.getCarriers).mockResolvedValue([])
+
+    renderPanel()
+
+    await screen.findByText('All checks passed')
+    expect(screen.queryByText('Could not run the validation check')).toBeNull()
+  })
+
+  it('renders the issue list unchanged on a successful fetch that reports findings', async () => {
+    vi.mocked(simulationApi.preflight).mockResolvedValue({
+      ok: false,
+      errors: 1,
+      warnings: 0,
+      issues: [{
+        severity: 'error', code: 'bus_ref_unknown', component_class: 'Load',
+        name: 'Load 1', message: "bus='Bus 5' does not match any bus",
+      }],
+    })
+    vi.mocked(networkApi.getCarriers).mockResolvedValue([])
+
+    renderPanel()
+
+    await screen.findByText('bus_ref_unknown')
+    expect(screen.getByText(/does not match any bus/)).toBeTruthy()
+    expect(screen.queryByText('Could not run the validation check')).toBeNull()
+    expect(screen.queryByText('All checks passed')).toBeNull()
+  })
+})

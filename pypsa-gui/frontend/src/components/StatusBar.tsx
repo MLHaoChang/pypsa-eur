@@ -38,13 +38,20 @@ export default function StatusBar() {
   })
   // Unsaved-edits indicator. The undo depth is the count of mutations since
   // the last explicit Save (which clears the stack as a checkpoint).
-  const { data: undoInfo } = useQuery({
+  const { data: undoInfo, isError: undoErrored } = useQuery({
     queryKey: nk(currentProject, 'undoInfo'),
     queryFn: networkApi.undoInfo,
     refetchInterval: 3000,
     staleTime: 0,
   })
-  const dirty = (undoInfo?.depth ?? 0) > 0
+  // ADR-0001 applies to the save-state dot as much as to a figure: defaulting
+  // a failed poll to depth 0 renders "Project is up-to-date" — a claim that
+  // the user's work is safe, made from an answer we never received. The
+  // unknown state is its own state, and it is the one worth being loud about.
+  const dirtyUnknown = undoErrored
+  // `unsaved` covers solver results too; `depth` stays the count below, which
+  // is a question about EDITS and still correctly reads 0 after a solve.
+  const dirty = !dirtyUnknown && !!undoInfo?.unsaved
   const dirtyCount = undoInfo?.depth ?? 0
 
   // Stale-results detection. A topology edit on a solved network makes the
@@ -137,8 +144,10 @@ export default function StatusBar() {
         <span
           aria-hidden
           className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
-          style={{ background: dirty ? '#d97706' : '#16a34a' }}
-          title={dirty ? `${dirtyCount} unsaved edit${dirtyCount === 1 ? '' : 's'}` : 'Project is up-to-date'}
+          style={{ background: dirtyUnknown ? '#94a3b8' : dirty ? '#d97706' : '#16a34a' }}
+          title={dirtyUnknown
+            ? 'Unknown save state — could not reach the backend to check for unsaved edits'
+            : dirty ? `${dirtyCount} unsaved edit${dirtyCount === 1 ? '' : 's'}` : 'Project is up-to-date'}
         />
         <span className="text-muted">{displayName}</span>
       </span>

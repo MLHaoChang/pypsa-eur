@@ -782,3 +782,717 @@ def test_save_as_copies_uploads_from_auth_storage(session_local):
     copied = project_registry.project_dir(copy_row) / "uploads" / "file-1" / "ref.csv"
     assert copied.exists(), "uploads/ was not copied from the source storage_path"
     assert copied.read_text() == "a,b\n1,2\n"
+
+
+# ── Task 5: lock enforcement at project write edges ───────────────────────────
+#
+# This file has no `client_a`/`client_b`/`shared_project` fixtures, so the
+# brief's sketches are adapted to the inline org/user/project construction
+# style already used above and in `test_project_locks.py`'s own Task 4
+# section — two org-admin users share one project (org-admin access means
+# neither the rename/delete permission check nor the save ACL check shadows
+# the lock check we're testing).
+
+
+def _seed_two_user_project(session_local, *, name="Shared"):
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name=name)
+    return org, user_a, user_b, project
+
+
+def test_save_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post(f"/api/projects/{project.name}")
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+
+def test_rename_and_delete_409_under_foreign_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+
+        rename = client_b.post(
+            f"/api/projects/{project.name}/rename", json={"new_name": "Taken"}
+        )
+        assert rename.status_code == 409, rename.text
+        assert rename.json()["detail"]["error_kind"] == "project_locked"
+
+        delete = client_b.delete(f"/api/projects/{project.name}")
+        assert delete.status_code == 409, delete.text
+        assert delete.json()["detail"]["error_kind"] == "project_locked"
+
+
+def test_holder_still_saves_and_free_project_saves(session_local):
+    _org, user_a, _user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_a.post(f"/api/projects/{project.name}")
+        assert r.status_code in (200, 409), r.text
+        # 409 is only acceptable if some OTHER save gate (e.g. empty-network
+        # guard) fired — the lock itself must never be the reason the holder's
+        # own save is refused.
+        if r.status_code == 409:
+            assert r.json()["detail"].get("error_kind") != "project_locked"
+
+
+def test_enqueue_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post("/api/simulation/queue", json={"project_id": str(project.id)})
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+
+# `routers/uploads.py` write edges (`POST`/`DELETE .../uploads`) write into
+# `project.directory` the same as save/rename/delete, but were missed by the
+# sweep that added `_enforce_project_lock` to this router family — neither
+# handler called it, and the write middleware's `_FOREIGN_LOCK_GATE_PREFIXES`
+# doesn't cover `/api/projects/` either (that prefix is exempt there by
+# design, since it IS covered by the route-edge calls — except these two
+# weren't). This is a consistency gap, not an authz hole: `ProjectAccessDep`
+# already ACL-gates the project inside the caller's org before either handler
+# runs; what was missing is refusing a non-holder's write while someone else
+# holds the edit lock.
+
+def test_upload_post_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post(
+            f"/api/projects/{project.id}/uploads",
+            files={"file": ("intruder.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+
+def test_upload_delete_409s_when_other_user_holds_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        # Seed a file as the (soon-to-be) holder, BEFORE locking, so there is
+        # something real for the non-holder to try to delete.
+        upload = client_a.post(
+            f"/api/projects/{project.id}/uploads",
+            files={"file": ("ref.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        assert upload.status_code == 200, upload.text
+        file_id = upload.json()["file_id"]
+
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+
+        r = client_b.delete(f"/api/projects/{project.id}/uploads/{file_id}")
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "project_locked"
+
+        # And it genuinely wasn't deleted — the intruder's refused DELETE
+        # didn't quietly go through underneath the 409.
+        listed = client_a.get(f"/api/projects/{project.id}/uploads").json()
+        assert any(u["file_id"] == file_id for u in listed)
+
+
+def test_upload_holder_can_still_post_and_delete_under_own_lock(session_local):
+    # Regression guard: the lock check must gate the NON-holder, not everyone.
+    _org, user_a, _user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+
+        upload = client_a.post(
+            f"/api/projects/{project.id}/uploads",
+            files={"file": ("mine.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        assert upload.status_code == 200, upload.text
+        file_id = upload.json()["file_id"]
+
+        delete = client_a.delete(f"/api/projects/{project.id}/uploads/{file_id}")
+        assert delete.status_code == 200, delete.text
+        assert delete.json()["deleted"] is True
+
+
+def test_upload_does_not_acquire_the_edit_lock(session_local):
+    """
+    The uploads edges are CHECK-ONLY (`_check_project_lock`), not
+    acquire-on-write (`_enforce_project_lock`).
+
+    This is the sibling assertion to the three 409 tests above: they pin what
+    the gate must REFUSE, and nothing pinned what it must not DO. The first
+    version of this gate used `_enforce_project_lock`, passed its own 79
+    targeted tests, and still shipped a defect — an attachment upload claimed
+    a 120 s edit lock that outlived the request, so two tests in other files
+    failed in the full run while passing in isolation. The damage was
+    cross-file, which is precisely what a targeted suite cannot see.
+
+    Uploading a file is not an act of editing the project; it is incidental to
+    one, like the canvas layout flush that `put_layout` deliberately keeps
+    check-only. A passive caller must not be able to take an idle project's
+    lock just by touching it.
+    """
+    from services import project_locks
+
+    _org, _user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with session_local() as db:
+        assert project_locks.get_lock(db, project.id) is None, "precondition: unlocked"
+
+    with _client_for(user_b.email) as client_b:
+        upload = client_b.post(
+            f"/api/projects/{project.id}/uploads",
+            files={"file": ("incidental.csv", b"a,b\n1,2\n", "text/csv")},
+        )
+        assert upload.status_code == 200, upload.text
+        file_id = upload.json()["file_id"]
+
+        with session_local() as db:
+            assert project_locks.get_lock(db, project.id) is None, (
+                "POST /uploads acquired the edit lock; it must only CHECK. "
+                "A passive write left a live claim behind."
+            )
+
+        assert client_b.delete(
+            f"/api/projects/{project.id}/uploads/{file_id}"
+        ).status_code == 200
+
+        with session_local() as db:
+            assert project_locks.get_lock(db, project.id) is None, (
+                "DELETE /uploads/{file_id} acquired the edit lock; check-only."
+            )
+
+
+# ── Task 6: foreign-lock gate in the write middleware ──────────────────────
+#
+# `_enforce_project_lock` (Task 4/5) covers the /api/projects/* write edges
+# (save/rename/delete/scenario/layout/members/snapshots/enqueue). It does NOT
+# cover /api/network/* or /api/io/* — those routes never resolve a `project`
+# row, they mutate the resident `PyPSAService` singleton directly. Because the
+# resident ProjectContext is shared per (org, project) (both users' sessions
+# `activate` the SAME registry slot and get the SAME in-memory network), a
+# non-holder's component write lands in the holder's memory and the holder's
+# next autosave persists it. This is a middleware CHECK ONLY (get_lock +
+# compare holder) — never an acquire; `_enforce_project_lock` still owns
+# acquisition at the project write edges.
+#
+# No `client_a`/`client_b`/`shared_project` fixtures exist in this file (see
+# the Task 5 section note above) — reuse `_seed_two_user_project` /
+# `_client_for` and the real bus-create shape from
+# `tests/test_line_lengths.py` (`POST /api/network/buses` with
+# `{"name", "v_nom"}`).
+
+def test_network_write_409s_when_active_project_lock_held_by_other(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        # Both users activate the same project; A holds the lock. Activation
+        # is what binds the middleware's active-context project_uuid that the
+        # gate reads — without it there's nothing for the gate to check.
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post(
+            "/api/network/buses", json={"name": "Intruder", "v_nom": 380.0}
+        )
+        assert r.status_code == 409, r.text
+        assert r.json().get("code") == "project_locked"
+
+        # The holder's own writes against the same shared context still pass.
+        r = client_a.post(
+            "/api/network/buses", json={"name": "Legit", "v_nom": 380.0}
+        )
+        assert r.status_code in (200, 201), r.text
+
+
+def test_network_write_503s_when_lock_check_db_call_errors(session_local, monkeypatch):
+    """
+    F4: the gate's DB block (`with SessionLocal() as gate_db: get_lock(...)`)
+    must fail CLOSED with 503.
+
+    A DB error means the lock is UNKNOWN, not absent — the other pass-through
+    branches (free/expired lock, unbound context, no auth_user) each KNOW there
+    is nothing to guard, and this one does not. Letting the write through on a
+    DB error hands a non-holder write into the holder's shared resident context
+    precisely when the check that would have caught it broke. The auth block a
+    few lines above in the same middleware already answers an unreachable DB
+    with 503; this matches its posture.
+
+    Not hypothetical: `get_lock` -> `_prune_expired` does a `db.delete` +
+    `db.commit` on the expired-lock path, so two concurrent writes racing a
+    lock's expiry can hit a SQLAlchemy `StaleDataError` from THIS exact call.
+    Simulated here by monkeypatching `get_lock` to raise directly.
+
+    The monkeypatch is applied only around the write itself, AFTER activate
+    + lock: `project_locks.get_lock` is also called by
+    `_serialize_project_lock` inside the activate/lock endpoints themselves
+    (routers/projects.py), which have no fail-closed wrapper of their own and
+    are not what this test is exercising — raising for the whole test would
+    just 500 those setup calls instead.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        def _raise(*_args, **_kwargs):
+            raise RuntimeError("simulated DB error (e.g. StaleDataError on prune)")
+
+        monkeypatch.setattr("services.project_locks.get_lock", _raise)
+
+        r = client_b.post(
+            "/api/network/buses", json={"name": "StillWorks", "v_nom": 380.0}
+        )
+        assert r.status_code == 503, r.text
+
+
+# ── I1: one wire shape for every project_locked refusal ────────────────────
+#
+# Three emitters send this refusal — `_enforce_project_lock` (route edges),
+# the write middleware, and the solve-queue enqueue check. The frontend reads
+# `detail.lock` (`utils/projectActions._lockFromErrorDetail`) to fill the
+# read-only banner, so a middleware 409 whose `detail` was a bare prose string
+# left the banner with no holder to name. All three now carry
+# `{error_kind, message, lock}`; the middleware keeps its top-level `code` for
+# the existing quiet-toast keying.
+
+
+def test_middleware_lock_409_carries_the_shared_detail_shape(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post(
+            "/api/network/buses", json={"name": "Intruder", "v_nom": 380.0}
+        )
+        assert r.status_code == 409, r.text
+        body = r.json()
+        assert body["code"] == "project_locked"
+        detail = body["detail"]
+        assert detail["error_kind"] == "project_locked"
+        assert isinstance(detail["message"], str) and detail["message"]
+        assert detail["lock"] == {"holder_email": user_a.email, "yours": False}
+
+
+def test_enqueue_lock_409_carries_the_serialized_lock(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        r = client_b.post("/api/simulation/queue", json={"project_id": str(project.id)})
+        assert r.status_code == 409, r.text
+        detail = r.json()["detail"]
+        assert detail["error_kind"] == "project_locked"
+        assert detail["lock"] == {"holder_email": user_a.email, "yours": False}
+
+
+# ── F2: the middleware gate also covers /api/simulation/* ──────────────────
+#
+# `/api/simulation/*` writes reach the resident network the same way
+# `/api/network/*` does — solver_config edits, run, abort and force_reset all
+# land in the shared `(org, project)` context and are persisted by the
+# holder's next autosave. `POST /api/simulation/queue` is the one exception:
+# it names its project in the BODY and runs its own lock check against THAT
+# project, so testing the ACTIVE project here would refuse the wrong thing.
+
+
+def test_simulation_write_409s_when_active_project_lock_held_by_other(session_local):
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.put("/api/simulation/solver_config", json={"solver": "highs"})
+        assert r.status_code == 409, r.text
+        assert r.json().get("code") == "project_locked"
+
+        # The holder is unaffected.
+        assert client_a.put(
+            "/api/simulation/solver_config", json={"solver": "highs"}
+        ).status_code == 200
+
+
+def test_enqueue_of_an_unlocked_project_passes_under_a_foreign_active_lock(
+    session_local,
+):
+    """
+    The `/api/simulation/queue` exemption is load-bearing, not cosmetic: the
+    middleware would test the ACTIVE project's lock while the request is about
+    a DIFFERENT project named in the body. Enqueueing an unlocked project must
+    not be refused because the caller happens to be looking at a locked one.
+    """
+    org, user_a, user_b, project = _seed_two_user_project(session_local)
+    other = _create_project(session_local, org=org, creator=user_b, name="Unlocked")
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/simulation/queue", json={"project_id": str(other.id)})
+        assert r.status_code != 409, r.text
+
+
+# ── N1: abort/clear_finished are job-scoped, not active-project-scoped ─────
+#
+# `POST /api/simulation/queue/{job_id}/abort` and
+# `POST /api/simulation/queue/clear_finished` never resolve the session's
+# ACTIVE project — abort is authorized against the JOB, clear_finished is
+# cross-org/super-admin-gated. An exact-path exemption for bare
+# `/api/simulation/queue` left these two 409ing merely because the caller's
+# active project happened to be foreign-locked: refusing on the wrong
+# project's lock, the exact failure the exemption exists to prevent.
+
+
+def test_abort_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    Pre-fix, the middleware's foreign-lock gate 409s BEFORE the router ever
+    sees the job id (exact-path exemption only matched bare
+    `/api/simulation/queue`). Post-fix, an unknown job id reaches the router
+    and gets its own 404 `No solve job with id ...` — a perfectly good
+    negative assertion since the point is that `project_locked` must not be
+    the reason.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        unknown_job_id = str(uuid.uuid4())
+        r = client_b.post(f"/api/simulation/queue/{unknown_job_id}/abort")
+        assert r.status_code != 409, r.text
+        assert r.status_code == 404, r.text
+
+
+def test_clear_finished_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    Same reasoning as the abort test above: clear_finished is cross-org and
+    super-admin-gated, never scoped to the caller's active project. `user_b`
+    is not a super-admin here, so the real refusal is 403 — the assertion
+    that matters is that it is NOT 409 `project_locked`.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/simulation/queue/clear_finished")
+        assert r.status_code != 409, r.text
+
+
+def test_preflight_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    `POST /api/simulation/preflight` is a read-only diagnostic: it calls
+    `validate_for_run(n, config)` and returns the issue list, taking no
+    PyPSA lock and mutating nothing. But it is a POST under the gated
+    `/api/simulation/` prefix, and the gate's `is_write` test keys on the
+    HTTP verb, not on behaviour — so pre-fix, a non-holder's Validate button
+    409s `project_locked`, and since that code is toast-suppressed on the
+    frontend, the button silently does nothing.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/simulation/preflight")
+        if r.status_code == 409:
+            assert r.json().get("detail", {}).get("error_kind") != "project_locked", r.text
+        else:
+            assert r.status_code != 409
+
+
+def test_foreign_lock_gate_exempt_predicate_is_an_explicit_allowlist(monkeypatch):
+    """
+    N1 follow-up: the exemption must not silently widen to every path that
+    happens to share the `/api/simulation/queue` prefix. A future sibling
+    route acting on the active project (a hypothetical `purge_all`, or a
+    per-job route beyond abort) must default to GATED, not exempt.
+
+    Asserted directly against the predicate `main._foreign_lock_gate_exempt`
+    since no such sibling route exists yet to exercise over HTTP.
+    """
+    exempt = main._foreign_lock_gate_exempt
+
+    # The three real, deliberately-exempt routes.
+    assert exempt("/api/simulation/queue") is True
+    assert exempt("/api/simulation/queue/clear_finished") is True
+    assert exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/abort") is True
+    assert exempt("/api/simulation/preflight") is True
+
+    # The queue negatives below pin the job-scoped family, but nothing yet
+    # pins the NEW read-only-POST category against being widened into "POSTs
+    # someone found inconvenient". `/api/simulation/run` and
+    # `/api/simulation/run_ac_pf` are the canonical MUTATING POSTs under the
+    # same prefix — both take the PyPSA lock and drive n.add/n.remove through
+    # the LP/PF build — so they must stay gated. If either assertion below
+    # ever fails, the read-only category has been abused.
+    assert exempt("/api/simulation/run") is False
+    assert exempt("/api/simulation/run_ac_pf") is False
+
+    # Hypothetical siblings under the SAME prefix must stay gated by default.
+    assert exempt("/api/simulation/queue/purge_all") is False
+    assert exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/priority") is False
+
+    # Non-canonical / crafted job-id segments on the abort route must NOT
+    # ride the exemption — fail-gated is the safe direction (a stray 409,
+    # never an accidental bypass).
+    assert exempt("/api/simulation/queue/not-a-uuid/abort") is False
+    assert exempt("/api/simulation/queue/../abort") is False
+
+# ── N2: requeue writes to a project without checking who holds its lock ────
+#
+# A LIVE cross-user overwrite path, not a latent one. The foreign-lock
+# middleware resolves the SESSION'S active project
+# (`PyPSAService.get_active_context().project_uuid`) and refuses only when
+# THAT project is foreign-locked. `requeue_job` resolves its target from the
+# job's `project_key`, which is unrelated — so:
+#
+#   1. A holds the lock on project P.
+#   2. B's active project is Q, unlocked. No special setup.
+#   3. B requeues a job whose `project_key` is P.
+#   4. The gate tests Q, finds it free, and passes the request through.
+#   5. Requeue enqueues a solve that SAVES P, overwriting A's work.
+#
+# The gate fires only when B's own active project happens to be locked — a
+# condition with nothing to do with the target — so it was never the
+# protection it looked like. Requeue is authorized by `_may_see`, which its
+# own docstring notes is deliberately WEAKER than the `_may_abort` used for
+# stopping work, so the trigger set is wider than for aborting the same job.
+#
+# `enqueue_solve` has carried the matching check since Step 0a for exactly
+# this reason; requeue is the second route that creates solve-and-save work
+# and it shipped without it.
+
+
+def test_requeue_refuses_when_the_jobs_own_project_is_foreign_locked(session_local):
+    """
+    The lock is held by `user_b` while `user_a` — the project's creator, so
+    ACL access is not in question — does the requeuing, and `user_a`
+    activates NOTHING.
+
+    Activating nothing is the point rather than a shortcut: with no active
+    project there is no session lock for the middleware to test, so it cannot
+    be the source of a refusal. A 409 here can only have come from the route
+    itself, which is the guarantee that makes this test still meaningful once
+    the exemption lands and the middleware stops looking at this path at all.
+
+    Ordering mirrors `enqueue_solve`: the lock check precedes the `network.nc`
+    existence test, so a held lock is reported as `project_locked` rather than
+    masked by a missing-network 404.
+    """
+    from services import project_locks
+    from services.solve_queue import SolveJob, solve_queue
+
+    org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    solve_queue.reset_for_tests()
+    try:
+        jid = uuid.uuid4()
+        with solve_queue._lock:
+            job = SolveJob(
+                id=jid,
+                project_id=project.name,
+                enqueued_at=0.0,
+                project_key=f"{org.id}:{project.id}",
+            )
+            job.status = "completed"
+            job.enqueued_by_user_id = user_a.id
+            solve_queue._jobs[jid] = job
+            solve_queue._order.append(jid)
+
+        with session_local() as db:
+            assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+
+        with _client_for(user_a.email) as client_a:
+            r = client_a.post(f"/api/simulation/queue/{jid}/requeue")
+            assert r.status_code == 409, r.text
+            assert r.json()["detail"]["error_kind"] == "project_locked", r.text
+            # I1 wire shape: the frontend reads `detail.lock` to name the
+            # holder in its read-only banner. A refusal without it leaves the
+            # banner saying "another user".
+            assert r.json()["detail"].get("lock") is not None, r.text
+    finally:
+        solve_queue.reset_for_tests()
+
+
+# ── N3: the five increment-3 queue routes are gated by default ─────────────
+#
+# Same shape of defect as N1 above, one increment later. `pause`, `resume`,
+# `cancel_queued`, `{job_id}/dismiss` and `{job_id}/requeue` live under
+# `/api/simulation/`, which IS in `_FOREIGN_LOCK_GATE_PREFIXES`, and no
+# allowlist entry was ever added for them — so each is refused 409
+# `project_locked` whenever the CALLER'S ACTIVE PROJECT happens to be held by
+# somebody else, a project none of the five so much as resolves. A super-admin
+# cannot pause the instance-wide dispatcher because a colleague is editing an
+# unrelated project they left open.
+#
+# No suite could have caught it: the feature branch predated the gate and
+# master's suite predated the routes, so the merge was textually clean and
+# fully green with the defect in it. It is visible only by computing the gate
+# verdict per route against the live allowlist.
+#
+# This is UX correctness — a wrong-project refusal on routes that should never
+# see one. It is deliberately a SEPARATE change from the requeue holder check
+# above, which is data integrity and ships on its own.
+
+
+def test_pause_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    Pausing stops the ONE process-global dispatcher for every org. It resolves
+    no project at all, so the caller's active project's lock is not merely the
+    wrong lock to test — there is nothing for it to be right about.
+
+    `user_b` is not a super-admin, so the real refusal is 403 from
+    `_require_instance_scope`. That is the correct post-fix answer; the
+    assertion that matters is that `project_locked` is not the reason.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/simulation/queue/pause")
+        assert r.status_code != 409, r.text
+        assert r.status_code == 403, r.text
+
+
+def test_resume_is_not_refused_by_active_project_foreign_lock(session_local):
+    """Same reasoning as pause — the two share `_require_instance_scope`."""
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/simulation/queue/resume")
+        assert r.status_code != 409, r.text
+        assert r.status_code == 403, r.text
+
+
+def test_cancel_queued_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    `cancel_queued` sweeps the caller's own QUEUED jobs, each authorized by
+    `_may_abort` against the JOB — never against the session's active project.
+    Unlike pause/resume it carries no super-admin gate, so post-fix this is a
+    plain 200 and the empty queue answers `{"cancelled": 0}`.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/simulation/queue/cancel_queued")
+        assert r.status_code != 409, r.text
+        assert r.status_code == 200, r.text
+        assert r.json() == {"cancelled": 0}
+
+
+def test_dismiss_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    Job-scoped and per-user, exactly like abort: authorized on the job's
+    `enqueued_by_user_id`, never on the caller's active project. An unknown
+    job id reaching the router and earning its own 404 is the post-fix
+    answer — the point is that `project_locked` must not preempt it.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        unknown_job_id = str(uuid.uuid4())
+        r = client_b.post(f"/api/simulation/queue/{unknown_job_id}/dismiss")
+        assert r.status_code != 409, r.text
+        assert r.status_code == 404, r.text
+
+
+def test_requeue_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    Requeue names its project through the JOB, not through the session — the
+    same structural reason enqueue is exempt.
+
+    Safe to exempt ONLY because the route carries its own holder check against
+    the project it actually resolves, which
+    `test_requeue_refuses_when_the_jobs_own_project_is_foreign_locked` pins.
+    That test and this one are a pair: this one removes the middleware's
+    refusal, that one is the reason removing it is not a regression.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        unknown_job_id = str(uuid.uuid4())
+        r = client_b.post(f"/api/simulation/queue/{unknown_job_id}/requeue")
+        assert r.status_code != 409, r.text
+        assert r.status_code == 404, r.text
+
+
+def test_the_five_increment_3_queue_routes_are_on_the_allowlist(monkeypatch):
+    """
+    Predicate-level companion to the five HTTP tests above, plus the control
+    that keeps the entries honest over time.
+
+    Asserting at the predicate is what the "test guards as written, not only as
+    used" rule calls for: probing only through the call site cannot see the
+    SHAPE of the rule, and the failure mode being guarded against is a future
+    maintainer "simplifying" six exact paths plus three anchored patterns into
+    one `startswith("/api/simulation/queue")`. Every HTTP test above would
+    still pass, while every sibling route not yet written would be silently
+    exempted.
+    """
+    exempt = main._foreign_lock_gate_exempt
+    job = "6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f"
+
+    assert exempt("/api/simulation/queue/pause") is True
+    assert exempt("/api/simulation/queue/resume") is True
+    assert exempt("/api/simulation/queue/cancel_queued") is True
+    assert exempt(f"/api/simulation/queue/{job}/dismiss") is True
+    assert exempt(f"/api/simulation/queue/{job}/requeue") is True
+
+    # THE CONTROL. A sibling nobody has written yet must still default to
+    # GATED. This is the assertion that fails the day the allowlist is widened
+    # into a prefix match, and it is the reason the five above can still be
+    # trusted to mean something a year from now.
+    assert exempt("/api/simulation/queue/purge_all") is False
+    assert exempt(f"/api/simulation/queue/{job}/priority") is False
+
+    # The two new job-scoped patterns are anchored to the canonical dashed
+    # UUID exactly like `abort`, and fail OUT of the exemption otherwise.
+    assert exempt("/api/simulation/queue/not-a-uuid/dismiss") is False
+    assert exempt("/api/simulation/queue/not-a-uuid/requeue") is False
+    assert exempt("/api/simulation/queue/../requeue") is False
+    # Anchored at BOTH ends: a suffix past the verb must not ride it either.
+    assert exempt(f"/api/simulation/queue/{job}/requeue/extra") is False

@@ -7,9 +7,10 @@ import { projectsApi } from '../api/projects'
 import type { ImportSummary } from '../api/types'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
-import { invalidateNetworkQueries } from '../utils/projectActions'
+import { invalidateNetworkQueries, saveProjectQuietly } from '../utils/projectActions'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 const EXPORT_FORMATS = [
   {
@@ -90,6 +91,7 @@ function ExportCard({ format }: { format: typeof EXPORT_FORMATS[number] }) {
 
 export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, fileName?: string) => void }) {
   const [dragging, setDragging] = useState(false)
+  const [pendingImport, setPendingImport] = useState<{ file: File; message: string } | null>(null)
   const pendingFileRef = useRef<string>('')
   const importedNameRef = useRef<string | null>(null)
   const { setCurrentProject, setProjectName, currentProject } = useUIStore()
@@ -139,9 +141,67 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
       onSuccess(s, pendingFileRef.current)
     },
     onError: (e: Error) => toast.error(e.message),
+    // M2: the DIALOG closes here, on settle — not in onConfirm. Clearing
+    // `pendingImport` synchronously in onConfirm unmounted the dialog on the
+    // same tick, so `pending={importMut.isPending}` had nothing left to render
+    // and the "Working…" affordance never appeared; and on failure the user
+    // was left with no dialog and no signal. ScenariosPanel's delete dialog is
+    // the precedent: confirm fires the mutation, the mutation closes the dialog.
+    onSettled: () => setPendingImport(null),
   })
 
-  const handleFile = useCallback((file: File) => importMut.mutate(file), [importMut])
+  const handleFile = useCallback(async (file: File) => {
+    const isBundle = file.name.toLowerCase().endsWith('.pypsaproj.zip')
+    if (currentProject && isBundle) {
+      // Bundle-into-current overwrites the project's contents and is NOT
+      // undo-captured (backend _UNDO_PREFIXES excludes /api/projects/) — ask.
+      setPendingImport({
+        file,
+        message: `Importing this bundle will replace the contents of '${currentProject}'.`,
+      })
+      return
+    }
+    if (currentProject && !isBundle) {
+      // Raw import is undo-captured; persist the outgoing project first so
+      // nothing is lost, then proceed without a prompt (Sidebar precedent).
+      //
+      // M3: the prompt-less path is prompt-less BECAUSE the save happens
+      // first. If that save is refused — a foreign edit lock is the realistic
+      // cause — importing anyway destroys the in-memory network the save was
+      // meant to protect. Stop, say so once, and leave the user's work alone.
+      const saved = await saveProjectQuietly(currentProject)
+      if (!saved) {
+        toast.error(`Could not save '${currentProject}' before importing — nothing was imported.`)
+        return
+      }
+      importMut.mutate(file)
+      return
+    }
+    // ADR-0001 on a DESTRUCTIVE path. `depth` used to initialise to 0 with the
+    // failed probe falling through to it, so an unreachable or refusing backend
+    // produced exactly the value a genuinely clean network produces — and the
+    // import then ran with no confirmation at all. The unknown is its own
+    // state, and on a path that replaces the user's network it must fail
+    // CLOSED: ask, rather than assume there was nothing to lose.
+    // `unsaved`, NOT `depth > 0`. Undo depth counts undoable EDITS; solver
+    // results are written straight into the network and never pushed, so a
+    // solved-but-unsaved project reports depth 0 and this guard used to let the
+    // solve be destroyed silently.
+    let unsaved = false
+    let unsavedKnown = true
+    try { unsaved = (await networkApi.undoInfo()).unsaved } catch { unsavedKnown = false }
+    if (!unsavedKnown || unsaved) {
+      setPendingImport({
+        file,
+        message: unsavedKnown
+          ? 'The current unsaved network will be replaced.'
+          : 'Could not check for unsaved changes — the backend did not answer. '
+            + 'Any unsaved work in the current network will be replaced.',
+      })
+      return
+    }
+    importMut.mutate(file)
+  }, [importMut, currentProject])
 
   const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -175,6 +235,16 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
         />
       </label>
       {importMut.isPending && <p className="text-xs text-muted animate-pulse">Importing…</p>}
+      <ConfirmDialog
+        open={pendingImport != null}
+        title="Replace current network"
+        message={pendingImport?.message ?? ''}
+        confirmLabel="Import"
+        danger
+        pending={importMut.isPending}
+        onConfirm={() => { if (pendingImport) importMut.mutate(pendingImport.file) }}
+        onCancel={() => setPendingImport(null)}
+      />
     </div>
   )
 }

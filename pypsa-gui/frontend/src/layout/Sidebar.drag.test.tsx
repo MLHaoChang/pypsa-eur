@@ -76,7 +76,7 @@ async function openPalette() {
 
 beforeEach(() => {
   vi.mocked(networkApi.getMeta).mockReset().mockResolvedValue({} as never)
-  vi.mocked(networkApi.undoInfo).mockReset().mockResolvedValue({ depth: 0 })
+  vi.mocked(networkApi.undoInfo).mockReset().mockResolvedValue({ depth: 0, unsaved: false })
   vi.mocked(projectsApi.list).mockReset().mockResolvedValue([])
   vi.mocked(simulationApi.preflight).mockReset().mockResolvedValue({} as never)
   useUIStore.setState({ currentProject: 'Demo', creationItem: null })

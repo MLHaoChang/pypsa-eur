@@ -629,3 +629,234 @@ def test_every_tool_safety_marker_resolves_to_known_tier(tool_name):
         f"the fail-open default catching a missing/unrecognised marker"
     )
     assert callable(chat_tools.DISPATCHERS[tool_name])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Foreign-lock enforcement through the chat surface (fix-wave C1 + F1)
+#
+# Chat tools call route handlers as plain Python functions, so NEITHER of the
+# two HTTP-shaped defences reaches them by itself:
+#
+#   C1 — `create_project_snapshot` / `delete_project_snapshot` called their
+#        handlers POSITIONALLY, bypassing `_route`. Those handlers now declare
+#        `db`/`user` Depends and call `_enforce_project_lock`, so `user`
+#        arrived as the raw `Depends` sentinel and `user.id` raised
+#        AttributeError in auth mode — the lock gate could never fire.
+#   F1 — network/io/simulation writes reached through chat never pass the
+#        write middleware, so the path-prefix foreign-lock gate in `main.py`
+#        never ran for them. The dispatch seam re-checks the same lock.
+#
+# Both are proved against a REAL foreign lock (held by the second seeded
+# identity) on the acting user's own active project.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+import contextlib as _contextlib
+import uuid as _uuid
+
+
+def _save_and_bind_project(client, install_network, name: str) -> None:
+    """Save a one-bus network as `name` so it owns a DB row + a bound ctx."""
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name=name)
+    assert client.post(
+        f"/api/projects/{name}", params={"force": True, "rebind": True}
+    ).status_code == 200
+
+
+def _project_row_id(session_local, name: str):
+    from sqlalchemy import select
+
+    from db.models import Project
+
+    with session_local() as db:
+        row = db.scalar(select(Project).where(Project.name == name))
+        assert row is not None, f"project {name!r} has no DB row"
+        return row.id
+
+
+def _hold_foreign_lock(session_local, project_id, holder_user_id) -> None:
+    """
+    Hand the project's lock to `holder_user_id`.
+
+    The save in `_save_and_bind_project` already ACQUIRED the lock for the
+    acting user (D4 — the writer becomes the holder for the TTL), so the row
+    has to be dropped first; `acquire_lock` is deliberately refusal-only for a
+    second user. Equivalent to that lock having lapsed or been released.
+    """
+    from db.models import ProjectLock
+    from services import project_locks
+
+    with session_local() as db:
+        existing = db.get(ProjectLock, project_id)
+        if existing is not None:
+            db.delete(existing)
+            db.commit()
+        assert project_locks.acquire_lock(db, project_id, holder_user_id) is not None
+
+
+@_contextlib.contextmanager
+def _bound_to(ctx):
+    """
+    Bind `ctx` as the request-scoped active context for a direct tool call.
+
+    Production does the same thing: the chat SSE generator copies the request
+    context into the tool worker, so `PyPSAService.get_active_context()` inside
+    a tool resolves the session's project. A bare direct call in a test would
+    otherwise land on a freshly-created empty context and the seam would (
+    correctly) find nothing to guard.
+    """
+    from services.pypsa_service import PyPSAService
+
+    token = PyPSAService.bind_request_context(ctx)
+    try:
+        yield
+    finally:
+        PyPSAService.reset_request_context(token)
+
+
+@pytest.fixture
+def foreign_locked_active_project(
+    client, install_network, _auth_db, second_identity, session_ctx
+):
+    """
+    A saved + active project whose edit lock is held by a DIFFERENT user.
+
+    Yields the project name; the acting chat identity stays the seeded user.
+    """
+    _engine, session_local = _auth_db
+    name = "LockedByOther"
+    _save_and_bind_project(client, install_network, name)
+    ctx = session_ctx(client)
+    project_id = _project_row_id(session_local, name)
+    yield name, project_id, ctx, session_local
+
+
+def test_chat_snapshot_tools_reach_the_lock_gate_in_auth_mode(
+    foreign_locked_active_project, second_identity
+):
+    """
+    C1: both snapshot dispatchers must route through `_route` so `db`/`user`
+    are injected. Before the fix the create call died with
+    `AttributeError: 'Depends' object has no attribute 'id'` inside
+    `_enforce_project_lock`, and the lock was never consulted at all.
+    """
+    from fastapi import HTTPException
+
+    name, project_id, ctx, session_local = foreign_locked_active_project
+
+    # Unlocked: the create dispatcher runs clean (no Depends sentinel reaches
+    # `user.id`) — the negative control for the AttributeError.
+    created = chat_tools.create_project_snapshot(name, "before-lock")
+    snapshot_id = created["id"] if isinstance(created, dict) else created.id
+
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.create_project_snapshot(name, "under-lock")
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error_kind"] == "project_locked"
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.delete_project_snapshot(name, snapshot_id)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error_kind"] == "project_locked"
+
+
+def test_write_tier_chat_tool_is_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """
+    F1: a network mutation dispatched through the chat seam gets the same
+    foreign-lock refusal the write middleware gives the HTTP route.
+    """
+    from fastapi import HTTPException
+
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    with _bound_to(ctx):
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.DISPATCHERS["create_component"](
+                component_class="Bus", name="Intruder", attrs={"v_nom": 380.0}
+            )
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error_kind"] == "project_locked"
+
+
+def test_read_tier_chat_tool_is_unaffected_by_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """Read-tier tools must stay callable while someone else holds the lock."""
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    with _bound_to(ctx):
+        result = chat_tools.DISPATCHERS["list_components"](component_class="Bus")
+    assert isinstance(result, dict)
+
+
+def test_write_tier_chat_tool_passes_when_the_acting_user_holds_the_lock(
+    foreign_locked_active_project,
+):
+    """
+    Negative control: the seam must refuse only a FOREIGN lock. The save in the
+    fixture left the acting user holding the lock (D4), which is the ordinary
+    steady state — that same write must go through.
+    """
+    _name, _project_id, ctx, _session_local = foreign_locked_active_project
+
+    with _bound_to(ctx):
+        result = chat_tools.DISPATCHERS["create_component"](
+            component_class="Bus", name="Allowed", attrs={"v_nom": 380.0}
+        )
+    assert result is not None
+
+
+def test_seam_lock_gate_is_a_no_op_in_local_mode(
+    foreign_locked_active_project, second_identity, monkeypatch
+):
+    """
+    D7: local mode has one identity and no lock semantics — the seam check must
+    short-circuit before it ever touches the lock table.
+    """
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    monkeypatch.setattr("local_mode.is_local_mode", lambda: True)
+
+    with _bound_to(ctx):
+        result = chat_tools.DISPATCHERS["create_component"](
+            component_class="Bus", name="LocalModeBus", attrs={"v_nom": 380.0}
+        )
+    assert result is not None
+
+
+def test_solve_queue_abort_tool_is_not_lock_gated(
+    foreign_locked_active_project, second_identity
+):
+    """
+    N1 mirror of `main.py`'s middleware exemption: `solve_queue_abort` is
+    job-scoped, carries its own authorization keyed on the job, and never
+    resolves the acting user's active project — so it must not be in the
+    seam's derived gated-tool set, and a real call under a foreign lock on
+    the active project must not be refused with `project_locked`.
+
+    The job id is made up (no real queued job), so the call falls through to
+    the router's own 404 `No solve job with id ...` — the point here is only
+    that the refusal is NOT the lock gate's 409.
+    """
+    from fastapi import HTTPException
+
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+
+    assert "solve_queue_abort" not in chat_tools._lock_gated_tool_names()
+
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    with _bound_to(ctx):
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.DISPATCHERS["solve_queue_abort"](job_id=str(_uuid.uuid4()))
+    assert exc.value.status_code == 404
+    assert exc.value.status_code != 409

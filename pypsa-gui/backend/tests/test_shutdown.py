@@ -60,25 +60,14 @@ def test_no_solve_running_means_nothing_is_in_flight():
     assert shutdown_service.solves_in_flight() == []
 
 
-def test_path_b_a_queued_job_is_seen_through_the_real_queue():
-    """
-    (b) driven through `solve_queue.enqueue`, NEVER a hand-registered context.
-
-    A queue job's context is in neither `_contexts` nor `_active`, so an
-    implementation that iterates the context registry misses this entirely —
-    and would pass a test that registered a context by hand.
-    """
-    from services.solve_queue import solve_queue
-
-    solve_queue.reset_for_tests()
-    try:
-        solve_queue.enqueue("quitting-mid-queue")
-
-        in_flight = shutdown_service.solves_in_flight()
-
-        assert "queue" in [s.path for s in in_flight], in_flight
-    finally:
-        solve_queue.reset_for_tests()
+# (b)-via-real-enqueue used to be pinned here (`test_path_b_a_queued_job_is_
+# seen_through_the_real_queue`). It asserted a QUEUED job counts as in flight,
+# which R28 inverted: a queued job is durable (row persisted, re-enqueued at
+# boot) and the quit deliberately leaves it alone, so counting it made the
+# quit's wait unsatisfiable. The job-table-not-context-registry property the
+# test existed for is pinned deterministically by
+# `test_a_running_queue_job_is_seen_deterministically` below; the queued
+# exclusion is pinned in `test_shutdown_keeps_the_queue.py`.
 
 
 # ── the ordered sequence ────────────────────────────────────────────────────
@@ -1183,7 +1172,8 @@ def test_a_running_queue_job_is_seen_deterministically():
     tests.
 
     This builds the job table directly and drives the same `list_jobs()` the
-    detector reads, covering BOTH live statuses with no dispatcher and no race.
+    detector reads, seeding BOTH live statuses with no dispatcher and no race —
+    and asserting only the `running` one is reported (see the assertion note).
     """
     import uuid
 
@@ -1202,7 +1192,10 @@ def test_a_running_queue_job_is_seen_deterministically():
 
         paths = [s.path for s in shutdown_service.solves_in_flight()]
 
-        assert paths.count("queue") == 2, paths
+        # Only the RUNNING job counts. The queued one is durable — persisted
+        # row, re-enqueued at boot (R25) — and the quit leaves it alone (R28),
+        # so reporting it in flight would make the quit's wait unsatisfiable.
+        assert paths.count("queue") == 1, paths
     finally:
         solve_queue.reset_for_tests()
 

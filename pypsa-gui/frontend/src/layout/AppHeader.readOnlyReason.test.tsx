@@ -37,7 +37,7 @@ import { READ_ONLY_MUTATION_MESSAGE, SOLVING_MUTATION_MESSAGE } from '../utils/m
 // wants — mirrors the pattern in ScenariosPanel.test.tsx / ProjectTabs.test.tsx.
 let queueJobs: Array<{ id: number; project_id: string; status: string; position: number | null }> = []
 vi.mock('../hooks/useSolveQueue', () => ({
-  useSolveQueue: () => ({ data: { jobs: queueJobs, current: null } }),
+  useSolveQueue: () => ({ data: { jobs: queueJobs, running: [], paused: false } }),
   useEnqueueSolve: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAbortJob: () => ({ mutateAsync: vi.fn(), isPending: false }),
   activeJobForProject: (list: { jobs: typeof queueJobs } | undefined, name: string) =>

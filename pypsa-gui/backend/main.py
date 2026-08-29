@@ -2,7 +2,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,6 +96,145 @@ _UNDO_PREFIXES = ("/api/network/", "/api/io/")
 # Exact paths that must never trigger a snapshot (the undo endpoint itself,
 # and the info probe which is a GET anyway but listed for safety).
 _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
+
+# Prefixes gated by the foreign-lock check (project-write-safety Task 6),
+# below. These are exactly the routes that mutate the resident PyPSA network
+# directly without ever resolving a `project` row, so `_enforce_project_lock`
+# (which runs inside `routers/projects.py` / `routers/snapshots.py` handler
+# bodies) never sees them. `_SOLVER_BLOCKING_PREFIXES` below is NOT the right
+# surface to reuse here: it also includes `/api/projects/`, whose write edges
+# already get an endpoint-level lock CHECK-AND-ACQUIRE via
+# `_enforce_project_lock` — gating them again here would just be a second,
+# less contextual 409.
+#
+# `/api/simulation/` joined the two undo prefixes (F2): solver-config edits,
+# run, abort and force_reset all land in the SAME shared `(org, project)`
+# resident context, and the holder's next autosave persists them. It was left
+# out originally only because the undo stack does not capture it — a different
+# question from who is allowed to write.
+#
+# ADDING A PROJECT WRITE EDGE? Ask which guards apply, not which guard you had
+# in mind. This module runs several with DIFFERENT coverage sets, and three
+# separate bugs in one review came from reasoning per-guard instead of
+# per-route: sibling routes inheriting an exemption; a read-only POST caught by
+# an `is_write` test keyed on the verb; and `/api/projects/` sitting in
+# `_SOLVER_BLOCKING_PREFIXES` (below) while absent here, so the uploads
+# endpoints are guarded against a solve-in-flight but not against another
+# user's edit lock. Reading any one guard makes coverage look complete.
+_FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)
+
+# Paths exempt from the gate above. The rule is NOT "everything under
+# `/api/simulation/queue/`" — it is an explicit allowlist: a queue route is
+# exempt only when it acts on a JOB or names its project in the BODY, never
+# because it merely shares the `/api/simulation/queue` prefix. A route that
+# acts on the session's ACTIVE project (a hypothetical future
+# `/queue/purge_all` or similar) must stay gated by default — a prefix match
+# would silently exempt it the day it's added, and a destructive route
+# inheriting an exemption is worse than the 409 this list exists to avoid.
+# Add new siblings here only after confirming they don't resolve the active
+# project.
+#
+#   * `POST /api/simulation/queue`                       — enqueue; names its
+#     project in the BODY and runs its own holder check against THAT project
+#     (`routers/solve_queue.py`), so the middleware — which can only test the
+#     session's ACTIVE project — would be refusing on the wrong project's lock.
+#   * `POST /api/simulation/queue/clear_finished`         — drops every org's
+#     terminal jobs; cross-org by construction and super-admin-gated. Never
+#     resolves the active project at all.
+#   * `POST /api/simulation/queue/{job_id}/abort`         — job-scoped; carries
+#     its own authorization (`_may_abort`) keyed on the job, not on the
+#     caller's active project.
+#
+# A third, separately-worded category: a route that is a POST by HTTP
+# convention but MUTATES NOTHING — a read-only diagnostic. It exists because
+# the gate's `is_write` test (below, keyed on `request.method`) tests the
+# VERB, not behaviour: verb != mutation. It satisfies neither "acts on a job"
+# nor "names its project in the body" above, so it earns its own category
+# rather than being smuggled into either existing one.
+#
+#   * `POST /api/simulation/preflight`                    — calls
+#     `validate_for_run(n, config)` and returns the issue list. Takes no
+#     PyPSA lock, calls no `n.add`/`n.remove`.
+#
+#     Refusing it 409 is worse than it first looks, because the endpoint is
+#     not just the Validate button: `layout/Sidebar.tsx` POLLS it to drive
+#     the sidebar's error/warning BADGE, and `pages/IssuesPanel.tsx` renders
+#     the same response. For a non-holder the badge therefore reads ZERO and
+#     the Issues panel empties — a workbench affirmatively reporting NO
+#     problems, which is worse than one reporting nothing.
+#
+#     It presents silently because two suppressions stack: `api/client.ts`
+#     lists preflight in `QUIET_MUTATION_URLS` (its 2xx traffic is noise) and
+#     `project_locked` in `QUIET_TOAST_CODES` (a standing condition, not an
+#     incident). BOTH ARE CORRECT AND NEITHER IS THE BUG — do not "fix" a
+#     recurrence by un-suppressing either one, which keeps the wrong answer
+#     and merely adds noise to it. The bug is refusing the read at all.
+#
+# Adding to THIS category requires confirming the handler takes no PyPSA lock
+# and performs no mutation — read the handler body, don't infer it from the
+# route name. `/api/simulation/run` and `/api/simulation/run_ac_pf` are
+# POSTs under the same prefix that do NOT belong here: both acquire the lock
+# and drive the network through `n.add`/`n.remove` via the LP/PF build.
+#   * `POST /api/simulation/queue/pause`
+#   * `POST /api/simulation/queue/resume`                 — these two act on
+#     the ONE process-global dispatcher and resolve no project whatsoever, so
+#     the active project's lock is not merely the wrong lock to test — there
+#     is nothing for it to be right about. Cross-org by construction and
+#     super-admin-gated (`_require_instance_scope`), exactly like
+#     clear_finished. Gated, a super-admin could not pause the instance
+#     because a colleague was editing an unrelated project they had open.
+#   * `POST /api/simulation/queue/cancel_queued`          — sweeps the
+#     caller's own QUEUED jobs, each authorized by `_may_abort` against the
+#     JOB. Like abort it only ever STOPS work, so it writes nothing to any
+#     project and needs no holder check of its own.
+_FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
+    "/api/simulation/queue",
+    "/api/simulation/queue/clear_finished",
+    "/api/simulation/queue/pause",
+    "/api/simulation/queue/resume",
+    "/api/simulation/queue/cancel_queued",
+    "/api/simulation/preflight",
+})
+#
+# The job-scoped patterns are anchored to the canonical dashed-UUID shape, not
+# "any non-slash segment": `_parse_job_id` (`routers/solve_queue.py`) only ever
+# resolves a real job from `uuid.UUID(job_id)`, so anything else can't
+# address a job regardless. Failing OUT of the exemption on a non-canonical
+# id is the safe direction — the frontend only ever sends the canonical form
+# it got back from the API, so a stray/odd-form segment just gets gated (a
+# 409 at worst), never an accidental bypass. Anchored at BOTH ends (`$`) so a
+# suffix past the verb cannot ride the exemption either.
+#
+# `dismiss` joins `abort` on the same terms: per-user and job-scoped
+# (authorized on the job's `enqueued_by_user_id`), it hides a row from ONE
+# caller's listing and touches no project.
+#
+# `requeue` is the one that could not simply be added. Exemption and holder
+# check are a PAIR — bare `POST /api/simulation/queue` is exempt BECAUSE it
+# runs its own `project_locks.get_lock` against the project named in its body,
+# since the middleware can only ever test the session's ACTIVE project.
+# `abort`/`dismiss` need no such check because stopping or hiding work writes
+# nothing. Requeue creates a job that SOLVES AND SAVES a project, so exempting
+# it without a check would start a write against a project another user holds
+# with nothing testing that lock at any layer — the "destructive route
+# inheriting an exemption" this whole list exists to prevent, and strictly
+# worse than the wrong-project 409. `requeue_job` now carries the check
+# against the project it actually resolves from the JOB; that is the
+# precondition for the entry below, not an incidental extra.
+_JOB_ID_RE = (
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS = tuple(
+    re.compile(rf"^/api/simulation/queue/{_JOB_ID_RE}/{verb}$")
+    for verb in ("abort", "dismiss", "requeue")
+)
+
+
+def _foreign_lock_gate_exempt(path: str) -> bool:
+    """True iff `path` is on the explicit queue-route allowlist above."""
+    if path in _FOREIGN_LOCK_GATE_EXEMPT_EXACT:
+        return True
+    return any(p.match(path) for p in _FOREIGN_LOCK_GATE_EXEMPT_PATTERNS)
 
 # Path prefixes whose write methods (POST/PUT/PATCH/DELETE) are refused with
 # 409 while the LP worker is alive. These touch the in-memory network
@@ -622,6 +763,121 @@ async def undo_snapshot_middleware(request: Request, call_next):
                     "code": "solver_in_flight",
                 },
             )
+
+    # ── Foreign-lock gate (project-write-safety Task 6) ────────────────
+    # The resident ProjectContext is shared per (org, project): both a lock
+    # holder's session and a non-holder's session that `activate` the same
+    # project point at the SAME in-memory network. Route-edge enforcement
+    # (`_enforce_project_lock`, routers/projects.py + routers/snapshots.py)
+    # covers /api/projects/* writes, but /api/network/* and /api/io/* never
+    # resolve a `project` row — without this, a non-holder's component edit
+    # lands in the holder's memory and the holder's next autosave persists
+    # it. CHECK ONLY — never an ACQUIRE; a free/expired lock, the holder's
+    # own writes, local mode, an unbound scratch context, or a request with
+    # no resolved auth_user all pass through untouched. "Check only" is
+    # about acquisition, not about the DB call being read-only: `get_lock`
+    # prunes an expired row via `_prune_expired`, which does a DELETE +
+    # commit on that path — so this still needs the same fail-open handling
+    # every other DB access in this middleware gets (see the auth block
+    # above), not a bare unguarded call.
+    if (is_write
+            and any(path.startswith(p) for p in _FOREIGN_LOCK_GATE_PREFIXES)
+            and not _foreign_lock_gate_exempt(path)):
+        gate_user = getattr(request.state, "auth_user", None)
+        if gate_user is not None and not local_mode.is_local_mode():
+            binding_uuid = None
+            try:
+                # Local re-import: see the UnboundLocalError note on the
+                # module-level `PyPSAService` import above — several blocks
+                # earlier in this function do `from services.pypsa_service
+                # import PyPSAService`, which makes the name function-local
+                # for this whole body.
+                from services.pypsa_service import PyPSAService
+
+                active_ctx = PyPSAService.get_active_context()
+                binding_uuid = active_ctx.project_uuid
+            except Exception:
+                binding_uuid = None  # unbound scratch context — nothing to guard
+            if binding_uuid is not None:
+                from services import project_locks
+
+                try:
+                    lock_project_id = uuid.UUID(binding_uuid)
+                except (TypeError, ValueError):
+                    lock_project_id = None
+                if lock_project_id is not None:
+                    try:
+                        with db_session_module.SessionLocal() as gate_db:
+                            lock = project_locks.get_lock(gate_db, lock_project_id)
+                            if (
+                                lock is not None
+                                and lock.holder_user_id != gate_user.id
+                            ):
+                                return JSONResponse(
+                                    status_code=409,
+                                    content={
+                                        # I1: same object shape
+                                        # `_enforce_project_lock` and the
+                                        # enqueue check send, so the
+                                        # frontend's `_lockFromErrorDetail`
+                                        # can name the holder in the
+                                        # read-only banner from ANY of the
+                                        # three emitters. The top-level
+                                        # `code` stays for the existing
+                                        # quiet-toast keying.
+                                        "detail": {
+                                            "error_kind": "project_locked",
+                                            "message": (
+                                                "This project is being edited "
+                                                "by another user. Their edit "
+                                                "lock must expire or be "
+                                                "released before network "
+                                                "changes are accepted."
+                                            ),
+                                            "lock": project_locks.serialize_lock(
+                                                gate_db,
+                                                lock_project_id,
+                                                gate_user.id,
+                                            ),
+                                        },
+                                        "code": "project_locked",
+                                    },
+                                )
+                    except Exception:
+                        # get_lock is NOT read-only (see the comment above):
+                        # _prune_expired does a DELETE + commit on the
+                        # expired-lock path, so two concurrent writes racing
+                        # one lock's expiry can raise a SQLAlchemy
+                        # StaleDataError (the loser's DELETE matches 0 rows),
+                        # and an unreachable/misconfigured DB raises here too.
+                        #
+                        # FAIL CLOSED (F4). This branch is NOT the same as the
+                        # pass-through branches above it: a free lock, an
+                        # unbound context and an absent auth_user all KNOW
+                        # there is nothing to guard, whereas a DB error means
+                        # the lock is UNKNOWN. Allowing the write is then
+                        # exactly the case the gate exists for — a non-holder's
+                        # edit landing in the holder's shared resident context
+                        # — waved through because the check that would have
+                        # caught it broke. The auth block a few blocks above
+                        # answers an unreachable DB with 503 for the same
+                        # reason.
+                        logger.exception(
+                            "foreign-lock gate: DB check failed; refusing "
+                            "the write (lock state unknown)"
+                        )
+                        return JSONResponse(
+                            status_code=503,
+                            content={
+                                "detail": (
+                                    "Could not verify this project's edit "
+                                    "lock, so the change was not applied. "
+                                    "Retry in a moment; if it persists, "
+                                    "check the database connection."
+                                ),
+                                "code": "project_lock_unavailable",
+                            },
+                        )
 
     should_snapshot = (
         is_write

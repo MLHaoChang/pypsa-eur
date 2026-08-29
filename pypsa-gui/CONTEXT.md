@@ -51,6 +51,17 @@ parameter table. Correct in UI copy and user-facing endpoints
 (`backend/routers/asset_results.py`); prefer **Component** in backend prose so
 the PyPSA mapping stays visible.
 
+**Asset write**:
+Any frontend update of a Component through `PUT /api/network/{class}/{name}`.
+The backend's remove+add cycle resets every omitted field to schema defaults,
+so an Asset write MUST spread the full current row under the patch — and the
+module that owns that idiom (fetch → spread → PUT → invalidate) is
+`frontend/src/utils/assetWrite.ts`. A hand-rolled read-spread copy at a call
+site is the defect this term exists to name (B1/B2 corruption class; the
+chat-staleness silent revert).
+_Avoid_: mutation (overloaded with React Query's `useMutation`), save (that's
+project persistence)
+
 **Vintage**:
 A per-investment-period capacity bound on a component
 (`backend/routers/vintage.py`). Multi-period work expands these transiently

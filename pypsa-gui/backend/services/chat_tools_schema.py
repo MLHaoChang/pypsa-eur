@@ -754,8 +754,10 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "solve_queue_list",
-        "{jobs: [...], current: job_id|None} — FIFO queue snapshot. "
-        "Safety: read.",
+        "{jobs: [...], running: [job_id], paused: bool} — FIFO queue snapshot. "
+        "`running` lists EVERY job solving right now (the pool size is "
+        "PYPSA_GUI_MAX_CONCURRENT_SOLVES, default 1), and omits jobs the caller "
+        "may not see. Job ids are UUIDs. Safety: read.",
     ),
     _t(
         "solve_queue_abort",
@@ -1705,3 +1707,36 @@ TOOL_ROUTES: dict[str, list] = {
 NON_HTTP_SENTINELS = frozenset(
     ["_service_call_", "_derived_", "_ui_event_", "_chat_jsonl_"]
 )
+
+
+# ── Safety tiers ────────────────────────────────────────────────────────────
+
+
+SAFETY_TIERS = (
+    "execution_long_running",
+    "execution",
+    "destructive",
+    "write",
+    "read",
+)
+
+
+def safety_tier_for(tool_name: str) -> str:
+    """
+    Resolve a tool's safety tier from the documented `Safety: <tier>` marker in
+    its description.
+
+    The marker in the description IS the declaration — there is no separate
+    tier field to drift from it. Unknown / undocumented tools resolve to
+    "read", which is the conservative answer for the confirmation card (no
+    card) and the permissive one for the chat dispatch seam's lock gate; the
+    schema-parity tests keep the undocumented case from existing.
+    """
+    for tool in TOOLS:
+        if tool["name"] == tool_name:
+            description = tool["description"]
+            for tier in SAFETY_TIERS:
+                if f"Safety: {tier}" in description:
+                    return tier
+            return "read"
+    return "read"

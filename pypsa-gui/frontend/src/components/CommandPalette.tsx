@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Dialog } from './Dialog'
+import { ConfirmDialog } from './ConfirmDialog'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { projectsApi } from '../api/projects'
@@ -32,6 +33,14 @@ interface Command {
   hint?: string                 // right-aligned hint (shortcut, last-saved, etc.)
   icon: React.ReactNode
   run: () => void | Promise<void>
+  // Destructive commands declare their confirmation here rather than raising
+  // their own dialog. The palette has TWO dispatch paths (Enter at the
+  // keyboard handler, click on the row), so a confirm built into a command's
+  // `run` would have to be right in one place while the gate that matters is
+  // whichever path the user actually took. Declaring it makes `runCommand`
+  // the single chokepoint, and makes the next destructive command opt IN by
+  // description instead of by remembering.
+  confirm?: { title: string; message: string; confirmLabel: string }
 }
 
 // Open mode — drives the placeholder + result filter. The 'projects' mode is
@@ -48,14 +57,44 @@ export type PaletteMode = 'all' | 'projects'
 export default function CommandPalette() {
   const openMode = useUIStore(s => s.paletteMode)
   const setOpenMode = useUIStore(s => s.setPaletteMode)
+  // Pending confirmation lives HERE, not in PaletteShell: confirming closes
+  // the palette (a destructive prompt should not sit on top of a live search
+  // list), and PaletteShell unmounts with it. Held one level up, the dialog
+  // survives that close.
+  const [pending, setPending] = useState<Command | null>(null)
 
-  if (openMode === null) return null
-  return <PaletteShell mode={openMode} onClose={() => setOpenMode(null)} />
+  if (openMode === null && pending === null) return null
+  return (
+    <>
+      {openMode !== null && (
+        <PaletteShell
+          mode={openMode}
+          onClose={() => setOpenMode(null)}
+          onRequestConfirm={cmd => { setPending(cmd); setOpenMode(null) }}
+        />
+      )}
+      {pending?.confirm && (
+        <ConfirmDialog
+          open
+          title={pending.confirm.title}
+          message={pending.confirm.message}
+          confirmLabel={pending.confirm.confirmLabel}
+          danger
+          onConfirm={() => { const cmd = pending; setPending(null); void cmd.run() }}
+          onCancel={() => setPending(null)}
+        />
+      )}
+    </>
+  )
 }
 
 // ── Shell ────────────────────────────────────────────────────────────────────
 
-function PaletteShell({ mode, onClose }: { mode: PaletteMode; onClose: () => void }) {
+function PaletteShell({ mode, onClose, onRequestConfirm }: {
+  mode: PaletteMode
+  onClose: () => void
+  onRequestConfirm: (cmd: Command) => void
+}) {
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -78,6 +117,14 @@ function PaletteShell({ mode, onClose }: { mode: PaletteMode; onClose: () => voi
   const all = useCommands(mode)
   const filtered = useMemo(() => fuzzyFilter(all, query), [all, query])
 
+  // Single dispatch chokepoint for BOTH the Enter path and the click path.
+  // A destructive command is refused here or nowhere.
+  const runCommand = useCallback((cmd: Command) => {
+    if (cmd.confirm) { onRequestConfirm(cmd); return }
+    void cmd.run()
+    onClose()
+  }, [onRequestConfirm, onClose])
+
   const onKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -88,12 +135,9 @@ function PaletteShell({ mode, onClose }: { mode: PaletteMode; onClose: () => voi
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const cmd = filtered[selectedIdx]
-      if (cmd) {
-        void cmd.run()
-        onClose()
-      }
+      if (cmd) runCommand(cmd)
     }
-  }, [filtered, selectedIdx, onClose])
+  }, [filtered, selectedIdx, runCommand])
 
   // Group results by kind for visual separation. Order is fixed to match
   // user expectations: actions first, then projects, then snapshots, then
@@ -165,7 +209,7 @@ function PaletteShell({ mode, onClose }: { mode: PaletteMode; onClose: () => voi
                 return (
                   <button
                     key={cmd.id}
-                    onClick={() => { void cmd.run(); onClose() }}
+                    onClick={() => runCommand(cmd)}
                     onMouseEnter={() => setSelectedIdx(idx)}
                     className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors ${
                       active ? 'bg-accent/10' : 'hover:bg-panel'
@@ -519,6 +563,12 @@ function useCommands(mode: PaletteMode): Command[] {
         subtitle: `${s.bus_count} buses · ${s.snapshot_count} snapshots${s.has_results ? ' · solved' : ''}`,
         hint: formatRelativeTime(s.created_at) ?? undefined,
         icon: <RotateCcw size={14} />,
+        confirm: {
+          title: 'Restore snapshot?',
+          message: `'${s.label || s.id}' will REPLACE the current network. `
+            + 'Any unsaved changes are lost.',
+          confirmLabel: 'Restore',
+        },
         run: async () => {
           if (!currentProject) return
           const tId = toast.loading(`Restoring '${s.label || s.id}'…`)

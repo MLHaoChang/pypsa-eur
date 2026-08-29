@@ -3,13 +3,17 @@ import { useQuery } from '@tanstack/react-query'
 import {
   Play, X, Trash2, Loader, ChevronRight, ChevronDown,
   CheckCircle2, AlertCircle, Clock, CircleSlash, Plus, PlugZap,
+  Pause, RotateCcw, EyeOff, ListX,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { projectsApi } from '../api/projects'
 import { solveQueueApi, isActive, isTerminal, type SolveJob, type SolveJobStatus, type ResultsBundle } from '../api/solveQueue'
-import { useSolveQueue, useEnqueueSolve, useAbortJob, useClearFinished } from '../hooks/useSolveQueue'
+import {
+  useSolveQueue, useEnqueueSolve, useAbortJob, useClearFinished,
+  usePauseQueue, useResumeQueue, useCancelQueued, useRequeueJob, useDismissJob,
+} from '../hooks/useSolveQueue'
 import { useAuth } from '../auth/AuthProvider'
 
 const STATUS_META: Record<SolveJobStatus, { label: string; cls: string; Icon: typeof Clock }> = {
@@ -23,6 +27,11 @@ const STATUS_META: Record<SolveJobStatus, { label: string; cls: string; Icon: ty
   interrupted: { label: 'Interrupted', cls: 'text-slate-500 bg-slate-500/10 border-slate-500/30', Icon: PlugZap },
 }
 
+// Live-log buffer bound — matches store/simulationStore.ts's cap for the
+// foreground solver log. The backend retains up to 5000 lines per job; the
+// panel only ever needs the visible tail.
+const LIVE_LOG_CAP = 2000
+
 function fmtObjective(v: number | null): string {
   if (v == null || !isFinite(v)) return '—'
   const abs = Math.abs(v)
@@ -33,7 +42,12 @@ function fmtObjective(v: number | null): string {
 }
 
 function StatusBadge({ status }: { status: SolveJobStatus }) {
+  // A status outside the known six (a newer backend writer, a legacy row)
+  // must degrade to a neutral badge showing the raw string — `db/models.py`
+  // keeps `solve_jobs.status` a plain string for exactly this reason, and an
+  // unguarded `STATUS_META[status]` here crashed the WHOLE panel, every row.
   const m = STATUS_META[status]
+    ?? { label: status, cls: 'text-muted bg-panel border-border', Icon: Clock }
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${m.cls}`}>
       <m.Icon size={11} className={status === 'running' ? 'animate-spin' : ''} />
@@ -214,7 +228,15 @@ function JobLogPanel({ jobId, live }: { jobId: string; live: boolean }) {
       // a stale "connection lost" message sitting on top of live data that is
       // actually accumulating fine behind it.
       setError(null)
-      setLines(prev => [...prev, e.data])
+      // Bounded like the other live-log consumer (store/simulationStore.ts,
+      // 2000): the stream replays up to 5000 buffered lines on expand and a
+      // chatty solver keeps appending — uncapped, the array copy plus the
+      // join-per-render below is O(n²) for the life of the solve.
+      setLines(prev => (
+        prev.length >= LIVE_LOG_CAP
+          ? [...prev.slice(prev.length - LIVE_LOG_CAP + 1), e.data]
+          : [...prev, e.data]
+      ))
     }
     es.addEventListener('done', () => { doneReceived = true; es.close() })
     es.onerror = () => {
@@ -260,20 +282,56 @@ function JobLogPanel({ jobId, live }: { jobId: string; live: boolean }) {
     return () => { cancelled = true; es.close() }
   }, [jobId, live])
 
-  if (error) return <div className="px-3 py-2 text-[11px] text-danger">{error}</div>
-  if (lines.length === 0) {
-    return <div className="px-3 py-2 text-[11px] text-muted">No log lines for this job.</div>
-  }
+  // The banner sits ABOVE the lines, never in place of them — a stream dying
+  // past the reconnect budget used to swap the whole view for the banner,
+  // hiding every line already received until the job went terminal and the
+  // retained log was refetched (2026-08-14 review).
   return (
-    <pre className="px-3 py-2 max-h-56 overflow-auto text-[10px] leading-snug font-mono text-muted bg-bg-2/40 border-t border-border whitespace-pre-wrap">
-      {lines.join('\n')}
-    </pre>
+    <>
+      {error && <div className="px-3 py-2 text-[11px] text-danger">{error}</div>}
+      {lines.length === 0 ? (
+        <div className="px-3 py-2 text-[11px] text-muted">No log lines for this job.</div>
+      ) : (
+        <pre className="px-3 py-2 max-h-56 overflow-auto text-[10px] leading-snug font-mono text-muted bg-bg-2/40 border-t border-border whitespace-pre-wrap">
+          {lines.join('\n')}
+        </pre>
+      )}
+    </>
   )
 }
 
-function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: string) => void }) {
+/**
+ * Whether to offer "Run again" on this row.
+ *
+ * Terminal, and not redacted. `interrupted` is deliberately INCLUDED: R25 bars
+ * only AUTOMATIC re-enqueue at boot — its point is that a job which crashed the
+ * process must not crash-loop the boot — and a user clicking "run it again" is
+ * not that. An interrupted job is in fact the one a user most often wants back,
+ * since nobody chose to stop it.
+ *
+ * A redacted row (`project_id: null`) is one the caller may not see, so
+ * `_visible_job_or_404` 404s it; rendering the control there would offer an
+ * action that fails every single time it is clicked.
+ */
+export function canRequeueJob(job: SolveJob): boolean {
+  if (job.project_id == null) return false
+  return isTerminal(job)
+}
+
+function JobRow({ job, onAbort, onRequeue, onDismiss }: {
+  job: SolveJob
+  onAbort: (id: string) => void
+  onRequeue: (id: string) => void
+  onDismiss: (id: string) => void
+}) {
   const [expanded, setExpanded] = useState(false)
   const canAbort = job.status === 'queued' || job.status === 'running'
+  const canRequeue = canRequeueJob(job)
+  // Straight from the server, never derived from the status. Dismissal is
+  // owner-gated on `enqueued_by_user_id`, which the payload deliberately does
+  // not carry, so `isTerminal(job)` would render an enabled control on every
+  // row a colleague queued and 403 on each one.
+  const canDismiss = job.can_dismiss
   // A redacted row names no project, so there is nothing to preview and no name
   // to put in the URL — `/projects/null/results_bundle` is what the unguarded
   // version would have requested.
@@ -316,6 +374,26 @@ function JobRow({ job, onAbort }: { job: SolveJob; onAbort: (id: string) => void
           </div>
         </div>
         <StatusBadge status={job.status} />
+        {canRequeue && (
+          <button
+            onClick={() => onRequeue(job.id)}
+            aria-label="Run again"
+            className="p-1 rounded text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+            title="Queue this project to solve again, with the same solver settings this run used"
+          >
+            <RotateCcw size={14} />
+          </button>
+        )}
+        {canDismiss && (
+          <button
+            onClick={() => onDismiss(job.id)}
+            aria-label="Dismiss"
+            className="p-1 rounded text-muted hover:text-text hover:bg-panel transition-colors"
+            title="Hide this finished job from your list — it stays in everyone else’s"
+          >
+            <EyeOff size={14} />
+          </button>
+        )}
         {canAbort && (
           <button
             onClick={() => onAbort(job.id)}
@@ -342,6 +420,11 @@ export default function SolveQueuePanel() {
   const enqueue = useEnqueueSolve()
   const abortJob = useAbortJob()
   const clearFinished = useClearFinished()
+  const pauseQueue = usePauseQueue()
+  const resumeQueue = useResumeQueue()
+  const cancelQueued = useCancelQueued()
+  const requeueJob = useRequeueJob()
+  const dismissJob = useDismissJob()
   const { user } = useAuth()
   const [adding, setAdding] = useState<string | null>(null)
 
@@ -352,9 +435,23 @@ export default function SolveQueuePanel() {
   // get a 403. Read the raw flag so the control matches the route exactly.
   const canClearFinished = Boolean(user?.is_super_admin)
 
+  // Pause/resume stop and start the ONE process-global dispatcher, which serves
+  // every organisation — the same cross-org blast radius that puts
+  // `clear_finished` on `is_super_admin` server-side (`_require_instance_scope`,
+  // routers/solve_queue.py). Read the RAW flag for the same reason
+  // `canClearFinished` does: `useAuth().isAdmin` is `hasAdminConsoleAccess`,
+  // true for an ORG admin too, who would see an enabled button and get a 403.
+  //
+  // Local mode is exempt server-side and `localAdminUser()` sets
+  // `is_super_admin: true`, so the packaged desktop app lights these up
+  // without a special case here.
+  const canControlDispatcher = Boolean(user?.is_super_admin)
+
   const jobs = data?.jobs ?? []
+  const paused = data?.paused ?? false
   const activeCount = jobs.filter(isActive).length
   const finishedCount = jobs.filter(isTerminal).length
+  const queuedCount = jobs.filter(j => j.status === 'queued').length
   // Project names that already have a queued/running job — don't offer to re-add.
   // A redacted row names no project and can match nothing, so drop it rather
   // than letting `null` sit in the set.
@@ -374,8 +471,15 @@ export default function SolveQueuePanel() {
         await projectsApi.save(name, false, false, name)
         markProjectSaved(name)
       }
-      await enqueue.mutateAsync(name)
-      toast.success(`Queued '${name}' to solve`)
+      const res = await enqueue.mutateAsync(name)
+      // Idempotent 200: the server returned the EXISTING job and created
+      // nothing (already_queued, routers/solve_queue.py). Claiming "Queued"
+      // here would misreport a no-op as a new job.
+      if (res?.already_queued) {
+        toast.success(`'${name}' is already in the queue — kept its existing job`)
+      } else {
+        toast.success(`Queued '${name}' to solve`)
+      }
     } catch (e) {
       const resp = (e as { response?: { status?: number; data?: { detail?: string } } })?.response
       const detail = resp?.data?.detail
@@ -393,7 +497,110 @@ export default function SolveQueuePanel() {
 
   const onAbort = (id: string) => {
     abortJob.mutate(id, {
-      onError: (e) => toast.error(`Abort failed: ${(e as Error)?.message ?? e}`),
+      onError: (e) => {
+        const resp = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+        if (resp?.status === 404) {
+          // The deliberate existence-oracle 404: a redacted row's abort is
+          // indistinguishable from a bad id server-side. Raw axios text
+          // ("Request failed with status code 404") explains nothing; say
+          // what actually happened. The X stays rendered on redacted rows on
+          // purpose — a job orphaned by a project delete is redacted AND
+          // abortable by its own org (`_may_abort`'s carve-out).
+          toast.error("Couldn't abort — this job is not visible to your account.")
+          return
+        }
+        const detail = typeof resp?.data?.detail === 'string' ? resp.data.detail : null
+        toast.error(`Abort failed: ${detail ?? (e as Error)?.message ?? e}`)
+      },
+    })
+  }
+
+  // Every mutation below reports its own failure. The shared shape: read
+  // `detail` when the server sent one (these routes explain themselves —
+  // "is running, not finished", "being edited by another user") and fall back
+  // to the axios message only when it did not. Raw axios text ("Request failed
+  // with status code 409") tells the user nothing about what to do next.
+  const detailOf = (e: unknown): string | null => {
+    const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+    if (typeof d === 'string') return d
+    // The lock refusal is an OBJECT (`{error_kind, message, lock}`) — the same
+    // wire shape `_enforce_project_lock` and the write middleware use.
+    if (d && typeof d === 'object' && typeof (d as { message?: unknown }).message === 'string') {
+      return (d as { message: string }).message
+    }
+    return null
+  }
+  const statusOf = (e: unknown): number | undefined =>
+    (e as { response?: { status?: number } })?.response?.status
+
+  const onTogglePause = () => {
+    const m = paused ? resumeQueue : pauseQueue
+    m.mutate(undefined, {
+      onError: (e) => toast.error(
+        `Could not ${paused ? 'resume' : 'pause'} the queue: ${detailOf(e) ?? (e as Error)?.message ?? e}`,
+      ),
+    })
+  }
+
+  const onCancelQueued = () => {
+    cancelQueued.mutate(undefined, {
+      onSuccess: (res) => {
+        // 0 is a legitimate answer, not a failure: the sweep cancels only jobs
+        // this caller could have cancelled one at a time, so a queue full of
+        // another org's work cancels nothing. Reporting "Cancelled 0 jobs"
+        // reads as a bug; say what actually happened instead.
+        if (res.cancelled === 0) {
+          toast('Nothing to cancel — no queued jobs you can cancel.')
+          return
+        }
+        toast.success(`Cancelled ${res.cancelled} queued job${res.cancelled === 1 ? '' : 's'}`)
+      },
+      onError: (e) => toast.error(
+        `Could not cancel the queue: ${detailOf(e) ?? (e as Error)?.message ?? e}`,
+      ),
+    })
+  }
+
+  const onRequeue = (id: string) => {
+    requeueJob.mutate(id, {
+      onSuccess: (res) => {
+        // Idempotent 200, same contract as enqueue: the project already had a
+        // queued/running job and the server returned THAT one rather than
+        // creating a second. Claiming "queued again" would misreport a no-op.
+        if (res.already_queued) {
+          toast.success('That project is already in the queue — kept its existing job')
+          return
+        }
+        toast.success(`Queued '${res.project_id ?? 'the project'}' to solve again`)
+      },
+      onError: (e) => {
+        const status = statusOf(e)
+        const detail = detailOf(e)
+        if (status === 404) {
+          // Either the caller may not see the job (the deliberate
+          // existence-oracle 404), or the project no longer has a saved
+          // network — the route's own message distinguishes them.
+          toast.error(detail ?? "Couldn't run this job again — it is no longer available.")
+          return
+        }
+        toast.error(`Could not run this job again: ${detail ?? (e as Error)?.message ?? e}`)
+      },
+    })
+  }
+
+  const onDismiss = (id: string) => {
+    dismissJob.mutate(id, {
+      onError: (e) => {
+        // `can_dismiss` should make a 403 unreachable, but the flag is a
+        // SNAPSHOT from the last poll and the row could have been dismissed or
+        // the caller's access changed since. Explain rather than showing raw
+        // axios text.
+        if (statusOf(e) === 403) {
+          toast.error('You can only dismiss jobs you queued.')
+          return
+        }
+        toast.error(`Could not dismiss this job: ${detailOf(e) ?? (e as Error)?.message ?? e}`)
+      },
     })
   }
 
@@ -425,7 +632,15 @@ export default function SolveQueuePanel() {
             Queue current project
           </button>
           <button
-            onClick={() => clearFinished.mutate()}
+            onClick={() => clearFinished.mutate(undefined, {
+              // Without this, a failed clear (a 403 for a super-admin revoked
+              // since page load, a network error) did nothing visible at all.
+              onError: (e) => {
+                const resp = (e as { response?: { data?: { detail?: unknown } } })?.response
+                const detail = typeof resp?.data?.detail === 'string' ? resp.data.detail : null
+                toast.error(`Could not clear finished jobs: ${detail ?? (e as Error)?.message ?? e}`)
+              },
+            })}
             disabled={!canClearFinished || finishedCount === 0 || clearFinished.isPending}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-border text-muted hover:text-text hover:bg-panel disabled:opacity-40 transition-colors"
             title={canClearFinished
@@ -434,7 +649,41 @@ export default function SolveQueuePanel() {
           >
             <Trash2 size={12} /> Clear finished
           </button>
+          <button
+            onClick={onCancelQueued}
+            disabled={queuedCount === 0 || cancelQueued.isPending}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-border text-muted hover:text-danger hover:border-danger/40 disabled:opacity-40 transition-colors"
+            title={queuedCount === 0
+              ? 'Nothing is waiting in the queue'
+              : 'Cancel every job waiting in the queue — a solve already running is left alone'}
+          >
+            <ListX size={12} /> Cancel queued
+          </button>
+          {/* ONE toggle, not two buttons: the dispatcher is either running or
+              paused, and rendering both states at once invites clicking the
+              one that is already true. */}
+          <button
+            onClick={onTogglePause}
+            disabled={!canControlDispatcher || pauseQueue.isPending || resumeQueue.isPending}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border border-border text-muted hover:text-text hover:bg-panel disabled:opacity-40 transition-colors"
+            title={!canControlDispatcher
+              ? 'Only super-admins can pause the queue — one dispatcher serves every organisation'
+              : paused
+                ? 'Start solving queued jobs again'
+                : 'Start no new jobs. A solve already running finishes normally.'}
+          >
+            {paused ? <><Play size={12} /> Resume queue</> : <><Pause size={12} /> Pause queue</>}
+          </button>
         </div>
+        {paused && (
+          <div className="flex items-start gap-1.5 px-2 py-1.5 rounded border border-amber-500/30 bg-amber-500/10 text-[11px] text-amber-700">
+            <Pause size={12} className="mt-px shrink-0" />
+            {/* The second half is load-bearing. "Paused" alone reads as
+                "everything stopped", and a user watching a long solve carry on
+                would reasonably conclude the pause had failed. */}
+            <span>Queue paused — running jobs finish, but nothing new starts.</span>
+          </div>
+        )}
         {addableTabs.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
             <span className="text-[10px] text-muted">Add open project:</span>
@@ -467,7 +716,15 @@ export default function SolveQueuePanel() {
             <p className="text-[11px]">Add a saved project above; it'll solve in the background and its results will appear here.</p>
           </div>
         )}
-        {jobs.map(job => <JobRow key={job.id} job={job} onAbort={onAbort} />)}
+        {jobs.map(job => (
+          <JobRow
+            key={job.id}
+            job={job}
+            onAbort={onAbort}
+            onRequeue={onRequeue}
+            onDismiss={onDismiss}
+          />
+        ))}
       </div>
     </div>
   )

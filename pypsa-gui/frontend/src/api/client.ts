@@ -4,6 +4,7 @@ import { appLog } from '../store/simulationStore'
 import { getAuthEnabled, setAuthEnabled } from '../auth/config'
 import { shouldRearmAuth, shouldRedirectWhenAuthDisabled } from '../auth/localMode'
 import { CSRF_HEADER, needsCsrfHeader, readCsrfToken } from './csrf'
+import { lockRefusalCode } from '../utils/lockState'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -68,8 +69,14 @@ export function formatApiDetail(detail: unknown, fallback = 'Unknown error'): st
 // open and produces nothing the user can act on — exclude it.
 const QUIET_MUTATION_URLS = ['/simulation/preflight']
 
-// Expected conflict codes — still log, but avoid toast spam during a solve.
-const QUIET_TOAST_CODES = new Set(['solver_in_flight'])
+// Expected conflict codes — still log, but avoid toast spam.
+//
+// `project_locked` joins `solver_in_flight` for the same reason: it is a
+// STANDING condition, not an incident. While another user holds the edit lock
+// every autosave tick, every canvas drag and every solver-config change is
+// refused, and one toast per refusal buries the workbench. The read-only
+// banner already says who holds it and is the affordance the user can act on.
+const QUIET_TOAST_CODES = new Set(['solver_in_flight', 'project_locked'])
 
 const AUTH_API_PREFIX = '/auth/'
 const AUTH_PAGES = new Set(['/login', '/set-password', '/reset-password'])
@@ -181,8 +188,13 @@ client.interceptors.response.use(
     // brief uvicorn --reload window. They'll succeed on the next interval; no
     // need to log an error or pop a toast.
     if (!isQuietPoll(url, method) && !err.config?.skipErrorToast) {
-      appLog('ERROR', `${method} ${url} — ${msg}${code ? ` [${code}]` : ''}`)
-      if (!code || !QUIET_TOAST_CODES.has(code)) {
+      // `code` covers the emitters that set a top-level one (the solver gate,
+      // the write middleware). `lockRefusalCode` covers the two that carry the
+      // kind inside `detail` instead — the route-edge and enqueue lock
+      // refusals — which the top-level read alone cannot see.
+      const quietKey = code ?? lockRefusalCode(data)
+      appLog('ERROR', `${method} ${url} — ${msg}${quietKey ? ` [${quietKey}]` : ''}`)
+      if (!quietKey || !QUIET_TOAST_CODES.has(quietKey)) {
         toast.error(msg)
       }
     }
