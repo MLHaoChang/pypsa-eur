@@ -45,3 +45,13 @@ def test_angle_out_of_tolerance_alone_fails(tmp_path):
     assert cmp.loc["BUS_02", "vm_rel_err"] == pytest.approx(0.0)
     assert cmp.loc["BUS_02", "va_abs_err_deg"] == pytest.approx(1.2)
     assert bool(cmp.loc["BUS_01", "ok"]) and not bool(cmp.loc["BUS_02", "ok"])
+
+
+def test_non_converged_lf_rejected(tmp_path):
+    """A failed LF carries an empty bus frame, so without this guard the
+    comparison reports a bus-set mismatch — blaming the fixture for what is
+    really a diverged load flow."""
+    csv = tmp_path / "pf.csv"
+    csv.write_text("bus_name,vm_pu,va_degree\nBUS_01,1.03,0.0\nBUS_02,0.985,-5.2\n")
+    with pytest.raises(ContractError, match="not converged"):
+        compare_lf(LFResult(converged=False), csv)

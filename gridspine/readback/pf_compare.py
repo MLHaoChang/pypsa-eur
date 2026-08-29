@@ -8,6 +8,10 @@ from gridspine.schema.contracts import ContractError
 
 
 def compare_lf(lf, pf_csv, vm_tol=0.01, va_tol_deg=0.5) -> pd.DataFrame:
+    # A diverged LF carries an empty bus frame, which would otherwise surface
+    # below as a bus-set mismatch and blame the fixture.
+    if not lf.converged:
+        raise ContractError("LF result not converged — nothing to compare")
     pf = pd.read_csv(pf_csv).set_index("bus_name")
     if set(pf.index) != set(lf.bus.index):
         raise ContractError(

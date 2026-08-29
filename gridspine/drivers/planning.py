@@ -1,6 +1,13 @@
 """Variant-1 driver, increment-1 scope: the 39-bus vertical slice.
 Each stage writes its artifact before the next starts — the file IS the
-boundary. Engines only via the caged modules."""
+boundary. Engines only via the caged modules.
+
+Increment-1 limitation: the pandapower loads are never rescaled — they stay at
+case39's native (peak) level — so only hour 19, the LOAD_SHAPE peak the
+dispatch is built for, produces a load-consistent flow; other hours converge
+only by importing the difference silently through the slack, so the driver
+refuses them.
+"""
 import argparse
 import dataclasses
 import json
@@ -9,6 +16,7 @@ from pathlib import Path
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.ingest.pandapower_source import load_case39, registry_from_net
 from gridspine.producers.pypsa_nodal import run_uc, to_dispatch_table, to_pypsa
+from gridspine.schema.contracts import ContractError
 from gridspine.schema.errors import StageError
 from gridspine.static.loadflow import LFResult, apply_dispatch, run_lf
 
@@ -31,7 +39,21 @@ class SliceResult:
     lf: LFResult
 
 
+PEAK_HOUR = 19
+
+# net.load is never rescaled in increment 1, so the pandapower demand is
+# case39's native (shape 1.00) level. Only the LOAD_SHAPE peak hour matches it.
+HOUR_GUARD_MSG = (
+    "increment 1's pandapower loads are fixed at the hour-19 (peak) level; "
+    "other hours produce load-inconsistent flows (they still converge — the "
+    "slack silently imports the residual); per-snapshot load scaling lands in "
+    "increment 2"
+)
+
+
 def run_39bus_slice(outdir, hour: int = 19) -> SliceResult:
+    if hour != PEAK_HOUR:
+        raise ContractError(f"hour={hour}: {HOUR_GUARD_MSG}")
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     art = {}
@@ -64,6 +86,7 @@ def run_39bus_slice(outdir, hour: int = 19) -> SliceResult:
             "stages": ["ingest", "dispatch", "loadflow", "handoff"],
             "network": "pandapower case39, canonical names",
             "hour": hour,
+            "load_consistency": "hour 19 only (increment 1)",
             "ledger": LEDGER,
         }, indent=2))
         return SliceResult(converged=lf.converged, artifacts=art, lf=lf)

@@ -6,6 +6,7 @@ import pytest
 
 from gridspine.drivers.planning import run_39bus_slice
 from gridspine.readback.pf_compare import compare_lf
+from gridspine.schema.contracts import ContractError
 
 FIXDIR = Path(__file__).parent / "fixtures" / "powerfactory"
 
@@ -27,8 +28,19 @@ def test_manifest_records_assumptions(slice_result):
     res, _ = slice_result
     manifest = json.loads(res.artifacts["manifest"].read_text())
     assert manifest["hour"] == 19
+    assert manifest["load_consistency"] == "hour 19 only (increment 1)"
     ledger_text = " ".join(manifest["ledger"])
     assert "q_mvar" in ledger_text and "LOAD_SHAPE" in ledger_text
+
+
+def test_non_peak_hour_is_rejected(tmp_path):
+    """Increment 1 never scales net.load, so only hour 19 is load-consistent.
+
+    Hours 8-18 still CONVERGE — the slack silently imports the difference
+    (up to ~933 MW of phantom residual), so convergence is not the guard.
+    """
+    with pytest.raises(ContractError, match="fixed at the hour-19"):
+        run_39bus_slice(tmp_path, hour=8)
 
 
 def test_raw_and_lf_use_same_bus_names(slice_result):
