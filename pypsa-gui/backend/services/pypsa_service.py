@@ -7,7 +7,11 @@ from contextvars import ContextVar
 
 import pypsa
 
-from services.project_context import ProjectContext
+from services.project_context import (
+    STUDY_KEYS,
+    ProjectContext,
+    record_is_running,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +295,34 @@ class PyPSAService:
         # intentionally keeps the prior lifecycle + undo, as before. B2's registry
         # replaces this carry-forward with per-project selection.
         if prev is not None:
+            # ★ A finished STUDY must not outlive the network it measured.
+            #
+            # The carried-forward solver_state below is the SAME dict object,
+            # and load_project re-hydrates only `solver_config` and
+            # RESULT_STATE_KEYS — the five study keys are in neither list. So
+            # without this, project A's completed MC study is served for
+            # project B, and a study of a discarded network survives "New".
+            # Both were reproduced over HTTP before this line existed
+            # (`tests/test_adequacy_study_scoping.py`), and it is the unfixed
+            # half of the QA-round-7 defect that put a 3.5x wrong reliability
+            # standard on the wire.
+            #
+            # This is the ONE choke point — every path that replaces the
+            # foreground network comes through here — so the fix cannot be
+            # bypassed by a caller that forgets.
+            #
+            # A RUNNING record is left ALONE, deliberately: clearing it would
+            # make `study_running()` False while the worker thread is still
+            # alive and still mutating a network, breaking the 409 mesh and
+            # admitting a SECOND study — the exact corruption the mesh exists
+            # to prevent. A study running ACROSS a network swap is a real
+            # defect and a separate fix (a 409 at the eight routes that
+            # replace the network); leaking its record keeps the mutex honest
+            # and the panel reads "running" rather than showing a fabricated
+            # result. A test pins this choice.
+            for key in STUDY_KEYS:
+                if not record_is_running(prev.solver_state.get(key)):
+                    prev.solver_state[key] = None
             cls._publish_active(ProjectContext(
                 network=n,
                 solver_state=prev.solver_state,

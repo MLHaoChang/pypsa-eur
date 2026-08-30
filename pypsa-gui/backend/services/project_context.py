@@ -226,6 +226,45 @@ RESULT_STATE_KEYS = (
 )
 
 
+# The keys under a project's solver state that hold a long-running STUDY
+# record — the class-B/C sweep, the frontier, the sequential MC and the two
+# planning loops.
+#
+# ★ Here rather than in `services/study_state.py` (which re-exports it) for two
+# reasons. It is the same KIND of datum as RESULT_STATE_KEYS above — the
+# enumerated contents of a solver_state — and keeping the two side by side is
+# what makes it visible that the study keys are NOT in the result keys, which
+# is precisely the bug this list was moved for: `reset_network` reset one list
+# and not the other, so a finished study outlived the network it measured.
+# And it keeps the import graph acyclic — `study_state` imports PyPSAService,
+# so `pypsa_service` cannot import `study_state`, but it already imports this
+# module.
+STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop")
+
+
+def record_is_running(record) -> bool:
+    """True while a study record's worker thread is genuinely alive.
+
+    ONE definition, called by `study_state.study_running` (the 409 mesh) and by
+    `PyPSAService.reset_network` (which must not clear a live study out from
+    under that mesh). study_state's own docstring makes the argument: a guard
+    that differs between callers is not a guard.
+
+    Testing `thread.is_alive()` and not just the status string matters: a
+    crashed worker that never got to write its terminal status would otherwise
+    wedge the surface permanently, and the user's only recovery would be a
+    process restart.
+    """
+    if not record:
+        return False
+    try:
+        thread = record.get("thread")
+        return bool(record.get("status") == "running"
+                    and thread is not None and thread.is_alive())
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
 @dataclass
 class ProjectSolverState:
     """
@@ -277,6 +316,28 @@ class ProjectSolverState:
     ac_pf_stripped_voll_slacks: Any = None
     ac_pf_converged_count: Any = None
     ac_pf_total_snapshots: Any = None
+    # ── Study records (STUDY_KEYS) — NOT persisted, NOT lifecycle ────────────
+    # Each holds the record of one long-running adequacy study: status, its
+    # result, the worker thread the 409 mesh tests for liveness.
+    #
+    # ★ Declared here for the same reason `last_failure` and
+    # `last_reserve_margin` above are: so they are part of the canonical state
+    # shape and NOT orphan keys. They were undeclared until Phase 10, and that
+    # is precisely why nothing ever reset them — every reset path iterates
+    # declared fields (LIFECYCLE_KEYS, RESULT_STATE_KEYS), so a key in neither
+    # list is a key that survives forever. A finished study therefore outlived
+    # the network it measured: project A's MC study was served for project B,
+    # and a study of a discarded network survived "New". Both reproduced over
+    # HTTP in `tests/test_adequacy_study_scoping.py`.
+    #
+    # They are deliberately in NO persistence group: a study measures a
+    # network in memory and must not be restored from disk beside a network it
+    # may no longer describe.
+    fmea_sweep: Any = None
+    frontier: Any = None
+    mc: Any = None
+    coupling_loop: Any = None
+    margin_loop: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

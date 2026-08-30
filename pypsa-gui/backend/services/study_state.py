@@ -26,12 +26,15 @@ not a guard.
 """
 from __future__ import annotations
 
+from services.project_context import STUDY_KEYS, record_is_running
 from services.pypsa_service import PyPSAService
 
 # The keys under the active project's solver state that hold a long-running
-# study record. Order is the order a blocked caller is told about them, so the
-# cheapest-to-explain blocker comes first.
-STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop")
+# study record, RE-EXPORTED from `project_context` (which owns the list, beside
+# RESULT_STATE_KEYS — see the note there). Order is the order a blocked caller
+# is told about them, so the cheapest-to-explain blocker comes first.
+__all__ = ["STUDY_KEYS", "STUDY_LABELS", "record_is_running", "study_running",
+           "running_study", "blocking_study_detail"]
 
 # What each study is called in a 409 message. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and abort it.
@@ -56,9 +59,7 @@ def study_running(key: str) -> bool:
         st = PyPSAService.get_solver_state().get(key)
     except Exception:                                         # noqa: BLE001
         return False
-    return bool(st and st.get("status") == "running"
-                and st.get("thread") is not None
-                and st["thread"].is_alive())
+    return record_is_running(st)
 
 
 def running_study() -> str | None:
