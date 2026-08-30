@@ -11,6 +11,7 @@ from services.project_context import (
     STUDY_KEYS,
     ProjectContext,
     record_is_running,
+    study_swap_refusal,
 )
 
 logger = logging.getLogger(__name__)
@@ -276,7 +277,8 @@ class PyPSAService:
         return cls._ensure_active()
 
     @classmethod
-    def reset_network(cls) -> None:
+    def reset_network(cls, *, allow_during_study: bool = False,
+                      action: str = "replace the network") -> None:
         # Swap in a fresh, UNBOUND context — no on-disk project owns it yet.
         # reset_network runs at the START of every load/import/restore (which
         # then re-bind via set_loaded_project at the end), and on explicit
@@ -285,6 +287,38 @@ class PyPSAService:
         # identity unbound (rather than dangling on the previous project) and a
         # subsequent autosave can't misdirect.
         prev = cls._request_ctx.get() or cls._active
+        # ★ REFUSE BY DEFAULT while a study is live (Phase 11).
+        #
+        # A study's worker closes over the `pypsa.Network` object captured
+        # before it started, so replacing the network does not STOP it — it
+        # DETACHES it. The study keeps solving the old object and keeps
+        # publishing into the solver_state carried forward below, so the new
+        # project's Adequacy tab fills in LIVE with the old project's study,
+        # and a `restore="final"` loop writes its certified cap or margin into
+        # the NEW project's solver config and re-solves there.
+        #
+        # The guard is here, at the one choke point every network-replacing
+        # route already goes through, and not repeated at those seven call
+        # sites — a guard repeated seven times is a guard the eighth route
+        # forgets. `allow_during_study=True` is the explicit opt-out for a
+        # caller that genuinely must proceed.
+        #
+        # Raised BEFORE any mutation, so a refusal leaves the swap
+        # `action` DEFAULTS to a correct-if-generic phrase rather than being
+        # required: the guard then works with no call-site changes at all, and
+        # a route that forgets to describe itself still gets a true sentence
+        # instead of no protection. Sharpening the wording per route is a copy
+        # improvement, never a correctness dependency.
+        #
+        # not-started rather than half-done. HTTPException from a service is
+        # the established pattern here (project_registry, project_acl,
+        # upload_service, storage_paths, chat_service, …), so FastAPI returns
+        # the 409 with no handler to register.
+        if not allow_during_study and prev is not None:
+            detail = study_swap_refusal(prev.solver_state, action)
+            if detail:
+                from fastapi import HTTPException
+                raise HTTPException(409, detail)
         n = pypsa.Network()
         n.name = "Untitled Project"
         # Carry the solver-state object (+ its lock) AND the undo stack forward so

@@ -241,6 +241,28 @@ RESULT_STATE_KEYS = (
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop")
 
+# What each study is called in a refusal. A user who is told "a study is
+# running" cannot act; one who is told WHICH can go and deal with it.
+STUDY_LABELS = {
+    "fmea_sweep": "an FMEA sweep",
+    "frontier": "a frontier study",
+    "mc": "a sequential-MC study",
+    "coupling_loop": "a coupling-loop study",
+    "margin_loop": "a margin-loop study",
+}
+
+# The studies a user can actually STOP.
+#
+# ★ Only these two have an `/abort` route and a `stop_event`; `mc`, `frontier`
+# and `fmea_sweep` have neither. This is load-bearing for the copy: the
+# Phase-7 refusal sentence said "Wait for it to finish, or abort it" for EVERY
+# study, which names a control that does not exist for three of the five. A
+# refusal must never invent an action the user cannot take.
+#
+# Pinned by a test against the routes that actually exist, so this cannot
+# drift the day someone gives the MC an abort.
+ABORTABLE_STUDIES = ("coupling_loop", "margin_loop")
+
 
 def record_is_running(record) -> bool:
     """True while a study record's worker thread is genuinely alive.
@@ -263,6 +285,53 @@ def record_is_running(record) -> bool:
                     and thread is not None and thread.is_alive())
     except Exception:                                         # noqa: BLE001
         return False
+
+
+def running_study_key(state) -> str | None:
+    """The key of the first live study in ``state``, or None.
+
+    Pure: takes the state dict rather than reaching for the active project, so
+    `pypsa_service` can call it without importing `study_state` (which imports
+    PyPSAService — the cycle Phase 10 already had to route around).
+    """
+    if not state:
+        return None
+    for key in STUDY_KEYS:
+        try:
+            if record_is_running(state.get(key)):
+                return key
+        except Exception:                                     # noqa: BLE001
+            continue
+    return None
+
+
+def study_swap_refusal(state, action: str) -> str | None:
+    """The 409 detail for an action that would REPLACE the network, or None.
+
+    ``action`` is what the user was trying to do ("load a project", "undo",
+    "restore a snapshot"), because a refusal that does not say what it refused
+    is a worse error than the bug it prevents.
+
+    Why the swap is refused at all: a study's worker closes over the
+    `pypsa.Network` object captured before it started, so replacing the
+    network does not STOP the study — it DETACHES it. The study keeps solving
+    the old object and keeps publishing into the solver state the swap carries
+    forward, so the new project's Adequacy tab fills in live with the old
+    project's study, and a `restore="final"` loop writes its certified value
+    into the new project's solver config.
+    """
+    key = running_study_key(state)
+    if key is None:
+        return None
+    label = STUDY_LABELS.get(key, key)
+    remedy = ("Wait for it to finish, or abort it."
+              if key in ABORTABLE_STUDIES else
+              "It cannot be aborted, so wait for it to finish.")
+    return (f"{label} is running on this network. Trying to {action} now "
+            "would not stop it — the study holds the network it started on, "
+            "so it would keep running against a network you are no longer "
+            "looking at, and would publish its result over the new one. "
+            + remedy)
 
 
 @dataclass

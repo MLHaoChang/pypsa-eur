@@ -26,7 +26,11 @@ not a guard.
 """
 from __future__ import annotations
 
-from services.project_context import STUDY_KEYS, record_is_running
+from services.project_context import (
+    STUDY_KEYS,
+    STUDY_LABELS,
+    record_is_running,
+)
 from services.pypsa_service import PyPSAService
 
 # The keys under the active project's solver state that hold a long-running
@@ -38,13 +42,6 @@ __all__ = ["STUDY_KEYS", "STUDY_LABELS", "record_is_running", "study_running",
 
 # What each study is called in a 409 message. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and abort it.
-STUDY_LABELS = {
-    "fmea_sweep": "an FMEA sweep",
-    "frontier": "a frontier study",
-    "mc": "a sequential-MC study",
-    "coupling_loop": "a coupling-loop study",
-    "margin_loop": "a margin-loop study",
-}
 
 
 def study_running(key: str) -> bool:

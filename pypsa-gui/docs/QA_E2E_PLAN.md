@@ -330,6 +330,24 @@ never bound", and Phase 8 built the lever that moves the metric there.
 | S19.5 | `restore="final"` writes the **margin's** config field, never the cap's, and a user's own ENS cap survives the study untouched |
 | S19.6 | the verdict names the SAME number the panel's restore explainer tells the user to type — one certified margin, one spelling |
 
+### S20 — Refusing a network swap during a study (area 20)
+| id | Assertion |
+|----|-----------|
+| S20.1 | With **no** study running, `POST /api/network/reset` succeeds — the baseline, and it runs FIRST because it is itself a reset: after the fixture build it would wipe the very fixture the rest of the suite needs |
+| S20.2 | With a **verifiably live** MC study, the same route is refused `409`, the refusal **names** the study, and it offers only a remedy that exists — the MC has no `/abort`, so the sentence must say it cannot be aborted rather than pointing at a button that is not there. The check reads the study's own status immediately before the swap and **SKIPs rather than fails** if the study finished first, so it can never report a lost race as a broken guard |
+| S20.3 | …and the guard **lifts**: once the study finishes the route succeeds again. A refusal that never releases is an outage, not a guard |
+
+**What the first runs found — in the suite, not the code.** Three times, and
+each was the harness lying rather than the product: `draws=4000` exceeded the
+engine's 2000-draw cap so the study never started (the 422 said so plainly
+once the detail was surfaced instead of swallowed); the baseline reset was
+ordered *after* the fixture build and wiped it, so every later check failed on
+an empty network for reasons unrelated to the guard; and on a two-day horizon
+the MC finished before the swap was attempted, so a **passing** guard reported
+a failure. The fixture now spans a quarter and the check states whether the
+study was actually alive — the difference between a check and a coin toss.
+
+
 **What S19.6 found on its first run — and the near-miss that nearly hid it.**
 The check failed live while passing every unit test: the verdict said
 `reserve_margin = 0.6716` where the panel said `0.671600430725`. The cause was

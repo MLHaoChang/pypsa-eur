@@ -3165,6 +3165,151 @@ def suite_S19():
 
 
 # ── main ──────────────────────────────────────────────────────────────────
+
+def suite_S20():
+    """
+    A network swap is REFUSED while a study runs (Phase 11 spec §1/§2).
+
+    A study's worker closes over the `pypsa.Network` object captured before it
+    started, so replacing the network does not STOP the study — it DETACHES
+    it. The study keeps solving the old object and keeps publishing into the
+    solver state the swap carries forward, so the NEW project's Adequacy tab
+    fills in live with the OLD project's study, and a `restore="final"` loop
+    writes its certified value into the NEW project's solver config.
+
+    Unit tests drive `reset_network` and two routes. This suite is here for
+    what only a live server shows: that the refusal reaches a real HTTP caller
+    with a real running study behind it, and that it LIFTS again afterwards —
+    a guard that never releases is not a guard, it is an outage.
+    """
+    # The engine caps a study at 2000 draws (`mc.MAX_DRAWS`) and refuses more
+    # with a 422 — which is what the first run of this suite hit. Ask for the
+    # cap: the study then runs long enough to still be alive when the swap is
+    # attempted, without being refused before it starts.
+    MAX_DRAWS_FOR_S20 = 2000
+
+    print("\nS20 - Refusing a network swap during a study (area 20)")
+    name = "qa_e2e_swapguard"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2, 3):
+            skip(f"S20.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        restore()
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    # ── S20.1 — with NO study running, the swap route works. The baseline
+    # goes FIRST, before the fixture exists: it is itself a network reset, so
+    # running it after the build would wipe the very fixture the rest of the
+    # suite needs (which is exactly what the first version of this suite did
+    # — every later check then failed on an empty network with a 422 that had
+    # nothing to do with the guard).
+    st_reset, _ = http("/api/network/reset", method="POST")
+    record("S20.1", st_reset == 200,
+           f"POST /api/network/reset with no study -> {st_reset} (want 200)")
+
+    # A samplable fixture — the MC needs occurrence data or it refuses, and
+    # this suite needs a study that runs long enough to still be alive when
+    # the swap is attempted.
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-03-31 23:00", "freq": "h"})[0])
+    for g in ("unit_1", "unit_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": 100.0, "marginal_cost": 10.0,
+                                "outage_rate_value": 0.12,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": 150.0})[0])
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2, 3):
+            skip(f"S20.{i}", f"fixture build failed: {built}")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        restore()
+        return
+
+    # ── S20.2 — start a REAL study, then try to swap. The study has to be
+    # genuinely alive: the guard tests `thread.is_alive()`, so anything less
+    # proves nothing.
+    http("/api/simulation/solver_config", method="PUT",
+         body={"solver_name": "highs", "voll": 3000.0})
+    http("/api/simulation/run", method="POST")
+    deadline = time.time() + 240
+    while time.time() < deadline:
+        _, stt = http("/api/simulation/status")
+        if (stt or {}).get("status") not in ("running", "starting"):
+            break
+        time.sleep(0.5)
+
+    st_mc, _mc_refusal = http("/api/results/mc", method="POST",
+                              body={"draws": MAX_DRAWS_FOR_S20, "seed": 11})
+    if st_mc != 200:
+        _, why = http("/api/results/mc")
+        for i in (2, 3):
+            skip(f"S20.{i}", f"could not start an MC study -> {st_mc}: "
+                             f"{str(_mc_refusal)[:200]}")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        restore()
+        return
+
+    # While it runs, every network-replacing route must refuse — and say why.
+    #
+    # Read the study's OWN status immediately before the swap. Without this
+    # the check cannot tell a working guard from a study that simply finished
+    # first, and a 200 would be reported as a failure of the guard when it is
+    # a failure of the fixture. That is the difference between a check and a
+    # coin toss: the first run of this suite hit exactly that race on a two-
+    # day horizon, which is why the fixture now spans a quarter.
+    _, mc_at_swap = http("/api/results/mc")
+    live_at_swap = (mc_at_swap or {}).get("status") == "running"
+    st_swap, body_swap = http("/api/network/reset", method="POST")
+    detail = str((body_swap or {}).get("detail", ""))
+    named = "sequential-MC study" in detail
+    # The MC has no abort route, so the refusal must NOT offer one.
+    honest = "cannot be aborted" in detail and "or abort it" not in detail
+    if not live_at_swap:
+        skip("S20.2", "the MC study finished before the swap was attempted "
+                      f"(status={(mc_at_swap or {}).get('status')}) — the "
+                      "guard was never exercised, so this proves nothing")
+    else:
+        record("S20.2", st_swap == 409 and named and honest,
+               f"MC study live at swap time={live_at_swap}; swap -> {st_swap} "
+               f"(want 409); names the study={named}; offers only a REAL "
+               f"remedy={honest}; detail={detail[:120]}")
+
+    # ── S20.3 — and it LIFTS. Wait the study out, then swap for real.
+    deadline = time.time() + 420
+    while time.time() < deadline:
+        _, mc = http("/api/results/mc")
+        if (mc or {}).get("status") != "running":
+            break
+        time.sleep(1.0)
+    st_after, _ = http("/api/network/reset", method="POST")
+    record("S20.3", st_after == 200,
+           f"after the study finished, POST /api/network/reset -> {st_after} "
+           "(want 200 — a guard that never lifts is an outage, not a guard)")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -3233,6 +3378,9 @@ def main() -> int:
         suite_S18()
     if run("S19"):
         suite_S19()
+
+    if run("S20"):
+        suite_S20()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

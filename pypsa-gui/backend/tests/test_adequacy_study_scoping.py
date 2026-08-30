@@ -149,15 +149,17 @@ def test_a_RUNNING_study_is_deliberately_left_alone(client, install_network):
     exists to prevent. Leaking it keeps the mutex honest and leaves the panel
     reading "running" instead of showing a fabricated result.
 
-    (A study running ACROSS a network swap is a real defect in its own right —
-    the worker closes over the network object, so a load detaches it rather
-    than stopping it — and it is fixed by refusing the swap at the routes that
-    replace the network, not here. Spec §1.)
+    Phase 11 made the user-facing case unreachable: `reset_network` now
+    REFUSES a swap while a study is live (409), because the worker closes over
+    the network object, so a load detaches the study rather than stopping it.
+    This path therefore only remains reachable through the explicit
+    `allow_during_study=True` opt-out — and the no-clear rule still has to
+    hold there, which is what this pins.
 
     This test exists so a later tidy-up cannot quietly turn the conditional
     clear into an unconditional one.
 
-    Bite (verified): drop the `record_is_running` guard.
+    Bite (verified): drop the `record_is_running` guard from the clear loop.
     """
     import threading
 
@@ -176,7 +178,7 @@ def test_a_RUNNING_study_is_deliberately_left_alone(client, install_network):
             }
         assert study_running("mc") is True, "the fixture is not actually live"
 
-        PyPSAService.reset_network()
+        PyPSAService.reset_network(allow_during_study=True)
 
         assert PyPSAService.get_solver_state().get("mc") is not None, (
             "a LIVE study record was cleared: the 409 mesh now reads False "
