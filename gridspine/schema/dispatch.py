@@ -71,3 +71,75 @@ def validate_dispatch(df: pd.DataFrame) -> pd.DataFrame:
             f"units with status 0 but nonzero p_mw: {out.loc[offline_producing, 'unit_id'].tolist()}"
         )
     return out
+
+
+LOADS_COLUMNS = {
+    "bus": "object",
+    "hour": "int64",
+    "p_mw": "float64",
+    "q_mvar": "float64",
+}
+
+
+def validate_loads(df: pd.DataFrame) -> pd.DataFrame:
+    """The loads artifact: per-bus, per-hour demand, keyed by canonical bus name.
+
+    Same pre-coercion discipline as ``validate_dispatch`` and for the same
+    reason: ``astype("int64")`` turns an hour of 1.5 into 1 in silence, so the
+    integrality guard has to see the values as supplied.
+
+    Relationship to ``ranking.metrics._checked_loads``, which re-checks a
+    minimum on the consumer side so a client can recompute metrics from the CSV
+    without importing the producer stack: everything this function accepts,
+    that one accepts too. The one place this is deliberately STRICTER on a
+    shared field is the sign of ``p_mw`` — a demand table with negative real
+    power is a producer defect (an injection dressed as a load), and catching
+    it here, where the artifact is written, is cheaper than explaining a
+    negative `load_mw` metric later. Strictness in that direction is safe: it
+    can only reject frames that would have reached ranking, never admit ones
+    ranking would refuse.
+
+    ``q_mvar`` is signed on purpose — a capacitive load exchanges negative
+    reactive power, and case39 has two such buses.
+    """
+    missing = set(LOADS_COLUMNS) - set(df.columns)
+    if missing:
+        raise ContractError(f"loads table missing columns: {sorted(missing)}")
+    out = df[list(LOADS_COLUMNS)].copy()
+
+    # --- guards on the values as supplied; coercion below would hide these ---
+    if out["bus"].isna().any():
+        raise ContractError(
+            f"loads table has null bus in {int(out['bus'].isna().sum())} row(s)"
+        )
+    for col in ("p_mw", "q_mvar"):
+        if out[col].isna().any():
+            raise ContractError(f"loads table has NaN in {col}")
+    hour_raw = pd.to_numeric(out["hour"], errors="coerce")
+    bad_hour = hour_raw.isna() | (hour_raw % 1 != 0)
+    if bad_hour.any():
+        raise ContractError(
+            f"loads table hour must be integral, got "
+            f"{out.loc[bad_hour, 'hour'].unique().tolist()}"
+        )
+
+    try:
+        out = out.astype(LOADS_COLUMNS)
+    except (ValueError, TypeError) as exc:
+        raise ContractError(f"loads table dtype coercion failed: {exc}") from exc
+
+    for col in ("p_mw", "q_mvar"):
+        if np.isinf(out[col]).any():
+            raise ContractError(f"loads table has non-finite inf in {col}")
+    negative = out["p_mw"] < 0.0
+    if negative.any():
+        raise ContractError(
+            f"loads table has negative p_mw at bus(es): "
+            f"{out.loc[negative, 'bus'].tolist()}"
+        )
+    dup = out.duplicated(subset=["bus", "hour"])
+    if dup.any():
+        raise ContractError(
+            f"loads table has duplicate (bus, hour) rows: {out.loc[dup, 'bus'].tolist()}"
+        )
+    return out

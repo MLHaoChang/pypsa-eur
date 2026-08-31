@@ -38,6 +38,15 @@ class LFResult:
 
 
 def apply_dispatch(net, table, hour, registry) -> None:
+    """Set the committable generators from the dispatch table.
+
+    DEPRECATED for driver use — call ``apply_snapshot`` instead. This function
+    sets generation and nothing else, so on its own it reproduces the
+    increment-1 defect: `net.load` keeps whatever level the source case carried
+    (case39's is the hour-19 peak) while the machines move to the requested
+    hour, and the slack quietly imports the difference. Kept because it is the
+    generator half of ``apply_snapshot`` and several tests drive it directly.
+    """
     snap = table[table["hour"] == hour].set_index("unit_id")
     name_to_gen_idx = {net.gen.at[i, "name"]: i for i in net.gen.index}
     for unit_id, rec in registry.iterrows():
@@ -47,6 +56,117 @@ def apply_dispatch(net, table, hour, registry) -> None:
         i = name_to_gen_idx[unit_id]
         net.gen.at[i, "p_mw"] = float(row["p_mw"])
         net.gen.at[i, "in_service"] = bool(int(row["status"]))
+
+
+
+def _apply_loads(net, loads, hour) -> None:
+    """Set `net.load` p/q for `hour` from the validated loads table.
+
+    Both directions of the bus correspondence are checked, and both are the
+    same defect wearing different clothes: a `net.load` row the table does not
+    cover keeps its NATIVE value, which is exactly the increment-1 residual the
+    loads artifact exists to remove, and it would go unnoticed because the flow
+    still converges. Failing closed is the point.
+
+    The table is per BUS; `net.load` is per ROW, and a bus may in principle
+    carry several load rows (case39 carries exactly one each). The bus total is
+    split across its rows in proportion to their native P, so a multi-row bus
+    keeps its internal composition. When a bus's native P is zero there is no
+    proportion to preserve and the split is equal — an arbitrary but harmless
+    choice, since the rows sum to the same bus total either way.
+    """
+    from gridspine.schema.dispatch import validate_loads
+
+    tbl = validate_loads(loads)
+    at_hour = tbl[tbl["hour"] == hour]
+    if at_hour.empty:
+        raise ContractError(
+            f"loads table has no rows for hour {hour}; "
+            f"it covers {sorted(tbl['hour'].unique().tolist())[:5]}..."
+        )
+    target = at_hour.set_index("bus")
+
+    bus_name = net.bus["name"]
+    rows_by_bus = {}
+    for i in net.load.index:
+        rows_by_bus.setdefault(bus_name.at[net.load.at[i, "bus"]], []).append(i)
+
+    uncovered = sorted(set(rows_by_bus) - set(target.index))
+    if uncovered:
+        raise ContractError(
+            f"loads table does not cover net.load buses {uncovered} at hour "
+            f"{hour}; leaving them at their native level is the increment-1 "
+            "silent-import defect"
+        )
+    unknown = sorted(set(target.index) - set(rows_by_bus))
+    if unknown:
+        raise ContractError(
+            f"loads table names buses with no net.load row: {unknown}"
+        )
+
+    for bus, idxs in rows_by_bus.items():
+        p_total = float(target.at[bus, "p_mw"])
+        q_total = float(target.at[bus, "q_mvar"])
+        native = [float(net.load.at[i, "p_mw"]) for i in idxs]
+        denom = sum(native)
+        weights = (
+            [v / denom for v in native] if denom != 0.0
+            else [1.0 / len(idxs)] * len(idxs)
+        )
+        for i, w in zip(idxs, weights):
+            net.load.at[i, "p_mw"] = p_total * w
+            net.load.at[i, "q_mvar"] = q_total * w
+
+
+def _apply_res(net, snap, registry) -> None:
+    """Set `net.sgen` p_mw and in_service for the registry's `kind == 'res'` rows.
+
+    A curtailed RES row arrives as status 0 / p_mw 0 (the producer zeroes both
+    together), and it is set OUT OF SERVICE here. That is correct FOR LOAD
+    FLOW: a zero-injection PQ element and an absent one are the same node
+    equation, and taking it out keeps the RAW writer's STAT field agreeing with
+    the snapshot being studied.
+
+    INCREMENT-3 WARNING — do not reuse this mapping for the short-circuit
+    stage. Curtailment is a control state, not a disconnection: a curtailed
+    inverter is still energised, still synchronised, and still contributes
+    fault current. `in_service=False` deletes it from the fault calculation
+    entirely, which would understate the contribution at exactly the buses the
+    study is about. Increment 3 needs its own status -> element mapping.
+    """
+    sgen = getattr(net, "sgen", None)
+    if sgen is None or len(sgen) == 0:
+        return
+    idx_of = {sgen.at[i, "name"]: i for i in sgen.index}
+    for unit_id, rec in registry.iterrows():
+        if rec["kind"] != "res":
+            continue
+        if unit_id not in idx_of:
+            raise ContractError(f"registry names a res unit with no sgen row: {unit_id}")
+        row = snap.loc[unit_id]
+        i = idx_of[unit_id]
+        net.sgen.at[i, "p_mw"] = float(row["p_mw"])
+        net.sgen.at[i, "in_service"] = bool(int(row["status"]))
+
+
+def apply_snapshot(net, dispatch, loads, hour, registry) -> None:
+    """Put the whole snapshot on the net: demand, commitment and RES output.
+
+    This is the function the driver calls. `apply_dispatch` moved the machines
+    and left the demand behind, so every non-peak hour converged by importing
+    the residual through the slack — which is why increment 1 refused them.
+    With the loads table applied alongside, any hour is load-consistent and the
+    slack carries losses only; `tests/gridspine/test_loads_artifact.py::
+    test_driver_slack_no_longer_imports_the_load_residual` is the assertion
+    that holds that claim up.
+
+    Order is deliberate: loads first, so that a table that fails its contract
+    aborts before any generator has been touched and the net is left as it was
+    found rather than half-updated.
+    """
+    _apply_loads(net, loads, hour)
+    apply_dispatch(net, dispatch, hour, registry)
+    _apply_res(net, dispatch[dispatch["hour"] == hour].set_index("unit_id"), registry)
 
 
 def _bus_numbers(net):

@@ -163,6 +163,63 @@ def to_pypsa(net, snapshots: int = 24, load_shape=None, res_cf=None) -> pypsa.Ne
     return n
 
 
+def to_loads_table(n: pypsa.Network, net) -> pd.DataFrame:
+    """Solved-or-unsolved PyPSA network + its source grid -> validated LoadsTable.
+
+    Rows are (bus, hour, p_mw, q_mvar) — one per PyPSA Load per snapshot, keyed
+    by the canonical BUS name rather than the load name, because that is the
+    key stage 2 sets `net.load` on and the key `ranking.metrics` aggregates by.
+
+    Two arguments, not one. `p_mw` comes from `n.loads_t.p_set`, which is the
+    whole of what the dispatch model knows about demand: PyPSA solves a real-
+    power problem and carries no reactive load at all. Q therefore has to come
+    from the detailed grid, and `net` is the only place it exists.
+
+    LEDGER ASSUMPTION — CONSTANT POWER FACTOR. `q_mvar` is the bus's native
+    pandapower Q scaled by the same factor the hour applies to its P, i.e.
+    `q = p * (Q_native / P_native)` per bus. The power factor of every bus is
+    thus held at its case39 value for all 8760 hours. Real demand's power
+    factor moves with the load mix, so this is an assumption and not a
+    measurement; it is recorded in the driver's manifest ledger.
+
+    A bus whose native P is zero has no defined ratio and takes `q = 0.0`
+    rather than a division result: the alternative is an inf or a NaN, and
+    `validate_loads` would (correctly) refuse the table either way, turning a
+    degenerate but harmless input into a hard stop three lines later.
+    """
+    from gridspine.schema.dispatch import validate_loads
+
+    bus_name = net.bus["name"]
+    native = net.load.groupby("bus")[["p_mw", "q_mvar"]].sum()
+    ratio = {}
+    for bus_idx, rec in native.iterrows():
+        p_native = float(rec["p_mw"])
+        ratio[bus_name.at[bus_idx]] = (
+            float(rec["q_mvar"]) / p_native if p_native != 0.0 else 0.0
+        )
+
+    p_set = n.loads_t.p_set
+    bus_of = n.loads["bus"]
+    missing = sorted(set(bus_of) - set(ratio))
+    if missing:
+        raise ContractError(
+            f"PyPSA loads sit on buses the source grid has no load for: {missing}"
+        )
+
+    rows = []
+    for hour, snap in enumerate(n.snapshots):
+        for load_name in p_set.columns:
+            bus = bus_of.at[load_name]
+            p_mw = float(p_set.at[snap, load_name])
+            rows.append({
+                "bus": bus,
+                "hour": hour,
+                "p_mw": p_mw,
+                "q_mvar": p_mw * ratio[bus],
+            })
+    return validate_loads(pd.DataFrame(rows))
+
+
 _STATUS_P_TOL_MW = 1e-4
 
 

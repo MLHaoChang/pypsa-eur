@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 
 from gridspine.drivers.planning import run_39bus_slice
+from gridspine.producers.pypsa_nodal import LOAD_SHAPE
 from gridspine.readback.pf_compare import compare_lf
-from gridspine.schema.contracts import ContractError
 
 FIXDIR = Path(__file__).parent / "fixtures" / "powerfactory"
 
@@ -28,19 +28,29 @@ def test_manifest_records_assumptions(slice_result):
     res, _ = slice_result
     manifest = json.loads(res.artifacts["manifest"].read_text())
     assert manifest["hour"] == 19
-    assert manifest["load_consistency"] == "hour 19 only (increment 1)"
+    assert manifest["load_consistency"] == "per-snapshot loads artifact (increment 2)"
     ledger_text = " ".join(manifest["ledger"])
     assert "q_mvar" in ledger_text and "LOAD_SHAPE" in ledger_text
 
 
-def test_non_peak_hour_is_rejected(tmp_path):
-    """Increment 1 never scales net.load, so only hour 19 is load-consistent.
+def test_non_peak_hour_is_accepted_and_load_consistent(tmp_path):
+    """The retired hour-19 guard, inverted.
 
-    Hours 8-18 still CONVERGE — the slack silently imports the difference
-    (up to ~933 MW of phantom residual), so convergence is not the guard.
+    Increment 1 never scaled net.load, so only hour 19 was load-consistent and
+    the driver raised on anything else. Hours 8-18 still CONVERGED — the slack
+    silently imported the difference, up to ~933 MW of phantom residual — which
+    is why convergence was never the guard and cannot be the assertion now
+    either. The loads artifact moves the demand with the hour, so the check
+    that the guard has genuinely been replaced rather than merely deleted is
+    the slack: it must carry losses only. Full coverage of the loads artifact
+    lives in tests/gridspine/test_loads_artifact.py.
     """
-    with pytest.raises(ContractError, match="fixed at the hour-19"):
-        run_39bus_slice(tmp_path, hour=8)
+    from gridspine.ingest.pandapower_source import load_case39
+
+    res = run_39bus_slice(tmp_path, hour=8)
+    assert res.converged
+    served = LOAD_SHAPE[8] * float(load_case39().load["p_mw"].sum())
+    assert abs(res.lf.slack_p_mw) < 0.05 * served
 
 
 def test_raw_and_lf_use_same_bus_names(slice_result):

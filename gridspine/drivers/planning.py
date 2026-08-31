@@ -1,12 +1,15 @@
-"""Variant-1 driver, increment-1 scope: the 39-bus vertical slice.
+"""Variant-1 driver: the 39-bus vertical slice.
 Each stage writes its artifact before the next starts — the file IS the
 boundary. Engines only via the caged modules.
 
-Increment-1 limitation: the pandapower loads are never rescaled — they stay at
-case39's native (peak) level — so only hour 19, the LOAD_SHAPE peak the
-dispatch is built for, produces a load-consistent flow; other hours converge
-only by importing the difference silently through the slack, so the driver
-refuses them.
+Increment 2 retired the hour-19 guard. Increment 1 never rescaled the
+pandapower loads — they stayed at case39's native (peak) level — so only hour
+19, the LOAD_SHAPE peak the dispatch was built for, produced a load-consistent
+flow; other hours converged only by importing the difference silently through
+the slack, and the driver refused them rather than emit a flow whose residual
+was invisible. The dispatch stage now writes a LOADS artifact alongside the
+dispatch table, and stage 2 applies both, so every hour is load-consistent and
+the slack carries losses only.
 """
 import argparse
 import dataclasses
@@ -15,10 +18,14 @@ from pathlib import Path
 
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.ingest.pandapower_source import load_case39, registry_from_net
-from gridspine.producers.pypsa_nodal import run_uc, to_dispatch_table, to_pypsa
-from gridspine.schema.contracts import ContractError
+from gridspine.producers.pypsa_nodal import (
+    run_uc,
+    to_dispatch_table,
+    to_loads_table,
+    to_pypsa,
+)
 from gridspine.schema.errors import StageError
-from gridspine.static.loadflow import LFResult, apply_dispatch, run_lf
+from gridspine.static.loadflow import LFResult, apply_snapshot, run_lf
 
 # case39 is a 60 Hz system: the RAW header BASFRQ and the line-charging B
 # conversion both key off it, so the export must not take the 50 Hz default.
@@ -29,6 +36,8 @@ LEDGER = [
     "LOAD_SHAPE is a synthetic 24 h profile, peak hour 19, valley hour 3 (assumed)",
     "ext_grid modelled as 3000 MW import at 80 EUR/MWh marginal cost (assumed)",
     "case39 exported at f_hz=60.0 (60 Hz system)",
+    "loads q_mvar scaled at constant power factor from case39's native Q/P per "
+    "bus, held fixed across all hours (assumed)",
 ]
 
 
@@ -39,21 +48,14 @@ class SliceResult:
     lf: LFResult
 
 
+# The LOAD_SHAPE peak, and still the default `hour` so the increment-1 call is
+# unchanged. It is no longer the only legal value: `apply_snapshot` sets the
+# demand for whichever hour is asked for, and a wrong hour now fails loudly
+# inside the loads contract instead of converging on a phantom import.
 PEAK_HOUR = 19
-
-# net.load is never rescaled in increment 1, so the pandapower demand is
-# case39's native (shape 1.00) level. Only the LOAD_SHAPE peak hour matches it.
-HOUR_GUARD_MSG = (
-    "increment 1's pandapower loads are fixed at the hour-19 (peak) level; "
-    "other hours produce load-inconsistent flows (they still converge — the "
-    "slack silently imports the residual); per-snapshot load scaling lands in "
-    "increment 2"
-)
 
 
 def run_39bus_slice(outdir, hour: int = 19) -> SliceResult:
-    if hour != PEAK_HOUR:
-        raise ContractError(f"hour={hour}: {HOUR_GUARD_MSG}")
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     art = {}
@@ -64,12 +66,19 @@ def run_39bus_slice(outdir, hour: int = 19) -> SliceResult:
 
         stage = "dispatch"
         n = to_pypsa(net)
+        # The loads table is read off the network BEFORE the solve: p_set is an
+        # input to the UC, not a result of it, so demand is knowable either
+        # side of `run_uc` and taking it here keeps the artifact independent of
+        # whether the solve succeeded.
+        loads = to_loads_table(n, net)
+        art["loads"] = outdir / "loads.csv"
+        loads.to_csv(art["loads"], index=False)
         table = to_dispatch_table(run_uc(n))
         art["dispatch"] = outdir / "dispatch.csv"
         table.to_csv(art["dispatch"], index=False)
 
         stage = "loadflow"
-        apply_dispatch(net, table, hour=hour, registry=registry)
+        apply_snapshot(net, table, loads, hour=hour, registry=registry)
         lf = run_lf(net)
         art["lf_bus"] = outdir / "lf_bus.csv"
         art["lf_branch"] = outdir / "lf_branch.csv"
@@ -86,7 +95,7 @@ def run_39bus_slice(outdir, hour: int = 19) -> SliceResult:
             "stages": ["ingest", "dispatch", "loadflow", "handoff"],
             "network": "pandapower case39, canonical names",
             "hour": hour,
-            "load_consistency": "hour 19 only (increment 1)",
+            "load_consistency": "per-snapshot loads artifact (increment 2)",
             "ledger": LEDGER,
         }, indent=2))
         return SliceResult(converged=lf.converged, artifacts=art, lf=lf)
