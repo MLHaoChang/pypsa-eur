@@ -1,0 +1,14 @@
+# IEEE 39-bus (New England) classic dynamic data, H on 100 MVA system base
+# (Athay et al. 1979 / standard case39 dynamic set). Tag: datasheet.
+# SLK_BUS_31 models grid import: excluded from pocket inertia (assumed).
+units:
+  G_BUS_30:   {h_s: 42.0,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  G_BUS_32:   {h_s: 35.8,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  G_BUS_33:   {h_s: 38.6,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  G_BUS_34:   {h_s: 26.0,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  G_BUS_35:   {h_s: 34.8,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  G_BUS_36:   {h_s: 26.4,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  G_BUS_37:   {h_s: 24.3,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  G_BUS_38:   {h_s: 34.5,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  G_BUS_39:   {h_s: 500.0, mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
+  SLK_BUS_31: {h_s: 30.3,  mbase_mva: 100.0, source: datasheet, include_in_inertia: false}
