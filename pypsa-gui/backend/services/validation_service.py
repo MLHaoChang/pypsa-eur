@@ -1670,6 +1670,90 @@ def _check_reserve_margin(n, solver_config) -> list[Issue]:
     return issues
 
 
+def _profile_is_informative(series) -> bool:
+    """True when a ``p_max_pu`` column is a real availability PROFILE.
+
+    ★ The single guard that keeps this warning from being noise. Every
+    conventional generator in a real project carries outage data, and many
+    carry a ``p_max_pu`` column that is identically 1.0 — testing for the
+    column's PRESENCE would fire on all of them, on every project, and a
+    warning that fires everywhere is one nobody reads.
+
+    "Informative" means the series actually varies below 1.0 somewhere: a
+    wind/solar trace, or a planned-maintenance schedule on a thermal unit.
+    Both are profiles the engines discard, so both deserve the warning.
+    """
+    try:
+        import numpy as _np
+
+        arr = _np.asarray(series, dtype=float)
+    except Exception:                                         # noqa: BLE001
+        return False
+    if arr.size == 0:
+        return False
+    finite = arr[_np.isfinite(arr)]
+    if finite.size == 0:
+        return False
+    # Below 1 anywhere, by more than float noise.
+    return bool((finite < 1.0 - 1e-9).any())
+
+
+def _check_shadowed_profiles(n, params) -> list[Issue]:
+    """Generators whose availability PROFILE is discarded because they also
+    carry outage data.
+
+    ★ THE DEFECT. `copt.py`'s membership rule sends a generator with
+    resolvable occurrence params into the sampled fleet as a **flat two-state
+    unit at its firm capacity** — its ``p_max_pu`` profile is not carried
+    (``CoptUnit`` has no profile field, and `mc.snapshot_inputs` preserves a
+    profile ONLY for must-take names). A generator WITHOUT outage data is
+    must-take and IS netted at ``p_max_pu x capacity``.
+
+    So on two identical 100 MW farms sharing one 25 %-capacity-factor
+    profile, measured: the one without outage data contributes 25 MW mean;
+    the one WITH it contributes ``(1-q)*100`` = 90 MW. Entering MORE data
+    credits the asset ~3.6x MORE. Meanwhile `reserve_margin_facts` credits
+    that same asset ``(1-q)*profile̅`` = 22.5 MW — so the constraint and the
+    sampler that certifies it disagree 4x about one asset.
+
+    This is an unhandled INPUT COMBINATION rather than an oversight: the
+    design assumes VRE carries no FOR (`occurrence.CARRIER_DEFAULTS`:
+    "Deliberately ABSENT: wind / solar / other VRE"), and nothing in the
+    defaults or the import path ever attaches one. It arises only when a user
+    enters one by hand — which is why this warning is rare by construction.
+
+    A WARNING, not an error: the user deliberately entered that data, and a
+    blocking refusal would stop a network that solved yesterday. But it names
+    the DIRECTION, because a warning that does not say which way it errs
+    cannot be acted on.
+    """
+    p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+    if p_max_pu_t is None or not len(getattr(p_max_pu_t, "columns", [])):
+        return []
+    shadowed = [
+        str(name) for name in params.index
+        if name in p_max_pu_t.columns
+        and _profile_is_informative(p_max_pu_t[name])
+    ]
+    if not shadowed:
+        return []
+    names = ", ".join(sorted(shadowed)[:20])
+    more = " …" if len(shadowed) > 20 else ""
+    return [_warn(
+        "outage_shadows_profile", "Generator", "",
+        f"{len(shadowed)} generator(s) carry BOTH an availability profile "
+        f"and outage data: {names}{more}. The adequacy engines use the "
+        "outage rate and DISCARD the profile — the COPT and the sequential "
+        "MC model these as firm capacity that is either fully available or "
+        "fully out, so their contribution to adequacy is OVERSTATED (a "
+        "25 %-capacity-factor farm with a 10 % outage rate is simulated at "
+        "90 % of nameplate, not 25 %). The reserve margin, by contrast, uses "
+        "BOTH factors for the same asset, so the two disagree. Remove the "
+        "outage rate to have the profile honoured, or remove the profile if "
+        "the asset really is firm.",
+    )]
+
+
 def _check_outage_params(n) -> list[Issue]:
     """
     Adequacy occurrence attributes (design spec §5.4): warn on implausible
@@ -1700,6 +1784,8 @@ def _check_outage_params(n) -> list[Issue]:
             params = params[params["source"] == "asset"]
             for msg in validate_outage_params(params):
                 issues.append(_warn("outage_params_implausible", cls, "", msg))
+            if component == "generators":
+                issues += _check_shadowed_profiles(n, params)
         except Exception:
             continue
     return issues

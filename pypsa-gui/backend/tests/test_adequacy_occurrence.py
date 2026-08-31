@@ -14,6 +14,7 @@ import math
 import pathlib
 import tempfile
 
+import numpy as np
 import pandas as pd
 import pypsa
 import pytest
@@ -188,3 +189,102 @@ def test_preflight_is_silent_without_outage_data():
     n.add("Bus", "b", carrier="AC")
     n.add("Generator", "g", bus="b", carrier="gas", p_nom=10.0)
     assert VS._check_outage_params(n) == []
+
+
+# ── ★ a profile SHADOWED by outage data ───────────────────────────────────
+
+def _profiled(n, name, *, outage: bool, profile=None):
+    """A 100 MW generator carrying an hourly p_max_pu profile, optionally with
+    an outage rate entered as well."""
+    kw = dict(bus="b", carrier="wind", p_nom=100.0, marginal_cost=0.0)
+    if outage:
+        kw.update(outage_rate_value=0.10, outage_rate_basis="EFORd",
+                  mttr_hours=24.0)
+    n.add("Generator", name, **kw)
+    n.generators_t.p_max_pu[name] = (
+        profile if profile is not None
+        else np.tile([0.05, 0.15, 0.35, 0.45], len(n.snapshots) // 4))
+
+
+def _two_farm_network():
+    """Two IDENTICAL 100 MW wind farms sharing one 25 %-capacity-factor
+    profile. The ONLY difference is whether an outage rate was entered."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=8, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "wind"); n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC", country="AA")
+    n.add("Load", "l", bus="b", p_set=100.0)
+    n.add("Generator", "gas1", bus="b", carrier="gas", p_nom=80.0,
+          marginal_cost=10.0, outage_rate_value=0.10,
+          outage_rate_basis="EFORd", mttr_hours=24.0)
+    _profiled(n, "wind_no_for", outage=False)
+    _profiled(n, "wind_with_for", outage=True)
+    return n
+
+
+def test_preflight_warns_when_outage_data_SHADOWS_an_availability_profile():
+    """★ A1/A3: entering outage data silently discards the asset's profile.
+
+    Measured on this exact fixture before the warning existed. Two identical
+    100 MW farms on one 25 %-capacity-factor profile:
+
+      * `wind_no_for`   -> must-take, netted at its profile   ->  25 MW mean
+      * `wind_with_for` -> sampled fleet, profile DISCARDED,
+                           flat two-state at capacity_mw       ->  90 MW
+
+    and the reserve margin credits that SAME asset `(1-q)*profile̅` = 22.5 MW.
+    So the constraint says 22.5 MW and the sampler that certifies it says 90 —
+    4x — and entering MORE data credits the asset ~3.6x more.
+
+    `copt.py` documents the split deliberately ("a generator with resolvable
+    occurrence params is a two-state COPT unit at its firm capacity"), on the
+    assumption that VRE carries no FOR — `occurrence.CARRIER_DEFAULTS` says
+    "Deliberately ABSENT: wind / solar". Nothing stops a user entering one by
+    hand, and then the profile is dropped in silence.
+
+    The warning must name the DIRECTION, not merely the conflict: a warning
+    that does not say which way it errs cannot be acted on.
+
+    Bite (verified): drop the `_profile_is_informative` test and warn on every
+    unit with outage data — `gas1` then appears and the warning is noise.
+    """
+    from services import validation_service as VS
+    issues = VS._check_outage_params(_two_farm_network())
+    shadow = [i for i in issues if i.code == "outage_shadows_profile"]
+    assert shadow, "the shadowed profile produced no preflight warning"
+    msg = " ".join(i.message for i in shadow)
+    assert "wind_with_for" in msg, msg
+    # …and NOT the farm that has no outage data — its profile is honoured.
+    assert "wind_no_for" not in msg, msg
+    # …nor the thermal unit, whose p_max_pu is a flat 1.0.
+    assert "gas1" not in msg, msg
+    # The direction is the actionable part.
+    assert "OVERSTAT" in msg.upper(), msg
+    assert all(i.severity == "warning" for i in shadow), shadow
+
+
+def test_a_flat_profile_is_not_a_shadowed_profile():
+    """★ A2, the false-positive guard — the single way this ships as noise.
+
+    Every conventional generator in a real project carries outage data, and
+    many carry a `p_max_pu` column that is identically 1.0. If the warning
+    fires there it is noise on every unit of every project and will be
+    ignored, taking the real signal with it.
+
+    Bite (verified): test only for the COLUMN's presence rather than for a
+    profile that actually varies.
+    """
+    from services import validation_service as VS
+    n = _two_farm_network()
+    # A thermal unit with outage data AND an explicit all-ones profile column.
+    n.add("Generator", "gas2", bus="b", carrier="gas", p_nom=50.0,
+          marginal_cost=12.0, outage_rate_value=0.06,
+          outage_rate_basis="EFORd", mttr_hours=30.0)
+    n.generators_t.p_max_pu["gas2"] = np.ones(len(n.snapshots))
+    issues = VS._check_outage_params(n)
+    msg = " ".join(i.message for i in issues
+                   if i.code == "outage_shadows_profile")
+    assert "gas2" not in msg, (
+        "a flat all-ones profile is not a resource profile, and warning on it "
+        "would fire on every thermal unit in every real project: " + msg)

@@ -117,3 +117,62 @@ asserting it.
    (no time series) the same case, or a derate the user set deliberately?
 4. Does the same ambiguity exist for storage (`p_max_pu` on a StorageUnit with
    outage data), and if so is it in scope?
+
+## Amendments
+
+### v1.1 — the review's questions, answered by the master
+
+The adversarial review died on a weekly rate limit before reporting, so its
+two highest-risk axes were investigated directly instead. Both came back in
+the plan's favour, and one **widened** the finding.
+
+**Q: is the input combination common?** No — and the codebase settles it.
+`occurrence.CARRIER_DEFAULTS` carries an explicit note:
+
+> **Deliberately ABSENT: wind / solar / other VRE.** Their availability is
+> profile-borne (p_max_pu time series); adding a mechanical FOR here would
+> double-count against the profile.
+
+So no default, and no import path, ever attaches a FOR to VRE; PyPSA-Eur's own
+conventional units carry a *static* `p_max_pu`. The combination arises ONLY
+from deliberate per-asset entry. That makes §2(b)'s warning appropriate (it is
+rare by construction, so it cannot become wallpaper) and makes §2(a)'s engine
+change harder to justify as urgent.
+
+*Recorded because it cuts against the codebase's own wording:* that note gives
+"would double-count against the profile" as the reason, i.e. it fears the FOR
+and the profile compounding. The engine does the opposite — it drops the
+profile and keeps the FOR, which OVER-credits. The conclusion (no VRE
+defaults) is right; the stated mechanism is not what the code does.
+
+**Q: would the warning fire on every thermal unit (A2's noise risk)?** Only if
+the predicate tests for the *presence* of a `p_max_pu` column. It tests
+whether the series is INFORMATIVE — varying below 1.0 somewhere — so an
+all-ones column, which is what a conventional generator carries, is silent.
+Pinned by `test_a_flat_profile_is_not_a_shadowed_profile`, and the bite for it
+is exactly the column-presence predicate.
+
+**The finding is WIDER than the plan scoped it.** Nothing here is
+VRE-specific: *any* generator whose `p_max_pu` varies loses that profile once
+it has outage data. A planned-maintenance schedule on a thermal unit is
+precisely that case, and it is common in adequacy work. The warning covers it,
+and the copy says "availability profile" rather than "VRE" for that reason.
+
+### v1.2 — where the check landed, and why not where the plan said
+
+The plan proposed the shared occurrence/preflight path and asked (§5 Q2) where
+both surfaces would get it. Answer: `validation_service._check_outage_params`,
+which is **not** margin-gated — it runs whenever someone entered outage data,
+which is exactly this warning's population — and emits through the `_warn`
+channel the UI already renders. So a user who never touches the reserve margin
+still sees it before a plain MC study.
+
+That is strictly better than the plan's own §3 suggestion of hanging it off
+`reserve_margin_facts`'s `emit`, which fires only when a margin is set — i.e.
+the one surface where the user is *least* likely to be misled, because the
+margin already derates correctly.
+
+**Still OUT, and honestly so:** the MC study payload does not itself carry the
+list, so a user driving `/results/mc` purely over the API (never through
+preflight) gets no signal. Closing that means threading the names into the MC
+record; it is worth doing and is not done here.
