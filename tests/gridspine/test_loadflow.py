@@ -5,7 +5,12 @@ import pytest
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.ingest.pandapower_source import load_case39, registry_from_net
 from gridspine.schema.contracts import ContractError
-from gridspine.static.loadflow import LFResult, apply_dispatch, run_lf
+from gridspine.static.loadflow import (
+    LFResult,
+    _bus_numbers,
+    apply_dispatch,
+    run_lf,
+)
 
 
 def dispatch_all_on(net, registry):
@@ -111,6 +116,15 @@ def test_branch_flow_keys_map_1to1_onto_the_raw_branch_records(tmp_path):
     """
     net = load_case39()
     nums = write_raw(net, tmp_path / "c39.raw")
+
+    # The numbering scheme itself, asserted directly against the dict the
+    # writer returns. The CKT-sequence checks below cannot catch a divergence
+    # here: case39 has no duplicate bus pair, so every ckt is '1' whatever the
+    # numbering, and the toy net in the parallel-branch test has two buses, so
+    # any 1-based scheme agrees by coincidence. If loadflow._bus_numbers ever
+    # stops matching raw_writer._bus_numbers, THIS is the line that says so.
+    assert _bus_numbers(net) == nums
+
     name_of_num = {n: name for name, n in nums.items()}
     text = (tmp_path / "c39.raw").read_text()
 
@@ -197,3 +211,87 @@ def test_line_and_trafo_sharing_a_bus_pair_is_rejected_not_silently_merged():
     )
     with pytest.raises(ContractError, match="duplicate branch keys"):
         run_lf(net)
+
+
+def _raw_branch_keys(text, name_of_num, n_trafo):
+    """(from_bus, to_bus, ckt) for every record in BOTH .raw branch sections."""
+    keys = []
+    for ln in _raw_section(text, "BEGIN BRANCH DATA", "END OF BRANCH DATA"):
+        f = _fields(ln)                       # I, J, CKT, ...
+        keys.append((name_of_num[int(f[0])], name_of_num[int(f[1])], f[2]))
+    trafo_lines = _raw_section(text, "BEGIN TRANSFORMER DATA", "END OF TRANSFORMER DATA")
+    assert len(trafo_lines) == 4 * n_trafo
+    for k in range(0, len(trafo_lines), 4):
+        f = _fields(trafo_lines[k])           # I, J, K, CKT, ...
+        keys.append((name_of_num[int(f[0])], name_of_num[int(f[1])], f[3]))
+    return keys
+
+
+def test_out_of_service_branches_keep_their_rows_and_their_keys(tmp_path):
+    """The writer emits a dead branch as STAT=0 rather than omitting it, so
+    branch_flow MUST keep a row for it too — drop them and the two sides
+    disagree on the key set for a topology reason that is not a topology
+    change at all, and every PowerFactory comparison fails on the fixture.
+
+    Measured on pandapower 3.1.2 (probe, not assumption): res_line/res_trafo
+    keep FULL-LENGTH indexes with the out-of-service rows present carrying
+    p/q == 0.0 — they are neither dropped nor NaN. `loading_percent` is the
+    odd one out: 0.0 for a dead line but NaN for a dead transformer, which is
+    why only the flows are pinned here.
+    """
+    net = load_case39()
+    line0, trafo0 = net.line.index[0], net.trafo.index[0]
+    net.line.at[line0, "in_service"] = False
+    net.trafo.at[trafo0, "in_service"] = False
+
+    nums = write_raw(net, tmp_path / "c39.raw")
+    assert _bus_numbers(net) == nums
+    name_of_num = {n: name for name, n in nums.items()}
+    raw_keys = _raw_branch_keys(
+        (tmp_path / "c39.raw").read_text(), name_of_num, len(net.trafo)
+    )
+
+    res = run_lf(net)
+    assert res.converged
+    bf = res.branch_flow
+
+    # every branch still has a row, dead ones included
+    assert len(bf) == len(net.line) + len(net.trafo)
+    lf_keys = list(zip(bf["from_bus"], bf["to_bus"], bf["ckt"]))
+    assert len(set(lf_keys)) == len(lf_keys)
+    assert set(lf_keys) == set(raw_keys)
+    assert len(lf_keys) == len(raw_keys)
+
+    # and the dead rows are the ones we forced out, carrying zero flow
+    name_of = net.bus["name"]
+    dead_line_key = (
+        name_of.at[net.line.at[line0, "from_bus"]],
+        name_of.at[net.line.at[line0, "to_bus"]],
+        "1",
+    )
+    dead_trafo_key = (
+        name_of.at[net.trafo.at[trafo0, "hv_bus"]],
+        name_of.at[net.trafo.at[trafo0, "lv_bus"]],
+        "1",
+    )
+    keyed = bf.set_index(["from_bus", "to_bus", "ckt"])
+    for key in (dead_line_key, dead_trafo_key):
+        assert key in keyed.index, key
+        assert keyed.loc[key, "p_from_mw"] == 0.0
+        assert keyed.loc[key, "q_from_mvar"] == 0.0
+
+    # the .raw agrees they are out of service (STAT=0), so both sides kept a
+    # record for a branch that carries nothing — which is the whole point
+    branch_recs = _raw_section((tmp_path / "c39.raw").read_text(),
+                               "BEGIN BRANCH DATA", "END OF BRANCH DATA")
+    assert _fields(branch_recs[0])[13] == "0"        # ST field of the dead line
+
+
+def test_branch_flow_and_csv_column_contracts_are_the_same_six_names():
+    """loadflow and pf_compare each declare the column set independently (the
+    engine cage forbids pf_compare importing anything pandapower-backed), so
+    nothing but this test stops them drifting apart."""
+    from gridspine.readback.pf_compare import BRANCH_CSV_COLUMNS
+    from gridspine.static.loadflow import BRANCH_FLOW_COLUMNS
+
+    assert list(BRANCH_FLOW_COLUMNS) == list(BRANCH_CSV_COLUMNS)

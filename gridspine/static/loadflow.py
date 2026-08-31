@@ -10,6 +10,11 @@ from gridspine.schema.contracts import ContractError
 #: Column contract of ``LFResult.branch_flow``. The first three are the join
 #: key the PowerFactory read-back compares on; see ``_branch_flow`` for why
 #: that triple is authored the way it is.
+#:
+#: Deliberately the same six names, in the same order, as
+#: ``gridspine.readback.pf_compare.BRANCH_CSV_COLUMNS`` and as the export
+#: header in tests/gridspine/fixtures/powerfactory/README.md — the operator's
+#: CSV is meant to drop straight onto this frame. Change one, change all three.
 BRANCH_FLOW_COLUMNS = (
     "from_bus", "to_bus", "ckt", "p_from_mw", "q_from_mvar", "loading_percent",
 )
@@ -69,8 +74,18 @@ def _branch_flow(net) -> pd.DataFrame:
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
     # Out-of-service branches are still written to the .raw (STAT=0), so they
-    # must still get a row here or the key sets stop matching. pandapower
-    # drops them from res_*, hence the reindex to NaN rather than a skip.
+    # must still get a row here or the key sets stop matching.
+    #
+    # An earlier version of this comment claimed pandapower DROPS them from
+    # res_*. It does not. Probed on pandapower 3.1.2 with one line and one
+    # transformer forced out of service: res_line/res_trafo keep full-length
+    # indexes equal to net.line/net.trafo, and the out-of-service rows carry
+    # p/q == 0.0 — NOT NaN, and not absent. (Asymmetry worth knowing: the
+    # dead line's loading_percent is 0.0 while the dead transformer's is
+    # NaN.) The reindex below is therefore a NO-OP on this version; it is
+    # kept only as a cheap alignment assertion so that a future pandapower
+    # which does drop rows degrades to NaN flows rather than silently
+    # shortening the frame and breaking the key contract.
     res_line = net.res_line.reindex(net.line.index)
     res_trafo = net.res_trafo.reindex(net.trafo.index)
 
@@ -121,6 +136,15 @@ def _branch_flow(net) -> pd.DataFrame:
 
 
 def run_lf(net) -> LFResult:
+    """Solve the snapshot and package the results.
+
+    Non-convergence is a RESULT, not an error: it comes back as
+    ``LFResult(converged=False)`` with empty frames. The one case that does
+    raise is ``ContractError``, from ``_branch_flow``, when a line and a
+    transformer share a bus pair and therefore collide on
+    (from_bus, to_bus, ckt) — see ``_branch_flow`` for why that is ambiguous
+    rather than merely unusual.
+    """
     try:
         pp.runpp(net)
     except pp.LoadflowNotConverged:

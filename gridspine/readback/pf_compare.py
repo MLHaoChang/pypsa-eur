@@ -42,7 +42,13 @@ def compare_lf(lf, pf_csv, vm_tol=0.01, va_tol_deg=0.5) -> pd.DataFrame:
 # on the pair alone would silently average two different circuits together.
 
 BRANCH_KEY = ["from_bus", "to_bus", "ckt"]
-#: Exactly the column set the fixture runbook tells the operator to export.
+#: Exactly the column set the fixture runbook tells the operator to export —
+#: and deliberately the same six names, in the same order, as
+#: ``gridspine.static.loadflow.BRANCH_FLOW_COLUMNS``, so the PowerFactory CSV
+#: drops straight onto the pandapower frame with no translation step. The two
+#: constants are NOT imported from one another (the engine cage keeps this
+#: module pandas-only, with no pandapower import behind it); they are kept in
+#: step by test_pf_compare.py and the runbook. Change one, change all three.
 BRANCH_CSV_COLUMNS = BRANCH_KEY + ["p_from_mw", "q_from_mvar", "loading_percent"]
 
 
