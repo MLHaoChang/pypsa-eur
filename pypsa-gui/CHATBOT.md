@@ -100,7 +100,11 @@ session cookies, and bundling it would publish both
 packaged app has to be told the key from inside itself:
 
 1. Open the chat panel and send anything. The assistant answers with an
-   **API key missing** banner.
+   **API key missing** banner. This inline paste-and-save flow is specific to
+   the *built-in* Anthropic profile (the zero-config default); if the active
+   profile is anything else, the banner instead names that profile and
+   deep-links to Settings → the assistant's model section, because a custom
+   profile's key has nothing to do with this route.
 2. The banner carries the key field. Paste an Anthropic key and press **Save**.
 3. The assistant is usable immediately — no restart. The key is written to
    `user.env` in the app-data directory (`~/Library/Application Support/PyPSA
@@ -116,10 +120,16 @@ gets in the way there.
 `user.env` is plaintext, like the `.env` it replaces. It is not the OS
 keychain: that would mean bundling `keyring` plus a platform backend for each
 of macOS and Windows, and it defends against a threat — another process reading
-your files as you — that `backend/.env` already accepts. Only
-`ANTHROPIC_API_KEY` is ever read from or written to it; anything else in the
-file is ignored, so it cannot be used to set `SECRET_KEY` or repoint the
-database.
+your files as you — that `backend/.env` already accepts. Only a **managed
+key** may be read from or written to it — the fixed built-in provider slots
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MOONSHOT_API_KEY`,
+`DASHSCOPE_API_KEY`) plus one `PYPSA_GUI_LLM_KEY__<PROFILE_ID>` slot per saved
+custom profile (see "Where keys live" under
+[Provider profiles](#provider-profiles) above) — so it can never be used to
+set `SECRET_KEY` or repoint the database. Every managed
+value currently in effect, wherever it appears in backend logs or a persisted
+chat transcript, is scrubbed before it is written — not just the ones shaped
+like a known key format.
 
 The `/api/chat/health` endpoint reports `anthropic_api_key_present` without
 ever echoing the key value, so you can probe the backend's view safely.
@@ -338,10 +348,22 @@ NEVER aborts the underlying project save / rename / restore.
 
 ## Security notes
 
-- The API key never reaches the frontend. `/api/chat/health` reports
-  only a boolean presence flag.
-- `_redact_for_log` strips both the literal `ANTHROPIC_API_KEY` value AND
-  any substring matching `sk-ant-*` before logging.
+- No managed key ever reaches the frontend. `/api/chat/health` and the
+  profile list report only presence/hint, never a value.
+- `services/redaction.py` scrubs secrets in two passes, in this order: first
+  by VALUE — every managed key currently in effect (every built-in slot and
+  every `PYPSA_GUI_LLM_KEY__<PROFILE_ID>` slot, via
+  `app_secrets.live_secret_values()`), substituted wherever it appears,
+  regardless of shape — then by PATTERN (`sk-ant-*`, `key=value`,
+  `bearer …`) for anything the value pass didn't already catch. The value
+  pass is what makes a custom provider's key safe to log or persist even
+  though its value doesn't look like an Anthropic key: pattern-only
+  redaction would miss it entirely. Applied before both the backend log
+  (`redact_for_log`) and the durable transcript (`redact_for_persist`,
+  `chat.jsonl`) — see `backend/tests/test_no_split_merge_precondition.py`,
+  which drives a real turn end-to-end to prove neither sink leaks a
+  non-pattern-shaped managed value, and that the value-substitution pass is
+  the reason: disable it alone and the same drive leaks.
 - `chat.jsonl` is gitignored via the existing `backend/projects/` rule.
 - Confirmation tokens are server-stamped, single-use, TTL'd, and never
   surface in URLs.
