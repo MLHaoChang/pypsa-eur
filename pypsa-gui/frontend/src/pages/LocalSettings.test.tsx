@@ -53,7 +53,13 @@ const LLM_PAYLOAD: LLMSettingsPayload = {
 }
 
 const renderPane = () => {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // `retryDelay: 0` alongside `retry: false`: react-query resolves the two
+  // independently per query, and `useLLMSettings` sets `retry: 2` (which
+  // correctly wins over this `retry: false` default) but never sets its own
+  // `retryDelay`, so it still falls through to whatever this default is.
+  // Without it, the outage test below waits out ~3s of real exponential
+  // backoff for no reason — only the retry COUNT is worth proving.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })
   return render(<QueryClientProvider client={qc}><LocalSettings /></QueryClientProvider>)
 }
 
@@ -107,10 +113,14 @@ describe('desktop-vs-web visibility', () => {
     )
     const { container } = renderPane()
 
-    const errorBox = await screen.findByTestId('assistant-model-settings-error', {}, { timeout: 8_000 })
+    // See renderPane's `retryDelay: 0` note above — this settles in ms, not
+    // the ~3s real backoff `retry: 2` would otherwise cost.
+    const errorBox = await screen.findByTestId('assistant-model-settings-error')
     expect(errorBox).toBeTruthy()
     expect(container.firstChild).not.toBeNull()
-  }, 12_000)
+    // Proves `retry: 2` itself is untouched: 1 initial attempt + 2 retries.
+    expect(fetchLLMSettingsOrNull).toHaveBeenCalledTimes(3)
+  })
 
   it('renders the pane once resolved to a real state object (desktop app)', async () => {
     // Catches: the null-check swallowing the non-null case too (e.g. a `!=`

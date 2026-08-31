@@ -72,7 +72,15 @@ function payload(over: Partial<LLMSettingsPayload> = {}): LLMSettingsPayload {
 }
 
 function renderSection() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // `retryDelay: 0` alongside `retry: false`: react-query resolves the two
+  // independently per query, and `useLLMSettings` sets `retry: 2` (which
+  // correctly wins over this `retry: false` default — real query, real
+  // retries) but never sets its own `retryDelay`, so `useLLMSettings` still
+  // falls through to whatever this default is. Without it, the outage test
+  // below waits out ~3s of real exponential backoff for no reason: the
+  // *retry count* (3 calls: 1 + 2 retries) is the thing worth proving, not
+  // the wall-clock delay between them.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })
   return render(
     <QueryClientProvider client={qc}>
       <AssistantModelSettings />
@@ -113,9 +121,11 @@ describe('AssistantModelSettings', () => {
 
     // useLLMSettings sets `retry: 2` explicitly, which wins over this
     // QueryClient's `retry: false` default — the query genuinely retries
-    // twice (~3s of real backoff) before settling to `isError`. Generous
-    // timeout is deliberate, not a smell.
-    const errorBox = await screen.findByTestId('assistant-model-settings-error', {}, { timeout: 8_000 })
+    // twice. `renderSection`'s `retryDelay: 0` (see above) settles that in
+    // milliseconds rather than ~3s of real exponential backoff, so this
+    // needs no timeout override — the retry COUNT is what's worth proving
+    // (asserted below), not the wall-clock delay between attempts.
+    const errorBox = await screen.findByTestId('assistant-model-settings-error')
     expect(errorBox.textContent).toMatch(/could not load/i)
     // Distinguishable from BOTH other states: not the null/hidden render...
     expect(container.firstChild).not.toBeNull()
@@ -125,7 +135,10 @@ describe('AssistantModelSettings', () => {
     expect(screen.queryByTestId(/^assistant-model-row-/)).toBeNull()
     // A retry affordance, not a dead end.
     expect(screen.getByTestId('assistant-model-settings-retry')).toBeTruthy()
-  }, 12_000)
+    // Proves `retry: 2` itself is untouched by the `retryDelay: 0` override
+    // above: 1 initial attempt + 2 retries.
+    expect(fetchLLMSettingsOrNull).toHaveBeenCalledTimes(3)
+  })
 
   it('renders every profile from the payload', async () => {
     vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
