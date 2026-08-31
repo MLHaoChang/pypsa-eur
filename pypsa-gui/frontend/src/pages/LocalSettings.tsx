@@ -16,7 +16,12 @@
  * unreachable — and waits for the llm-settings query to SETTLE (not just
  * "not yet true") before deciding that, so a slow-but-eventually-reachable
  * llm-settings fetch cannot flash "nothing" and then pop the section back
- * in a moment later.
+ * in a moment later. "Confirmed unreachable" is NOT the same as "errored"
+ * (fix round 1): an llm-settings OUTAGE (`isError`) is excluded from that
+ * null-return on purpose, so `AssistantModelSettings`' own visible outage
+ * state (see its header) still gets to mount even when local-settings is
+ * also unavailable — an admin-facing surface silently vanishing during a
+ * real failure is the exact thing ADR-0001 rules out.
  */
 import { useState } from 'react'
 import toast from 'react-hot-toast'
@@ -191,9 +196,17 @@ export default function LocalSettings() {
   const invalidate = useInvalidateLocalSettings()
 
   if (isLoading) return <div className="p-4 text-muted">Loading…</div>
-  // Both surfaces confirmed unreachable — this pane has nothing to show.
-  // `state == null` alone is not enough any more (see module doc above).
-  if (state == null && !llmSettings.isLoading && llmSettings.data == null) return null
+  // Both surfaces confirmed UNAVAILABLE (not merely erroring) — this pane
+  // truly has nothing to show. `llmSettings.data == null` alone is NOT
+  // enough (fix round 1): that is also true while `llmSettings.isError` —
+  // a genuine outage, not "not for you" — and `AssistantModelSettings`
+  // renders its OWN visible error state for that case (see its header and
+  // hooks/useLLMSettings.ts). Returning null here on `isError` would bury
+  // that state before it ever mounts, hiding a real outage behind "this
+  // pane doesn't exist" — exactly the ADR-0001 violation this fix closes.
+  if (state == null && !llmSettings.isLoading && !llmSettings.isError && llmSettings.data == null) {
+    return null
+  }
 
   return (
     <div className="p-4 space-y-6 overflow-y-auto">

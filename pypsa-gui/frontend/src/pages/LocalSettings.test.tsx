@@ -91,6 +91,27 @@ describe('desktop-vs-web visibility', () => {
     expect(screen.queryByText('Diagnostics')).toBeNull()
   })
 
+  // Fix round 1 — the pane's own outer "nothing to show" guard had the same
+  // bug AssistantModelSettings did: it only checked `llmSettings.data ==
+  // null`, which is true on BOTH "not for you" (403/404) and a genuine
+  // llm-settings outage (500/network failure) — so with local-settings also
+  // unreachable, an outage made the ENTIRE pane vanish, burying
+  // AssistantModelSettings' own new visible error state before it could
+  // ever render.
+  it('still renders something (the assistant section\'s outage state), not nothing, when llm-settings errors and local-settings is also unreachable', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    vi.mocked(fetchLLMSettingsOrNull).mockRejectedValue(
+      Object.assign(new Error('Internal Server Error'), {
+        isAxiosError: true, response: { status: 500 },
+      }),
+    )
+    const { container } = renderPane()
+
+    const errorBox = await screen.findByTestId('assistant-model-settings-error', {}, { timeout: 8_000 })
+    expect(errorBox).toBeTruthy()
+    expect(container.firstChild).not.toBeNull()
+  }, 12_000)
+
   it('renders the pane once resolved to a real state object (desktop app)', async () => {
     // Catches: the null-check swallowing the non-null case too (e.g. a `!=`
     // typo'd to `==`, or the guard firing unconditionally) — the pane must
@@ -98,6 +119,11 @@ describe('desktop-vs-web visibility', () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue(STATE)
     renderPane()
     expect(await screen.findByText('Anthropic API key')).toBeTruthy()
+    // Fix round 1, item (2): pin the third leg of the gating matrix
+    // explicitly. This test's own default (beforeEach) already has
+    // llm-settings unreachable — this assertion was previously incidental,
+    // never checked.
+    expect(screen.queryByTestId('assistant-model-settings')).toBeNull()
   })
 
   it('shows the loading state before a pending fetch resolves — no empty-state flash', async () => {

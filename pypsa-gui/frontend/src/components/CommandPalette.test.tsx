@@ -46,6 +46,7 @@ import { MemoryRouter } from 'react-router-dom'
 import CommandPalette from './CommandPalette'
 import { useUIStore } from '../store/uiStore'
 import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
+import { fetchLLMSettingsOrNull, type LLMSettingsPayload } from '../api/llmSettings'
 
 // Partial mock, same shape as pages/LocalSettings.test.tsx: keep everything
 // else real, stub only the network call `useLocalSettingsAvailable` wraps.
@@ -60,8 +61,19 @@ vi.mock('../api/localSettings', async (orig) => ({
   fetchLocalSettings: vi.fn(),
 }))
 
+// Same partial-mock shape, for `useLLMSettingsAvailable` — the OTHER leg of
+// the `act-settings` entry's OR-gate (Task 15). Defaults to null too, so
+// every pre-existing test in this file (which never mocked this module at
+// all before fix round 1, and so exercised the real, failing network call —
+// resolving false the same way) keeps its old behaviour.
+vi.mock('../api/llmSettings', async (orig) => ({
+  ...(await orig<typeof import('../api/llmSettings')>()),
+  fetchLLMSettingsOrNull: vi.fn(),
+}))
+
 beforeEach(() => {
   vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+  vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
 })
 
 function renderPalette(mode: 'all' | 'projects' = 'all') {
@@ -151,6 +163,7 @@ describe('CommandPalette on Dialog', () => {
 // door. Same gate as the Sidebar row: `useLocalSettingsAvailable()`, backed
 // by the shared `['localSettings']` query.
 const SETTINGS_STATE: LocalSettingsState = { key_set: false, key_hint: null, log_path: '/tmp/pypsa-gui.log' }
+const LLM_PAYLOAD: LLMSettingsPayload = { active_profile_id: 'anthropic-sonnet', profiles: [], presets: [] }
 
 describe('act-settings entry (⌘K) tracks local-settings availability', () => {
   it('is absent when local settings resolve to null (web deployment)', async () => {
@@ -167,6 +180,19 @@ describe('act-settings entry (⌘K) tracks local-settings availability', () => {
 
   it('is present once local settings resolve to a real state (desktop app)', async () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue(SETTINGS_STATE)
+    renderPalette()
+
+    expect(await screen.findByRole('button', { name: /Open settings/i })).toBeTruthy()
+  })
+
+  // Fix round 1, item (3): the branch nothing previously covered. Every test
+  // above (and every other test in this file) left `fetchLLMSettingsOrNull`
+  // unmocked before this fix round, which resolved to `false` the same way
+  // local-settings did — so the OR in `useCommands` (CommandPalette.tsx)
+  // was never actually exercised on its llm-only leg.
+  it('is present when ONLY llm-settings is reachable — a web super-admin, local-settings 404s', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(LLM_PAYLOAD)
     renderPalette()
 
     expect(await screen.findByRole('button', { name: /Open settings/i })).toBeTruthy()

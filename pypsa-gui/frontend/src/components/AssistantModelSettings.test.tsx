@@ -88,11 +88,44 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('AssistantModelSettings', () => {
-  it('hides itself while llm-settings is unresolved or unreachable', async () => {
+  it('hides itself (renders nothing) when llm-settings answers "not for you" (403/404 → null)', async () => {
     vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
     const { container } = renderSection()
     await waitFor(() => expect(container.firstChild).toBeNull())
   })
+
+  // Fix round 1 — ADR-0001 in a new place: an OUTAGE must not render
+  // identically to "not for you". Before this fix, `useLLMSettings`'s
+  // `data` was `undefined` on ANY settled failure (a real 500, a network
+  // drop, not just the 403/404 fetchLLMSettingsOrNull maps to null), and
+  // `data == null` is true for `undefined` too — so a genuine outage
+  // silently rendered nothing, indistinguishable from an ordinary member
+  // being told this isn't for them. `fetchLLMSettingsOrNull` itself was
+  // already correct (it only maps 403/404 to null and rethrows everything
+  // else); the loss was one layer up, in how the component read the query.
+  it('renders a distinct, visible outage state — not hidden, not the "not for you" null — on a real failure', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockRejectedValue(
+      Object.assign(new Error('Internal Server Error'), {
+        isAxiosError: true, response: { status: 500 },
+      }),
+    )
+    const { container } = renderSection()
+
+    // useLLMSettings sets `retry: 2` explicitly, which wins over this
+    // QueryClient's `retry: false` default — the query genuinely retries
+    // twice (~3s of real backoff) before settling to `isError`. Generous
+    // timeout is deliberate, not a smell.
+    const errorBox = await screen.findByTestId('assistant-model-settings-error', {}, { timeout: 8_000 })
+    expect(errorBox.textContent).toMatch(/could not load/i)
+    // Distinguishable from BOTH other states: not the null/hidden render...
+    expect(container.firstChild).not.toBeNull()
+    expect(screen.queryByTestId('assistant-model-settings')).toBeNull()
+    // ...and not silently reusing the ready state's "no profiles" shape —
+    // there is no profile list rendered here at all, error copy only.
+    expect(screen.queryByTestId(/^assistant-model-row-/)).toBeNull()
+    // A retry affordance, not a dead end.
+    expect(screen.getByTestId('assistant-model-settings-retry')).toBeTruthy()
+  }, 12_000)
 
   it('renders every profile from the payload', async () => {
     vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())

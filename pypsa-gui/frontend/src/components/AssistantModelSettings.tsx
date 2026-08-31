@@ -16,6 +16,20 @@
  * to `profile.key_hint`. Connection-test copy is keyed off the typed
  * `TestVerdict`, never off a server-supplied message string, so it cannot
  * leak a base_url or upstream exception text either.
+ *
+ * FOUR-STATE DISCIPLINE (fix round 1, ADR-0001 in a new place — matches how
+ * Task 13 handles the chat profile dropdown): loading / error / "not for
+ * you" / ready are four DISTINCT renders, not three:
+ *   - loading  → nothing yet (`isLoading`).
+ *   - error    → a visible, labelled outage state with a retry affordance
+ *                (`isError`) — NEVER the same as "hidden" or "no profiles".
+ *   - not for you → nothing, permanently for this session (`data === null`,
+ *                a 403/404 `fetchLLMSettingsOrNull` mapped for us).
+ *   - ready    → the profile list (`data` is the payload).
+ * `useLocalSettings` (hooks/useLocalSettings.ts) still collapses error into
+ * its null/"not available" state — that is a DELIBERATE, pre-existing
+ * choice this task does not touch, not an inconsistency to fix here; see
+ * that hook's own header.
  */
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -383,7 +397,7 @@ function AddProfileForm({ presets, takenIds, pending, onCancel, onSubmit }: AddP
 }
 
 export default function AssistantModelSettings() {
-  const { data, isLoading } = useLLMSettings()
+  const { data, isLoading, isError, refetch } = useLLMSettings()
   const invalidateLLM = useInvalidateLLMSettings()
   const qc = useQueryClient()
   const sectionRef = useRef<HTMLDivElement>(null)
@@ -408,7 +422,7 @@ export default function AssistantModelSettings() {
     if (!sectionRef.current) return
     sectionRef.current.scrollIntoView({ block: 'start' })
     clearSettingsSectionRequest()
-  }, [settingsSectionRequest, clearSettingsSectionRequest, isLoading, data])
+  }, [settingsSectionRequest, clearSettingsSectionRequest, isLoading, data, isError])
 
   function refreshAll() {
     void invalidateLLM()
@@ -481,8 +495,43 @@ export default function AssistantModelSettings() {
   }
 
   if (isLoading) return null
-  // `null` means "not for you" — a 403 (ordinary member) or 404 (route not
-  // mounted). See fetchLLMSettingsOrNull in api/llmSettings.ts.
+
+  // Fix round 1 — ADR-0001 in a new place: an outage must not render
+  // identically to "not for you". `fetchLLMSettingsOrNull` (api/llmSettings.ts)
+  // maps ONLY 403/404 to `data === null`; anything else (a 500, a network
+  // drop) rethrows and settles this query into `isError`, with `data` left
+  // `undefined`. Checking `data == null` alone (loose equality also matches
+  // `undefined`) would have collapsed those two very different situations
+  // into the same silent nothing — an admin-facing diagnostic surface
+  // vanishing during a real outage is worse than showing nothing to a member
+  // it was never for. This branch MUST be checked before the `data == null`
+  // one below, and must render something visibly distinct from both "hidden"
+  // and the ready state's profile list — never the same shape as "no
+  // profiles configured".
+  if (isError) {
+    return (
+      <div
+        ref={sectionRef}
+        id="assistant-model"
+        data-testid="assistant-model-settings-error"
+        className="rounded border border-danger/40 bg-danger/5 p-3 space-y-2 text-xs text-danger"
+      >
+        <p>Could not load model settings.</p>
+        <button
+          type="button"
+          className="underline"
+          onClick={() => void refetch()}
+          data-testid="assistant-model-settings-retry"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  // `null` (not `undefined` — see above) means "not for you" — a 403
+  // (ordinary member) or 404 (route not mounted). See fetchLLMSettingsOrNull
+  // in api/llmSettings.ts.
   if (data == null) return null
 
   const { profiles, active_profile_id, presets } = data
