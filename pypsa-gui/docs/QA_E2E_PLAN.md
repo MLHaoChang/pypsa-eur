@@ -337,6 +337,23 @@ never bound", and Phase 8 built the lever that moves the metric there.
 | S20.2 | With a **verifiably live** MC study, the same route is refused `409`, the refusal **names** the study, and it offers only a remedy that exists — the MC has no `/abort`, so the sentence must say it cannot be aborted rather than pointing at a button that is not there. The check reads the study's own status immediately before the swap and **SKIPs rather than fails** if the study finished first, so it can never report a lost race as a broken guard |
 | S20.3 | …and the guard **lifts**: once the study finishes the route succeeds again. A refusal that never releases is an outage, not a guard |
 
+
+### S21 — Outage data shadowing an availability profile (area 21)
+| id | Assertion |
+|----|-----------|
+| S21.1 | The `outage_shadows_profile` warning reaches a **live preflight**, names the asset, and is a `warning` — not an error, because the user entered that data deliberately and blocking would stop a network that solved yesterday |
+| S21.2 | It names the **direction** (OVERSTATED), and is silent both on a profiled farm with no outage data (whose profile IS honoured) and on a thermal unit whose `p_max_pu` is a flat 1.0 — the false positive that would make this noise on every real project |
+
+**Why a live suite for a preflight warning.** The unit tests drive
+`_check_outage_params` directly; they cannot tell you whether the warning
+survives the route, the issue serialisation and the payload. The first attempt
+at this check was itself a false green: the fixture's `PUT
+/api/network/timeseries/...` returned **405** because the route takes
+`{index, columns, data}` rather than `{values}`, so the asset had no profile
+at all and the warning correctly did not fire — a passing-looking run that
+proved nothing. The suite now asserts the fixture build, so it cannot pass
+without the profile it is about.
+
 **What the first runs found — in the suite, not the code.** Three times, and
 each was the harness lying rather than the product: `draws=4000` exceeded the
 engine's 2000-draw cap so the study never started (the 422 said so plainly

@@ -3310,6 +3310,106 @@ def suite_S20():
     restore()
 
 
+
+def suite_S21():
+    """
+    Outage data that SHADOWS an availability profile (Phase 12a).
+
+    `copt.py`'s membership rule sends a generator with resolvable occurrence
+    params into the sampled fleet as a flat two-state unit at its firm
+    capacity — its `p_max_pu` profile is not carried. A generator WITHOUT
+    outage data is must-take and IS netted at `p_max_pu x capacity`. So on two
+    identical 100 MW farms sharing one 25 %-capacity-factor profile, the one
+    with an outage rate contributes (1-q)*100 = 90 MW where the other
+    contributes 25 MW, and the reserve margin credits that same asset 22.5 MW.
+
+    Unit tests drive `_check_outage_params` directly. This suite is here for
+    the only thing that matters to a user: that the warning actually REACHES
+    them through a live preflight, naming the asset and the DIRECTION.
+    """
+    print("\nS21 - Outage data shadowing an availability profile (area 21)")
+    name = "qa_e2e_shadowprofile"
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S21.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("wind", "gas"):
+        built.append(http("/api/network/carriers", method="POST",
+                          body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-01 07:00", "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "gas1", "bus": "b", "carrier": "gas",
+                            "p_nom": 80.0, "marginal_cost": 10.0,
+                            "outage_rate_value": 0.10,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 24.0})[0])
+    # Two IDENTICAL farms; only one carries an outage rate.
+    for nm, extra in (("wind_no_for", {}),
+                      ("wind_with_for", {"outage_rate_value": 0.10,
+                                         "outage_rate_basis": "EFORd",
+                                         "mttr_hours": 24.0})):
+        body = {"name": nm, "bus": "b", "carrier": "wind", "p_nom": 100.0,
+                "marginal_cost": 0.0}
+        body.update(extra)
+        built.append(http("/api/network/generators", method="POST",
+                          body=body)[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    idx = [f"2030-01-01T{h:02d}:00:00" for h in range(8)]
+    prof = [0.05, 0.15, 0.35, 0.45] * 2
+    st_ts, _ = http("/api/network/timeseries/generators/p_max_pu",
+                    method="PUT",
+                    body={"index": idx,
+                          "columns": ["wind_no_for", "wind_with_for"],
+                          "data": [[v, v] for v in prof]})
+    built.append(st_ts)
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2):
+            skip(f"S21.{i}", f"fixture build failed: {built}")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    st_p, pf = http("/api/simulation/preflight", method="POST")
+    issues = (pf or {}).get("issues") or []
+    hit = [i for i in issues if i.get("code") == "outage_shadows_profile"]
+    msg = " ".join(str(i.get("message", "")) for i in hit)
+
+    # ── S21.1 — it reaches a live preflight, names the asset, and is a WARNING
+    # (not an error: the user entered that data deliberately, and blocking
+    # would stop a network that solved yesterday).
+    record("S21.1",
+           st_p == 200 and bool(hit)
+           and "wind_with_for" in msg
+           and all(i.get("severity") == "warning" for i in hit),
+           f"preflight->{st_p}; outage_shadows_profile present={bool(hit)}; "
+           f"names the asset={'wind_with_for' in msg}; "
+           f"severity={[i.get('severity') for i in hit]}")
+
+    # ── S21.2 — it names the DIRECTION, and does NOT fire on the farm with no
+    # outage data (whose profile IS honoured) nor on the thermal unit (whose
+    # p_max_pu is a flat 1.0 — the false-positive that would make it noise on
+    # every real project).
+    record("S21.2",
+           bool(hit) and "OVERSTATED" in msg
+           and "wind_no_for" not in msg and "gas1" not in msg,
+           f"states the direction={'OVERSTATED' in msg}; "
+           f"silent on the no-outage farm={'wind_no_for' not in msg}; "
+           f"silent on the flat-profile thermal unit={'gas1' not in msg}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -3381,6 +3481,9 @@ def main() -> int:
 
     if run("S20"):
         suite_S20()
+
+    if run("S21"):
+        suite_S21()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
