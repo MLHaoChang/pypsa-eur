@@ -23,7 +23,7 @@ import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { createChatStream, getChatHistory, type ChatFrame } from '../api/chat'
 import { getChatProfiles, type ChatProfilesPayload } from '../api/llmSettings'
-import ChatPanel from './ChatPanel'
+import ChatPanel, { KIND_COPY, TOOL_ERROR_BANNER_KINDS } from './ChatPanel'
 
 vi.mock('../api/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/chat')>()
@@ -411,4 +411,151 @@ it('a "New chat" control starts a fresh conversation (nulls sessionId, clears me
   await user.click(screen.getByTestId('chat-new-chat'))
   expect(useChatStore.getState().sessionId).toBeNull()
   expect(useChatStore.getState().messages).toEqual([])
+})
+
+// ── Task 14 — KIND_COPY: single source of truth for the error banner ───────
+//
+// The banner used to be three hand-maintained structures that had to agree
+// by hand: a title chain, a NEGATED list gating the raw-kind fall-through,
+// and a separate tool_error routing allowlist. This block proves the
+// fall-through is now DERIVED (an unknown kind can only print raw, a known
+// kind can only print its title — never both, never neither), that every
+// kind the old structures covered still has copy with its title unchanged,
+// and that the three new kinds render their copy and action.
+
+function seedError(kind: string, message = 'test message') {
+  act(() => {
+    useChatStore.setState({ error: { error_kind: kind, message } as never })
+  })
+}
+
+it('KIND_COPY completeness: every key renders its title and never the raw kind; an unknown kind renders only the raw kind', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+
+  for (const kind of Object.keys(KIND_COPY)) {
+    seedError(kind)
+    const banner = await screen.findByTestId('chat-error-banner')
+    expect(banner.getAttribute('data-error-kind')).toBe(kind)
+    expect(banner.textContent).toContain(KIND_COPY[kind].title)
+    // The negated fall-through must NOT also fire for a matched kind — the
+    // exact drift `error_kind === 'x' && title` plus a stale negated list
+    // used to allow (title AND raw kind both printed).
+    expect(banner.textContent).not.toContain(kind)
+  }
+
+  // An unmatched kind is the other half of the same guarantee: it must fall
+  // through to the raw kind, not render nothing (the reverse drift).
+  seedError('some_unmapped_kind_xyz')
+  const banner = await screen.findByTestId('chat-error-banner')
+  expect(banner.textContent).toContain('some_unmapped_kind_xyz')
+})
+
+it('KIND_COPY carries every kind the old three hand-maintained structures covered, with byte-identical titles', () => {
+  // The union of the old title chain / negated fall-through list (they were
+  // identical sets) as they stood immediately before this task, captured
+  // here so a future edit to KIND_COPY cannot silently drop one without
+  // failing this test.
+  const oldTitles: Record<string, string> = {
+    project_exists: 'Project name already exists',
+    descendants_exist: 'Project has descendants',
+    confirmation_expired: 'Confirmation expired',
+    rate_limited: 'Rate limited',
+    unauthorized: 'API key rejected',
+    missing_api_key: 'API key missing',
+    inactive_acting_user: 'Account is no longer active',
+    solver_in_flight: 'Solver in flight',
+    parallel_destructive_not_allowed: 'Multiple destructive actions in one turn',
+    tool_call_cap_exceeded: 'Tool call limit reached this turn',
+    file_too_large: 'File exceeds the 25 MB cap',
+    empty_file: 'Uploaded file is empty',
+    invalid_filename: 'Filename contains invalid characters',
+    unsupported_mime: 'File type not supported',
+    mime_type_mismatch: 'File type mismatch — declared vs. actual content',
+    upload_quota_exceeded: 'Per-project upload quota reached',
+    upload_not_found: 'Referenced upload no longer exists',
+    image_too_large: 'Image exceeds the 10 MB multimodal cap',
+    too_many_multimodal_blocks: 'Too many attachments (max 20)',
+    mime_not_allowlisted_for_multimodal: 'File type cannot be attached — use the read tool instead',
+    load_not_found: 'Load name not in network',
+    snapshot_count_mismatch: 'Row count does not match network snapshots',
+    snapshot_range_mismatch: 'Time range does not match network snapshots',
+    time_column_parse_error: 'Time column could not be parsed as datetimes',
+    value_column_parse_error: 'Value column has non-numeric data',
+    image_analysis_timeout: 'Vision call timed out (30 s)',
+    vision_invalid_json: 'Vision response was not valid JSON',
+    vision_call_failed: 'Vision call failed',
+  }
+  for (const [kind, title] of Object.entries(oldTitles)) {
+    expect(KIND_COPY).toHaveProperty(kind)
+    expect(KIND_COPY[kind].title).toBe(title)
+  }
+})
+
+it('TOOL_ERROR_BANNER_KINDS (the tool_error routing allowlist) is fully covered by KIND_COPY — no drift between the two', () => {
+  for (const kind of TOOL_ERROR_BANNER_KINDS) {
+    expect(KIND_COPY).toHaveProperty(kind)
+  }
+})
+
+it('missing_api_key still renders the inline ApiKeySetup form (load-bearing for the packaged app)', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  seedError('missing_api_key', 'ANTHROPIC_API_KEY is not set')
+  expect(await screen.findByText('API key missing')).toBeTruthy()
+  expect(await screen.findByTestId('chat-api-key-input')).toBeTruthy()
+})
+
+it('unreachable renders fix-oriented body copy and an Open settings action', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  seedError('unreachable', 'Connection refused')
+
+  const banner = await screen.findByTestId('chat-error-banner')
+  expect(banner.textContent).toContain('Could not reach the model endpoint.')
+  expect(banner.textContent).toMatch(/start/i)
+  expect(banner.textContent).toContain('Connection refused')
+
+  const user = userEvent.setup()
+  await user.click(await screen.findByTestId('chat-error-open-settings'))
+  expect(useUIStore.getState().activeSlidePanel).toBe('settings')
+})
+
+it('capability_unsupported renders a generic title and the server message as body (no invented copy)', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  const serverMessage =
+    "the 'Claude Haiku (fast)' profile does not support image or document attachments " +
+    '(vision is disabled for this profile) — remove the attachment or switch to a ' +
+    'vision-capable profile.'
+  seedError('capability_unsupported', serverMessage)
+
+  const banner = await screen.findByTestId('chat-error-banner')
+  expect(banner.textContent).toContain(serverMessage)
+  expect(await screen.findByTestId('chat-error-open-settings')).toBeTruthy()
+})
+
+it('profile_switch_requires_new_chat offers Start new chat, which calls startNewChat()', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  act(() => {
+    useChatStore.setState({
+      sessionId: 'sess-old',
+      messages: [{ id: 'm1', role: 'user', content: 'hi', ts: 1 }] as never,
+      error: {
+        error_kind: 'profile_switch_requires_new_chat',
+        message: 'this chat session is already bound to a different LLM provider wire.',
+      } as never,
+    })
+  })
+
+  const banner = await screen.findByTestId('chat-error-banner')
+  expect(banner.textContent).toContain('This model needs a fresh chat.')
+
+  const user = userEvent.setup()
+  await user.click(await screen.findByTestId('chat-error-start-new-chat'))
+
+  expect(useChatStore.getState().sessionId).toBeNull()
+  expect(useChatStore.getState().messages).toEqual([])
+  expect(useChatStore.getState().error).toBeNull()
 })

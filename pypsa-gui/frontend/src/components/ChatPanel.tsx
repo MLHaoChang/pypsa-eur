@@ -507,11 +507,123 @@ const RETRYABLE_ERROR_KINDS = new Set([
   'rate_limited', 'upstream_error', 'internal_error', 'tool_call_cap_exceeded',
 ])
 
+/**
+ * Task 14 — single source of truth for the error banner's copy.
+ *
+ * Used to be three hand-maintained structures that had to agree by hand: a
+ * ~28-line `error_kind === 'x' && 'Title'` chain, a NEGATED array of the same
+ * ~28 strings gating the raw-kind fall-through, and a third allowlist (below,
+ * `TOOL_ERROR_BANNER_KINDS`) deciding which `tool_error` frames get promoted
+ * to this banner at all. Adding a kind to the title chain and forgetting the
+ * negated list silently printed the title AND the raw kind; the reverse
+ * printed nothing. The fall-through below is now DERIVED from this map's
+ * keys (`!(kind in KIND_COPY) && kind`), so the two can no longer disagree —
+ * see the completeness test in ChatPanel.profile.test.tsx.
+ *
+ * Every title for a kind that predates this map is copied byte-for-byte from
+ * the old per-kind JSX condition it replaces — this migration does not
+ * restyle existing copy.
+ *
+ * SECURITY: no title/body added here may name an identifier (email, user id,
+ * org id, project uuid) or a full base_url. The dynamic `error.message` row
+ * (rendered unconditionally, unchanged) is the server's own text, already
+ * constrained to host:port at most — this map's static copy must not widen
+ * that.
+ */
+export const KIND_COPY: Record<
+  string,
+  { title: string; body?: string; action?: 'open-settings' | 'new-chat' }
+> = {
+  project_exists: { title: 'Project name already exists' },
+  descendants_exist: { title: 'Project has descendants' },
+  confirmation_expired: { title: 'Confirmation expired' },
+  rate_limited: { title: 'Rate limited' },
+  unauthorized: { title: 'API key rejected' },
+  missing_api_key: { title: 'API key missing' },
+  // P-2 — the acting account stopped being active mid-turn.
+  inactive_acting_user: { title: 'Account is no longer active' },
+  solver_in_flight: { title: 'Solver in flight' },
+  parallel_destructive_not_allowed: { title: 'Multiple destructive actions in one turn' },
+  tool_call_cap_exceeded: { title: 'Tool call limit reached this turn' },
+  // Phase D — chatbot upload error_kinds
+  file_too_large: { title: 'File exceeds the 25 MB cap' },
+  empty_file: { title: 'Uploaded file is empty' },
+  invalid_filename: { title: 'Filename contains invalid characters' },
+  unsupported_mime: { title: 'File type not supported' },
+  mime_type_mismatch: { title: 'File type mismatch — declared vs. actual content' },
+  upload_quota_exceeded: { title: 'Per-project upload quota reached' },
+  upload_not_found: { title: 'Referenced upload no longer exists' },
+  image_too_large: { title: 'Image exceeds the 10 MB multimodal cap' },
+  too_many_multimodal_blocks: { title: 'Too many attachments (max 20)' },
+  mime_not_allowlisted_for_multimodal: {
+    title: 'File type cannot be attached — use the read tool instead',
+  },
+  load_not_found: { title: 'Load name not in network' },
+  snapshot_count_mismatch: { title: 'Row count does not match network snapshots' },
+  snapshot_range_mismatch: { title: 'Time range does not match network snapshots' },
+  time_column_parse_error: { title: 'Time column could not be parsed as datetimes' },
+  value_column_parse_error: { title: 'Value column has non-numeric data' },
+  image_analysis_timeout: { title: 'Vision call timed out (30 s)' },
+  vision_invalid_json: { title: 'Vision response was not valid JSON' },
+  vision_call_failed: { title: 'Vision call failed' },
+
+  // Task 14 — new kinds, fix-oriented copy.
+  unreachable: {
+    title: 'Could not reach the model endpoint.',
+    body: 'If this is a local endpoint, it likely needs to be started. Check the model settings.',
+    action: 'open-settings',
+  },
+  capability_unsupported: {
+    // llm_provider seam + chat_service's capability checks already send a
+    // message naming the capability and the profile LABEL (never an
+    // id/base_url — see chat_service.py's `capability_unsupported` frames).
+    // That renders in the unconditional `error.message` row below, so this
+    // entry stays generic and adds no body of its own — inventing a second
+    // description would just repeat the server's, or drift from it.
+    title: "This model doesn't support that.",
+    action: 'open-settings',
+  },
+  profile_switch_requires_new_chat: {
+    title: 'This model needs a fresh chat.',
+    action: 'new-chat',
+  },
+}
+
+/**
+ * The subset of KIND_COPY kinds that can arrive on a `tool_error` SSE frame
+ * and should be promoted to this banner instead of staying a gray tool-line
+ * in the message list. Deliberately NOT the full KIND_COPY key set:
+ * `inactive_acting_user` is raised by `_acting()` in chat_tools.py as an
+ * HTTPException that surfaces on the top-level chat-stream `error` frame
+ * (handled unconditionally, unfiltered — see the `case 'error':` branch),
+ * never as a per-tool `tool_error`, so it has copy above but no routing
+ * entry here. Every string below is checked against KIND_COPY by a test
+ * (ChatPanel.profile.test.tsx) so a typo or a stale rename fails loudly
+ * instead of silently falling through to the raw kind.
+ */
+export const TOOL_ERROR_BANNER_KINDS = new Set([
+  'project_exists', 'descendants_exist',
+  'confirmation_expired', 'rate_limited',
+  'unauthorized', 'missing_api_key',
+  'solver_in_flight', 'parallel_destructive_not_allowed',
+  'tool_call_cap_exceeded',
+  // Phase D — upload-tool errors. Same routing as the chat-stream 'error'
+  // frame, so a single user mental model handles every failure surface.
+  'file_too_large', 'empty_file', 'invalid_filename',
+  'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
+  'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
+  'mime_not_allowlisted_for_multimodal', 'load_not_found',
+  'snapshot_count_mismatch', 'snapshot_range_mismatch',
+  'time_column_parse_error', 'value_column_parse_error',
+  'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
+])
+
 function ErrorBanner({ onRetry }: { onRetry: () => void }) {
   const error = useChatStore((s) => s.error)
   const setError = useChatStore((s) => s.setError)
   const streaming = useChatStore((s) => s.streaming)
   const hasQuestion = useChatStore((s) => s.messages.some((m) => m.role === 'user'))
+  const startNewChat = useChatStore((s) => s.startNewChat)
   if (!error) return null
 
   // v6-F2 — cold-path activate is NOT an error from the user's POV; the
@@ -525,6 +637,10 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
   // v4-MAJOR-1 / v6-F1 project_exists — rendered as a typed banner with a
   // hint that the user should retry with force or a new name. v4-MINOR-1
   // descendants_exist — same shape but with the descendant list.
+  const copy = KIND_COPY[error.error_kind] as
+    | { title: string; body?: string; action?: 'open-settings' | 'new-chat' }
+    | undefined
+
   return (
     <div
       // A turn that failed is an interruption, not a status update — the
@@ -538,51 +654,13 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
       data-error-kind={error.error_kind}
     >
       <div className="font-medium text-rose-400 mb-1">
-        {error.error_kind === 'project_exists' && 'Project name already exists'}
-        {error.error_kind === 'descendants_exist' && 'Project has descendants'}
-        {error.error_kind === 'confirmation_expired' && 'Confirmation expired'}
-        {error.error_kind === 'rate_limited' && 'Rate limited'}
-        {error.error_kind === 'unauthorized' && 'API key rejected'}
-        {error.error_kind === 'missing_api_key' && 'API key missing'}
-        {/* P-2 — the acting account stopped being active mid-turn. */}
-        {error.error_kind === 'inactive_acting_user' && 'Account is no longer active'}
-        {error.error_kind === 'solver_in_flight' && 'Solver in flight'}
-        {error.error_kind === 'parallel_destructive_not_allowed' && 'Multiple destructive actions in one turn'}
-        {error.error_kind === 'tool_call_cap_exceeded' && 'Tool call limit reached this turn'}
-        {/* Phase D — chatbot upload error_kinds */}
-        {error.error_kind === 'file_too_large' && 'File exceeds the 25 MB cap'}
-        {error.error_kind === 'empty_file' && 'Uploaded file is empty'}
-        {error.error_kind === 'invalid_filename' && 'Filename contains invalid characters'}
-        {error.error_kind === 'unsupported_mime' && 'File type not supported'}
-        {error.error_kind === 'mime_type_mismatch' && 'File type mismatch — declared vs. actual content'}
-        {error.error_kind === 'upload_quota_exceeded' && 'Per-project upload quota reached'}
-        {error.error_kind === 'upload_not_found' && 'Referenced upload no longer exists'}
-        {error.error_kind === 'image_too_large' && 'Image exceeds the 10 MB multimodal cap'}
-        {error.error_kind === 'too_many_multimodal_blocks' && 'Too many attachments (max 20)'}
-        {error.error_kind === 'mime_not_allowlisted_for_multimodal' && 'File type cannot be attached — use the read tool instead'}
-        {error.error_kind === 'load_not_found' && 'Load name not in network'}
-        {error.error_kind === 'snapshot_count_mismatch' && 'Row count does not match network snapshots'}
-        {error.error_kind === 'snapshot_range_mismatch' && 'Time range does not match network snapshots'}
-        {error.error_kind === 'time_column_parse_error' && 'Time column could not be parsed as datetimes'}
-        {error.error_kind === 'value_column_parse_error' && 'Value column has non-numeric data'}
-        {error.error_kind === 'image_analysis_timeout' && 'Vision call timed out (30 s)'}
-        {error.error_kind === 'vision_invalid_json' && 'Vision response was not valid JSON'}
-        {error.error_kind === 'vision_call_failed' && 'Vision call failed'}
-        {!['project_exists', 'descendants_exist', 'confirmation_expired',
-            'rate_limited', 'unauthorized', 'missing_api_key',
-            'inactive_acting_user',
-            'solver_in_flight', 'parallel_destructive_not_allowed',
-            'file_too_large', 'empty_file', 'invalid_filename',
-            'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
-            'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
-            'mime_not_allowlisted_for_multimodal', 'load_not_found',
-            'snapshot_count_mismatch', 'snapshot_range_mismatch',
-            'time_column_parse_error', 'value_column_parse_error',
-            'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
-            'tool_call_cap_exceeded'].includes(error.error_kind)
-          && error.error_kind}
+        {error.error_kind in KIND_COPY && KIND_COPY[error.error_kind].title}
+        {!(error.error_kind in KIND_COPY) && error.error_kind}
       </div>
       <div className="text-muted whitespace-pre-wrap">{error.message}</div>
+      {copy?.body && (
+        <div className="text-muted text-[11px] whitespace-pre-wrap mt-1">{copy.body}</div>
+      )}
       {/*
         U-1 — "API key missing" used to be a dead end. In the packaged app it
         was THE state: the bundle ships no `backend/.env` on purpose, so this
@@ -604,6 +682,31 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
             data-testid="chat-error-retry"
           >
             Try again
+          </button>
+        )}
+        {copy?.action === 'open-settings' && (
+          <button
+            className="text-[10px] underline text-rose-300 hover:text-rose-200"
+            onClick={() => {
+              // TODO(Task 15): Task 15 adds a `requestSettingsSection`
+              // uiStore pair that deep-links straight to the model/profile
+              // settings section. Until it lands, this opens the settings
+              // slide panel only — wire the section anchor here once Task 15
+              // ships rather than inventing a parallel mechanism.
+              useUIStore.getState().setSlidePanel('settings')
+            }}
+            data-testid="chat-error-open-settings"
+          >
+            Open settings
+          </button>
+        )}
+        {copy?.action === 'new-chat' && (
+          <button
+            className="text-[10px] underline text-rose-300 hover:text-rose-200"
+            onClick={() => startNewChat()}
+            data-testid="chat-error-start-new-chat"
+          >
+            Start new chat
           </button>
         )}
         <button
@@ -1686,23 +1789,7 @@ export default function ChatPanel() {
         // v4-MAJOR-1 / v4-MINOR-1 / v6-F1 + Phase D upload errors — route
         // structured error_kinds into the ErrorBanner so the user sees a
         // typed banner instead of a gray tool-line buried in the message list.
-        if ([
-          'project_exists', 'descendants_exist',
-          'confirmation_expired', 'rate_limited',
-          'unauthorized', 'missing_api_key',
-          'solver_in_flight', 'parallel_destructive_not_allowed',
-          'tool_call_cap_exceeded',
-          // Phase D — upload-tool errors. Same routing as the chat-stream
-          // 'error' frame, so a single user mental model handles every
-          // failure surface.
-          'file_too_large', 'empty_file', 'invalid_filename',
-          'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
-          'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
-          'mime_not_allowlisted_for_multimodal', 'load_not_found',
-          'snapshot_count_mismatch', 'snapshot_range_mismatch',
-          'time_column_parse_error', 'value_column_parse_error',
-          'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
-        ].includes(d.error_kind)) {
+        if (TOOL_ERROR_BANNER_KINDS.has(d.error_kind)) {
           setError({ error_kind: d.error_kind, message: d.message })
         }
         {
