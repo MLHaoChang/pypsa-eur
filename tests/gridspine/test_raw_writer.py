@@ -280,3 +280,112 @@ def test_tap_ignored_without_ratio_changer_type(tmp_path):
     write_raw(net, tmp_path / "t.raw")
     trafo = _records((tmp_path / "t.raw").read_text(), 5)
     assert float(trafo[2][0]) == pytest.approx(1.0)      # WINDV1: tap inert
+
+
+# ---------------------------------------------------------------------------
+# Task 6: sgen (RES machine) support — appended, existing tests untouched
+# ---------------------------------------------------------------------------
+
+from gridspine.ingest.pandapower_source import load_case39_res
+
+# v33 GENERATOR record field positions (0-based, after comma-split):
+# I=0, ID=1, PG=2, QG=3, QT=4, QB=5, VS=6, IREG=7, MBASE=8, ..., STAT=14
+
+
+def _toy_net_with_sgen(**sgen_kwargs):
+    """toy_net + a third bus carrying only an sgen (no gen, no slack)."""
+    net = toy_net()
+    b3 = pp.create_bus(net, vn_kv=345.0, name="BUS_03")
+    kwargs = dict(bus=b3, p_mw=80.0, q_mvar=0.0, name="W_BUS_03")
+    kwargs.update(sgen_kwargs)
+    pp.create_sgen(net, **kwargs)
+    return net
+
+
+def test_sgen_emitted_as_generator_record(tmp_path):
+    net = _toy_net_with_sgen()
+    write_raw(net, tmp_path / "t.raw")
+    gens = _records((tmp_path / "t.raw").read_text(), 3)
+    assert len(gens) == 3                               # gen + ext_grid + sgen
+    srec = [g for g in gens if g[0] == "3"][0]
+    assert float(srec[2]) == pytest.approx(80.0)        # PG = p_mw
+    assert float(srec[8]) == pytest.approx(80.0)        # MBASE = installed p_mw
+    assert srec[14] == "1"                              # STAT in service
+    assert len(srec) == 20                              # full 20-field record
+
+
+def test_sgen_fixed_q_qt_equals_qb(tmp_path):
+    # A pandapower sgen is a PQ injection with no voltage-control duty.
+    # v33/PSS-E convention: a machine with QT == QB (== QG) is held at fixed
+    # Q — wide-open limits would wrongly hand the IBR voltage regulation.
+    net = _toy_net_with_sgen(q_mvar=12.5)
+    write_raw(net, tmp_path / "t.raw")
+    srec = [g for g in _records((tmp_path / "t.raw").read_text(), 3)
+            if g[0] == "3"][0]
+    assert float(srec[3]) == pytest.approx(12.5)        # QG
+    assert float(srec[4]) == pytest.approx(12.5)        # QT
+    assert float(srec[5]) == pytest.approx(12.5)        # QB
+
+
+def test_sgen_explicit_q_limits_win(tmp_path):
+    # When the sgen row carries real capability limits, they are the machine's
+    # QT/QB — fixed-Q is only the fallback for the limitless default row.
+    net = _toy_net_with_sgen(q_mvar=0.0, min_q_mvar=-30.0, max_q_mvar=40.0)
+    write_raw(net, tmp_path / "t.raw")
+    srec = [g for g in _records((tmp_path / "t.raw").read_text(), 3)
+            if g[0] == "3"][0]
+    assert float(srec[4]) == pytest.approx(40.0)        # QT = max_q_mvar
+    assert float(srec[5]) == pytest.approx(-30.0)       # QB = min_q_mvar
+
+
+def test_sgen_only_bus_gets_ide2(tmp_path):
+    net = _toy_net_with_sgen()
+    write_raw(net, tmp_path / "t.raw")
+    buses = _records((tmp_path / "t.raw").read_text(), 0)
+    assert buses[2][1] == "BUS_03"
+    assert buses[2][3] == "2"                           # sgen-only bus IDE=2
+
+
+def test_sgen_distinct_machine_id_on_shared_bus(tmp_path):
+    net = toy_net()
+    pp.create_sgen(net, bus=1, p_mw=80.0, q_mvar=0.0, name="W_BUS_02")
+    write_raw(net, tmp_path / "t.raw")
+    gens = _records((tmp_path / "t.raw").read_text(), 3)
+    ids_at_bus2 = [g[1] for g in gens if g[0] == "2"]
+    assert len(ids_at_bus2) == 2                        # gen + sgen
+    assert len(set(ids_at_bus2)) == 2                   # distinct machine IDs
+
+
+def test_offline_sgen_written_with_stat0(tmp_path):
+    net = _toy_net_with_sgen(in_service=False)
+    write_raw(net, tmp_path / "t.raw")
+    srec = [g for g in _records((tmp_path / "t.raw").read_text(), 3)
+            if g[0] == "3"][0]
+    assert srec[14] == "0"                              # STAT=0, not omitted
+
+
+def test_sgen_scaling_applies_to_pg_not_mbase(tmp_path):
+    net = _toy_net_with_sgen(scaling=0.5, q_mvar=10.0)
+    write_raw(net, tmp_path / "t.raw")
+    srec = [g for g in _records((tmp_path / "t.raw").read_text(), 3)
+            if g[0] == "3"][0]
+    assert float(srec[2]) == pytest.approx(40.0)        # PG scaled
+    assert float(srec[3]) == pytest.approx(5.0)         # QG scaled
+    assert float(srec[8]) == pytest.approx(80.0)        # MBASE = installed
+
+
+def test_sgen_mbase_prefers_sn_mva_when_given(tmp_path):
+    net = _toy_net_with_sgen(sn_mva=100.0)
+    write_raw(net, tmp_path / "t.raw")
+    srec = [g for g in _records((tmp_path / "t.raw").read_text(), 3)
+            if g[0] == "3"][0]
+    assert float(srec[8]) == pytest.approx(100.0)       # MBASE = sn_mva
+
+
+def test_case39_res_machine_records(tmp_path):
+    net = load_case39_res()
+    write_raw(net, tmp_path / "c39r.raw")
+    gens = _records((tmp_path / "c39r.raw").read_text(), 3)
+    assert len(gens) == 15                              # 9 gen + 1 slack + 5 sgen
+    keys = [(g[0], g[1]) for g in gens]
+    assert len(set(keys)) == len(keys)                  # (I, ID) unique per bus
