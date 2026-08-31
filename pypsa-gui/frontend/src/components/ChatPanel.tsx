@@ -539,6 +539,9 @@ export const KIND_COPY: Record<
   confirmation_expired: { title: 'Confirmation expired' },
   rate_limited: { title: 'Rate limited' },
   unauthorized: { title: 'API key rejected' },
+  // Fix round 1 (Task 14) — body left unset here on purpose: it's computed
+  // in ErrorBanner from the active profile's LABEL (client-side, from
+  // useChatProfiles()), not a static string — see `body` in ErrorBanner.
   missing_api_key: { title: 'API key missing' },
   // P-2 — the acting account stopped being active mid-turn.
   inactive_acting_user: { title: 'Account is no longer active' },
@@ -592,19 +595,38 @@ export const KIND_COPY: Record<
 /**
  * The subset of KIND_COPY kinds that can arrive on a `tool_error` SSE frame
  * and should be promoted to this banner instead of staying a gray tool-line
- * in the message list. Deliberately NOT the full KIND_COPY key set:
- * `inactive_acting_user` is raised by `_acting()` in chat_tools.py as an
- * HTTPException that surfaces on the top-level chat-stream `error` frame
- * (handled unconditionally, unfiltered — see the `case 'error':` branch),
- * never as a per-tool `tool_error`, so it has copy above but no routing
- * entry here. Every string below is checked against KIND_COPY by a test
- * (ChatPanel.profile.test.tsx) so a typo or a stale rename fails loudly
- * instead of silently falling through to the raw kind.
+ * in the message list.
+ *
+ * Fix round 1 (Task 14) — CORRECTION, recorded rather than quietly edited:
+ * this comment previously claimed `inactive_acting_user` surfaces ONLY on
+ * the top-level chat-stream `error` frame and can never arrive as a
+ * `tool_error`, and excluded it here on that basis. That claim was
+ * investigated and written down as verified, and it was backwards.
+ * Re-traced properly this round: `inactive_acting_user` is raised in
+ * exactly one place, `_acting()` in `chat_tools.py:1464`. `_acting()` has
+ * six call sites, ALL inside tool handlers reached through `_route` /
+ * `_authorized_project`. `_dispatch_real_tool_call`
+ * (`chat_service.py`, ~line 3824) wraps every handler call in
+ * `except Exception`, reads `error_kind` off `exc.detail`, and YIELDS a
+ * `tool_error` frame — it does not re-raise, so nothing raised inside a
+ * tool handler reaches the top-level `error`-frame catch-all.
+ * `inactive_acting_user` can therefore ONLY arrive as a `tool_error`, the
+ * opposite of the old claim. Excluding it meant an account deactivated
+ * mid-turn showed a generic, truncated gray tool line instead of the
+ * "Account is no longer active" banner `KIND_COPY` already had copy for.
+ * Included below now, with a routing test
+ * (`ChatPanel.profile.test.tsx`) asserting a `tool_error` frame of this
+ * kind renders the banner and its title.
+ *
+ * Every string here is still checked against KIND_COPY by a test so a typo
+ * or a stale rename fails loudly instead of silently falling through to
+ * the raw kind.
  */
 export const TOOL_ERROR_BANNER_KINDS = new Set([
   'project_exists', 'descendants_exist',
   'confirmation_expired', 'rate_limited',
   'unauthorized', 'missing_api_key',
+  'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
   // Phase D — upload-tool errors. Same routing as the chat-stream 'error'
@@ -618,7 +640,18 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
 ])
 
-function ErrorBanner({ onRetry }: { onRetry: () => void }) {
+function ErrorBanner({
+  onRetry,
+  activeProfileLabel,
+}: {
+  onRetry: () => void
+  // Fix round 1 (Task 14) — the brief's `missing_api_key` broadening: body
+  // names the ACTIVE profile so a user on a non-Anthropic profile isn't told
+  // to paste an Anthropic key. LABEL only, sourced from the same
+  // `selectedProfileMeta` the parent already derives from `useChatProfiles()`
+  // — never an id or base_url, and no second query added here.
+  activeProfileLabel: string | null
+}) {
   const error = useChatStore((s) => s.error)
   const setError = useChatStore((s) => s.setError)
   const streaming = useChatStore((s) => s.streaming)
@@ -641,6 +674,17 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
     | { title: string; body?: string; action?: 'open-settings' | 'new-chat' }
     | undefined
 
+  // `missing_api_key`'s body can't live as a static KIND_COPY string — it
+  // names WHICH profile is missing a key, known only client-side from the
+  // profiles query, not from the server's error message. Falls back to no
+  // body (old behaviour) when the active profile isn't resolved yet, rather
+  // than fabricating a label.
+  const body =
+    copy?.body ??
+    (error.error_kind === 'missing_api_key' && activeProfileLabel
+      ? `Currently using the "${activeProfileLabel}" profile.`
+      : undefined)
+
   return (
     <div
       // A turn that failed is an interruption, not a status update — the
@@ -658,8 +702,8 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
         {!(error.error_kind in KIND_COPY) && error.error_kind}
       </div>
       <div className="text-muted whitespace-pre-wrap">{error.message}</div>
-      {copy?.body && (
-        <div className="text-muted text-[11px] whitespace-pre-wrap mt-1">{copy.body}</div>
+      {body && (
+        <div className="text-muted text-[11px] whitespace-pre-wrap mt-1">{body}</div>
       )}
       {/*
         U-1 — "API key missing" used to be a dead end. In the packaged app it
@@ -2469,7 +2513,7 @@ export default function ChatPanel() {
           </button>
         </div>
       )}
-      <ErrorBanner onRetry={onRetryLastTurn} />
+      <ErrorBanner onRetry={onRetryLastTurn} activeProfileLabel={selectedProfileMeta?.label ?? null} />
       {historyGap > 0 && (
         <div
           role="status"

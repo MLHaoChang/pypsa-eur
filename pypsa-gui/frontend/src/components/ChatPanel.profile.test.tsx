@@ -559,3 +559,66 @@ it('profile_switch_requires_new_chat offers Start new chat, which calls startNew
   expect(useChatStore.getState().messages).toEqual([])
   expect(useChatStore.getState().error).toBeNull()
 })
+
+// ── Task 14, fix round 1 ────────────────────────────────────────────────────
+//
+// (1) A disproven claim was recorded in a source comment as verified:
+// `inactive_acting_user` was excluded from `TOOL_ERROR_BANNER_KINDS` on the
+// (wrong) belief it could only arrive as a top-level `error` frame. Traced
+// properly: `_acting()` (chat_tools.py) is called only from inside tool
+// handlers, and `_dispatch_real_tool_call` (chat_service.py) catches every
+// handler exception and yields `tool_error` without re-raising — so this
+// kind can ONLY arrive as a `tool_error`. This test is the regression guard:
+// it exercises the actual routing path (a `tool_error` SSE frame), not just
+// the KIND_COPY/TOOL_ERROR_BANNER_KINDS data tables.
+
+it('routes a tool_error frame carrying inactive_acting_user to the banner, rendering its title (fix round 1)', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  await scriptFrames([
+    { event: 'session_init', data: { session_id: 's1' } },
+    {
+      event: 'tool_error',
+      data: {
+        tool_use_id: 'tu1',
+        tool_name: 'delete_project',
+        error_kind: 'inactive_acting_user',
+        message: 'This account is no longer active, so it can no longer act on projects.',
+      },
+    },
+  ])
+  const banner = await screen.findByTestId('chat-error-banner')
+  expect(banner.getAttribute('data-error-kind')).toBe('inactive_acting_user')
+  expect(banner.textContent).toContain('Account is no longer active')
+})
+
+it('TOOL_ERROR_BANNER_KINDS includes inactive_acting_user (regression: it was wrongly excluded)', () => {
+  expect(TOOL_ERROR_BANNER_KINDS.has('inactive_acting_user')).toBe(true)
+})
+
+// (2) The brief's `missing_api_key` broadening — body names the ACTIVE
+// profile, LABEL only — was dropped in round 0 without a note. Implemented
+// now: `ErrorBanner` receives `activeProfileLabel` from the same
+// `selectedProfileMeta` the parent already derives from `useChatProfiles()`.
+
+it('missing_api_key body names the ACTIVE profile (not hardcoded to Anthropic)', async () => {
+  useChatStore.setState({ profileId: 'openai-main' })
+  renderPanel()
+  await screen.findByText('GPT-5')
+  seedError('missing_api_key', 'ANTHROPIC_API_KEY is not set')
+
+  const banner = await screen.findByTestId('chat-error-banner')
+  expect(banner.textContent).toContain('Currently using the "GPT-5" profile.')
+  // ApiKeySetup keeps rendering unconditionally on this kind — the brief
+  // states that behaviour is load-bearing and must not change in this task.
+  expect(await screen.findByTestId('chat-api-key-input')).toBeTruthy()
+})
+
+it('missing_api_key names the server-active profile when no explicit pick was made', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  seedError('missing_api_key', 'ANTHROPIC_API_KEY is not set')
+
+  const banner = await screen.findByTestId('chat-error-banner')
+  expect(banner.textContent).toContain('Currently using the "Claude Sonnet" profile.')
+})
