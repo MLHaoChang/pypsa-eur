@@ -732,11 +732,10 @@ function ErrorBanner({
           <button
             className="text-[10px] underline text-rose-300 hover:text-rose-200"
             onClick={() => {
-              // TODO(Task 15): Task 15 adds a `requestSettingsSection`
-              // uiStore pair that deep-links straight to the model/profile
-              // settings section. Until it lands, this opens the settings
-              // slide panel only — wire the section anchor here once Task 15
-              // ships rather than inventing a parallel mechanism.
+              // Deep-link straight to the model/profile settings section
+              // (Task 15's `requestSettingsSection`/AssistantModelSettings),
+              // not just the settings panel in general.
+              useUIStore.getState().requestSettingsSection('assistant-model')
               useUIStore.getState().setSlidePanel('settings')
             }}
             data-testid="chat-error-open-settings"

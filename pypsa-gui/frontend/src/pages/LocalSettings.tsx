@@ -1,20 +1,37 @@
 /**
- * Desktop-only Settings pane: the Anthropic API key and the application log.
+ * The Settings pane: the desktop-only Anthropic API key + application log,
+ * AND (Task 15) the AssistantModelSettings section, which is NOT
+ * desktop-only — it is super-admin-gated and meaningful on a server too.
  *
- * Renders nothing at all when `fetchLocalSettings` returns null — the routes
- * 404 on a web deployment, and one build serves both.
+ * The two are independently gated and either can be absent without the
+ * other: `AssistantModelSettings` hides itself when `/chat/settings/llm` is
+ * unreachable (see hooks/useLLMSettings.ts), and the local-settings body
+ * below still hides on `state == null` (`/api/local-settings` 404s on a web
+ * deployment). AssistantModelSettings is hosted ABOVE that null check —
+ * NOT inside this component's own early return — precisely so a web
+ * deployment (local-settings unreachable) still renders it for a
+ * super-admin.
+ *
+ * The pane itself renders `null` only once BOTH surfaces have confirmed
+ * unreachable — and waits for the llm-settings query to SETTLE (not just
+ * "not yet true") before deciding that, so a slow-but-eventually-reachable
+ * llm-settings fetch cannot flash "nothing" and then pop the section back
+ * in a moment later.
  */
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { useInvalidateLocalSettings, useLocalSettings } from '../hooks/useLocalSettings'
+import { useLLMSettings } from '../hooks/useLLMSettings'
 import {
   keyFieldPlaceholder,
   probeMessage,
   putApiKey,
   revealLog,
+  type LocalSettingsState,
   type ProbeMessage,
 } from '../api/localSettings'
+import AssistantModelSettings from '../components/AssistantModelSettings'
 
 // Tokens defined in src/index.css:71-73 (--color-success / --color-warn /
 // --color-danger). There is no `text-ok`.
@@ -24,16 +41,22 @@ const TONE_CLASS: Record<ProbeMessage['tone'], string> = {
   error: 'text-danger',
 }
 
-export default function LocalSettings() {
-  const { data: state, isLoading } = useLocalSettings()
-  const invalidate = useInvalidateLocalSettings()
+/**
+ * The desktop-only key + diagnostics body. Split out from `LocalSettings` so
+ * `state` is a plain, non-null `LocalSettingsState` prop rather than a
+ * closed-over nullable — the parent only ever mounts this once `state` is
+ * known non-null, and this keeps that guarantee visible in the type rather
+ * than relying on call-site discipline.
+ */
+function LocalSettingsBody({
+  state, invalidate,
+}: {
+  state: LocalSettingsState
+  invalidate: () => Promise<void>
+}) {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<ProbeMessage | null>(null)
-
-  if (isLoading) return <div className="p-4 text-muted">Loading…</div>
-  // null means the routes 404: this build is not the desktop app.
-  if (state == null) return null
 
   const save = async (value: string) => {
     setBusy(true)
@@ -58,8 +81,13 @@ export default function LocalSettings() {
     // "bypassed in CI / headless setups, silently auto-cancelling" — which is
     // exactly what a WKWebView with no JS-dialog delegate would do, turning
     // Clear into a button that does nothing.
+    //
+    // "The built-in Claude profiles" — NOT "chat" — because this key is
+    // ANTHROPIC_API_KEY specifically (see api/localSettings.ts's header): a
+    // different active LLM profile (Task 15 added several) would keep
+    // working after this key is cleared.
     confirmToast(
-      'Remove the stored Anthropic API key? Chat will be disabled.',
+      'Remove the stored Anthropic API key? The built-in Claude Sonnet / Claude Opus profiles will stop working until a new key is set.',
       () => save(''),
       { confirmLabel: 'Remove', danger: true },
     )
@@ -83,7 +111,6 @@ export default function LocalSettings() {
   }
 
   const copyPath = async () => {
-    if (!state) return
     // navigator.clipboard is undefined outside a secure context. The desktop
     // app serves from 127.0.0.1 (which qualifies), but a plain-http web
     // deployment does not — and a thrown TypeError here would surface as a
@@ -97,12 +124,13 @@ export default function LocalSettings() {
   }
 
   return (
-    <div className="p-4 space-y-6 overflow-y-auto">
+    <>
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">Anthropic API key</h3>
         <p className="text-xs text-muted">
-          Needed for the chat assistant. Stored on this machine only, in your
-          application data folder — never in a project file.
+          Needed for the built-in Claude Sonnet / Claude Opus profiles. Stored
+          on this machine only, in your application data folder — never in a
+          project file.
         </p>
         <div className="flex gap-2">
           <input
@@ -153,6 +181,24 @@ export default function LocalSettings() {
           </button>
         </div>
       </section>
+    </>
+  )
+}
+
+export default function LocalSettings() {
+  const { data: state, isLoading } = useLocalSettings()
+  const llmSettings = useLLMSettings()
+  const invalidate = useInvalidateLocalSettings()
+
+  if (isLoading) return <div className="p-4 text-muted">Loading…</div>
+  // Both surfaces confirmed unreachable — this pane has nothing to show.
+  // `state == null` alone is not enough any more (see module doc above).
+  if (state == null && !llmSettings.isLoading && llmSettings.data == null) return null
+
+  return (
+    <div className="p-4 space-y-6 overflow-y-auto">
+      <AssistantModelSettings />
+      {state != null && <LocalSettingsBody state={state} invalidate={invalidate} />}
     </div>
   )
 }

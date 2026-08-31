@@ -42,6 +42,22 @@ vi.mock('../api/chat', async (importOriginal) => {
     }),
     putApiKeySettings: vi.fn(),
     deleteApiKeySettings: vi.fn(),
+    // Task 15: ApiKeySetup reads this to pick inline-form vs. deep-link.
+    // `active_profile` here is the SERVER's globally-active profile, NOT the
+    // client-side `profileId` a test below may set on chatStore — those are
+    // different things (see ApiKeySetup.tsx's own header), and this file's
+    // "missing_api_key still renders the inline ApiKeySetup form" /
+    // "...names the ACTIVE profile" tests both pin that the inline form
+    // renders regardless of the client-selected profile, which only holds if
+    // this mock's `active_profile` stays a builtin id.
+    getChatHealth: vi.fn().mockResolvedValue({
+      ok: true,
+      anthropic_api_key_present: false,
+      default_model: 'claude-sonnet-5',
+      confirmation_ttl_seconds: 300,
+      active_profile: { id: 'anthropic-sonnet', label: 'Claude Sonnet', wire: 'anthropic' },
+      chat_ready: false,
+    }),
   }
 })
 

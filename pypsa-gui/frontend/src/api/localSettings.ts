@@ -5,6 +5,17 @@
  * `reject_unless_local_mode`). `fetchLocalSettings` maps that 404 to `null`
  * rather than an error, which is how the pane and its nav entry know to hide
  * themselves — the same shape `listUnclaimed` uses at projects.ts:111.
+ *
+ * NOTE (Task 15, LLM provider config): the key this module writes IS
+ * `ANTHROPIC_API_KEY` — the same secret slot `api/chat.ts`'s
+ * `/chat/settings/api-key` writes (ApiKeySetup.tsx) and the same one the two
+ * built-in Claude profiles' `key_env` resolves to (`services/llm_config.py`,
+ * backend). It is not "the chat key" any more, now that a deployment can
+ * have several LLM profiles on other providers — `keyFieldPlaceholder`'s
+ * `'sk-ant-…'` below stays correct precisely because it is scoped to that one
+ * slot, not to "the" assistant key; the pane's own copy (pages/LocalSettings.
+ * tsx) says so explicitly rather than implying this is the only key that
+ * matters.
  */
 import axios from 'axios'
 import { client } from './client'

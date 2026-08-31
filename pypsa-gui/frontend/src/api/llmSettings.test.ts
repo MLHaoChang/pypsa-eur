@@ -20,6 +20,7 @@ vi.mock('./client', () => ({
 import {
   deleteLLMProfile,
   deleteLLMProfileKey,
+  fetchLLMSettingsOrNull,
   getChatProfiles,
   getLLMSettings,
   postLLMActive,
@@ -116,5 +117,32 @@ describe('llmSettings client', () => {
     // Fixed verdict strings are the contract: the server never echoes a full
     // base_url or upstream exception text, so UI copy keys off the verdict.
     expect(out.models).toBeNull()
+  })
+})
+
+describe('fetchLLMSettingsOrNull', () => {
+  it('suppresses the error toast — this query runs on every session for the nav gate', async () => {
+    get.mockResolvedValue({ data: { profiles: [], active_profile_id: 'x', presets: [] } })
+    await fetchLLMSettingsOrNull()
+    expect(get).toHaveBeenCalledWith('/chat/settings/llm', { skipErrorToast: true })
+  })
+
+  it('maps a 403 (ordinary member) to null, not a thrown error', async () => {
+    get.mockRejectedValue(Object.assign(new Error('Forbidden'), {
+      isAxiosError: true, response: { status: 403 },
+    }))
+    await expect(fetchLLMSettingsOrNull()).resolves.toBeNull()
+  })
+
+  it('maps a 404 (route not mounted) to null, same shape fetchLocalSettings uses', async () => {
+    get.mockRejectedValue(Object.assign(new Error('Not Found'), {
+      isAxiosError: true, response: { status: 404 },
+    }))
+    await expect(fetchLLMSettingsOrNull()).resolves.toBeNull()
+  })
+
+  it('rethrows any other failure — a real outage must surface, not hide as "not for you"', async () => {
+    get.mockRejectedValue(Object.assign(new Error('Network Error'), { isAxiosError: true }))
+    await expect(fetchLLMSettingsOrNull()).rejects.toThrow('Network Error')
   })
 })

@@ -17,15 +17,25 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   deleteApiKeySettings,
   getApiKeySettings,
+  getChatHealth,
   putApiKeySettings,
   type ApiKeySettings,
+  type ChatHealth,
 } from '../api/chat'
+import { useUIStore } from '../store/uiStore'
 import ApiKeySetup from './ApiKeySetup'
 
+// FULL-FACTORY mock (no importOriginal): every function ApiKeySetup calls at
+// runtime MUST be listed here, or it resolves to `undefined` and calling it
+// throws. `getChatHealth` joined this list in Task 15 — ApiKeySetup now
+// reads it to decide inline-form vs. deep-link — and the default resolution
+// below (a builtin Anthropic active profile) is what keeps every
+// pre-existing test in this file on its original path unmodified.
 vi.mock('../api/chat', () => ({
   getApiKeySettings: vi.fn(),
   putApiKeySettings: vi.fn(),
   deleteApiKeySettings: vi.fn(),
+  getChatHealth: vi.fn(),
 }))
 
 vi.mock('react-hot-toast', () => ({
@@ -45,12 +55,27 @@ function settings(over: Partial<ApiKeySettings> = {}): ApiKeySettings {
   }
 }
 
+function health(over: Partial<ChatHealth> = {}): ChatHealth {
+  return {
+    ok: true,
+    anthropic_api_key_present: false,
+    default_model: 'claude-sonnet-5',
+    confirmation_ttl_seconds: 300,
+    active_profile: { id: 'anthropic-sonnet', label: 'Claude Sonnet', wire: 'anthropic' },
+    chat_ready: false,
+    ...over,
+  }
+}
+
 function forbidden() {
   return Object.assign(new Error('Forbidden'), { response: { status: 403 } })
 }
 
 afterEach(() => cleanup())
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(getChatHealth).mockResolvedValue(health())
+})
 
 function renderSetup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -152,5 +177,39 @@ describe('ApiKeySetup', () => {
 
     expect(await screen.findByTestId('chat-api-key-forbidden')).toBeTruthy()
     expect(screen.queryByTestId('chat-api-key-input')).toBeNull()
+  })
+
+  // Task 15 — ApiKeySetup generalisation: the built-in Anthropic profile
+  // keeps the verbatim inline form (every test above this point exercises
+  // that path via the default `health()` mock); any OTHER active profile —
+  // a custom OpenAI/local endpoint the admin switched to — gets told which
+  // profile is short a key and pointed at Settings instead, because that
+  // profile's key has nothing to do with `/chat/settings/api-key`.
+  describe('a non-builtin active profile', () => {
+    it('names the active profile and offers no inline Anthropic form', async () => {
+      vi.mocked(getChatHealth).mockResolvedValue(
+        health({ active_profile: { id: 'ollama-local', label: 'Local Ollama', wire: 'openai' } }),
+      )
+      renderSetup()
+
+      expect(await screen.findByText(/Local Ollama/)).toBeTruthy()
+      expect(screen.queryByTestId('chat-api-key-input')).toBeNull()
+      // getApiKeySettings is the Anthropic-specific route; it must not even
+      // be consulted to decide this branch's copy.
+    })
+
+    it('deep-links to Settings, requesting the assistant-model section', async () => {
+      vi.mocked(getChatHealth).mockResolvedValue(
+        health({ active_profile: { id: 'ollama-local', label: 'Local Ollama', wire: 'openai' } }),
+      )
+      renderSetup()
+      const user = userEvent.setup()
+
+      useUIStore.setState({ activeSlidePanel: null, settingsSectionRequest: null })
+      await user.click(await screen.findByTestId('chat-api-key-open-settings'))
+
+      expect(useUIStore.getState().activeSlidePanel).toBe('settings')
+      expect(useUIStore.getState().settingsSectionRequest).toBe('assistant-model')
+    })
   })
 })

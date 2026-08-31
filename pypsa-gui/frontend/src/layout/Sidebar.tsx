@@ -36,6 +36,7 @@ import { H2Icon } from '../components/AssetIcons'
 import ProjectPicker from '../components/ProjectPicker'
 import { useSolveQueue } from '../hooks/useSolveQueue'
 import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
+import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
@@ -1273,10 +1274,17 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // are active (see useSolveQueue), so this idle-mounted consumer is cheap.
   const { data: solveQueue } = useSolveQueue()
   const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
-  // The Settings pane is desktop-only; its routes 404 on a web deployment.
-  // The row hides with it — a nav entry that opens an empty panel is worse
-  // than no nav entry. Shares one react-query fetch with the pane.
-  const settingsAvailable = useLocalSettingsAvailable()
+  // The Settings pane hosts two independently-gated surfaces (Task 15): the
+  // desktop-only Anthropic key + log (routes 404 on a web deployment) and
+  // AssistantModelSettings (super-admin-gated, meaningful on a server too).
+  // The row shows when EITHER is reachable — hiding on local-settings alone
+  // would take the row away from a web super-admin who can still reach the
+  // assistant-model section. A nav entry that opens a genuinely empty panel
+  // is still worse than no nav entry, which is why this stays an OR rather
+  // than always-on. Both hooks share their pane's own react-query fetch.
+  const localSettingsAvailable = useLocalSettingsAvailable()
+  const llmSettingsAvailable = useLLMSettingsAvailable()
+  const settingsAvailable = localSettingsAvailable || llmSettingsAvailable
   return (
     <div>
       <SItem icon={<Settings2 size={15} />} label="Solver Settings"
@@ -1286,7 +1294,7 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
       />
       {settingsAvailable && (
         <SItem icon={<SlidersHorizontal size={15} />} label="Settings"
-          title="Store your Anthropic API key and find the application log."
+          title="Choose the assistant model and, on desktop, store your Anthropic API key and find the application log."
           active={activeSlidePanel === 'settings'}
           onClick={() => { setSlidePanel(activeSlidePanel === 'settings' ? null : 'settings'); onCloseModal?.() }}
         />

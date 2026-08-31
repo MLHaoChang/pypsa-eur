@@ -19,6 +19,7 @@
  *    `key_required` / `key_present` / `key_hint` (last four characters), the
  *    same status accessor `/settings/api-key` uses.
  */
+import axios from 'axios'
 import { client } from './client'
 
 /** One configured profile, as the settings surface sees it. */
@@ -111,6 +112,32 @@ export interface ChatProfilesPayload {
 export async function getLLMSettings(): Promise<LLMSettingsPayload> {
   const r = await client.get('/chat/settings/llm')
   return r.data
+}
+
+/**
+ * `GET /chat/settings/llm`, mapped for the reachability gate the Assistant
+ * Model Settings section hosts on — mirrors `fetchLocalSettings` in
+ * api/localSettings.ts exactly, including `skipErrorToast`.
+ *
+ * A 403 (an ordinary, non-super-admin member) or a 404 (the route not
+ * mounted at all, same shape a web deployment could someday produce) both
+ * mean "not for you", not a failure. This wrapper — not `getLLMSettings`
+ * above, whose single-argument call is pinned by llmSettings.test.ts — is
+ * what the Settings nav row's availability hook and the section component
+ * both call, and that hook runs on EVERY session (it decides whether to
+ * show the nav row at all), so an un-suppressed 403 toast would fire for
+ * every non-admin member on every load.
+ */
+export async function fetchLLMSettingsOrNull(): Promise<LLMSettingsPayload | null> {
+  try {
+    const r = await client.get<LLMSettingsPayload>('/chat/settings/llm', { skipErrorToast: true })
+    return r.data
+  } catch (error) {
+    if (axios.isAxiosError(error) && (error.response?.status === 403 || error.response?.status === 404)) {
+      return null
+    }
+    throw error
+  }
 }
 
 export async function putLLMProfile(

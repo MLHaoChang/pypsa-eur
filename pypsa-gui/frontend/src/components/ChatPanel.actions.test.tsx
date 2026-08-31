@@ -39,6 +39,18 @@ vi.mock('../api/chat', async (importOriginal) => {
     }),
     putApiKeySettings: vi.fn(),
     deleteApiKeySettings: vi.fn(),
+    // Task 15: ApiKeySetup (rendered inline for `missing_api_key`, seeded by
+    // this file's `seedFailedTurn('missing_api_key')` test) now reads this
+    // to decide inline-form vs. deep-link. A builtin-Anthropic active
+    // profile keeps the pinned inline-form path.
+    getChatHealth: vi.fn().mockResolvedValue({
+      ok: true,
+      anthropic_api_key_present: false,
+      default_model: 'claude-sonnet-5',
+      confirmation_ttl_seconds: 300,
+      active_profile: { id: 'anthropic-sonnet', label: 'Claude Sonnet', wire: 'anthropic' },
+      chat_ready: false,
+    }),
   }
 })
 vi.mock('../api/uploads', () => ({
