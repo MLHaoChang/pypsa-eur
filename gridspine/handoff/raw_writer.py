@@ -36,8 +36,11 @@ sgen (RES / IBR machine) decisions:
   PowerFactory both hold such a machine at its Q value instead of letting it
   regulate VS. Wide-open +/-9999 limits (inc-1 gens) would wrongly hand the
   IBR voltage control on import. Explicit ``min_q_mvar``/``max_q_mvar``
-  columns, when finite, are real capability limits and win over the
-  fixed-Q collapse. VS is written 1.0 and is inert for a machine pinned at
+  columns engage as real capability limits ONLY when BOTH are finite —
+  a one-sided bound collapses to fixed-Q, since backfilling the missing
+  side from QG can yield QT < QB, a malformed v33 record. Explicit limits
+  are deliberately NOT multiplied by ``scaling``: they are physical
+  capability, ``scaling`` is dispatch. VS is written 1.0 and is inert for a machine pinned at
   its Q limits.
 - v33 wind-machine trailing optionals WMOD/WPF are OMITTED (importer
   defaults: WMOD=0 "not a wind machine", WPF=1.0). Q behaviour is already
@@ -162,8 +165,13 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
             qg = float(s.get("q_mvar", 0.0)) * scal
             qt_raw = s.get("max_q_mvar", np.nan)
             qb_raw = s.get("min_q_mvar", np.nan)
-            qt = float(qt_raw) if np.isfinite(qt_raw) else qg
-            qb = float(qb_raw) if np.isfinite(qb_raw) else qg
+            if np.isfinite(qt_raw) and np.isfinite(qb_raw):
+                qt, qb = float(qt_raw), float(qb_raw)
+            else:
+                # A lone bound is not a capability box; backfilling the
+                # missing side from QG can invert the pair (QT < QB —
+                # malformed v33 record). Collapse to fixed-Q instead.
+                qt = qb = qg
             lines.append(gen_record(s["bus"], p_inst * scal, 1.0, mbase,
                                     1 if s["in_service"] else 0,
                                     qg=qg, qt=qt, qb=qb))

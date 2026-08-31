@@ -389,3 +389,19 @@ def test_case39_res_machine_records(tmp_path):
     assert len(gens) == 15                              # 9 gen + 1 slack + 5 sgen
     keys = [(g[0], g[1]) for g in gens]
     assert len(set(keys)) == len(keys)                  # (I, ID) unique per bus
+
+
+def test_sgen_one_sided_q_limit_collapses_to_fixed_q(tmp_path):
+    # Fix round 1: a lone min_q_mvar (or max_q_mvar) is not a capability box.
+    # Independently backfilling the missing side from QG can invert the pair
+    # (min_q_mvar=50, qg=0 -> QT=0 < QB=50: malformed v33 record). Only BOTH
+    # finite bounds engage the capability branch; one-sided collapses to
+    # fixed-Q QT=QB=QG.
+    for kwargs in ({"min_q_mvar": 50.0}, {"max_q_mvar": -50.0}):
+        net = _toy_net_with_sgen(q_mvar=0.0, **kwargs)
+        write_raw(net, tmp_path / "t.raw")
+        srec = [g for g in _records((tmp_path / "t.raw").read_text(), 3)
+                if g[0] == "3"][0]
+        assert float(srec[4]) == pytest.approx(0.0)     # QT = QG
+        assert float(srec[5]) == pytest.approx(0.0)     # QB = QG
+        assert float(srec[4]) >= float(srec[5])         # never QT < QB
