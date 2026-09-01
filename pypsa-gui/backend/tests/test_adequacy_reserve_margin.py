@@ -1250,3 +1250,147 @@ def test_a_margin_only_run_reports_the_energy_it_actually_shed():
 
     # And the cap's own block must not masquerade as a target that was met.
     assert rep["target"]["energy_target_set"] is False
+
+
+# ── ★ the payload must report what a VINTAGE-EXPANDED plan built ────────────
+#
+# Found by the Phase 12b (v3) review while checking a premise of that plan,
+# not by looking for it. On a multi-period network with per-period capacity
+# bounds, `apply_vintage_bounds` expands `wind` into transient rows
+# `wind@2030` / `wind@2040`, the wrapper stashes those names, and the restore
+# drops the rows BEFORE the payload runs. `_built()` then finds no row and
+# credits zero — so a plan that built 35 MW of wind and met the margin was
+# reported as `met=False`. The built size is recoverable from the per-vintage
+# breakdown the restore persists into `n.meta["vintage_results"]`.
+
+def _vintage_network() -> pypsa.Network:
+    """Two periods, one load, a cheap must-take wind candidate with per-period
+    bounds and an absurdly expensive peaker, so the margin is met by wind."""
+    from services.vintage_service import set_bounds_for_asset
+
+    sns = pd.MultiIndex.from_product(
+        [[2030, 2040], pd.date_range("2030-01-01", periods=4, freq="h")],
+        names=["period", "timestep"])
+    n = pypsa.Network()
+    n.set_snapshots(sns)
+    n.investment_periods = [2030, 2040]
+    n.add("Carrier", "gas")
+    n.add("Carrier", "wind")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=150.0)
+    n.add("Generator", "base", bus="b", carrier="gas", p_nom=200.0,
+          marginal_cost=10.0, build_year=2000, lifetime=100)
+    n.add("Generator", "peaker", bus="b", carrier="gas", p_nom=0.0,
+          p_nom_extendable=True, p_nom_max=500.0, capital_cost=5e6,
+          marginal_cost=500.0, build_year=2030, lifetime=100)
+    # must-take (carrier absent from the defaults library), flat profile 1.0
+    n.add("Generator", "wind", bus="b", carrier="wind", p_nom=0.0,
+          p_nom_extendable=True, p_nom_max=500.0, capital_cost=1000.0,
+          marginal_cost=0.0, build_year=2030, lifetime=100,
+          p_max_pu=pd.Series(1.0, index=sns))
+    set_bounds_for_asset(n, "Generator", "wind",
+                         {"2030": {"p_nom_min": 0.0, "p_nom_max": 100.0},
+                          "2040": {"p_nom_min": 0.0, "p_nom_max": 100.0}})
+    return n
+
+
+VINTAGE_REQUIRED_MW = 1.5 * 150.0          # (1 + 0.5) × peak
+VINTAGE_BASE_FIRM_MW = GAS_DERATE * 200.0  # 190
+VINTAGE_WIND_MW = VINTAGE_REQUIRED_MW - VINTAGE_BASE_FIRM_MW   # 35, derate 1.0
+
+
+def test_a_vintage_expanded_plan_reports_the_capacity_it_built():
+    """★ The LP builds exactly 35 MW of `wind@2030` to reach the standard.
+    The payload must say so — in BOTH periods, since a 2030 vintage with a
+    100-year lifetime is active in 2040 too — and name the vintage row with
+    its built size.
+
+    BROKEN VARIANT (bite): `_built()` without the vintage fallback — the row
+    is gone from the network, the lookup returns None, firm capacity reads
+    190 < 225 and `met` is False in both periods.
+    """
+    sink, status, _ = _solve(_vintage_network(), reserve_margin=0.5,
+                             multi_investment_periods=True)
+    assert status == "ok", sink
+    block = _report(sink).reserve_margin
+    by_period = {r.period: r for r in block.by_period}
+    assert set(by_period) == {"2030", "2040"}
+    for P, row in by_period.items():
+        assert row.met is True, (P, row)
+        assert row.firm_mw == pytest.approx(VINTAGE_REQUIRED_MW, rel=1e-6), (P, row)
+    rows = {(a.name, a.period): a for a in block.assets}
+    assert rows[("wind@2030", "2030")].capacity_mw == pytest.approx(VINTAGE_WIND_MW, rel=1e-6)
+    assert rows[("wind@2030", "2040")].capacity_mw == pytest.approx(VINTAGE_WIND_MW, rel=1e-6)
+    # the 2040 vintage was not needed and reads as built-to-zero, not None
+    assert rows[("wind@2040", "2040")].capacity_mw == pytest.approx(0.0, abs=1e-9)
+
+
+# ── ★ a failed margin run must not leak its targets into the next solve ─────
+#
+# Same review. The stash is deleted at the report step, inside the try body;
+# an exception between the wrapper and that line lands in the outer handlers,
+# which never touch the attribute, and the wrapper is a no-op without a
+# margin so nothing overwrites it. The NEXT solve — one that set no margin —
+# then publishes a margin result built on the dead run's targets.
+
+def test_a_failed_margin_run_does_not_leak_its_targets_into_the_next_solve():
+    """★ Run 1 sets a margin and fails after optimize. Run 2 sets NO margin.
+    Run 2 must publish no reserve-margin result.
+
+    BROKEN VARIANT (bite): do not clear `_reserve_margin_targets` at solve
+    start — run 2 finds run 1's stash and publishes `margin 0.5, met=False`
+    for a run that never asked for one.
+    """
+    import services.solver_service as S
+
+    n = _network()
+    orig = S._capture_extendable_p_nom_opt_to_frozen_store
+
+    def boom(*_a, **_k):
+        raise RuntimeError("simulated post-optimize failure")
+
+    S._capture_extendable_p_nom_opt_to_frozen_store = boom
+    try:
+        sink1, status1, _ = _solve(n, reserve_margin=MARGIN)
+    finally:
+        S._capture_extendable_p_nom_opt_to_frozen_store = orig
+    assert status1 != "ok", "the fixture did not fail run 1"
+    assert "last_reserve_margin" not in sink1 or sink1["last_reserve_margin"] is None
+
+    sink2, status2, _ = _solve(n)          # no margin at all
+    assert status2 == "ok", sink2
+    assert sink2.get("last_reserve_margin") is None, (
+        "a run that set no margin published a margin result: "
+        f"{sink2.get('last_reserve_margin')}")
+
+
+def test_a_failed_ens_cap_run_does_not_leak_its_targets_into_the_next_solve():
+    """★ The ENS-cap stash (`_ens_cap_targets`) is read and deleted on the
+    same try body as the margin's, so it has the same leak. Run 1 sets a cap
+    and fails after optimize; run 2 sets nothing and must publish no adequacy
+    report at all — a report fires only when a standard's stash is present.
+
+    BROKEN VARIANT (bite): clear only `_reserve_margin_targets` at solve
+    start — run 2 then finds run 1's ENS stash and publishes a report for a
+    standard it never set.
+    """
+    import services.solver_service as S
+
+    n = _network()
+    orig = S._capture_extendable_p_nom_opt_to_frozen_store
+
+    def boom(*_a, **_k):
+        raise RuntimeError("simulated post-optimize failure")
+
+    S._capture_extendable_p_nom_opt_to_frozen_store = boom
+    try:
+        _sink1, status1, _ = _solve(n, voll=3000.0, ens_cap_permyriad=10.0)
+    finally:
+        S._capture_extendable_p_nom_opt_to_frozen_store = orig
+    assert status1 != "ok", "the fixture did not fail run 1"
+
+    sink2, status2, _ = _solve(n)          # no standard at all
+    assert status2 == "ok", sink2
+    assert sink2.get("adequacy_report") is None, (
+        "a run that set no standard published an adequacy report: "
+        f"{sink2.get('adequacy_report')}")

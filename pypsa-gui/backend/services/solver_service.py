@@ -834,6 +834,20 @@ def run_simulation(
             # deletes the network attribute, so an infeasible PRM run would
             # otherwise get the generic "no obvious structural cause" hint.
             _margin_targets = None
+            # A run that failed between the wrapper and the report step left
+            # its stash on the network: the delete at the report step is inside
+            # the try body and none of the outer handlers touch it, and each
+            # wrapper is a no-op without its standard so nothing overwrites it.
+            # The NEXT solve — one that set no standard — then published a
+            # result built on the dead run's targets: a margin verdict, or an
+            # adequacy report claiming an energy target was set and binding.
+            # Both stashes share the exposure; clear both before anything can
+            # read them.
+            for _stale in ("_reserve_margin_targets", "_ens_cap_targets"):
+                try:
+                    delattr(network, _stale)
+                except AttributeError:
+                    pass
             t_solve = time.time()
             # Clean up stale `transformer.type` strings that don't match any
             # row in n.transformer_types. The GUI's presets are display

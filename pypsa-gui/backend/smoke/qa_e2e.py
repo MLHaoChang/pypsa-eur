@@ -3410,6 +3410,178 @@ def suite_S21():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
 
+def suite_S22():
+    """
+    A vintage-expanded plan's reserve-margin result, live (Phase 8 §4, found
+    by the Phase 12b review).
+
+    On a multi-period network with per-period capacity bounds the solve
+    expands `wind` into transient `wind@2030` / `wind@2040` rows, the wrapper
+    stashes those names, and the restore drops the rows BEFORE the payload
+    reads built capacities — so `_built()` found nothing, credited zero, and a
+    plan that built 35 MW of wind and met the margin was served as `met=False`
+    in both periods. The unit test drives `run_simulation`; this drives the
+    surface a user reads, `GET /results/reserve_margin`, after a solve
+    started over HTTP with bounds set over HTTP.
+
+    The companion defect — a failed margin run leaking its stash into the
+    next solve — has NO honest live reproduction: it needs an exception
+    between optimize and the report step, which no API input produces. It
+    is covered by its unit test only, and this docstring says so rather than
+    faking a check.
+    """
+    print("\nS22 - A vintage-expanded plan reports what it built (area 22)")
+    name = "qa_e2e_vintage"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    # 200 MW base (EFORd 0.05 -> 190 firm) against 150 MW load at margin 0.5
+    # (225 required): 35 MW of firm capacity short. A cheap wind candidate at
+    # 1000/MW versus a peaker at 5e6/MW, so the LP closes the gap with wind.
+    #
+    # The unit test's wind is MUST-TAKE (a time-series profile, no outage
+    # data). That cannot be reproduced here: the generator API takes a static
+    # `p_max_pu`, the margin's profile test is a time-series column check, and
+    # a per-period profile cannot be set over the API on a multi-period
+    # network (a limitation this PR records). Without either, preflight
+    # correctly refuses the unit as unpriceable — the first run of this suite
+    # hit exactly that, and named it. So the candidate carries outage data
+    # instead: it is then a sampled unit at derate 0.95, and the thing under
+    # test — the vintage row's BUILT capacity reaching the payload — does not
+    # depend on which membership the unit has.
+    BASE, LOAD, EFORD, MARGIN = 200.0, 150.0, 0.05, 0.5
+    required = (1.0 + MARGIN) * LOAD                          # 225
+    wind_needed = (required - BASE * (1.0 - EFORD)) / (1.0 - EFORD)   # 35 / 0.95
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S22.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("gas", "wind"):
+        built.append(http("/api/network/carriers", method="POST",
+                          body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots/multi_period", method="POST",
+                      body={"periods": [2030, 2040],
+                            "start": "2030-01-01 00:00",
+                            "end": "2030-01-01 03:00", "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "base", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": BASE, "marginal_cost": 10.0,
+                            "outage_rate_value": EFORD,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 50.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 500.0, "capital_cost": 5_000_000.0,
+                            "marginal_cost": 500.0,
+                            "outage_rate_value": EFORD,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 50.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "wind", "bus": "bus_a", "carrier": "wind",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 500.0, "capital_cost": 1000.0,
+                            "marginal_cost": 0.0, "p_max_pu": 1.0,
+                            "outage_rate_value": EFORD,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 50.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": LOAD})[0])
+    st_vb, vb = http("/api/network/vintage_bounds/Generator/wind", method="PUT",
+                     body={"bounds": {"2030": {"p_nom_min": 0.0, "p_nom_max": 100.0},
+                                      "2040": {"p_nom_min": 0.0, "p_nom_max": 100.0}}})
+    built.append(st_vb)
+    bad_build = [c for c in built if c not in (200, 201)]
+    if bad_build:
+        # The S21 lesson: a fixture that did not build proves nothing.
+        for i in (1, 2):
+            skip(f"S22.{i}", f"fixture build non-2xx={bad_build}; vintage_bounds->{st_vb} {str(vb)[:80]}")
+        restore()
+        return
+
+    st_cfg, _ = put_cfg(reserve_margin=MARGIN, multi_investment_periods=True)
+    # The S21 lesson, applied one step later: a fixture that BUILT but was
+    # refused at preflight proves nothing either, and the first run of this
+    # suite did exactly that. So the refusal is named in the detail rather
+    # than left as an opaque `validation_failed`.
+    st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+    pf_errors = [f"{i.get('code')}: {str(i.get('message', ''))[:90]}"
+                 for i in ((pf or {}).get("issues") or [])
+                 if isinstance(i, dict) and i.get("severity") == "error"]
+    http("/api/simulation/run", method="POST")
+    solved = poll_solve()
+    why = (f"; preflight->{st_pf} errors={pf_errors or 'none'}"
+           if not (isinstance(solved, dict) and solved.get("condition") == "optimal")
+           else "")
+    st_rm, rm = http("/api/results/reserve_margin")
+    rows = {str(r.get("period")): r for r in ((rm or {}).get("by_period") or [])}
+    assets = {(a.get("name"), str(a.get("period"))): a
+              for a in ((rm or {}).get("assets") or [])}
+
+    # ── S22.1 — the standard the LP MET is reported as met, in both periods,
+    # at the firm capacity the plan actually has. Before the fix: firm 190,
+    # met=False, for a plan that built 35 MW of wind.
+    met_ok = (set(rows) == {"2030", "2040"}
+              and all(r.get("met") is True for r in rows.values())
+              and all(abs(float(r.get("firm_mw") or 0.0) - required) < 1e-3
+                      for r in rows.values()))
+    record("S22.1",
+           st_cfg == 200 and isinstance(solved, dict)
+           and solved.get("condition") == "optimal" and st_rm == 200 and met_ok,
+           f"cfg->{st_cfg} solved={(solved or {}).get('condition')} "
+           f"/results/reserve_margin->{st_rm}; periods="
+           f"{ {P: (r.get('met'), r.get('firm_mw')) for P, r in rows.items()} } "
+           f"(want met=True, firm={required:.0f} in both){why}")
+
+    # ── S22.2 — the VINTAGE rows carry their built sizes: wind@2030 at ~35 MW
+    # in 2030 AND in 2040 (a 2030 vintage is active later), and wind@2040 at
+    # 0.0 — built-to-zero, not null. Before the fix every vintage row read
+    # capacity=None.
+    v30_30 = (assets.get(("wind@2030", "2030")) or {}).get("capacity_mw")
+    v30_40 = (assets.get(("wind@2030", "2040")) or {}).get("capacity_mw")
+    v40_40 = (assets.get(("wind@2040", "2040")) or {}).get("capacity_mw")
+    def near(v, want):
+        return v is not None and abs(float(v) - want) < 1e-3
+    record("S22.2",
+           near(v30_30, wind_needed) and near(v30_40, wind_needed)
+           and near(v40_40, 0.0),
+           f"wind@2030: 2030={v30_30} 2040={v30_40} (want {wind_needed:.2f}); "
+           f"wind@2040: 2040={v40_40} (want 0.0, not None)")
+
+    restore()
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -3484,6 +3656,9 @@ def main() -> int:
 
     if run("S21"):
         suite_S21()
+
+    if run("S22"):
+        suite_S22()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

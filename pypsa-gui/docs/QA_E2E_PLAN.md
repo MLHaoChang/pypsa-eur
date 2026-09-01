@@ -400,6 +400,47 @@ cap loop and got `409`, because the margin loop it had just started was still
 running — the 409 mesh working exactly as designed, and the test reaching the
 wrong question. Ordering fixed, with the reason in the code.
 
+### S22 — A vintage-expanded plan reports what it built (area 22)
+| id | Assertion |
+|----|-----------|
+| S22.1 | On a two-period network with per-period capacity bounds, a margin the LP **met** by building ~36.8 MW of `wind@2030` (35 MW firm at derate 0.95) is served by `GET /results/reserve_margin` as `met=True` in **both** periods at the firm capacity the plan actually has — not `met=False` at the fixed fleet's 190 MW |
+| S22.2 | The **vintage rows** carry their built sizes: `wind@2030` at ~36.8 MW in 2030 *and* in 2040 (a 2030 vintage is active later), and `wind@2040` at `0.0` — built-to-zero, never `null` |
+
+**Why this suite exists.** The Phase 12b (v3) plan claimed that
+`reserve_margin_payload` is the one post-solve point with built capacity in
+scope. Its review checked the premise on a vintage-expanded network and found
+the shipped payload wrong there: the solve expands `wind` into transient
+`wind@2030` / `wind@2040` rows, the wrapper stashes those names, and the
+restore drops the rows *before* the payload reads capacities, so `_built()`
+found nothing and credited zero. The reserve margin had mis-reported the
+network class it exists for since it landed. The unit test drives
+`run_simulation` directly; this suite drives the fixture, the bounds and the
+solve over HTTP and reads the surface a user reads.
+
+**Why the candidate carries outage data when the unit test's does not.**
+The unit test's wind is must-take: a time-series profile and no outage data.
+Over HTTP that cannot be built — the generator API takes a static `p_max_pu`,
+the margin's profile test is a time-series column check, and a per-period
+profile cannot be set over the API on a multi-period network (recorded above
+under S21). Without either, preflight correctly refuses the unit as
+`reserve_margin_unpriceable_assets` — the first run of this suite hit exactly
+that and read as `validation_failed`, so the suite now names the preflight
+refusal in its detail rather than leaving it opaque. The candidate carries
+outage data instead and is a sampled unit at derate 0.95; the thing under
+test — the vintage row's built capacity reaching the payload — does not
+depend on which membership the unit has. **Bitten live**: with the vintage
+lookup removed, both checks fail (`met=False`, firm 190, every vintage row
+`None`).
+
+**What is deliberately NOT here.** The companion defect found in the same
+review — a margin run that fails between optimize and the report step leaves
+its stash on the network, and the *next* solve, one that set no standard,
+publishes a margin verdict (or a full adequacy report claiming an energy
+target was set and binding) built on the dead run's targets — has no honest
+live reproduction: it needs an exception at a point no API input reaches. It
+is covered by two unit tests, one per stash, and this plan says so rather
+than shipping a check that could only pass.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

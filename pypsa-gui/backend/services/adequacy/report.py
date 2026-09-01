@@ -104,15 +104,53 @@ def reserve_margin_payload(n, targets: dict) -> dict:
         col = "p_nom_opt" if "p_nom_opt" in df.columns else "p_nom"
         opt[kind] = {str(k): float(v or 0.0) for k, v in df[col].items()}
 
+    # Vintage rows are TRANSIENT. On a multi-period network with per-period
+    # capacity bounds, `apply_vintage_bounds` expands `wind` into `wind@2030`,
+    # `wind@2040` for the LP, the wrapper stashes those names, and the restore
+    # drops the rows BEFORE this function runs — so the live lookup below
+    # missed, credited zero, and a plan that built 35 MW of wind and met the
+    # margin was reported `met=False` (found by the Phase 12b review while
+    # checking a premise, not by looking). The built size is not lost: the
+    # restore persists a per-vintage breakdown into `n.meta`, keyed by the
+    # PyPSA class and the parent name, and that is what is read here.
+    vintage_results = (getattr(n, "meta", None) or {}).get("vintage_results") or {}
+    _class_of_kind = {"generator": "Generator", "storage": "StorageUnit"}
+
+    def _built_vintage(kind: str, name: str) -> float | None:
+        """`p_nom_opt` of the vintage `<parent>@<build_year>`, or None if the
+        name is not a vintage this solve expanded. A user-named `foo@bar` with
+        no breakdown entry falls through to None rather than being guessed."""
+        parent, sep, suffix = name.rpartition("@")
+        if not sep:
+            return None
+        try:
+            build_year = int(suffix)
+        except ValueError:
+            return None
+        by_class = vintage_results.get(_class_of_kind.get(kind, ""))
+        entry = by_class.get(parent) if isinstance(by_class, dict) else None
+        if not isinstance(entry, dict):
+            return None
+        for per in entry.get("periods") or []:
+            try:
+                if int(per.get("build_year")) == build_year:
+                    return float(per.get("p_nom_opt") or 0.0)
+            except (TypeError, ValueError):
+                continue
+        return None
+
     def _built(row) -> float | None:
         """The asset's capacity in the SOLVED plan. For a fixed asset that is
         the stash's constant; for an extendable it is `p_nom_opt`, which is
-        the whole point of the standard — the capacity it forced into being."""
+        the whole point of the standard — the capacity it forced into being.
+        A vintage row is read from the persisted breakdown (above)."""
         if not row.get("extendable"):
             cap = row.get("capacity_mw")
             return None if cap is None else float(cap)
-        table = opt.get(str(row.get("kind")), {})
-        val = table.get(str(row.get("name")))
+        kind, name = str(row.get("kind")), str(row.get("name"))
+        val = opt.get(kind, {}).get(name)
+        if val is None:
+            val = _built_vintage(kind, name)
         return None if val is None else float(val)
 
     assets: list[dict] = []
