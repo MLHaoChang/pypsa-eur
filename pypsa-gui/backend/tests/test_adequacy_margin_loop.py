@@ -117,6 +117,17 @@ LEVER_SPELLINGS = [
     (0.1 + 0.2, "0.3"),               # 12 sig figs absorbs the binary noise
     (1 / 3, "0.333333333333"),
     (5.0, "5"),                       # MAX_MARGIN
+    # ★ DYADIC rationals — k/2**n — which is exactly what a bisection
+    # produces, and exactly where an exact decimal TIE at the 13th
+    # significant figure can occur. `%.12g` rounds half-to-EVEN there;
+    # JS `toPrecision` rounds half-UP. The uniform randoms below essentially
+    # never hit a tie, so without these the mirror was unverified in the one
+    # region where it was false.
+    (0.03814697265625, "0.0381469726563"),
+    (0.6885986328125, "0.688598632813"),
+    (0.004302978515625, "0.00430297851563"),
+    (3.814697265625e-06, "0.00000381469726563"),
+    (-0.0, "0"),                      # JS String(-0) is "0", not "-0"
 ]
 
 
@@ -145,6 +156,13 @@ def test_the_margin_spelling_is_javascripts_spelling():
         pytest.skip("node is not installed; the pinned table still guards")
     values = [v for v, _ in LEVER_SPELLINGS]
     rng = random.Random(20260829)
+    # Dyadics FIRST: uniform randoms cannot find a 13-significant-figure tie,
+    # so a sweep made only of them proves the mirror exactly where it holds
+    # and never where it breaks.
+    values += [k / 2 ** n
+               for n in range(1, 40)
+               for k in (1, 3, 5, 7, 9, 11, 13, 141, 1409)
+               if 0 < k / 2 ** n < MAX_MARGIN]
     values += [rng.uniform(0.0, MAX_MARGIN) for _ in range(300)]
     values += [rng.uniform(0.0, 1e-4) for _ in range(100)]
     values += [1.0 / rng.uniform(0.2, 1.0) - 1.0 for _ in range(100)]

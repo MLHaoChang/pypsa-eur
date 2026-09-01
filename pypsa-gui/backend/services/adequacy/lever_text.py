@@ -33,11 +33,36 @@ is installed.
 from __future__ import annotations
 
 import math
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 # How many significant figures a certified lever value is quoted to, on BOTH
 # sides of the wire. Twelve, not six, and not the badge's two.
 LEVER_SIGFIGS = 12
+
+
+def _round_like_js(value: float) -> float:
+    """`Number(value.toPrecision(12))` — round-half-UP on the exact binary value.
+
+    ★ NOT `f"{v:.12g}"`. That is IEEE round-half-to-EVEN, while ECMA-262's
+    `toPrecision` rounds half-UP, so the two disagree on every exact decimal
+    tie at the 13th significant figure — i.e. on dyadic rationals, which is
+    precisely what a bisection produces. Measured against `node`: 12
+    divergences in 364 dyadic values, e.g. 0.03814697265625 spelled
+    "0.0381469726562" here and "0.0381469726563" in the panel.
+
+    `Decimal(float)` is EXACT (it takes the binary value, not a decimal
+    approximation of it), so quantising it half-up reproduces what JS does.
+    """
+    if not math.isfinite(value):
+        return value
+    if value == 0.0:
+        # Covers -0.0, which JS prints as "0": `String(-0) === "0"`.
+        return 0.0
+    d = Decimal(value)
+    # `adjusted()` is the exponent of the most significant digit, so this
+    # quantum keeps exactly LEVER_SIGFIGS of them.
+    quantum = Decimal(1).scaleb(d.adjusted() - (LEVER_SIGFIGS - 1))
+    return float(d.quantize(quantum, rounding=ROUND_HALF_UP))
 
 
 def format_lever_value(value: float) -> str:
@@ -55,7 +80,7 @@ def format_lever_value(value: float) -> str:
     decimal that round-trips, so `repr`'s mantissa is JS's mantissa and
     `Decimal` only moves the point.
     """
-    y = float(f"{float(value):.{LEVER_SIGFIGS}g}")
+    y = _round_like_js(float(value))
     if not math.isfinite(y):
         # Not reachable for either lever, but a formatter that raises is worse
         # than one that says so.
