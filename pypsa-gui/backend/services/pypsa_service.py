@@ -382,7 +382,26 @@ class PyPSAService:
                     prev.solver_state[key] = None
             cls._publish_active(ProjectContext(
                 network=n,
-                solver_state=prev.solver_state,
+                # ★ A COPY, not the same dict (Phase 11 review, BLOCKER 5).
+                #
+                # Carrying the object itself left the outgoing project's
+                # context and the fresh one pointing at ONE dict, so the clear
+                # above — which runs once, at swap time — cleared what was
+                # there THEN, and any study written AFTER the swap landed in a
+                # dict the old project still read. Reproduced over HTTP: load
+                # A, press "New", run a study, re-activate A, and A is served
+                # the scratch network's study. That is Phase 10's headline
+                # symptom with the order reversed.
+                #
+                # Copying is safe precisely because nothing depends on the
+                # dict's IDENTITY surviving a swap: `simulation._state` is
+                # `_ActiveStateProxy`, which resolves through
+                # `PyPSAService.get_solver_state()` on every access. The
+                # carry-forward's actual purpose — the user's solver_config
+                # and lifecycle surviving "New" — is preserved by the copy's
+                # VALUES. The lock stays shared: it guards both dicts, which
+                # is coarser than necessary and never wrong.
+                solver_state=dict(prev.solver_state),
                 solver_state_lock=prev.solver_state_lock,
                 undo=prev.undo,
                 # Carry the mutation_lock forward too (B4 Inc 2): the foreground

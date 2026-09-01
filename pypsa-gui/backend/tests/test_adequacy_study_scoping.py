@@ -229,3 +229,47 @@ def test_the_409_mesh_still_names_the_study_it_refuses_for(
         release.set()
         t.join(timeout=5)
         PyPSAService.get_solver_state().pop("coupling_loop", None)
+
+
+def test_a_study_run_AFTER_a_swap_does_not_leak_back_to_the_old_project(
+        client, install_network, api_project, session_state):
+    """★ BLOCKER 5: Phase 10's clear fixed one direction and not the other.
+
+    `reset_network` carries `solver_state` forward as the SAME dict object,
+    and Phase 10's clear runs once, at swap time. So it clears what was there
+    THEN — and anything written AFTER the swap lands in a dict the outgoing
+    project's context is still pointing at.
+
+    Reproduced over HTTP: load project A, press "New", run a study on the
+    fresh network, then re-activate A — and A is served the scratch network's
+    study. That is byte-for-byte Phase 10's headline symptom ("project A's
+    finished MC study was served for project B"), still live with the order
+    reversed.
+
+    The fix is that the fresh context gets its OWN state dict. Safe because
+    `simulation._state` is `_ActiveStateProxy`, which resolves through
+    `PyPSAService.get_solver_state()` on every access rather than holding a
+    bound reference — so nothing depends on the dict's identity surviving a
+    swap.
+
+    Bite (verified): carry `prev.solver_state` itself instead of a copy.
+    """
+    name = api_project("leak_probe_project")
+    assert client.get(f"/api/projects/{name}").status_code == 200
+    state_before = session_state(client)
+
+    assert client.post("/api/network/reset").status_code == 200
+    state_after = session_state(client)
+    assert state_after is not state_before, (
+        "the fresh context still ALIASES the outgoing project's state dict")
+
+    # A study belonging to the scratch network, written the way a worker would.
+    state_after["mc"] = {
+        "status": "done", "result": {"marker": "SCRATCH_ONLY"},
+        "error": None, "started_at": 1.0, "finished_at": 2.0, "thread": None,
+    }
+    assert _served_marker(client) == "SCRATCH_ONLY", "the fixture never took"
+
+    assert client.post(f"/api/projects/{name}/activate").status_code == 200
+    assert _served_marker(client) != "SCRATCH_ONLY", (
+        "project A is being served a study of the network that replaced it")
