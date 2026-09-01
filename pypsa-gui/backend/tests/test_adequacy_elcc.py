@@ -299,11 +299,14 @@ def test_portfolio_credit_is_not_the_sum_of_marginal_credits():
     lowest rungs cleared: Δ ≥ 34. **Portfolio ELCC = 34 MW**, against a sum of
     last-in credits of 8 + 8 = 16 MW.
 
-    The direction matters and is the interesting half: a sum of MARGINAL
-    (last-in) credits UNDERSTATES the portfolio, because each marginal
+    The direction matters and is the interesting half — ON THIS FIXTURE: two
+    farms with the SAME profile, so they share every peak hour, and a sum of
+    MARGINAL (last-in) credits UNDERSTATES the portfolio, because each marginal
     evaluation charges the asset for standing behind the other one. Reporting
     ``Σ elcc_mw`` as "the portfolio's firm capacity" is therefore wrong by more
-    than a factor of two on this fixture.
+    than a factor of two here. The direction is NOT general: see
+    ``test_a_sum_of_marginals_can_OVERSTATE_the_portfolio`` for members that
+    never overlap, where it inverts.
 
     BROKEN VARIANT (bite): make the reduced system share the baseline's
     residual (ignore the ``reduced`` argument in ``elcc_of_removal``) — the
@@ -584,3 +587,69 @@ def test_an_asset_that_carries_no_credit_is_reported_as_exactly_zero():
     assert row["status"] == "ok", row
     assert row["elcc_mw"] == 0.0
     assert row["elcc_share"] == 0.0
+
+
+# ── ★ the sign of non-additivity is not a law ───────────────────────────────
+#
+# Phase 12b (v3/v4 reviews, measured): two farms that NEVER overlap. Each is
+# worth a lot alone — the other still covers its half of the hours — while
+# the pair can never deliver more than one farm's output at any instant, so
+# the group is capped at max_h(Σ profile) = 100 MW. The sum of marginals
+# exceeds that cap. And the effect GROWS as the fleet loosens: with one more
+# thermal unit each marginal saturates at its own bracket ceiling.
+
+H20 = 20
+_A = np.zeros(H20); _A[:10] = 1.0          # farm A: hours 0–9
+_B = np.zeros(H20); _B[10:] = 1.0          # farm B: hours 10–19
+NONOVERLAP_CAP = 100.0
+NONOVERLAP_LOAD = 250.0
+
+
+def _nonoverlap_inputs(n_units: int):
+    """Two 100 MW must-take farms that never overlap, netted from a flat
+    250 MW load, against ``n_units`` × 30 MW at q = 0.15, MTTR 20 h."""
+    prof = {"a": _A * NONOVERLAP_CAP, "b": _B * NONOVERLAP_CAP}
+    tot = prof["a"] + prof["b"]
+    units = tuple(C.CoptUnit(name=f"u{i}", capacity_mw=30.0, q=0.15,
+                             basis="EFORd", mttr_hours=20.0, source="asset")
+                  for i in range(n_units))
+    return M.MCInputs(units=units,
+                      residual=np.maximum(NONOVERLAP_LOAD - tot, 0.0),
+                      weights=np.ones(H20), periods=(("ALL", 0, H20),),
+                      storage=(), nyears=1.0, vre_profiles=prof), tot
+
+
+@pytest.mark.parametrize("n_units, marg_each, portfolio", [
+    (5, 60.15625, 100.0),      # tight: shared-hour LOLE trades some back
+    (6, 100.0, 100.0),         # +30 MW slack: each marginal at its own ceiling
+])
+def test_a_sum_of_marginals_can_OVERSTATE_the_portfolio(n_units, marg_each,
+                                                         portfolio):
+    """★ Non-overlapping members: the sum of last-in credits OVERSTATES the
+    portfolio — 120.31 vs 100.00 at zero slack, 200 vs 100 at +30 MW — and
+    the overstatement GROWS as the fleet loosens. Pins the exact values so
+    the sentence in ``elcc_of_removal``'s docstring is a measurement, not a
+    belief.
+
+    BROKEN VARIANT (bite): make the group removal share the baseline's
+    residual (ignore ``reduced`` in ``elcc_of_removal``) — the portfolio then
+    removes nothing, its ELCC collapses to 0.0, and the ≈100 assertion fails.
+    """
+    from dataclasses import replace
+
+    inp, tot = _nonoverlap_inputs(n_units)
+    tol = E.default_tol_mw(float(tot.max()))
+    marg = {nm: E.elcc_for_asset(inp, "vre", nm, seed=0, draws=64)
+            for nm in ("a", "b")}
+    for nm, r in marg.items():
+        assert r["status"] == "ok", (nm, r)
+        assert abs(r["elcc_mw"] - marg_each) <= tol, (nm, r["elcc_mw"])
+    port = E.elcc_of_removal(
+        inp, reduced=replace(inp, residual=inp.residual + tot),
+        nameplate_mw=float(tot.max()), seed=0, draws=64)
+    assert port["status"] == "ok", port
+    assert abs(port["elcc_mw"] - portfolio) <= tol, port["elcc_mw"]
+    s = sum(r["elcc_mw"] for r in marg.values())
+    # the group's cap is physical: it never delivers more than 100 MW at once
+    assert port["elcc_mw"] <= float(tot.max()) + tol
+    assert s > port["elcc_mw"] + tol, (s, port["elcc_mw"])

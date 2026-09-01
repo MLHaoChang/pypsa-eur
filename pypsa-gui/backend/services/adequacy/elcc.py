@@ -225,10 +225,18 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
 
     This is the entry point for anything that is not a single named asset —
     notably a PORTFOLIO removal, which is what makes ELCC's non-additivity
-    testable: the sum of last-in credits UNDERSTATES a portfolio's joint
-    credit, because each marginal evaluation charges the asset for standing
-    behind the others. ``elcc_for_asset`` is this function plus name
-    resolution.
+    testable. The SIGN of that non-additivity is not a law. On fixtures whose
+    members share peak hours the sum of last-in credits UNDERSTATES the
+    portfolio, because each marginal evaluation charges the asset for
+    standing behind the others. It OVERSTATES when members do not overlap —
+    by up to k× for k such members, since each marginal is bracketed by its
+    own peak (``max_h(profile_i)``) while the group is capped at the most it
+    can deliver at once (``max_h(Σ profile_i)``) — and the effect GROWS as
+    the fleet loosens. Measured: two 100 MW farms, A available hours 0–9 and
+    B hours 10–19, flat 250 MW load, five 30 MW units at q = 0.15 (seed 0,
+    draws 64): marginals 60.16 + 60.16 = 120.31 against a portfolio of
+    100.00; with six units instead of five, 100 + 100 = 200 against 100.
+    ``elcc_for_asset`` is this function plus name resolution.
 
     ``sim_kwargs`` (e.g. ``initial_soc_frac``) reaches ``mc.simulate`` through
     ``mc_adequacy`` and is applied IDENTICALLY to the baseline and to every
