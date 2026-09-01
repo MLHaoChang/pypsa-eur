@@ -444,3 +444,144 @@ rather than inventing a second convention.
    anti-correlated case where the bracket asymmetry would bite. Is "observed
    on every fixture we have, not proved" the right standard for shipped text
    here, or should the docstring itself carry that qualifier?
+
+---
+
+# v2 REVIEW OUTCOME: **reject**. Do not implement this document.
+
+Recorded rather than quietly rewritten, per this project's convention — the
+same treatment v1 got. §§1, 2, 3 and 5 all need rewriting. **Every blocker
+below was re-verified independently before being accepted**; two of them were
+found to be understated, and one of the review's own conclusions is overturned
+at the end.
+
+## The six blockers, and what I checked
+
+**BLOCKER 1 — §1's three sets are not the sets the code has.** `V` and `M` are
+taken from walks with different `keep_zero_capacity`, and `V`'s capacity rule
+is `solved_capacity`, which for an extendable returns `p_nom_opt` — *including
+0.0*. **Verified in the source**: `copt.py:183-213`, whose own docstring says
+"on an UNSOLVED network PyPSA's `p_nom_opt` default is 0.0, so an extendable
+row reads as 0 MW until a solve writes a size"; `must_take_generators` walks at
+the default `False` (`copt.py:305`) while `reserve_margin_facts` walks at
+`True`. Two consequences, both fatal to §1 as written: an unbuilt extendable
+VRE farm with *no* outage data lands in `M \ V` and would be reported as
+`shadowed` — which Phase 12a's warning will never name, because that check is
+fed `source != "missing"`; and on a capacity-expansion network, the case the
+reserve margin exists for, every VRE candidate is extendable at
+`p_nom_opt = 0`, so **`V` is empty and the comparison covers nothing**. A6 as
+designed reports that as `0/(0+0)`, indistinguishable from "no VRE". §1's
+stated failure condition does not cover it. `covered_mw` also has no defined
+capacity rule, and `unpriceable_mw` is not computable at all — the generator
+branch `continue`s before capacity is recorded (`solver_service.py:3364`).
+
+**BLOCKER 2 — §2.3's netting basis does not exist where §2 computes it.**
+`p_nom` is never written back from `p_nom_opt`: the only assignment is the
+myopic freeze (`solver_service.py:5992`), and it pushes the originals onto
+`undo_actions` (6066-6067) so the restore puts `p_nom` back. **Verified**: the
+grep finds no other writeback, and `reserve_margin_facts` reads the raw
+`p_nom` column (`solver_service.py:3390`). So `netted_mw` for an extendable is
+**0 at every call site** — preflight, the LP wrapper, and every route — and
+§2.3's user-facing "run a solve first" is wrong advice. The dilemma is
+structural and the plan never states it: the one function that reads built
+capacity back (`report.py:104-116`) runs *after* restore on unscaled loads, so
+correct demand and real capacities are not available in the same place. §2.6's
+−58.7 % is only reachable on an all-fixed VRE fleet, which contradicts §2.3's
+own caveat.
+
+**BLOCKER 3 — A2 is inverted.** Load scaling multiplies every electrical load
+column in a period by one factor, and the window is a threshold on a
+monotone-rescaled series, so `derate_gross` **cannot** move; but `s·D − N` is
+not order-equivalent to `D − N`, so the net window does. **Verified
+independently**: on an 8760 h series at ×1.25, the gross window is identical
+(`True`) and the net window is not (`False`). So the ratio moves for the
+*correct* implementation and is constant under the named bite — A2 as written
+fails against correct code and passes against its bug. A consequence §2 does
+not disclose: the margin's derating table is currently invariant to load
+scaling and `derate_net` would not be, so preflight and the solve-time stash
+would publish different values for one asset with no copy explaining why.
+
+**BLOCKER 4 — A7 passes against its own bite.** Under the named bite the group
+removal removes nothing, `elcc_of_removal` short-circuits at the Δ = 0 probe
+and returns **0.0**, which differs from the marginal sum by far more than the
+tolerance — so A7's "differs by more than tol" assertion holds. **Verified on
+my own fixture**: marginals 60.16 + 60.16 = 120.31, correct portfolio 100.00
+(A7 passes), bite portfolio 0.0 → `|0.0 − 120.31| = 120.31 > 0.5` → **A7
+passes under its bite**. Dropping the direction is exactly what destroyed the
+bite the shipped test still has.
+
+**BLOCKER 5 — the bracket mechanism in §0.2 does not exist (but see the
+correction below).** The bracket is a search interval, not a coefficient.
+**Verified**: doubling the ceiling from `max_h(Σ)` = 100 MW to `Σ max_h` = 200
+MW moved the credit by **0.0000 MW**. `max_h(Σ)` is still the right ceiling —
+for the dominance reason at `elcc.py:61-69`, not the reason §0.2 gives — and
+A10's bite does not bite.
+
+**BLOCKER 6 — §3.2's boolean is not sufficient.** `snapshot_inputs` preserves a
+profile only for names passed in `vre_assets` (`mc.py:255-276`), so with a bare
+`elcc_portfolio: bool` there is nothing to sum; the route must compute the
+`V ∩ M` list, which needs the margin's membership walk inside `post_mc`. And an
+empty population is not refused: **verified**, `elcc_of_removal(nameplate_mw=0.0)`
+returns `{'status': 'ok', 'elcc_mw': 0.0, 'reason': None}` — a fabricated
+number, and given BLOCKER 1 the *modal* step-B answer on an expansion network.
+
+Also **SERIOUS 7** (§3 never states its load basis, so BLOCKER 2 of v1 is
+closed for step A only and reopened by step B), **SERIOUS 8** (step A is not
+free plumbing: `reserve_margin_payload` builds rows from an explicit
+whitelist, and `test_stash_shape` asserts stash keys with `==`, not `>=` —
+**verified**, `tests/test_adequacy_reserve_margin.py:594-601`), **SERIOUS 9**
+(A1 duplicates a shipped test and is defeated by the shared helper §2.1
+promises), **MINOR 10** (§3.3's injected baseline can silently desynchronise
+the CRN replay and has no ★ test), **MINOR 11** (storage and thermal members
+report an identically zero delta, so the diagnostic says "no problem" for the
+duration-limited battery whose credit is most window-sensitive).
+
+## Where the review is itself wrong, measured
+
+**BLOCKER 5 is right about the mechanism and too strong in its conclusion.**
+Widening the bracket is inert *when the located step is strictly inside it* —
+that is the reviewer's fixture and the six-farm one. It is **not** inert when
+the credit saturates at the ceiling, and then `max_h(Σ)` binds as a genuine
+physical bound: a group of non-overlapping farms cannot deliver more than
+`max_h(Σ)` at any instant, however much nameplate it owns.
+
+**And that overturns §0.3, the shipped docstring, and the review's own Q4.**
+On two farms that never overlap (A on hours 0–9, B on 10–19), each is worth
+60.16 MW alone — the other still covers its half — while the pair is capped at
+100 MW:
+
+| | MW |
+|---|---|
+| marginal A | 60.16 |
+| marginal B | 60.16 |
+| **Σ marginals** | **120.31** |
+| **portfolio** | **100.00** (= `max_h(Σ)`, the group's physical maximum) |
+
+**The sum OVERSTATES**, robustly: 7 of 8 runs across four seeds and two draw
+counts. So `elcc.py`'s shipped claim that a sum of last-in credits "UNDERSTATES
+a portfolio's joint credit" is **false in general**, and the review's Q4
+recommendation — leave it alone because the anti-correlated case was measured
+and did not invert — rests on a single fixture whose fleet was loose enough to
+hide it. The sign is not determined by correlation alone: it turns on how much
+of a removed asset's contribution the *remaining* fleet can absorb, which is a
+property of fleet tightness as much as of profile shape.
+
+So **A7's decision to assert a difference and not a direction was right** — for
+the ceiling reason, not the bisection reason §0.2 gave. The docstring needs
+qualifying, and that is now a finding about shipped user-facing text rather
+than an open question.
+
+## What v3 must do
+
+1. State `V`, `M` and `S` as the code defines them, define `S` by Phase 12a's
+   own predicate rather than as `M \ V`, give every reported MW a capacity
+   rule, and redesign A6 to report `|V|`, `|M|`, `|V ∩ M|`, `|S|` and the
+   extendable/fixed split separately so an empty `V` is its own outcome.
+2. Resolve the netting-capacity dilemma explicitly — pre-solve indicative at
+   `p_nom_max`/`p_nom_opt`, post-solve from the stash, or fixed members only —
+   and name the cost of the choice.
+3. Replace A1, A2, A7 and A10 with assertions that can fail.
+4. Split the phase, per the review's Q3 and more strongly than v2 leaned: step
+   A and step B fail for unrelated reasons and should not be re-reviewed as one
+   document. Step B is gated on the profile-discard **fix**, not on A6.
+5. Qualify `elcc.py`'s non-additivity docstring, with the counterexample above.
