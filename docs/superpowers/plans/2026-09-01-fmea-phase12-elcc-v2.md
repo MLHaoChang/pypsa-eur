@@ -12,6 +12,8 @@ shipped the *warning* (`outage_shadows_profile`), not the fix. §1 confronts
 that rather than proceeding as if it were closed. And v1's cost claims, which
 the review correctly called out as asserted rather than measured, are now
 measured; two of them were wrong, one in v1's favour and one in the review's.
+A third claim — my own, that ELCC's non-additivity might change sign on a
+diverse fleet — was measured and did not survive (§0.3).
 
 ---
 
@@ -75,19 +77,48 @@ correlation runs 0.03–0.62. That is a v1 bracket *policy* interacting with
 diversity, not a fact about capacity credit, and it is sufficient reason for v2
 to assert non-additivity without asserting its sign.
 
-### 0.3 The sign itself — measurement in flight
+That is the argument for caution. As a *prediction* it failed: §0.3 measures
+the sign and it did not invert. Read the two together — the caution survives,
+the prediction does not.
 
-Whether a sum of marginals over- or understates the portfolio on a DIVERSE
-fleet is being measured now, on the §0.1 fixture: all six marginals plus the
-portfolio, each one actually run. It is deliberately not extrapolated from a
-single marginal — doing exactly that during the v1 review produced a confident
-conclusion with the sign backwards, which is the reason this subsection exists
-at all.
+### 0.3 The sign itself — measured, and it did NOT invert
 
-Whatever it returns, §5's A7 does not depend on it: A7 asserts a *difference*,
-not a direction. The result decides §7 Q4 — whether `elcc.py`'s shipped
-docstring, which tells the user a sum "UNDERSTATES", needs qualifying as
-user-facing text.
+All six marginals plus the portfolio, each one actually run on the §0.1
+fixture (`draws=200`, `seed=0`; profile pairwise correlation 0.03–0.62, so
+these farms are diverse, not clones):
+
+| asset | ELCC (MW) | bracket ceiling (MW) |
+|---|---|---|
+| vre0 | 48.20 | 114.3 |
+| vre1 | 28.75 | 116.8 |
+| vre2 | 17.03 | 111.8 |
+| vre3 | 32.34 | 120.0 |
+| vre4 | 43.13 | 120.0 |
+| vre5 | 40.78 | 120.0 |
+| **Σ marginals** | **210.24** | 702.9 |
+| **portfolio** | **272.39** | 458.8 |
+
+**The sum understates the portfolio by 22.8 %** — the same direction
+`elcc.py`'s docstring states, and the same direction as the review's own
+independent 8760 h measurement (533.9 vs 631.6, understating by 15 %).
+
+**So my §0.2 argument was sound as a caution and wrong as a prediction.** The
+group's bracket really is 35 % narrower, and I argued that was enough reason to
+expect the sign could invert on a diverse fleet. It did not: the last-in
+penalty — each marginal charged for standing behind the other five — dominates
+the bracket asymmetry by a wide margin at this diversity. Two fixtures now, both
+understating.
+
+That is **evidence for the docstring, not proof of it**, and §5's A7 still
+asserts a difference rather than a direction. The distinction matters because
+the failure mode is asymmetric: a UI that promises "understates" and is wrong
+tells a user their fleet is worth more than it is. Nothing here has explored
+genuinely anti-correlated members (these are all positively correlated, 0.03
+being the weakest pair), and that is where the bracket asymmetry would have its
+best chance.
+
+Determinism was confirmed twice in passing: `vre0` and the portfolio each
+returned bit-identical values to a separate earlier run at the same seed.
 
 ---
 
@@ -405,8 +436,11 @@ rather than inventing a second convention.
    and answers a *different* question from a *different* standard. A defensible
    reading of the review is that step B should be its own phase gated on A6 —
    and I lean that way.
-4. **§0.2 vs a shipped docstring.** `elcc.py` tells the user a sum of last-in
-   credits *understates* a portfolio. If §0.2's measurement shows the sign can
-   invert, that docstring and any UI copy quoting it are wrong as stated and
-   need qualifying — a small change, but to shipped user-facing text, so it
-   should be a deliberate decision rather than a side effect of this phase.
+4. **§0.3 vs a shipped docstring — resolved, but confirm the reading.**
+   `elcc.py` tells the user a sum of last-in credits *understates* a portfolio.
+   Measured, it does, on two independent fixtures. My proposal is therefore to
+   leave the docstring alone and NOT let the phase quote it as a guarantee in
+   UI copy, because two positively-correlated fixtures are not the
+   anti-correlated case where the bracket asymmetry would bite. Is "observed
+   on every fixture we have, not proved" the right standard for shipped text
+   here, or should the docstring itself carry that qualifier?
