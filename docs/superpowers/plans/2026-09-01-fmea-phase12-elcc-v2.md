@@ -164,6 +164,16 @@ delta, and the two firm-capacity totals they imply.
 
 ### 2.2 Why this answers BLOCKER 2 by construction
 
+**The blocker's premise, verified rather than inherited.** `load_scalers` /
+`load_scalers_by_carrier` multiply `n.loads_t.p_set` in
+`_apply_modelling_assumptions` **before** the LP and revert it after
+(`solver_service.py:165-173`, and the restore discipline at 100 and 416-419).
+So `reserve_margin_facts` called from inside a solve reads scaled demand and
+the same function called from a route afterwards reads unscaled demand. Any
+design that measures one number in one context and the other in the other is
+comparing two systems, exactly as the review said — and A2's bite is
+constructible from this, not hypothetical.
+
 Both windows are built from the **same `demand` series**, from the **same
 `members` list**, inside the **same call**. Whichever network `reserve_margin_facts`
 is handed — solve-time scaled, or the restored network a route passes it — gross
