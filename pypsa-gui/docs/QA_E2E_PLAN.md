@@ -441,6 +441,24 @@ live reproduction: it needs an exception at a point no API input reaches. It
 is covered by two unit tests, one per stash, and this plan says so rather
 than shipping a check that could only pass.
 
+### S23 — The net-load window, live (area 23)
+| id | Assertion |
+|----|-----------|
+| S23.1 | On a flat-load network with one 100 MW wind farm whose profile is 1,0,1,0, `GET /results/reserve_margin` serves a `net_window` with `status="ok"`, the two hours the wind is **absent** as its snapshots, `netted_mw = 50`, and the farm's `derate_net = 0.0` beside its gross `derate = 0.5` — what the credit would have been on the hours the system actually runs short |
+| S23.2 | The same farm with a **flat 1.0** column reads `profile_kind = "constant"`, is not netted, and the block says `nothing_netted` with an empty window — never a zero-delta window dressed as a finding |
+
+**Why single-period.** A per-period profile cannot be set over the API on a
+multi-period network (recorded under S21 and S22), and the window is a
+per-period object regardless, so the flat network is the honest live surface
+for it. The vintage path — the net window on a row the restore has dropped —
+is covered by the unit test on the alternating-profile vintage fixture, whose
+built size (70 MW) and net derate (0.0) the plan review reproduced end to end.
+
+**Why the copy matters here.** The panel line and the "Net derate" column are
+a SECOND PROXY in the margin's own units, never a correction, and "netted
+capacity" is not "VRE" — a thermal maintenance schedule is netted too. Both
+are pinned by component tests that assert the words do not appear.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

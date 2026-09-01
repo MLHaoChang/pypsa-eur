@@ -3,6 +3,7 @@ import { AlertTriangle, ShieldCheck } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import type {
   ReserveMarginAsset, ReserveMarginPayload, ReserveMarginPeriod,
+  NetWindowBlock,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -129,6 +130,46 @@ export function peakHoursCell(stamps: string[], n: number): string {
  * `<blank>` in the roll-up) reads as data the user forgot to enter and sends
  * them hunting for an outage rate that should not exist. Name what it is.
  */
+/** Phase 12b — the derate the row WOULD have had on the net-load window.
+ *  `—` carries a title that says WHY there is no number, by `profile_kind`:
+ *  the reader must be able to tell "no profile" from "a profile that is
+ *  constant in this period" from "no net window this period". */
+export function derateNetText(
+  a: Pick<ReserveMarginAsset, 'derate_net' | 'profile_kind'>,
+): { text: string; title: string } {
+  if (a.derate_net != null && Number.isFinite(a.derate_net)) {
+    return {
+      text: a.derate_net.toFixed(3),
+      title: 'What the derate WOULD have been had the standard been built on the net-load window. A second proxy in the margin\'s own units — never a correction.',
+    }
+  }
+  switch (a.profile_kind) {
+    case 'constant':
+      return { text: '—', title: 'Constant in this period — window-independent.' }
+    case 'varying':
+      return { text: '—', title: 'No net-load window in this period (see the status above).' }
+    default:
+      return { text: '—', title: 'No profile — window-independent.' }
+  }
+}
+
+/** Phase 12b — one sentence per period. Never "corrected", never "VRE". */
+export function netWindowSentence(nw: NetWindowBlock | null | undefined): string {
+  if (!nw) return 'Net-load window: not computed by this backend.'
+  if (nw.status === 'nothing_netted') {
+    return 'No profile-bearing capacity in the built plan; the net-load window is the gross window.'
+  }
+  if (nw.status === 'no_finite_demand') {
+    return 'No finite demand in this period; no window could be selected on either series.'
+  }
+  const m = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)} MW`)
+  return (
+    `Net-load window: ${nw.n_hours} h; ${nw.overlap_hours ?? '—'} shared with the gross window; ` +
+    `profile-bearing capacity netted ${m(nw.netted_mw)} (${nw.netted_assets.join(', ')}); ` +
+    `firm credit ${m(nw.firm_gross_mw)} → ${m(nw.firm_net_mw)} on the net window.`
+  )
+}
+
 export function basisLabel(basis: string | null | undefined,
                            source?: string | null): string {
   const b = (basis ?? '').trim()
@@ -247,6 +288,18 @@ function DeratingTable({ assets }: { assets: ReserveMarginAsset[] }) {
             <th className="text-left font-medium py-1 pr-3">Derate</th>
             <th
               className="text-left font-medium py-1 pr-3"
+              title="What the derate WOULD have been on the net-load window (demand minus every varying-profile unit's availability). A second proxy in the margin's own units — never a correction. Hover a dash to see why there is no number."
+            >
+              Net derate
+            </th>
+            <th
+              className="text-left font-medium py-1 pr-3"
+              title="Whether this row shaped the net-load window: a varying profile AND built capacity. Netted capacity is not 'VRE' — a thermal maintenance schedule is netted too."
+            >
+              Netted
+            </th>
+            <th
+              className="text-left font-medium py-1 pr-3"
               title="FOR or EFORd. `1 − FOR` is not a UCAP derate: FOR excludes reserve-shutdown hours and is optimistic exactly for peakers."
             >
               Basis
@@ -280,6 +333,19 @@ function DeratingTable({ assets }: { assets: ReserveMarginAsset[] }) {
                 </td>
                 <td className="py-1 pr-3 font-mono" data-testid={`rm-asset-derate-${id}`}>
                   {a.derate.toFixed(3)}
+                </td>
+                <td
+                  className="py-1 pr-3 font-mono"
+                  data-testid={`rm-asset-derate-net-${id}`}
+                  title={derateNetText(a).title}
+                >
+                  {derateNetText(a).text}
+                </td>
+                <td
+                  className={'py-1 pr-3 ' + (a.netted ? 'text-accent' : 'text-muted')}
+                  data-testid={`rm-asset-netted-${id}`}
+                >
+                  {a.netted ? 'netted' : '—'}
                 </td>
                 <td className="py-1 pr-3 font-mono" data-testid={`rm-asset-basis-${id}`}>
                   {basisLabel(a.basis, a.source)}
@@ -358,6 +424,29 @@ export function ReserveMarginPanel() {
             </p>
 
             <PeriodTable rows={payload.by_period} />
+
+            {/* Phase 12b — the net-load window, one line per period. A
+                SECOND PROXY: the margin credits profile-bearing capacity on
+                the hours GROSS demand peaks; a system with such capacity
+                runs short on the hours NET demand peaks. The line says how
+                far apart those windows are and what the credit would have
+                been on the other one. It is never called a correction. */}
+            <div className="flex flex-col gap-0.5" data-testid="rm-net-window">
+              {payload.by_period.map(r => (
+                <p
+                  key={r.period}
+                  className="text-[10px] text-muted"
+                  data-testid={`rm-net-window-${r.period}`}
+                  data-status={r.net_window?.status ?? 'absent'}
+                  title={r.net_window?.snapshots?.length
+                    ? r.net_window.snapshots.join(', ')
+                    : undefined}
+                >
+                  {payload.by_period.length > 1 ? `${r.period}: ` : ''}
+                  {netWindowSentence(r.net_window)}
+                </p>
+              ))}
+            </div>
 
             {/* ★ Why two columns and not one green tick. */}
             <p className="text-[10px] text-muted" data-testid="reserve-margin-binding-note">

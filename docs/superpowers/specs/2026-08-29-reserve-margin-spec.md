@@ -285,3 +285,58 @@ worker's first-draft bite variants did not bite — the coord-membership test
 that reaches the real defence (the full capex-wrapper mirror; both membership
 call sites; stores repointed as a power rating). A test whose first bite fails
 is not a passing test — it is an untested one.
+
+### v1.3 — the net-load window (Phase 12b, plan v5 + v5.1)
+
+1. **§2.5 — one window rule, shared.** The peak-coincidence selection
+   (top 1 %, capped at 100, never fewer than 1, every snapshot tied with the
+   Nth-highest included, `prm_peak_hours` honoured) is extracted to
+   `services/adequacy/window.peak_window` and used for BOTH the gross window
+   the constraint credits on and the net-load window the payload selects
+   post-solve, so the two can only differ by their series.
+2. **§2.6 — the stash carries the demand and the profile leg.** Per period:
+   `demand_mw` (the SCALED demand `pd.Series` the constraint was built on)
+   and `peak_hours_override`. Per asset row: `q`, `profile_kind ∈ {"none",
+   "constant", "varying"}` (what the row's availability looked like IN THIS
+   PERIOD), `nettable` (= `profile_kind == "varying"`), and `profile` (the
+   member's `p_max_pu` series restricted to the period — the exact object
+   the derate was computed from — stashed ONLY when varying). All in memory,
+   never serialised; cleared at solve start and deleted at the report step.
+   The profile is stashed rather than re-read because the restore drops the
+   columns the vintage expansion cloned (`wind@2030`), and because every
+   demand- and profile-derived number must come from the same system.
+3. **§4 — the payload computes the net-load window, post-solve.** In
+   `reserve_margin_payload`, from the stashed demand, the stashed profiles
+   and BUILT capacity through the payload's own vintage-aware `_built`
+   (the rule `firm_mw` is computed with — one capacity rule, not two). A row
+   is `netted` when `nettable` and `cap is not None and cap > 0`; the net
+   series is `demand − Σ fillna(profile, 0) × cap` over netted rows (rule 1:
+   an unknown hour is unavailable). Per period a `net_window` block is
+   ALWAYS present with `status ∈ {"ok", "nothing_netted", "no_finite_demand"}`,
+   `netted_assets`, `snapshots`, `n_hours`, `net_peak_mw`,
+   `gross_at_net_peak_mw`, `netted_mw`, `overlap_hours`, `firm_gross_mw`,
+   `firm_net_mw` (numerics null unless `ok`). Per asset row: `profile_kind`,
+   `nettable`, `netted`, and `derate_net` = `(1 − q) × _finite(mean(profile
+   over the net window), 0.0)` — `derate`'s own expression on the other
+   window (rule 2), null for a row without a varying profile. A constant
+   profile is window-independent and is never netted; a thermal maintenance
+   schedule varies and IS netted, as a decision — "netted capacity" is not
+   "VRE". The block is a SECOND PROXY in the margin's own units, never a
+   correction; the copy never says "corrected".
+4. **§4 — models and sanitiser.** `models/adequacy.py` gains
+   `NetWindowBlock`, `ReserveMarginPeriod.net_window`, and the four asset
+   fields; `ReserveMarginPeriod.peak_mw` / `required_mw` widen to
+   `float | None` so the report surface degrades on non-finite demand as the
+   route already did, instead of throwing the whole adequacy report away.
+   `sanitize_reserve_margin_payload` descends into `net_window` and into
+   asset rows. Amendment v1.2(7) is pinned by a test that compares the
+   report block to the route payload field for field.
+5. **§6 — the panel** gains a `derate_net` column beside `derate` (`—` with
+   "no profile" or "constant in this period — window-independent" by
+   `profile_kind`), a `netted` marker, and one summary line per period;
+   under myopic the block is the last period solved, as every other margin
+   field already is.
+6. **Two shipped defects fixed as the precondition (`2aa4dcd`):** the payload
+   credited zero to every vintage-expanded asset (the restore dropped the
+   rows before `_built` ran); and a run that failed between the wrapper and
+   the report step leaked its stash — both standards' — into the next solve.

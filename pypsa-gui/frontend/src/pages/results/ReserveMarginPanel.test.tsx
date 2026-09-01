@@ -22,7 +22,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import type { ReserveMarginPayload } from '../../api/simulation'
-import { ReserveMarginPanel, basisLabel, forOptimisticNote, maxAchievableText, peakHoursCell, scopeSentence } from './ReserveMarginPanel'
+import { ReserveMarginPanel, basisLabel, derateNetText, forOptimisticNote, maxAchievableText, netWindowSentence, peakHoursCell, scopeSentence } from './ReserveMarginPanel'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -48,22 +48,39 @@ const PAYLOAD: ReserveMarginPayload = {
     peak_snapshots: ['2030-01-01 00:00:00', '2030-01-01 01:00:00'],
     max_achievable_mw: 220,
     max_achievable_unbounded: false,
+    // Phase 12b: one farm shaped the net window; the gross window was the
+    // two peak hours, the net window is two DIFFERENT hours (overlap 0).
+    net_window: {
+      status: 'ok', netted_assets: ['wind'], snapshots: ['2030-01-01 02:00:00', '2030-01-01 03:00:00'],
+      n_hours: 2, net_peak_mw: 150, gross_at_net_peak_mw: 150, netted_mw: 50,
+      overlap_hours: 0, firm_gross_mw: 50, firm_net_mw: 0,
+    },
   }],
   assets: [
     {
       name: 'coal_a', period: 'ALL', kind: 'generator', capacity_mw: 100,
       derate: 0.9, basis: 'EFORd', source: 'asset', extendable: false,
       firm_mw: 90, energy_limited: false,
+      profile_kind: 'none', nettable: false, netted: false, derate_net: null,
     },
     {
       name: 'peaker', period: 'ALL', kind: 'generator', capacity_mw: 40,
       derate: 0.95, basis: 'FOR', source: 'carrier_default', extendable: true,
       firm_mw: 38, energy_limited: false,
+      // a flat p_max_pu column: constant in this period, so window-independent
+      profile_kind: 'constant', nettable: false, netted: false, derate_net: null,
     },
     {
       name: 'reservoir', period: 'ALL', kind: 'storage', capacity_mw: 20,
       derate: 0.98, basis: 'EFORd', source: 'carrier_default',
       extendable: false, firm_mw: 19.6, energy_limited: true,
+      profile_kind: 'none', nettable: false, netted: false, derate_net: null,
+    },
+    {
+      name: 'wind', period: 'ALL', kind: 'generator', capacity_mw: 100,
+      derate: 0.5, basis: '', source: 'missing', extendable: false,
+      firm_mw: 50, energy_limited: false,
+      profile_kind: 'varying', nettable: true, netted: true, derate_net: 0,
     },
   ],
   derating_bases: { EFORd: 2, FOR: 1 },
@@ -347,5 +364,78 @@ describe('ReserveMarginPanel — findings from the browser round', () => {
     expect(basisLabel('', 'missing')).not.toContain('blank')
     expect(basisLabel('EFORd', 'asset')).toBe('EFORd')
     expect(basisLabel('FOR', 'carrier_default')).toBe('FOR')
+  })
+})
+
+
+// ── Phase 12b — the net-load window ───────────────────────────────────────
+
+describe('ReserveMarginPanel — the net-load window (Phase 12b)', () => {
+  beforeEach(() => { useUIStore.setState({ resultsRange: null } as never) })
+
+  it('★ renders one line per period, with the status on the node and the hours in the title', async () => {
+    vi.mocked(resultsApi.getReserveMargin).mockResolvedValue(PAYLOAD)
+    renderPanel()
+    const line = await screen.findByTestId('rm-net-window-ALL')
+    expect(line.getAttribute('data-status')).toBe('ok')
+    expect(line.textContent).toContain('Net-load window: 2 h')
+    expect(line.textContent).toContain('0 shared with the gross window')
+    expect(line.textContent).toContain('netted 50.0 MW (wind)')
+    expect(line.textContent).toContain('50.0 MW → 0.0 MW')
+    expect(line.getAttribute('title')).toContain('2030-01-01 02:00:00')
+    // ★ the copy never promotes the second proxy to a correction, and never
+    // calls netted capacity "VRE" — a maintenance schedule is netted too.
+    expect(line.textContent).not.toMatch(/correct/i)
+    expect(line.textContent).not.toMatch(/\bVRE\b/)
+  })
+
+  it('★ nothing_netted is a sentence, not a zero-delta window', async () => {
+    const nw = { ...PAYLOAD.by_period[0].net_window!, status: 'nothing_netted' as const,
+      netted_assets: [], snapshots: [], n_hours: 0, net_peak_mw: null,
+      gross_at_net_peak_mw: null, netted_mw: null, overlap_hours: null,
+      firm_gross_mw: null, firm_net_mw: null }
+    vi.mocked(resultsApi.getReserveMargin).mockResolvedValue({
+      ...PAYLOAD, by_period: [{ ...PAYLOAD.by_period[0], net_window: nw }],
+    })
+    renderPanel()
+    const line = await screen.findByTestId('rm-net-window-ALL')
+    expect(line.getAttribute('data-status')).toBe('nothing_netted')
+    expect(line.textContent).toContain('the net-load window is the gross window')
+    expect(line.textContent).not.toContain('0 h')
+  })
+
+  it('★ mounts against a payload persisted BEFORE 12b (no net_window at all)', async () => {
+    vi.mocked(resultsApi.getReserveMargin).mockResolvedValue({
+      ...PAYLOAD, by_period: [{ ...PAYLOAD.by_period[0], net_window: undefined }],
+    })
+    renderPanel()
+    const line = await screen.findByTestId('rm-net-window-ALL')
+    expect(line.getAttribute('data-status')).toBe('absent')
+    expect(line.textContent).toContain('not computed by this backend')
+  })
+
+  it('★ the derating table says WHY a net derate is a dash, by profile_kind', async () => {
+    vi.mocked(resultsApi.getReserveMargin).mockResolvedValue(PAYLOAD)
+    renderPanel()
+    expect((await screen.findByTestId('rm-asset-derate-net-wind-ALL')).textContent).toBe('0.000')
+    const coal = screen.getByTestId('rm-asset-derate-net-coal_a-ALL')
+    expect(coal.textContent).toBe('—')
+    expect(coal.getAttribute('title')).toMatch(/No profile/)
+    const peaker = screen.getByTestId('rm-asset-derate-net-peaker-ALL')
+    expect(peaker.textContent).toBe('—')
+    expect(peaker.getAttribute('title')).toMatch(/Constant in this period/)
+    expect(screen.getByTestId('rm-asset-netted-wind-ALL').textContent).toBe('netted')
+    expect(screen.getByTestId('rm-asset-netted-coal_a-ALL').textContent).toBe('—')
+  })
+
+  it('derateNetText / netWindowSentence: the three dash reasons are distinct, and the sentences are honest', () => {
+    expect(derateNetText({ derate_net: null, profile_kind: 'none' }).title).toMatch(/No profile/)
+    expect(derateNetText({ derate_net: null, profile_kind: 'constant' }).title).toMatch(/Constant in this period/)
+    expect(derateNetText({ derate_net: null, profile_kind: 'varying' }).title).toMatch(/No net-load window/)
+    expect(derateNetText({ derate_net: 0.25, profile_kind: 'varying' }).text).toBe('0.250')
+    expect(netWindowSentence(null)).toMatch(/not computed/)
+    expect(netWindowSentence({ status: 'no_finite_demand', netted_assets: [], snapshots: [],
+      n_hours: 0, net_peak_mw: null, gross_at_net_peak_mw: null, netted_mw: null,
+      overlap_hours: null, firm_gross_mw: null, firm_net_mw: null })).toMatch(/No finite demand/)
   })
 })

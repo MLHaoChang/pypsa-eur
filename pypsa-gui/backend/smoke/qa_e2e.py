@@ -3582,6 +3582,147 @@ def suite_S22():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
 
+def suite_S23():
+    """
+    The net-load window on the surface a user reads (Phase 12b, spec v1.3).
+
+    The margin credits a profile-bearing unit on the hours GROSS demand
+    peaks; a system with such units runs short on the hours NET demand
+    peaks, and those are not the same hours. Fourteen unit tests drive the
+    payload directly; this drives the fixture, the profile and the solve over
+    HTTP and reads `GET /results/reserve_margin`.
+
+    Single-period on purpose: a per-period profile cannot be set over the
+    API on a multi-period network (recorded under S21/S22), and the window
+    is a per-period object anyway. Flat 150 MW load over four hours; a 200 MW
+    gas unit (EFORd 0.05 -> 190 firm); a 100 MW wind farm with NO outage
+    data whose profile is 1,0,1,0 -> gross window is all four tied hours,
+    derate 0.5, credited 50 MW. Net load is [50,150,50,150]: the net window
+    is hours 1 and 3, where the wind is absent, and its net derate is 0.0.
+    """
+    print("\nS23 - The net-load window, live (area 23)")
+    name = "qa_e2e_netwindow"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    def solve_and_read():
+        st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+        pf_errors = [f"{i.get('code')}: {str(i.get('message', ''))[:80]}"
+                     for i in ((pf or {}).get("issues") or [])
+                     if isinstance(i, dict) and i.get("severity") == "error"]
+        http("/api/simulation/run", method="POST")
+        solved = poll_solve()
+        st_rm, rm = http("/api/results/reserve_margin")
+        ok = isinstance(solved, dict) and solved.get("condition") == "optimal" and st_rm == 200
+        why = "" if ok else f"; solved={(solved or {}).get('condition')} preflight->{st_pf} errors={pf_errors or 'none'}"
+        return ok, rm or {}, why
+
+    idx = [f"2030-01-01T{h:02d}:00:00" for h in range(4)]
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S23.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("gas", "wind"):
+        built.append(http("/api/network/carriers", method="POST", body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-01-01 03:00",
+                            "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "base", "bus": "b", "carrier": "gas",
+                            "p_nom": 200.0, "marginal_cost": 10.0,
+                            "outage_rate_value": 0.05, "outage_rate_basis": "EFORd",
+                            "mttr_hours": 50.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "wind", "bus": "b", "carrier": "wind",
+                            "p_nom": 100.0, "marginal_cost": 0.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 150.0})[0])
+    st_ts, body_ts = http("/api/network/timeseries/generators/p_max_pu", method="PUT",
+                          body={"index": idx, "columns": ["wind"],
+                                "data": [[1.0], [0.0], [1.0], [0.0]]})
+    built.append(st_ts)
+    bad_build = [c for c in built if c not in (200, 201)]
+    if bad_build:
+        for i in (1, 2):
+            skip(f"S23.{i}", f"fixture build non-2xx={bad_build}; timeseries->{st_ts} {str(body_ts)[:80]}")
+        restore()
+        return
+
+    st_cfg, _ = put_cfg(reserve_margin=0.2)
+    ok, rm, why = solve_and_read()
+    row = ((rm.get("by_period") or [{}])[0])
+    nw = row.get("net_window") or {}
+    assets = {a.get("name"): a for a in (rm.get("assets") or [])}
+    w = assets.get("wind") or {}
+    want_hours = [idx[1].replace("T", " "), idx[3].replace("T", " ")]
+
+    # ── S23.1 — the net window is the hours the wind is ABSENT, and the net
+    # derate says what its credit would have been there: nothing.
+    record("S23.1",
+           st_cfg == 200 and ok and nw.get("status") == "ok"
+           and nw.get("netted_assets") == ["wind"]
+           and nw.get("snapshots") == want_hours
+           and nw.get("netted_mw") is not None and abs(float(nw["netted_mw"]) - 50.0) < 1e-6
+           and w.get("profile_kind") == "varying" and w.get("netted") is True
+           and w.get("derate") is not None and abs(float(w["derate"]) - 0.5) < 1e-6
+           and w.get("derate_net") is not None and abs(float(w["derate_net"])) < 1e-9,
+           f"cfg->{st_cfg}{why}; status={nw.get('status')} netted={nw.get('netted_assets')} "
+           f"hours={nw.get('snapshots')} (want {want_hours}) netted_mw={nw.get('netted_mw')} "
+           f"(want 50); wind derate={w.get('derate')} derate_net={w.get('derate_net')} "
+           f"(want 0.5 / 0.0)")
+
+    # ── S23.2 — a CONSTANT profile is not netted: the same farm with a flat
+    # 1.0 column reads `constant`, the block says nothing_netted, and the
+    # panel is not handed a zero-delta window dressed as a finding.
+    st_ts2, _ = http("/api/network/timeseries/generators/p_max_pu", method="PUT",
+                     body={"index": idx, "columns": ["wind"],
+                           "data": [[1.0], [1.0], [1.0], [1.0]]})
+    ok2, rm2, why2 = solve_and_read()
+    row2 = ((rm2.get("by_period") or [{}])[0])
+    nw2 = row2.get("net_window") or {}
+    w2 = ({a.get("name"): a for a in (rm2.get("assets") or [])}).get("wind") or {}
+    record("S23.2",
+           st_ts2 == 200 and ok2 and nw2.get("status") == "nothing_netted"
+           and nw2.get("snapshots") == [] and nw2.get("netted_mw") is None
+           and w2.get("profile_kind") == "constant" and w2.get("netted") is False
+           and w2.get("derate_net") is None,
+           f"ts->{st_ts2}{why2}; status={nw2.get('status')} hours={nw2.get('snapshots')} "
+           f"wind profile_kind={w2.get('profile_kind')} netted={w2.get('netted')} "
+           f"derate_net={w2.get('derate_net')} (want constant / False / None)")
+
+    restore()
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -3659,6 +3800,9 @@ def main() -> int:
 
     if run("S22"):
         suite_S22()
+
+    if run("S23"):
+        suite_S23()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

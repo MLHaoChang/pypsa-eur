@@ -497,14 +497,49 @@ export interface ReserveMarginAsset {
   /** A reservoir takes full POWER credit while its ENERGY limit is what binds
    *  it — recorded, not fixed (plan §1.4). */
   energy_limited: boolean
+  /** Phase 12b — what this row's availability looked like IN THIS PERIOD:
+   *  "none" (no time series — storage, a static p_max_pu), "constant" (a
+   *  series that does not vary here — window-independent), or "varying".
+   *  Optional: a payload persisted before 12b lacks it. */
+  profile_kind?: 'none' | 'constant' | 'varying'
+  /** `profile_kind === "varying"`. */
+  nettable?: boolean
+  /** `nettable` AND built — the row actually shaped the net-load window. */
+  netted?: boolean
+  /** What `derate` would have been had the standard been built on the
+   *  net-load window. A SECOND PROXY, never a correction. null when the row
+   *  has no varying profile or the period has no `ok` net window. */
+  derate_net?: number | null
+}
+
+/** Phase 12b — the net-load window for one period. ALWAYS present on a
+ *  period row served by a 12b backend, with a status rather than a null:
+ *  `nothing_netted` = no row is both nettable and built (the net window IS
+ *  the gross window; no zero-delta "finding" is published);
+ *  `no_finite_demand` = the stashed demand had no finite value. "Netted
+ *  capacity" is NOT "VRE": every unit whose availability varies over the
+ *  period is netted, a thermal maintenance schedule included. */
+export interface NetWindowBlock {
+  status: 'ok' | 'nothing_netted' | 'no_finite_demand'
+  netted_assets: string[]
+  snapshots: string[]
+  n_hours: number
+  net_peak_mw: number | null
+  gross_at_net_peak_mw: number | null
+  netted_mw: number | null
+  overlap_hours: number | null
+  firm_gross_mw: number | null
+  firm_net_mw: number | null
 }
 
 /** One investment period's standard and what met it. */
 export interface ReserveMarginPeriod {
   period: string
-  /** Unweighted MW maximum of electrical demand — never a weighted sum. */
-  peak_mw: number
-  required_mw: number
+  /** Unweighted MW maximum of electrical demand — never a weighted sum.
+   *  null when the stashed demand had no finite value (Phase 12b widened it
+   *  so the report surface degrades as the route already did). */
+  peak_mw: number | null
+  required_mw: number | null
   firm_mw: number
   /** firm_mw / peak_mw − 1; null when the period has no demand. */
   margin_achieved: number | null
@@ -526,6 +561,8 @@ export interface ReserveMarginPeriod {
    *  nobody entered. */
   max_achievable_mw: number | null
   max_achievable_unbounded: boolean
+  /** Phase 12b. Optional: a payload persisted before 12b lacks it. */
+  net_window?: NetWindowBlock | null
 }
 
 export interface ReserveMarginPayload {

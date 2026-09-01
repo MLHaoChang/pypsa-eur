@@ -138,6 +138,45 @@ class ReserveMarginAsset(BaseModel):
     # energy limit is what actually binds it — the mirror of the failure the
     # duration haircut exists to prevent. Recorded, not fixed (plan §1.4).
     energy_limited: bool = False
+    # Phase 12b — the net-load window. `profile_kind` says what the row's
+    # availability looked like IN THIS PERIOD: "none" (no time series —
+    # storage, a static p_max_pu), "constant" (a series that does not vary
+    # here — window-independent, so `derate_net` is null and the panel says
+    # so rather than "no profile"), or "varying". `nettable` is
+    # `profile_kind == "varying"`; `netted` adds "and built", which the stash
+    # cannot know. `derate_net` is what `derate` would have been had the
+    # standard been built on the net-load window: a second proxy, never a
+    # correction.
+    profile_kind: Literal["none", "constant", "varying"] = "none"
+    nettable: bool = False
+    netted: bool = False
+    derate_net: float | None = None
+
+
+class NetWindowBlock(BaseModel):
+    """The net-load window for one period (Phase 12b).
+
+    ALWAYS present on a period row, with a status rather than a null: a
+    diagnostic that is absent when it has nothing to say is indistinguishable
+    from one that was never computed. ``nothing_netted`` = no row in this
+    period is both `nettable` and built — the net-load window IS the gross
+    window, and no zero-delta "finding" is published. ``no_finite_demand`` =
+    the stashed demand had no finite value (the static ``p_set`` wart), so
+    no window could be selected on either series.
+
+    "Netted capacity" is NOT "VRE": every unit whose availability varies over
+    the period is netted, a thermal maintenance schedule included, and
+    ``netted_assets`` says which."""
+    status: Literal["ok", "nothing_netted", "no_finite_demand"] = "ok"
+    netted_assets: list[str] = Field(default_factory=list)
+    snapshots: list[str] = Field(default_factory=list)
+    n_hours: int = 0
+    net_peak_mw: float | None = None
+    gross_at_net_peak_mw: float | None = None
+    netted_mw: float | None = None
+    overlap_hours: int | None = None
+    firm_gross_mw: float | None = None
+    firm_net_mw: float | None = None
 
 
 class ReserveMarginPeriod(BaseModel):
@@ -154,8 +193,12 @@ class ReserveMarginPeriod(BaseModel):
     already satisfies is met and not binding, and calling it binding would
     credit the margin for capacity that was always there."""
     period: str
-    peak_mw: float
-    required_mw: float
+    # None when the stashed demand had no finite value (the static `p_set`
+    # wart, plan v5.1 §3): the route already nulls these, and a model that
+    # refused the null threw the WHOLE adequacy report away while the route
+    # served the block — a two-surface divergence amendment v1.2(7) forbids.
+    peak_mw: float | None
+    required_mw: float | None
     firm_mw: float
     # firm_mw / peak_mw − 1, i.e. the margin the plan actually carries. None
     # when the period has no demand to take a margin over.
@@ -171,6 +214,7 @@ class ReserveMarginPeriod(BaseModel):
     # says which case the null is.
     max_achievable_mw: float | None = None
     max_achievable_unbounded: bool = False
+    net_window: NetWindowBlock | None = None
 
 
 class ReserveMarginBlock(BaseModel):

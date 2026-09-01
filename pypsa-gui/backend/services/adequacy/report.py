@@ -23,6 +23,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+
+import numpy as np
+import pandas as pd
 from dataclasses import asdict, is_dataclass
 
 import pandas as pd
@@ -153,7 +156,15 @@ def reserve_margin_payload(n, targets: dict) -> dict:
             val = _built_vintage(kind, name)
         return None if val is None else float(val)
 
-    assets: list[dict] = []
+    def _fin(v, default: float) -> float:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return default
+        return f if math.isfinite(f) else default
+
+    # ── first pass: built capacity and the gross credit, per row ──────────
+    rows_by_period: dict[str, list[tuple[dict, float | None]]] = {}
     firm_built: dict[str, float] = {}
     bases: dict[str, set] = {}
     for row in (stash.get("assets") or []):
@@ -164,18 +175,126 @@ def reserve_margin_payload(n, targets: dict) -> dict:
         if row.get("extendable"):
             firm_built[period] = firm_built.get(period, 0.0) + firm
         bases.setdefault(str(row.get("basis") or ""), set()).add(str(row.get("name")))
-        assets.append({
-            "name": str(row.get("name")),
-            "period": period,
-            "kind": str(row.get("kind")),
-            "capacity_mw": cap,
-            "derate": derate,
-            "basis": str(row.get("basis") or ""),
-            "source": str(row.get("source") or ""),
-            "extendable": bool(row.get("extendable")),
-            "firm_mw": firm,
-            "energy_limited": bool(row.get("energy_limited")),
-        })
+        rows_by_period.setdefault(period, []).append((row, cap))
+
+    # ── the net-load window, per period (Phase 12b) ───────────────────────
+    #
+    # The margin credits every profile-bearing member on the hours when
+    # GROSS demand peaks; a system with such members runs short on the hours
+    # when NET demand peaks, and those are not the same hours. This selects
+    # the second window by the SAME rule on the SAME stashed demand, nets
+    # only rows that are `nettable` (a varying profile) AND built, and
+    # reports what each member's derate would have been on it. A second
+    # proxy, never a correction — and "netted capacity" is not "VRE": it is
+    # every unit whose availability varies, thermal maintenance included.
+    from services.adequacy.window import peak_window
+
+    net_by_period: dict[str, dict] = {}
+    derate_net_by_row: dict[int, float | None] = {}
+    netted_by_row: dict[int, bool] = {}
+    for P, per in (stash.get("periods") or {}).items():
+        P = str(P)
+        demand = per.get("demand_mw")
+        rows = rows_by_period.get(P, [])
+        netted_rows = []
+        for row, cap in rows:
+            netted = bool(row.get("nettable")) and cap is not None and cap > 0
+            netted_by_row[id(row)] = netted
+            if netted:
+                netted_rows.append((row, cap))
+        block = {
+            "status": "ok",
+            "netted_assets": [str(r.get("name")) for r, _c in netted_rows],
+            "snapshots": [],
+            "n_hours": 0,
+            "net_peak_mw": None,
+            "gross_at_net_peak_mw": None,
+            "netted_mw": None,
+            "overlap_hours": None,
+            "firm_gross_mw": None,
+            "firm_net_mw": None,
+        }
+        demand_ok = (demand is not None and len(demand) > 0
+                     and bool(np.isfinite(demand.to_numpy(dtype=float)).any()))
+        if not demand_ok:
+            block["status"] = "no_finite_demand"
+        elif not netted_rows:
+            block["status"] = "nothing_netted"
+        else:
+            # Rule 1: an hour whose availability is UNKNOWN is netted as
+            # unavailable (fillna 0) — pandas would otherwise skip it
+            # silently and the hour would drop out of the window.
+            net = demand.astype(float).copy()
+            netted_series = pd.Series(0.0, index=demand.index)
+            for row, cap in netted_rows:
+                # The ONE line that implements rule 1. A plain `+` follows on
+                # purpose: `Series.add(..., fill_value=0.0)` would re-apply
+                # the rule by accident and hide a regression of this line —
+                # the first bite of B10 did not bite for exactly that reason.
+                contrib = row["profile"].reindex(demand.index).fillna(0.0) * float(cap)
+                netted_series = netted_series + contrib
+            net = net - netted_series
+            net_idx = peak_window(net, n_override=per.get("peak_hours_override"))
+            if len(net_idx) == 0:
+                block["status"] = "no_finite_demand"
+            else:
+                gross_snaps = set(per.get("peak_snapshots") or [])
+                net_snaps = [str(x) for x in net_idx]
+                firm_gross = 0.0
+                firm_net = 0.0
+                for row, cap in rows:
+                    kind = str(row.get("profile_kind") or "none")
+                    if kind == "none":
+                        continue
+                    derate = float(row.get("derate", 0.0) or 0.0)
+                    if kind == "varying":
+                        # Rule 2: derate_net is `derate`'s own expression on
+                        # the other window — a `_finite`-guarded skipna mean,
+                        # so an all-NaN window reads 0.0, not NaN.
+                        q = _fin(row.get("q"), 0.0)
+                        avail = _fin(row["profile"].reindex(net_idx).mean(), 0.0)
+                        dn = (1.0 - q) * avail
+                        dn = max(0.0, min(1.0, dn if math.isfinite(dn) else 0.0))
+                        derate_net_by_row[id(row)] = dn
+                    else:
+                        dn = derate            # constant: window-independent
+                    if cap is not None:
+                        firm_gross += derate * cap
+                        firm_net += dn * cap
+                block.update({
+                    "snapshots": net_snaps,
+                    "n_hours": int(len(net_idx)),
+                    "net_peak_mw": _fin(net.max(), 0.0),
+                    "gross_at_net_peak_mw": _fin(demand.reindex(net_idx).mean(), 0.0),
+                    "netted_mw": _fin(netted_series.mean(), 0.0),
+                    "overlap_hours": int(len(gross_snaps & set(net_snaps))),
+                    "firm_gross_mw": firm_gross,
+                    "firm_net_mw": firm_net,
+                })
+        net_by_period[P] = block
+
+    # ── second pass: the asset rows, now with the net-window fields ───────
+    assets: list[dict] = []
+    for P in sorted(rows_by_period):
+        for row, cap in rows_by_period[P]:
+            derate = float(row.get("derate", 0.0) or 0.0)
+            firm = derate * cap if cap is not None else 0.0
+            assets.append({
+                "name": str(row.get("name")),
+                "period": P,
+                "kind": str(row.get("kind")),
+                "capacity_mw": cap,
+                "derate": derate,
+                "basis": str(row.get("basis") or ""),
+                "source": str(row.get("source") or ""),
+                "extendable": bool(row.get("extendable")),
+                "firm_mw": firm,
+                "energy_limited": bool(row.get("energy_limited")),
+                "profile_kind": str(row.get("profile_kind") or "none"),
+                "nettable": bool(row.get("nettable")),
+                "netted": netted_by_row.get(id(row), False),
+                "derate_net": derate_net_by_row.get(id(row)),
+            })
 
     by_period: list[dict] = []
     for P, per in sorted((stash.get("periods") or {}).items()):
@@ -198,6 +317,7 @@ def reserve_margin_payload(n, targets: dict) -> dict:
             "n_peak_hours": int(per.get("n_peak_hours", 0) or 0),
             "peak_snapshots": [str(x) for x in (per.get("peak_snapshots") or [])],
             "max_achievable_mw": float(per.get("max_achievable_mw", 0.0) or 0.0),
+            "net_window": net_by_period.get(str(P)),
         })
 
     return {
@@ -242,8 +362,38 @@ def sanitize_reserve_margin_payload(payload: dict) -> dict:
                     r[key] = None
             except (TypeError, ValueError):
                 r[key] = None
+        # Phase 12b: descend into the net-window block. Its numerics are
+        # `_finite`-guarded upstream; this is belt and braces, because a NaN
+        # in a nested dict is exactly as much of a 500 as one at the top.
+        nw = r.get("net_window")
+        if isinstance(nw, dict):
+            nw = dict(nw)
+            for key in ("net_peak_mw", "gross_at_net_peak_mw", "netted_mw",
+                        "firm_gross_mw", "firm_net_mw"):
+                v = nw.get(key)
+                try:
+                    if v is not None and not math.isfinite(float(v)):
+                        nw[key] = None
+                except (TypeError, ValueError):
+                    nw[key] = None
+            r["net_window"] = nw
         rows.append(r)
     out["by_period"] = rows
+    # Asset rows were never sanitised: `derate` is clamped upstream so it was
+    # safe by accident. `derate_net` is guarded upstream too, and is nulled
+    # here as well so the guard is not the only thing between a NaN and a 500.
+    arows: list[dict] = []
+    for row in (out.get("assets") or []):
+        a = dict(row)
+        for key in ("derate_net", "firm_mw", "derate"):
+            v = a.get(key)
+            try:
+                if v is not None and not math.isfinite(float(v)):
+                    a[key] = None
+            except (TypeError, ValueError):
+                a[key] = None
+        arows.append(a)
+    out["assets"] = arows
     return out
 
 

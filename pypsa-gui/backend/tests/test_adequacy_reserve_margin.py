@@ -27,6 +27,7 @@ Every ★ below is one of the traps the spec exists to prevent; the plan's
 """
 from __future__ import annotations
 
+import math
 import queue
 import threading
 
@@ -588,7 +589,14 @@ def test_storage_with_inflow_is_flagged_energy_limited():
 # ── the stash ─────────────────────────────────────────────────────────────
 
 def test_stash_shape():
-    """§2.6 — the contract §4's report and §3's diagnoser read."""
+    """§2.6 — the contract §4's report and §3's diagnoser read.
+
+    Amendment v1.3 (Phase 12b): the period row also carries `demand_mw` —
+    the scaled demand Series itself, so the payload can select a net-load
+    window on the SAME demand the constraint was built on — and
+    `peak_hours_override`; the asset row carries `q`, `profile_kind`,
+    `nettable` and `profile`. All in memory only; none reach the wire.
+    """
     n, _ = _apply(_network(), reserve_margin=MARGIN)
     st = _stash(n)
     assert set(st) == {"margin", "horizon_wide", "periods", "assets"}
@@ -598,7 +606,10 @@ def test_stash_shape():
     per = st["periods"]["ALL"]
     assert set(per) == {
         "peak_mw", "peak_snapshots", "n_peak_hours", "required_mw",
-        "firm_fixed_mw", "max_achievable_mw"}
+        "firm_fixed_mw", "max_achievable_mw",
+        "demand_mw", "peak_hours_override"}
+    assert isinstance(per["demand_mw"], pd.Series)
+    assert list(per["demand_mw"].index) == list(n.snapshots)
     assert per["peak_mw"] == pytest.approx(LOAD_MW)
     assert per["required_mw"] == pytest.approx(REQUIRED_MW)
     assert per["firm_fixed_mw"] == pytest.approx(FIRM_FIXED_MW)
@@ -606,7 +617,11 @@ def test_stash_shape():
     for row in st["assets"]:
         assert set(row) >= {
             "name", "kind", "capacity_mw", "derate", "basis", "source",
-            "extendable", "energy_limited"}
+            "extendable", "energy_limited",
+            "q", "profile_kind", "nettable", "profile"}
+        assert row["profile_kind"] in ("none", "constant", "varying")
+        assert row["nettable"] == (row["profile_kind"] == "varying")
+        assert (row["profile"] is None) == (row["profile_kind"] != "varying")
 
 
 def test_stash_records_max_achievable_capacity():
@@ -1263,9 +1278,15 @@ def test_a_margin_only_run_reports_the_energy_it_actually_shed():
 # reported as `met=False`. The built size is recoverable from the per-vintage
 # breakdown the restore persists into `n.meta["vintage_results"]`.
 
-def _vintage_network() -> pypsa.Network:
+def _vintage_network(*, alternating: bool = False) -> pypsa.Network:
     """Two periods, one load, a cheap must-take wind candidate with per-period
-    bounds and an absurdly expensive peaker, so the margin is met by wind."""
+    bounds and an absurdly expensive peaker, so the margin is met by wind.
+
+    ``alternating=True`` gives wind the profile 1,0,1,0 across each period's
+    four hours (Phase 12b B3b): the gross window is all four tied hours, so
+    the derate is 0.5 and the LP must build 70 MW of `wind@2030` for 35 MW of
+    firm capacity; the net-load window is then exactly the two hours wind is
+    absent, and its `derate_net` is 0.0."""
     from services.vintage_service import set_bounds_for_asset
 
     sns = pd.MultiIndex.from_product(
@@ -1287,7 +1308,8 @@ def _vintage_network() -> pypsa.Network:
     n.add("Generator", "wind", bus="b", carrier="wind", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=500.0, capital_cost=1000.0,
           marginal_cost=0.0, build_year=2030, lifetime=100,
-          p_max_pu=pd.Series(1.0, index=sns))
+          p_max_pu=pd.Series(
+              ([1.0, 0.0, 1.0, 0.0] * 2) if alternating else 1.0, index=sns))
     set_bounds_for_asset(n, "Generator", "wind",
                          {"2030": {"p_nom_min": 0.0, "p_nom_max": 100.0},
                           "2040": {"p_nom_min": 0.0, "p_nom_max": 100.0}})
@@ -1394,3 +1416,453 @@ def test_a_failed_ens_cap_run_does_not_leak_its_targets_into_the_next_solve():
     assert sink2.get("adequacy_report") is None, (
         "a run that set no standard published an adequacy report: "
         f"{sink2.get('adequacy_report')}")
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 12b — the net-load window (plan v5 + v5.1). Every ★ names its bite.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _payload(n):
+    from services.adequacy.report import reserve_margin_payload
+    return reserve_margin_payload(n, _stash(n))
+
+
+def _add_profiled(n, name, values, *, p_nom=100.0, carrier="wind",
+                  extendable=False):
+    """A generator with a TIME-SERIES `p_max_pu`. Carrier `wind` has no
+    entry in the defaults library → must-take, priced by its profile alone."""
+    kw = dict(bus="b", carrier=carrier, marginal_cost=0.0,
+              p_max_pu=pd.Series(list(values), index=n.snapshots))
+    if extendable:
+        kw.update(p_nom=0.0, p_nom_extendable=True, p_nom_max=500.0,
+                  capital_cost=1000.0)
+    else:
+        kw.update(p_nom=p_nom)
+    if carrier not in n.carriers.index:
+        n.add("Carrier", carrier)
+    n.add("Generator", name, **kw)
+    return n
+
+
+def _row(payload, name, period="ALL"):
+    for a in payload["assets"]:
+        if a["name"] == name and a["period"] == period:
+            return a
+    raise KeyError((name, period))
+
+
+def _snaps(n, *positions):
+    return [str(n.snapshots[i]) for i in positions]
+
+
+# ── ★ B1: the net window's CONTENT, on a fixture whose ordering is known ──
+
+def test_the_net_window_is_the_hours_the_profile_is_absent():
+    """★ Flat 150 MW load, one 100 MW farm on hours 0 and 2, off 1 and 3.
+    Net load is [50,150,50,150]; N=1; the ≥-threshold rule returns BOTH
+    tied hours 1 and 3. The gross window is all four (flat), so the overlap
+    is 2 and the two windows are different objects.
+
+    BROKEN VARIANTS (bites): (a) select the net window on gross demand —
+    flat, so all four hours; (b) `nlargest(1)` — one hour.
+    """
+    n = _add_profiled(_network(peaker=False), "wind", [1, 0, 1, 0])
+    _apply(n, reserve_margin=0.2)
+    nw = _payload(n)["by_period"][0]["net_window"]
+    assert nw["status"] == "ok", nw
+    assert nw["netted_assets"] == ["wind"]
+    assert nw["snapshots"] == _snaps(n, 1, 3)
+    assert nw["n_hours"] == 2
+    assert nw["overlap_hours"] == 2
+    assert nw["net_peak_mw"] == pytest.approx(150.0)
+    assert nw["gross_at_net_peak_mw"] == pytest.approx(150.0)
+    assert nw["netted_mw"] == pytest.approx(50.0)     # 100 × mean(1,0,1,0)
+
+
+# ── ★ B2: the demand comes from the STASH, never from the network ─────────
+
+def test_the_net_window_is_selected_on_the_stashed_demand_not_a_reread():
+    """★ v1's BLOCKER 2 as a regression test. After the wrapper stashes a
+    flat-150 demand, the network's load is overwritten with a spike that
+    would put the net window on hour 2 alone. The payload must still report
+    the stashed window (hours 1 and 3).
+
+    Guard (the Phase-9 lesson): the two candidate windows are asserted to
+    DIFFER first, so the fixture can see the defect.
+
+    BROKEN VARIANT (bite): rebuild the demand series from `n.loads` inside
+    the payload — the spike then selects hour 2.
+    """
+    n = _add_profiled(_network(peaker=False), "wind", [1, 0, 1, 0])
+    _apply(n, reserve_margin=0.2)
+    # simulate the restore leaving DIFFERENT loads behind
+    n.loads.at["l", "p_set"] = 0.0
+    n.loads_t.p_set["l"] = pd.Series([0.0, 0.0, 300.0, 0.0], index=n.snapshots)
+    from services.adequacy.window import peak_window
+    reread_net = n.loads_t.p_set["l"] - 100.0 * pd.Series([1, 0, 1, 0], index=n.snapshots)
+    assert [str(x) for x in peak_window(reread_net)] == _snaps(n, 2)   # differs
+    nw = _payload(n)["by_period"][0]["net_window"]
+    assert nw["snapshots"] == _snaps(n, 1, 3), nw
+
+
+# ── ★ B3: built capacity through `_built`, not nameplate ───────────────────
+
+def test_an_extendable_is_netted_at_its_built_capacity():
+    """★ An extendable farm with `p_nom = 0` and a hand-set `p_nom_opt = 80`
+    (what a solve writes) is netted at 80: `netted_mw = 80 × 0.5 = 40`.
+
+    BROKEN VARIANT (bite): read `p_nom` — 0 — so the farm is not built, not
+    netted, and the block reads `nothing_netted`.
+    """
+    n = _add_profiled(_network(peaker=False), "wind", [1, 0, 1, 0], extendable=True)
+    _apply(n, reserve_margin=0.2)
+    n.generators["p_nom_opt"] = 0.0
+    n.generators.at["wind", "p_nom_opt"] = 80.0
+    p = _payload(n)
+    row = _row(p, "wind")
+    assert row["nettable"] is True and row["netted"] is True, row
+    assert row["capacity_mw"] == pytest.approx(80.0)
+    nw = p["by_period"][0]["net_window"]
+    assert nw["status"] == "ok" and nw["netted_mw"] == pytest.approx(40.0), nw
+
+
+# ── ★ B3b: a VINTAGE row on the netting path (v3 BLOCKER 1, pinned) ────────
+
+VINTAGE_ALT_WIND_MW = (VINTAGE_REQUIRED_MW - VINTAGE_BASE_FIRM_MW) / 0.5   # 70
+
+
+def test_a_vintage_row_is_netted_at_the_capacity_the_plan_built():
+    """★ The alternating-profile vintage fixture. The expansion clones the
+    1,0,1,0 profile onto `wind@2030`; the gross window is all four tied
+    hours so the derate is 0.5; the LP builds exactly 70 MW of `wind@2030`.
+    The restore then DROPS that row and its cloned column — so the profile
+    the payload nets with must be the stashed one and the capacity must come
+    through the vintage-aware `_built`.
+
+    Per period: `wind@2030` netted at 70 (`netted_mw = 35`); net load is
+    [80,150,80,150] so the net window is hours 1 and 3; `derate_net = 0.0` —
+    the wind is available only when load is already served, which is this
+    phase's whole point on one fixture. The zero-capacity rows are pinned
+    too: the parent `wind` (capacity 0) and `wind@2040` (built 0) are
+    `nettable` and NOT `netted`, so a bite that drops the `> 0` test flips
+    those flags even though it changes no number.
+
+    BROKEN VARIANT (bite): look the vintage up in the live `p_nom_opt` table
+    by name → None → not netted → `nothing_netted` for a plan that built it.
+    """
+    sink, status, _ = _solve(_vintage_network(alternating=True),
+                             reserve_margin=0.5, multi_investment_periods=True)
+    assert status == "ok", sink
+    from services.adequacy.report import sanitize_reserve_margin_payload
+    p = sanitize_reserve_margin_payload(sink["last_reserve_margin"])
+    per = {r["period"]: r for r in p["by_period"]}
+    assert set(per) == {"2030", "2040"}
+    for P in ("2030", "2040"):
+        assert per[P]["met"] is True, per[P]
+        nw = per[P]["net_window"]
+        assert nw["status"] == "ok", nw
+        assert nw["netted_assets"] == ["wind@2030"], nw
+        assert nw["netted_mw"] == pytest.approx(0.5 * VINTAGE_ALT_WIND_MW)   # 35
+        assert nw["n_hours"] == 2 and nw["net_peak_mw"] == pytest.approx(150.0)
+        v = _row(p, "wind@2030", P)
+        assert v["capacity_mw"] == pytest.approx(VINTAGE_ALT_WIND_MW, rel=1e-6)
+        assert v["nettable"] is True and v["netted"] is True
+        assert v["derate"] == pytest.approx(0.5)
+        assert v["derate_net"] == pytest.approx(0.0)
+        parent = _row(p, "wind", P)
+        assert parent["nettable"] is True and parent["netted"] is False, parent
+    v40 = _row(p, "wind@2040", "2040")
+    assert v40["capacity_mw"] == pytest.approx(0.0, abs=1e-9)
+    assert v40["nettable"] is True and v40["netted"] is False, v40
+
+
+# ── ★ B4: no profile ⇒ derate_net is null, not a zero delta ────────────────
+
+def test_a_profile_less_member_reports_no_net_derate():
+    """★ A storage unit has a duration haircut, not a profile: its credit is
+    window-independent, and a numeric "delta = 0" there would read as a
+    clean bill for exactly the asset most sensitive to which hours the
+    window picks. Null, with `profile_kind = "none"`.
+
+    BROKEN VARIANT (bite): compute `derate_net` for every row — a number
+    equal to `derate` appears.
+    """
+    n = _add_profiled(_network(peaker=False), "wind", [1, 0, 1, 0])
+    n.add("Carrier", "battery")
+    n.add("StorageUnit", "batt", bus="b", carrier="battery", p_nom=50.0,
+          max_hours=4.0)
+    _apply(n, reserve_margin=0.2)
+    row = _row(_payload(n), "batt")
+    assert row["profile_kind"] == "none"
+    assert row["nettable"] is False and row["netted"] is False
+    assert row["derate_net"] is None, row
+
+
+# ── ★ B5′: the empty case is a STATUS, and the block is present ────────────
+
+def test_nothing_netted_is_reported_as_a_status_not_as_a_zero_delta_window():
+    """★ No profile-bearing capacity at all. The block is present with
+    `status = "nothing_netted"`, an empty window and null numbers — never a
+    net window identical to the gross one with every delta at zero, which
+    would render as an all-clear.
+
+    BROKEN VARIANT (bite): publish the gross window as the net window.
+    """
+    n = _network()
+    _apply(n, reserve_margin=MARGIN)
+    nw = _payload(n)["by_period"][0]["net_window"]
+    assert nw is not None
+    assert nw["status"] == "nothing_netted", nw
+    assert nw["netted_assets"] == [] and nw["snapshots"] == [] and nw["n_hours"] == 0
+    for k in ("net_peak_mw", "gross_at_net_peak_mw", "netted_mw",
+              "overlap_hours", "firm_gross_mw", "firm_net_mw"):
+        assert nw[k] is None, (k, nw[k])
+
+
+# ── ★ B6: a SHADOWED farm is netted too (all of M, not the MC's residual) ──
+
+def test_a_shadowed_farm_is_netted_alongside_a_must_take_one():
+    """★ Two identical 100 MW farms with the 1,0,1,0 profile. `w_hydro` sits
+    on a carrier the defaults library prices (q = 0.02), so it is
+    occurrence-bearing — the Phase-12a shadowed case — while `w_wind` is
+    must-take. Both are netted: the window asks when the SYSTEM runs short,
+    and both farms' output reduces that. `netted_mw` is asserted EXACTLY as
+    both farms' contribution, 100.
+
+    BROKEN VARIANT (bite): net only `source == "missing"` — 50.
+    """
+    n = _add_profiled(_network(peaker=False), "w_wind", [1, 0, 1, 0])
+    _add_profiled(n, "w_hydro", [1, 0, 1, 0], carrier="hydro")
+    _apply(n, reserve_margin=0.2)
+    p = _payload(n)
+    assert _row(p, "w_hydro")["source"] == "carrier_default"
+    assert _row(p, "w_hydro")["netted"] is True
+    assert _row(p, "w_wind")["netted"] is True
+    nw = p["by_period"][0]["net_window"]
+    assert sorted(nw["netted_assets"]) == ["w_hydro", "w_wind"]
+    assert nw["netted_mw"] == 100.0, nw["netted_mw"]
+
+
+# ── ★ B8: the netting PREDICATE — a flat column cannot move a window ──────
+
+def test_only_a_varying_profile_is_netted():
+    """★ Three 100 MW gas units, all with a `p_max_pu` COLUMN: all-ones, a
+    flat 0.9, and a maintenance schedule (off at hour 2). The first two are
+    constant — subtracting a constant changes no ordering, and netting one
+    would let the panel report a gas unit as netted capacity (v3 BLOCKER 2).
+    The schedule varies and IS netted, as a stated decision.
+
+    BROKEN VARIANT (bite): use Phase 12a's `_profile_is_informative`, which
+    accepts a flat 0.9 — `gas_flat` is then netted and `netted_mw` reads 165.
+    """
+    n = _network(peaker=False)
+    _add_profiled(n, "gas_ones", [1, 1, 1, 1], carrier="gas")
+    _add_profiled(n, "gas_flat", [0.9, 0.9, 0.9, 0.9], carrier="gas")
+    _add_profiled(n, "gas_maint", [1, 1, 0, 1], carrier="gas")
+    _apply(n, reserve_margin=0.2)
+    p = _payload(n)
+    assert _row(p, "gas_ones")["profile_kind"] == "constant"
+    assert _row(p, "gas_flat")["profile_kind"] == "constant"
+    assert _row(p, "gas_maint")["profile_kind"] == "varying"
+    assert _row(p, "gas_ones")["netted"] is False
+    assert _row(p, "gas_flat")["netted"] is False
+    assert _row(p, "gas_maint")["netted"] is True
+    nw = p["by_period"][0]["net_window"]
+    assert nw["netted_assets"] == ["gas_maint"]
+    assert nw["netted_mw"] == pytest.approx(75.0)          # 100 × mean(1,1,0,1)
+    assert nw["snapshots"] == _snaps(n, 2)                 # the outage hour
+
+
+# ── ★ B9: the profile comes from the STASH — the column may be gone ────────
+
+def test_derate_net_survives_the_profile_column_being_dropped():
+    """★ What the restore does to a vintage's cloned column, done by hand:
+    after the wrapper stashes, the farm's `p_max_pu` column is deleted from
+    the network. The payload must still compute `derate_net` from the
+    stashed series (v3 BLOCKER 1(b)).
+
+    BROKEN VARIANT (bite): read `generators_t.p_max_pu[name]` in the payload
+    — the column is gone.
+    """
+    n = _add_profiled(_network(peaker=False), "wind", [1, 0, 1, 0])
+    _apply(n, reserve_margin=0.2)
+    n.generators_t.p_max_pu = n.generators_t.p_max_pu.drop(columns=["wind"])
+    assert "wind" not in n.generators_t.p_max_pu.columns
+    row = _row(_payload(n), "wind")
+    assert row["netted"] is True
+    assert row["derate_net"] == pytest.approx(0.0), row      # absent on hours 1, 3
+
+
+# ── ★ B10: NaN — two rules, both pinned ────────────────────────────────────
+
+def test_a_nan_availability_hour_is_netted_as_unavailable_and_stays_in_the_window():
+    """★ Rule 1 (window): profile [1, NaN, 1, 0]. NaN nets as 0, so net load
+    is [50,150,50,150] and hour 1 — the NaN hour — is IN the window with
+    hour 3. Rule 2 (derate_net): the guarded skipna mean over {1, 3} is
+    mean(NaN, 0) = 0.0, finite.
+
+    BROKEN VARIANT (bite): skip `fillna` — pandas skips the NaN hour in the
+    comparison and hour 1 silently drops out of the window.
+    """
+    n = _add_profiled(_network(peaker=False), "wind", [1.0, float("nan"), 1.0, 0.0])
+    _apply(n, reserve_margin=0.2)
+    p = _payload(n)
+    nw = p["by_period"][0]["net_window"]
+    assert nw["status"] == "ok"
+    assert nw["snapshots"] == _snaps(n, 1, 3), nw
+    row = _row(p, "wind")
+    assert row["derate_net"] == pytest.approx(0.0) and math.isfinite(row["derate_net"])
+
+
+def test_an_all_nan_net_window_reads_zero_not_nan_and_serialises():
+    """★ Profile [1, NaN, 0.5, 1]. It VARIES over its finite values (so it
+    is netted — a profile that is 1.0 everywhere except one NaN is constant
+    over its finite values and correctly is not, which is what the first
+    draft of this test got wrong). Net load is [50,150,100,50], the window
+    is hour 1 alone, and the only profile value there is NaN. The guarded
+    mean reads 0.0 — "unknown = unavailable", consistent with rule 1 — and
+    the sanitised payload serialises with `allow_nan=False`.
+
+    BROKEN VARIANT (bite): drop the `_finite` guard — `derate_net` is NaN and
+    the serialisation assertion fails.
+    """
+    import json
+    from services.adequacy.report import sanitize_reserve_margin_payload
+
+    n = _add_profiled(_network(peaker=False), "wind", [1.0, float("nan"), 0.5, 1.0])
+    _apply(n, reserve_margin=0.2)
+    p = _payload(n)
+    nw = p["by_period"][0]["net_window"]
+    assert nw["snapshots"] == _snaps(n, 1), nw
+    row = _row(p, "wind")
+    assert row["derate_net"] == 0.0, row
+    json.dumps(sanitize_reserve_margin_payload(p), allow_nan=False)
+
+
+# ── ★ B12: a `None` capacity on a nettable row must not lose the block ─────
+
+def test_a_missing_built_capacity_is_not_netted_and_does_not_lose_the_block():
+    """★ The vintage fixture solved, then its per-vintage breakdown removed
+    from `n.meta`, so `_built` returns None for `wind@2030`. The row is
+    `netted = False`, the block is present, and no exception escapes.
+
+    BROKEN VARIANT (bite): `cap > 0` without the `None` test — `TypeError`,
+    caught by the solver's broad except, and the whole margin block is gone.
+    """
+    from services.adequacy.report import reserve_margin_payload
+    import services.adequacy.report as R
+
+    n = _vintage_network(alternating=True)
+    captured = {}
+    orig = R.reserve_margin_payload
+
+    def spy(net, targets):
+        captured["targets"] = targets
+        return orig(net, targets)
+
+    R.reserve_margin_payload = spy
+    try:
+        sink, status, _ = _solve(n, reserve_margin=0.5, multi_investment_periods=True)
+    finally:
+        R.reserve_margin_payload = orig
+    assert status == "ok"
+    n.meta.pop("vintage_results", None)
+    p = reserve_margin_payload(n, captured["targets"])       # must not raise
+    v = _row(p, "wind@2030", "2030")
+    assert v["capacity_mw"] is None
+    assert v["nettable"] is True and v["netted"] is False
+    assert p["by_period"][0]["net_window"]["status"] == "nothing_netted"
+
+
+# ── ★ B13: non-finite demand degrades to a status on BOTH surfaces ─────────
+
+def test_non_finite_demand_yields_a_status_and_the_report_still_builds():
+    """★ A static `p_set` of NaN passes the facts loop (`float(nan or 0.0)`
+    is nan — the recorded wart) and the peak is NaN. Preflight refuses this
+    live, so the harness is the wrapper + payload directly. The route
+    surface nulls the peak; the report surface must ACCEPT that null rather
+    than throw the whole adequacy report away, which it did before
+    `ReserveMarginPeriod.peak_mw` was widened (v5 review SERIOUS 2).
+
+    BROKEN VARIANT (bite): `peak_mw: float` (non-Optional) — the report
+    validation raises.
+    """
+    from models.adequacy import ReserveMarginBlock
+    from services.adequacy.report import sanitize_reserve_margin_payload
+
+    n = _add_profiled(_network(peaker=False), "wind", [1, 0, 1, 0])
+    n.loads.at["l", "p_set"] = float("nan")
+    _apply(n, reserve_margin=0.2)
+    p = _payload(n)
+    nw = p["by_period"][0]["net_window"]
+    assert nw["status"] == "no_finite_demand", nw
+    san = sanitize_reserve_margin_payload(p)
+    assert san["by_period"][0]["peak_mw"] is None
+    block = ReserveMarginBlock.model_validate(san)            # must not raise
+    assert block.by_period[0].net_window.status == "no_finite_demand"
+
+
+# ── ★ B14: the report surface and the route surface AGREE, field for field ─
+
+def test_the_report_block_equals_the_route_payload_field_for_field():
+    """★ Amendment v1.2(7): the adequacy report and `/results/reserve_margin`
+    are two views of one payload. `net_window` is compared on
+    `.model_dump()` against the SANITISED sink payload (the route sanitises
+    at serve time; the report is built from the sanitised dict), so every
+    key the block emits must be one the model declares, and vice versa.
+
+    BROKEN VARIANT (bite): leave the pydantic models unchanged —
+    `AttributeError: 'ReserveMarginPeriod' object has no attribute
+    'net_window'`.
+    """
+    from services.adequacy.report import sanitize_reserve_margin_payload
+
+    sink, status, _ = _solve(_vintage_network(alternating=True),
+                             reserve_margin=0.5, multi_investment_periods=True)
+    assert status == "ok", sink
+    san = sanitize_reserve_margin_payload(sink["last_reserve_margin"])
+    rep = _report(sink).reserve_margin
+    assert rep is not None
+    for i, row in enumerate(rep.by_period):
+        assert row.net_window is not None
+        assert row.net_window.model_dump() == san["by_period"][i]["net_window"]
+    for i, a in enumerate(rep.assets):
+        for k in ("profile_kind", "nettable", "netted", "derate_net"):
+            assert getattr(a, k) == san["assets"][i][k], (a.name, k)
+
+
+# ── B11: the sanitiser descends (contract pin, not a bite) ─────────────────
+
+def test_the_sanitiser_nulls_non_finite_values_inside_the_net_window_and_asset_rows():
+    import json
+    from services.adequacy.report import sanitize_reserve_margin_payload
+
+    payload = {
+        "margin": 0.2, "horizon_wide": True,
+        "by_period": [{
+            "period": "ALL", "peak_mw": 150.0, "required_mw": 180.0,
+            "firm_mw": 190.0, "margin_achieved": 0.27, "met": True,
+            "binding": False, "n_peak_hours": 4, "peak_snapshots": [],
+            "max_achievable_mw": float("inf"),
+            "net_window": {"status": "ok", "netted_assets": ["w"],
+                           "snapshots": ["x"], "n_hours": 1,
+                           "net_peak_mw": float("nan"),
+                           "gross_at_net_peak_mw": 150.0,
+                           "netted_mw": float("inf"), "overlap_hours": 1,
+                           "firm_gross_mw": 1.0, "firm_net_mw": float("nan")},
+        }],
+        "assets": [{"name": "w", "period": "ALL", "kind": "generator",
+                    "capacity_mw": 100.0, "derate": 0.5, "basis": "",
+                    "source": "missing", "extendable": False,
+                    "firm_mw": 50.0, "energy_limited": False,
+                    "profile_kind": "varying", "nettable": True,
+                    "netted": True, "derate_net": float("nan")}],
+        "derating_bases": {},
+    }
+    san = sanitize_reserve_margin_payload(payload)
+    nw = san["by_period"][0]["net_window"]
+    assert nw["net_peak_mw"] is None and nw["netted_mw"] is None and nw["firm_net_mw"] is None
+    assert nw["gross_at_net_peak_mw"] == 150.0
+    assert san["assets"][0]["derate_net"] is None
+    json.dumps(san, allow_nan=False)

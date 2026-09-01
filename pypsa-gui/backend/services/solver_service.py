@@ -3498,20 +3498,12 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None) -> dict | None:
         peak = float(demand_p.max()) if len(demand_p) else 0.0
         required = (1.0 + margin) * peak
 
-        # Peak-coincidence window (§2.3). N scales with the horizon and
-        # EVERY snapshot tied with the Nth-highest demand is included —
-        # on a flat-demand fixture that is the whole period, not the
-        # first N by index order, which is what `nlargest` would give.
-        n_snaps = int(len(demand_p))
-        if n_snaps:
-            n_target = peak_hours_override or min(
-                100, max(1, int(round(0.01 * n_snaps))))
-            n_target = max(1, min(n_target, n_snaps))
-            threshold = float(
-                demand_p.sort_values(ascending=False).iloc[n_target - 1])
-            peak_idx = demand_p.index[demand_p >= threshold]
-        else:
-            peak_idx = demand_p.index
+        # Peak-coincidence window (§2.3): ONE rule, shared with the net-load
+        # window the payload selects post-solve (Phase 12b), so the two can
+        # only differ by their series. Every snapshot tied with the
+        # Nth-highest demand is included.
+        from services.adequacy.window import peak_window
+        peak_idx = peak_window(demand_p, n_override=peak_hours_override)
 
         active = {c: _active(c, P) for c in ("generators", "storage_units")}
 
@@ -3543,16 +3535,40 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None) -> dict | None:
 
             if mem["source"] == "carrier_default" and mem["name"] not in carrier_default:
                 carrier_default.append(mem["name"])
+            # Phase 12b: the profile leg is STASHED here, restricted to this
+            # period, because it is the object the derate above was computed
+            # from and it does not survive the restore — the vintage
+            # expansion clones `p_max_pu` onto `wind@2030` and the restore
+            # drops the column before the payload runs. Only a VARYING
+            # profile is kept: a constant one shifts every hour equally and
+            # cannot move a window, so stashing it would spend memory on a
+            # row that is never netted (plan v4 §2.2, v5.1 §6).
+            profile_kind = "none"
+            profile_p = None
+            if mem["profile"] is not None:
+                import numpy as _np
+                candidate = mem["profile"].reindex(demand_p.index)
+                vals = candidate.to_numpy(dtype=float)
+                fin = vals[_np.isfinite(vals)]
+                if fin.size and (fin.max() - fin.min()) > 1e-9:
+                    profile_kind = "varying"
+                    profile_p = candidate
+                else:
+                    profile_kind = "constant"
             stash["assets"].append({
                 "name": mem["name"],
                 "period": str(P),
                 "kind": mem["kind"],
                 "capacity_mw": capacity_mw,
                 "derate": d,
+                "q": float(mem["q"]),
                 "basis": mem["basis"],
                 "source": mem["source"],
                 "extendable": bool(mem["extendable"]),
                 "energy_limited": bool(mem["energy_limited"]),
+                "profile_kind": profile_kind,
+                "nettable": profile_kind == "varying",
+                "profile": profile_p,
             })
 
         terms[str(P)] = ext_here
@@ -3564,6 +3580,12 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None) -> dict | None:
             "required_mw": required,
             "firm_fixed_mw": firm_fixed,
             "max_achievable_mw": max_achievable,
+            # Phase 12b: the scaled demand series itself, so the payload can
+            # select a net-load window on the SAME demand the constraint was
+            # built on. Restore reverts the load scaling; a post-solve re-read
+            # would be a different system. In memory only, never serialised.
+            "demand_mw": demand_p,
+            "peak_hours_override": peak_hours_override,
         }
 
     # One horizon-wide variable set ⇒ one horizon-wide standard at the
