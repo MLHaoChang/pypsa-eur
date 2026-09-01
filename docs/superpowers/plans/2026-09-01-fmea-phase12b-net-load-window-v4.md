@@ -358,3 +358,67 @@ Carried into 12c's brief, including the three v3 dropped (v3 review M6):
    `solved_capacity` also learn vintages (via `n.meta["vintage_results"]`) so
    the adequacy engines and the payload agree on every row, rather than only
    on non-vintage ones — and is that this phase's work?
+
+---
+
+# v4 REVIEW OUTCOME: **reject — narrowly**. Do not implement this document; implement v5.
+
+One blocker, three serious, five minor. The architecture, the §1 premise
+(stash the profile at wrapper time), the §2.2 predicate, §2.5, §2.8's
+sanitiser claim and the §3 table all **survived verification** — the
+reviewer ran the pipeline with a recorder and saw the wrapper receive the
+cloned `wind@2030` column and the restore drop it; ran the loose-fleet table
+and reproduced every row; and confirmed under pandas 3.0.5 copy-on-write that
+a stashed Series survives the column being dropped. What failed is the
+acceptance section and two contract surfaces. Every finding below marked ✔
+was re-verified by me before acceptance.
+
+**BLOCKER 1 ✔ — B3b cannot pass under the plan's own predicate.** It names
+"the `2aa4dcd` fixture, `wind@2030` built to 36.84 MW". There are two
+fixtures and I conflated them: the unit fixture's wind is a **flat 1.0**
+time series and builds 35.0; S22's wind is a **static** 1.0 with outage data
+and builds 36.84. Both are constant, so §2.2 condition 2 refuses to net
+either, a correct implementation reports `nothing_netted`, and B3b's
+assertion fails against correct code while its bite is unreachable. The
+regression test for the finding that killed v3 did not exist as written.
+
+**SERIOUS 2 ✔ — `netted` is one name for two predicates, and condition 3
+raises.** The stash cannot know `_built` (it needs `p_nom_opt`), so a
+stash-level `netted` can encode only conditions 1–2. And `_built` returns
+`None` for an extendable with no live row and no `vintage_results` entry
+(`report.py:147-155`, read); `None > 0` is a `TypeError` that lands in the
+broad `except` at the payload call and drops the **entire** margin block.
+
+**SERIOUS 3 ✔ — `models/adequacy.py` is missing from §2.8.**
+`ReserveMarginPeriod` and `ReserveMarginAsset` set no `extra` config (read:
+no `model_config` on either), so pydantic's default silently discards
+`net_window`, `derate_net` and `netted`. The adequacy report would lack them
+while `/results/reserve_margin` served them — the two-surface drift amendment
+v1.2(7) forbids — and a shape test against the route would pass.
+
+**SERIOUS 4 ✔ — B10's bite does not do what v4 says, and "mirroring the facts
+loop" is false.** pandas skips NaN in `max`, `sort_values` and `>=`, so
+without `fillna` no NaN reaches the wire; the defect is a **silently missing
+hour** in the net window. And the facts loop does *not* fillna the profile —
+`derate` is `mean()` over the window, skipna — so `derate` treats NaN as
+absent while v4's netting treated it as zero, undisclosed.
+
+**MINOR 5 ✔** — "NaN cannot reach it" is false: the static `p_set` branch is
+`float(x or 0.0)`, and `nan or 0.0` is `nan`. Today the sanitiser nulls the
+result and the block ships; a finiteness assertion would lose the whole
+block. **MINOR 6 ✔** — line references drifted by the 14-line `2aa4dcd`
+insertion, and the `_normalise_dynamic_indexes` sentence is irrelevant (it
+runs before the wrapper). **MINOR 7** — §3's table verified exactly; the
+wording should lead with the cap algebra, `Σ_i max_h(p_i) / max_h(Σ p_i)`,
+which is k× for k non-overlapping members, so "up to 2×" is not a bound; and
+`tests/test_adequacy_elcc.py:300-310` states the direction generally too.
+**MINOR 8** — the predicate behaves correctly on every adversarial column
+tried; a period-constant profile should render "constant in this period".
+**MINOR 9** — §7 paraphrases 12a §2(a) inside quotation marks; §2.6 should
+say the solve-start clear suffices *because* nothing reads the attribute
+between solves.
+
+**Verified correct and carried into v5 unchanged:** §1's premise, B9's
+copy-on-write survival and its bite, `_built_vintage`'s behaviour on every
+edge tried, B8's bite, §2.8's sanitiser-does-not-descend claim and the
+Starlette 500 on a nested NaN, B5′ as a plausible bug, B1/B2/B3/B6/B7/B7b.
