@@ -93,7 +93,13 @@ from services.solver_service import SolverConfig
 
 def _reset_backend_state() -> None:
     """Fresh singleton network (unbound) + cleared lifecycle/result state."""
-    PyPSAService.reset_network()  # new Network, _loaded_project -> None
+    # `allow_during_study=True` is exactly the internal caller the opt-out
+    # exists for (Phase 11 review, finding 9): a test that leaves a live
+    # study thread in the process foreground would otherwise raise 409 OUT
+    # of this autouse fixture, skipping every cleanup below it — the
+    # registry clear, `_user_ts`, undo and the solve queue — so state bled
+    # into the next test and the failure surfaced far from its cause.
+    PyPSAService.reset_network(allow_during_study=True)
     PyPSAService._contexts.clear()  # B2 registry: no resident ctxs bleed across tests
     # `_user_ts` is a PROCESS-GLOBAL time-series store in routers.network (keyed
     # by (component, attr, name)), NOT a per-context field — so reset_network()

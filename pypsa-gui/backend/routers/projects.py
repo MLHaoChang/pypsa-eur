@@ -857,6 +857,12 @@ async def import_bundle(
     not interpret ``import_bundle`` as a value for the ``name`` path parameter
     of the save endpoint (which would silently call save_project).
     """
+    # ★ Precheck BEFORE any destructive work (Phase 11 review).
+    # The guard inside `reset_network` fires too late here: by then this
+    # route has already committed the project row and written its files. Worse, the retry the
+    # refusal advises then fails FOREVER, because the committed row makes
+    # every attempt 409 with "already exists" instead.
+    PyPSAService.refuse_if_study_running("import a project bundle")
     from services.upload_guard import read_capped
     data = await read_capped(file)
 
@@ -1133,6 +1139,12 @@ def create_from_template(
     MUST be registered before `POST /{name}` so FastAPI does not interpret
     `from_template` as a value for the `name` path parameter of save_project.
     """
+    # ★ Precheck BEFORE any destructive work (Phase 11 review).
+    # The guard inside `reset_network` fires too late here: by then this
+    # route has already committed the project row and written its files. Worse, the retry the
+    # refusal advises then fails FOREVER, because the committed row makes
+    # every attempt 409 with "already exists" instead.
+    PyPSAService.refuse_if_study_running("create a project from a template")
     if template_id not in _TEMPLATE_DEFAULT_NAMES:
         raise HTTPException(
             404,
@@ -2086,6 +2098,13 @@ def load_project(
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
+
+    # ★ Precheck BEFORE any destructive work (Phase 11 review, BLOCKER 3b).
+    # The guard inside `reset_network` fires too late: by then this route
+    # has already called `undo_service.clear()`, so a REFUSED load destroys
+    # the undo history of the project the user is still looking at. Placed
+    # after the 404 so a missing project is still reported as missing.
+    PyPSAService.refuse_if_study_running("load a project")
 
     # Crash-recovery surface. `_atomic_write_with` renames `.tmp → final` as
     # the last step; a `.tmp` sibling means a prior save was killed mid-write.

@@ -420,6 +420,12 @@ def restore_snapshot(
     Step 2 is the safety net: a careless restore can't lose work because the
     pre-restore state is itself saved as a snapshot named "before-restore-...".
     """
+    # ★ Precheck BEFORE any destructive work (Phase 11 review).
+    # The guard inside `reset_network` fires too late here: by then this
+    # route has already overwritten network.nc, solver_config.json and the
+    # whole bundle in the project directory — so the user is told the
+    # operation was refused while it has partly happened.
+    PyPSAService.refuse_if_study_running("restore a snapshot")
     name = project.name
     project_dir = project.directory
     if not (project_dir / "network.nc").exists():

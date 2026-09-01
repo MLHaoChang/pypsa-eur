@@ -277,6 +277,32 @@ class PyPSAService:
         return cls._ensure_active()
 
     @classmethod
+    def refuse_if_study_running(cls, action: str = "replace the network",
+                                *, ctx=None) -> None:
+        """Raise 409 if a study is live — WITHOUT swapping anything.
+
+        ★ Phase 11 put this check inside `reset_network` and asserted the 409
+        was "raised BEFORE any mutation". That is true INSIDE `reset_network`
+        and false at four of its seven call sites, which do destructive work
+        first: `undo_last` pops the undo entry (destroying the step it then
+        refuses to apply), `restore_snapshot` overwrites the project's files
+        on disk, and `import_bundle` / `create_from_template` commit the
+        project row — so the retry the refusal advises fails forever with
+        "already exists".
+
+        A route that mutates anything before swapping must call THIS first.
+        The check is pure: it reads the state and raises, and touches nothing.
+        """
+        prev = ctx if ctx is not None else (cls._request_ctx.get() or cls._active)
+        if prev is None:
+            return
+        detail = study_swap_refusal(prev.solver_state, action)
+        if detail:
+            from fastapi import HTTPException
+
+            raise HTTPException(409, detail)
+
+    @classmethod
     def reset_network(cls, *, allow_during_study: bool = False,
                       action: str = "replace the network") -> None:
         # Swap in a fresh, UNBOUND context — no on-disk project owns it yet.
@@ -314,11 +340,8 @@ class PyPSAService:
         # the established pattern here (project_registry, project_acl,
         # upload_service, storage_paths, chat_service, …), so FastAPI returns
         # the 409 with no handler to register.
-        if not allow_during_study and prev is not None:
-            detail = study_swap_refusal(prev.solver_state, action)
-            if detail:
-                from fastapi import HTTPException
-                raise HTTPException(409, detail)
+        if not allow_during_study:
+            cls.refuse_if_study_running(action, ctx=prev)
         n = pypsa.Network()
         n.name = "Untitled Project"
         # Carry the solver-state object (+ its lock) AND the undo stack forward so
@@ -384,7 +407,8 @@ class PyPSAService:
         cls._clear_swap_caches()
 
     @classmethod
-    def set_network(cls, n: pypsa.Network) -> None:
+    def set_network(cls, n: pypsa.Network, *,
+                    allow_during_study: bool = False) -> None:
         """
         Replace the in-memory network with a new one (e.g. the output of a
         spatial clustering operation). Preserves the existing display name AND
@@ -393,6 +417,18 @@ class PyPSAService:
         pointed at the old network).
         """
         prev = cls._ensure_active()
+        # ★ The EIGHTH network-replacing path (Phase 11 review, BLOCKER 4).
+        # Phase 11's spec asserted `reset_network` was the only one; clustering
+        # replaces the network through HERE, and had neither the refusal nor
+        # Phase 10's study-record clear. So clustering during a study returned
+        # 200 and DETACHED it — verbatim the defect the guard exists to
+        # prevent — and a finished study of the pre-clustering network
+        # survived onto the clustered one.
+        if not allow_during_study:
+            cls.refuse_if_study_running("re-cluster the network", ctx=prev)
+        for key in STUDY_KEYS:
+            if not record_is_running(prev.solver_state.get(key)):
+                prev.solver_state[key] = None
         n.name = prev.network.name
         # Same project (clustering swaps the network in place): carry identity,
         # solver_state AND undo forward so the user's solver_config / status /
