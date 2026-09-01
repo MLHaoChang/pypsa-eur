@@ -191,3 +191,104 @@ v4's four stand. One added: **§2.3's two NaN rules** — is it acceptable that
 the window treats an unknown hour as unavailable while the derate ignores it,
 on the grounds that they answer different questions, or should `derate_net`
 (and therefore `derate`, which it must match) also treat NaN as zero?
+
+---
+
+# v5 REVIEW OUTCOME: **accept with changes**. Implement v5 + the v5.1 amendments below.
+
+The first non-reject in five iterations. The reviewer **reproduced B3b end to
+end** — the expansion clones the alternating profile onto `wind@2030`, the
+gross window is all four tied hours, `derate = 0.5`, the LP builds exactly
+70 MW of `wind@2030` and nothing of `wind@2040` (forced, not preferred: the
+peaker is 5e6/MW), the payload reports `met=True, binding=True, firm 225`
+in both periods, the net series is `[80,150,80,150]`, the net window is hours
+1 and 3, `derate_net = 0.0`. Every derived number held. Two serious findings
+and five minor; each ✔ below was re-verified before acceptance.
+
+**SERIOUS 1 ✔ — `derate_net` can be NaN and nothing stops it reaching the
+wire.** `derate` is not a bare skipna mean: it is
+`_finite(mem["profile"].reindex(peak_idx).mean(), 0.0)`, and the `_finite`
+guard is load-bearing here because rule 1 *selects for* NaN hours (netting
+NaN as 0 leaves gross load standing there). An all-NaN net window gives a
+NaN `derate_net`; the sanitiser descends into `by_period` only (`report.py:227`,
+read) and never touches asset rows; Starlette 500s. B10(b) as written was
+unfalsifiable (`NaN == NaN`).
+
+**SERIOUS 2 ✔ — "today the sanitiser nulls it and the block ships" was false
+on both surfaces.** Live, preflight refuses a NaN static `p_set` outright
+(`load_p_set_invalid`, `validation_service.py:330-331`, read), so a run never
+reaches the wrapper. By direct call, the route surface ships nulls — but
+`ReserveMarginPeriod.peak_mw` and `required_mw` are non-Optional `float`
+(`models/adequacy.py`, read), so `build_adequacy_report` throws on the nulled
+peak and the **whole adequacy report is skipped** today. v4-review M5 and v5
+both had this half wrong. B13 as written could not run through `_solve`.
+
+**MINOR 3 ✔** — B14 must compare `.model_dump()` to the *sanitised* sink
+payload; the bite is an `AttributeError`, not a `None`. **MINOR 4 ✔** — the
+parent `wind` row sits in the stash at capacity 0 beside `wind@2030`
+(seen in the `2aa4dcd` probe), and `wind@2040` builds 0; both are `nettable`
+and must be `netted=False`, and B3b pinned neither, so dropping the `> 0`
+test changed no number. **MINOR 5** — a period-constant profile and no
+profile are indistinguishable from the row. **MINOR 6** — saturation is one
+route to k×, not the condition: at load 200 the ratio is 2.99–3.01 with no
+marginal at its ceiling. **MINOR 7** — `_built` is at `report.py:142`.
+
+---
+
+# v5.1 amendments (the seven changes, applied)
+
+**1. §2.3 — `derate_net` is `_finite(mean over the net window, 0.0)`**, the
+3525-3527 expression verbatim on the other window. An all-NaN net window
+therefore reads `0.0`, consistent with rule 1's "unknown = unavailable". §8's
+NaN question now includes the all-NaN case, which rule 1 manufactures.
+
+**2. B10 — two fixtures, both pinned, and the sanitiser descends into asset
+rows.** (i) Mixed window, profile `[1, NaN, 1, 0]`, flat load: net window =
+hours {1, 3}; hour 1 (the NaN) is **in** it; `derate_net = 0.0` and finite.
+(ii) All-NaN window, profile `[1, NaN, 1, 1]`: net window = {1};
+`derate_net == 0.0` by the guard; the payload serialises. *Bites: skip
+`fillna` → hour 1 drops out of (i)'s window; drop the `_finite` guard → (ii)'s
+`derate_net` is NaN and the serialisation assertion fails.*
+`sanitize_reserve_margin_payload` gains a descent into **asset rows** for
+`derate_net` as well as into `net_window` — belt and braces with the guard,
+and B11's sanitiser test puts a NaN in an asset row too.
+
+**3. §2.3 / B13 — the status quo corrected, the harness named, the contract
+widened.** Status quo: a NaN static `p_set` is refused at preflight; bypassing
+preflight, a NaN peak today kills the *entire* adequacy report (validation
+error) while the route ships nulls — a latent two-surface divergence. v5.1
+widens **`ReserveMarginPeriod.peak_mw`, `required_mw` to `float | None`**
+(added to §2.8's list) so the report degrades as the route does, and B14 then
+holds on both surfaces. B13's harness: `_network()` with `p_set = nan` through
+`_apply` (no preflight) to obtain a NaN-peak stash, then `reserve_margin_payload`
+directly; asserts on the sanitised dict **and** on the validated report block:
+`status == "no_finite_demand"`, block present, report built. *Bite: leave the
+model fields non-Optional → the report is skipped.* The static-branch wart
+(`float(nan or 0.0)`) stands recorded, with the corrected consequence.
+
+**4. B14 — written on `.model_dump()`**, right-hand side
+`sanitize_reserve_margin_payload(sink["last_reserve_margin"])["by_period"][i]["net_window"]`;
+the payload emits **every** `NetWindowBlock` key (no model defaults filled
+in silently); the bite is `AttributeError: 'ReserveMarginPeriod' object has
+no attribute 'net_window'`.
+
+**5. B3b — pins the zero-capacity rows too.** `nettable=True, netted=False`
+on the parent `wind` (capacity 0.0, present in both periods) and on
+`wind@2040` (built 0.0, period 2040), so a bite that drops `cap > 0` flips
+those flags even though it changes no number. §5 gains a sentence: the panel
+shows the parent `wind` row with `derate_net = 0.0` and `netted=False`.
+
+**6. §2.1 / §2.4 / §2.8 / §5 — `profile_kind`.** A per-asset-row field
+`profile_kind ∈ {"none", "constant", "varying"}` in the stash, the payload
+and `ReserveMarginAsset`, so the panel renders "no profile", "constant in
+this period — window-independent", or the value, from the row alone rather
+than by cross-period inference. `nettable` is then `profile_kind ==
+"varying"` and is kept as its own field for the contract's sake.
+
+**7. §3 / §0.** "When every marginal saturates" → "for example when every
+marginal saturates"; the k× bound holds without saturation (measured 2.99×
+at load 200 with marginals well below their ceilings), because under
+non-overlap each marginal needs the same block the portfolio needs. `_built`
+at `report.py:142`.
+
+Implementable as written after these: everything.
