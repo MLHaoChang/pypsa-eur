@@ -293,3 +293,89 @@ def test_a_CRASHED_worker_does_not_wedge_every_route_forever(
             + r.text[:200])
     finally:
         state["mc"] = None
+
+
+def test_a_study_published_but_not_yet_STARTED_still_counts_as_running(
+        client, install_network, session_state):
+    """★ SERIOUS 8: the window between publishing a record and starting it.
+
+    `post_mc` (and `post_frontier`, `post_fmea_sweep`) do:
+
+        t = Thread(...); record["thread"] = t; _state["mc"] = record; t.start()
+
+    with no lock. In that gap the record is VISIBLE and `thread.is_alive()` is
+    still False, so `record_is_running` said "not running" — which meant a
+    swap was allowed AND Phase 10's clear nulled the live study's record,
+    after which the 409 mesh could no longer see it and would admit a second
+    study on the same network.
+
+    Starting the thread before publishing would only move the hole (a running
+    worker with no published record). The fix is that a record carrying a
+    thread that has NEVER been started counts as running: `Thread.ident` is
+    None until `start()`, and is set forever after — so this is exactly the
+    not-yet-started state and nothing else.
+
+    Bite (verified): drop the `ident is None` arm.
+    """
+    import threading
+
+    from services.project_context import record_is_running
+
+    install_network(_network())
+    state = session_state(client)
+
+    # Exactly the shape post_mc leaves behind between publish and start.
+    never_started = threading.Thread(target=lambda: None, name="unstarted")
+    assert never_started.ident is None, "fixture is not in the pre-start state"
+    state["mc"] = {
+        "status": "running", "result": None, "error": None,
+        "started_at": 1.0, "finished_at": None, "thread": never_started,
+    }
+    try:
+        r = client.post("/api/network/reset")
+        assert r.status_code == 409, (
+            "a swap was allowed in the publish-before-start window: "
+            + r.text[:160])
+        assert state.get("mc") is not None, (
+            "the clear nulled a live study's record in that window, blinding "
+            "the 409 mesh")
+        # Assert the predicate on the record under test. `study_running` reads
+        # the ACTIVE project's state, which is not the session dict the route
+        # used — checking it here would test the wrong object.
+        assert record_is_running(state["mc"]) is True
+    finally:
+        state["mc"] = None
+
+
+def test_a_thread_that_RAN_and_finished_still_does_not_wedge(
+        client, install_network, session_state):
+    """★ The other side of SERIOUS 8's fix: `ident is None` must mean
+    "never started", not "not currently running".
+
+    A worker that started, ran and died without writing a terminal status has
+    `ident` SET and `is_alive()` False — it must NOT count as running, or it
+    wedges every network-replacing route for the rest of the session, which
+    is the failure mode Phase 11 was careful to avoid.
+
+    Bite (verified): treat `not thread.is_alive()` as running.
+    """
+    import threading
+
+    from services.project_context import record_is_running
+
+    install_network(_network())
+    state = session_state(client)
+    dead = threading.Thread(target=lambda: None, name="crashed")
+    dead.start()
+    dead.join(timeout=5)
+    assert dead.ident is not None and not dead.is_alive()
+
+    state["mc"] = {
+        "status": "running", "result": None, "error": None,
+        "started_at": 1.0, "finished_at": None, "thread": dead,
+    }
+    try:
+        assert record_is_running(state["mc"]) is False
+        assert client.post("/api/network/reset").status_code != 409
+    finally:
+        state["mc"] = None

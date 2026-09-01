@@ -281,8 +281,24 @@ def record_is_running(record) -> bool:
         return False
     try:
         thread = record.get("thread")
-        return bool(record.get("status") == "running"
-                    and thread is not None and thread.is_alive())
+        if thread is None or record.get("status") != "running":
+            return False
+        # ★ A record can be PUBLISHED before its thread is STARTED. `post_mc`,
+        # `post_frontier` and `post_fmea_sweep` do
+        #     record["thread"] = t; _state[key] = record; t.start()
+        # with no lock, so in that gap the record is visible while
+        # `is_alive()` is still False. Reading that as "not running" was a
+        # real hole: a swap was allowed AND Phase 10's clear nulled the live
+        # study's record, after which the 409 mesh could no longer see it and
+        # would admit a second study on the same network.
+        #
+        # `Thread.ident` is None until `start()` and set forever after, so it
+        # distinguishes NEVER-STARTED from ran-and-finished exactly. That
+        # distinction is what keeps this from re-introducing the wedge Phase
+        # 11 avoided: a worker that died without writing a terminal status has
+        # `ident` set, so it still reads as NOT running and cannot block every
+        # network-replacing route for the rest of the session.
+        return bool(thread.is_alive() or thread.ident is None)
     except Exception:                                         # noqa: BLE001
         return False
 
