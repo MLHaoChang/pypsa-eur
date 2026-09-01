@@ -1728,13 +1728,30 @@ def _check_shadowed_profiles(n, params) -> list[Issue]:
     cannot be acted on.
     """
     p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
-    if p_max_pu_t is None or not len(getattr(p_max_pu_t, "columns", [])):
-        return []
-    shadowed = [
-        str(name) for name in params.index
-        if name in p_max_pu_t.columns
-        and _profile_is_informative(p_max_pu_t[name])
-    ]
+    gens = getattr(n, "generators", None)
+    static = getattr(gens, "get", lambda *_a, **_k: None)("p_max_pu") \
+        if gens is not None else None
+
+    def _shadowed(name) -> bool:
+        # An hourly profile that actually varies…
+        if (p_max_pu_t is not None
+                and name in getattr(p_max_pu_t, "columns", [])
+                and _profile_is_informative(p_max_pu_t[name])):
+            return True
+        # …or a STATIC derate below 1 (Phase 12a review, SERIOUS 6b).
+        # `solved_capacity` reads p_nom_opt/p_nom only, so a static
+        # p_max_pu = 0.5 is discarded exactly like a time series: the unit
+        # enters the fleet at full nameplate. 1.0 is the default on every
+        # generator and must stay silent, which `_profile_is_informative`
+        # enforces for both arms.
+        if static is not None:
+            try:
+                return _profile_is_informative([float(static.get(name, 1.0))])
+            except Exception:                                 # noqa: BLE001
+                return False
+        return False
+
+    shadowed = [str(name) for name in params.index if _shadowed(name)]
     if not shadowed:
         return []
     names = ", ".join(sorted(shadowed)[:20])
@@ -1780,12 +1797,29 @@ def _check_outage_params(n) -> list[Issue]:
             # already plausible by construction.
             continue
         try:
-            params = resolve_outage_params(n, component)
-            params = params[params["source"] == "asset"]
+            all_params = resolve_outage_params(n, component)
+            params = all_params[all_params["source"] == "asset"]
             for msg in validate_outage_params(params):
                 issues.append(_warn("outage_params_implausible", cls, "", msg))
             if component == "generators":
-                issues += _check_shadowed_profiles(n, params)
+                # ★ UNFILTERED, deliberately (Phase 12a review, SERIOUS 6a).
+                # The plausibility check above is about values a USER typed,
+                # so it narrows to source == "asset". The shadow check is
+                # about which population the ENGINES admit, and
+                # `fleet_and_residual` admits `source != "missing"` — which
+                # includes `carrier_default`. Narrowing here made the check
+                # blind to a hydro unit with an inflow profile whose outage
+                # rate comes from the library, i.e. to the commonest instance
+                # of the defect, which needs no user input at all.
+                # `source != "missing"` — EXACTLY the population
+                # `fleet_and_residual` admits into the sampled fleet. Not
+                # "all": a `missing` row is a MUST-TAKE unit whose profile IS
+                # honoured (it is netted at profile x capacity), so warning
+                # about it would be a false positive — which is what the
+                # first version of this widening did, caught by the test that
+                # pins silence on the profiled farm with no outage data.
+                sampled = all_params[all_params["source"] != "missing"]
+                issues += _check_shadowed_profiles(n, sampled)
         except Exception:
             continue
     return issues

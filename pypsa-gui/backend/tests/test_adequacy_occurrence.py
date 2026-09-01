@@ -288,3 +288,94 @@ def test_a_flat_profile_is_not_a_shadowed_profile():
     assert "gas2" not in msg, (
         "a flat all-ones profile is not a resource profile, and warning on it "
         "would fire on every thermal unit in every real project: " + msg)
+
+
+def test_a_CARRIER_DEFAULT_outage_rate_shadows_a_profile_too(client=None):
+    """★ SERIOUS 6a: the check saw only HAND-ENTERED outage data.
+
+    `_check_outage_params` narrows to `params["source"] == "asset"` before
+    the shadow check runs, but `copt.fleet_and_residual` admits a unit on
+    `source != "missing"` — which includes `carrier_default`. And
+    `CARRIER_DEFAULTS` covers hydro and battery among others, so a HYDRO unit
+    with an inflow `p_max_pu` needs ZERO user input to hit the defect: the
+    engines drop its profile and model it as firm capacity at the library's
+    outage rate.
+
+    That destroys the "rare by construction, so it cannot become wallpaper"
+    argument the original commit rested on — the commonest instance needs no
+    user input at all.
+
+    Bite (verified): pass the `source == "asset"` filtered frame to the check.
+    """
+    from services import validation_service as VS
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=8, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "hydro"); n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC", country="AA")
+    n.add("Load", "l", bus="b", p_set=100.0)
+    # Hand-entered data on ONE unit, so the enclosing validator runs at all.
+    n.add("Generator", "gas_asset", bus="b", carrier="gas", p_nom=50.0,
+          marginal_cost=10.0, outage_rate_value=0.05,
+          outage_rate_basis="EFORd", mttr_hours=24.0)
+    # …and a hydro unit whose outage rate comes from the LIBRARY, with an
+    # inflow profile the engines will discard.
+    n.add("Generator", "hydro_inflow", bus="b", carrier="hydro", p_nom=100.0,
+          marginal_cost=0.0)
+    n.generators_t.p_max_pu["hydro_inflow"] = np.tile(
+        [0.05, 0.15, 0.35, 0.45], 2)
+
+    msg = " ".join(i.message for i in VS._check_outage_params(n)
+                   if i.code == "outage_shadows_profile")
+    assert "hydro_inflow" in msg, (
+        "a carrier-default outage rate shadows the profile just as a "
+        "hand-entered one does, and needs no user input at all: " + msg)
+
+
+def test_a_STATIC_derate_below_one_is_shadowed_too():
+    """★ SERIOUS 6b: the check looked only at the time-series frame.
+
+    `solved_capacity` uses `p_nom_opt`/`p_nom` only, so a static
+    `p_max_pu = 0.5` is discarded exactly like an hourly profile — the unit
+    enters the fleet at full nameplate. This was open question 3 in the
+    plan and shipped unanswered.
+
+    Bite (verified): inspect only `generators_t.p_max_pu`.
+    """
+    from services import validation_service as VS
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC", country="AA")
+    n.add("Load", "l", bus="b", p_set=100.0)
+    n.add("Generator", "gas_static", bus="b", carrier="gas", p_nom=100.0,
+          marginal_cost=10.0, p_max_pu=0.5, outage_rate_value=0.10,
+          outage_rate_basis="EFORd", mttr_hours=24.0)
+
+    msg = " ".join(i.message for i in VS._check_outage_params(n)
+                   if i.code == "outage_shadows_profile")
+    assert "gas_static" in msg, (
+        "a static p_max_pu below 1 is discarded exactly like a profile: "
+        + msg)
+
+
+def test_a_static_p_max_pu_of_ONE_is_still_silent():
+    """★ The noise guard, restated for the static arm: p_max_pu = 1.0 is the
+    default on every generator and must never warn."""
+    from services import validation_service as VS
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC", country="AA")
+    n.add("Load", "l", bus="b", p_set=100.0)
+    n.add("Generator", "plain", bus="b", carrier="gas", p_nom=100.0,
+          marginal_cost=10.0, outage_rate_value=0.10,
+          outage_rate_basis="EFORd", mttr_hours=24.0)
+    msg = " ".join(i.message for i in VS._check_outage_params(n)
+                   if i.code == "outage_shadows_profile")
+    assert "plain" not in msg, msg
