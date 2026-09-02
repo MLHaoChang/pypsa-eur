@@ -254,3 +254,208 @@ port-verified server; every ★ bitten, restores by hash.
 4. **Disclosure as a `warning`.** Every hydro-with-series project will see
    it. Is that the right weight, or should the disclosure be a fidelity
    line on the payload only, with no preflight issue at all?
+
+---
+
+## v2 REVIEW OUTCOME — accept with changes (2026-09-02)
+
+An adversarial reviewer took the v2 plan with the attack surfaces named at
+the end of v1's outcome. Verdict: **accept with changes**. Every finding
+was re-run against the code and its probes before being recorded here
+(`scratchpad/v2_p{A..J}*.py`, `v2_common.py`); all ten reproduce. What
+the review could not break: the `2^k` mixture equals an independently
+built per-hour table to 1e-14; the survival function's grid, negative and
+beyond-table edges are handled; the MC broadcast is exact and the scalar
+path byte-identical (M2 re-derives, 0.57 s, no `slow` mark needed); the
+ELCC dominance tripwire holds pathwise in 12/12 trials with and without
+storage; the deconvolve path equals the mixture path at a profile ≡ 1 to
+5e-12; every line reference is correct; A1, A4′, A10 bites bite.
+
+### Findings, verified
+
+1. **SERIOUS — §1.1 row 3 is a cliff, and A7 was built where it is
+   invisible.** A *constant* series at level L is left two-state at `cap`
+   (level ignored); the same series with one hour 1e-8 lower is "varying"
+   and enters the mixture at `L·cap`. Measured on RTS-79 minus one 400 MW
+   unit plus the 500 MW q = 0.05 unit (`v2_pD_A7.py`):
+
+   | level | constant series → at cap, LOLE | one hour 1e-8 lower → mixture, LOLE | ratio |
+   |---|---|---|---|
+   | 0.9 | 3.877 | 4.446 | ×1.15 |
+   | 0.5 | 3.877 | 11.770 | ×3.04 |
+   | 0.25 | 3.877 | 26.654 | ×6.87 |
+
+   At level `1 − ε` the two paths agree to 0.000 % for every ε, so A7 as
+   written passes and proves nothing. Worse, the reason v2 gave for
+   leaving a constant series alone — §1.3's "the CF already contains
+   outages" — is about the **static column** (`add_electricity.py:668-690`
+   writes `nuclear_p_max_pu.csv` via `n.generators.update`, never a
+   series); and the margin already honours a constant series' level
+   (`solver_service.py:3525-3527` takes `mean(profile over the window)`
+   for any series column; `profile_kind="constant"` only governs stashing
+   and netting). Row 3 therefore makes the engines and the margin disagree
+   by construction — the opposite of §1.1's intent.
+2. **SERIOUS — A5′'s pooled gate fails on a correct engine.** With the
+   pooled standard error taken as hours-independent (`sqrt(Σ SE_h²)/H`),
+   the correct `sample_capacity` fails 3 of 4 seeds (z = +11.7, +11.3,
+   +1.9, +13.6; `v2_pF2_pooled.py`, q = 0.05, D = 2000, H = 8760): hours
+   within a draw are autocorrelated over ≈ MTTR, and the true SE from the
+   D per-draw horizon means is 6.6× larger (z = +1.76, +1.75, +0.28,
+   +2.08 — note the last still fails a 1.96 gate). The engine is unbiased
+   (`v2_pJ_mcbias.py`, D = 20000: up-fraction 0.95003 ± 0.00023). The
+   Bonferroni half is fine: 0/8760 exceedances on the correct engine, and
+   the +5 MW bite is 10.3 SE so every hour fails it.
+3. **SERIOUS — the re-worded static warning's two remedies both fail
+   under v2's own rule** (`v2_pH_network.py`, 1000 MW nuclear, static CF
+   0.8): "set q = 0" → `_is_set(0.0)` is True (`occurrence.py:89-96`),
+   `source="asset"`, and the unit becomes a perfectly firm 1000 MW — worse
+   than today's 980 MW expected; "enter it as a time series" → a constant
+   series is not varying under row 3 → at cap, q = 0.02, CF ignored.
+   Also, the static branch lives in `_check_shadowed_profiles`, called
+   only from `_check_outage_params`, which `continue`s when the component
+   has no `outage_rate_value` column (`validation_service.py:1795-1798`);
+   an import has no outage columns (probe: `outage cols present=False`),
+   so the warning **cannot reach the PyPSA-Eur nuclear import it is
+   written for**.
+4. **MODERATE — beyond `K_EXACT`, "bounded and disclosed" holds for LOLE
+   but reproduces v1's Jensen defect on the netted units' own rows**
+   (`v2_pC_cap.py`, 12 profiled units, 4 netted): LOLE bias 0.1–1.4 % on
+   seasonal and wind fixtures, but a netted unit's ΔEUE with a *mild*
+   profile is understated 6.8–13.3× (on near-zero absolute values in those
+   fixtures — the ratio is the point, the MWh are not). Per-hour
+   convolution of the remainder, grouped by distinct integer offset tuple,
+   is exact and vectorisable — §7 Q1's "not vectorisable" was false — but
+   it is cheap only when the tuples are few: 0.4–2.8 s at 16–155 groups,
+   **99 s** at 6311 groups (RBTS + 12 × 20 MW wind). Not a uniform
+   answer.
+5. **MODERATE — the mixture is "milliseconds" only with a vectorised
+   `S`/`ES`; `hourly_adequacy` is a Python `map`** (`copt.py:136-137`,
+   ≈ 200 ms per call). `v2_pB_cost.py`, N = 300, C/Δ = 5447, H = 8760:
+   vectorised mixture 1 / 6 / 89 ms at k = 1 / 4 / 8; through today's
+   scalar path 0.5 / 3.7 / **51 s**. `CapacityDistribution` has no
+   vectorised API; the plan asserted one. And Q2 counted one metric: the
+   route computes N + 1 (attribution for every unit under the same
+   mixture) — at k = 8 that is ≈ 30 s for 300 units, on top of today's
+   ≈ 32 s (`deconvolve` is a Python double loop over C/Δ). The
+   synchronous `/copt` contract is a **pre-existing** problem the FMEA
+   spec's "milliseconds" already misstates; v2 makes it ≈ 2× worse at
+   k = 8 and negligibly worse at k ≤ 4.
+6. **MINOR — A3′'s fixture is misstated.** "RTS-79 plus the 500 MW unit"
+   gives 0.588 h; the 3.97 h needs RTS-79 **minus one 400 MW unit**
+   (`v2_pE_A3.py`: drop U400-1 or U400-2 → 3.9746; full fleet → 0.5882).
+   "To 1e-12" holds (1.5e-14 across three orderings). v1's 1.28 and
+   today's 3.88 re-confirmed.
+7. **MINOR — S24 does not exist.** `qa_e2e.py` has `suite_S15`…`S23`;
+   "S22–S24" was carried from v1. A11′ is implementable (`/api/results/copt`
+   is live, S15 uses it; S21's fixture builds over HTTP) but must say
+   "new S24". Its values re-confirmed: 4.76 / 4.40 / 0.80.
+8. **MINOR — the `/copt` `must_take` rationale is stale.** Under v2
+   profiled units stay in `units`, so `n_elec_gens − len(units)` does not
+   miscount them; it miscounts **zero-capacity** generators
+   (`v2_pI_musttake.py`: route 2, walk 1). The fix is right; the M12
+   citation is not the reason.
+9. **MINOR — §1.3 inverts the magnitudes.** The margin's double-count is
+   real (`avail_static × (1 − 0.02)`, carrier-default q on an import with
+   no outage columns — verified) but is 2 %; the engines' treatment of the
+   same unit (CF 0.8 ignored → 980 MW expected vs the margin's 784) is a
+   25 % error, and it is that which is being deferred. Record both.
+10. **MINOR — Q4.** Warnings never gate (`solver_service.py:819-828`
+    counts; `IssuesPanel.tsx:79` lists). A `warning` on every
+    hydro-with-series project is safe but is noise; the fidelity line
+    already discloses.
+
+**Q1's empirical half, answered here:** `CARRIER_DEFAULTS` has no wind or
+solar entry (deliberately), and PyPSA-Eur's run-of-river generators are
+carrier `ror` (`add_electricity.py:288, 766`), which is not in the library
+either (`hydro` there is a StorageUnit). So on an import the profiled
+occurrence set is **empty** unless a user enters outage data by hand;
+k > 8 needs hand-entered outage data on more than eight profiled farms.
+`K_EXACT = 8` stands.
+
+### v2.1 amendments (the changes required, in the reviewer's order)
+
+**C1 — §1.1 row 3 replaced; the rule is "informative series".** A
+profile is attached whenever the generator has a `p_max_pu` *series* column
+that is not identically 1 over its finite values (`|v − 1| > 1e-9`
+anywhere): constant-below-1, varying, or both. A constant series at level
+L is then mixed at `a_{i,h} = L·cap`, which is exactly what the margin's
+window mean credits it, so the cliff is gone and the engines and the
+margin agree on the level by construction. NaN hours are availability 0 at
+attachment (`np.nan_to_num(…, nan=0.0)`, one explicit line — Phase 12b's
+rule 1, for the same reason: the margin nets a NaN hour as 0). The static
+column stays deferred (§1.3). Phase 12b's *varying* predicate is untouched
+— it governs stashing and netting for the window, a different question.
+**A4′** becomes: the static-0.9 thermal unit and the all-ones-column unit
+are two-state at `cap`, `profile is None`; a **constant-0.8 series** unit
+carries a constant profile (bite: drop it to the all-ones class → the M1
+hash for that row changes and its LOLE reverts to today's). **A7**
+retargeted to level **0.5**: constant series at 0.5 vs 0.5 with one hour
+at `0.5 − 1e-8`; LOLE within 0.1 % and ΔEUE within 0.5 % of each other
+(both now mixtures), the varying row equal to `EUE(mixture) − EUE(s_i ≡
+1)`. *Bite: leave the constant series two-state at cap → LOLE 3.877 vs
+11.770.* M1's fixture adds the constant-0.8 row and pins it as attached.
+
+**C2 — the static warning: no "q = 0" remedy; emitted from the walk.**
+Code `static_p_max_pu_not_applied` (`warning`), emitted from the
+membership walk in preflight so it reaches carrier-default-only networks
+(the PyPSA-Eur nuclear import), for any occurrence unit whose static
+`p_max_pu < 1 − 1e-9`. Message: *"a static `p_max_pu < 1` on a unit with
+outage data is not applied by the COPT or the sequential MC, which model
+the unit at nameplate × (1 − q); the reserve margin applies both. If it is
+an availability, enter it as a time series (a constant series is
+honoured). If it is a capacity factor that already includes outages, the
+margin double-counts it and neither engine sees it — recorded as an open
+item (§1.3)."* The old `_shadowed` static arm and the `outage_rate_value`
+trigger go with the series arm.
+
+**C3 — A5′ re-specified.** Pooled SE from the D per-draw horizon means
+(`std(draw_means, ddof=1)/sqrt(D)`); gate at 3σ; seed pinned
+(`seed=20260902`), so the gate is deterministic and the 3σ states the
+intent. Bonferroni half unchanged.
+
+**C4 — §1.2 costed and specified.** `CapacityDistribution` gains
+`survival_vec(x: ndarray) → ndarray` and `expected_shortfall_vec(x)` on
+cumsum tables: `j = clip(ceil(x/Δ − 1e-12), 0, n)`, `S = _surv[j]` with
+`x ≤ 0 → 1`, `ES = x·F[j] − Δ·G[j]` with `F[j] = Σ_{k<j} p_k`,
+`G[j] = Σ_{k<j} k·p_k`, `x ≤ 0 → 0`. **Pin A12:** on the RBTS table the
+vectorised pair equals the scalar methods to 1e-12 on a grid that includes
+exact multiples of Δ, negatives and beyond-table loads (the reviewer's
+evaluator measured 0 / 7e-15). `hourly_adequacy` switches to the
+vectorised pair (the anchors pin its values; **A12** also asserts the
+switch equals the old `map` to 1e-12 on the RBTS residual). The mixture
+uses them; **cost pin A13:** LOLE + EUE over 256 states, H = 8760, on the
+300-unit / 5447-state table under 1 s (measured 89 ms). The attribution
+loop is `N · 2^k` evaluations and is **recorded, not gated**: ≈ +30 s at
+k = 8 for 300 units on top of today's ≈ 32 s. The `/copt` route's
+synchronous contract at that size is a pre-existing defect: added to the
+hardening backlog beside the abort routes, and the FMEA spec's
+"milliseconds" is corrected to what is measured. Beyond `K_EXACT`: the
+remainder is **netted at expectation** (per-hour convolution rejected on
+finding 4's 99 s case), and the payload says so on the rows: the
+`netted_beyond_cap` names carry a per-row `note` that their ΔEUE is
+understated by netting (v1's measured 14×), and `fidelity` repeats it.
+
+**C5 — wording.** A3′: "RTS-79 minus one 400 MW unit plus the 500 MW
+q = 0.05 unit → 3.97 h". A11′: "new S24". `/copt` `must_take`: computed
+from the walk because the subtraction miscounts zero-capacity generators
+(finding 8), not M12.
+
+**Q4 decided (finding 10).** `profile_and_outage_modelled` is a preflight
+`warning` only when the unit's outage `source == "asset"` — the user typed
+the data and deserves to be told how it is used (12a's premise). For
+carrier-default sources (a hydro carrier with an inflow series) there is
+no preflight issue; the `/copt` and `/mc` payloads' `profile_units` and
+`fidelity` carry the disclosure. **A10** becomes: 12a's fixture (asset
+source) gets the warning; the carrier-default-only network gets **no**
+preflight issue and its `/copt` `profile_units` names the unit (bite:
+emit for carrier-default too; bite: emit from the outage-column trigger
+instead of the walk → the asset case on a network without the column
+goes silent). The static warning fires for either source.
+
+**Finding 9 recorded** in §1.3 as amended: the deferred item is two
+errors of different size on the same unit — the engines' 25 % and the
+margin's 2 % — and its adjudication (a per-asset "this CF includes
+outages" flag) is a data-model change outside this phase.
+
+Implementation proceeds on v2 + these amendments; the shipped code gets
+its own review, as Phase 12b's did.
