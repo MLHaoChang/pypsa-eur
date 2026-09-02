@@ -557,3 +557,15 @@ its own review, as Phase 12b's did.
   pre-existing S17.6 skip, S18 5/5, S19 6/6, S20 3/3, S21 2/2 (re-scoped),
   S22 2/2, S23 2/2, **S24 2/2**.
 - Full backend tree: recorded below.
+
+### Gates, completed after the code commit (`fb6548f`)
+
+- **Full backend tree** (from `pypsa-gui/backend`, summary line refused
+  if empty): **2760 passed, 43 failed, 19 skipped** in 31 min. The 43
+  `FAILED` ids diffed against master `07b32c2`'s 43 (`base_fails_sorted`):
+  branch minus master **empty**, master minus branch **empty**.
+- **S24 bitten live.** With `_occurrence_profile` returning None (the
+  series dropped at attachment) on a restarted, port-verified server:
+  S24.1 FAIL — `LOLE=0.440000`, the flat two-state value, `profile_units=[]`,
+  the note absent; S24.2 FAIL — the MC's `profile_units=[]`. Restore
+  verified by hash (`4f326702b0c75bdd`), server restarted, S24 2/2 again.
