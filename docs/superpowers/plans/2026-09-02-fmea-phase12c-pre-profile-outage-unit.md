@@ -203,3 +203,75 @@ port-verified server; every ★ bitten with hash-verified restores.
    until now (12a called it out). Folding it in is a behaviour change on
    existing projects' COPT/MC numbers — flag in the PR body as a fourteenth
    finding, or as part of this phase?
+
+---
+
+# v1 REVIEW OUTCOME: **reject**. Do not implement §1's COPT treatment. Implement v2.
+
+Two blockers, four serious, six minor; every load-bearing one re-verified
+before acceptance (the probe re-run, the code read). The MC half of §1 is
+**right** — the `(H, 1)` broadcast is exact and CRN-safe, and the no-profile
+path is byte-identical (a no-profile fleet hashes identically before and
+after; every other unit's contribution is bitwise unchanged when one unit
+is profiled). The COPT half is wrong, by a lot, in one direction.
+
+**BLOCKER 1 ✔ — netting expected output is a one-signed optimistic bias, not
+a variance loss.** LOLP is convex in the shortfall, so the mixture over the
+unit's up/down states exceeds LOLP at the mean (Jensen). Measured on the
+benchmark loads, exact per-hour mixture vs the plan:
+
+| fixture | today | plan | **exact** | MC (95 % CI) |
+|---|---|---|---|---|
+| RTS-79 + 500 MW, q = 0.05, seasonal 0.10–1.00 | 3.88 | 8.54 | **10.60** | 10.84 (10.06–11.63) |
+| same, mild 0.90–1.00 (a maintenance schedule) | 3.88 | **1.28** | **3.97** | 3.82 (3.42–4.23) |
+| RBTS + 100 MW wind CF 25 %, q = 0.10 | 0.109 | 0.402 | **0.458** | 0.442 (0.35–0.53) |
+
+On the mild profile — the case 12a v1.1 called *common* — the plan
+understates LOLE **3.1×**, and its 1.28 h sits barely above the 0.99 h of a
+unit that never fails: the unit's outages had vanished from the screening
+number. The exact mixture lands inside the MC's CI on all three. And the
+plan's reason for netting was a false dichotomy: nothing needs re-convolving
+per hour. Build the table once without the profiled units and mix per hour
+over their up/down offsets — for one unit that is the two `hourly_adequacy`
+calls §2 already proposed for attribution. The FMEA spec §3.1(3) lists
+"nets VRE off deterministically, destroying its variance and biasing down"
+as a **v1 error**; §4 would have legalised it.
+
+**BLOCKER 2 ✔ — attribution for a profiled unit was incomparable with the
+deconvolution rows.** Same unit, mild profile: plan ΔEUE **27.6**, exact
+399.7, today's deconvolve-and-shift 400.1. A profile crossing the `1e-9`
+threshold dropped a unit's criticality 14× with nothing physical changed.
+Under the mixture the counterfactual agrees with the deconvolution path by
+construction.
+
+**SERIOUS 3 ✔** — A11 would have enshrined the approximation: on 12a's
+fixture the plan's LOLE matched the must-take farm to 0 % only because that
+fixture's LOLP is a step function the derate never crosses; the exact value
+is 8.2 % apart. **SERIOUS 4 ✔** — there is no INFO severity anywhere:
+`Severity = Literal["error", "warning"]` (`validation_service.py:28`), the
+TS type matches, and the issues panel groups errors and warnings only, so an
+`"info"` row would be **silently dropped**. **SERIOUS 5 ✔** — the constant
+fold-in is not "exact": PyPSA-Eur writes `data/nuclear_p_max_pu.csv`, a
+historical **capacity-factor** table that already contains forced outages,
+to the static `p_max_pu` (`config.default.yaml:429`); `cap × level` then
+`q = 0.02` counts them twice. The margin already does this (v1.1(1)) — a
+finding against the margin too. **SERIOUS 6 ✔** — the anchors build
+`MCInputs` by hand, "deliberately NOT" via `snapshot_inputs`, so they are
+blind to every membership change this plan makes.
+
+**MINOR 7** — `CoptUnit` is frozen; an ndarray field needs
+`compare=False, hash=False`. **MINOR 8** — A6 could not fail (the margin
+already computes `(1−q)·mean(profile)`). **MINOR 9** — A5 is a multiple
+comparison over H hours. **MINOR 10** — A2's pin: RBTS, H = 8736,
+draws = 64, seed = 20260828, numpy 2.4.6 → sha256
+`aa4b3c0f25c70b6fc0bb094a071c96c28704c9c9a149e1d6a9143c148cdf2394`; name the
+numpy version in the skip. **MINOR 11** — the ELCC generator branch must
+exclude a zero-peak profile as the vre branch does. **MINOR 12** — `/copt`'s
+`must_take` count is `n_elec_gens − len(units)` and would miscount removed
+profiled units; and the 12a check only runs when an outage column exists,
+so a note placed there never fires on a carrier-default-only network.
+
+**§0's premise corrected**: a PyPSA-Eur import produces nuclear with a
+static CF (the static case) and `ror` as a Generator with no defaults entry
+(must-take); GUI-native hydro Generators with an inflow profile are the
+varying case.
