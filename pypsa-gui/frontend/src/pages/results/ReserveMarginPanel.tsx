@@ -148,24 +148,39 @@ export function derateNetText(
       return { text: '—', title: 'Constant in this period — window-independent.' }
     case 'varying':
       return { text: '—', title: 'No net-load window in this period (see the status above).' }
-    default:
+    case 'none':
       return { text: '—', title: 'No profile — window-independent.' }
+    default:
+      // A payload persisted before Phase 12b carries no `profile_kind`; saying
+      // "no profile" about a wind row would be false (review finding 7).
+      return { text: '—', title: 'Not computed by this backend.' }
   }
 }
 
-/** Phase 12b — one sentence per period. Never "corrected", never "VRE". */
-export function netWindowSentence(nw: NetWindowBlock | null | undefined): string {
-  if (!nw) return 'Net-load window: not computed by this backend.'
+/** Phase 12b — one sentence per period. Never "corrected", never "VRE".
+ *  `partial` prefixes the myopic caveat: the block is the LAST period solved. */
+export function netWindowSentence(nw: NetWindowBlock | null | undefined,
+                                  partial = false): string {
+  const prefix = partial ? 'Last period solved (myopic) — ' : ''
+  if (!nw) return prefix + 'Net-load window: not computed by this backend.'
   if (nw.status === 'nothing_netted') {
-    return 'No profile-bearing capacity in the built plan; the net-load window is the gross window.'
+    return prefix + 'No profile-bearing capacity in the built plan; the net-load window is the gross window.'
   }
   if (nw.status === 'no_finite_demand') {
-    return 'No finite demand in this period; no window could be selected on either series.'
+    return prefix + 'No finite demand in this period; no window could be selected on either series.'
+  }
+  if (nw.status === 'empty_window') {
+    return prefix + 'The net-load window came back empty (a non-finite hour at the threshold); nothing can be compared.'
   }
   const m = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)} MW`)
+  const k = nw.netted_assets.length
+  // `netted_mw` is the PERIOD MEAN of netted availability (spec v1.3(3)),
+  // not availability on the window — the copy says which. The names live in
+  // the table's "Netted" column; a clustered network has hundreds.
   return (
+    prefix +
     `Net-load window: ${nw.n_hours} h; ${nw.overlap_hours ?? '—'} shared with the gross window; ` +
-    `profile-bearing capacity netted ${m(nw.netted_mw)} (${nw.netted_assets.join(', ')}); ` +
+    `${k} asset${k === 1 ? '' : 's'} netted (see the table), mean netted availability over the period ${m(nw.netted_mw)}; ` +
     `firm credit ${m(nw.firm_gross_mw)} → ${m(nw.firm_net_mw)} on the net window.`
   )
 }
@@ -443,7 +458,7 @@ export function ReserveMarginPanel() {
                     : undefined}
                 >
                   {payload.by_period.length > 1 ? `${r.period}: ` : ''}
-                  {netWindowSentence(r.net_window)}
+                  {netWindowSentence(r.net_window, Boolean(payload.partial_periods))}
                 </p>
               ))}
             </div>

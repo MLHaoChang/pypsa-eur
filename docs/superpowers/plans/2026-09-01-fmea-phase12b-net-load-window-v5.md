@@ -292,3 +292,73 @@ non-overlap each marginal needs the same block the portfolio needs. `_built`
 at `report.py:142`.
 
 Implementable as written after these: everything.
+
+---
+
+# SHIPPED-CODE REVIEW of `5229312`: **accept with fixes**. Fixed in the next commit.
+
+No blocker; two serious, five minor; every finding verified by a probe and
+each re-verified here before acceptance. The core mechanism — stash the
+demand and the varying profiles at wrapper time, select the second window
+with the same rule, net only `nettable ∧ built` through `_built` — was
+verified correct: the gross window is preserved **bit-for-bit** against the
+pre-12b inline rule on 9 series × 10 overrides; the `id(row)` keying is
+correct because the stash's own dicts live for the whole function; a pre-12b
+persisted payload validates and renders; B14 compares the two real wire
+surfaces.
+
+**SERIOUS 1 ✔ — the myopic copy the spec promised was never carried.** Spec
+v1.3(5) and plan v4 §5 said the panel would say "last period solved" under
+myopic; nothing on the wire said which strategy ran, so the panel could not.
+*Fixed*: `partial_periods: bool` on the payload and model, set from the solve
+strategy at the report step; the panel prefixes every line with "Last period
+solved (myopic) —". Test + bite.
+
+**SERIOUS 2 ✔ — the sanitiser nulled `derate` and `firm_mw` on asset rows
+while the model declares them `float`.** The route would ship a null the
+report surface rejects — the exact two-surface hole v5.1 §3 closed for
+`peak_mw`, re-opened one field over; and the panel's `a.derate.toFixed(3)`
+would throw. Latent (both are clamped finite upstream), not live. *Fixed*:
+the sanitiser touches only `derate_net`, the one asset field the model
+declares Optional, and the sanitiser test pins that `derate` / `firm_mw` are
+left alone.
+
+**MINOR 3 ✔ — `no_finite_demand` mislabelled an empty window with finite
+demand** (threshold landing on a NaN). Unreachable from the facts loop;
+still the enum is the contract. *Fixed*: a fourth status, `empty_window`, on
+the model, the frontend type and the sentence. Test + bite.
+
+**MINOR 4 ✔ — `firm_gross_mw` / `firm_net_mw` were never pinned** to a
+computed value; an implementation that summed every row would have passed.
+*Fixed*: pinned in B1 (50 → 0) and in S23.1. Bite: the no-profile guard
+removed → 240 ≠ 50.
+
+**MINOR 5 ✔ — spec/plan said `derate_net` is computed for every varying
+row; the code nulls it unless the period's window is `ok`.** *Fixed* in the
+spec wording; the code is right (there is no other window to compute it
+on).
+
+**MINOR 6 ✔ — the hot path, measured.** 300 profile-bearing members ×
+8760 h: 3 periods **+109 %** (329 → 688 ms per `reserve_margin_facts`
+call), 1 period +23 %; 66 MB attached for the duration of a 3-period solve,
+released at the report step; `n.copy()` would carry it but nothing on the
+solve path copies. *Halved*: the profile frame is reindexed once per period
+instead of once per member — re-measured **+54 %** (308 → 473 ms) and +27 %.
+The remaining cost is the classification itself and the stashed period
+slices, which under a MultiIndex are real copies.
+
+**MINOR 7 ✔ — frontend copy.** A pre-12b row with no `profile_kind` read
+"No profile" (false for a wind row) → "Not computed by this backend"; the
+sentence inlined every netted name (hundreds on a clustered network) → a
+count plus "see the table"; `netted_mw` is the period mean and the sentence
+now says "mean netted availability over the period".
+
+Also: a duplicate `import pandas as pd` removed; B12's monkeypatched spy
+now accepts the payload's new keyword.
+
+**A harness lie caught in this pass, recorded:** the first full-tree gate
+for these fixes "finished" in seconds with an empty log and a diff reading
+zero failures against a baseline of 43 — the previous command had left the
+shell in the frontend directory, so pytest found no `tests/` and exited at
+once. A diff that reads zero against a known-nonzero baseline is not green;
+it is a run that did not happen. Relaunched from an absolute path.

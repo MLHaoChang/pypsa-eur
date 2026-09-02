@@ -312,13 +312,18 @@ is not a passing test — it is an untested one.
    is `netted` when `nettable` and `cap is not None and cap > 0`; the net
    series is `demand − Σ fillna(profile, 0) × cap` over netted rows (rule 1:
    an unknown hour is unavailable). Per period a `net_window` block is
-   ALWAYS present with `status ∈ {"ok", "nothing_netted", "no_finite_demand"}`,
+   ALWAYS present with `status ∈ {"ok", "nothing_netted", "no_finite_demand",
+   "empty_window"}` (the last: finite demand but an empty window — the
+   threshold landed on a NaN — unreachable from the facts loop today, named
+   so the enum never lies),
    `netted_assets`, `snapshots`, `n_hours`, `net_peak_mw`,
    `gross_at_net_peak_mw`, `netted_mw`, `overlap_hours`, `firm_gross_mw`,
    `firm_net_mw` (numerics null unless `ok`). Per asset row: `profile_kind`,
    `nettable`, `netted`, and `derate_net` = `(1 − q) × _finite(mean(profile
    over the net window), 0.0)` — `derate`'s own expression on the other
-   window (rule 2), null for a row without a varying profile. A constant
+   window (rule 2), null for a row without a varying profile AND null for
+   every row in a period whose window is not `ok` (there is no other window
+   to compute it on). A constant
    profile is window-independent and is never netted; a thermal maintenance
    schedule varies and IS netted, as a decision — "netted capacity" is not
    "VRE". The block is a SECOND PROXY in the margin's own units, never a
@@ -333,9 +338,13 @@ is not a passing test — it is an untested one.
    report block to the route payload field for field.
 5. **§6 — the panel** gains a `derate_net` column beside `derate` (`—` with
    "no profile" or "constant in this period — window-independent" by
-   `profile_kind`), a `netted` marker, and one summary line per period;
-   under myopic the block is the last period solved, as every other margin
-   field already is.
+   `profile_kind`), a `netted` marker, and one summary line per period.
+   Under myopic the block is the last period solved, as every other margin
+   field already is — and the payload now SAYS so: `partial_periods: bool`
+   on the block, set from the solve strategy at the report step, and the
+   panel prefixes every line with "last period solved (myopic)". The
+   shipped-code review found the first version promised this copy without
+   carrying the fact.
 6. **Two shipped defects fixed as the precondition (`2aa4dcd`):** the payload
    credited zero to every vintage-expanded asset (the restore dropped the
    rows before `_built` ran); and a run that failed between the wrapper and

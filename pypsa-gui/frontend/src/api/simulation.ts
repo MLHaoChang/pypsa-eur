@@ -520,7 +520,7 @@ export interface ReserveMarginAsset {
  *  capacity" is NOT "VRE": every unit whose availability varies over the
  *  period is netted, a thermal maintenance schedule included. */
 export interface NetWindowBlock {
-  status: 'ok' | 'nothing_netted' | 'no_finite_demand'
+  status: 'ok' | 'nothing_netted' | 'no_finite_demand' | 'empty_window'
   netted_assets: string[]
   snapshots: string[]
   n_hours: number
@@ -568,6 +568,9 @@ export interface ReserveMarginPeriod {
 export interface ReserveMarginPayload {
   /** Fraction: 0.15 == 15 %. */
   margin: number
+  /** True under the myopic strategy: the block describes the LAST period
+   *  solved only. Optional: a payload persisted before 12b lacks it. */
+  partial_periods?: boolean
   /** True when the periods share ONE `Generator-p_nom` variable set and the
    *  system degenerates to a single standard at `max_P peak_P`. Calling that
    *  "per period" would be a claim the constraint does not support. */

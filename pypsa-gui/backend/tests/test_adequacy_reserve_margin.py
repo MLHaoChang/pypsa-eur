@@ -1478,6 +1478,10 @@ def test_the_net_window_is_the_hours_the_profile_is_absent():
     assert nw["net_peak_mw"] == pytest.approx(150.0)
     assert nw["gross_at_net_peak_mw"] == pytest.approx(150.0)
     assert nw["netted_mw"] == pytest.approx(50.0)     # 100 × mean(1,0,1,0)
+    # the two totals, pinned (review finding 4): only rows WITH a profile
+    # count — `base` has none — so gross = 0.5 × 100, net = 0.0 × 100.
+    assert nw["firm_gross_mw"] == pytest.approx(50.0)
+    assert nw["firm_net_mw"] == pytest.approx(0.0)
 
 
 # ── ★ B2: the demand comes from the STASH, never from the network ─────────
@@ -1757,9 +1761,9 @@ def test_a_missing_built_capacity_is_not_netted_and_does_not_lose_the_block():
     captured = {}
     orig = R.reserve_margin_payload
 
-    def spy(net, targets):
+    def spy(net, targets, **kw):
         captured["targets"] = targets
-        return orig(net, targets)
+        return orig(net, targets, **kw)
 
     R.reserve_margin_payload = spy
     try:
@@ -1866,3 +1870,55 @@ def test_the_sanitiser_nulls_non_finite_values_inside_the_net_window_and_asset_r
     assert nw["gross_at_net_peak_mw"] == 150.0
     assert san["assets"][0]["derate_net"] is None
     json.dumps(san, allow_nan=False)
+    # The sanitiser touches ONLY what the model declares Optional. `derate`
+    # and `firm_mw` are `float` on `ReserveMarginAsset`; nulling them would
+    # make the route ship a null the report surface rejects (review, 2).
+    payload["assets"][0]["derate"] = float("nan")
+    payload["assets"][0]["firm_mw"] = float("nan")
+    san2 = sanitize_reserve_margin_payload(payload)
+    assert math.isnan(san2["assets"][0]["derate"])
+    assert math.isnan(san2["assets"][0]["firm_mw"])
+
+
+# ── review findings 1 and 3: the enum never lies, and myopic is said ───────
+
+def test_an_empty_window_with_finite_demand_is_its_own_status_not_no_finite_demand():
+    """Demand [150, NaN, NaN, NaN] with `prm_peak_hours = 3`: the peak IS
+    150, but the window's threshold lands on a NaN and the window is empty.
+    Labelling that `no_finite_demand` beside `peak_mw = 150` would be false.
+    Not reachable from the facts loop today; the enum is the contract.
+
+    BROKEN VARIANT (bite): report `no_finite_demand` for the empty window.
+    """
+    from services.adequacy.report import reserve_margin_payload
+
+    n = _add_profiled(_network(peaker=False), "wind", [1, 0, 1, 0])
+    _apply(n, reserve_margin=0.2)
+    st = _stash(n)
+    per = st["periods"]["ALL"]
+    per["demand_mw"] = pd.Series([150.0, float("nan"), float("nan"), float("nan")],
+                                 index=n.snapshots)
+    per["peak_hours_override"] = 3
+    nw = reserve_margin_payload(n, st)["by_period"][0]["net_window"]
+    assert nw["status"] == "empty_window", nw
+    assert nw["snapshots"] == [] and nw["net_peak_mw"] is None
+
+
+def test_the_payload_says_when_it_describes_the_last_period_only():
+    """★ Under the myopic strategy each iteration overwrites the stash, so the
+    payload describes ONE period. That was always true of every margin
+    field; Phase 12b's review found the spec promised the panel would say
+    so and nothing carried the fact. `partial_periods` does.
+
+    BROKEN VARIANT (bite): drop the flag — the model default hides it.
+    """
+    from models.adequacy import ReserveMarginBlock
+    from services.adequacy.report import reserve_margin_payload, sanitize_reserve_margin_payload
+
+    n = _add_profiled(_network(peaker=False), "wind", [1, 0, 1, 0])
+    _apply(n, reserve_margin=0.2)
+    st = _stash(n)
+    assert reserve_margin_payload(n, st)["partial_periods"] is False
+    p = reserve_margin_payload(n, st, partial=True)
+    assert p["partial_periods"] is True
+    assert ReserveMarginBlock.model_validate(sanitize_reserve_margin_payload(p)).partial_periods is True

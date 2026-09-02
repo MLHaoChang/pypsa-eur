@@ -28,8 +28,6 @@ import numpy as np
 import pandas as pd
 from dataclasses import asdict, is_dataclass
 
-import pandas as pd
-
 from models.adequacy import (
     PeriodTarget,
     AdequacyReport,
@@ -81,7 +79,7 @@ def _outage_basis_counts(n) -> dict[str, int]:
     return counts
 
 
-def reserve_margin_payload(n, targets: dict) -> dict:
+def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
     """
     The firm-capacity result: the solve-time stash (§2.6) joined to what the
     solve actually BUILT.
@@ -97,6 +95,12 @@ def reserve_margin_payload(n, targets: dict) -> dict:
     ``max_achievable_mw`` is left EXACTLY as stashed, ``inf`` included — the
     honest value, and not JSON-serialisable. ``sanitize_reserve_margin_payload``
     is what makes it wire-safe, at the two surfaces that put it on the wire.
+
+    ``partial`` is True under the myopic strategy, where each iteration
+    overwrites the stash and this payload describes the LAST period solved
+    only. It is carried on the wire as ``partial_periods`` so the panel can
+    say so beside the number rather than relying on a preflight warning the
+    user saw before the solve (Phase 12b shipped-code review, finding 1).
     """
     stash = targets or {}
     opt: dict[str, dict[str, float]] = {}
@@ -236,7 +240,12 @@ def reserve_margin_payload(n, targets: dict) -> dict:
             net = net - netted_series
             net_idx = peak_window(net, n_override=per.get("peak_hours_override"))
             if len(net_idx) == 0:
-                block["status"] = "no_finite_demand"
+                # Demand HAS a finite value (tested above) yet the window is
+                # empty: the threshold landed on a NaN. Not reachable from
+                # `reserve_margin_facts` today (a static NaN poisons the whole
+                # series; time-series loads are fillna'd) — but the enum is
+                # the contract, and "no finite demand" would be a lie here.
+                block["status"] = "empty_window"
             else:
                 gross_snaps = set(per.get("peak_snapshots") or [])
                 net_snaps = [str(x) for x in net_idx]
@@ -323,6 +332,7 @@ def reserve_margin_payload(n, targets: dict) -> dict:
     return {
         "margin": float(stash.get("margin", 0.0) or 0.0),
         "horizon_wide": bool(stash.get("horizon_wide", False)),
+        "partial_periods": bool(partial),
         "by_period": by_period,
         "assets": assets,
         "derating_bases": {b: len(names) for b, names in sorted(bases.items())},
@@ -379,13 +389,16 @@ def sanitize_reserve_margin_payload(payload: dict) -> dict:
             r["net_window"] = nw
         rows.append(r)
     out["by_period"] = rows
-    # Asset rows were never sanitised: `derate` is clamped upstream so it was
-    # safe by accident. `derate_net` is guarded upstream too, and is nulled
-    # here as well so the guard is not the only thing between a NaN and a 500.
+    # Asset rows: ONLY `derate_net` is nulled — it is the one asset field the
+    # model declares Optional. `derate` and `firm_mw` are `float` on the
+    # model and clamped finite upstream; nulling them here would make the
+    # route ship a null the report surface then rejects, the exact
+    # two-surface hole v5.1 closed for `peak_mw` (shipped-code review,
+    # finding 2). The sanitiser touches only what the contract lets it.
     arows: list[dict] = []
     for row in (out.get("assets") or []):
         a = dict(row)
-        for key in ("derate_net", "firm_mw", "derate"):
+        for key in ("derate_net",):
             v = a.get(key)
             try:
                 if v is not None and not math.isfinite(float(v)):

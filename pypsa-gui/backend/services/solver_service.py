@@ -1354,7 +1354,8 @@ def run_simulation(
                             reserve_margin_payload,
                         )
                         _margin_payload = reserve_margin_payload(
-                            network, _margin_targets)
+                            network, _margin_targets,
+                            partial=getattr(config, "solve_strategy", "full") == "myopic")
                         # Emitted into solver state like `last_lost_load`, so
                         # /results/reserve_margin serves the PERSISTED stash
                         # rather than recomputing peaks from restored loads.
@@ -3506,6 +3507,13 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None) -> dict | None:
         peak_idx = peak_window(demand_p, n_override=peak_hours_override)
 
         active = {c: _active(c, P) for c in ("generators", "storage_units")}
+        # Phase 12b: the profile frame restricted to this period, ONCE, so the
+        # per-member classification below is a column take rather than a
+        # per-member reindex of the full column (the shipped-code review
+        # measured the latter at +109 % on a 300-member, 3-period network).
+        # Under copy-on-write a same-index reindex shares the buffer.
+        pmp_period = (p_max_pu_t.reindex(demand_p.index)
+                      if p_max_pu_t is not None and len(profile_cols) else None)
 
         firm_fixed = 0.0
         max_achievable = 0.0
@@ -3547,7 +3555,9 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None) -> dict | None:
             profile_p = None
             if mem["profile"] is not None:
                 import numpy as _np
-                candidate = mem["profile"].reindex(demand_p.index)
+                candidate = (pmp_period[mem["name"]] if pmp_period is not None
+                             and mem["name"] in pmp_period.columns
+                             else mem["profile"].reindex(demand_p.index))
                 vals = candidate.to_numpy(dtype=float)
                 fin = vals[_np.isfinite(vals)]
                 if fin.size and (fin.max() - fin.min()) > 1e-9:

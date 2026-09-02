@@ -380,8 +380,10 @@ describe('ReserveMarginPanel — the net-load window (Phase 12b)', () => {
     expect(line.getAttribute('data-status')).toBe('ok')
     expect(line.textContent).toContain('Net-load window: 2 h')
     expect(line.textContent).toContain('0 shared with the gross window')
-    expect(line.textContent).toContain('netted 50.0 MW (wind)')
+    expect(line.textContent).toContain('1 asset netted (see the table)')
+    expect(line.textContent).toContain('mean netted availability over the period 50.0 MW')
     expect(line.textContent).toContain('50.0 MW → 0.0 MW')
+    expect(line.textContent).not.toMatch(/myopic/i)
     expect(line.getAttribute('title')).toContain('2030-01-01 02:00:00')
     // ★ the copy never promotes the second proxy to a correction, and never
     // calls netted capacity "VRE" — a maintenance schedule is netted too.
@@ -428,12 +430,27 @@ describe('ReserveMarginPanel — the net-load window (Phase 12b)', () => {
     expect(screen.getByTestId('rm-asset-netted-coal_a-ALL').textContent).toBe('—')
   })
 
+  it('★ says "last period solved (myopic)" on every line when the payload is partial', async () => {
+    vi.mocked(resultsApi.getReserveMargin).mockResolvedValue({ ...PAYLOAD, partial_periods: true })
+    renderPanel()
+    const line = await screen.findByTestId('rm-net-window-ALL')
+    expect(line.textContent).toMatch(/^Last period solved \(myopic\)/)
+  })
+
+  it('★ an old payload row with no profile_kind is "not computed", never "no profile"', () => {
+    expect(derateNetText({ derate_net: null, profile_kind: undefined }).title).toMatch(/Not computed/)
+    expect(derateNetText({ derate_net: null, profile_kind: undefined }).title).not.toMatch(/No profile/)
+  })
+
   it('derateNetText / netWindowSentence: the three dash reasons are distinct, and the sentences are honest', () => {
     expect(derateNetText({ derate_net: null, profile_kind: 'none' }).title).toMatch(/No profile/)
     expect(derateNetText({ derate_net: null, profile_kind: 'constant' }).title).toMatch(/Constant in this period/)
     expect(derateNetText({ derate_net: null, profile_kind: 'varying' }).title).toMatch(/No net-load window/)
     expect(derateNetText({ derate_net: 0.25, profile_kind: 'varying' }).text).toBe('0.250')
     expect(netWindowSentence(null)).toMatch(/not computed/)
+    expect(netWindowSentence({ status: 'empty_window', netted_assets: [], snapshots: [],
+      n_hours: 0, net_peak_mw: null, gross_at_net_peak_mw: null, netted_mw: null,
+      overlap_hours: null, firm_gross_mw: null, firm_net_mw: null })).toMatch(/came back empty/)
     expect(netWindowSentence({ status: 'no_finite_demand', netted_assets: [], snapshots: [],
       n_hours: 0, net_peak_mw: null, gross_at_net_peak_mw: null, netted_mw: null,
       overlap_hours: null, firm_gross_mw: null, firm_net_mw: null })).toMatch(/No finite demand/)

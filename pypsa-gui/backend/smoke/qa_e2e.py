@@ -3693,11 +3693,14 @@ def suite_S23():
            and nw.get("netted_mw") is not None and abs(float(nw["netted_mw"]) - 50.0) < 1e-6
            and w.get("profile_kind") == "varying" and w.get("netted") is True
            and w.get("derate") is not None and abs(float(w["derate"]) - 0.5) < 1e-6
-           and w.get("derate_net") is not None and abs(float(w["derate_net"])) < 1e-9,
+           and w.get("derate_net") is not None and abs(float(w["derate_net"])) < 1e-9
+           and nw.get("firm_gross_mw") is not None and abs(float(nw["firm_gross_mw"]) - 50.0) < 1e-6
+           and nw.get("firm_net_mw") is not None and abs(float(nw["firm_net_mw"])) < 1e-9,
            f"cfg->{st_cfg}{why}; status={nw.get('status')} netted={nw.get('netted_assets')} "
            f"hours={nw.get('snapshots')} (want {want_hours}) netted_mw={nw.get('netted_mw')} "
            f"(want 50); wind derate={w.get('derate')} derate_net={w.get('derate_net')} "
-           f"(want 0.5 / 0.0)")
+           f"(want 0.5 / 0.0); firm gross->net={nw.get('firm_gross_mw')}->{nw.get('firm_net_mw')} "
+           f"(want 50->0)")
 
     # ── S23.2 — a CONSTANT profile is not netted: the same farm with a flat
     # 1.0 column reads `constant`, the block says nothing_netted, and the

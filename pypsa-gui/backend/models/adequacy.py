@@ -162,12 +162,15 @@ class NetWindowBlock(BaseModel):
     period is both `nettable` and built — the net-load window IS the gross
     window, and no zero-delta "finding" is published. ``no_finite_demand`` =
     the stashed demand had no finite value (the static ``p_set`` wart), so
-    no window could be selected on either series.
+    no window could be selected on either series. ``empty_window`` = demand
+    has finite values but the window came back empty (the threshold landed
+    on a NaN) — not reachable from the facts loop today, named so the enum
+    never lies.
 
     "Netted capacity" is NOT "VRE": every unit whose availability varies over
     the period is netted, a thermal maintenance schedule included, and
     ``netted_assets`` says which."""
-    status: Literal["ok", "nothing_netted", "no_finite_demand"] = "ok"
+    status: Literal["ok", "nothing_netted", "no_finite_demand", "empty_window"] = "ok"
     netted_assets: list[str] = Field(default_factory=list)
     snapshots: list[str] = Field(default_factory=list)
     n_hours: int = 0
@@ -232,6 +235,10 @@ class ReserveMarginBlock(BaseModel):
     justified by convention and by the derating factors, not by a sampler."""
     margin: float
     horizon_wide: bool
+    # True under the myopic strategy: each iteration overwrites the stash, so
+    # this block describes the LAST period solved only — as every margin
+    # field already did, now said on the wire (Phase 12b review, finding 1).
+    partial_periods: bool = False
     by_period: list[ReserveMarginPeriod] = Field(default_factory=list)
     assets: list[ReserveMarginAsset] = Field(default_factory=list)
     # How many credited assets carried each basis — the same
