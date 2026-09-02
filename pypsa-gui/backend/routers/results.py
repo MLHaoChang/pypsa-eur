@@ -3365,6 +3365,11 @@ def post_mc(body: McRequest | None = None):
                     "metrics": metrics,
                     "elcc": rows,
                     "warning": MC_WARNING_V1,
+                    # Phase 12c-pre: the units whose outages were sampled ON
+                    # their availability series rather than at nameplate.
+                    "profile_units": [
+                        str(u.name) for u in inputs.units
+                        if getattr(u, "profile", None) is not None],
                 })
         except Exception as exc:                              # noqa: BLE001
             record.update(status="failed", result=None, error=str(exc),
@@ -4992,32 +4997,30 @@ def get_copt():
     occurrence data (see services/adequacy/occurrence.py).
     """
     from services.adequacy.copt import (
-        attribute_criticality,
-        build_copt,
+        K_EXACT,
         fleet_and_residual,
-        hourly_adequacy,
+        must_take_generators,
+        screening_analysis,
     )
 
     n = PyPSAService.get_network()
     units, residual, w = fleet_and_residual(n)
     if not units:
         return Response(status_code=204)
-    dist = build_copt(units, delta_mw=1.0)
-    metrics = hourly_adequacy(dist, residual, weights=w)
     cfg = _state.get("solver_config")
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
-    rows = attribute_criticality(units, dist, residual, weights=w, voll=voll)
-    # Count must-take by re-deriving membership is wasteful; infer from the
-    # generator walk instead: electrical non-slack gens minus COPT units.
-    from services.adequacy.metrics import electrical_columns
-    from services.adequacy.slack import slack_generator_mask
-    gens = n.generators
-    elec = set(electrical_columns(n, list(n.buses.index)))
-    slack = slack_generator_mask(gens)
-    n_elec_gens = sum(
-        1 for g in gens.index
-        if not bool(slack.get(g, False)) and str(gens.at[g, "bus"]) in elec
-    )
+    # Phase 12c-pre: split, net the remainder, table, mixture, attribution —
+    # one call so this route and the engine tests see the same arithmetic.
+    analysis = screening_analysis(units, residual, weights=w, voll=voll,
+                                  delta_mw=1.0)
+    metrics = analysis["metrics"]
+    rows = analysis["rows"]
+    split = analysis["split"]
+    # The must-take count comes from the SAME walk that decided membership.
+    # The previous `electrical non-slack gens − len(units)` subtraction
+    # miscounted zero-capacity generators, which the walk skips and the
+    # subtraction did not (plan 12c-pre v2 review, finding 8).
+    n_must_take = len(must_take_generators(n))
     from services.adequacy.metrics import horizon_years, resolve_time_basis
     _copt_nyears = horizon_years(n)
     _copt_basis = resolve_time_basis(_copt_nyears)
@@ -5039,14 +5042,23 @@ def get_copt():
         },
         "per_mode": [
             {**r["failure_mode"],
-             "delta_eue_mwh": r["delta_eue_mwh"]}
+             "delta_eue_mwh": r["delta_eue_mwh"],
+             **({"note": r["note"]} if "note" in r else {})}
             for r in rows
         ],
         "fleet": {
             "units": len(units),
-            "must_take": n_elec_gens - len(units),
+            "must_take": n_must_take,
             "delta_mw": 1.0,
+            # Phase 12c-pre disclosure: which units carry a profile INTO the
+            # sampled fleet, which of those were netted beyond the exact
+            # cap, and the sentence that says so. `fidelity` above stays the
+            # engine enum the comparison table keys on.
+            "profile_units": [u.name for u in split.mixed] + [u.name for u in split.netted],
+            "netted_beyond_cap": [u.name for u in split.netted],
+            "k_exact": K_EXACT,
         },
+        "fidelity_note": analysis["fidelity_note"],
         "voll_eur_per_mwh": voll,
     }
 

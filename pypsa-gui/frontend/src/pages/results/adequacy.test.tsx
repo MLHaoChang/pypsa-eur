@@ -99,6 +99,30 @@ describe('CoptChips — the screening row', () => {
     render(<CoptChips copt={coptPayload()} proxyEnsMwh={30.0} />)
     expect(screen.queryByText(/storage\/network carry the adequacy/)).toBeNull()
   })
+  // Phase 12c-pre: a unit that carries both a series and outage data is now
+  // MODELLED on its series; the chip says how many, and how many were netted
+  // beyond the exact cap, with the payload's sentence as its tooltip.
+  it('names the profiled units and the netted remainder when the payload says so', () => {
+    render(<CoptChips copt={coptPayload({
+      fleet: { units: 12, must_take: 1, delta_mw: 1,
+               profile_units: ['h1', 'h2', 'h3'], netted_beyond_cap: ['h3'], k_exact: 2 },
+      fidelity_note: '3 unit(s) carry both an availability series and outage data (h1, h2, h3): '
+        + 'outages are sampled on the series and the COPT mixes them exactly per hour over their '
+        + 'outage states. 1 more beyond the exact cap of 2 (h3) are netted at expected output; '
+        + 'their criticality rows understate their outages.',
+    })} proxyEnsMwh={null} />)
+    const chip = screen.getByTestId('copt-fidelity-note')
+    expect(chip.textContent).toBe('3 on a profile, 1 netted beyond the cap')
+    expect(chip.getAttribute('title')).toMatch(/mixes them exactly per hour/)
+  })
+  it('says nothing about profiles on a payload without the note (pre-phase or none)', () => {
+    render(<CoptChips copt={coptPayload()} proxyEnsMwh={null} />)
+    expect(screen.queryByTestId('copt-fidelity-note')).toBeNull()
+    render(<CoptChips copt={coptPayload({ fidelity_note: null,
+      fleet: { units: 2, must_take: 1, delta_mw: 1, profile_units: [], netted_beyond_cap: [] } })}
+      proxyEnsMwh={null} />)
+    expect(screen.queryByTestId('copt-fidelity-note')).toBeNull()
+  })
 })
 
 // ── Multi-period: the summed headline hides which period bound.

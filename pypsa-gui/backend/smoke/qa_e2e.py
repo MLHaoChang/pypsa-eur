@@ -3313,21 +3313,21 @@ def suite_S20():
 
 def suite_S21():
     """
-    Outage data that SHADOWS an availability profile (Phase 12a).
+    A unit with BOTH an availability profile and outage data — the preflight
+    disclosure (Phase 12a, re-scoped by Phase 12c-pre).
 
-    `copt.py`'s membership rule sends a generator with resolvable occurrence
-    params into the sampled fleet as a flat two-state unit at its firm
-    capacity — its `p_max_pu` profile is not carried. A generator WITHOUT
-    outage data is must-take and IS netted at `p_max_pu x capacity`. So on two
-    identical 100 MW farms sharing one 25 %-capacity-factor profile, the one
-    with an outage rate contributes (1-q)*100 = 90 MW where the other
-    contributes 25 MW, and the reserve margin credits that same asset 22.5 MW.
-
-    Unit tests drive `_check_outage_params` directly. This suite is here for
-    the only thing that matters to a user: that the warning actually REACHES
-    them through a live preflight, naming the asset and the DIRECTION.
+    12a found that `copt.py`'s membership rule sent such a unit into the
+    sampled fleet as a flat two-state unit at its firm capacity, profile
+    discarded, and WARNED (`outage_shadows_profile`). 12c-pre models the
+    series in both engines — outages sampled on it, the COPT mixed exactly
+    per hour — so the preflight issue is now a DISCLOSURE of how the unit is
+    modelled (`profile_and_outage_modelled`), emitted for outage data the
+    user typed. Unit tests drive `_check_profiled_occurrence_units` directly;
+    this suite is here for the only thing that matters to a user: that the
+    disclosure REACHES them through a live preflight, naming the asset and
+    saying how it is modelled.
     """
-    print("\nS21 - Outage data shadowing an availability profile (area 21)")
+    print("\nS21 - Profile plus outage data: the preflight disclosure (area 21)")
     name = "qa_e2e_shadowprofile"
 
     http("/api/network/reset", method="POST")
@@ -3382,28 +3382,31 @@ def suite_S21():
 
     st_p, pf = http("/api/simulation/preflight", method="POST")
     issues = (pf or {}).get("issues") or []
-    hit = [i for i in issues if i.get("code") == "outage_shadows_profile"]
+    hit = [i for i in issues if i.get("code") == "profile_and_outage_modelled"]
+    old = [i for i in issues if i.get("code") == "outage_shadows_profile"]
     msg = " ".join(str(i.get("message", "")) for i in hit)
 
     # ── S21.1 — it reaches a live preflight, names the asset, and is a WARNING
-    # (not an error: the user entered that data deliberately, and blocking
-    # would stop a network that solved yesterday).
+    # (the only non-error severity on the wire; the user entered that data
+    # deliberately, and blocking would stop a network that solved yesterday).
+    # The 12a code is gone: with the profile modelled it would be false.
     record("S21.1",
-           st_p == 200 and bool(hit)
+           st_p == 200 and bool(hit) and not old
            and "wind_with_for" in msg
            and all(i.get("severity") == "warning" for i in hit),
-           f"preflight->{st_p}; outage_shadows_profile present={bool(hit)}; "
+           f"preflight->{st_p}; profile_and_outage_modelled present={bool(hit)}; "
+           f"old outage_shadows_profile absent={not old}; "
            f"names the asset={'wind_with_for' in msg}; "
            f"severity={[i.get('severity') for i in hit]}")
 
-    # ── S21.2 — it names the DIRECTION, and does NOT fire on the farm with no
-    # outage data (whose profile IS honoured) nor on the thermal unit (whose
-    # p_max_pu is a flat 1.0 — the false-positive that would make it noise on
-    # every real project).
+    # ── S21.2 — it says HOW the unit is modelled, and does NOT fire on the
+    # farm with no outage data (must-take, netted as before) nor on the
+    # thermal unit (whose p_max_pu is a flat 1.0 — the false-positive that
+    # would make it noise on every real project).
     record("S21.2",
-           bool(hit) and "OVERSTATED" in msg
+           bool(hit) and "mixes" in msg
            and "wind_no_for" not in msg and "gas1" not in msg,
-           f"states the direction={'OVERSTATED' in msg}; "
+           f"says how it is modelled={'mixes' in msg}; "
            f"silent on the no-outage farm={'wind_no_for' not in msg}; "
            f"silent on the flat-profile thermal unit={'gas1' not in msg}")
 
@@ -3726,6 +3729,143 @@ def suite_S23():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
 
+
+def suite_S24():
+    """
+    A unit with BOTH a profile and outage data — the engines, live
+    (Phase 12c-pre, plan v2.1 A11′).
+
+    12a measured the defect on this exact fixture: two identical 100 MW farms
+    on one profile, one with an outage rate; the one WITH it was modelled as
+    (1-q)*100 = 90 MW of firm capacity. 12c-pre attaches the series to the
+    unit: the sequential MC samples its outages on the series and the COPT
+    mixes it exactly per hour over its outage states. This suite asserts the
+    LIVE `/results/copt` equals the mixture computed independently here from
+    the fixture's numbers alone, that the MC names the unit, and that the
+    disclosure is on the payload.
+
+    The independent mixture: the table without the farm is gas1 alone (80 MW,
+    q = 0.10), so S(x) = 1 for x <= 0, 0.9 for 0 < x <= 80, else 0; the
+    residual nets only the must-take farm, r_h = 100 - 100*p_h; the profiled
+    farm is a_h = 100*p_h up with probability 0.9:
+
+        LOLP_h = 0.1*(1 - S(r_h)) + 0.9*(1 - S(r_h - a_h))
+
+    Bitten live (recorded in the plan): with the profile dropped the COPT
+    reverts to the flat two-state value.
+    """
+    print("\nS24 - Profile plus outage data: the engines, live (area 24)")
+    name = "qa_e2e_profiledunit"
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S24.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("wind", "gas"):
+        built.append(http("/api/network/carriers", method="POST",
+                          body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-01 07:00", "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "gas1", "bus": "b", "carrier": "gas",
+                            "p_nom": 80.0, "marginal_cost": 10.0,
+                            "outage_rate_value": 0.10,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 24.0})[0])
+    for nm, extra in (("wind_no_for", {}),
+                      ("wind_with_for", {"outage_rate_value": 0.10,
+                                         "outage_rate_basis": "EFORd",
+                                         "mttr_hours": 24.0})):
+        body = {"name": nm, "bus": "b", "carrier": "wind", "p_nom": 100.0,
+                "marginal_cost": 0.0}
+        body.update(extra)
+        built.append(http("/api/network/generators", method="POST",
+                          body=body)[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    idx = [f"2030-01-01T{h:02d}:00:00" for h in range(8)]
+    prof = [0.05, 0.15, 0.35, 0.45] * 2
+    st_ts, _ = http("/api/network/timeseries/generators/p_max_pu",
+                    method="PUT",
+                    body={"index": idx,
+                          "columns": ["wind_no_for", "wind_with_for"],
+                          "data": [[v, v] for v in prof]})
+    built.append(st_ts)
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2):
+            skip(f"S24.{i}", f"fixture build failed: {built}")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    # The independent mixture, from the fixture's numbers alone.
+    def surv(x):
+        return 1.0 if x <= 0 else (0.9 if x <= 80.0 else 0.0)
+    q_farm = 0.10
+    expected = sum(
+        q_farm * (1.0 - surv(100.0 - 100.0 * p))
+        + (1.0 - q_farm) * (1.0 - surv(100.0 - 100.0 * p - 100.0 * p))
+        for p in prof)
+    # …and the flat two-state value 12a measured: the farm at 100 MW q=0.10
+    # in the table, profile discarded (states 0/80/100/180).
+    def surv_flat(x):
+        return sum(pr for c, pr in ((0.0, 0.01), (80.0, 0.09),
+                                    (100.0, 0.09), (180.0, 0.81)) if c >= x) \
+            if x > 0 else 1.0
+    flat = sum(1.0 - surv_flat(100.0 - 100.0 * p) for p in prof)
+
+    st_k, copt = http("/api/results/copt")
+    lole = float(((copt or {}).get("metrics") or {}).get("lole_hours", float("nan")))
+    fleet = (copt or {}).get("fleet") or {}
+    note = (copt or {}).get("fidelity_note") or ""
+
+    # ── S24.1 — the live COPT equals the independent mixture, not the flat
+    # value; the payload names the unit and carries the sentence.
+    record("S24.1",
+           st_k == 200 and abs(lole - expected) < 1e-6
+           and abs(lole - flat) > 0.1
+           and fleet.get("profile_units") == ["wind_with_for"]
+           and fleet.get("netted_beyond_cap") == []
+           and fleet.get("must_take") == 1
+           and "wind_with_for" in note and "mixes" in note,
+           f"copt->{st_k}; LOLE={lole:.6f} expected mixture={expected:.6f} "
+           f"(flat two-state would be {flat:.6f}); "
+           f"profile_units={fleet.get('profile_units')}; "
+           f"must_take={fleet.get('must_take')}; note names it={'wind_with_for' in note}")
+
+    # ── S24.2 — the MC study names the unit among those sampled on their
+    # series, and preflight carries the disclosure for the typed outage data.
+    st_m, _ = http("/api/results/mc", method="POST",
+                   body={"draws": 50, "seed": 1, "cov_target": 1.0})
+    result = None
+    if st_m == 200:
+        for _ in range(60):
+            st_g, rec = http("/api/results/mc")
+            if st_g == 200 and (rec or {}).get("status") in ("done", "failed"):
+                result = rec
+                break
+            time.sleep(0.5)
+    mc_units = (((result or {}).get("result") or {}).get("profile_units"))
+    st_p, pf = http("/api/simulation/preflight", method="POST")
+    codes = [i.get("code") for i in ((pf or {}).get("issues") or [])]
+    record("S24.2",
+           st_m == 200 and (result or {}).get("status") == "done"
+           and mc_units == ["wind_with_for"]
+           and "profile_and_outage_modelled" in codes
+           and "outage_shadows_profile" not in codes,
+           f"mc start->{st_m}; status={(result or {}).get('status')}; "
+           f"profile_units={mc_units}; preflight codes={codes}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -3806,6 +3946,9 @@ def main() -> int:
 
     if run("S23"):
         suite_S23()
+
+    if run("S24"):
+        suite_S24()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

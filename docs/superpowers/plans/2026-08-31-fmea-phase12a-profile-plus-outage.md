@@ -1,5 +1,15 @@
 # Phase 12a — a generator with BOTH a profile and outage data (plan, v1)
 
+> **Superseded by Phase 12c-pre**
+> (`2026-09-02-fmea-phase12c-pre-profile-outage-unit-v2.md`, v2.1). 12a
+> WARNED that the engines discarded the profile; 12c-pre MODELS it — the MC
+> samples the unit's outages on its series and the COPT mixes it exactly per
+> hour — so `outage_shadows_profile` is retired and replaced by the
+> `profile_and_outage_modelled` disclosure (typed outage data only) and
+> `static_p_max_pu_not_applied` (the static column, still not applied, for
+> the reason recorded in 12c-pre §1.3). The measurement below stands as the
+> finding this phase fixed.
+
 ## 0. The finding, measured
 
 Two IDENTICAL 100 MW wind farms, same 25 %-capacity-factor `p_max_pu` profile.

@@ -220,6 +220,9 @@ export interface McResult {
   elcc: ElccRow[]
   /** MC_WARNING_V1, shipped with every payload — render it, never inline it. */
   warning: string
+  /** Phase 12c-pre: units whose outages were sampled ON their availability
+   *  series rather than at nameplate. Absent on pre-phase payloads. */
+  profile_units?: string[]
 }
 
 export interface McStatus {

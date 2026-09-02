@@ -107,6 +107,20 @@ _MAX_BISECTION_STEPS = 64
 _KINDS = ("generator", "storage_unit", "vre")
 
 
+def unit_nameplate_mw(u) -> float:
+    """The capacity a firm block must bracket for one sampled unit: its
+    nameplate, or for a profiled unit (Phase 12c-pre) its best hour
+    ``max_h(profile_h) × cap`` — never a ``(1−q)``-derated figure."""
+    prof = getattr(u, "profile", None)
+    if prof is None:
+        return float(u.capacity_mw)
+    arr = np.asarray(prof, dtype=np.float64)
+    peak = float(np.nanmax(arr)) if arr.size else 0.0
+    if not math.isfinite(peak):
+        peak = 0.0
+    return max(peak, 0.0) * float(u.capacity_mw)
+
+
 def elcc_candidates(n) -> list[dict]:
     """
     Every asset in ``n`` whose capacity credit this module can price, as
@@ -149,11 +163,19 @@ def elcc_candidates(n) -> list[dict]:
     must_take = must_take_generators(n)
     inputs = snapshot_inputs(n, vre_assets=must_take)
 
-    rows: list[dict] = [
-        {"kind": "generator", "name": str(u.name),
-         "nameplate_mw": float(u.capacity_mw)}
-        for u in inputs.units
-    ]
+    # Phase 12c-pre: a profiled unit's nameplate for the bracket is its
+    # best hour, max_h(a_{i,h}) — the firm block then dominates the unit
+    # hour by hour and the dominance tripwire holds; a (1−q)-derated peak
+    # would make `not_bracketed` reachable on the unit's best hour. A
+    # zero-peak profile has nothing to price and is excluded, as the vre
+    # branch below excludes it.
+    rows: list[dict] = []
+    for u in inputs.units:
+        nameplate = unit_nameplate_mw(u)
+        if nameplate <= 0.0 and getattr(u, "profile", None) is not None:
+            continue
+        rows.append({"kind": "generator", "name": str(u.name),
+                     "nameplate_mw": nameplate})
     rows += [
         {"kind": "storage_unit", "name": str(s.name),
          "nameplate_mw": float(s.p_nom_mw)}
@@ -350,7 +372,7 @@ def _resolve(inputs, kind: str, name: str):
     if kind == "generator":
         for i, u in enumerate(inputs.units):
             if u.name == name:
-                return inputs, frozenset({i}), frozenset(), float(u.capacity_mw)
+                return inputs, frozenset({i}), frozenset(), unit_nameplate_mw(u)
         raise KeyError(f"no occurrence-bearing generator named {name!r} in the "
                        "sampled fleet")
 

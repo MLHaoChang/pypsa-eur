@@ -354,9 +354,30 @@ Antares export is worth doing. Presenting either alone invites misplaced trust.
 COPT cost is `O(N · C/Δ)` over a **rounding increment Δ**, not `2^N`, so "fast" is
 directionally right — but Δ must be named and its rounding bias handled (capacity
 apportioned probabilistically to adjacent rounded states, or the table drifts).
-Milliseconds holds for a national model (~300 units); full PyPSA-Eur (10³–10⁴ units) is
-seconds-to-minutes, and **multi-area** COPTs with transfer limits are exponential in the
-number of areas — the actual reason PRAS exists.
+The **table** is milliseconds for a national model (~300 units); the **route** is not:
+`attribute_criticality` deconvolves every unit in a Python loop over C/Δ and was
+measured at ≈ 32 s for 300 units on a 5447-state table (Phase 12c-pre review), and
+the synchronous `/copt` contract at that size is an open hardening item beside the
+abort routes. Full PyPSA-Eur (10³–10⁴ units) is seconds-to-minutes for the table
+alone, and **multi-area** COPTs with transfer limits are exponential in the number of
+areas — the actual reason PRAS exists.
+
+**Amendment (Phase 12c-pre) — profiled occurrence units.** A generator that carries
+BOTH an availability series (`p_max_pu` column, not identically 1) and resolvable
+outage data enters the sampled fleet with the series attached (`CoptUnit.profile`).
+The table is built over the units without a profile and the profiled units are
+**mixed exactly per hour over their `2^k` outage states**
+(`LOLP_h = Σ_s P[s]·(1 − S(r_h − Σ_i s_i·a_{i,h}))`, `a_{i,h} = profile_i(h)·cap_i`),
+up to `K_EXACT = 8` of them; beyond that the smallest-mean units are netted at
+expected output and the payload names them, with their attribution rows marked as
+understated. Netting a unit at its expectation — the obvious shortcut — was rejected on
+measurement: LOLP is convex in the shortfall, so it understates LOLE 3× and a unit's
+criticality 14× on a mild profile. The sequential MC samples the same unit's outages on
+its series. A **static** `p_max_pu < 1` is still not applied by either engine (it is
+ambiguous in the wild — a typed capacity factor, or PyPSA-Eur's nuclear CF that already
+contains outages) and preflight says so (`static_p_max_pu_not_applied`); the reserve
+margin applies it, so the margin and the engines disagree about such a unit by a
+recorded 25 % / 2 % on the nuclear import — an open item, not this amendment's.
 
 ### 5.4 Criticality — IEC 60812 FMECA, no RPN
 

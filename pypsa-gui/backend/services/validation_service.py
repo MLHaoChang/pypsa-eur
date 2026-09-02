@@ -1670,105 +1670,92 @@ def _check_reserve_margin(n, solver_config) -> list[Issue]:
     return issues
 
 
-def _profile_is_informative(series) -> bool:
-    """True when a ``p_max_pu`` column is a real availability PROFILE.
+def _check_profiled_occurrence_units(n) -> list[Issue]:
+    """Phase 12c-pre: how a unit that carries BOTH a ``p_max_pu`` and outage
+    data is modelled — the disclosure that replaced 12a's shadowed-profile
+    warning once the engines modelled the series.
 
-    ★ The single guard that keeps this warning from being noise. Every
-    conventional generator in a real project carries outage data, and many
-    carry a ``p_max_pu`` column that is identically 1.0 — testing for the
-    column's PRESENCE would fire on all of them, on every project, and a
-    warning that fires everywhere is one nobody reads.
+    Walks the SAME membership the engines use (``copt.occurrence_units``), so
+    it fires on carrier-default-only networks too — a PyPSA-Eur import has
+    no outage columns at all, and the column-gated ``_check_outage_params``
+    below could never reach it (plan 12c-pre v2 review, finding 3).
 
-    "Informative" means the series actually varies below 1.0 somewhere: a
-    wind/solar trace, or a planned-maintenance schedule on a thermal unit.
-    Both are profiles the engines discard, so both deserve the warning.
+    * ``profile_and_outage_modelled`` — the unit's availability SERIES is
+      informative and the engines now honour it: outages are sampled on the
+      series and the COPT mixes the unit exactly per hour. Emitted only when
+      the outage data was typed by the user (``source == "asset"``): they
+      entered it and deserve to be told how it is used. For a library
+      (carrier-default) rate — a hydro carrier with an inflow series — the
+      ``/copt`` and ``/mc`` payloads carry the disclosure and preflight is
+      silent, because a warning on every hydro project is one nobody reads.
+    * ``static_p_max_pu_not_applied`` — a STATIC ``p_max_pu < 1`` on a unit
+      with outage data (either source). The engines do NOT apply it: it is
+      ambiguous in the wild (a typed capacity factor on a farm, or
+      PyPSA-Eur's nuclear CF table that already contains forced outages),
+      and folding it in would double-count the second case. The reserve
+      margin applies both. There is no correct remedy inside this phase for
+      a CF that includes outages; the message says so rather than offering
+      "set q = 0", which would model a perfectly firm unit.
     """
     try:
-        import numpy as _np
-
-        arr = _np.asarray(series, dtype=float)
+        from services.adequacy.copt import occurrence_units, series_is_informative
+        rows = occurrence_units(n)
     except Exception:                                         # noqa: BLE001
-        return False
-    if arr.size == 0:
-        return False
-    finite = arr[_np.isfinite(arr)]
-    if finite.size == 0:
-        return False
-    # Below 1 anywhere, by more than float noise.
-    return bool((finite < 1.0 - 1e-9).any())
-
-
-def _check_shadowed_profiles(n, params) -> list[Issue]:
-    """Generators whose availability PROFILE is discarded because they also
-    carry outage data.
-
-    ★ THE DEFECT. `copt.py`'s membership rule sends a generator with
-    resolvable occurrence params into the sampled fleet as a **flat two-state
-    unit at its firm capacity** — its ``p_max_pu`` profile is not carried
-    (``CoptUnit`` has no profile field, and `mc.snapshot_inputs` preserves a
-    profile ONLY for must-take names). A generator WITHOUT outage data is
-    must-take and IS netted at ``p_max_pu x capacity``.
-
-    So on two identical 100 MW farms sharing one 25 %-capacity-factor
-    profile, measured: the one without outage data contributes 25 MW mean;
-    the one WITH it contributes ``(1-q)*100`` = 90 MW. Entering MORE data
-    credits the asset ~3.6x MORE. Meanwhile `reserve_margin_facts` credits
-    that same asset ``(1-q)*profile̅`` = 22.5 MW — so the constraint and the
-    sampler that certifies it disagree 4x about one asset.
-
-    This is an unhandled INPUT COMBINATION rather than an oversight: the
-    design assumes VRE carries no FOR (`occurrence.CARRIER_DEFAULTS`:
-    "Deliberately ABSENT: wind / solar / other VRE"), and nothing in the
-    defaults or the import path ever attaches one. It arises only when a user
-    enters one by hand — which is why this warning is rare by construction.
-
-    A WARNING, not an error: the user deliberately entered that data, and a
-    blocking refusal would stop a network that solved yesterday. But it names
-    the DIRECTION, because a warning that does not say which way it errs
-    cannot be acted on.
-    """
-    p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+        return []
     gens = getattr(n, "generators", None)
+    p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
     static = getattr(gens, "get", lambda *_a, **_k: None)("p_max_pu") \
         if gens is not None else None
 
-    def _shadowed(name) -> bool:
-        # An hourly profile that actually varies…
-        if (p_max_pu_t is not None
-                and name in getattr(p_max_pu_t, "columns", [])
-                and _profile_is_informative(p_max_pu_t[name])):
-            return True
-        # …or a STATIC derate below 1 (Phase 12a review, SERIOUS 6b).
-        # `solved_capacity` reads p_nom_opt/p_nom only, so a static
-        # p_max_pu = 0.5 is discarded exactly like a time series: the unit
-        # enters the fleet at full nameplate. 1.0 is the default on every
-        # generator and must stay silent, which `_profile_is_informative`
-        # enforces for both arms.
+    modelled: list[str] = []
+    static_hit: list[str] = []
+    for name, _cap, row in rows:
+        has_series = (p_max_pu_t is not None
+                      and name in getattr(p_max_pu_t, "columns", [])
+                      and series_is_informative(p_max_pu_t[name]))
+        if has_series and str(row["source"]) == "asset":
+            modelled.append(name)
         if static is not None:
             try:
-                return _profile_is_informative([float(static.get(name, 1.0))])
-            except Exception:                                 # noqa: BLE001
-                return False
-        return False
+                sv = float(static.get(name, 1.0))
+            except (TypeError, ValueError):
+                sv = 1.0
+            if math.isfinite(sv) and sv < 1.0 - 1e-9:
+                static_hit.append(name)
 
-    shadowed = [str(name) for name in params.index if _shadowed(name)]
-    if not shadowed:
-        return []
-    names = ", ".join(sorted(shadowed)[:20])
-    more = " …" if len(shadowed) > 20 else ""
-    return [_warn(
-        "outage_shadows_profile", "Generator", "",
-        f"{len(shadowed)} generator(s) carry BOTH an availability profile "
-        f"and outage data: {names}{more}. The adequacy engines use the "
-        "outage rate and DISCARD the profile — the COPT and the sequential "
-        "MC model these as firm capacity that is either fully available or "
-        "fully out, so their contribution to adequacy is OVERSTATED (a "
-        "25 %-capacity-factor farm with a 10 % outage rate is simulated at "
-        "90 % of nameplate, not 25 %). The reserve margin, by contrast, uses "
-        "BOTH factors for the same asset, so the two disagree. Remove the "
-        "outage rate to have the profile honoured, or remove the profile if "
-        "the asset really is firm.",
-    )]
+    issues: list[Issue] = []
+    if modelled:
+        names = ", ".join(sorted(modelled)[:20])
+        more = " …" if len(modelled) > 20 else ""
+        issues.append(_warn(
+            "profile_and_outage_modelled", "Generator", "",
+            f"{len(modelled)} generator(s) carry BOTH an availability profile "
+            f"and outage data you entered: {names}{more}. The adequacy "
+            "engines model both: outages are sampled on the availability "
+            "series (available at the series' value when up, zero when "
+            "down) and the COPT mixes the unit exactly per hour over its "
+            "outage states. The reserve margin credits the same unit at "
+            "(1 - q) x the profile's window mean, so the three agree. "
+            "Remove the outage rate if the profile already accounts for "
+            "outages.",
+        ))
+    if static_hit:
+        names = ", ".join(sorted(static_hit)[:20])
+        more = " …" if len(static_hit) > 20 else ""
+        issues.append(_warn(
+            "static_p_max_pu_not_applied", "Generator", "",
+            f"{len(static_hit)} generator(s) with outage data carry a STATIC "
+            f"p_max_pu below 1: {names}{more}. The COPT and the sequential "
+            "MC do NOT apply it — they model the unit at nameplate x (1 - q) "
+            "— while the reserve margin applies both, so the engines and the "
+            "margin disagree about this unit. If the value is an "
+            "availability, enter it as a time series (a constant series is "
+            "honoured by every engine). If it is a capacity factor that "
+            "already includes outages, the margin double-counts it and "
+            "neither engine sees it; that case is recorded as an open item "
+            "and has no correct remedy yet.",
+        ))
+    return issues
 
 
 def _check_outage_params(n) -> list[Issue]:
@@ -1801,25 +1788,6 @@ def _check_outage_params(n) -> list[Issue]:
             params = all_params[all_params["source"] == "asset"]
             for msg in validate_outage_params(params):
                 issues.append(_warn("outage_params_implausible", cls, "", msg))
-            if component == "generators":
-                # ★ UNFILTERED, deliberately (Phase 12a review, SERIOUS 6a).
-                # The plausibility check above is about values a USER typed,
-                # so it narrows to source == "asset". The shadow check is
-                # about which population the ENGINES admit, and
-                # `fleet_and_residual` admits `source != "missing"` — which
-                # includes `carrier_default`. Narrowing here made the check
-                # blind to a hydro unit with an inflow profile whose outage
-                # rate comes from the library, i.e. to the commonest instance
-                # of the defect, which needs no user input at all.
-                # `source != "missing"` — EXACTLY the population
-                # `fleet_and_residual` admits into the sampled fleet. Not
-                # "all": a `missing` row is a MUST-TAKE unit whose profile IS
-                # honoured (it is netted at profile x capacity), so warning
-                # about it would be a false positive — which is what the
-                # first version of this widening did, caught by the test that
-                # pins silence on the profiled farm with no outage data.
-                sampled = all_params[all_params["source"] != "missing"]
-                issues += _check_shadowed_profiles(n, sampled)
         except Exception:
             continue
     return issues
@@ -1840,6 +1808,9 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_carrier_emissions(n)
     # Adequacy occurrence data — warnings only, any mode.
     issues += _check_outage_params(n)
+    # Phase 12c-pre: how a unit with BOTH a profile and outage data is
+    # modelled — from the membership walk, NOT gated on an outage column.
+    issues += _check_profiled_occurrence_units(n)
     # Reliability-target coherence — pure config checks.
     issues += _check_ens_cap_coherence(solver_config)
     # Demand-response tier coherence (spec §4.4).

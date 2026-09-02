@@ -48,6 +48,11 @@ def test_endpoint_serves_metrics_and_ranked_modes():
     assert set(names) == {"thermal1", "thermal2"}
     assert out["fleet"]["units"] == 2
     assert out["fleet"]["must_take"] == 1          # the wind farm
+    # Phase 12c-pre: no unit carries a profile into the fleet here, so the
+    # disclosure is empty and the sentence absent — the shape is present.
+    assert out["fleet"]["profile_units"] == []
+    assert out["fleet"]["netted_beyond_cap"] == []
+    assert out["fidelity_note"] is None
     # VoLL comes from the live solver config; default config has voll=0 →
     # € fields are zero but ΔEUE still ranks.
     assert all(r["criticality_eur_per_year"] == 0.0 for r in out["per_mode"])

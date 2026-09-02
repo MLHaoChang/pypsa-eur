@@ -401,7 +401,20 @@ def sample_capacity(units, H, draws, seed, *, exclude=frozenset(),  # noqa: N803
     state_path = np.empty((H, draws), dtype=bool)
 
     for i, u in enumerate(units):
-        cap = np.float32(u.capacity_mw)
+        if getattr(u, "profile", None) is None:
+            cap = np.float32(u.capacity_mw)
+        else:
+            # Phase 12c-pre: UP is the series' value that hour, DOWN is zero.
+            # An (H, 1) column broadcasts over draws in the very same
+            # `np.add(..., where=state_path)` below — the chain, its stream
+            # and its consumption are untouched, and a unit without a
+            # profile takes the scalar path byte-for-byte as before (M2).
+            prof = np.asarray(u.profile, dtype=np.float64)
+            if prof.shape != (H,):
+                raise ValueError(
+                    f"unit {u.name!r}: profile has shape {prof.shape}, "
+                    f"expected ({H},)")
+            cap = (prof * float(u.capacity_mw)).astype(np.float32)[:, None]
         q = float(u.q)
         included = i not in exclude
         if q <= 0.0:

@@ -459,3 +459,101 @@ outages" flag) is a data-model change outside this phase.
 
 Implementation proceeds on v2 + these amendments; the shipped code gets
 its own review, as Phase 12b's did.
+
+---
+
+## SHIPPED — v2.1 as implemented (2026-09-02)
+
+### What shipped
+
+- `services/adequacy/copt.py`: `CoptUnit.profile` (`field(default=None,
+  compare=False, hash=False, repr=False)`); `K_EXACT = 8`;
+  `series_is_informative` (not identically 1 over finite values);
+  `_occurrence_profile` attaches the series in `fleet_and_residual` with
+  NaN → 0 in one line; `occurrence_units(n)` (the walk, for preflight);
+  `CapacityDistribution.survival_vec` / `expected_shortfall_vec` on cumsum
+  tables (`ES = x·F[j] − Δ·G[j]`); `mixture_hourly` (the `2^k` mixture,
+  vectorised over H, `fixed_up` for attribution); `hourly_adequacy` on the
+  vectorised pair with `mixed=`; `split_fleet` / `FleetSplit` /
+  `netted_expectation`; `attribute_criticality(..., mixed=, netted=)` with
+  `note` on netted rows; `fidelity_note`; `screening_analysis` (the one
+  call the route makes); `build_copt` **refuses** a profiled unit.
+- `services/adequacy/mc.py`: `sample_capacity` broadcasts `(H, 1)
+  = profile × cap`; wrong length is a `ValueError`.
+- `services/adequacy/elcc.py`: `unit_nameplate_mw` (best hour); candidates
+  exclude a zero-peak profiled unit; `_resolve` uses it.
+- `routers/results.py`: `/copt` via `screening_analysis`; `must_take` from
+  `must_take_generators` (the walk); `fleet.profile_units`,
+  `fleet.netted_beyond_cap`, `fleet.k_exact`, `fidelity_note`; per-mode
+  `note`. `/mc` result: `profile_units`.
+- `services/validation_service.py`: `_check_profiled_occurrence_units`
+  from the walk, called from `validate_for_run` unconditionally;
+  `profile_and_outage_modelled` (asset source only),
+  `static_p_max_pu_not_applied` (either source, no "q = 0" remedy);
+  `_check_shadowed_profiles`, `_profile_is_informative` and
+  `outage_shadows_profile` removed.
+- Tests: `tests/test_adequacy_profiled_units.py` (17); the five 12a tests
+  re-scoped to six (25 in the file); the endpoint test extended.
+- Live: S21 re-scoped; **new S24**. Frontend: `CoptPayload.fleet` optional
+  fields, `fidelity_note`, a chip (`copt-fidelity-note`) with the sentence
+  as tooltip; `McResult.profile_units?`. Specs: FMEA §5.3 amended, MC spec
+  v1.4, 12a plan superseded note, QA plan S21/S24.
+
+### Deviations from v2.1, recorded
+
+1. **`fidelity` stays the enum; the sentence is `fidelity_note`.** The
+   plan said `fidelity` names the netted units. `fidelity` is
+   `"analytic_convolution"` on the payload and on every per-mode row, and
+   the frontend comparison table keys on it; turning it into prose would
+   break that contract for a sentence. So the sentence is a sibling
+   field and `fidelity` is untouched (pinned by the endpoint test).
+2. **A11′'s numbers are for the two-farm fixture, not the reviewer's
+   single-farm variants.** The review's 4.76 / 4.40 / 0.80 were measured
+   on the shadowed farm ALONE. S24 builds 12a's two-farm fixture (both
+   farms) and computes the mixture in-suite from the fixture's numbers:
+   **2.78 h** mixed against **0.44 h** flat. Both are hand-checkable in
+   eight lines (the table is gas1 alone).
+3. **M2's bite.** The plan's implied broken variant — force every unit
+   through the `(H, 1)` path with a profile of ones — does NOT change the
+   bytes. That is the broadcast claim itself, confirmed by the attempt,
+   so it is not a broken variant. M2 was bitten instead by accumulating
+   in float64 (a genuine scalar-path change): bites.
+4. **A12's fixture had to carry mass.** The first bite of the `− 1e-12`
+   grid rule did not bite: at 1 or 40 MW the RBTS table has no state, so
+   a wrong index reads an identical value. The fixture now includes
+   `200 + 5e-13` (one 40 MW unit down, P ≈ 0.02): bites.
+5. **Per-hour convolution of the remainder is rejected** (finding 4's
+   99 s case), and the netted rows say they understate rather than
+   pretend otherwise.
+
+### Bites (each ★ against its named broken variant; restores verified by hash)
+
+| ★ | broken variant | result |
+|---|---|---|
+| A3′ | net the mixed units at expected output | bites (3.97 → 1.28) |
+| M1/A4′ | fold a static 0.9 into units without a column | bites (gas_static hash) |
+| M1/A4′ | attach only VARYING series | bites (hydro_const hash = old) |
+| A7 | attach only VARYING series (the 3× cliff) | bites (3.877 vs 11.770) |
+| A12 | drop the `− 1e-12` grid rule | bites, once the fixture carried mass (see 4) |
+| split | net the largest instead of the smallest | bites |
+| A1 | ignore the profile in the MC | bites |
+| A5′ | apply the profile without the state | bites |
+| M2 | accumulate in float64 | bites (see 3) |
+| A10 | leave the old series branch in | bites |
+| A10 | emit for carrier-default too | bites |
+| A10 | gate on the outage column | bites |
+| A10 | drop the static arm | bites |
+| A10 | test only for the column's presence | bites |
+| route | drop `profile_units` | bites |
+| S24 (live) | drop the series at attachment | bites — recorded below after the tree gate |
+
+### Gates
+
+- `tests/test_adequacy_profiled_units.py` 17 passed; `test_adequacy_occurrence.py`
+  25; COPT / MC / ELCC / endpoint / benchmark anchors 77 (the anchors pin
+  the vectorised switch at their tolerances).
+- Frontend: 876 passed / 92 files; `tsc --noEmit` clean.
+- Live, one port-verified server: S15 15/15, S16 6/6, S17 5/5 + the
+  pre-existing S17.6 skip, S18 5/5, S19 6/6, S20 3/3, S21 2/2 (re-scoped),
+  S22 2/2, S23 2/2, **S24 2/2**.
+- Full backend tree: recorded below.

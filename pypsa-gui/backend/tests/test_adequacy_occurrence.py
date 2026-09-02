@@ -223,123 +223,112 @@ def _two_farm_network():
     return n
 
 
-def test_preflight_warns_when_outage_data_SHADOWS_an_availability_profile():
-    """★ A1/A3: entering outage data silently discards the asset's profile.
+def _codes(issues, code):
+    return " ".join(i.message for i in issues if i.code == code)
 
-    Measured on this exact fixture before the warning existed. Two identical
-    100 MW farms on one 25 %-capacity-factor profile:
 
-      * `wind_no_for`   -> must-take, netted at its profile   ->  25 MW mean
-      * `wind_with_for` -> sampled fleet, profile DISCARDED,
-                           flat two-state at capacity_mw       ->  90 MW
+def test_preflight_DISCLOSES_how_a_profile_plus_outage_unit_is_modelled():
+    """★ Phase 12c-pre A10 (supersedes 12a's A1/A3): the engines now MODEL
+    the series — outages sampled on it, the COPT mixed exactly per hour —
+    so the preflight issue is a disclosure of how, not a warning that the
+    profile is discarded. It fires for the farm whose outage data the user
+    typed (`source == "asset"`), names it, says how it is modelled, and is a
+    `warning` (the only non-error severity on the wire).
 
-    and the reserve margin credits that SAME asset `(1-q)*profile̅` = 22.5 MW.
-    So the constraint says 22.5 MW and the sampler that certifies it says 90 —
-    4x — and entering MORE data credits the asset ~3.6x more.
+    Silent on the farm with NO outage data (must-take, netted as before) and
+    on the thermal unit whose column is a flat 1.0. The old
+    `outage_shadows_profile` code is gone: with the profile modelled it
+    would be a false statement.
 
-    `copt.py` documents the split deliberately ("a generator with resolvable
-    occurrence params is a two-state COPT unit at its firm capacity"), on the
-    assumption that VRE carries no FOR — `occurrence.CARRIER_DEFAULTS` says
-    "Deliberately ABSENT: wind / solar". Nothing stops a user entering one by
-    hand, and then the profile is dropped in silence.
-
-    The warning must name the DIRECTION, not merely the conflict: a warning
-    that does not say which way it errs cannot be acted on.
-
-    Bite (verified): drop the `_profile_is_informative` test and warn on every
-    unit with outage data — `gas1` then appears and the warning is noise.
+    Bite (verified): leave the old series branch in — `outage_shadows_profile`
+    reappears on `wind_with_for`.
     """
     from services import validation_service as VS
-    issues = VS._check_outage_params(_two_farm_network())
-    shadow = [i for i in issues if i.code == "outage_shadows_profile"]
-    assert shadow, "the shadowed profile produced no preflight warning"
-    msg = " ".join(i.message for i in shadow)
+    issues = VS._check_profiled_occurrence_units(_two_farm_network())
+    assert not [i for i in issues if i.code == "outage_shadows_profile"], issues
+    msg = _codes(issues, "profile_and_outage_modelled")
     assert "wind_with_for" in msg, msg
-    # …and NOT the farm that has no outage data — its profile is honoured.
     assert "wind_no_for" not in msg, msg
-    # …nor the thermal unit, whose p_max_pu is a flat 1.0.
     assert "gas1" not in msg, msg
-    # The direction is the actionable part.
-    assert "OVERSTAT" in msg.upper(), msg
-    assert all(i.severity == "warning" for i in shadow), shadow
+    assert "mixes" in msg and "sampled on the availability series" in msg, msg
+    assert all(i.severity == "warning" for i in issues), issues
+    # …and the engines really do carry the series in (the disclosure is true).
+    from services.adequacy.copt import fleet_and_residual
+    units, _res, _w = fleet_and_residual(_two_farm_network())
+    by = {u.name: u for u in units}
+    assert by["wind_with_for"].profile is not None
+    assert by["gas1"].profile is None
 
 
-def test_a_flat_profile_is_not_a_shadowed_profile():
-    """★ A2, the false-positive guard — the single way this ships as noise.
+def test_a_flat_profile_is_not_disclosed():
+    """★ A2, the false-positive guard, kept from 12a — the single way this
+    ships as noise: a thermal unit with outage data AND an all-ones column
+    must stay silent, and must NOT carry a profile into the engines.
 
-    Every conventional generator in a real project carries outage data, and
-    many carry a `p_max_pu` column that is identically 1.0. If the warning
-    fires there it is noise on every unit of every project and will be
-    ignored, taking the real signal with it.
-
-    Bite (verified): test only for the COLUMN's presence rather than for a
-    profile that actually varies.
+    Bite (verified): test only for the COLUMN's presence.
     """
     from services import validation_service as VS
+    from services.adequacy.copt import fleet_and_residual
     n = _two_farm_network()
-    # A thermal unit with outage data AND an explicit all-ones profile column.
     n.add("Generator", "gas2", bus="b", carrier="gas", p_nom=50.0,
           marginal_cost=12.0, outage_rate_value=0.06,
           outage_rate_basis="EFORd", mttr_hours=30.0)
     n.generators_t.p_max_pu["gas2"] = np.ones(len(n.snapshots))
-    issues = VS._check_outage_params(n)
-    msg = " ".join(i.message for i in issues
-                   if i.code == "outage_shadows_profile")
-    assert "gas2" not in msg, (
-        "a flat all-ones profile is not a resource profile, and warning on it "
-        "would fire on every thermal unit in every real project: " + msg)
+    msg = _codes(VS._check_profiled_occurrence_units(n),
+                 "profile_and_outage_modelled")
+    assert "gas2" not in msg, msg
+    units, _r, _w = fleet_and_residual(n)
+    assert {u.name: u.profile is None for u in units}["gas2"]
 
 
-def test_a_CARRIER_DEFAULT_outage_rate_shadows_a_profile_too(client=None):
-    """★ SERIOUS 6a: the check saw only HAND-ENTERED outage data.
-
-    `_check_outage_params` narrows to `params["source"] == "asset"` before
-    the shadow check runs, but `copt.fleet_and_residual` admits a unit on
-    `source != "missing"` — which includes `carrier_default`. And
-    `CARRIER_DEFAULTS` covers hydro and battery among others, so a HYDRO unit
-    with an inflow `p_max_pu` needs ZERO user input to hit the defect: the
-    engines drop its profile and model it as firm capacity at the library's
-    outage rate.
-
-    That destroys the "rare by construction, so it cannot become wallpaper"
-    argument the original commit rested on — the commonest instance needs no
-    user input at all.
-
-    Bite (verified): pass the `source == "asset"` filtered frame to the check.
-    """
-    from services import validation_service as VS
-
+def _hydro_library_network():
+    """A hydro unit whose outage rate comes from the LIBRARY with an inflow
+    series, and NO hand-entered outage data anywhere (no outage columns at
+    all — the PyPSA-Eur import shape)."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=8, freq="h"))
     n.snapshot_weightings.loc[:, :] = 1.0
     n.add("Carrier", "hydro"); n.add("Carrier", "gas")
     n.add("Bus", "b", carrier="AC", country="AA")
     n.add("Load", "l", bus="b", p_set=100.0)
-    # Hand-entered data on ONE unit, so the enclosing validator runs at all.
-    n.add("Generator", "gas_asset", bus="b", carrier="gas", p_nom=50.0,
-          marginal_cost=10.0, outage_rate_value=0.05,
-          outage_rate_basis="EFORd", mttr_hours=24.0)
-    # …and a hydro unit whose outage rate comes from the LIBRARY, with an
-    # inflow profile the engines will discard.
+    n.add("Generator", "gas_lib", bus="b", carrier="gas", p_nom=50.0,
+          marginal_cost=10.0)
     n.add("Generator", "hydro_inflow", bus="b", carrier="hydro", p_nom=100.0,
           marginal_cost=0.0)
     n.generators_t.p_max_pu["hydro_inflow"] = np.tile(
         [0.05, 0.15, 0.35, 0.45], 2)
-
-    msg = " ".join(i.message for i in VS._check_outage_params(n)
-                   if i.code == "outage_shadows_profile")
-    assert "hydro_inflow" in msg, (
-        "a carrier-default outage rate shadows the profile just as a "
-        "hand-entered one does, and needs no user input at all: " + msg)
+    return n
 
 
-def test_a_STATIC_derate_below_one_is_shadowed_too():
-    """★ SERIOUS 6b: the check looked only at the time-series frame.
+def test_a_CARRIER_DEFAULT_profiled_unit_is_modelled_but_not_warned_about():
+    """★ A10, Q4 decided (plan 12c-pre v2.1): a hydro unit with an inflow
+    series and a LIBRARY outage rate is modelled on its series like any other
+    profiled unit — the engines carry the profile — but preflight is SILENT:
+    the user typed nothing, and a warning on every hydro project is one
+    nobody reads. The `/copt` and `/mc` payloads carry the disclosure.
 
-    `solved_capacity` uses `p_nom_opt`/`p_nom` only, so a static
-    `p_max_pu = 0.5` is discarded exactly like an hourly profile — the unit
-    enters the fleet at full nameplate. This was open question 3 in the
-    plan and shipped unanswered.
+    Bite (verified): emit `profile_and_outage_modelled` for carrier-default
+    sources too.
+    """
+    from services import validation_service as VS
+    from services.adequacy.copt import fleet_and_residual
+    n = _hydro_library_network()
+    units, _r, _w = fleet_and_residual(n)
+    by = {u.name: u for u in units}
+    assert by["hydro_inflow"].source == "carrier_default"
+    assert by["hydro_inflow"].profile is not None
+    issues = VS._check_profiled_occurrence_units(n)
+    assert not [i for i in issues if i.code == "profile_and_outage_modelled"], issues
+
+
+def test_a_STATIC_derate_below_one_is_NOT_applied_and_says_so():
+    """★ A10 (12a's SERIOUS 6b re-scoped): a static `p_max_pu < 1` on a unit
+    with outage data is not applied by either engine (plan §1.3 — it is
+    ambiguous in the wild and folding it in double-counts PyPSA-Eur's
+    nuclear CF, which already contains outages). The issue names the unit
+    and the disagreement, offers "enter it as a time series", and does NOT
+    offer "set q = 0" — that remedy models a perfectly firm unit (plan v2
+    review, finding 3).
 
     Bite (verified): inspect only `generators_t.p_max_pu`.
     """
@@ -355,11 +344,37 @@ def test_a_STATIC_derate_below_one_is_shadowed_too():
           marginal_cost=10.0, p_max_pu=0.5, outage_rate_value=0.10,
           outage_rate_basis="EFORd", mttr_hours=24.0)
 
-    msg = " ".join(i.message for i in VS._check_outage_params(n)
-                   if i.code == "outage_shadows_profile")
-    assert "gas_static" in msg, (
-        "a static p_max_pu below 1 is discarded exactly like a profile: "
-        + msg)
+    msg = _codes(VS._check_profiled_occurrence_units(n),
+                 "static_p_max_pu_not_applied")
+    assert "gas_static" in msg, msg
+    assert "time series" in msg, msg
+    assert "q = 0" not in msg and "q=0" not in msg, msg
+
+
+def test_the_static_warning_reaches_an_import_with_NO_outage_columns():
+    """★ A10 (plan v2 review, finding 3): the PyPSA-Eur nuclear import — a
+    static CF below 1, a LIBRARY outage rate, and no outage column anywhere
+    — is the case the static warning is written for, and the column-gated
+    `_check_outage_params` could never reach it. The disclosure walks the
+    membership instead, and `validate_for_run`-style callers get it without
+    any outage column.
+
+    Bite (verified): gate the check on `outage_rate_value` being present.
+    """
+    from services import validation_service as VS
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "nuclear")
+    n.add("Bus", "b", carrier="AC", country="AA")
+    n.add("Load", "l", bus="b", p_set=100.0)
+    n.add("Generator", "nuc", bus="b", carrier="nuclear", p_nom=1000.0,
+          marginal_cost=5.0, p_max_pu=0.8)
+    assert "outage_rate_value" not in n.generators.columns
+    msg = _codes(VS._check_profiled_occurrence_units(n),
+                 "static_p_max_pu_not_applied")
+    assert "nuc" in msg, msg
 
 
 def test_a_static_p_max_pu_of_ONE_is_still_silent():
@@ -376,6 +391,5 @@ def test_a_static_p_max_pu_of_ONE_is_still_silent():
     n.add("Generator", "plain", bus="b", carrier="gas", p_nom=100.0,
           marginal_cost=10.0, outage_rate_value=0.10,
           outage_rate_basis="EFORd", mttr_hours=24.0)
-    msg = " ".join(i.message for i in VS._check_outage_params(n)
-                   if i.code == "outage_shadows_profile")
-    assert "plain" not in msg, msg
+    issues = VS._check_profiled_occurrence_units(n)
+    assert not [i for i in issues if i.code == "static_p_max_pu_not_applied"], issues

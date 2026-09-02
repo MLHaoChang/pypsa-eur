@@ -158,7 +158,18 @@ export interface CoptPayload {
     horizon_years?: number | null
   }
   per_mode: Array<Record<string, unknown>>
-  fleet: { units: number; must_take: number; delta_mw: number }
+  fleet: {
+    units: number; must_take: number; delta_mw: number
+    /** Phase 12c-pre: units whose availability series rode INTO the sampled
+     *  fleet (outages sampled on the series; the COPT mixes them per hour),
+     *  the subset netted at expected output beyond the exact cap, and the
+     *  cap. Absent on payloads from before the phase. */
+    profile_units?: string[]
+    netted_beyond_cap?: string[]
+    k_exact?: number
+  }
+  /** The one sentence about profiled units; null when the fleet has none. */
+  fidelity_note?: string | null
   voll_eur_per_mwh: number
 }
 
@@ -214,6 +225,18 @@ export function CoptChips({ copt, proxyEnsMwh }: {
       <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted" title={tip}>
         {copt.fleet.units} unit(s), {copt.fleet.must_take} must-take
       </span>
+      {copt.fidelity_note && (
+        <span
+          className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted"
+          data-testid="copt-fidelity-note"
+          title={copt.fidelity_note}
+        >
+          {(copt.fleet.profile_units?.length ?? 0)} on a profile
+          {(copt.fleet.netted_beyond_cap?.length ?? 0) > 0
+            ? `, ${copt.fleet.netted_beyond_cap!.length} netted beyond the cap`
+            : ''}
+        </span>
+      )}
       {diverges && (
         <span
           className="px-2 py-0.5 rounded bg-warn/10 text-warn text-[10px]"

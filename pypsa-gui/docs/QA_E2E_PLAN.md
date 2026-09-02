@@ -338,11 +338,18 @@ never bound", and Phase 8 built the lever that moves the metric there.
 | S20.3 | …and the guard **lifts**: once the study finishes the route succeeds again. A refusal that never releases is an outage, not a guard |
 
 
-### S21 — Outage data shadowing an availability profile (area 21)
+### S21 — Profile plus outage data: the preflight disclosure (area 21)
+
+*Re-scoped by Phase 12c-pre.* 12a warned that the engines discarded the
+profile (`outage_shadows_profile`); 12c-pre models it in both engines, so the
+preflight issue is now a disclosure of how (`profile_and_outage_modelled`),
+emitted for outage data the user typed. A library (carrier-default) rate on a
+profiled unit gets no preflight issue; the `/copt` and `/mc` payloads carry
+the disclosure instead (S24).
 | id | Assertion |
 |----|-----------|
-| S21.1 | The `outage_shadows_profile` warning reaches a **live preflight**, names the asset, and is a `warning` — not an error, because the user entered that data deliberately and blocking would stop a network that solved yesterday |
-| S21.2 | It names the **direction** (OVERSTATED), and is silent both on a profiled farm with no outage data (whose profile IS honoured) and on a thermal unit whose `p_max_pu` is a flat 1.0 — the false positive that would make this noise on every real project |
+| S21.1 | The `profile_and_outage_modelled` disclosure reaches a **live preflight**, names the asset, is a `warning` (the only non-error severity on the wire), and the old `outage_shadows_profile` code is absent — with the profile modelled it would be a false statement |
+| S21.2 | It says **how** the unit is modelled (the COPT *mixes* it per hour; outages sampled on the series), and is silent both on a profiled farm with no outage data (must-take, netted as before) and on a thermal unit whose `p_max_pu` is a flat 1.0 — the false positive that would make this noise on every real project |
 
 **Why a live suite for a preflight warning.** The unit tests drive
 `_check_outage_params` directly; they cannot tell you whether the warning
@@ -458,6 +465,21 @@ built size (70 MW) and net derate (0.0) the plan review reproduced end to end.
 a SECOND PROXY in the margin's own units, never a correction, and "netted
 capacity" is not "VRE" — a thermal maintenance schedule is netted too. Both
 are pinned by component tests that assert the words do not appear.
+
+### S24 — Profile plus outage data: the engines, live (area 24)
+| id | Assertion |
+|----|-----------|
+| S24.1 | On 12a's two-farm fixture (100 MW flat load; gas1 80 MW q = 0.10; two identical 100 MW farms on the profile 0.05/0.15/0.35/0.45, one with q = 0.10 entered), `GET /results/copt` equals the **mixture computed independently in the suite** from the fixture's numbers alone — `LOLP_h = 0.1·(1 − S(r_h)) + 0.9·(1 − S(r_h − a_h))` over the gas1-only table — **2.78 h**, not the **0.44 h** the flat two-state treatment gave; `fleet.profile_units` names `wind_with_for`, `netted_beyond_cap` is empty, `must_take` counts the other farm from the walk, and `fidelity_note` names the unit and says the COPT *mixes* it |
+| S24.2 | A small MC study on the same network finishes and its result's `profile_units` names `wind_with_for` (outages sampled on the series); preflight carries `profile_and_outage_modelled` and not `outage_shadows_profile` |
+
+**Bitten live** (recorded in the plan): with the series dropped at attachment
+the COPT reverts to the flat value and S24.1 fails on the number and the
+names.
+
+**What is not live here.** A fleet with more than `K_EXACT = 8` profiled
+units (the netted remainder) needs nine hand-entered outage rates on nine
+profiled farms; the split, the netting and the per-row `note` are pinned by
+unit tests on a 4-unit fleet with the cap overridden to 2.
 
 ## Loop protocol
 

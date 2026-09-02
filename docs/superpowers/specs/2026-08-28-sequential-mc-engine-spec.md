@@ -307,3 +307,49 @@ stays bare.
 registry entries — `test_golden_coverage.ROUTE_SURFACES` **and**
 `test_results_range.py`'s series/aggregate census — and each gate fails
 loudly when its own entry is missing.
+
+## Amendment v1.4 — a unit with BOTH a profile and outage data (Phase 12c-pre)
+
+**`CoptUnit.profile: np.ndarray | None`** (`field(default=None, compare=False,
+hash=False)`): the unit's availability fraction per modelled hour, attached by
+`fleet_and_residual` whenever the generator's `p_max_pu` **series** column is
+informative — not identically 1 (a constant 0.8 counts; an all-ones column does
+not; the static column is never read). A NaN hour is availability 0 at
+attachment, the reserve margin's rule.
+
+**§2.3 sampling, amended.** `sample_capacity` accumulates a profiled unit as
+`(H, 1) = profile × cap` broadcast over draws in the same
+`np.add(acc, cap, out=acc, where=state_path)`: UP is the series' value that
+hour, DOWN is zero. The chain, its substream and its consumption are
+untouched, and a unit without a profile takes the scalar path byte-for-byte
+(pin M2: RBTS fleet, H = 8736, draws = 64, seed = 20260828 →
+sha256 `aa4b3c0f…2394` under numpy 2.4.6; skipped, naming the version, on
+another numpy major — NEP 19). A profile of the wrong length is a
+`ValueError`, never a silent broadcast.
+
+**§3 ELCC, amended.** A profiled `kind="generator"` candidate's
+`nameplate_mw` is its best hour, `max_h(profile_h) × cap` — the firm block
+then dominates the unit hour by hour and the dominance tripwire holds; a
+`(1−q)`-derated peak would make `not_bracketed` reachable on the unit's best
+hour. A zero-peak profile is not a candidate, as the vre branch already
+excludes one. Removal semantics are unchanged (exclusion by position).
+
+**§4 API, amended.** The `/mc` result carries `profile_units: [names]`. The
+`/copt` payload carries `fleet.profile_units`, `fleet.netted_beyond_cap`,
+`fleet.k_exact` and a `fidelity_note` sentence; `fidelity` stays the engine
+enum. Preflight emits `profile_and_outage_modelled` (`warning`) for a
+profiled unit whose outage data the user typed, and
+`static_p_max_pu_not_applied` for a static derate on any occurrence unit —
+both from the membership walk, so they reach a network with no outage
+columns (the PyPSA-Eur import). `outage_shadows_profile` (12a) is retired:
+with the profile modelled it would be false.
+
+**§6 test contract, amended.** `tests/test_adequacy_profiled_units.py`:
+A1 (the MC samples on the series), A3′ (the COPT mixes exactly — RTS-79
+minus one 400 MW unit plus a 500 MW q = 0.05 mild-profile unit → 3.97 h,
+not netting's 1.28 nor the flat 3.88), A4′/M1 (which rows carry a profile,
+by hash), A5′ (expectation, pooled over per-draw means at 3σ, Bonferroni per
+hour), A6′ (the margin's derate is the window mean of the same expectation),
+A7 (continuity at the constant-series boundary, level 0.5), A8 (nameplate),
+A12 (vectorised survival/shortfall equal the scalar pair), A13 (the 256-state
+mixture on a 300-unit table under 1 s), M2, the cap and the route.
