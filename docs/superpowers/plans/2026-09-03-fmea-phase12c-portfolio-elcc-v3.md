@@ -301,3 +301,204 @@ occurrence farm is not removed and the credit halves.*
    argued, and is `min positive weight in the period / n` the right floor?
 4. **The ratio.** Is `elcc / credit` the right single number for the panel,
    or should the block show only the three MW figures?
+
+---
+
+## v3 REVIEW OUTCOME — reject as written; v3.1 amendments below (2026-09-03)
+
+Verdict: **reject as written → v3.1**: no section needs redesign; rules and
+tests do. Sixteen findings; every one re-run against the code before being
+recorded (`scratchpad/v3_p{1..6}*.py`). The fifteenth finding was
+**confirmed end to end** by the reviewer's own probe: on a two-period
+network with `load_scalers = {"2035": 1.25}`, route-side `snapshot_inputs`,
+`fleet_and_residual` and `reserve_margin_facts` all read the raw peak
+(179.93) while the solve-time wrapper stashes 224.92 and `p_set` is
+restored bit-identical, so the post-solve snapshot the loops evaluate
+equals the pre-solve raw residual. No engine reads `loads_t.p`. Both loops
+call `snapshot_inputs(n, keep_zero_capacity=True)` on the restored network.
+
+### Findings, verified
+
+1. **BLOCKER — Part 0's rule was inverted for static `p_set`.**
+   `_apply_modelling_assumptions` scales only `loads_t.p_set` *columns*,
+   gated on `cfg.multi_investment_periods`, a MultiIndex and a non-empty
+   frame (`solver_service.py:5313-5320`); a static `loads.p_set` is never
+   scaled, and `lp_scaled_load_frame` returns `None` for a static-only
+   network. So static loads are on ONE basis everywhere today, and §1's
+   "static `p_set` is scaled the same way" would have created a mismatch on
+   every static-load network — including every reserve-margin test fixture.
+   **The helper must reproduce the LP's behaviour verbatim**, not improve
+   on it.
+2. **SERIOUS — the engines ignore the activity mask.** `_membership_walk` /
+   `fleet_and_residual` never consult `build_year`/`lifetime` (no
+   `get_active_assets` in copt.py or mc.py), while `reserve_margin_facts`
+   masks per period (`solver_service.py:3509`). Measured: a must-take farm
+   with `build_year=2035` is netted into the **2030** residual and has no
+   2030 margin row. Pre-existing and MC-wide; §2.2's "rule for their
+   disagreement" cannot see it because there is no row to compare.
+3. **SERIOUS — §2.1's population is not "the engines' predicate".**
+   `elcc_candidates` admits every must-take with `peak > 0`
+   (`elcc.py:185-193`) and `snapshot_inputs` builds a profile from the
+   column whether or not it is informative, or from the STATIC `p_max_pu`
+   when there is no column (`mc.py:264-274`); `fleet_and_residual` nets a
+   must-take's static value too. Measured: candidates include
+   `wind_ones_col`, `wind_static09`, `wind_nocol`, none informative. The
+   population needs the plan's OWN filter on both halves.
+4. **SERIOUS — §2.2's vintage mechanism was misstated.** The restore writes
+   the parent's `p_nom_opt` as the aggregate over vintages
+   (`vintage_service.py:747`), so `solved_capacity(wind) = 70 = built`; the
+   payload's shape is `wind: 0.0` + `wind@2030: 70` + `wind@2040: 0`. A
+   member-by-member check fails as 0 ≠ 70 for the wrong reason; a by-parent
+   aggregate agrees in the common case. B6's fixture was the inverse of the
+   real shape.
+5. **SERIOUS — B3's bite does not bite.** Per-period dominance guarantees
+   the top probe at `nameplate_P` satisfies, so the located step edge is
+   ≤ `nameplate_P` whatever the bracket; measured 100.0 with bracket 100 and
+   with bracket 200. `max_h(Σ)` per period stays the ceiling for the
+   dominance reason; B3 is an anchor, not a bitten ★.
+6. **MODERATE — the wrapper cannot pass `cfg=None`**:
+   `_wrap_with_reserve_margin` calls `reserve_margin_facts(n, cfg, …)` and
+   needs `cfg` (`solver_service.py:3693`). Applying the router's scaling on
+   the in-place-scaled frame measured 281.15 = 1.25² × raw. An explicit
+   switch is needed.
+7. **MODERATE — the router's fallback branch is not the LP's resolution**:
+   no `multi_investment_periods` gate (measured: `mip=False` → LP unscaled
+   179.93, router 224.92), `f == f` vs `math.isfinite`, carrier fallback
+   `"electrical"` vs `"unspecified"`. The factor resolution must be
+   extracted from `_apply_modelling_assumptions` and used by all three.
+8. **MODERATE — `/copt` takes no lock** (`results.py:5020-5021`) and can read
+   the in-place-scaled frame mid-solve: a transient inconsistency today, a
+   double-scaling after Part 0.
+9. **MODERATE — the worker must not read `_state`** (request-scoped;
+   `post_mc` closes over `record` for this reason, `results.py:3327-3331`).
+   The margin payload is `_state.get("last_reserve_margin")`
+   (`results.py:5124`, emitted at `solver_service.py:1362`), sanitised, with
+   `capacity_mw` possibly `None`; it must be captured in the request before
+   `Thread.start()`.
+10. **MODERATE — cost.** Measured 22–23 `mc_adequacy` calls for a two-period
+    portfolio (11–12 per period) vs 11 horizon-wide, every call over the
+    full horizon; "nearly free on top of a study that already ran" is false
+    for the per-period design. The Δ = 0 probe can be shared across periods.
+11. **MODERATE — `not_bracketed` was re-purposed** for a no-op removal;
+    measured: `elcc_of_removal(nameplate=0)` on a no-op removal returns
+    `ok 0.0`, on a real removal `not_bracketed`. A distinct status is needed.
+12. **MINOR — `baseline_key`** omitted `**sim_kwargs` (`initial_soc_frac`,
+    `storage_enabled`, `exclude_storage`) and `id()` is not a content hash.
+13. **MINOR — staleness**: a `p_max_pu` edit after the solve is not caught by
+    the capacity check; the report carries hashes from Phases 10/11.
+14. **MINOR — line references**: the scaling is `solver_service.py:5307-5374`
+    (not 160-187, which are field comments); the `p_set` restore closure
+    `5371-5374`; preflight is `validate_for_run` at `813`, before the
+    transforms at `987`.
+15. **MINOR — D1's bite**: ×1.0 is exact in IEEE-754; only a reordered sum
+    over ≥ 3 loads bites. D1 is a regression anchor.
+16. **MINOR — Q4**: a ratio invites the "correction" reading the copy
+    forbids.
+
+Verified true (no action): the fifteenth finding (above); `by_period` LOLE
+is the per-draw mean of per-period weighted shed hours, monotone
+non-increasing in Δ per period (measured on [0, 200]), SoC and outage states
+restart per block; the per-period floor is `resolution_floor_h`'s
+definition restricted; B1's bite bites (horizon predicate → 2035
+`not_bracketed`), B2 verified (2030 `unidentifiable`, 2035 `ok`), B4's bite
+bites (100.0 without `exclude` vs 130.08 mixed); un-net + exclude in one
+call is supported without double counting and CRN holds; `post_mc`'s
+baseline is bit-identical to `elcc_of_removal`'s own (same defaults
+`max_draws=2000, batch=250`); `solved_capacity == payload capacity_mw` on a
+plain extendable network post-solve; B11's population on the M1 fixture is
+`{hydro_const, wind_for, wind_mt}`; `loads_t.p` IS scaled post-solve and
+`lp_scaled_load_frame` prefers it, so the helper must be fed `p_set`.
+
+Reviewer's answers to §7: Q1 — Part 0 is its own item, first. Q2 — refuse by
+parent-aggregate mismatch; do not fix `solved_capacity` here. Q3 — the
+per-period predicate is well-posed and the floor is right. Q4 — the three MW
+figures; the ratio only beside the two-standards sentence, or not at all.
+
+### v3.1 amendments
+
+**Sequencing.** Part 0 ships first as its own item (**12c-0**), with its own
+gates and its own shipped-code review, before 12c's code is written.
+
+**A1 — Part 0 is the LP's behaviour verbatim (findings 1, 6, 7, 8, 14).**
+The per-(period, carrier, column) factor resolution is extracted from
+`_apply_modelling_assumptions` into `services/adequacy/demand.py::load_scale_factors(n, cfg) -> dict[(period, col), factor]`
+(gated exactly as the LP is: `cfg.multi_investment_periods`, a MultiIndex,
+a non-empty `loads_t.p_set`, `math.isfinite`, the LP's carrier fallback) and
+`lp_demand_frame(n, cfg) -> DataFrame | None` applies it to `loads_t.p_set`
+columns only — a static `loads.p_set` is untouched, as the LP leaves it.
+`_apply_modelling_assumptions` calls `load_scale_factors` (one resolution,
+D3 by construction) and `lp_scaled_load_frame`'s fallback branch calls
+`lp_demand_frame`. The consumers — `snapshot_inputs`, `fleet_and_residual`,
+`reserve_margin_facts` — take `cfg=None` and a keyword
+`demand_scaled_in_place: bool = False`; the solve wrapper passes
+`demand_scaled_in_place=True` with its `cfg`, so the helper is skipped
+there and the switch is explicit. `/copt` takes the network lock like
+`/mc`. Every snapshotting route passes `_state.get("solver_config")`.
+Consumer census recorded: after Part 0 the LP, ENS cap, margin constraint,
+DSR sizing and stress sweep are on the LP basis as before; `/mc`, `/copt`,
+`elcc_candidates`, both loops, preflight `_check_reserve_margin` and the
+margin loop's `reserve_margin_facts` move from raw to the LP basis;
+`asset_results` load metrics stay as they are (not adequacy).
+
+**A2 — Part 0's pins.** D1 is a *regression anchor*: hashes of the MC
+residual bytes, the COPT residual and the stash `demand_mw` on a two-period
+SERIES-load network with no scalers, pinned on the pre-change code. D2 uses
+a series load (`loads_t.p_set` column): with `{"2035": 1.25}` the three
+surfaces scale in 2035 only; bites: every period; skip the COPT. D3: the
+wrapper path (`demand_scaled_in_place=True`) and the route path give an
+identical stash `demand_mw`; bite: run the helper inside the wrapper too
+(×1.25²). D4 (new): a static-load network is unchanged on every surface
+with scalers configured; bite: scale the static value. D5 (new): `/copt`
+under the lock — a concurrent solve cannot be observed mid-transform
+(pinned by a test that holds the lock and asserts the route blocks).
+
+**A3 — the population is filtered here (finding 3).** `P` = names the walk
+admits whose `p_max_pu` COLUMN is informative, for both halves — the plan's
+own filter, applied to the must-take candidates (`series_is_informative`
+on the column; a must-take with only a static value or no column is not in
+`P`, though it remains an ELCC candidate on its own) and to the profiled
+units (already the engine's rule). B11 stands. A member ≡ 1 within a
+period or NaN-only in a period is consistent on both sides (measured:
+margin `constant/d=1.000` and `constant/d=0.000`; engine nameplate 0).
+
+**A4 — activity, and the two capacity rules (findings 2, 4, 13).** Per
+period, the comparison first checks membership: a `P` member with no
+payload row in the period (inactive for the margin, present for the
+engines), or a payload row for a name absent from the snapshot, is an
+`activity_mismatch` refusal naming the members. Then capacity, **by
+parent aggregate per period**: payload rows are grouped by
+`name.rpartition("@")[0]` and summed; the sum must equal
+`solved_capacity(parent)` (rel 1e-9, `None` treated as mismatch), else
+`capacity_basis_mismatch`. B6 is built on the shipped `_vintage_network`
+(both statuses reachable: aggregate 70 = 70 passes; a later vintage in an
+earlier period is the activity case). The engines' activity blindness is
+recorded in the hardening backlog beside `solved_capacity`. Staleness: the
+block also carries the report's network hash and refuses (`stale_report`)
+when it differs from the snapshot's.
+
+**A5 — statuses (finding 11).** Block-level: `ok`, `no_population`,
+`activity_mismatch`, `capacity_basis_mismatch`, `stale_report`,
+`margin_unavailable` (no margin on the last solve — the ELCC rows still
+run). Per period: `ok`, `unidentifiable`, `not_bracketed`, and
+`no_contribution` (Σa ≡ 0 in the period — a no-op removal, reported as
+such, never `ok 0.0` and never `not_bracketed`).
+
+**A6 — cost and copy (findings 10, 16).** Cost is stated as
+`n_periods × ~10 full evaluations` plus one shared baseline; the Δ = 0
+probe is evaluated once for all periods; "nearly free" is withdrawn. The
+panel sentence quantifies like the per-asset one. The block shows the
+three MW figures per period; no ratio.
+
+**A7 — baseline injection (finding 12).** `baseline_key` = the loops'
+`_hash` shape over `MCInputs` (units incl. profile bytes, storage,
+residual bytes) plus `(draws, seed, cov_target, max_draws, batch)` plus the
+sorted `sim_kwargs` items; mismatch raises.
+
+**A8 — tests.** B3 demoted to an anchor inside B1. B5 gains the
+`no_contribution` case. B6 on `_vintage_network`. B12 (new):
+`activity_mismatch` on the `build_year=2035` fixture. B13 (new):
+`stale_report` after a `p_max_pu` edit.
+
+**A9 — where the payload is read (finding 9).** `post_mc` captures
+`_state.get("last_reserve_margin")` and the report hash in the request and
+closes over them; the worker never touches `_state`.
