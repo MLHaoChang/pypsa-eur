@@ -3764,10 +3764,17 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
         the same seed and draw count, so reuse is exact where cost equality
         was a guess.
         """
+        import numpy as _np
         h = hashlib.sha256()
-        for name, cap in sorted((str(u.name), float(u.capacity_mw))
-                                for u in mc_inputs.units):
-            h.update(f"{name}\x1f{cap!r}\x1e".encode())
+        for name, cap, prof in sorted(
+                (str(u.name), float(u.capacity_mw),
+                 # Phase 12c-pre: the sampler also reads the unit's
+                 # availability series; hash its bytes so "exactly what the
+                 # MC reads" stays true (shipped-code review, finding 5).
+                 b"" if getattr(u, "profile", None) is None
+                 else _np.asarray(u.profile, dtype=_np.float64).tobytes())
+                for u in mc_inputs.units):
+            h.update(f"{name}\x1f{cap!r}\x1e".encode() + prof + b"\x1e")
         h.update(b"\x1d")
         for row in sorted((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh))
                           for s in mc_inputs.storage):
@@ -4437,10 +4444,17 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         bytes. NOT the objective: degenerate optima give equal cost for
         different plans. Equal hash ⇒ bit-identical MC under the same seed and
         draw count, so the controller's plateau reuse is exact."""
+        import numpy as _np
         h = hashlib.sha256()
-        for name, cap in sorted((str(u.name), float(u.capacity_mw))
-                                for u in mc_inputs.units):
-            h.update(f"{name}\x1f{cap!r}\x1e".encode())
+        for name, cap, prof in sorted(
+                (str(u.name), float(u.capacity_mw),
+                 # Phase 12c-pre: the sampler also reads the unit's
+                 # availability series; hash its bytes so "exactly what the
+                 # MC reads" stays true (shipped-code review, finding 5).
+                 b"" if getattr(u, "profile", None) is None
+                 else _np.asarray(u.profile, dtype=_np.float64).tobytes())
+                for u in mc_inputs.units):
+            h.update(f"{name}\x1f{cap!r}\x1e".encode() + prof + b"\x1e")
         h.update(b"\x1d")
         for row in sorted((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh))
                           for s in mc_inputs.storage):

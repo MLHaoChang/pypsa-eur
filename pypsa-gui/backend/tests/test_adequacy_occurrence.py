@@ -393,3 +393,36 @@ def test_a_static_p_max_pu_of_ONE_is_still_silent():
           outage_rate_basis="EFORd", mttr_hours=24.0)
     issues = VS._check_profiled_occurrence_units(n)
     assert not [i for i in issues if i.code == "static_p_max_pu_not_applied"], issues
+
+
+def test_a_static_value_BESIDE_a_series_is_superseded_not_flagged():
+    """★ Shipped-code review, finding 3: a unit with BOTH a series and a
+    static `p_max_pu < 1` got the static warning too, and that warning's
+    text ("the reserve margin applies both") was false there — PyPSA reads
+    the series, the margin's derate reads the series (`avail_static` is used
+    only when there is no profile), and so do the engines. The static value
+    is superseded, not "not applied". Only the disclosure fires.
+
+    Bite (verified): drop the `not has_series` guard on the static arm.
+    """
+    from services import validation_service as VS
+    n = _two_farm_network()
+    n.generators.at["wind_with_for", "p_max_pu"] = 0.7
+    issues = VS._check_profiled_occurrence_units(n)
+    assert "wind_with_for" in _codes(issues, "profile_and_outage_modelled")
+    assert "wind_with_for" not in _codes(issues, "static_p_max_pu_not_applied"), issues
+
+
+def test_a_typed_q_of_ZERO_gets_no_sampled_outages_disclosure():
+    """★ Shipped-code review, finding 4: `q = 0` typed by the user resolves
+    to `source == "asset"` and the disclosure said "outages are sampled on
+    the availability series" — of a unit with no outages. The engines are
+    right (the mixture collapses at q = 0); the sentence was not. Silent.
+
+    Bite (verified): drop the `q > 0` test.
+    """
+    from services import validation_service as VS
+    n = _two_farm_network()
+    n.generators.at["wind_with_for", "outage_rate_value"] = 0.0
+    issues = VS._check_profiled_occurrence_units(n)
+    assert "wind_with_for" not in _codes(issues, "profile_and_outage_modelled"), issues

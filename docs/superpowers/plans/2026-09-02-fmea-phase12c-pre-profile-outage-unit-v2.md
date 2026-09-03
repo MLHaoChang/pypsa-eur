@@ -569,3 +569,88 @@ its own review, as Phase 12b's did.
   S24.1 FAIL — `LOLE=0.440000`, the flat two-state value, `profile_units=[]`,
   the note absent; S24.2 FAIL — the MC's `profile_units=[]`. Restore
   verified by hash (`4f326702b0c75bdd`), server restarted, S24 2/2 again.
+
+---
+
+## SHIPPED-CODE REVIEW (2026-09-02, on `149aab0..7e8b646`) — accept with fixes
+
+The pass that has found real defects every time it has run here ran on
+12c-pre as shipped. Verdict: **accept with fixes** — no blocker, two
+moderate, seven minor. Every finding below was re-run against the code
+before being recorded (`scratchpad/sc_*.py`); the arithmetic the record
+claims — the mixture's exactness (5e-16 / 2e-14 vs an independent per-hour
+table at k = 1, 2, 3), the k = 0 path equal to the old scalar map, the
+attribution rows equal to brute force (≤ 2.3e-13), M2 byte-identity,
+ELCC dominance 24/24 with storage, the A5′ statistics (two-sided z for
+α = 0.01/8760 is 4.866), A13 not flaky (0.37–0.44 s ×3), the docs'
+numbers — all checked out.
+
+### Findings, verified, and what was done
+
+1. **MODERATE — a ±inf hour in a `p_max_pu` series crashed `/copt` and
+   `/mc/elcc_candidates`, reachable through the public timeseries PUT.**
+   `np.nan_to_num(nan=0.0)` kept ±inf; `profile × cap` overflowed; the
+   mixture's DOWN state gave `0 × inf = NaN`; `_grid_index` cast NaN to
+   `int64` → `IndexError` out of the app; the nameplate was `inf`, which
+   Starlette refuses to serialise. JSON accepts `Infinity`, and the PUT has
+   no finiteness check, so a user can reach it. Pre-phase the same column
+   on a must-take unit survived (residual −inf, LOLE 0.70) — a robustness
+   regression, not a pre-existing crash. **Fixed:** attachment drops every
+   non-finite hour to 0 (`np.where(np.isfinite(vals), vals, 0.0)`), and
+   `unit_nameplate_mw` guards the product. ★ test
+   `test_a_NON_FINITE_hour_in_the_series_is_availability_zero_and_serves`;
+   bite: back to `nan_to_num` — bit.
+2. **MODERATE — the "NaN hour is the reserve margin's rule" claim was false
+   for the derate, so "the three agree" was false on NaN hours.** Rule 1 is
+   the net-load *window*'s `fillna(0.0)`; the margin's *derate* takes a
+   pandas mean over the window, which skips NaN. Measured: two-hour window,
+   one NaN hour → derate 0.45, engines' expectation 0.225. **Done:** the
+   docstring and the preflight message now say exactly that (the engines
+   count 0, the margin's mean skips it). **Open item:** whether the derate
+   should adopt `fillna(0)` is a margin change with its own tests (the 12b
+   B10 fixture carries a NaN) and is adjudicated separately, not here.
+3. **MINOR — the static warning was a false positive on a unit that ALSO
+   carries a series**, and its text was false there: PyPSA reads the
+   series, the margin's derate reads the series (`avail_static` only when
+   there is no profile), so do the engines — the static value is
+   superseded, not "not applied". **Fixed:** the static arm skips a unit
+   with an informative series. ★ test
+   `test_a_static_value_BESIDE_a_series_is_superseded_not_flagged`; bite:
+   drop the guard — bit.
+4. **MINOR — the disclosure fired for a typed q = 0 and said "outages are
+   sampled".** The engines were right (the mixture collapses at q = 0); the
+   sentence was not. **Fixed:** no disclosure at q ≤ 0. ★ test
+   `test_a_typed_q_of_ZERO_gets_no_sampled_outages_disclosure`; bite: drop
+   the `q > 0` test — bit.
+5. **MINOR — the coupling- and margin-loop `_hash` no longer hashed
+   "exactly what the MC reads"**: the sampler now reads `u.profile` too.
+   No reachable wrong reuse was found (within one loop `p_max_pu` is
+   invariant and a newly built profiled unit changes `capacity_mw`), but
+   the docstring was stale. **Fixed:** both hashes include the profile
+   bytes (`b""` for none). No ★ — the loop suites pin the hash's behaviour
+   on unprofiled fleets and pass unchanged.
+6. **MINOR — `split_fleet` ranks by `mean(a)` and ignores `q`**, though
+   the Jensen error of netting scales with `q(1−q)·a²` (a q = 0.5 unit at
+   20 MW mean is netted before a q = 0.001 unit at 21 MW). Only bites at
+   k > 8, which Q1's answer says is practically empty. **Recorded as a
+   design note**; the rank key would be `q(1−q)·mean(a²)` if it ever
+   matters.
+7. **MINOR — a hand-built `CoptUnit` with a NaN profile gives
+   `IndexError` in the COPT and silent NaN in the MC.** Unreachable via
+   `fleet_and_residual` after fix 1. Recorded; `_grid_index` left as is.
+8. **MINOR — one vacuous assertion** (`delta_eue_mwh >= 0` on rows the
+   code clamps at 0). **Fixed:** the test now checks the *unclamped*
+   counterfactual (perfect availability lowers EUE) directly. Also noted:
+   `attribute_criticality` on RTS-79 emits 65 `RuntimeWarning`s from
+   `deconvolve` — 22 of 31 units fall back to the rebuild path; rows equal
+   brute force; pre-existing and noisy, not this phase's.
+9. **MINOR (pre-existing) — ELCC dominance holds in exact arithmetic
+   only**: a cap of 100.049 MW rounds up by 3.6e-6 in float32, above
+   `SHORTFALL_TOL`, and a contrived residual makes `not_bracketed`
+   reachable — identically on the flat two-state path. The profile adds
+   nothing new. Recorded.
+
+Gates after the fixes: the three new ★ tests bitten (3/3, restores by
+hash); targeted suites (profiled, occurrence, endpoint, ELCC, coupling and
+margin loops) 155 passed; live S21, S24, S15 on a port-verified server;
+adequacy suites and the full tree recorded in the commit message.

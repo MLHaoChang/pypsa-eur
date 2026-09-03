@@ -1713,9 +1713,19 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
         has_series = (p_max_pu_t is not None
                       and name in getattr(p_max_pu_t, "columns", [])
                       and series_is_informative(p_max_pu_t[name]))
-        if has_series and str(row["source"]) == "asset":
+        try:
+            q = float(row["rate"])
+        except (KeyError, TypeError, ValueError):
+            q = float("nan")
+        # A typed q of 0 has no outages to sample; the series is honoured
+        # exactly as a must-take unit's would be, and a sentence about
+        # sampled outages would be false (shipped-code review, finding 4).
+        if has_series and str(row["source"]) == "asset" and q > 0.0:
             modelled.append(name)
-        if static is not None:
+        # A static value beside a SERIES is inert everywhere — PyPSA itself
+        # reads the series, and so does the margin — so it is not "not
+        # applied", it is superseded (shipped-code review, finding 3).
+        if static is not None and not has_series:
             try:
                 sv = float(static.get(name, 1.0))
             except (TypeError, ValueError):
@@ -1735,9 +1745,10 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
             "series (available at the series' value when up, zero when "
             "down) and the COPT mixes the unit exactly per hour over its "
             "outage states. The reserve margin credits the same unit at "
-            "(1 - q) x the profile's window mean, so the three agree. "
-            "Remove the outage rate if the profile already accounts for "
-            "outages.",
+            "(1 - q) x the profile's mean over its peak window, the same "
+            "expectation (on a NaN hour the engines count 0 availability "
+            "while the margin's mean skips it). Remove the outage rate if "
+            "the profile already accounts for outages.",
         ))
     if static_hit:
         names = ", ".join(sorted(static_hit)[:20])

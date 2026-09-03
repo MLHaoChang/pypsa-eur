@@ -447,15 +447,23 @@ def _occurrence_profile(p_max_pu_t, g, snapshots) -> np.ndarray | None:
     """The availability series an occurrence-bearing unit carries into the
     engines (Phase 12c-pre, plan v2.1 C1): its ``p_max_pu`` column when that
     column is INFORMATIVE (not identically 1), aligned to the snapshots. A
-    NaN hour is availability 0 — one explicit line, the same rule the
-    reserve margin nets a NaN hour by (Phase 12b rule 1). The static column
-    is deliberately NOT read here (plan §1.3)."""
+    non-finite hour (NaN or ±inf) is availability 0 — one explicit line, the
+    rule the reserve margin's net-load WINDOW nets a NaN hour by (Phase 12b
+    rule 1). NOTE the margin's *derate* does not share it: its window mean
+    skips NaN (a pandas mean), so on a NaN hour the derate and the engines'
+    expectation differ — recorded as an open item by the shipped-code
+    review, not papered over here. ±inf is dropped too because
+    ``nan_to_num`` would otherwise keep it, the product ``profile × cap``
+    would overflow, and the mixture would index the table with NaN (shipped-
+    code review, finding 1). The static column is deliberately NOT read
+    here (plan §1.3)."""
     if p_max_pu_t is None or g not in getattr(p_max_pu_t, "columns", []):
         return None
     col = p_max_pu_t[g].reindex(snapshots)
-    if not series_is_informative(col.to_numpy(dtype=np.float64)):
+    vals = col.to_numpy(dtype=np.float64)
+    if not series_is_informative(vals):
         return None
-    return np.nan_to_num(col.to_numpy(dtype=np.float64), nan=0.0)
+    return np.where(np.isfinite(vals), vals, 0.0)
 
 
 def occurrence_units(n) -> list[tuple[str, float, object]]:

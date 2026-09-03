@@ -115,10 +115,12 @@ def unit_nameplate_mw(u) -> float:
     if prof is None:
         return float(u.capacity_mw)
     arr = np.asarray(prof, dtype=np.float64)
-    peak = float(np.nanmax(arr)) if arr.size else 0.0
-    if not math.isfinite(peak):
-        peak = 0.0
-    return max(peak, 0.0) * float(u.capacity_mw)
+    finite = arr[np.isfinite(arr)]
+    peak = float(finite.max()) if finite.size else 0.0
+    nameplate = max(peak, 0.0) * float(u.capacity_mw)
+    # The product, not only the peak, must be finite: a non-finite nameplate
+    # is not JSON and brackets nothing (shipped-code review, finding 1).
+    return nameplate if math.isfinite(nameplate) else 0.0
 
 
 def elcc_candidates(n) -> list[dict]:

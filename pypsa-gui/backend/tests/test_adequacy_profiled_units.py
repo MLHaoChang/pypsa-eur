@@ -421,7 +421,14 @@ def test_split_fleet_mixes_the_largest_and_nets_the_rest_and_says_so():
     assert notes["p0"] is None and notes["t0"] is None
     assert "2 more beyond the exact cap of 2 (p2, p3)" in an["fidelity_note"]
     # Every row is non-negative and the netted rows are still attributed.
-    assert all(r["delta_eue_mwh"] >= 0 for r in an["rows"])
+    # Not the clamped row value (which is >= 0 by construction) but the
+    # unclamped counterfactual: perfect availability can only lower EUE
+    # (shipped-code review, finding 8 — the old line was vacuous).
+    for u in an["split"].netted:
+        r = an["residual"].to_numpy(dtype=float)
+        _l, perfect = C.mixture_hourly(an["dist"], r - u.q * C._availability_mw(u, len(r)),
+                                       an["split"].mixed)
+        assert float(perfect.sum()) <= an["metrics"]["eue_mwh"] + 1e-9
 
 
 def test_build_copt_refuses_a_profiled_unit():
@@ -522,3 +529,38 @@ def test_the_copt_route_discloses_profile_units_and_counts_must_take_from_the_wa
     assert {r["name"] for r in out["per_mode"]} == {"gas1", "wind_with_for"}
     assert not any("note" in r for r in out["per_mode"])
     assert out["fidelity"] == "analytic_convolution"   # the enum is untouched
+
+
+def test_a_NON_FINITE_hour_in_the_series_is_availability_zero_and_serves():
+    """★ Shipped-code review, finding 1: `np.nan_to_num(nan=0.0)` left ±inf
+    in place, the product `profile × cap` overflowed, the mixture's DOWN
+    state gave `0 × inf = NaN`, and the table was indexed with NaN — an
+    `IndexError` out of `/results/copt`, reachable through the public
+    timeseries PUT (JSON accepts `Infinity`), and an `inf` nameplate that
+    is not JSON on `/mc/elcc_candidates`. A non-finite hour is availability
+    0, like a NaN hour; the nameplate is finite.
+
+    Bite (verified): back to `np.nan_to_num(..., nan=0.0)`.
+    """
+    import routers.results as R
+    from services.adequacy.elcc import elcc_candidates, unit_nameplate_mw
+    from services.pypsa_service import PyPSAService
+    from tests.test_adequacy_occurrence import _two_farm_network
+
+    n = _two_farm_network()
+    col = n.generators_t.p_max_pu["wind_with_for"].to_numpy(dtype=float).copy()
+    col[1] = np.inf
+    col[3] = -np.inf
+    col[5] = np.nan
+    n.generators_t.p_max_pu["wind_with_for"] = col
+    units, _r, _w = C.fleet_and_residual(n)
+    u = {x.name: x for x in units}["wind_with_for"]
+    assert np.isfinite(u.profile).all()
+    assert u.profile[1] == 0.0 and u.profile[3] == 0.0 and u.profile[5] == 0.0
+    assert math.isfinite(unit_nameplate_mw(u)) and unit_nameplate_mw(u) == pytest.approx(45.0)
+    PyPSAService.set_network(n)
+    out = R.get_copt()
+    assert math.isfinite(out["metrics"]["lole_hours"])
+    assert out["fleet"]["profile_units"] == ["wind_with_for"]
+    cands = {c["name"]: c["nameplate_mw"] for c in elcc_candidates(n)}
+    assert math.isfinite(cands["wind_with_for"])
