@@ -5034,6 +5034,9 @@ def get_copt():
     # demand basis.
     with PyPSAService.get_lock():
         units, residual, w = fleet_and_residual(n, cfg=cfg)
+        # …and the membership read for `must_take`, under the same hold
+        # (12c-0 shipped-code review, finding 4).
+        n_must_take = len(must_take_generators(n))
     if not units:
         return Response(status_code=204)
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
@@ -5048,7 +5051,6 @@ def get_copt():
     # The previous `electrical non-slack gens − len(units)` subtraction
     # miscounted zero-capacity generators, which the walk skips and the
     # subtraction did not (plan 12c-pre v2 review, finding 8).
-    n_must_take = len(must_take_generators(n))
     from services.adequacy.metrics import horizon_years, resolve_time_basis
     _copt_nyears = horizon_years(n)
     _copt_basis = resolve_time_basis(_copt_nyears)
@@ -5231,6 +5233,9 @@ def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = T
     ``loads_t.p_set`` (the BASE input profile) and re-applies the per-carrier /
     per-period scalers from ``cfg``. Returns a DataFrame (snapshots × loads) or
     ``None``. Never mutates the source frame.
+
+    The returned frame MAY BE THE LIVE ``loads_t.p_set`` when nothing is
+    scaled (Phase 12c-0) — read-only for every consumer; never mutate it.
 
     ``from_state``: when True (default, live network) the LP-stage `_state`
     result snapshot takes priority via ``_result_df``. When False (e.g. a

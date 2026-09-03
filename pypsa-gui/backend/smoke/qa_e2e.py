@@ -3866,6 +3866,159 @@ def suite_S24():
 
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
+
+def suite_S25():
+    """
+    One demand basis — the engines read the LP's scaled demand, live
+    (Phase 12c-0; the fifteenth finding).
+
+    `load_scalers` are applied to `loads_t.p_set` in place before the LP and
+    reverted after, so the LP, the ENS cap and the reserve-margin constraint
+    saw scaled demand while the COPT, the MC, ELCC and both certifying loops
+    read the raw series. This suite sets a 2035 growth factor of 1.25 over
+    HTTP, solves, and reads two engines: `GET /results/copt`, whose
+    per-period LOLE is computed here by hand from the uploaded profile on
+    BOTH bases, and `GET /results/reserve_margin`, whose 2035 peak must be
+    exactly 1.25x the 2030 peak of the same replicated profile.
+
+    The multi-period load COLUMN the scalers gate on is set through
+    `POST /loads/upload_profile`, which replicates a flat upload across the
+    periods — the 12c-0 shipped-code review found this route after the plan
+    had recorded "no honest live reproduction"; the QA plan now says so.
+
+    Bitten live (recorded in the plan): with `/copt` reading the raw frame,
+    the 2035 LOLE collapses to the 2030 value.
+    """
+    print("\nS25 - One demand basis: the engines read the LP's demand, live (area 25)")
+    name = "qa_e2e_demandbasis"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S25.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    # Two units, both q = 0.10: 130 MW (the raw ramp never exceeds it, the
+    # scaled 2035 ramp does) and 100 MW (so the margin at m = 0.10 is met by
+    # the fixed fleet — 207 MW firm against 169 MW required — and the solve
+    # is feasible without expansion).
+    Q, UNITS = 0.10, [130.0, 100.0]
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST", body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots/multi_period", method="POST",
+                      body={"periods": [2030, 2035],
+                            "start": "2030-01-01 00:00",
+                            "end": "2030-01-01 23:00", "freq": "h"})[0])
+    for i, cap in enumerate(UNITS, 1):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": f"gas{i}", "bus": "b", "carrier": "gas",
+                                "p_nom": cap, "marginal_cost": 10.0 * i,
+                                "outage_rate_value": Q,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    # A 24 h ramp 100..123 MW, uploaded flat: replicated into BOTH periods.
+    ts = [f"2030-01-01T{h:02d}:00:00" for h in range(24)]
+    load = [100.0 + h for h in range(24)]
+    st_u, up = multipart_post("/api/network/loads/upload_profile", {}, "file",
+                              "l.csv", _s12_csv("l", ts, load))
+    built.append(st_u)
+    ok_up = (isinstance(up, dict) and up.get("matched") == ["l"]
+             and up.get("snapshot_count") == 48)
+    st_cfg, _ = put_cfg(multi_investment_periods=True,
+                        load_scalers={"2035": 1.25}, reserve_margin=0.10)
+    if [c for c in built if c not in (200, 201)] or not ok_up or st_cfg != 200:
+        for i in (1, 2):
+            skip(f"S25.{i}", f"fixture build failed: {built} upload={up} cfg={st_cfg}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    http("/api/simulation/run", method="POST")
+    solved = poll_solve()
+
+    # The hand values: the two-unit table enumerated (four states), LOLP_h =
+    # P[available < r_h]. Raw hour: r_h <= 123 < 130, so only the 100 MW
+    # state and the zero state fall short. Scaled 2035 hour: r_h up to
+    # 153.75, so the 130 MW state falls short too on the hours above 130.
+    states = [(0.0, Q * Q), (UNITS[1], (1 - Q) * Q), (UNITS[0], Q * (1 - Q)),
+              (sum(UNITS), (1 - Q) * (1 - Q))]
+
+    def lolp(r):
+        return sum(p for c, p in states if c < r) if r > 0 else 0.0
+
+    lole_raw = sum(lolp(v) for v in load)
+    lole_2035 = sum(lolp(1.25 * v) for v in load)
+    st_k, copt = http("/api/results/copt")
+    byp = ((copt or {}).get("metrics") or {}).get("by_period") or {}
+    l30 = float((byp.get("2030") or {}).get("lole_hours", float("nan")))
+    l35 = float((byp.get("2035") or {}).get("lole_hours", float("nan")))
+
+    # ── S25.1 — the COPT evaluates the LP's basis: 2035 on the scaled load,
+    # 2030 on the raw one, both to the hand value.
+    record("S25.1",
+           st_k == 200 and abs(l30 - lole_raw) < 1e-6 and abs(l35 - lole_2035) < 1e-6,
+           f"copt->{st_k}; LOLE 2030={l30:.4f} (hand {lole_raw:.4f}); "
+           f"2035={l35:.4f} (hand on the scaled load {lole_2035:.4f}; "
+           f"raw would be {lole_raw:.4f})")
+
+    # ── S25.2 — the margin the LP enforced is on the same basis: the 2035
+    # peak is exactly 1.25x the 2030 peak of one replicated profile; and the
+    # MC study reads it too (its 2035 LOLE exceeds 2030's).
+    st_rm, rm = http("/api/results/reserve_margin")
+    peaks = {r.get("period"): float(r.get("peak_mw") or 0.0)
+             for r in ((rm or {}).get("by_period") or [])}
+    st_m, _ = http("/api/results/mc", method="POST",
+                   body={"draws": 200, "seed": 3, "cov_target": 1.0})
+    mc = None
+    if st_m == 200:
+        for _ in range(120):
+            st_g, rec = http("/api/results/mc")
+            if st_g == 200 and (rec or {}).get("status") in ("done", "failed"):
+                mc = rec
+                break
+            time.sleep(0.5)
+    mbp = ((((mc or {}).get("result") or {}).get("metrics") or {}).get("by_period")) or {}
+    m30 = float((mbp.get("2030") or {}).get("lole_hours", float("nan")))
+    m35 = float((mbp.get("2035") or {}).get("lole_hours", float("nan")))
+    record("S25.2",
+           (solved or {}).get("status") in ("ok", "optimal", "completed")
+           and st_rm == 200 and abs(peaks.get("2030", 0.0) - 123.0) < 1e-6
+           and abs(peaks.get("2035", 0.0) - 1.25 * 123.0) < 1e-6
+           and (mc or {}).get("status") == "done" and m35 > m30,
+           f"solve={(solved or {}).get('status')} {str((solved or {}).get('last_failure') or '')[:120]}; margin peaks={peaks} "
+           f"(2035 must be 1.25 x 123 = 153.75); mc status={(mc or {}).get('status')} "
+           f"LOLE 2030={m30:.3f} 2035={m35:.3f}")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -3949,6 +4102,9 @@ def main() -> int:
 
     if run("S24"):
         suite_S24()
+
+    if run("S25"):
+        suite_S25()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

@@ -540,3 +540,64 @@ says why (a per-period load series cannot be set over the API).
 **Recorded, not fixed here:** the engines' activity blindness (v3 review
 finding 2) and `solved_capacity`'s vintage blindness stay on the backlog;
 12c refuses on both rather than comparing across them.
+
+### 12c-0 SHIPPED-CODE REVIEW (2026-09-03, on `a627e56`) — accept with fixes
+
+Verdict **accept with fixes**, docs-only for the code. The reviewer ran the
+OLD `_apply_modelling_assumptions` from a detached worktree of `ca37368`
+against the new one on 6 networks × 15 scaler configurations: in-place
+`p_set`, static `p_set`, restore identity and the log line identical in
+**90/90** cases (its first pass had silently imported the new code through
+the fixture's `sys.path` and was thrown away — recorded by the reviewer).
+D1's anchor re-derived on the old tree; the bites reproduced 6/6 by
+monkeypatch; the loops' snapshots verified to carry the config
+(`base_cfg` precedes both closures; per-iterate configs are
+`dataclasses.replace(base_cfg, …)`); a live loop run with the scaler
+differs from the run without (margin loop 1.375 h vs 1.6875 h at the same
+margin; the coupling loop meets in one iterate without and exhausts its
+budget with) and the wrapper's stash peak equals the post-loop snapshot's
+peak in every scaled run; the consumer census confirmed with no raw reader
+left where the LP is scaled; D5 proves the only case that exists (a
+background solve runs on a different context's network and lock).
+
+Findings, verified and acted on:
+
+1. **MODERATE — the QA plan's "no honest live reproduction" was false.**
+   `POST /api/network/loads/upload_profile` replicates a flat upload across
+   the periods (`routers/network.py:3704`, `_apply_profile_upload`), which
+   is exactly the multi-period column the scalers gate on. **Fixed:** the
+   note is replaced by a live suite, **S25**, that uploads a 24 h ramp,
+   sets a 2035 factor of 1.25 over HTTP, solves, and checks `/results/copt`
+   per period against a four-state hand table on each basis (2.31 h raw,
+   4.11 h scaled) and the margin's peaks (123 / 153.75). Bitten live: with
+   `/copt` on the raw frame the 2035 value collapses to the 2030 one.
+2. **MODERATE — `lp_scaled_load_frame`'s fallback differs from the old
+   router in four ways; two were unstated:** it now returns the live
+   `p_set` itself when nothing scales (the old copy was made whenever any
+   scaler was configured), and the carrier-map build no longer degrades to
+   `"electrical"` on a pathological `loads` frame. Every consumer is
+   read-only (verified). **Fixed:** both docstrings say the frame may be
+   the live input and must never be mutated.
+3. **MINOR (pre-existing, adjacent) — a margin-less solve did not clear
+   `last_reserve_margin`** when driven through `run_simulation` directly
+   (the loops' path; the HTTP route clears it at start,
+   `routers/simulation.py:597`). Observed live by the reviewer: after a
+   scaled margin run, a no-scaler coupling run still served the 224.92
+   peak. **Fixed** in `run_simulation` (★ D6, bitten).
+4. **MINOR — `/copt` read `must_take_generators` after releasing the
+   lock.** **Fixed:** under the same hold.
+5. **MINOR — the per-period mask was recomputed per column** (measured
+   3.824 s vs 3.849 s on 300 × 3 × 6000: no regression, the `.loc`
+   dominates). **Fixed:** hoisted, in both the LP and the helper.
+6. **MINOR (pre-existing) — the `validate` route's TOCTOU**: it guards on
+   `_solver_in_flight()` rather than the lock, so a solve starting in the
+   millisecond window would let the route's `reserve_margin_facts` scale
+   an in-place-scaled frame. Recorded; the route avoids the lock by design.
+
+**A harness lapse, recorded.** The live S25 bite was restored with
+`git checkout -- routers/results.py`, which reverted the file to the last
+COMMIT and discarded the uncommitted fixes 2 and 4 in it; the hash check
+reported the mismatch and both were re-applied from their patch. Restores
+are by saved copy and hash — the unit-bite rule — for live bites too.
+
+Gates after the fixes recorded in the commit message.

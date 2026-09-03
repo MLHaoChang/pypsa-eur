@@ -325,3 +325,35 @@ def test_D5_copt_route_waits_for_the_mutation_lock():
         assert not done.is_set(), "get_copt read the network while a solve held the lock"
     assert done.wait(10.0)
     assert result["out"]["engine"] == "copt"
+
+
+def test_D6_a_margin_less_solve_clears_the_previous_margin_payload():
+    """★ D6 (12c-0 shipped-code review, finding 3). The HTTP route resets
+    `last_reserve_margin` before a solve; `run_simulation` called directly —
+    the loops' path — did not, so after a margin run a margin-less coupling
+    run left the previous payload on `/results/reserve_margin`: a standard
+    the plan the loop built never met (observed live by the review: the
+    stale stash still read the 1.25-scaled 2035 peak after a no-scaler run).
+    Cleared in `run_simulation`, the one place every solve passes through.
+
+    Bite (verified): drop the `_emit_state(last_reserve_margin=None)`.
+    """
+    import queue
+
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import run_simulation
+
+    n = two_period_network()
+    PyPSAService.set_network(n)
+    sink: dict = {}
+    upd = lambda **kw: sink.update(kw)  # noqa: E731
+    with_margin = SolverConfig(multi_investment_periods=True, reserve_margin=0.15)
+    status, cond = run_simulation(with_margin, n, PyPSAService.get_lock(),
+                                  threading.Event(), queue.SimpleQueue(), state_update=upd)
+    assert status in ("ok", "optimal"), (status, cond)
+    assert sink.get("last_reserve_margin"), "the margin solve must publish a payload"
+    without = SolverConfig(multi_investment_periods=True)
+    status, cond = run_simulation(without, n, PyPSAService.get_lock(),
+                                  threading.Event(), queue.SimpleQueue(), state_update=upd)
+    assert status in ("ok", "optimal"), (status, cond)
+    assert "last_reserve_margin" in sink and sink["last_reserve_margin"] is None

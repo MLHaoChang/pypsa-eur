@@ -95,7 +95,11 @@ def lp_demand_frame(n, cfg):
     """``loads_t.p_set`` as the LP sees it. Returns the frame ITSELF (no
     copy) when nothing is scaled, so the no-scaler path is bit-identical to
     reading the frame directly; a scaled copy otherwise. ``None`` when the
-    network has no ``loads_t``."""
+    network has no ``loads_t``.
+
+    The returned frame MAY BE THE LIVE MODEL INPUT — read it, never mutate
+    it (12c-0 shipped-code review, finding 2: every consumer today is
+    read-only; a future in-place op would corrupt ``loads_t.p_set``)."""
     loads_t = getattr(n, "loads_t", None)
     p_set = getattr(loads_t, "p_set", None) if loads_t is not None else None
     if p_set is None:
@@ -105,9 +109,9 @@ def lp_demand_frame(n, cfg):
         return p_set
     df = p_set.copy(deep=True)
     period_level = df.index.get_level_values(0)
+    masks = {period: period_level == period for period, *_ in factors}
     for period, col, _carrier, factor in factors:
-        mask = period_level == period
-        df.loc[mask, col] = df.loc[mask, col] * factor
+        df.loc[masks[period], col] = df.loc[masks[period], col] * factor
     return df
 
 

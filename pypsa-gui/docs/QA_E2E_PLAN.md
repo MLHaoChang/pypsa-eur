@@ -481,17 +481,31 @@ units (the netted remainder) needs nine hand-entered outage rates on nine
 profiled farms; the split, the netting and the per-row `note` are pinned by
 unit tests on a 4-unit fleet with the cap overridden to 2.
 
-### Phase 12c-0 — one demand basis (no live suite, and why)
+### S25 — One demand basis: the engines read the LP's demand, live (area 25)
+| id | Assertion |
+|----|-----------|
+| S25.1 | On a two-period network with a 24 h load ramp (100–123 MW, uploaded flat and replicated into both periods), two units of 130 and 100 MW at q = 0.10 and `load_scalers = {"2035": 1.25}`, `GET /results/copt` serves per-period LOLE equal to the four-state hand table on **each basis**: 2030 = **2.31 h** (raw: every hour above 100 MW loses the 100 MW state and the zero state), 2035 = **4.11 h** (the scaled hours above 130 MW lose the 130 MW state too) — where reading the raw frame gives 2.31 h in both |
+| S25.2 | The solve's `GET /results/reserve_margin` peaks are 123 MW (2030) and exactly 1.25 × 123 = 153.75 MW (2035) — the LP's basis, met by the fixed fleet so the solve needs no expansion — and a small MC study's 2035 LOLE exceeds its 2030 LOLE |
 
-The fifteenth finding — engines evaluating raw demand on projects with load
-scalers — is closed by `services/adequacy/demand.py` and pinned by
-`tests/test_adequacy_demand_basis.py` (D1–D5, a real solve included). It has
-**no honest live reproduction**: scaling applies to `loads_t.p_set`
-*columns* on a multi-period network, and `PUT /api/network/timeseries/…`
-builds a plain `DatetimeIndex` (recorded under S21/S22), so a per-period
-load series cannot be set over the API; a static load is — correctly —
-never scaled. Rather than ship a live check that could only pass, the plan
-says it is unit-covered only, as it did for the stash leak.
+**A corrected claim.** The first record of this phase said the basis had "no
+honest live reproduction" because `PUT /api/network/timeseries/…` builds a
+plain `DatetimeIndex`. The 12c-0 shipped-code review found that
+`POST /api/network/loads/upload_profile` replicates a flat upload across the
+periods — exactly the multi-period column the scalers gate on — and this
+suite is built on it. The earlier note was wrong on its premise, and is
+replaced rather than kept.
+
+**Bitten live** (recorded in the plan): with `/copt` reading the raw frame
+S25.1 fails on the 2035 value (2.4 against 19.5 on the first single-unit
+fixture, whose solve was infeasible under the margin; the two-unit fixture
+above replaced it).
+
+**A harness lapse, recorded.** The live bite's restore used `git checkout`
+on the router, which reverted the file to its last COMMIT and silently
+discarded two uncommitted review fixes in it; the hash check caught the
+mismatch and the fixes were re-applied from their patch. Restores are by
+saved copy and hash, never by `git checkout` — the rule already in force
+for the unit bites, now also for live ones.
 
 ## Loop protocol
 

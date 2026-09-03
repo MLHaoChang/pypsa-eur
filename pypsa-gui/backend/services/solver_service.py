@@ -1348,6 +1348,15 @@ def run_simulation(
                 # reason: with no plan to measure, a margin block would report
                 # the previous solve's firm capacity as this one's.
                 _margin_payload = None
+                if not _margin_targets:
+                    # 12c-0 shipped-code review, finding 3: the HTTP route
+                    # clears `last_reserve_margin` at solve START, but the
+                    # loops call this function directly, so a margin-less
+                    # solve here left the PREVIOUS solve's payload on
+                    # `/results/reserve_margin` — a stale standard the plan
+                    # the loop built never met. Cleared from the one place
+                    # every solve passes through.
+                    _emit_state(last_reserve_margin=None)
                 if _margin_targets and status in ("ok", "optimal"):
                     try:
                         from services.adequacy.report import (
@@ -5335,9 +5344,9 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         period_level = p_set.index.get_level_values(0)
         applied: list[str] = []
         original_p_set = p_set.copy(deep=True)
+        _masks = {period: period_level == period for period, *_ in _factors}
         for period, col, carrier_key, factor in _factors:
-            mask = period_level == period
-            p_set.loc[mask, col] = p_set.loc[mask, col] * factor
+            p_set.loc[_masks[period], col] = p_set.loc[_masks[period], col] * factor
             applied.append(f"{period}/{carrier_key}/{col}×{factor:g}")
         if original_p_set is not None:
             def _restore_p_set(orig=original_p_set):
