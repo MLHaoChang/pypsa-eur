@@ -640,3 +640,63 @@ served payload rows — and bitten live by dropping the generator half of
 the population (restored by saved copy and hash, never `git checkout`).
 
 Gates recorded in the commit message.
+
+### 12c SHIPPED-CODE REVIEW (2026-09-03, on `f1e0242`) — accept with fixes
+
+Verdict **accept with fixes**; the per-period predicate (monotone on
+[0, 200] with a store at three initial SoCs; int/str/"ALL" labels; a
+zero-weight period → `unidentifiable`), the shared Δ = 0 probe (same
+reduced inputs and arguments), the cost claim (20 calls for two periods,
+30 for three, +1 own baseline), the baseline key (differs on weights,
+period boundaries, storage efficiency, profile values, `initial_soc_frac`),
+the vintage aggregate (parent not double-counted; 35 MW per period), the
+route reaching `ok` (planted payload: `nameplate 90`, `elcc 10.1953`,
+`credit_gross 47.5`, `credit_net 9.5`), the S26 hand values and the B4
+bit-identity all checked out. Every finding below re-run before recording.
+
+1. **SERIOUS — the staleness fingerprint did not cover the outage data.**
+   It hashed names, capacities, profiles, loads and storage sizes; the
+   margin's derate is `(1 − q) × window mean` and the sampler's chain is
+   `(q, MTTR)`. Measured: a post-solve `q` edit 0.05 → 0.30, an MTTR edit,
+   a weightings edit, a carrier edit, and outage data ADDED to the farm —
+   which flips its kind vre → generator and samples it at q = 0.2 beside the
+   old q = 0 credit — all compared silently as `ok`. **Fixed:** the hash
+   covers the resolved outage parameters (rate, MTTR, source), carriers and
+   snapshot weightings. ★ `test_B13b…` (parametrised over all five edits);
+   bite: drop that block — bit.
+2. **MODERATE — the fingerprint was computed inside the report step's
+   `try`,** so a failure there discarded the margin payload AND the
+   adequacy report (measured with a raising hash: neither present).
+   **Fixed:** its own guard; `fingerprint: None` on failure, which the block
+   refuses as `stale_report`. ★ bitten (re-raise).
+3. **MODERATE — `population.unbuilt` was unreachable from the route:**
+   `must_take_generators` and the snapshot walk at the default
+   `keep_zero_capacity=False`, so a 0 MW row never reached either half;
+   the `no_population` hint, the panel's "unbuilt, not priced" line and the
+   spec sentence described a state the backend could not emit. **Fixed:**
+   the unbuilt names come from the superset walk (informative column,
+   zero capacity). ★ bitten (drop the walk).
+4. **MODERATE — a period row carried the HORIZON interval beside a period
+   LOLE** (measured: 2030 LOLE 10.0 inside a reported CI of
+   [19.3, 22.1]). **Fixed:** `mc_adequacy` reports `lole_ci` / `eue_ci`
+   per period from the same per-draw arrays, and `_row(period=)` uses
+   the period's. ★ in B1 (the CI brackets the period LOLE and differs from
+   the horizon's); bite: hand the horizon's — bit.
+5. **MINOR — B1's seed guard was a proxy for the edge condition** (pooled
+   over both periods; 13 of 200 seeds disagree with the exact 2030
+   condition; seed 0 passes the exact check by 0.001). The 130 edge is
+   right on seed 0 (`LOLE_red(129.99) = 10.031 > 10.000`,
+   `LOLE_red(130) = 3.305`). Recorded; the guard's docstring now says it
+   is a proxy.
+6. **MINOR — `sim_kwargs` carrying `batch=`/`max_draws=` crashed
+   `elcc_of_portfolio`** (duplicate keyword). **Fixed:** explicit kwargs.
+7. **MINOR — the absent-row activity check is generator-only** (a storage
+   row absent from the MC's store list passes). Consistent with storage
+   being out of scope; the docstring now says so.
+8. **MINOR — a user-named plain generator `foo@2030`** is refused as
+   `activity_mismatch` with a message naming a row that does not exist.
+   Recorded; a refusal, never a wrong number.
+9. Cost notes (deepcopy of a 10 000-row payload 66 ms under the lock;
+   68 KB per preserved farm profile at 8760 h): recorded, no action.
+
+Gates after the fixes in the commit message.

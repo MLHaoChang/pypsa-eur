@@ -683,11 +683,18 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
 
     lole_mean, lole_ci, _ = _mean_ci(lole_all)
     eue_mean, eue_ci, _ = _mean_ci(eue_all)
-    by_period = {
-        lab: {"lole_hours": float(np.concatenate(parts[lab][0]).mean()),
-              "eue_mwh": float(np.concatenate(parts[lab][1]).mean())}
-        for lab in labels
-    }
+    by_period = {}
+    for lab in labels:
+        p_lole = np.concatenate(parts[lab][0])
+        p_eue = np.concatenate(parts[lab][1])
+        # Phase 12c: the period's own interval, from the same per-draw
+        # arrays — a per-period ELCC row must not carry the horizon's CI
+        # beside a period LOLE that lies outside it (shipped-code review,
+        # finding 4).
+        by_period[lab] = {"lole_hours": float(p_lole.mean()),
+                          "eue_mwh": float(p_eue.mean()),
+                          "lole_ci": _mean_ci(p_lole)[1],
+                          "eue_ci": _mean_ci(p_eue)[1]}
 
     from services.adequacy.metrics import resolve_time_basis
 

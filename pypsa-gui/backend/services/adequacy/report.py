@@ -308,8 +308,14 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
     # Phase 12c: the network fingerprint the portfolio comparison checks
     # against its own snapshot, so a payload that describes a network the
     # user has since edited is refused as `stale_report` rather than compared.
-    from services.adequacy.portfolio import network_fingerprint
-    fingerprint = network_fingerprint(n)
+    # Under its OWN guard: a failure here must not discard the margin result
+    # and the adequacy report with it (12c shipped-code review, finding 2);
+    # a None fingerprint is refused downstream as `stale_report`.
+    try:
+        from services.adequacy.portfolio import network_fingerprint
+        fingerprint: str | None = network_fingerprint(n)
+    except Exception:                                         # noqa: BLE001
+        fingerprint = None
 
     by_period: list[dict] = []
     for P, per in sorted((stash.get("periods") or {}).items()):

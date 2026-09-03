@@ -217,12 +217,27 @@ def default_tol_mw(nameplate_mw) -> float:
     return max(0.5, 0.001 * abs(nameplate))
 
 
+def _ci_of(metrics: dict, period) -> tuple:
+    """The interval that belongs beside ``_lole_of(metrics, period)``: the
+    horizon's, or the period's own (``by_period[P]["lole_ci"]``, Phase 12c)."""
+    if period is None:
+        return tuple(float(v) for v in metrics["lole_ci"])
+    by = metrics.get("by_period") or {}
+    for k, v in by.items():
+        if k == period or str(k) == str(period):
+            ci = v.get("lole_ci")
+            if ci is not None:
+                return tuple(float(x) for x in ci)
+            break
+    raise KeyError(f"no per-period interval for {period!r} in the MC payload")
+
+
 def _row(*, nameplate, baseline, elcc_mw=None, status="ok", reason=None,
          period=None):
     """The row shape, in one place so every exit builds the same nine keys
     (spec §3's eight, plus ``reason`` — spec §5 renders it for status rows).
-    With ``period`` the baseline LOLE is that period's; the interval stays
-    the horizon's (the per-period split carries no interval of its own)."""
+    With ``period`` both the baseline LOLE and its interval are that
+    period's own."""
     share = None
     if elcc_mw is not None and nameplate > 0:
         share = float(elcc_mw) / float(nameplate)
@@ -233,7 +248,7 @@ def _row(*, nameplate, baseline, elcc_mw=None, status="ok", reason=None,
         "status": status,
         "reason": reason,
         "baseline_lole_h": _lole_of(baseline, period),
-        "baseline_lole_ci": tuple(float(v) for v in baseline["lole_ci"]),
+        "baseline_lole_ci": _ci_of(baseline, period),
     }
 
 

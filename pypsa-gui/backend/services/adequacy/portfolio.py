@@ -20,7 +20,9 @@ Populations, capacity rules and refusals are the load-bearing part:
   engines' ``solved_capacity`` against the margin payload's vintage-aware
   built capacity, compared BY PARENT AGGREGATE per period (the restore
   writes the parent's ``p_nom_opt`` as the sum over vintages). A member
-  with no payload row in a period is an ``activity_mismatch`` (the engines
+  with no payload row in a period, or a capacity-bearing GENERATOR row
+  of the margin's that the snapshot does not know (storage rows are not
+  checked — storage is out of scope), is an ``activity_mismatch`` (the engines
   ignore ``build_year``/``lifetime``; the margin masks them — a recorded
   MC-wide item); a disagreeing aggregate is ``capacity_basis_mismatch``;
   a payload whose network fingerprint differs from the snapshot's is
@@ -99,6 +101,20 @@ def portfolio_population(n, inputs) -> dict:
             members.append(Member("generator", str(u.name), cap))
         else:
             unbuilt.append(str(u.name))
+    # The two walks above run at the default `keep_zero_capacity=False`, so
+    # a 0 MW row never reaches either half and `unbuilt` was unreachable
+    # as first shipped (12c shipped-code review, finding 3). The unbuilt
+    # names come from the SUPERSET walk instead: every generator the scope
+    # tests admit whose column is informative and whose capacity is zero.
+    from services.adequacy.copt import _membership_walk
+    from services.adequacy.metrics import electrical_columns
+    buses = getattr(n, "buses", None)
+    if buses is not None:
+        elec = set(electrical_columns(n, list(buses.index)))
+        seen = {m.name for m in members} | set(unbuilt)
+        for g, cap, _row in _membership_walk(n, elec, keep_zero_capacity=True):
+            if float(cap) <= 0.0 and str(g) not in seen and _informative(g):
+                unbuilt.append(str(g))
     snapshot_names = set(must_take) | {str(u.name) for u in inputs.units} \
         | {str(s.name) for s in inputs.storage}
     return {"members": members, "unbuilt": unbuilt,
@@ -107,10 +123,15 @@ def portfolio_population(n, inputs) -> dict:
 
 def network_fingerprint(n) -> str:
     """sha256 over what the comparison depends on: generator names,
-    capacities (``p_nom``, ``p_nom_opt``), every ``p_max_pu`` column, the
-    load frame and static loads, storage sizes. Stamped on the margin
-    payload at the report step and recomputed at request time; a difference
-    is ``stale_report`` (A4, staleness)."""
+    carriers, capacities (``p_nom``, ``p_nom_opt``), activity, the RESOLVED
+    outage parameters (rate, MTTR, source — half of every derate and the
+    whole of the sampler's chain), every ``p_max_pu`` column, the load frame
+    and static loads, storage sizes, and the snapshot weightings. Stamped
+    on the margin payload at the report step and recomputed at request
+    time; a difference is ``stale_report`` (A4, staleness). The outage
+    half was missing as first shipped: a post-solve ``q`` edit — or outage
+    data ADDED to a farm, flipping its kind — compared silently (12c
+    shipped-code review, finding 1)."""
     h = hashlib.sha256()
     gens = getattr(n, "generators", None)
     if gens is not None and not gens.empty:
@@ -120,6 +141,21 @@ def network_fingerprint(n) -> str:
                 h.update(np.ascontiguousarray(
                     gens[col].to_numpy(dtype=np.float64, na_value=np.nan)).tobytes())
         h.update("\x1f".join(map(str, gens.index)).encode())
+        if "carrier" in gens.columns:
+            h.update("\x1f".join(map(str, gens["carrier"].to_numpy())).encode())
+        try:
+            from services.adequacy.occurrence import resolve_outage_params
+            params = resolve_outage_params(n, "generators")
+            for col in ("rate", "mttr_hours"):
+                h.update(np.ascontiguousarray(
+                    params[col].to_numpy(dtype=np.float64, na_value=np.nan)).tobytes())
+            h.update("\x1f".join(map(str, params["source"].to_numpy())).encode())
+        except Exception:                                     # noqa: BLE001
+            h.update(b"\x1dno-outage-params")
+    weights = getattr(n, "snapshot_weightings", None)
+    if weights is not None and not getattr(weights, "empty", True):
+        h.update(np.ascontiguousarray(
+            weights.to_numpy(dtype=np.float64)).tobytes())
     p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
     if p_max_pu_t is not None and not p_max_pu_t.empty:
         for col in p_max_pu_t.columns:
@@ -165,6 +201,7 @@ def member_contributions(inputs, members) -> np.ndarray:
 
 def elcc_of_portfolio(inputs, members, *, seed, draws, cov_target: float = 0.05,
                       baseline=None, baseline_key=None, tol_mw=None,
+                      max_draws: int | None = None, batch: int = 250,
                       **sim_kwargs) -> list[dict]:
     """
     One row per period label of ``inputs.periods``: the last-in credit of the
@@ -201,15 +238,16 @@ def elcc_of_portfolio(inputs, members, *, seed, draws, cov_target: float = 0.05,
     # this baseline, and nothing is evaluated twice).
     from services.adequacy.elcc import _NEVER_CONVERGE, baseline_key as _key
     from services.adequacy.mc import MAX_DRAWS, mc_adequacy
+    max_draws = MAX_DRAWS if max_draws is None else int(max_draws)
     if baseline is None:
         baseline = mc_adequacy(inputs, draws=draws, seed=seed, cov_target=cov_target,
-                               **sim_kwargs)
+                               max_draws=max_draws, batch=batch, **sim_kwargs)
         baseline_key = _key(inputs, draws=draws, seed=seed, cov_target=cov_target,
-                            max_draws=MAX_DRAWS, batch=250, sim_kwargs=sim_kwargs)
+                            max_draws=max_draws, batch=batch, sim_kwargs=sim_kwargs)
     n_fixed = int(baseline["n_samples"])
     zero_probe = mc_adequacy(
         reduced, draws=draws, seed=seed, cov_target=_NEVER_CONVERGE,
-        max_draws=n_fixed, batch=250, exclude=frozenset(exclude),
+        max_draws=n_fixed, batch=batch, exclude=frozenset(exclude),
         extra_firm_mw=0.0, **sim_kwargs)
 
     rows: list[dict] = []
@@ -231,6 +269,7 @@ def elcc_of_portfolio(inputs, members, *, seed, draws, cov_target: float = 0.05,
             nameplate_mw=nameplate, seed=seed, draws=draws,
             cov_target=cov_target, tol_mw=tol_mw, period=label,
             baseline=baseline, baseline_key=baseline_key,
+            max_draws=max_draws, batch=batch,
             _zero_probe=zero_probe, **sim_kwargs)
         rows.append({"period": str(label), **row})
     return rows

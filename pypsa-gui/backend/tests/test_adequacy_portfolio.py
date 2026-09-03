@@ -98,6 +98,10 @@ def test_B1_the_portfolio_credit_is_priced_per_period_at_the_hand_edges():
     (`_lole_of` ignoring `period`) → the two periods report one number and
     neither equals its hand value."""
     inp = _two_period()
+    # A PROXY for the 2030 edge condition (it pools both periods' hours; the
+    # exact condition is on 2030's alone and seed 0 clears it by 0.001 —
+    # 12c shipped-code review, finding 5). The hand value below was checked
+    # exactly on seed 0: LOLE_red(129.99) = 10.031 > 10.000, LOLE_red(130) = 3.305.
     assert _empirical_share(inp, 120.0) > 0.5, "seed moved the 2030 edge — re-derive"
     rows = {r["period"]: r for r in P.elcc_of_portfolio(
         inp, _members(inp), seed=SEED, draws=DRAWS)}
@@ -107,10 +111,17 @@ def test_B1_the_portfolio_credit_is_priced_per_period_at_the_hand_edges():
     assert rows["2030"]["status"] == "ok"
     assert rows["2030"]["nameplate_mw"] == 200.0
     assert abs(rows["2030"]["elcc_mw"] - 130.0) <= E.default_tol_mw(200.0), rows["2030"]
-    # the baseline LOLE is the period's, not the horizon's
+    # the baseline LOLE is the period's, not the horizon's — and so is its
+    # interval: a period LOLE outside its own reported CI is a lie on the
+    # wire (12c shipped-code review, finding 4). Bite: hand the horizon's.
     base = M.mc_adequacy(inp, draws=DRAWS, seed=SEED, cov_target=0.05)
-    assert rows["2030"]["baseline_lole_h"] == pytest.approx(base["by_period"][2030]["lole_hours"])
-    assert rows["2035"]["baseline_lole_h"] == pytest.approx(base["by_period"][2035]["lole_hours"])
+    for p_ in ("2030", "2035"):
+        bp = base["by_period"][int(p_)]
+        assert rows[p_]["baseline_lole_h"] == pytest.approx(bp["lole_hours"])
+        assert tuple(rows[p_]["baseline_lole_ci"]) == tuple(bp["lole_ci"])
+        lo, hi = rows[p_]["baseline_lole_ci"]
+        assert lo <= rows[p_]["baseline_lole_h"] <= hi
+        assert tuple(rows[p_]["baseline_lole_ci"]) != tuple(base["lole_ci"])
 
 
 # ── B2: the floor is per period ──────────────────────────────────────────
@@ -347,6 +358,86 @@ def test_B13_a_network_edited_after_the_solve_is_a_stale_report():
     block2, _pop = _block_for(n, sink, cfg=SolverConfig(multi_investment_periods=True))
     assert block2["status"] == "stale_report", block2
     assert block2["periods"] == []
+
+
+@pytest.mark.parametrize("edit", ["q", "mttr", "weights", "carrier", "add_outage"])
+def test_B13b_the_fingerprint_covers_the_outage_data_carriers_and_weightings(edit):
+    """★ B13b (12c shipped-code review, finding 1). As first shipped the
+    fingerprint hashed capacities and profiles only, so a post-solve edit to
+    the OUTAGE data — half of every derate and the whole of the sampler's
+    chain — compared silently; adding outage data to a farm even flipped its
+    kind (vre → generator) while the credit beside it was the old q = 0
+    derate. Every such edit is now `stale_report`. Bite (verified): drop the
+    outage-params / carrier / weightings block from the hash."""
+    from tests.test_adequacy_demand_basis import two_period_network
+    from services.solver_service import SolverConfig
+    n = two_period_network()
+    sink = _solved(n, reserve_margin=0.15, multi_investment_periods=True)
+    if edit == "q":
+        n.generators.at["base", "outage_rate_value"] = 0.30
+    elif edit == "mttr":
+        n.generators.at["base", "mttr_hours"] = 2.0
+    elif edit == "weights":
+        n.snapshot_weightings.loc[:, :] = n.snapshot_weightings * 2.0
+    elif edit == "carrier":
+        n.generators.at["wind", "carrier"] = "gas"
+    elif edit == "add_outage":
+        n.generators.at["wind", "outage_rate_value"] = 0.2
+        n.generators.at["wind", "outage_rate_basis"] = "EFORd"
+        n.generators.at["wind", "mttr_hours"] = 24.0
+    assert P.network_fingerprint(n) != sink["last_reserve_margin"]["fingerprint"]
+    block, _pop = _block_for(n, sink, cfg=SolverConfig(multi_investment_periods=True))
+    assert block["status"] == "stale_report", (edit, block)
+
+
+def test_a_fingerprint_failure_does_not_discard_the_margin_result(monkeypatch):
+    """★ 12c shipped-code review, finding 2: the fingerprint was computed
+    inside the report step's try, so a failure there dropped the margin
+    payload AND the adequacy report. It has its own guard now: the payload
+    is published with `fingerprint: None`, which the block refuses as
+    `stale_report`. Bite (verified): move the call back inside the outer
+    try."""
+    from tests.test_adequacy_demand_basis import two_period_network
+    import services.adequacy.portfolio as PM
+
+    def boom(_n):
+        raise TypeError("fingerprint blew up")
+
+    monkeypatch.setattr(PM, "network_fingerprint", boom)
+    n = two_period_network()
+    sink = _solved(n, reserve_margin=0.15, multi_investment_periods=True)
+    payload = sink.get("last_reserve_margin")
+    assert payload is not None and payload["fingerprint"] is None
+    assert sink.get("adequacy_report") is not None
+    monkeypatch.undo()
+    from services.solver_service import SolverConfig
+    block, _pop = _block_for(n, sink, cfg=SolverConfig(multi_investment_periods=True))
+    assert block["status"] == "stale_report"
+
+
+def test_unbuilt_members_are_named_from_the_superset_walk():
+    """★ 12c shipped-code review, finding 3: `must_take_generators` and the
+    route's snapshot walk at the default `keep_zero_capacity=False`, so a
+    0 MW row never reached either half and `unbuilt` could not be
+    populated. It comes from the superset walk now: an unbuilt extendable
+    farm with an informative column is listed, and the `no_population`
+    reason names it. Bite (verified): drop the superset walk."""
+    from tests.test_adequacy_demand_basis import two_period_network
+    from services.adequacy.copt import must_take_generators
+    n = two_period_network()
+    n.generators.at["wind", "p_nom"] = 0.0
+    n.generators.at["wind", "p_nom_extendable"] = True
+    n.generators.at["wind", "p_nom_max"] = 500.0
+    n.generators.at["wind", "capital_cost"] = 1e9      # never built
+    assert must_take_generators(n) == []
+    inp = M.snapshot_inputs(n, vre_assets=must_take_generators(n))
+    pop = P.portfolio_population(n, inp)
+    assert pop["members"] == [] and pop["unbuilt"] == ["wind"]
+    block = P.portfolio_block(inp, pop, margin_payload=None, snapshot_fingerprint="x",
+                              seed=SEED, draws=DRAWS, cov_target=0.05,
+                              baseline=None, baseline_key=None)
+    assert block["status"] == "no_population" and "wind" in block["reason"]
+    assert block["population"]["unbuilt"] == ["wind"]
 
 
 def test_a_solve_without_a_margin_prices_the_portfolio_and_says_so():

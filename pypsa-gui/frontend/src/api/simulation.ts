@@ -182,7 +182,12 @@ export interface McMetrics {
   lole_ci: [number, number] | null
   eue_mwh: number
   eue_ci: [number, number] | null
-  by_period?: Record<string, { lole_hours: number; eue_mwh: number }>
+  /** Phase 12c: each period carries its own interval (a per-period ELCC row
+   *  reports it beside the period's LOLE, never the horizon's). */
+  by_period?: Record<string, {
+    lole_hours: number; eue_mwh: number
+    lole_ci?: [number, number]; eue_ci?: [number, number]
+  }>
   n_samples: number
   converged?: boolean
   /** "hours_per_year" only when the modelled horizon really is a year. */
