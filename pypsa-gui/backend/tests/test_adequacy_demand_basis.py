@@ -43,7 +43,8 @@ def _h(a) -> str:
         np.ascontiguousarray(a, dtype=np.float64).tobytes()).hexdigest()
 
 
-def two_period_network(*, static_load: bool = False) -> pypsa.Network:
+def two_period_network(*, static_load: bool = False,
+                       wind_build_year: int | None = None) -> pypsa.Network:
     """The v3 review's fixture: two 24 h periods, one series load (or one
     static load), a firm base unit, a wind farm with a profile, an
     extendable peaker with outage data."""
@@ -65,7 +66,8 @@ def two_period_network(*, static_load: bool = False) -> pypsa.Network:
           marginal_cost=10.0, build_year=2000, lifetime=100,
           outage_rate_value=0.05, outage_rate_basis="FOR", mttr_hours=24.0)
     n.add("Generator", "wind", bus="b", carrier="wind", p_nom=100.0,
-          marginal_cost=0.0, build_year=2000, lifetime=100)
+          marginal_cost=0.0, lifetime=100,
+          build_year=2000 if wind_build_year is None else int(wind_build_year))
     wp = np.clip(0.5 + 0.5 * np.cos(np.linspace(0, 4 * np.pi, 2 * H)), 0, 1)
     n.generators_t.p_max_pu["wind"] = wp
     n.add("Generator", "peaker", bus="b", carrier="gas", p_nom=0.0,

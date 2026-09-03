@@ -4019,6 +4019,156 @@ def suite_S25():
     restore()
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
+
+def suite_S26():
+    """
+    The portfolio ELCC as a second opinion on the reserve margin, live
+    (Phase 12c, plan v3.1).
+
+    12a's two-farm fixture with a reserve margin: two 100 MW farms on one
+    profile, one must-take and one with outage data — after 12c-pre both
+    are profile-bearing members of one group. Solve with the margin over
+    HTTP, then `POST /results/mc` with `elcc_portfolio: true`: the block is
+    `ok`, its `credit_gross_mw` equals the served margin payload's own rows
+    summed over the two farms (recomputed here from `/results/reserve_margin`),
+    the period row prices, and the row is NOT in `elcc`.
+
+    Bitten live (recorded in the plan): with the population's generator
+    half dropped, the outage-bearing farm stays in the fleet and the credit
+    is the must-take farm's alone.
+    """
+    print("\nS26 - Portfolio ELCC beside the reserve margin, live (area 26)")
+    name = "qa_e2e_portfolio"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S26.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("wind", "gas"):
+        built.append(http("/api/network/carriers", method="POST", body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-01 07:00", "freq": "h"})[0])
+    # 90 MW of gas: with it UP the system is short only when the farms
+    # deliver under 10 MW, and never once they deliver 10 — so the group's
+    # last-in credit is its minimum hourly contribution, 0.05 x 200 = 10 MW,
+    # exactly (the predicate's step edge). With gas DOWN it is short
+    # regardless. The margin at 10 % (110 MW required) is met by
+    # 0.9 x 90 + the farms' 47.5 MW of profile credit, so no expansion.
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "gas1", "bus": "b", "carrier": "gas",
+                            "p_nom": 90.0, "marginal_cost": 10.0,
+                            "outage_rate_value": 0.10,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 24.0})[0])
+    for nm, extra in (("wind_no_for", {}),
+                      ("wind_with_for", {"outage_rate_value": 0.10,
+                                         "outage_rate_basis": "EFORd",
+                                         "mttr_hours": 24.0})):
+        body = {"name": nm, "bus": "b", "carrier": "wind", "p_nom": 100.0,
+                "marginal_cost": 0.0}
+        body.update(extra)
+        built.append(http("/api/network/generators", method="POST", body=body)[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    idx = [f"2030-01-01T{h:02d}:00:00" for h in range(8)]
+    prof = [0.05, 0.15, 0.35, 0.45] * 2
+    built.append(http("/api/network/timeseries/generators/p_max_pu", method="PUT",
+                      body={"index": idx, "columns": ["wind_no_for", "wind_with_for"],
+                            "data": [[v, v] for v in prof]})[0])
+    st_cfg, _ = put_cfg(reserve_margin=0.10)
+    if [c for c in built if c not in (200, 201)] or st_cfg != 200:
+        for i in (1, 2):
+            skip(f"S26.{i}", f"fixture build failed: {built} cfg={st_cfg}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    http("/api/simulation/run", method="POST")
+    solved = poll_solve()
+    st_rm, rm = http("/api/results/reserve_margin")
+    rows = [a for a in ((rm or {}).get("assets") or [])
+            if a.get("kind") == "generator" and a.get("name") in ("wind_no_for", "wind_with_for")]
+    credit_hand = sum(float(a.get("derate") or 0.0) * float(a.get("capacity_mw") or 0.0)
+                      for a in rows)
+
+    st_m, _ = http("/api/results/mc", method="POST",
+                   body={"draws": 100, "seed": 5, "cov_target": 1.0,
+                         "elcc_portfolio": True,
+                         "elcc_assets": [{"kind": "vre", "name": "wind_no_for"}]})
+    mc = None
+    if st_m == 200:
+        for _ in range(240):
+            st_g, rec = http("/api/results/mc")
+            if st_g == 200 and (rec or {}).get("status") in ("done", "failed"):
+                mc = rec
+                break
+            time.sleep(0.5)
+    res = ((mc or {}).get("result") or {})
+    block = res.get("elcc_portfolio") or {}
+    members = sorted(m.get("name") for m in ((block.get("population") or {}).get("members") or []))
+    periods = block.get("periods") or []
+    row = periods[0] if periods else {}
+
+    # ── S26.1 — the block is ok on the solved margin, its population is the
+    # two farms, and its gross credit is the margin payload's own rows.
+    record("S26.1",
+           (solved or {}).get("status") in ("ok", "optimal", "completed")
+           and st_rm == 200 and len(rows) == 2
+           and (mc or {}).get("status") == "done"
+           and block.get("status") == "ok"
+           and members == ["wind_no_for", "wind_with_for"]
+           and len(periods) == 1
+           and abs(float(row.get("credit_gross_mw") or 0.0) - credit_hand) < 1e-6,
+           f"solve={(solved or {}).get('status')}; mc={(mc or {}).get('status')}; "
+           f"block={block.get('status')} {str(block.get('reason') or '')[:80]}; "
+           f"members={members}; credit_gross={row.get('credit_gross_mw')} "
+           f"(payload rows sum {credit_hand:.4f})")
+
+    # ── S26.2 — the period row prices the group at its hand value, 10 MW
+    # (the step edge; tolerance max(0.5, 0.1 % of the 90 MW bracket) = 0.5),
+    # and the portfolio is NOT a row in `elcc`.
+    elcc_names = [r_.get("name") for r_ in (res.get("elcc") or [])]
+    record("S26.2",
+           row.get("status") == "ok"
+           and abs(float(row.get("elcc_mw") or 0.0) - 10.0) <= 0.5
+           and abs(float(row.get("nameplate_mw") or 0.0) - 90.0) < 1e-6
+           and elcc_names == ["wind_no_for"]
+           and all("period" not in r_ for r_ in (res.get("elcc") or [])),
+           f"period row status={row.get('status')} elcc_mw={row.get('elcc_mw')} "
+           f"nameplate={row.get('nameplate_mw')}; elcc list={elcc_names}")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -4105,6 +4255,9 @@ def main() -> int:
 
     if run("S25"):
         suite_S25()
+
+    if run("S26"):
+        suite_S26()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

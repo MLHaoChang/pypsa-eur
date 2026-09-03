@@ -3185,6 +3185,12 @@ class McRequest(_BaseModel):
     seed: int | None = None
     cov_target: float | None = None
     elcc_assets: list[McElccAsset] | None = None
+    # Phase 12c: price the whole profile-bearing fleet as one portfolio, per
+    # period, beside the reserve margin's own credit for the same group. A
+    # boolean, not a pseudo-asset: the row must never land in `elcc` (a
+    # consumer summing that list would double-count), and the population is
+    # the engines' to derive, not the caller's to name.
+    elcc_portfolio: bool | None = None
 
 
 @results_router.get("/mc")
@@ -3276,6 +3282,7 @@ def post_mc(body: McRequest | None = None):
     cov_target = 0.05 if cov_target is None else float(cov_target)
 
     assets = [(a.kind, a.name) for a in (getattr(body, "elcc_assets", None) or [])]
+    want_portfolio = bool(getattr(body, "elcc_portfolio", None) or False)
     if len(assets) > MAX_ELCC_ASSETS:
         raise HTTPException(
             422,
@@ -3287,13 +3294,45 @@ def post_mc(body: McRequest | None = None):
     # after this line — validation and the worker alike — reads plain arrays,
     # so the network is free the moment the lock is released.
     n = PyPSAService.get_network()
+    population = None
+    snapshot_fp = None
+    margin_payload = None
     with PyPSAService.get_lock():
+        vre_names = [nm for kind, nm in assets if kind == "vre"]
+        if want_portfolio:
+            # The portfolio's must-take half needs its profiles PRESERVED in
+            # the snapshot (`snapshot_inputs` keeps only the names it is
+            # asked for): every must-take whose column is informative.
+            from services.adequacy.copt import (
+                must_take_generators,
+                series_is_informative,
+            )
+            pmp = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+            for nm in must_take_generators(n):
+                if (nm not in vre_names and pmp is not None
+                        and nm in getattr(pmp, "columns", [])
+                        and series_is_informative(pmp[nm])):
+                    vre_names.append(nm)
         try:
             inputs = snapshot_inputs(
-                n, vre_assets=[nm for kind, nm in assets if kind == "vre"],
-                cfg=_state.get("solver_config"))
+                n, vre_assets=vre_names, cfg=_state.get("solver_config"))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        if want_portfolio:
+            # Everything the worker needs from the NETWORK and from request-
+            # scoped state is captured here (plan 12c v3.1 A9): the
+            # population with the engines' capacity rule, the fingerprint the
+            # margin payload is checked against, and that payload itself —
+            # the worker never touches `_state` or `n`.
+            import copy as _copy
+
+            from services.adequacy.portfolio import (
+                network_fingerprint,
+                portfolio_population,
+            )
+            population = portfolio_population(n, inputs)
+            snapshot_fp = network_fingerprint(n)
+            margin_payload = _copy.deepcopy(_state.get("last_reserve_margin"))
 
     if not inputs.units:
         raise HTTPException(
@@ -3335,12 +3374,21 @@ def post_mc(body: McRequest | None = None):
         try:
             metrics = mc_adequacy(inputs, draws=draws, seed=seed,
                                   cov_target=cov_target)
+            # Phase 12c: the headline metrics ARE the baseline every ELCC
+            # row needs, argument for argument; injected with a content key
+            # the callee recomputes (the N+1 baseline, closed with CRN kept).
+            from services.adequacy.elcc import baseline_key as _baseline_key
+            from services.adequacy.mc import MAX_DRAWS as _MAX_DRAWS
+            key = _baseline_key(inputs, draws=draws, seed=seed,
+                                cov_target=cov_target, max_draws=_MAX_DRAWS,
+                                batch=250)
             rows = []
             for kind, name in assets:
                 try:
                     rows.append(elcc_for_asset(
                         inputs, kind, name, seed=seed, draws=draws,
-                        cov_target=cov_target))
+                        cov_target=cov_target, baseline=metrics,
+                        baseline_key=key))
                 except KeyError as exc:
                     # Belt-and-braces for the 404 the POST already raised
                     # synchronously: the only way to reach this is a name that
@@ -3354,6 +3402,13 @@ def post_mc(body: McRequest | None = None):
                         error=f"unknown ELCC asset {name!r} "
                               f"(kind {kind!r}): {msg}")
                     return
+            portfolio = None
+            if want_portfolio:
+                from services.adequacy.portfolio import portfolio_block
+                portfolio = portfolio_block(
+                    inputs, population, margin_payload=margin_payload,
+                    snapshot_fingerprint=snapshot_fp, seed=seed, draws=draws,
+                    cov_target=cov_target, baseline=metrics, baseline_key=key)
             record.update(
                 status="done", error=None, finished_at=time.time(),
                 result={
@@ -3365,6 +3420,8 @@ def post_mc(body: McRequest | None = None):
                     "fidelity": "sequential_mc",
                     "metrics": metrics,
                     "elcc": rows,
+                    # Phase 12c: a SIBLING of `elcc`, never a row in it.
+                    "elcc_portfolio": portfolio,
                     "warning": MC_WARNING_V1,
                     # Phase 12c-pre: the units whose outages were sampled ON
                     # their availability series rather than at nameplate.
@@ -3381,7 +3438,8 @@ def post_mc(body: McRequest | None = None):
     _state["mc"] = record
     t.start()
     return {"status": "running", "draws": draws, "seed": seed,
-            "cov_target": cov_target, "elcc_assets": len(assets)}
+            "cov_target": cov_target, "elcc_assets": len(assets),
+            "elcc_portfolio": want_portfolio}
 
 
 @results_router.get("/mc/elcc_candidates")

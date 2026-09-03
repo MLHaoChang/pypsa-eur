@@ -305,6 +305,12 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
                 "derate_net": derate_net_by_row.get(id(row)),
             })
 
+    # Phase 12c: the network fingerprint the portfolio comparison checks
+    # against its own snapshot, so a payload that describes a network the
+    # user has since edited is refused as `stale_report` rather than compared.
+    from services.adequacy.portfolio import network_fingerprint
+    fingerprint = network_fingerprint(n)
+
     by_period: list[dict] = []
     for P, per in sorted((stash.get("periods") or {}).items()):
         peak = float(per.get("peak_mw", 0.0) or 0.0)
@@ -330,6 +336,7 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
         })
 
     return {
+        "fingerprint": fingerprint,
         "margin": float(stash.get("margin", 0.0) or 0.0),
         "horizon_wide": bool(stash.get("horizon_wide", False)),
         "partial_periods": bool(partial),

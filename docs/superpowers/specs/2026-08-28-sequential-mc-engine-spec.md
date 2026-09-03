@@ -395,3 +395,63 @@ the LP's, D5 (`/copt` waits for the lock).
 ELCC row move after this amendment — upward, as demand grows — and a
 coupling- or margin-loop value certified before it was certified against
 the wrong demand; re-run the loop.
+
+## Amendment v1.6 — the portfolio ELCC, per period (Phase 12c)
+
+**§3, amended.** `elcc_of_removal(..., period=None, baseline=None,
+baseline_key=None)`: with `period` the predicate compares
+`by_period[period]["lole_hours"]` and refuses against that period's floor
+(`min positive weight in the period / n_samples`); well-posed because a
+firm block in every hour cannot raise any period's LOLE, the periods are
+chronologically independent (states and SoC restart at the boundary), and
+CRN holds per period. With `baseline` the caller's `mc_adequacy` result is
+used instead of a fresh one — the `/mc` worker's headline metrics ARE that
+baseline, argument for argument — and `baseline_key(inputs, draws=, seed=,
+cov_target=, max_draws=, batch=, sim_kwargs=)` (a content hash over every
+unit incl. profile bytes, every store, the residual and weight bytes, the
+period blocks, the sampling parameters and the sim kwargs) must match the
+one the callee recomputes, else `ValueError`. The N+1 baseline is closed
+for every marginal row and the portfolio alike.
+
+**`portfolio.py`** (new). `portfolio_population(n, inputs)`: the members
+are the generators the walk admits whose `p_max_pu` COLUMN is informative
+(`series_is_informative`), for both halves — must-take farms (`kind="vre"`)
+and profiled occurrence units (`kind="generator"`) — with
+`solved_capacity`; zero-capacity members are listed as `unbuilt`, storage
+is out of scope. `elcc_of_portfolio(inputs, members, ...)`: one row per
+period; the removal un-nets every vre member and excludes every generator
+member in one `elcc_of_removal` call per period on one shared baseline and
+one shared Δ = 0 probe; the bracket top is `max_{h∈P} Σ a_{i,h}`, the
+group's physical maximum in the period; a period where that is zero is
+`no_contribution` (never `ok 0.0`). `portfolio_block(...)`: the comparison
+with the last solve's reserve-margin payload, captured IN THE REQUEST with
+the network fingerprint — block statuses `ok | no_population |
+activity_mismatch` (a member with no margin row in a period, or a
+capacity-bearing margin row absent from the snapshot; the engines ignore
+`build_year`/`lifetime`, the margin does not — recorded MC-wide item) `|
+capacity_basis_mismatch` (the payload's built capacity summed by PARENT
+per period ≠ `solved_capacity`; the vintage restore writes the parent's
+`p_nom_opt` as the aggregate) `| stale_report` (the payload's
+`fingerprint` ≠ the snapshot's) `| margin_unavailable` (ELCC rows still
+run; credits null). Per period: `credit_gross_mw = Σ derate × capacity_mw`
+over the payload rows whose parent is a member, `credit_net_mw` the same
+with `derate_net` where present, null unless the period's net window is
+`ok`. The reserve-margin payload gains `fingerprint` (`network_fingerprint(n)`
+at the report step: generator names, capacities, every `p_max_pu` column,
+loads, storage sizes).
+
+**§4, amended.** `McRequest.elcc_portfolio: bool | None`; the result gains
+the SIBLING key `elcc_portfolio` (never a row in `elcc`; `null` when not
+requested); the POST echoes the flag. Cost: one shared baseline plus
+`n_periods × ~10` full evaluations.
+
+**§5, amended.** A toggle beside the picker; a block under the ELCC table
+with one row per period and THREE MW figures (group peak, portfolio ELCC,
+margin credit gross / net-load window) and no ratio; every refusal renders
+with the engine's reason; the sentence: *"The margin credits this group by
+its peak-window mean × (1 − q); the sampler prices the same group by the
+firm block that restores its own loss-of-load. Two standards, neither a
+correction of the other."*
+
+**§6, amended.** `tests/test_adequacy_portfolio.py` (B1–B13 as numbered
+in the plan) and four `McPanel` cases; live S26.

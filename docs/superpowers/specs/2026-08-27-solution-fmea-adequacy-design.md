@@ -362,6 +362,13 @@ abort routes. Full PyPSA-Eur (10³–10⁴ units) is seconds-to-minutes for the 
 alone, and **multi-area** COPTs with transfer limits are exponential in the number of
 areas — the actual reason PRAS exists.
 
+**Amendment (Phase 12c) — the portfolio ELCC beside the reserve margin.** The
+profile-bearing fleet is priced as ONE group, per investment period, by the
+sequential MC's constant-LOLE bisection, and shown beside the reserve margin's
+own credit for the same group (its payload rows, not a recomputation). Two
+standards on one population, one capacity rule per side with the rule for
+their disagreement stated, and no ratio between them (MC spec v1.6).
+
 **Amendment (Phase 12c-0) — one demand basis.** Every engine on this page
 evaluates the demand the LP was built against: `services/adequacy/demand.py`
 owns the load-scaler resolution the LP applies, and `fleet_and_residual`,

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Dices } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import type {
-  ElccCandidate, ElccRow, McMetrics, McRequestBody, McStatus,
+  ElccCandidate, ElccRow, McMetrics, McRequestBody, McStatus, ElccPortfolioBlock, ElccPortfolioPeriod,
 } from '../../api/simulation'
 import { formatApiDetail } from '../../api/client'
 import { useUIStore } from '../../store/uiStore'
@@ -174,6 +174,23 @@ const NO_CANDIDATES =
   + 'a must-take generator qualifies on a non-zero availability profile; a '
   + 'storage unit on a positive power rating. Slacks and non-electrical buses '
   + 'never qualify.'
+
+/** Phase 12c: the portfolio block's refusals, in the user's words. The
+ *  engine's `reason` is rendered beside each; these are the headings. */
+const PORTFOLIO_STATUS_LABEL: Record<ElccPortfolioBlock['status'], string> = {
+  ok: '',
+  no_population: 'nothing to price',
+  activity_mismatch: 'the margin and the engines disagree about who is present',
+  capacity_basis_mismatch: 'the margin and the engines disagree about built capacity',
+  stale_report: 'the margin result is older than the network',
+  margin_unavailable: 'no reserve margin on the last solve',
+}
+const PORTFOLIO_PERIOD_LABEL: Record<ElccPortfolioPeriod['status'], string> = {
+  ok: '',
+  unidentifiable: 'unidentifiable',
+  not_bracketed: 'not bracketed',
+  no_contribution: 'no contribution',
+}
 
 const STATUS_LABEL: Record<ElccRow['status'], string> = {
   ok: 'ok',
@@ -347,6 +364,8 @@ export function McPanel() {
   const [draws, setDraws] = useState('500')
   const [blocked, setBlocked] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
+  // Phase 12c: the portfolio opt-in, beside the picker it extends.
+  const [portfolio, setPortfolio] = useState(false)
 
   const { data } = useQuery({
     queryKey: nk(currentProject, 'results', 'mc'),
@@ -391,6 +410,9 @@ export function McPanel() {
       const body: McRequestBody = {}
       if (draws.trim() !== '' && isFinite(n) && n > 0) body.draws = n
       if (assets) body.elcc_assets = assets
+      // Same rule as `elcc_assets`: ABSENT unless asked, so a bare run stays
+      // bare and the backend's default (no portfolio) is never forked here.
+      if (portfolio) body.elcc_portfolio = true
       return resultsApi.startMc(body)
     },
     onSuccess: () => {
@@ -408,6 +430,7 @@ export function McPanel() {
   const loleCi = m ? ciRange(m.lole_ci, basisSuffix(m)) : null
   const eueCi = m ? ciRange(m.eue_ci, 'MWh') : null
   const elcc = result?.elcc ?? []
+  const portfolioBlock = result?.elcc_portfolio ?? null
 
   return (
     <section className="border border-border rounded" data-testid="mc-panel">
@@ -520,6 +543,24 @@ export function McPanel() {
                   )}
                 </>
               )}
+              {/* Phase 12c: the portfolio is a property of the fleet, not a
+                  pick — every generator with an availability series and built
+                  capacity, priced as one group per period beside the reserve
+                  margin's credit for the same group. Cost stated like the
+                  per-asset sentence, in evaluations, not adjectives. */}
+              <label className="flex items-start gap-1.5 text-[10px] cursor-pointer mt-1">
+                <input
+                  type="checkbox"
+                  data-testid="elcc-portfolio-toggle"
+                  checked={portfolio}
+                  onChange={() => setPortfolio(p => !p)}
+                />
+                <span>
+                  Also price the profile-bearing fleet as <span className="font-semibold">one portfolio</span>,
+                  per investment period, beside the reserve margin&apos;s credit for the same
+                  group — about ten full evaluations per period on top of the run.
+                </span>
+              </label>
             </div>
           )}
 
@@ -638,8 +679,104 @@ export function McPanel() {
               </p>
             </div>
           )}
+
+          {portfolioBlock && (
+            <PortfolioSection block={portfolioBlock} />
+          )}
         </div>
       )}
     </section>
+  )
+}
+
+
+/**
+ * Phase 12c — the profile-bearing fleet priced as one portfolio, per period,
+ * beside the reserve margin's own credit for the same group. Three MW
+ * figures per period and NO ratio: a ratio invites the "correction" reading
+ * the copy forbids (plan v3.1 A6). Every refusal is rendered with the
+ * engine's reason — a refusal is data, and an empty block would read as a
+ * broken panel.
+ */
+export function PortfolioSection({ block }: { block: ElccPortfolioBlock }) {
+  const heading = PORTFOLIO_STATUS_LABEL[block.status]
+  const refused = block.status !== 'ok' && block.status !== 'margin_unavailable'
+  const n = block.population.members.length
+  return (
+    <div className="flex flex-col gap-1" data-testid="elcc-portfolio">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+        Portfolio credit — the profile-bearing fleet as one group
+      </span>
+      <p className="text-[10px] text-muted" data-testid="elcc-portfolio-population">
+        {n} member{n === 1 ? '' : 's'}
+        {n > 0 && (
+          <>: {block.population.members.map(m => m.name).join(', ')}</>
+        )}
+        {block.population.unbuilt.length > 0 && (
+          <> · unbuilt, not priced: {block.population.unbuilt.join(', ')}</>
+        )}
+      </p>
+      {block.status !== 'ok' && (
+        <p
+          className={`text-[10px] ${refused ? 'text-warn' : 'text-muted'}`}
+          data-testid="elcc-portfolio-status"
+        >
+          <span className="font-semibold">{heading}</span>
+          {block.reason ? ` — ${block.reason}` : ''}
+        </p>
+      )}
+      {block.periods.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[10px]" data-testid="elcc-portfolio-table">
+            <thead className="text-muted">
+              <tr>
+                <th className="text-left font-medium py-1 pr-3">Period</th>
+                <th className="text-right font-medium py-1 pr-3">Group peak</th>
+                <th className="text-left font-medium py-1 pr-3">Portfolio ELCC</th>
+                <th className="text-right font-medium py-1 pr-3">Margin credit (gross window)</th>
+                <th className="text-right font-medium py-1 pr-3">Margin credit (net-load window)</th>
+                <th className="text-right font-medium py-1 pr-3">Baseline LOLE</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {block.periods.map(r => (
+                <tr key={r.period} className="border-t border-border/50 align-top"
+                    data-testid={`elcc-portfolio-row-${r.period}`}>
+                  <td className="py-1 pr-3">{r.period}</td>
+                  <td className="py-1 pr-3 text-right">{trim(r.nameplate_mw)} MW</td>
+                  <td className="py-1 pr-3" data-testid={`elcc-portfolio-verdict-${r.period}`}>
+                    {r.status === 'ok' && r.elcc_mw != null ? (
+                      <>
+                        {trim(r.elcc_mw)} MW
+                        {elccShare(r.elcc_share) && (
+                          <span className="text-muted"> ({elccShare(r.elcc_share)})</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="font-sans text-warn">
+                        <span className="font-semibold">{PORTFOLIO_PERIOD_LABEL[r.status]}</span>
+                        {r.reason ? ` — ${r.reason}` : ''}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1 pr-3 text-right" data-testid={`elcc-portfolio-gross-${r.period}`}>
+                    {r.credit_gross_mw == null ? '—' : `${trim(r.credit_gross_mw)} MW`}
+                  </td>
+                  <td className="py-1 pr-3 text-right" data-testid={`elcc-portfolio-net-${r.period}`}>
+                    {r.credit_net_mw == null ? '—' : `${trim(r.credit_net_mw)} MW`}
+                  </td>
+                  <td className="py-1 pr-3 text-right">{trim(r.baseline_lole_h)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-[10px] text-muted" data-testid="elcc-portfolio-standards">
+        The margin credits this group by its peak-window mean × (1 − q); the
+        sampler prices the same group by the firm block that restores its own
+        loss-of-load. Two standards, neither a correction of the other.
+      </p>
+    </div>
   )
 }

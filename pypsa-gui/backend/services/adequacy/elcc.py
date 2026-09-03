@@ -78,6 +78,8 @@ depends on the answer is a payload the panel has to branch on.
 """
 from __future__ import annotations
 
+import hashlib
+
 import logging
 import math
 from dataclasses import replace
@@ -215,9 +217,12 @@ def default_tol_mw(nameplate_mw) -> float:
     return max(0.5, 0.001 * abs(nameplate))
 
 
-def _row(*, nameplate, baseline, elcc_mw=None, status="ok", reason=None):
+def _row(*, nameplate, baseline, elcc_mw=None, status="ok", reason=None,
+         period=None):
     """The row shape, in one place so every exit builds the same nine keys
-    (spec §3's eight, plus ``reason`` — spec §5 renders it for status rows)."""
+    (spec §3's eight, plus ``reason`` — spec §5 renders it for status rows).
+    With ``period`` the baseline LOLE is that period's; the interval stays
+    the horizon's (the per-period split carries no interval of its own)."""
     share = None
     if elcc_mw is not None and nameplate > 0:
         share = float(elcc_mw) / float(nameplate)
@@ -227,16 +232,83 @@ def _row(*, nameplate, baseline, elcc_mw=None, status="ok", reason=None):
         "elcc_share": share,
         "status": status,
         "reason": reason,
-        "baseline_lole_h": float(baseline["lole_hours"]),
+        "baseline_lole_h": _lole_of(baseline, period),
         "baseline_lole_ci": tuple(float(v) for v in baseline["lole_ci"]),
     }
+
+
+def baseline_key(inputs, *, draws, seed, cov_target, max_draws, batch,
+                 sim_kwargs=None) -> str:
+    """
+    sha256 over EVERYTHING the baseline evaluation depends on (Phase 12c,
+    plan v3.1 A7): every unit (name, capacity, q, MTTR, profile bytes), every
+    store, the residual and weight bytes, the period blocks, and the sampling
+    parameters plus the simulation kwargs. A baseline injected into
+    ``elcc_of_removal`` must carry the key its callee recomputes, or the
+    replay that CRN rests on could silently run against a different sample
+    set — the v2 review's MINOR 10, closed by construction rather than by
+    trust. Content, never ``id()``.
+    """
+    h = hashlib.sha256()
+    for u in inputs.units:
+        prof = getattr(u, "profile", None)
+        h.update(f"{u.name}\x1f{float(u.capacity_mw)!r}\x1f{float(u.q)!r}\x1f"
+                 f"{float(u.mttr_hours)!r}\x1e".encode())
+        h.update(b"" if prof is None else np.asarray(prof, dtype=np.float64).tobytes())
+        h.update(b"\x1e")
+    h.update(b"\x1d")
+    for st in inputs.storage:
+        h.update(f"{st.name}\x1f{float(st.p_nom_mw)!r}\x1f{float(st.e_nom_mwh)!r}\x1f"
+                 f"{float(st.eff_store)!r}\x1f{float(st.eff_dispatch)!r}\x1e".encode())
+    h.update(b"\x1d")
+    h.update(np.ascontiguousarray(inputs.residual, dtype=np.float64).tobytes())
+    h.update(np.ascontiguousarray(inputs.weights, dtype=np.float64).tobytes())
+    h.update(repr(tuple(inputs.periods)).encode())
+    h.update(f"\x1d{int(draws)}\x1f{seed!r}\x1f{float(cov_target)!r}\x1f"
+             f"{int(max_draws)}\x1f{int(batch)}".encode())
+    for k in sorted(sim_kwargs or {}):
+        v = (sim_kwargs or {})[k]
+        v = sorted(v) if isinstance(v, (set, frozenset)) else v
+        h.update(f"\x1f{k}={v!r}".encode())
+    return h.hexdigest()
+
+
+# `elcc_of_removal` takes a kwarg named `baseline_key`, which would shadow
+# the function inside its body; the body uses this alias.
+baseline_key_for = baseline_key
+
+
+def _period_slice(inputs, period):
+    """``(start, end)`` of the period block labelled ``period`` in
+    ``inputs.periods``; ``KeyError`` when there is no such block."""
+    for label, start, end in inputs.periods:
+        if label == period or str(label) == str(period):
+            return int(start), int(end)
+    raise KeyError(f"no period {period!r} in the snapshot "
+                   f"(periods: {[b[0] for b in inputs.periods]})")
+
+
+def _lole_of(metrics: dict, period) -> float:
+    """The LOLE the predicate compares: the horizon's, or one period's
+    (Phase 12c §3.2 — the margin is enforced per period, and a horizon-wide
+    credit beside a per-period proxy is the Phase-4 mistake)."""
+    if period is None:
+        return float(metrics["lole_hours"])
+    by = metrics.get("by_period") or {}
+    if period in by:
+        return float(by[period]["lole_hours"])
+    for k, v in by.items():
+        if str(k) == str(period):
+            return float(v["lole_hours"])
+    raise KeyError(f"no period {period!r} in the MC payload ({list(by)})")
 
 
 def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
                     exclude=frozenset(), exclude_storage=frozenset(),
                     tol_mw=None, cov_target: float = 0.05,
                     max_draws: int = MAX_DRAWS, batch: int = 250,
-                    **sim_kwargs) -> dict:
+                    period=None, baseline=None, baseline_key=None,
+                    _zero_probe=None, **sim_kwargs) -> dict:
     """
     The credit of an arbitrary REMOVAL, expressed as firm MW (spec §3).
 
@@ -267,6 +339,20 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
     candidate — an ELCC run at a different initial SoC than its own baseline
     would price the free initial cycle rather than the asset (plan review
     finding 5).
+
+    **Phase 12c.** ``period``: compare the predicate on ONE period's LOLE
+    (``by_period[period]``) with that period's resolution floor — the
+    margin is enforced per period; a firm block in every hour cannot raise
+    any period's LOLE, the periods are chronologically independent (states
+    and SoC restart at the boundary), and CRN holds per period, so
+    ``LOLE_P(Δ)`` is the same monotone step function the horizon predicate
+    rests on. ``baseline`` / ``baseline_key``: a caller that already ran the
+    identical ``mc_adequacy`` (the ``/mc`` worker, whose headline metrics
+    ARE this baseline) passes it in with ``baseline_key(...)``; the key is
+    recomputed here and a mismatch raises, so the CRN replay can never run
+    against a baseline from another sample set. ``_zero_probe``: the
+    Δ = 0 evaluation, shareable across periods since one call returns every
+    period's LOLE.
     """
     nameplate = float(nameplate_mw)
     if not math.isfinite(nameplate) or nameplate < 0.0:
@@ -276,12 +362,29 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
         raise ValueError(f"tol_mw {tol_mw!r} must be a positive MW tolerance")
 
     # ── the baseline: the ONLY evaluation allowed to adapt (spec §3 [v1.1]) ──
-    baseline = mc_adequacy(inputs, draws=draws, seed=seed,
-                           cov_target=cov_target, max_draws=max_draws,
-                           batch=batch, **sim_kwargs)
-    lole_base = float(baseline["lole_hours"])
+    if baseline is not None:
+        expected = baseline_key_for(inputs, draws=draws, seed=seed,
+                                    cov_target=cov_target, max_draws=max_draws,
+                                    batch=batch, sim_kwargs=sim_kwargs)
+        if baseline_key != expected:
+            raise ValueError(
+                "elcc_of_removal: the injected baseline's key does not match "
+                "this evaluation's inputs and sampling parameters — a "
+                "baseline from another sample set would break the CRN replay")
+    else:
+        baseline = mc_adequacy(inputs, draws=draws, seed=seed,
+                               cov_target=cov_target, max_draws=max_draws,
+                               batch=batch, **sim_kwargs)
+    lole_base = _lole_of(baseline, period)
     n_fixed = int(baseline["n_samples"])
     floor = baseline["resolution_floor_h"]
+    if period is not None:
+        # The period's own floor: its smallest positive weight over the
+        # sample count — `resolution_floor_h`'s definition, restricted.
+        start, end = _period_slice(inputs, period)
+        w = np.asarray(inputs.weights, dtype=np.float64)[start:end]
+        w_pos = w[w > 0]
+        floor = (float(w_pos.min()) / n_fixed) if (w_pos.size and n_fixed) else None
 
     # ── honest refusal 1: nothing to hold constant (spec §3) ────────────────
     # Compared against the RESOLUTION FLOOR, not against zero. A baseline of
@@ -294,6 +397,7 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
         shown = "unknown" if floor is None else f"{refuse_at:.4g} h"
         return _row(
             nameplate=nameplate, baseline=baseline, status="unidentifiable",
+            period=period,
             reason=(f"baseline LOLE {lole_base:.4g} h is at or below the "
                     f"resolution floor ({shown}) at {n_fixed} draws — no "
                     "shortfall to hold constant, so no credit is "
@@ -302,7 +406,7 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
 
     reduced_inputs = inputs if reduced is None else reduced
 
-    def lole_at(delta_mw: float) -> float:
+    def metrics_at(delta_mw: float) -> dict:
         """One candidate evaluation, PINNED to the baseline's sample set.
 
         ``cov_target=_NEVER_CONVERGE`` + ``max_draws=n_fixed`` replays the
@@ -311,25 +415,31 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
         ``seed`` is the caller's, unmodified, on every single call — that is
         the CRN contract in one line.
         """
-        out = mc_adequacy(reduced_inputs, draws=draws, seed=seed,
-                          cov_target=_NEVER_CONVERGE, max_draws=n_fixed,
-                          batch=batch, exclude=exclude,
-                          exclude_storage=exclude_storage,
-                          extra_firm_mw=float(delta_mw), **sim_kwargs)
-        return float(out["lole_hours"])
+        return mc_adequacy(reduced_inputs, draws=draws, seed=seed,
+                           cov_target=_NEVER_CONVERGE, max_draws=n_fixed,
+                           batch=batch, exclude=exclude,
+                           exclude_storage=exclude_storage,
+                           extra_firm_mw=float(delta_mw), **sim_kwargs)
+
+    def lole_at(delta_mw: float) -> float:
+        return _lole_of(metrics_at(delta_mw), period)
 
     # ── Δ = 0: does the asset carry any LOLE credit at all? ─────────────────
     # Probed explicitly so a worthless asset reads exactly 0.0 rather than the
     # half-tolerance crumb a bare bisection would return. (Under CRN
     # LOLE_reduced(0) ≥ LOLE_baseline always — removing capacity cannot help —
-    # so this is an equality test in all but name.)
-    if lole_at(0.0) <= lole_base:
-        return _row(nameplate=nameplate, baseline=baseline, elcc_mw=0.0)
+    # so this is an equality test in all but name.) Shareable across periods
+    # through `_zero_probe`: one Δ = 0 call carries every period's LOLE.
+    zero = _zero_probe if _zero_probe is not None else metrics_at(0.0)
+    if _lole_of(zero, period) <= lole_base:
+        return _row(nameplate=nameplate, baseline=baseline, elcc_mw=0.0,
+                    period=period)
 
     # ── the bracket [0, nameplate]; NEVER extrapolate past it (spec §3) ─────
     if lole_at(nameplate) > lole_base:
         return _row(
             nameplate=nameplate, baseline=baseline, status="not_bracketed",
+            period=period,
             reason=(f"a firm block of {nameplate:.4g} MW — the asset's full "
                     "nameplate — does not restore the baseline LOLE of "
                     f"{lole_base:.4g} h; v1 rejects exceedance rather than "
@@ -352,7 +462,7 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
     if steps >= _MAX_BISECTION_STEPS:                       # pragma: no cover
         logger.warning("adequacy ELCC: bisection hit its step guard at "
                        "tol %.4g MW on a %.4g MW bracket", tol, nameplate)
-    return _row(nameplate=nameplate, baseline=baseline, elcc_mw=hi)
+    return _row(nameplate=nameplate, baseline=baseline, elcc_mw=hi, period=period)
 
 
 def _resolve(inputs, kind: str, name: str):

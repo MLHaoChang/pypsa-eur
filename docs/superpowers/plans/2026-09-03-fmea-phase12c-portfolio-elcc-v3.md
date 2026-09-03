@@ -601,3 +601,42 @@ reported the mismatch and both were re-applied from their patch. Restores
 are by saved copy and hash — the unit-bite rule — for live bites too.
 
 Gates after the fixes recorded in the commit message.
+
+---
+
+## 12c SHIPPED — the portfolio ELCC, per period (2026-09-03)
+
+Built per v3.1 A3–A9 on top of 12c-0. `elcc.py`: `period=`, `baseline=` /
+`baseline_key=` (content hash incl. profile bytes and sim kwargs), a
+shared Δ = 0 probe, `_row(period=)`. `portfolio.py` (new):
+`portfolio_population`, `network_fingerprint`, `member_contributions`,
+`elcc_of_portfolio`, `portfolio_block` with the six block statuses and the
+`no_contribution` period status. `report.py`: the margin payload carries
+`fingerprint`. `/mc`: `elcc_portfolio` flag; the population, fingerprint
+and margin payload captured in the request; the worker prices every
+marginal row and the portfolio against the headline metrics as the
+injected baseline. Frontend: the toggle, the block (three MW figures, no
+ratio), four panel cases.
+
+**Tests** (`tests/test_adequacy_portfolio.py`, 13): B1 (2035 exactly at
+its 100 MW cap, 2030 at the 130 MW edge, both hand-derived on the 30 MW
+fleet grid; B3 as an anchor inside it), B2, B4 (mixed kinds bit-identical
+to all-vre at q = 0), B5 (`no_population` without a bisection;
+`no_contribution`), B6 (the real vintage shape: parent aggregate 70 = 70),
+B7 (injected baseline bit-identical; a wrong key raises; the key covers sim
+kwargs), B8, B9, B10, B11 (two must-takes the filter keeps out), B12
+(`build_year = 2035` → `activity_mismatch`), B13 (`stale_report` after a
+`p_max_pu` edit), margin-less solve → `margin_unavailable`.
+
+**Bites** (restores by hash): engine 7/7 (B11's first attempt did not
+bite — the M1 fixture's only must-take already had a varying column, so
+"admit any must-take with a column" changed nothing; two must-takes the
+filter must exclude were added and it bit), payload/route 6/6, frontend
+3/3 (F2's first attempt did not bite — the "—" regex was satisfied by the
+em dash in the verdict's reason separator; the test now targets the credit
+cell by id). Live: S26 on 12a's two-farm fixture under a margin — the
+block `ok`, the population both farms, `credit_gross_mw` equal to the
+served payload rows — and bitten live by dropping the generator half of
+the population (restored by saved copy and hash, never `git checkout`).
+
+Gates recorded in the commit message.

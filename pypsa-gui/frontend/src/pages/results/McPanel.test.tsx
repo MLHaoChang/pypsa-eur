@@ -19,6 +19,7 @@ import {
 } from './McPanel'
 import type {
   McMetrics, McStatus, ElccRow, ElccCandidatesPayload,
+  ElccPortfolioBlock,
 } from '../../api/simulation'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -87,6 +88,39 @@ const DONE: McStatus = {
     metrics: METRICS, elcc: ELCC, warning: MC_WARNING_V1,
   },
   error: null, started_at: 1, finished_at: 2,
+}
+
+/** Phase 12c: the portfolio block, verbatim key names (services/adequacy/
+ *  portfolio.py portfolio_block). Two periods: one priced, one a no-op. */
+const PORTFOLIO_OK: ElccPortfolioBlock = {
+  status: 'ok', reason: null,
+  population: {
+    members: [
+      { kind: 'vre', name: 'Wind-North', capacity_mw: 250 },
+      { kind: 'generator', name: 'Hydro-1', capacity_mw: 60 },
+    ],
+    unbuilt: ['Solar-Unbuilt'], n_vre: 1, n_generator: 1,
+  },
+  margin_available: true,
+  periods: [
+    { period: '2030', nameplate_mw: 280, elcc_mw: 130.25, elcc_share: 0.4652,
+      status: 'ok', reason: null, baseline_lole_h: 4.5, baseline_lole_ci: [4.1, 4.9],
+      credit_gross_mw: 171.5, credit_net_mw: 88.25 },
+    { period: '2035', nameplate_mw: 0, elcc_mw: null, elcc_share: null,
+      status: 'no_contribution',
+      reason: 'the group is available nowhere in this period',
+      baseline_lole_h: 2.0, baseline_lole_ci: [1.8, 2.2],
+      credit_gross_mw: 0, credit_net_mw: null },
+  ],
+  load_basis: 'lp',
+}
+const PORTFOLIO_REFUSED: ElccPortfolioBlock = {
+  ...PORTFOLIO_OK, status: 'activity_mismatch',
+  reason: 'the margin and the engines disagree about who is present: wind has no margin row in 2030',
+  periods: [],
+}
+function withPortfolio(block: ElccPortfolioBlock): McStatus {
+  return { ...DONE, result: { ...DONE.result!, elcc_portfolio: block } }
 }
 
 const ADEQUACY = {
@@ -558,5 +592,64 @@ describe('McPanel ELCC picker', () => {
     const body = vi.mocked(resultsApi.startMc).mock.calls[0][0] as Record<string, unknown>
     expect(Object.prototype.hasOwnProperty.call(body, 'elcc_assets')).toBe(false)
     expect(body).toEqual({ draws: 500 })
+  })
+})
+
+
+// ── Phase 12c: the portfolio block ──────────────────────────────────────────
+
+describe('McPanel portfolio credit', () => {
+  // ★ Bite: send `elcc_portfolio: false` (or the key) on an untouched run —
+  // the existing "sends the typed draw count" test pins the bare body.
+  it('sends elcc_portfolio only when the toggle is ticked', async () => {
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('elcc-portfolio-toggle'))
+    await user.click(screen.getByRole('button', { name: /run study/i }))
+    await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalledWith(
+      expect.objectContaining({ elcc_portfolio: true })))
+  })
+
+  // ★ Bite: render a ratio, or drop the null credit to a blank cell.
+  it('renders one row per period with three MW figures and no ratio', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(withPortfolio(PORTFOLIO_OK))
+    await openPanel()
+    const table = await screen.findByTestId('elcc-portfolio-table')
+    expect(table).toBeTruthy()
+    const row = screen.getByTestId('elcc-portfolio-row-2030').textContent ?? ''
+    expect(row).toMatch(/280 MW/)
+    expect(row).toMatch(/130\.25 MW/)
+    expect(row).toMatch(/171\.5 MW/)
+    expect(row).toMatch(/88\.25 MW/)
+    expect(row).not.toMatch(/ratio|corrected|true credit/i)
+    const noop = screen.getByTestId('elcc-portfolio-row-2035').textContent ?? ''
+    expect(noop).toMatch(/no contribution/)
+    expect(noop).toMatch(/available nowhere/)
+    // the null net credit is an em dash IN ITS CELL — the reason separator
+    // in the verdict cell also carries one, which is why the cell is targeted
+    expect(screen.getByTestId('elcc-portfolio-net-2035').textContent).toBe('—')
+    expect(screen.getByTestId('elcc-portfolio-gross-2035').textContent).toBe('0 MW')
+    const pop = screen.getByTestId('elcc-portfolio-population').textContent ?? ''
+    expect(pop).toMatch(/2 members: Wind-North, Hydro-1/)
+    expect(pop).toMatch(/unbuilt, not priced: Solar-Unbuilt/)
+    expect(screen.queryByTestId('elcc-portfolio-status')).toBeNull()
+    expect(screen.getByTestId('elcc-portfolio-standards').textContent).toMatch(
+      /Two standards, neither a correction of the other/)
+  })
+
+  // ★ Bite: render a refusal as an empty block.
+  it('renders a refusal with the engine\'s reason and no table', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(withPortfolio(PORTFOLIO_REFUSED))
+    await openPanel()
+    const status = await screen.findByTestId('elcc-portfolio-status')
+    expect(status.textContent).toMatch(/disagree about who is present/)
+    expect(status.textContent).toMatch(/wind has no margin row in 2030/)
+    expect(screen.queryByTestId('elcc-portfolio-table')).toBeNull()
+  })
+
+  it('renders nothing for a study that did not ask for the portfolio', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(DONE)
+    await openPanel()
+    await screen.findByTestId('elcc-table')
+    expect(screen.queryByTestId('elcc-portfolio')).toBeNull()
   })
 })

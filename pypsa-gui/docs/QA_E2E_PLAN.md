@@ -500,6 +500,21 @@ S25.1 fails on the 2035 value (2.4 against 19.5 on the first single-unit
 fixture, whose solve was infeasible under the margin; the two-unit fixture
 above replaced it).
 
+### S26 — Portfolio ELCC beside the reserve margin, live (area 26)
+| id | Assertion |
+|----|-----------|
+| S26.1 | On 12a's two-farm fixture (90 MW gas at q = 0.10, two 100 MW farms on the profile 0.05/0.15/0.35/0.45, one with outage data) solved under a 10 % margin (met by the fixed fleet: 81 MW firm gas + 47.5 MW of profile credit against 110 MW required), `POST /results/mc` with `elcc_portfolio: true` returns a block with `status = "ok"`, a population of exactly the two farms — one `vre`, one `generator`, both profile-bearing after 12c-pre — and a `credit_gross_mw` equal to the served `/results/reserve_margin` rows for those farms summed as derate × built capacity, recomputed in the suite |
+| S26.2 | The period row prices the group at its hand value: with the gas unit up the system is short only while the farms deliver under 10 MW, so the group's last-in credit is its minimum hourly contribution, **10 MW** exactly (0.05 × 200; the predicate's step edge, within the 0.5 MW tolerance) against a group peak of 90 MW — and the portfolio is a **sibling** of `elcc`: the `elcc` list carries only the requested marginal row |
+
+**A corrected fixture.** The first fixture used a 200 MW gas unit, under which the
+farms carry no loss-of-load credit at all (the system is fine whenever the unit
+is up and short regardless when it is down), and the engine correctly answered
+`ok 0.0`; the check that asserted a positive credit was wrong, not the engine.
+
+**Bitten live** (recorded in the plan): with the population's generator half
+dropped, the outage-bearing farm stays in the sampled fleet and the credit is
+the must-take farm's alone.
+
 **A harness lapse, recorded.** The live bite's restore used `git checkout`
 on the router, which reverted the file to its last COMMIT and silently
 discarded two uncommitted review fixes in it; the hash check caught the

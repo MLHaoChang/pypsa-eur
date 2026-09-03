@@ -223,6 +223,47 @@ export interface McResult {
   /** Phase 12c-pre: units whose outages were sampled ON their availability
    *  series rather than at nameplate. Absent on pre-phase payloads. */
   profile_units?: string[]
+  /** Phase 12c: the profile-bearing fleet priced as ONE portfolio, per
+   *  period, beside the reserve margin's own credit for the same group. A
+   *  SIBLING of `elcc`, never a row in it; `null` when not requested. */
+  elcc_portfolio?: ElccPortfolioBlock | null
+}
+
+export type ElccPortfolioStatus =
+  | 'ok' | 'no_population' | 'activity_mismatch' | 'capacity_basis_mismatch'
+  | 'stale_report' | 'margin_unavailable'
+export type ElccPortfolioPeriodStatus =
+  | 'ok' | 'unidentifiable' | 'not_bracketed' | 'no_contribution'
+
+export interface ElccPortfolioPeriod {
+  period: string
+  nameplate_mw: number
+  elcc_mw: number | null
+  elcc_share: number | null
+  status: ElccPortfolioPeriodStatus
+  reason: string | null
+  baseline_lole_h: number
+  baseline_lole_ci: [number, number]
+  /** The margin's own credit for the group in this period: Σ derate × built
+   *  capacity over its payload rows; null when no margin was set. */
+  credit_gross_mw: number | null
+  /** The same on the net-load window; null unless that window is `ok`. */
+  credit_net_mw: number | null
+}
+
+export interface ElccPortfolioBlock {
+  status: ElccPortfolioStatus
+  /** null iff status === "ok"; a refusal names what it saw. */
+  reason: string | null
+  population: {
+    members: Array<{ kind: string; name: string; capacity_mw: number }>
+    unbuilt: string[]
+    n_vre: number
+    n_generator: number
+  }
+  margin_available: boolean
+  periods: ElccPortfolioPeriod[]
+  load_basis: string
 }
 
 export interface McStatus {
@@ -234,6 +275,8 @@ export interface McStatus {
 }
 
 export interface McRequestBody {
+  /** Phase 12c: price the profile-bearing fleet as one portfolio, per period. */
+  elcc_portfolio?: boolean
   draws?: number
   seed?: number
   cov_target?: number
