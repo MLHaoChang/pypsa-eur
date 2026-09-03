@@ -349,3 +349,17 @@ is not a passing test — it is an untested one.
    credited zero to every vintage-expanded asset (the restore dropped the
    rows before `_built` ran); and a run that failed between the wrapper and
    the report step leaked its stash — both standards' — into the next solve.
+
+### v1.4 — the facts read the LP's demand basis from every caller (Phase 12c-0)
+
+`reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
+demand_scaled_in_place=False)`. §2.5's demand series is built from
+`services.adequacy.demand.demand_frame_for`: from a route (preflight §3,
+the margin loop's probes, any post-solve reader) the frame is
+`loads_t.p_set` with the solver config's load scalers applied through the
+shared resolution; inside the solve wrapper the transforms are already in
+place and the wrapper says so with the switch. Consequence: the preflight's
+reachability check (§3) and the margin loop's probe now see the same peaks
+the constraint enforces on a scaled project; before this amendment they
+read the raw series (v3 review of the 12c plan, verified). A static
+`loads.p_set` is untouched everywhere, as the LP leaves it.

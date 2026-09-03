@@ -362,6 +362,14 @@ abort routes. Full PyPSA-Eur (10³–10⁴ units) is seconds-to-minutes for the 
 alone, and **multi-area** COPTs with transfer limits are exponential in the number of
 areas — the actual reason PRAS exists.
 
+**Amendment (Phase 12c-0) — one demand basis.** Every engine on this page
+evaluates the demand the LP was built against: `services/adequacy/demand.py`
+owns the load-scaler resolution the LP applies, and `fleet_and_residual`,
+`snapshot_inputs` and the route-side `reserve_margin_facts` read it. Until
+then the COPT, the MC, ELCC and both certifying loops evaluated the raw
+series on scaled projects — the fifteenth finding, recorded in the 12c v3
+plan and its review.
+
 **Amendment (Phase 12c-pre) — profiled occurrence units.** A generator that carries
 BOTH an availability series (`p_max_pu` column, not identically 1) and resolvable
 outage data enters the sampled fleet with the series attached (`CoptUnit.profile`).

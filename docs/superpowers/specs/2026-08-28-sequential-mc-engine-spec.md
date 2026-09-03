@@ -353,3 +353,45 @@ hour), A6′ (the margin's derate is the window mean of the same expectation),
 A7 (continuity at the constant-series boundary, level 0.5), A8 (nameplate),
 A12 (vectorised survival/shortfall equal the scalar pair), A13 (the 256-state
 mixture on a 300-unit table under 1 s), M2, the cap and the route.
+
+## Amendment v1.5 — one demand basis (Phase 12c-0; the fifteenth finding)
+
+`load_scalers` / `load_scalers_by_carrier` are applied to `loads_t.p_set`
+in place inside `_apply_modelling_assumptions` and reverted after the LP.
+Until this amendment `snapshot_inputs` read the restored frame, so the MC
+study, every ELCC row and BOTH certifying loops evaluated the raw demand
+while the LP, the ENS cap and the reserve-margin constraint were built on
+the scaled one (measured: route-side peak 179.93 in both periods against a
+stashed 224.92 under a 2035 factor of 1.25; the post-solve snapshot equal
+to the pre-solve raw residual).
+
+**§2.1, amended.** `snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False,
+cfg=None, demand_scaled_in_place=False)`. The residual is built on the LP's
+demand basis through `services/adequacy/demand.py` — the ONE factor
+resolution, which `_apply_modelling_assumptions` itself now calls: gated on
+`cfg.multi_investment_periods`, a MultiIndex and a non-empty `loads_t.p_set`;
+series columns only (a static `loads.p_set` is never scaled by the LP and
+never scaled here); per-carrier, then legacy global, then identity;
+non-finite factors are identity. `cfg=None` reads the raw frame, which IS the
+LP's basis whenever no scaler is configured — pinned bit-identical
+(regression anchor D1). `demand_scaled_in_place=True` is the solve wrapper's
+switch: the transforms are already applied, and applying them twice is
+×1.25² (measured), so the switch is explicit rather than inferred. Every
+route that snapshots passes the solver config; `/copt` takes the mutation
+lock like `/mc`, since a solve scales the frame in place for its duration.
+
+**§4, amended.** `GET /results/mc/elcc_candidates` and the loops' initial
+and per-iterate snapshots pass the config captured in the request (the
+worker never reads request-scoped state).
+
+**§6, amended.** `tests/test_adequacy_demand_basis.py`: D1 (anchor), D2 (a
+scaler moves the MC, the COPT and the margin peak in its period only),
+D3/D3b (the in-place path and the route path stash one demand; a real
+solve stashes it once and the loops' snapshot reads it), D4 (a static load
+is untouched on every surface), the gate and the finiteness rule equal
+the LP's, D5 (`/copt` waits for the lock).
+
+**Consequence, stated.** On a project with scalers the MC's LOLE and every
+ELCC row move after this amendment — upward, as demand grows — and a
+coupling- or margin-loop value certified before it was certified against
+the wrong demand; re-run the loop.

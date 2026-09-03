@@ -3290,7 +3290,8 @@ def post_mc(body: McRequest | None = None):
     with PyPSAService.get_lock():
         try:
             inputs = snapshot_inputs(
-                n, vre_assets=[nm for kind, nm in assets if kind == "vre"])
+                n, vre_assets=[nm for kind, nm in assets if kind == "vre"],
+                cfg=_state.get("solver_config"))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 
@@ -3417,7 +3418,7 @@ def get_mc_elcc_candidates():
 
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
-        assets = elcc_candidates(n)
+        assets = elcc_candidates(n, cfg=_state.get("solver_config"))
     return {"assets": assets, "max_assets": MAX_ELCC_ASSETS}
 
 
@@ -3697,7 +3698,9 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         try:
-            inputs = snapshot_inputs(n, keep_zero_capacity=True)
+            # Phase 12c-0: the LP's demand basis — the plan the loop
+            # certifies was built on it (the fifteenth finding).
+            inputs = snapshot_inputs(n, keep_zero_capacity=True, cfg=cfg)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         nyears = float(horizon_years(n))
@@ -3750,8 +3753,10 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
     # ── the bindings (spec §3) ────────────────────────────────────────────
 
     def _snapshot():
+        # `base_cfg` is captured in the request — the worker never reads
+        # `_state` — and the scalers do not change across iterates.
         with lock:
-            return snapshot_inputs(n, keep_zero_capacity=True)
+            return snapshot_inputs(n, keep_zero_capacity=True, cfg=base_cfg)
 
     def _hash(mc_inputs) -> str:
         """sha256 over exactly what the MC reads — the sorted
@@ -4330,7 +4335,9 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
     lock = PyPSAService.get_lock()
     with lock:
         try:
-            inputs = snapshot_inputs(n, keep_zero_capacity=True)
+            # Phase 12c-0: the LP's demand basis — the plan the loop
+            # certifies was built on it (the fifteenth finding).
+            inputs = snapshot_inputs(n, keep_zero_capacity=True, cfg=cfg)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         nyears = float(horizon_years(n))
@@ -4434,8 +4441,10 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
     # ── the bindings (§2.1) ───────────────────────────────────────────────
 
     def _snapshot():
+        # `base_cfg` is captured in the request — the worker never reads
+        # `_state` — and the scalers do not change across iterates.
         with lock:
-            return snapshot_inputs(n, keep_zero_capacity=True)
+            return snapshot_inputs(n, keep_zero_capacity=True, cfg=base_cfg)
 
     def _hash(mc_inputs) -> str:
         """sha256 over exactly what the MC reads — the sorted
@@ -5018,10 +5027,15 @@ def get_copt():
     )
 
     n = PyPSAService.get_network()
-    units, residual, w = fleet_and_residual(n)
+    cfg = _state.get("solver_config")
+    # Phase 12c-0: under the mutation lock, like /mc — a solve scales the
+    # load frame IN PLACE for its duration, and a bare read mid-solve saw a
+    # half-transformed network (v3 review, finding 8); and on the LP's
+    # demand basis.
+    with PyPSAService.get_lock():
+        units, residual, w = fleet_and_residual(n, cfg=cfg)
     if not units:
         return Response(status_code=204)
-    cfg = _state.get("solver_config")
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
     # Phase 12c-pre: split, net the remainder, table, mixture, attribution —
     # one call so this route and the engine tests see the same arithmetic.
@@ -5237,56 +5251,15 @@ def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = T
         df = getattr(getattr(n, "loads_t", None), "p_set", None)
     if df is None or df.empty:
         return None
-    load_scalers = getattr(cfg, "load_scalers", {}) if cfg is not None else {}
-    by_carrier = getattr(cfg, "load_scalers_by_carrier", {}) if cfg is not None else {}
-    multi_periods = isinstance(df.index, _pd.MultiIndex)
-    has_any_scaling = bool(load_scalers) or bool(by_carrier)
-    if not already_scaled and multi_periods and has_any_scaling:
-        from services.solver_service import _canonical_load_carrier_key
-        df = df.copy(deep=True)
-        carrier_by_col: dict = {}
-        try:
-            loads_df = n.loads
-            if "carrier" in loads_df.columns:
-                for col in df.columns:
-                    carrier_by_col[col] = (
-                        _canonical_load_carrier_key(loads_df.at[col, "carrier"])
-                        if col in loads_df.index else "electrical"
-                    )
-            else:
-                for col in df.columns:
-                    carrier_by_col[col] = "electrical"
-        except Exception:
-            carrier_by_col = {col: "electrical" for col in df.columns}
-        period_level = df.index.get_level_values(0)
-        for period in sorted(set(period_level)):
-            mask = period_level == period
-            p_str = str(period)
-            for col in df.columns:
-                carrier_key = carrier_by_col.get(col, "electrical")
-                factor = None
-                car_block = by_carrier.get(carrier_key) if isinstance(by_carrier, dict) else None
-                if isinstance(car_block, dict):
-                    raw = car_block.get(p_str)
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if f == f:
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                if factor is None and load_scalers:
-                    raw = load_scalers.get(p_str)
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if f == f:
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                if factor is None or factor == 1.0:
-                    continue
-                df.loc[mask, col] = df.loc[mask, col] * factor
+    if not already_scaled:
+        # Phase 12c-0: the fallback is the LP's own resolution, from the one
+        # module that owns it — the previous inline copy diverged from the LP
+        # (no `multi_investment_periods` gate, `f == f` for `isfinite`, an
+        # `"electrical"` carrier fallback; v3 review, finding 7).
+        from services.adequacy.demand import lp_demand_frame
+        df = lp_demand_frame(n, cfg)
+        if df is None or df.empty:
+            return None
     return df
 
 

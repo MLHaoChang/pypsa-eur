@@ -502,3 +502,41 @@ sorted `sim_kwargs` items; mismatch raises.
 **A9 — where the payload is read (finding 9).** `post_mc` captures
 `_state.get("last_reserve_margin")` and the report hash in the request and
 closes over them; the worker never touches `_state`.
+
+---
+
+## 12c-0 SHIPPED — one demand basis (2026-09-03)
+
+Built per v3.1 A1/A2. `services/adequacy/demand.py` owns the resolution
+(`load_scale_factors`, `lp_demand_frame`, `demand_frame_for`);
+`_apply_modelling_assumptions` step 5 applies it in place;
+`lp_scaled_load_frame`'s fallback calls it (the router's inline copy, with
+its three divergences, is gone); `fleet_and_residual`, `snapshot_inputs`,
+`elcc_candidates` and `reserve_margin_facts` take `cfg` and the explicit
+`demand_scaled_in_place` switch; the solve wrapper passes the switch; `/mc`,
+`/mc/elcc_candidates`, `/copt` and both loops (initial snapshot and the
+worker's per-iterate re-snapshot, config captured in the request) pass the
+config; `/copt` takes the mutation lock.
+
+**Tests** (`tests/test_adequacy_demand_basis.py`, 10): D1 anchor (three
+hashes pinned on `52d4244`; the no-scaler path returns the frame itself),
+D2, D3, D3b (a real HiGHS solve: stash 1.25× once, `p_set` restored,
+the loops' snapshot on the same basis), D4, the gate (parametrised on
+`multi_investment_periods`), finiteness, per-carrier precedence, D5.
+
+**Bites** (restores by hash): D2 ×2, D3 (ignore the switch), D3b (wrapper
+drops the switch), D4, gate, D5 — **7/7 bit**. One first attempt did not
+bite and is recorded: biting the wrapper's call against D3 could not fail
+it, because D3 calls the facts directly and never passes through the
+wrapper; that exposed the wrapper's switch as unpinned, D3b was added to
+pin it through a real solve, and the D3 bite was moved to the switch
+itself.
+
+**Gates:** targeted regression (routes, loops, reserve margin, results
+range, golden coverage) 296 passed; live S15–S24 and the full tree recorded
+in the commit message. No live suite for the basis itself, and the QA plan
+says why (a per-period load series cannot be set over the API).
+
+**Recorded, not fixed here:** the engines' activity blindness (v3 review
+finding 2) and `solved_capacity`'s vintage blindness stay on the backlog;
+12c refuses on both rather than comparing across them.

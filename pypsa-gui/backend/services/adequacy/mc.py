@@ -172,7 +172,8 @@ def _period_blocks(snapshots) -> tuple:
     return tuple(blocks)
 
 
-def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False) -> MCInputs:
+def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
+                    demand_scaled_in_place: bool = False) -> MCInputs:
     """
     Freeze a network into MCInputs. Call this ONCE under the PyPSAService lock;
     everything downstream is lock-free (spec §1).
@@ -201,8 +202,11 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False) -> MCInputs:
     from services.adequacy.metrics import electrical_columns, horizon_years
     from services.adequacy.slack import is_slack_carrier, is_slack_name
 
+    # Phase 12c-0: the LP's demand basis, threaded to the one place demand
+    # is built (the fifteenth finding).
     units, residual, weights = fleet_and_residual(
-        n, keep_zero_capacity=keep_zero_capacity)
+        n, keep_zero_capacity=keep_zero_capacity, cfg=cfg,
+        demand_scaled_in_place=demand_scaled_in_place)
     snapshots = n.snapshots
 
     # np.ascontiguousarray on .to_numpy(copy=True): no view onto a pandas block

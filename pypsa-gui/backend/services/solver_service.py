@@ -3240,7 +3240,8 @@ def _prm_margin(cfg) -> float | None:
     return margin
 
 
-def reserve_margin_facts(n, cfg, snapshots=None, emit=None) -> dict | None:
+def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
+                         demand_scaled_in_place: bool = False) -> dict | None:
     """
     Everything the firm-capacity standard knows BEFORE an LP exists (§2, §3).
 
@@ -3327,7 +3328,13 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None) -> dict | None:
         if str(loads.at[l, "bus"]) in elec_buses
     ]
     demand = pd.Series(0.0, index=snapshots)
-    p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+    # Phase 12c-0: the LP's demand basis. From a route (preflight, the
+    # margin loop, the payload comparison) the frame is scaled through the
+    # shared helper; inside the solve wrapper it is already scaled in place
+    # and the caller says so.
+    from services.adequacy.demand import demand_frame_for
+    p_set_t = demand_frame_for(
+        n, cfg, demand_scaled_in_place=demand_scaled_in_place)
     for l in elec_loads:
         if p_set_t is not None and l in getattr(p_set_t, "columns", []):
             demand = demand.add(
@@ -3690,7 +3697,12 @@ def _wrap_with_reserve_margin(network: "pypsa.Network", user_fn, cfg, log_queue=
         # nothing about the LP — the same function §3's preflight calls, so
         # the standard it blocks on and the standard this installs cannot
         # drift apart. All this loop adds is the LP terms.
-        facts = reserve_margin_facts(n, cfg, snapshots, emit=_emit)
+        # Phase 12c-0: inside the wrapper the load transforms are already
+        # applied IN PLACE, so the facts read the frame as it stands; the
+        # explicit switch is what keeps the LP-basis helper from scaling a
+        # scaled frame twice (v3 review, finding 6).
+        facts = reserve_margin_facts(n, cfg, snapshots, emit=_emit,
+                                     demand_scaled_in_place=True)
         if facts is None:
             return
         stash = facts["stash"]
@@ -5310,64 +5322,23 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     #      3. 1.0 — identity
     #    Multi-period only; ignored for flat networks. The whole p_set frame
     #    is snapshotted and restored wholesale.
-    by_carrier_cfg = getattr(cfg, "load_scalers_by_carrier", {}) or {}
-    if (
-        cfg.multi_investment_periods
-        and (cfg.load_scalers or by_carrier_cfg)
-        and isinstance(n.snapshots, pd.MultiIndex)
-        and not n.loads_t.p_set.empty
-    ):
+    # Phase 12c-0: the resolution lives in services/adequacy/demand.py and is
+    # SHARED with every adequacy engine and the Results/Compare tabs, so the
+    # demand the LP is built on and the demand the engines evaluate cannot
+    # drift (the fifteenth finding). The gate and the per-(period, carrier,
+    # column) rule are that module's, applied here in place with the same
+    # snapshot-and-restore as before.
+    from services.adequacy.demand import load_scale_factors
+    _factors = load_scale_factors(n, cfg)
+    if _factors:
         p_set = n.loads_t.p_set
         period_level = p_set.index.get_level_values(0)
-        # Build a per-column carrier-key map up front. We canonicalise to
-        # the same alias set the frontend uses (see loadCarrierKey in
-        # Dispatch.tsx) so 'AC' / 'electricity' / '' all map to 'electrical'.
-        carrier_by_col: dict[str, str] = {}
-        if "carrier" in n.loads.columns:
-            for col in p_set.columns:
-                if col in n.loads.index:
-                    carrier_by_col[col] = _canonical_load_carrier_key(n.loads.at[col, "carrier"])
-                else:
-                    carrier_by_col[col] = "unspecified"
-        else:
-            for col in p_set.columns:
-                carrier_by_col[col] = "unspecified"
-
         applied: list[str] = []
-        original_p_set = None
-        for period in sorted(set(period_level)):
+        original_p_set = p_set.copy(deep=True)
+        for period, col, carrier_key, factor in _factors:
             mask = period_level == period
-            for col in p_set.columns:
-                carrier_key = carrier_by_col.get(col, "unspecified")
-                factor: float | None = None
-                # 1) per-carrier per-period
-                car_block = by_carrier_cfg.get(carrier_key)
-                if isinstance(car_block, dict):
-                    raw = car_block.get(str(period))
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if math.isfinite(f):
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                # 2) legacy global (applied to ALL carriers if no per-carrier override)
-                if factor is None and cfg.load_scalers:
-                    raw = cfg.load_scalers.get(str(period))
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if math.isfinite(f):
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                # 3) identity
-                if factor is None or factor == 1.0:
-                    continue
-                if original_p_set is None:
-                    original_p_set = p_set.copy(deep=True)
-                p_set.loc[mask, col] = p_set.loc[mask, col] * factor
-                applied.append(f"{period}/{carrier_key}/{col}×{factor:g}")
+            p_set.loc[mask, col] = p_set.loc[mask, col] * factor
+            applied.append(f"{period}/{carrier_key}/{col}×{factor:g}")
         if original_p_set is not None:
             def _restore_p_set(orig=original_p_set):
                 n.loads_t["p_set"] = orig

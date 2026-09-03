@@ -481,6 +481,18 @@ units (the netted remainder) needs nine hand-entered outage rates on nine
 profiled farms; the split, the netting and the per-row `note` are pinned by
 unit tests on a 4-unit fleet with the cap overridden to 2.
 
+### Phase 12c-0 — one demand basis (no live suite, and why)
+
+The fifteenth finding — engines evaluating raw demand on projects with load
+scalers — is closed by `services/adequacy/demand.py` and pinned by
+`tests/test_adequacy_demand_basis.py` (D1–D5, a real solve included). It has
+**no honest live reproduction**: scaling applies to `loads_t.p_set`
+*columns* on a multi-period network, and `PUT /api/network/timeseries/…`
+builds a plain `DatetimeIndex` (recorded under S21/S22), so a per-period
+load series cannot be set over the API; a static load is — correctly —
+never scaled. Rather than ship a live check that could only pass, the plan
+says it is unit-covered only, as it did for the stash leak.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

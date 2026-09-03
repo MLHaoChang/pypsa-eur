@@ -516,7 +516,8 @@ def netted_expectation(netted, H: int) -> np.ndarray:  # noqa: N803
     return out
 
 
-def fleet_and_residual(n, *, keep_zero_capacity: bool = False
+def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
+                       demand_scaled_in_place: bool = False,
                        ) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
     """
     Apply the membership rule to a network: returns (COPT units, residual
@@ -532,6 +533,12 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False
     positional CRN substreams stay stable across networks that differ only in
     what the LP built. It is the coupling loop's flag — the COPT table, the MC
     study endpoint and ELCC all take the default.
+
+    ``cfg`` / ``demand_scaled_in_place`` (Phase 12c-0): the demand is read on
+    the LP's basis — ``loads_t.p_set`` with the solver config's load scalers
+    applied through ``services.adequacy.demand`` — unless the caller says the
+    transforms are already in place. ``cfg=None`` reads the raw frame, which
+    is the LP's basis whenever no scaler is configured.
     """
     from services import period_utils as _period_utils
     from services.adequacy.metrics import electrical_columns
@@ -571,7 +578,9 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False
 
     demand = pd.Series(0.0, index=snapshots)
     if loads is not None and not loads.empty and "bus" in loads.columns:
-        p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+        from services.adequacy.demand import demand_frame_for
+        p_set_t = demand_frame_for(
+            n, cfg, demand_scaled_in_place=demand_scaled_in_place)
         for l in loads.index:
             if str(loads.at[l, "bus"]) not in elec_buses:
                 continue

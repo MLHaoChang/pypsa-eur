@@ -123,7 +123,7 @@ def unit_nameplate_mw(u) -> float:
     return nameplate if math.isfinite(nameplate) else 0.0
 
 
-def elcc_candidates(n) -> list[dict]:
+def elcc_candidates(n, cfg=None) -> list[dict]:
     """
     Every asset in ``n`` whose capacity credit this module can price, as
     ``[{kind, name, nameplate_mw}, …]`` sorted by nameplate DESCENDING with
@@ -163,7 +163,7 @@ def elcc_candidates(n) -> list[dict]:
     from services.adequacy.mc import snapshot_inputs
 
     must_take = must_take_generators(n)
-    inputs = snapshot_inputs(n, vre_assets=must_take)
+    inputs = snapshot_inputs(n, vre_assets=must_take, cfg=cfg)
 
     # Phase 12c-pre: a profiled unit's nameplate for the bracket is its
     # best hour, max_h(a_{i,h}) — the firm block then dominates the unit
