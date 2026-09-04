@@ -47,12 +47,21 @@ export interface FrontierPayload {
    *  back. The engine has always computed it; the route used to discard it,
    *  so a study that could not restore the user's plan said nothing. */
   base_restored?: boolean | null
+  /** Phase 12e (shipped-code review, finding 13): the solver's own word on
+   *  that closing re-solve. `base_restored` says it did not raise; a status
+   *  that is not optimal means the plan is NOT back however the flag reads. */
+  base_restore_status?: string | null
 }
 
 // Literal hex, not a CSS custom property: `var(--…)` does not resolve inside
 // an SVG stroke here, which silently renders the curve as a bare scatter —
 // the line simply never draws. Every other chart in this directory uses a
 // literal for the same reason.
+// A closing re-solve that RAN can still have failed to restore anything: an
+// `infeasible` re-solve does not raise. Only these statuses mean the plan is
+// back (shipped-code review, finding 13).
+const OPTIMAL_STATUS = new Set(['ok', 'optimal'])
+
 const CURVE = '#dc2626'   // matches the Lost load tab this panel lives on
 const KNEE = '#f59e0b'    // amber, so the economic point reads as distinct
 
@@ -181,10 +190,25 @@ export function FrontierPanel() {
                 <Square size={9} /> Abort
               </button>
             )}
+            {payload?.status === 'aborted' && (
+              <span className="text-[10px] text-warn" data-testid="frontier-aborted">
+                Stopped — these are the targets swept before you aborted, not
+                the whole frontier. The knee is the knee of what was swept.
+              </span>
+            )}
             {payload?.base_restored === false && (
               <span className="text-[10px] text-warn" data-testid="frontier-not-restored">
                 The closing re-solve did not run — the network is on the last
                 swept target, not your own plan. Re-run your solve.
+              </span>
+            )}
+            {payload?.base_restored === true
+              && payload.base_restore_status != null
+              && !OPTIMAL_STATUS.has(payload.base_restore_status) && (
+              <span className="text-[10px] text-warn"
+                    data-testid="frontier-restore-not-optimal">
+                The closing re-solve came back “{payload.base_restore_status}”
+                — it ran but did not restore your plan. Re-run your solve.
               </span>
             )}
             {rows.length > 0 && (

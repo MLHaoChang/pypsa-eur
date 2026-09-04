@@ -29,6 +29,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getMc: vi.fn(), startMc: vi.fn(), getElccCandidates: vi.fn(),
+      abortMc: vi.fn(),
       getAdequacy: vi.fn(), getCopt: vi.fn(),
     },
   }
@@ -672,5 +673,77 @@ describe('McPanel portfolio credit', () => {
     await openPanel()
     await screen.findByTestId('elcc-table')
     expect(screen.queryByTestId('elcc-portfolio')).toBeNull()
+  })
+})
+
+
+// ── Phase 12e: the abort, and what a stopped study says on screen ──────────
+//
+// Shipped-code review, finding 14: the three abort buttons and the two states
+// they produce (`status: "aborted"`, and a truncated portfolio block) had no
+// frontend test at all. The engine work is worth nothing if the panel renders
+// a stopped study as a finished one.
+
+describe('McPanel — aborting a run', () => {
+  // ★ Bite: drop the `running &&` guard so the button is always mounted, or
+  // wire `onClick` to `run.mutate`. Either way this fails.
+  it('offers Abort only while the study is running, and calls the abort route', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(DONE)
+    const first = renderPanel()
+    await userEvent.setup().click(await screen.findByTestId('mc-toggle'))
+    await screen.findByTestId('elcc-table')
+    expect(screen.queryByTestId('mc-abort')).toBeNull()
+    first.unmount()
+    cleanup()
+
+    vi.mocked(resultsApi.getMc).mockResolvedValue(
+      { ...DONE, status: 'running', result: null })
+    vi.mocked(resultsApi.abortMc).mockResolvedValue(undefined as never)
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('mc-abort'))
+    await waitFor(() => expect(resultsApi.abortMc).toHaveBeenCalledTimes(1))
+  })
+
+  // ★ Bite: render nothing for `status: "aborted"`. A stopped study then looks
+  // exactly like a finished one — same metrics, same table — and the ELCC rows
+  // that never ran read as absent-because-nothing-to-say rather than
+  // absent-because-never-priced.
+  it('says a stopped study is stopped, and says it only then', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(DONE)
+    const first = renderPanel()
+    await userEvent.setup().click(await screen.findByTestId('mc-toggle'))
+    await screen.findByTestId('elcc-table')
+    expect(screen.queryByTestId('mc-aborted')).toBeNull()
+    first.unmount()
+    cleanup()
+
+    vi.mocked(resultsApi.getMc).mockResolvedValue({ ...DONE, status: 'aborted' })
+    await openPanel()
+    const note = (await screen.findByTestId('mc-aborted')).textContent ?? ''
+    expect(note).toMatch(/stopped/i)
+    expect(note).toMatch(/absent, not zero/i)
+  })
+
+  // ★ Bite: render nothing for `truncated`. It is a BOOLEAN beside the status,
+  // so an `ok` block can be truncated — and a short `periods` list with no note
+  // reads as a fleet that simply has fewer periods.
+  it('says a truncated portfolio block was cut short, not that it has fewer periods', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(withPortfolio(PORTFOLIO_OK))
+    const first = renderPanel()
+    await userEvent.setup().click(await screen.findByTestId('mc-toggle'))
+    await screen.findByTestId('elcc-portfolio')
+    expect(screen.queryByTestId('elcc-portfolio-truncated')).toBeNull()
+    first.unmount()
+    cleanup()
+
+    vi.mocked(resultsApi.getMc).mockResolvedValue(
+      withPortfolio({ ...PORTFOLIO_OK, truncated: true,
+                      periods: [PORTFOLIO_OK.periods[0]] }))
+    await openPanel()
+    // `status` is still `ok`, so nothing but the truncation flag can say this.
+    expect(screen.queryByTestId('elcc-portfolio-status')).toBeNull()
+    const note = (await screen.findByTestId('elcc-portfolio-truncated')).textContent ?? ''
+    expect(note).toMatch(/stopped before every period was priced/i)
+    expect(note).toMatch(/never evaluated, not evaluated at zero/i)
   })
 })

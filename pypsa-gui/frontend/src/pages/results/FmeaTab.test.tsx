@@ -22,6 +22,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getWorksheet: vi.fn(),
       putWorksheet: vi.fn(),
       postFmeaSweep: vi.fn(),
+      abortFmeaSweep: vi.fn(),
       getStressScenarios: vi.fn(),
     },
   }
@@ -57,6 +58,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getWorksheet).mockReset().mockResolvedValue(sidecar())
   vi.mocked(resultsApi.putWorksheet).mockReset().mockResolvedValue({ version: 2 })
   vi.mocked(resultsApi.postFmeaSweep).mockReset().mockResolvedValue({ status: 'running' })
+  vi.mocked(resultsApi.abortFmeaSweep).mockReset().mockResolvedValue(undefined as never)
   vi.mocked(resultsApi.getStressScenarios).mockReset()
     .mockResolvedValue({ scenarios: [{ id: 'cold_snap' }] })
 })
@@ -210,4 +212,68 @@ it('renders the empty state when every source is empty', async () => {
     { version: 0, manual_rows: [], overlays: {} })
   renderTab()
   expect(await screen.findByText(/No failure modes yet/)).toBeTruthy()
+})
+
+
+// ── Phase 12e: the abort, and what a stopped sweep says on screen ──────────
+//
+// Shipped-code review, finding 14. The worksheet is where the sweep's class
+// B/C rows are read, so it is where a stopped sweep and a failed closing
+// re-solve have to be said — and none of it had a test.
+
+// ★ Bite: drop the `sweepRunning &&` guard so the button is always mounted, or
+// wire its `onClick` to the sweep mutation.
+it('offers Abort only while the sweep is running, and calls the abort route', async () => {
+  renderTab()
+  await screen.findByText('g1')
+  expect(screen.queryByTestId('sweep-abort')).toBeNull()
+  cleanup()
+
+  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
+    per_mode: [COMPUTED], sweep_status: 'running', sweep_error: null })
+  renderTab()
+  await userEvent.setup().click(await screen.findByTestId('sweep-abort'))
+  await waitFor(() => expect(resultsApi.abortFmeaSweep).toHaveBeenCalledTimes(1))
+})
+
+// ★ Bite: render nothing for `sweep_status: "aborted"`. The worksheet then
+// shows a partial class B/C set as if it were the whole sweep — a contingency
+// that was never measured is indistinguishable from one measured at zero, and
+// this table is ranked on exactly that number.
+it('says a stopped sweep is stopped, and says it only then', async () => {
+  renderTab()
+  await screen.findByText('g1')
+  expect(screen.queryByTestId('sweep-aborted')).toBeNull()
+  cleanup()
+
+  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
+    per_mode: [COMPUTED], sweep_status: 'aborted', sweep_error: null })
+  renderTab()
+  const note = (await screen.findByTestId('sweep-aborted')).textContent ?? ''
+  expect(note).toMatch(/stopped/i)
+  expect(note).toMatch(/absent, not harmless/i)
+})
+
+// ★ Bite: drop either notice. A sweep whose closing re-solve failed leaves the
+// network on the last contingency while this table describes another plan, and
+// the `true`-but-not-optimal case is the one a bare boolean cannot express.
+it('warns when the closing re-solve failed, and when it ran without restoring', async () => {
+  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
+    per_mode: [COMPUTED], sweep_status: 'done', sweep_error: null,
+    sweep_base_restored: false, sweep_base_restore_status: 'raised: boom' })
+  renderTab()
+  expect(((await screen.findByTestId('sweep-not-restored')).textContent ?? ''))
+    .toMatch(/on the last contingency, not your own plan/i)
+  cleanup()
+
+  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
+    per_mode: [COMPUTED], sweep_status: 'done', sweep_error: null,
+    sweep_base_restored: true, sweep_base_restore_status: 'infeasible' })
+  renderTab()
+  // `sweep_base_restored` is TRUE, so the plain notice must stay silent.
+  const note = (await screen.findByTestId('sweep-restore-not-optimal'))
+    .textContent ?? ''
+  expect(screen.queryByTestId('sweep-not-restored')).toBeNull()
+  expect(note).toMatch(/infeasible/)
+  expect(note).toMatch(/did not restore your plan/i)
 })

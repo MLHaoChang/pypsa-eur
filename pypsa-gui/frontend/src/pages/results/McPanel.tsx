@@ -488,6 +488,13 @@ export function McPanel() {
                 <Square size={9} /> Abort
               </button>
             )}
+            {payload?.status === 'aborted' && (
+              <span className="text-[10px] text-warn" data-testid="mc-aborted">
+                Stopped — the headline metrics are from the batches that
+                finished, and only the ELCC rows priced before you aborted are
+                below. Rows that never ran are absent, not zero.
+              </span>
+            )}
             {blocked && (
               <span className="text-[10px] text-warn" data-testid="mc-blocked">
                 Blocked: {blocked}
@@ -754,6 +761,17 @@ export function PortfolioSection({ block }: { block: ElccPortfolioBlock }) {
         >
           <span className="font-semibold">{heading}</span>
           {block.reason ? ` — ${block.reason}` : ''}
+        </p>
+      )}
+      {/* Phase 12e: `truncated` is a BOOLEAN beside the status, not a status
+          of its own, so it has to be rendered separately — an `ok` block can
+          be truncated, and a short `periods` list with no note reads as a
+          fleet that simply has fewer periods (shipped-code review, finding
+          14). */}
+      {block.truncated === true && (
+        <p className="text-[10px] text-warn" data-testid="elcc-portfolio-truncated">
+          Stopped before every period was priced — the periods missing below
+          were never evaluated, not evaluated at zero.
         </p>
       )}
       {block.periods.length > 0 && (

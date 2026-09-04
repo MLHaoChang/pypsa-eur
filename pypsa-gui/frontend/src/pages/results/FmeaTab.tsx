@@ -99,6 +99,16 @@ export default function FmeaTab() {
   const sweepRunning =
     (modes as ModesPayload | null | undefined)?.sweep_status === 'running' ||
     sweep.isPending
+  // A closing re-solve that RAN can still have failed to restore anything: an
+  // `infeasible` re-solve does not raise, so `sweep_base_restored` is `true`
+  // and the plan is not back. Null when there is nothing to say.
+  const sweepRestoreNotOptimal = (() => {
+    const m = modes as ModesPayload | null | undefined
+    if (m?.sweep_base_restored !== true) return null
+    const st = m.sweep_base_restore_status
+    if (st == null || st === 'ok' || st === 'optimal') return null
+    return st
+  })()
   type SortK = 'name' | 'occurrence_per_year' | 'severity_eur' | 'criticality_eur_per_year'
   const { rows: filtered, search, setSearch, sortKey, sortDir, onSortClick } =
     useFilterableTable<WorksheetRow, SortK>({
@@ -191,6 +201,25 @@ export default function FmeaTab() {
           >
             <Square size={9} /> Abort
           </button>
+        )}
+        {(modes as ModesPayload | null | undefined)?.sweep_status === 'aborted' && (
+          <span className="text-[10px] text-warn" data-testid="sweep-aborted">
+            Sweep stopped — the class B/C rows below are the ones measured
+            before you aborted. The contingencies never reached are absent, not
+            harmless.
+          </span>
+        )}
+        {(modes as ModesPayload | null | undefined)?.sweep_base_restored === false && (
+          <span className="text-[10px] text-warn" data-testid="sweep-not-restored">
+            The sweep's closing re-solve did not run — the network is on the
+            last contingency, not your own plan. Re-run your solve.
+          </span>
+        )}
+        {sweepRestoreNotOptimal && (
+          <span className="text-[10px] text-warn" data-testid="sweep-restore-not-optimal">
+            The sweep's closing re-solve came back “{sweepRestoreNotOptimal}” —
+            it ran but did not restore your plan. Re-run your solve.
+          </span>
         )}
         {(modes as ModesPayload | null | undefined)?.sweep_error && (
           <span className="text-[10px] text-danger">

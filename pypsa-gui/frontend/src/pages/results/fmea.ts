@@ -10,6 +10,12 @@ export interface ModesPayload {
   voll_eur_per_mwh?: number | null
   sweep_status?: string | null
   sweep_error?: string | null
+  /** Phase 12e (shipped-code review, finding 14): whether the sweep's closing
+   *  base re-solve RAN, and the solver's own word on it. `true` never meant
+   *  "your plan is back", only "it did not raise" — an `infeasible` re-solve
+   *  does neither. */
+  sweep_base_restored?: boolean | null
+  sweep_base_restore_status?: string | null
 }
 
 /**

@@ -66,12 +66,29 @@ the FMEA worksheet's source list and failed a shipped test.
 
 **And a claim of v3's own, corrected.** "The rebuild is faster even when the
 deconvolution succeeds" is not unconditional: the deconvolve path wins by up
-to 3.9× when `L/n ≲ 3` *and* `q ≳ 0.4` together. It is true on every fleet
-`/copt` can produce — `delta_mw=1.0` and MW-scale capacities give `L/n ≳ 6`
-(measured across n = 2…300, q = 0.02…0.499, rebuild 3.3–5× faster) — and in
-that counterexample regime the deconvolved table is also the *less accurate*
-of the two, and the whole fleet costs under 0.1 s either way. The conclusion
-stands; the sentence is scoped.
+to 3.9× when `L/n ≲ 3` *and* `q ≳ 0.4` together.
+
+> **Corrected again after the shipped-code review (finding 16).** This
+> paragraph went on to say the counterexample regime is unreachable because
+> "`delta_mw=1.0` and MW-scale capacities give `L/n ≳ 6`". That premise is
+> false. `/copt` fixes `delta_mw = 1.0` (`routers/results.py:5282`), so
+> `L/n` is just the fleet's MEAN CAPACITY IN MW — and nothing stops a user
+> entering 3 MW units. Measured on 30 × 3 MW at q = 0.45: `L/n = 4` and the
+> deconvolution is 2.4× faster; at 30 × 1 MW, 3.3×.
+>
+> What actually holds up the decision is narrower, and enough. (a) The regime
+> needs BOTH small units and a high `q`, because the deconvolution has to
+> succeed to be the faster path at all — on 30 × 3 MW at `q = 0.2` its mass
+> guard refuses all 30 and the rebuild runs regardless. (b) Where it does
+> succeed the absolute cost is small: the worst case found is 100 × 3 MW at
+> `q = 0.45`, 87 ms rebuild against 27 ms — 60 ms on a route whose budget is
+> seconds. (c) By 300 × 3 MW the guard refuses all 300 again, so the rebuild
+> is what runs whatever the code says. (d) In that regime the deconvolved
+> table is the *less accurate* of the two, which is the reason the call was
+> deleted in the first place.
+>
+> So: the conclusion stands, on accuracy plus a bounded cost in a narrow
+> regime — not on the regime being unreachable, which it is not.
 
 ## 1. Part A — the three studies get a stop event
 
@@ -180,7 +197,9 @@ widens.
 
 **Change 1 — delete the `deconvolve` call** from `attribute_criticality`
 (`copt.py:740-745`). No predicate: on every fleet `/copt` can produce
-(`delta_mw=1.0`, MW capacities, so `L/n ≳ 6`) the rebuild is 3.3–5× faster,
+(`delta_mw=1.0`, capacities of tens of MW and up, so `L/n ≳ 6` — see the
+scoping note in §0, which corrects an earlier claim that every `/copt` fleet
+is in this regime) the rebuild is 3.3–5× faster,
 measured across n = 2…300 and q = 0.02…0.499. `deconvolve` stays public for
 its round-trip test (`test_adequacy_copt.py:275-282`, its only other caller).
 
@@ -408,3 +427,106 @@ tests is unchanged — never name a control the user does not have — and the
 check is what noticed that the copy had moved underneath it. The unit-side
 twin (A3 in `test_adequacy_study_swap_guard.py`) was rewritten in the same
 way, for the same reason.
+
+## 12e SHIPPED-CODE REVIEW — fixes (2026-09-04)
+
+An adversarial review of the shipped 12e code returned one blocker and a
+series of serious findings. Every one was verified against the code before
+being recorded; all are fixed below, with what each cost.
+
+**The blocker.** `run_class_b_sweep` / `run_class_c_sweep` computed the
+closing base re-solve's outcome and dropped it on the floor, so a sweep whose
+restore FAILED left the network on the last contingency while the record still
+read `done`. Both assemblers now return `(rows, restore)` and `post_fmea_sweep`
+writes `base_restored` / `base_restore_status` onto the record.
+
+**A real defect the review did not name, found while fixing finding 7.**
+`_eue_cells` sized its bin grid from `r.max()`, which is the largest `x` the
+mixture can produce only if every availability is non-negative — and nothing
+enforces that, since `_availability_mw` multiplies a profile by a capacity
+series and clamps neither. One signed hour pushes some state's `x` past the
+residual; those cells clip into the top bin; and when the TABLE OUTRUNS THE
+RESIDUAL, `_eue_binned` reads them at the wrong grid index instead of folding
+them. **Measured 70% relative error** on a 10-unit table against a 300 MW
+load. `n_max` now bounds the subtracted term below per hour, which removes the
+precondition rather than asserting it, and is the same `n_max` as before
+wherever availabilities are non-negative. Pinned by **F2h**.
+
+**The frontier's restore (13).** `_restore_base` discarded `run_simulation`'s
+return value and reported a bare `True` for "it did not raise". An
+`infeasible` re-solve does neither raise nor restore. It now returns
+`(ok, status)`, matching the sweep's `_restore_base_guarded`; the route carries
+`base_restore_status` on all three paths. Pinned by **F1i**.
+
+**Three shipped ★ tests could not fail — all three my own design errors, and
+all three the same error: asserting through a path the fixture never takes.**
+
+1. **F2b** called `attribute_criticality` on a fleet with **no mixed units**,
+   so `len(mixed) >= BIN_MIN_MIXED` is false, the switch routes to the direct
+   path, and `_eue_binned`'s beyond-table fold — the thing its bite removes —
+   never ran. Rewritten to call the binned evaluator directly, as F2 does, and
+   to check the shipped path against the same hand value.
+2. **F2e** asserted the shipped rows sit within `1e-3` of the deconvolved ones,
+   "bounded by the mass guard". Two errors: the guard bounds the table's MASS
+   and no ΔEUE bound follows from it, and on its fixture the two routes agreed
+   to **8e-15**, so neither the assertion nor its bite could fail. Rewritten to
+   pin the DIRECTION on a fixture where the two routes provably disagree — the
+   shipped rows equal the rebuild's to 1e-12, with the disagreement itself
+   asserted `> 1e-6` so it cannot go vacuous again.
+3. **F2g** gave both period blocks the **same fleet**. Each block's rows leave
+   `attribute_criticality` already name-sorted, so the merge dict filled
+   alphabetically and the stable sort returned alphabetical order with or
+   without the merge key's tie-break. The blocks now hold different units, so
+   the dict fills `[mike, zulu, alpha, bravo]` and only the merge key recovers
+   the asserted order.
+
+Both new tests from the review's finding 5 (**F1h**, **F1b4**) also failed on
+first run, for a fourth instance of the same class of error: they monkeypatched
+`routers.results`, but the route imports both assemblers INSIDE its function
+body, so the names live in their defining modules.
+
+**Claims nothing pinned, now pinned.**
+- **The netted-row asymmetry (8).** A netted unit's counterfactual shifts the
+  residual, so it keeps the direct path even on a binned call and its ΔEUE is
+  `base_binned − perfect_direct` — sound only because the binning is exact.
+  Stated where it is created and in the spec; **F2i** pins it, and its bite
+  names a netted row.
+- **Non-uniform weights (9).** Every F2 case weighted the hours equally, so `w`
+  was a constant factor that cancelled. A `weighted` case adds a ramp with
+  exact zeros; a bite that ignores the hour weight fails **that case alone**
+  and leaves the other five green, which is the finding restated as a test.
+- **The `/fmea_modes` tie-break (11).** The spec claimed
+  `(-criticality_eur_per_year, mode_id)`; the code sorted on criticality alone,
+  leaving exactly-tied rows in source order. Not a corner case: with no VoLL
+  every row is €0/yr, so the whole ranking ties. The code now does what the
+  spec says. Pinned by **F1k**.
+- **The three abort buttons and what a stopped study says (14).** None of it
+  had a frontend test, and two states were not rendered at all: a study-level
+  `aborted`, and the portfolio's `truncated` (a boolean beside an `ok` status,
+  so a short period list read as a fleet with fewer periods). Banners added on
+  all three panels plus the frontier's and the sweep's "ran but did not
+  restore" case; `/fmea_modes` now carries the sweep's restore outcome, since
+  the worksheet is where those rows are read. **Nine frontend ★ tests, all
+  bitten.**
+
+**A live gate that could not fail (12).** S28.3 asserted `/copt` finishes
+inside 10 s and called it a Part B cost check. It was neither: the fixture is
+12 generators with no profiles, so it answers in ~0.09 s (≈800× headroom), and
+with `k = 0` mixed units it never enters the binned path the claim is about. A
+wall-clock gate on a live server cannot fail on a fast machine and cannot pass
+on a slow one — the reason F2c counts operations instead — so the time is now
+printed and the assertion is on the payload.
+
+**A premise that was simply false (16).** The plan scoped "the rebuild always
+wins" to `L/n ≳ 6` and justified reaching it with "every fleet `/copt` can
+produce". `/copt` fixes `delta_mw = 1.0`, so `L/n` IS the mean capacity in MW,
+and nothing stops a user entering 3 MW units: measured 30 × 3 MW at q = 0.45,
+`L/n = 4`, deconvolution **2.4× faster**. The decision still stands, on
+narrower ground now stated in §0 — the regime needs small units AND a high `q`
+for the deconvolution to succeed at all, costs at most ~60 ms where it does,
+and is refused outright by n = 300.
+
+**Housekeeping.** The route inventory fixture was regenerated (67 routes had
+accumulated unrecorded across phases, including 12e's three aborts; nothing
+removed). `test_adequacy_mc_endpoint.py`'s ELCC status set was widened with
+`aborted`, which 12e added to the union without it.

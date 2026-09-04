@@ -4269,18 +4269,34 @@ def suite_S28():
            f"{[k for k in (final or {}) if k in ('stop_event', 'thread')]}")
 
     # S28.3 - the mesh reopens: the next study is accepted, not 409 - and
-    # /results/copt (Part B) answers well inside the old cost
+    # /results/copt still answers with a real payload on the same project.
+    #
+    # NO WALL-CLOCK GATE. This check used to assert `copt_s < 10.0` and call
+    # it a Part B cost check, which it was not on two counts (shipped-code
+    # review, finding 12): this fixture is 12 generators with no profiles, so
+    # it takes ~10 ms and the gate had ~800x headroom, and it has k = 0 mixed
+    # units so it never enters the binned path the cost claim is about. A
+    # timing gate on a live server cannot fail on a fast machine and cannot
+    # pass on a slow one - the same reason F2c counts operations instead of
+    # timing them - so the time is PRINTED and the assertion is on the
+    # payload: /copt must come back with real rows and real metrics, not a
+    # 204 or an empty shell.
     t0 = time.time()
     st_copt, copt = http("/api/results/copt")
     copt_s = time.time() - t0
+    copt_ok = (st_copt == 200 and isinstance(copt, dict)
+               and bool(copt.get("per_mode"))
+               and isinstance(copt.get("metrics"), dict)
+               and copt["metrics"].get("eue_mwh") is not None)
     # Another MC rather than the frontier: the frontier refuses without a
     # VoLL, and this check is about the MESH reopening, not about that.
     st_next, next_body = http("/api/results/mc", method="POST",
                               body={"draws": 8, "cov_target": 1.0})
     record("S28.3",
-           st_next in (200, 201) and st_copt == 200 and copt_s < 10.0,
+           st_next in (200, 201) and copt_ok,
            f"next study POST={st_next} {str(next_body)[:60]}; "
-           f"/copt={st_copt} in {copt_s:.2f}s (gate 10 s)")
+           f"/copt={st_copt} rows={len((copt or {}).get('per_mode') or [])} "
+           f"in {copt_s:.2f}s (printed, not gated)")
     http("/api/results/mc/abort", method="POST")
 
     restore()

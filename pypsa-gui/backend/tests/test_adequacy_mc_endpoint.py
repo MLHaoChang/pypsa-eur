@@ -548,5 +548,11 @@ def test_every_candidate_is_accepted_by_the_run_that_prices_it(
         (a["kind"], a["name"]) for a in assets]
     for row in rows:
         assert set(row) == ELCC_ROW_KEYS, row
-        assert row["status"] in {"ok", "unidentifiable", "not_bracketed"}
+        # Phase 12e widened this union with `aborted` (a bisection stopped by
+        # `/results/mc/abort`), and this set was not widened with it
+        # (shipped-code review, finding 18). It cannot trip on this fixture —
+        # nothing aborts here — but a set that silently lags the union is
+        # exactly how the NEXT status ships unasserted.
+        assert row["status"] in {"ok", "unidentifiable", "not_bracketed",
+                                 "aborted"}
         assert row["nameplate_mw"] > 0.0

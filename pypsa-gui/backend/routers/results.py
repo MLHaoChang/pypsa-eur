@@ -2986,6 +2986,14 @@ def get_fmea_modes():
     return {"per_mode": per_mode,
             "voll_eur_per_mwh": _voll,
             "sweep_status": (sweep or {}).get("status"),
+            # Phase 12e (shipped-code review, finding 14): the worksheet is
+            # where the sweep's rows are read, so it is where a failed closing
+            # re-solve has to be said. The record has carried these since the
+            # review's finding 1; this surface used to drop them, leaving the
+            # user reading contingency rows with no sign that the network is
+            # still on the last contingency.
+            "sweep_base_restored": (sweep or {}).get("base_restored"),
+            "sweep_base_restore_status": (sweep or {}).get("base_restore_status"),
             "sweep_error": (sweep or {}).get("error")}
 
 
