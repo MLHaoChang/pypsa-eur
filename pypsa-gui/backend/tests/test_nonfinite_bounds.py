@@ -238,3 +238,96 @@ def test_K4e_a_clean_network_is_silent():
     n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
     n.generators_t.p_max_pu["g"] = [0.5, 0.6, 0.7]
     assert V._check_nonfinite_bounds(n) == []
+
+
+# ── K2: a time series with a non-finite cell is refused at the write ───────
+
+def _idx(n):
+    return [str(x) for x in n.snapshots]
+
+
+def test_K2a_a_null_in_a_put_body_is_422_naming_the_column_and_row():
+    """★ K2a. JSON `null` becomes NaN the moment pandas builds the frame, and
+    the route wrote it straight into the store. Bite (verified): drop the
+    validator call — the write succeeds and the LP is left unbounded there."""
+    from fastapi import HTTPException
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    PyPSAService.set_network(n)
+    with pytest.raises(HTTPException) as e:
+        N.set_timeseries("generators", "p_max_pu",
+                         {"index": _idx(n), "columns": ["g"],
+                          "data": [[0.5], [None], [1.0]]})
+    assert e.value.status_code == 422
+    detail = str(e.value.detail)
+    assert "p_max_pu" in detail and "'g'" in detail
+    assert "2030-01-01" in detail          # it names WHERE, not just that
+
+
+def test_K2b_infinity_is_refused_too():
+    """★ K2b. `json.loads` accepts the bare `Infinity` literal, so a client can
+    send one; `inf` masks a row exactly as NaN does. Bite (verified): test
+    `isnan` instead of `isfinite` — the infinity sails through."""
+    from fastapi import HTTPException
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    PyPSAService.set_network(n)
+    with pytest.raises(HTTPException) as e:
+        N.set_timeseries("generators", "p_max_pu",
+                         {"index": _idx(n), "columns": ["g"],
+                          "data": [[0.5], [float("inf")], [1.0]]})
+    assert e.value.status_code == 422
+
+
+def test_K2c_the_guard_is_not_a_wall_a_finite_series_still_writes():
+    """★ K2c. The anti-vacuity floor — a refusal that refuses everything is
+    not a guard. Bite (verified): raise unconditionally."""
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    PyPSAService.set_network(n)
+    N.set_timeseries("generators", "p_max_pu",
+                     {"index": _idx(n), "columns": ["g"],
+                      "data": [[0.5], [0.6], [0.7]]})
+    assert PyPSAService.get_network().generators_t.p_max_pu["g"].to_list() \
+        == [0.5, 0.6, 0.7]
+
+
+def test_K2d_the_profile_upload_path_refuses_before_user_ts_is_written():
+    """★ K2d. The profile routes are a SECOND write path — a CSV's blank cell
+    is a NaN by the time `read_csv` returns — and what they write lands in
+    `_user_ts`, which survives project reload and is re-injected on every
+    solve. So a rejected upload must leave nothing behind.
+
+    Bite (verified): guard `set_timeseries` only; this path stays green and a
+    NaN reaches `_user_ts`.
+    """
+    from fastapi import HTTPException
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    PyPSAService.set_network(n)
+    live = PyPSAService.get_network()
+    before = dict(N._user_ts)
+    bad = pd.DataFrame({"g": [0.5, np.nan, 0.7]}, index=live.snapshots)
+    with pytest.raises(HTTPException) as e:
+        N._apply_profile_upload(live, "generators", "p_max_pu", "Generator", bad)
+    assert e.value.status_code == 422
+    assert dict(N._user_ts) == before, "a refused upload wrote to _user_ts"
+
+    ok = pd.DataFrame({"g": [0.5, 0.6, 0.7]}, index=live.snapshots)
+    out = N._apply_profile_upload(live, "generators", "p_max_pu", "Generator", ok)
+    assert out["matched"] == ["g"]
+
+
+def test_K2e_every_dynamic_column_is_checked_not_only_the_bounds():
+    """★ K2e. `upload_load_profile` writes `p_set`, which is not a bound at all
+    — and a non-finite demand hour masks that snapshot's nodal balance. The
+    validator therefore checks every column it is given, not a bound list.
+    Bite (verified): restrict the validator to `FINITE_DEFAULT_BOUNDS`."""
+    from fastapi import HTTPException
+    n = _net(load=50.0)
+    PyPSAService.set_network(n)
+    with pytest.raises(HTTPException) as e:
+        N.set_timeseries("loads", "p_set",
+                         {"index": _idx(n), "columns": ["l"],
+                          "data": [[50.0], [None], [50.0]]})
+    assert e.value.status_code == 422

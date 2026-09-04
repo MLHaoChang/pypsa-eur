@@ -3205,6 +3205,9 @@ def set_timeseries(component: str, attribute: str, body: dict):
         cols = body.get("columns", [])
         data = body.get("data", [])
         df = pd.DataFrame(data, index=idx, columns=cols)
+        # Phase 12f: refuse before the store is touched, so a rejected write
+        # leaves nothing behind.
+        _reject_nonfinite_timeseries(df, component, attribute)
         ts_store[attribute] = df
         # Persist edits in _user_ts so they survive project reload.
         # Hold _user_ts_lock for the mutation — autosave's
@@ -3279,6 +3282,11 @@ async def upload_timeseries(
             names=["period", "timestep"],
         )
         df.index = new_mi
+
+    # Phase 12f: refuse before the lock is taken and before `_user_ts` is
+    # written. A CSV's blank cell is a NaN by the time `read_csv` is done, and
+    # an entry that reaches `_user_ts` is re-injected on every solve.
+    _reject_nonfinite_timeseries(df, component, attribute)
 
     with PyPSAService.get_lock():
         with _user_ts_lock:
@@ -3703,6 +3711,50 @@ def aggregate_load_profile(
     }
 
 
+def _reject_nonfinite_timeseries(df, component: str, attribute: str) -> None:
+    """Phase 12f: a time series with a non-finite cell is corrupt input, and it
+    is refused here rather than repaired later.
+
+    A NaN or ±inf in a `_pu` bound does not clamp anything — linopy MASKS that
+    constraint row out of the LP, so a 100 MW unit can dispatch 500 MW, and a
+    NaN `p_min_pu` hour will run a generator as a −900 MW load. There is no
+    honest repair value: `p_max_pu`'s default is 1.0 but an asset's own static
+    ceiling may be 0.4, and picking either silently rewrites the user's model.
+
+    Applied to EVERY dynamic column, not only the bounds: `p_set` is not a
+    bound and a NaN there is just as wrong. JSON carries both `null` (→ NaN via
+    pandas) and the `Infinity` literal, which is why the test is `isfinite` and
+    not `isnan`.
+
+    Raises 422 naming the column and the first offending row labels, so the
+    user can find them. Called from the handler BODY at every write path
+    rather than as a dependency: the chat tools invoke these handlers directly,
+    and a FastAPI `Depends()` would be bypassed.
+    """
+    import numpy as _np
+
+    if df is None or not len(getattr(df, "columns", [])):
+        return
+    for col in df.columns:
+        try:
+            vals = df[col].to_numpy(dtype=float)
+        except (TypeError, ValueError):
+            continue
+        bad = ~_np.isfinite(vals)
+        if not bad.any():
+            continue
+        labels = [str(x) for x in df.index[bad][:5]]
+        more = " …" if int(bad.sum()) > 5 else ""
+        raise HTTPException(
+            422,
+            f"{component}.{attribute}: column '{col}' has {int(bad.sum())} "
+            f"non-finite value(s) (null, NaN or Infinity) at {', '.join(labels)}"
+            f"{more}. A time series must be finite at every snapshot: PyPSA "
+            "does not fall back to a default for a missing hour, it drops the "
+            "constraint, leaving the asset unbounded there. Supply a value for "
+            "every snapshot, or shorten the series and the horizon to match.")
+
+
 def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str, df) -> dict:
     """
     Shared body of the load/generator/link profile-upload endpoints.
@@ -3726,6 +3778,12 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
             f"No column names matched any {display_class.lower()}. "
             f"{display_class}s in network: {list(valid)[:10]}",
         )
+    # Phase 12f: refuse before `_user_ts` is written — an entry that lands here
+    # survives project reload and is re-injected on every solve, so a rejected
+    # upload must leave nothing behind. Only the matched columns are checked:
+    # an unmatched one is discarded anyway and its blanks are not the user's
+    # problem.
+    _reject_nonfinite_timeseries(df[matched], display_class, attribute)
     with _user_ts_lock:
         for col in matched:
             _user_ts[(comp_attr, attribute, col)] = df[col].astype(float)
