@@ -40,6 +40,54 @@ jobs:
       run: |
         pixi run unit-tests
 
+  gridspine-tests:
+    name: Gridspine
+    runs-on: ubuntu-latest
+    # The suite solves real MILPs in its fixtures (~6-11 min observed); the cap
+    # is there so a solve that stops converging fails loudly instead of holding
+    # a runner for the six-hour default.
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: dorny/paths-filter@v4
+      id: filter
+      with:
+        filters: |
+          src:
+            - 'gridspine/**'
+            - 'tests/gridspine/**'
+            - 'pixi.toml'
+            - 'pixi.lock'
+            - '.github/workflows/test.yaml'
+
+    - name: Skip - no gridspine changes
+      if: steps.filter.outputs.src != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+      run: echo "Skipping gridspine tests because no gridspine source changes detected"
+
+    - name: Setup Pixi
+      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        cache: true
+        cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+
+    # `gridspine-tests` sits in the root `[tasks]` table, so it resolves to the
+    # `default` environment -- deliberately, since `gridspine/` is engine-caged
+    # against exactly the packages `default` carries. Two skips are expected and
+    # documented (no `from_psse` in pandapower 3.1.2; the PowerFactory fixture
+    # awaits a manual export), so a green run here is 247 passed, 2 skipped.
+    - name: Run gridspine tests
+      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: |
+        pixi run gridspine-tests
+
   integration-tests:
     name: Integration
     runs-on: ${{ matrix.os }}-latest
