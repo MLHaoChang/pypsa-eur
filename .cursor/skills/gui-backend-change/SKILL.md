@@ -38,6 +38,18 @@ Two rules hold this together:
   `assumptions`/`diagnostics`/`objective` → `myopic`). If new code seems to need
   a back-import, it is in the wrong module. The same test enforces this.
 
+## Where results arithmetic goes
+The `/results/*` handlers in `routers/results.py` are thin: network lookup,
+`_dispatch_ready` gate, `_state` reads, then a call into
+`services/results/<name>.py::compute_<name>(...)`, which returns the payload or
+`None` for 204. New results computation goes in `services/results/`, takes the
+network and plain arguments, gets result frames through the `result_df`
+keyword (never from router state), and gains a case in
+`tests/test_results_seam.py`. Handler names and parameter lists are API —
+`services/chat_tools.py` resolves them reflectively — and
+`tests/test_results_facade_surface.py` fails if one changes. Nothing under
+`services/results/` imports a router.
+
 ## Weighting (multi-period)
 - Use `snapshot_weights(n, column, sns=None)`, `period_years_map`, `years_for_period`.
 - Energy KPIs → column `"generators"`; cost KPIs → `"objective"`.
