@@ -1272,10 +1272,15 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
     column, so the caller can say "3 of 5 hours" without re-deriving it.
     """
     hits: list[tuple[str, str, str, int, int]] = []
+    # `n.components` first: `iterate_components` is deprecated in PyPSA 1.0 and
+    # removed in 2.0. The old call stays as the fallback for an older PyPSA.
     try:
-        comps = list(n.iterate_components())
+        comps = [n.components[c] for c in n.components]
     except Exception:                                         # noqa: BLE001
-        return hits
+        try:
+            comps = list(n.iterate_components())
+        except Exception:                                     # noqa: BLE001
+            return hits
     # `or ()` would raise here: a pandas Index has no truth value, and a
     # multi-period network's snapshots are a MultiIndex.
     _snaps = getattr(n, "snapshots", None)

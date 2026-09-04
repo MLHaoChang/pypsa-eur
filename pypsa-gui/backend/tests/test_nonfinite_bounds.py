@@ -331,3 +331,84 @@ def test_K2e_every_dynamic_column_is_checked_not_only_the_bounds():
                          {"index": _idx(n), "columns": ["l"],
                           "data": [[50.0], [None], [50.0]]})
     assert e.value.status_code == 422
+
+
+# ── K6: both loops refuse up front rather than burning their budget ────────
+
+def _margin_ready_network():
+    """A network the margin loop would otherwise accept, so that the refusal
+    under test is the one this phase adds.
+
+    EVERY generator carries outage data, the slack included: without that the
+    pre-existing `reserve_margin_unpriceable_assets` error fires first and the
+    test passes for the wrong reason — which is exactly what the first version
+    of this fixture did.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=3, freq="h"))
+    n.add("Bus", "b")
+    n.add("Load", "l", bus="b", p_set=50.0)
+    n.add("Carrier", "gas")
+    for name, p_nom, cost in (("g", 100.0, 10.0), ("slack", 5000.0, 999.0)):
+        n.add("Generator", name, bus="b", p_nom=p_nom, marginal_cost=cost,
+              carrier="gas", outage_rate_value=0.05,
+              outage_rate_basis="EFORd", mttr_hours=24.0)
+    n.generators_t.p_max_pu["g"] = [1.0, np.nan, 1.0]
+    return n
+
+
+@pytest.mark.parametrize("which", ["coupling", "margin"])
+def test_K6a_a_loop_refuses_a_nan_bound_up_front(which):
+    """★ K6a. Every iterate of either loop calls `run_simulation`, which now
+    refuses a non-finite LP bound — so without an up-front check the loop
+    spends its whole budget failing identically and ends `budget_exhausted`,
+    advising "Raise max_solves" (coupling) or the margin equivalent. That
+    advice can never work: no number of solves fixes a NaN.
+
+    `_margin_out_of_reach` cannot save this — it relabels `validation_failed`
+    only when the MARGIN is the cause, which it is not here.
+
+    Bite (verified): drop the up-front check from the loop under test; the
+    other loop stays green, which is why this is parametrised.
+    """
+    import routers.results as R
+    from fastapi import HTTPException
+    from routers.simulation import _state
+
+    n = _margin_ready_network()
+    PyPSAService.set_network(n)
+    _state["solver_config"] = _cfg_with_margin()
+    # Isolate the mesh: if a previous case's loop actually STARTED (which is
+    # what the bite for the other loop causes), the study it holds would make
+    # this one refuse 409 "a study is running" and the test would pass for the
+    # wrong reason. Each case starts with an empty mesh and leaves one.
+    for _k in ("coupling_loop", "margin_loop", "mc", "frontier", "fmea_sweep"):
+        _state.pop(_k, None)
+
+    try:
+        with pytest.raises(HTTPException) as e:
+            if which == "coupling":
+                R.post_coupling_loop(body=R.CouplingLoopRequest(target_lole_h=1.0))
+            else:
+                R.post_margin_loop(body=R.MarginLoopRequest(target_lole_h=1.0))
+        assert e.value.status_code == 422
+        assert "p_max_pu" in str(e.value.detail)
+    finally:
+        # In a `finally`, because the whole point of the bite is that the call
+        # does NOT raise — it starts a real study instead. Cleaning up only on
+        # the happy path leaks that study into the next parametrised case,
+        # which then refuses 409 and fails for the wrong reason.
+        for _k in ("coupling_loop", "margin_loop", "mc", "frontier",
+                   "fmea_sweep"):
+            rec = _state.pop(_k, None)
+            th = (rec or {}).get("thread") if isinstance(rec, dict) else None
+            if th is not None:
+                ev = rec.get("stop_event")
+                if ev is not None:
+                    ev.set()
+                th.join(timeout=30)
+
+
+def _cfg_with_margin():
+    from services.solver_service import SolverConfig
+    return SolverConfig(solver_name="highs", voll=3000.0, reserve_margin=0.1)

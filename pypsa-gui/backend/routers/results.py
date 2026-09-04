@@ -3949,6 +3949,18 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
     # positional CRN substreams shift under it, and a fleet that is empty here
     # would be empty for every evaluation too.
     n = PyPSAService.get_network()
+    # Phase 12f: the same up-front refusal the margin loop makes, for the same
+    # reason and against the same defect. A non-finite value in one of the five
+    # finite-default LP bounds is a blocking preflight error, so EVERY iterate
+    # would come back `validation_failed`, the loop would spend its whole
+    # budget, and the verdict copy would advise "Raise max_solves, or start
+    # from a tighter eps0" — advice that can never work here.
+    #
+    # Guarded at BOTH loops deliberately: this codebase already learned that a
+    # guard repeated at seven call sites is the one the eighth route forgets.
+    from services.validation_service import _check_nonfinite_bounds as _cnb
+    for _iss in _cnb(n):
+        raise HTTPException(422, _iss.message)
     with PyPSAService.get_lock():
         try:
             # Phase 12c-0: the LP's demand basis — the plan the loop
@@ -4505,7 +4517,10 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
     from services.adequacy.metrics import horizon_years, resolve_time_basis
     from services.adequacy.sweep import _solve_once
     from services.solver_service import _prm_margin, reserve_margin_facts
-    from services.validation_service import _check_reserve_margin
+    from services.validation_service import (
+        _check_nonfinite_bounds,
+        _check_reserve_margin,
+    )
     from routers.simulation import _state_update
 
     # ── the 409 mesh ──────────────────────────────────────────────────────
@@ -4662,8 +4677,19 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         # blocking validation, ending `budget_exhausted` and advising "raise
         # max_solves", which can never work here.
         margin_issues = _check_reserve_margin(n, facts_cfg)
+        # Phase 12f: the SAME up-front refusal, for the same reason. A
+        # non-finite value in one of the five finite-default LP bounds is a
+        # blocking preflight error, so every iterate would fail validation and
+        # the loop would end `budget_exhausted` advising "raise max_solves" —
+        # `_margin_out_of_reach` only relabels `validation_failed` when the
+        # MARGIN is the cause, and it is not here. This check has to be CALLED,
+        # not merely allowed through the filter below: `_check_reserve_margin`
+        # is one sub-validator, not `validate_for_run`, so a code it never
+        # produces can never appear in `margin_issues`.
+        margin_issues = margin_issues + _check_nonfinite_bounds(n)
     for iss in margin_issues:
-        if iss.code == "reserve_margin_unpriceable_assets":
+        if iss.code in ("reserve_margin_unpriceable_assets",
+                        "nonfinite_bound", "nonfinite_bound_partial_coverage"):
             raise HTTPException(422, iss.message)
 
     # The ceiling: a margin is achievable iff EVERY period can reach it, so
