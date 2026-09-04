@@ -42,12 +42,12 @@ _FACADE_ORIGINS: dict[str, str | None] = {
     "_canonical_load_carrier_key": None,  # routers/results.py
 
     # ── Task 1 → services/solver/periodized_costs.py ─────────────────────────
-    "_annuity": None,
-    "_reference_build_year": None,
-    "_pv_factor_series": None,
-    "fill_periodized_cost_defaults": None,
-    "with_periodized_cost_defaults": None,
-    "periodized_capital_costs": None,
+    "_annuity": "services.solver.periodized_costs",
+    "_reference_build_year": "services.solver.periodized_costs",
+    "_pv_factor_series": "services.solver.periodized_costs",
+    "fill_periodized_cost_defaults": "services.solver.periodized_costs",
+    "with_periodized_cost_defaults": "services.solver.periodized_costs",
+    "periodized_capital_costs": "services.solver.periodized_costs",
 
     # ── Task 2 → services/solver/diagnostics.py ──────────────────────────────
     "_diagnose_infeasibility": None,
