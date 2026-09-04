@@ -122,11 +122,11 @@ is already a string. `_annuity` living here is also what unblocks diagnostics.
 `tests/golden/fixture.py`, `tests/test_results_range.py`,
 `tests/test_compare_cross_surface.py`.
 
-- [ ] **Step 1: Flip the six names in `_FACADE_ORIGINS` (red)** — fails on `ModuleNotFoundError`.
-- [ ] **Step 2: Create the package; move lines 3427–3705 verbatim.** `services/solver/__init__.py` re-exports nothing: the façade is `solver_service`, and a second export surface would let call sites drift onto the package.
-- [ ] **Step 3: Wire the façade.**
-- [ ] **Step 4: Tripwire green, then full suite; failing set unchanged.**
-- [ ] **Step 5: Commit.**
+- [x] **Step 1: Flip the six names in `_FACADE_ORIGINS` (red)** — fails on `ModuleNotFoundError`.
+- [x] **Step 2: Create the package; move lines 3427–3705 verbatim.** `services/solver/__init__.py` re-exports nothing: the façade is `solver_service`, and a second export surface would let call sites drift onto the package.
+- [x] **Step 3: Wire the façade.**
+- [x] **Step 4: Tripwire green, then full suite; failing set unchanged.**
+- [x] **Step 5: Commit.**
 
 ---
 
@@ -147,7 +147,7 @@ from `solver_service` **inside a function body**, with a comment naming the
 exactly as it is — this task does not get to reopen it, and the façade keeps
 it working.
 
-- [ ] **Steps 1–5** as Task 1.
+- [x] **Steps 1–5** as Task 1.
 
 ---
 
@@ -171,7 +171,7 @@ file in this task's diff.
 `services/validation_service.py`, `routers/results.py`
 (`_canonical_load_carrier_key`), `tests/test_myopic_build_period_visibility.py`.
 
-- [ ] **Steps 1–5** as Task 1.
+- [x] **Steps 1–5** as Task 1.
 
 ---
 
@@ -196,7 +196,7 @@ parent.
 
 **External importers:** `tests/test_infeasibility_diagnosis.py`.
 
-- [ ] **Steps 1–5** as Task 1.
+- [x] **Steps 1–5** as Task 1.
 
 ---
 
@@ -215,7 +215,7 @@ exactly this.
 **External importers:** `tests/test_solve_queue.py`, `tests/test_qa_step0a.py`,
 `tests/test_myopic_feasibility.py`, `routers/simulation.py`.
 
-- [ ] **Steps 1–5** as Task 1.
+- [x] **Steps 1–5** as Task 1.
 
 ---
 
@@ -232,7 +232,7 @@ specifically, not just the suite total.
 `_wrap_with_objective_scale`, `_rescale_results_for_objective`, and the
 `_COND_*` constants at `:3095–3097`. Depends on `_safe_log` (Task 5).
 
-- [ ] **Steps 1–5** as Task 1.
+- [x] **Steps 1–5** as Task 1.
 
 ---
 
@@ -257,19 +257,69 @@ carefully rather than glancing at a count.
 `tests/test_myopic_build_period_visibility.py`, `tests/qa_myopic_sclopf.py`,
 `tests/qa_myopic_future_vintage_defer.py`.
 
-- [ ] **Steps 1–5** as Task 1.
+- [x] **Steps 1–5** as Task 1.
 
 ---
 
-## Task 8: Verify the shape
+## Task 8: Verify the shape — done
 
-- [ ] `wc -l services/solver_service.py` reports ~1,370, down from 5,783.
-- [ ] No carved module imports `solver_service` — `grep -rn "solver_service" services/solver/` returns only docstring prose.
-- [ ] No new function-body import was added to break a cycle.
-- [ ] `git diff master --stat` shows zero changed lines in `tests/` other than the added `test_solver_facade_surface.py`.
-- [ ] Update `.cursor/skills/gui-backend-change/SKILL.md`: its "avoid drive-by refactors of `solver_service.py`" line should now point at `services/solver/` for where new solver code belongs.
+Checked against `master`, not asserted:
 
----
+- [x] `solver_service.py` is **1,191 lines, down from 5,783** (target was ~1,370).
+- [x] **No carved module imports `solver_service`** — `grep` over `services/solver/*.py` returns nothing but docstring prose.
+- [x] **Zero new function-body imports.** An AST count of imports inside function bodies gives 28 before and 28 after, and the multiset difference is empty: the DAG removed the cycles rather than deferring them the way `ac_pf_service.py` had to.
+- [x] **Nothing lost.** All 70 top-level definitions in `master`'s `solver_service.py` are still reachable; the set difference is empty in both directions once `master`'s own function-body imports are accounted for.
+- [x] **No call site changed.** `git diff master --name-status` lists 12 files: 2 docs, 8 new modules, `solver_service.py`, and the one added test. Not a single existing test, router, or sibling service.
+- [x] `.cursor/skills/gui-backend-change/SKILL.md` updated — it now names the seven modules, states the two rules that hold the layout together, and points its "avoid drive-by refactors" line at this spec as the deliberate alternative.
+
+### Final shape
+
+| module | lines |
+|---|---|
+| `services/solver_service.py` | 1,191 |
+| `services/solver/diagnostics.py` | 1,190 |
+| `services/solver/myopic.py` | 1,105 |
+| `services/solver/assumptions.py` | 1,050 |
+| `services/solver/objective.py` | 785 |
+| `services/solver/runtime.py` | 363 |
+| `services/solver/periodized_costs.py` | 306 |
+| `services/solver/vintage_store.py` | 63 |
+| `services/solver/__init__.py` | 15 |
+
+### Verification runs
+
+All in `/tmp/claude-0/venv` (pinned `pypsa==1.1.2`, `linopy==0.8.0`, `pandas<3`),
+which **approximates** `pixi run gui-tests` — this session has no pixi.
+
+| point | collected | passed | failed | skipped |
+|---|---|---|---|---|
+| baseline (`master`) | 2,306 | 2,282 | 2 | 22 |
+| after Task 1 | 2,341 | 2,317 | 2 | 22 |
+| after Tasks 2–4 | 2,350 | 2,326 | 2 | 22 |
+| after Tasks 5–7 | 2,362 | 2,338 | 2 | 22 |
+
+The failing set is byte-identical at every point: `test_app_paths.py`'s two
+macOS `Library/Application Support` assertions, which cannot pass on Linux.
+
+### What actually went wrong, and what caught it
+
+Task 3's line range for the load-carrier block silently swallowed `_safe_log`,
+sending it to `assumptions.py` and leaving five callers in `solver_service`
+referring to a name that was no longer there. Python binds globals at call
+time, so the module still imported, the app still booted, and the tripwire
+still passed — it would have broken inside a real solve.
+
+That is why `test_no_call_site_was_left_behind_by_a_move` exists. It runs ruff
+F821 over `services/` and `routers/` and was confirmed to catch the defect by
+reintroducing it and watching it fail. On the final batch it earned its place
+again, flagging six `"pypsa.Network"` annotations in `objective.py` in seconds
+rather than through a 35-minute suite run.
+
+The lesson for Phases 2–4: **verify extraction boundaries by AST, never by line
+range.** Every cut in this plan was validated by AST beforehand — which is how
+the three cycles were found before any code moved — but the line ranges used to
+*perform* the cuts were still hand-derived, and that is where the one real
+defect came from.
 
 ## Phase 2 — `routers/results.py` (4,106 lines)
 
