@@ -3,7 +3,9 @@
 **Branch:** `feature/llm-provider-config` (36 commits ahead of local `master`)
 **Head at handover:** `cf3d3102`
 **Status:** all 16 planned tasks implemented and individually reviewed.
-**NOT done:** the two closing reviews and the ADR-0002 live probes. See
+**NOT done:** the ADR-0002 live probes, and the 38 findings the two closing
+reviews returned (both say DO NOT MERGE — see
+[the findings doc](../findings/2026-09-04-llm-provider-config-closing-reviews.md)). See
 [What is genuinely not finished](#what-is-genuinely-not-finished) — read that
 section before deciding this is ready to merge, because a green suite here
 does **not** mean what it usually means.
@@ -135,11 +137,36 @@ pixi run -e test python pypsa-gui/backend/smoke/run_chat_smoke.py --profile <id>
 Note this debt predates the branch: the already-merged provider **seam** also
 shipped without a live probe. These probes close both.
 
-### 2. The two closing reviews never completed
+### 2. The two closing reviews — NOW COMPLETE. Both say DO NOT MERGE.
 
-The final whole-branch review and the adversarial security pass were dispatched
-and **killed by an API session limit**, along with four sub-agents. Neither
-produced a verdict. Re-run both before merging:
+> **Update 2026-09-04.** Both reviews have now run against `93ddbf79`,
+> independently and in parallel, and both return **DO NOT MERGE**. 38 findings:
+> **[2026-09-04-llm-provider-config-closing-reviews.md](../findings/2026-09-04-llm-provider-config-closing-reviews.md)**
+> — read that before touching this branch.
+>
+> The two that change what the branch *is*:
+>
+> 1. **`tools: false` is advertised but never enforced.** `profile.tools` is
+>    read only on outbound paths; the dispatch loop iterates `tool_uses`
+>    ungated, so an endpoint returning tool_use blocks it was never offered has
+>    them executed. Of 121 tools, 34 are confirmation-gated and **87 are not**,
+>    31 of those mutating. This inverts the branch's own premise: the headline
+>    feature is pointing the assistant at an arbitrary endpoint, which promotes
+>    that endpoint to attacker-controlled input.
+> 2. **The OpenAI wire may be dead on arrival.** The request sends both
+>    `max_tokens` and `max_completion_tokens`; the branch's own `presets.json`
+>    help text says current models reject the former. The only test asserts
+>    field presence through a `MockTransport` and cannot see it. One live call
+>    settles it — this is exactly what ADR-0002 exists for.
+>
+> Nearly every finding is a *composition* failure: two correct halves with no
+> test spanning the seam. Twenty-four per-task reviews and a green gate saw
+> none of them.
+
+The original entry, kept for the record — the final whole-branch review and the
+adversarial security pass were dispatched and **killed by an API session limit**,
+along with four sub-agents. Neither produced a verdict at the time. What they
+were scoped to cover:
 
 - Whole-branch review over `master..HEAD` (36 commits) — cross-task coherence,
   dead code, surviving false-fact comments, and triage of the deferred items in
