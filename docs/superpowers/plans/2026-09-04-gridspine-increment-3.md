@@ -50,7 +50,8 @@ The honest cost, which must be stated in the ledger and the report: **the rankin
 
 **Interfaces:**
 - `lightsim2grid` currently appears in `pixi.lock` ONLY as an optional extra of pandapower (`extra == 'performance'` / `'all'`); `import lightsim2grid` fails in `default`. Add it as a pinned `[pypi-dependencies]` entry, same discipline as `pandapower = "==3.1.2"` — an exact pin, because a range resolved differently per platform is the defect that pin exists to prevent.
-- Re-solve the lock with the repo's own task (`pixi run sync-locks`), not by hand.
+- **Re-locking is not a one-line change, and `pixi run sync-locks` is not the tool for it.** `sync-locks` runs `pixi install -e default` and then EXPORTS explicit specs to `envs/`; it does not re-solve. The solve happens when `pixi.toml` changes. And the workspace sets `exclude-newer = "7d"` with `0d` overrides for linopy/pypsa/atlite, so that window is relative to the moment of solving: re-locking today moves packages that have nothing to do with lightsim2grid, across all four platforms of a 45 000-line lock.
+- Therefore: treat this as a lockfile change, not a dependency addition. Inspect the resulting `pixi.lock` diff and report its scope BEFORE committing; run `unit-tests` and `integration-tests`, not just `gridspine-tests`, because the environment under them moved too. The repo has `.github/workflows/update-lockfile.yaml` — check whether the lock update belongs in that managed process rather than in this task.
 - **Confirm the entry point against the INSTALLED version and record it in the task report.** The contingency API has been renamed across releases (`SecurityAnalysis` → `ContingencyAnalysis`) and the pandapower bridge lives in `lightsim2grid.gridmodel.init_from_pandapower`. Do not write tasks 4–5 against a remembered signature; read the installed package.
 
 - [ ] **Step 1: failing test** — extend the env-wiring check to import lightsim2grid and assert a version; RED before the pin.
