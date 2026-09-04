@@ -62,6 +62,12 @@ Per active investment period P, add ONE constraint:
   degenerates to one horizon-wide constraint at `max_P peak_P`. Record it in
   the stash as `horizon_wide: true` so the panel can say so.
 
+**[Phase 12d]** The mask is `services.adequacy.activity.active_mask` —
+`_active` delegates to it (keeping its own all-True guard), so the margin
+and the adequacy engines, which now mask by the same call and score a
+vintage-expanded parent per period from the persisted breakdown, agree by
+construction (E12 pins the delegation).
+
 ### 2.2 Derating `d_g` [B4, S1, S3]
 `d_g = (1 − q_g) × static_p_max_pu_g`, clamped to [0, 1].
 - `static_p_max_pu_g` = `float(gens.at[g, "p_max_pu"])` when the column exists

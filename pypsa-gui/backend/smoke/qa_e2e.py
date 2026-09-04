@@ -4169,6 +4169,127 @@ def suite_S26():
     restore()
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
+def suite_S27():
+    """
+    The engines honour activity, live (Phase 12d).
+
+    The plan's F1 over the API: two 24 h periods (2030, 2035), a flat 80 MW
+    load, two 50 MW gas units at q = 0.10 and `new` — 40 MW at q = 0.20 with
+    `build_year = 2035`. By hand the 2030 fleet (two units) has LOLP 0.19
+    and the 2035 fleet (three) 0.046: per-period LOLE 4.56 h and 1.104 h.
+    Before 12d every engine scored `new` in 2030 too and both periods read
+    1.104 h. `GET /results/copt` lands on the closed form per period and
+    discloses `new` as inactive in 2030; `POST /results/mc` lands inside
+    its per-period intervals and carries the same disclosure.
+
+    Bitten live (recorded in the plan): with the per-block COPT replaced by
+    the single-table path, 2030 reads the 2035 value.
+    """
+    print("\nS27 - The engines honour activity, live (area 27)")
+    name = "qa_e2e_activity"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S27.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    LOLE_2030, LOLE_2035 = 0.19 * 24, 0.046 * 24
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST", body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots/multi_period", method="POST",
+                      body={"periods": [2030, 2035],
+                            "start": "2030-01-01 00:00",
+                            "end": "2030-01-01 23:00", "freq": "h"})[0])
+    for nm in ("base_a", "base_b"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": nm, "bus": "b", "carrier": "gas",
+                                "p_nom": 50.0, "marginal_cost": 10.0,
+                                "build_year": 2000, "lifetime": 100.0,
+                                "outage_rate_value": 0.10,
+                                "outage_rate_basis": "FOR",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "new", "bus": "b", "carrier": "gas",
+                            "p_nom": 40.0, "marginal_cost": 20.0,
+                            "build_year": 2035, "lifetime": 100.0,
+                            "outage_rate_value": 0.20,
+                            "outage_rate_basis": "FOR",
+                            "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 80.0})[0])
+    st_cfg, _ = put_cfg(multi_investment_periods=True)
+    if [c for c in built if c not in (200, 201)] or st_cfg != 200:
+        for i in (1, 2):
+            skip(f"S27.{i}", f"fixture build failed: {built} cfg={st_cfg}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    # ── S27.1 — the COPT per period at the closed form, and the disclosure.
+    st_k, copt = http("/api/results/copt")
+    byp = ((copt or {}).get("metrics") or {}).get("by_period") or {}
+    act = (copt or {}).get("activity") or {}
+    l30 = float((byp.get("2030") or {}).get("lole_hours") or -1.0)
+    l35 = float((byp.get("2035") or {}).get("lole_hours") or -1.0)
+    record("S27.1",
+           st_k == 200
+           and abs(l30 - LOLE_2030) < 1e-6 and abs(l35 - LOLE_2035) < 1e-6
+           and ((act.get("by_period") or {}).get("2030") or {}).get("inactive") == ["new"]
+           and ((act.get("by_period") or {}).get("2035") or {}).get("inactive") == []
+           and "build year" in str(act.get("note") or ""),
+           f"copt={st_k}; by_period 2030={l30:.4f} (hand {LOLE_2030:.4f}) "
+           f"2035={l35:.4f} (hand {LOLE_2035:.4f}); activity={act}")
+
+    # ── S27.2 — the MC inside its per-period intervals, same disclosure.
+    st_m, _ = http("/api/results/mc", method="POST",
+                   body={"draws": 400, "seed": 1, "cov_target": 1.0})
+    mc = None
+    if st_m == 200:
+        for _ in range(240):
+            st_g, rec = http("/api/results/mc")
+            if st_g == 200 and (rec or {}).get("status") in ("done", "failed"):
+                mc = rec
+                break
+            time.sleep(0.5)
+    res = ((mc or {}).get("result") or {})
+    mbp = ((res.get("metrics") or {}).get("by_period") or {})
+    mact = res.get("activity") or {}
+
+    def inside(period, hand):
+        ci = (mbp.get(period) or {}).get("lole_ci") or [None, None]
+        try:
+            return ci[0] <= hand <= ci[1]
+        except TypeError:
+            return False
+
+    record("S27.2",
+           (mc or {}).get("status") == "done"
+           and inside("2030", LOLE_2030) and inside("2035", LOLE_2035)
+           and ((mact.get("by_period") or {}).get("2030") or {}).get("inactive") == ["new"]
+           and "build year" in str(mact.get("note") or ""),
+           f"mc={(mc or {}).get('status')}; by_period={ {k: (v.get('lole_hours'), v.get('lole_ci')) for k, v in mbp.items()} }; "
+           f"activity={mact}")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -4258,6 +4379,8 @@ def main() -> int:
 
     if run("S26"):
         suite_S26()
+    if run("S27"):
+        suite_S27()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

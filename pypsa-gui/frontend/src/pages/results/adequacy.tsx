@@ -2,6 +2,7 @@
 // Kept as a small standalone module so the warning logic and the chips are
 // unit-testable without mounting SolverSettings or LostLoadTab.
 import { AlertTriangle, Target } from 'lucide-react'
+import type { ActivitySummary } from '../../api/simulation'
 
 // Payload of GET /results/adequacy (models/adequacy.py, serialized). Only
 // the fields the UI renders — the backend owns the full contract.
@@ -170,7 +171,21 @@ export interface CoptPayload {
   }
   /** The one sentence about profiled units; null when the fleet has none. */
   fidelity_note?: string | null
+  /** Phase 12d: the activity disclosure (see `ActivitySummary`). */
+  activity?: ActivitySummary
   voll_eur_per_mwh: number
+}
+
+/** "2 inactive in 2030, 1 partial in 2040" — the chip text for an activity
+ *  disclosure; empty when nothing is masked. */
+export function activityChipText(a: ActivitySummary | undefined | null): string {
+  if (!a || !a.note) return ''
+  const bits: string[] = []
+  for (const [period, v] of Object.entries(a.by_period ?? {})) {
+    if (v.inactive.length) bits.push(`${v.inactive.length} inactive in ${period}`)
+    if (v.partial.length) bits.push(`${v.partial.length} partial in ${period}`)
+  }
+  return bits.join(', ')
 }
 
 // The screening EUE dwarfing the LP proxy's ENS means storage/network are
@@ -225,6 +240,15 @@ export function CoptChips({ copt, proxyEnsMwh }: {
       <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted" title={tip}>
         {copt.fleet.units} unit(s), {copt.fleet.must_take} must-take
       </span>
+      {copt.activity?.note && (
+        <span
+          className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted"
+          data-testid="copt-activity-note"
+          title={copt.activity.note}
+        >
+          {activityChipText(copt.activity)}
+        </span>
+      )}
       {copt.fidelity_note && (
         <span
           className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted"

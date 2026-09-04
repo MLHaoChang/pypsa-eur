@@ -394,6 +394,16 @@ contains outages) and preflight says so (`static_p_max_pu_not_applied`); the res
 margin applies it, so the margin and the engines disagree about such a unit by a
 recorded 25 % / 2 % on the nuclear import — an open item, not this amendment's.
 
+**[Phase 12d — activity and vintages.]** Every engine scores an asset at
+its capacity IN THE PERIOD: PyPSA's own `get_active_assets(P)` (build year,
+lifetime, `active`) and, for a vintage-expanded parent, the per-vintage
+breakdown the restore persists — the same mask the LP and the reserve
+margin apply. The COPT evaluates one table per period block; the sampler
+carries the capacity series as its UP value; the portfolio block no longer
+refuses `activity_mismatch` on a farm built later, it prices it where it
+exists and reports `no_contribution` where it does not. Payloads disclose
+what was masked (`activity`). MC spec v1.7.
+
 ### 5.4 Criticality — IEC 60812 FMECA, no RPN
 
 ```

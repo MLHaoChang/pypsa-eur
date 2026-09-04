@@ -455,3 +455,74 @@ correction of the other."*
 
 **§6, amended.** `tests/test_adequacy_portfolio.py` (B1–B13 as numbered
 in the plan) and four `McPanel` cases; live S26.
+
+## Amendment v1.7 — activity and vintages (Phase 12d)
+
+**§2.1, amended — capacity is per period.** For a component row `i` and a
+period block `P` (`activity.period_blocks`, formerly `mc._period_blocks`):
+
+    c_{i,P} = cap_i · [i active in P]                             (plain row)
+    c_{i,P} = initial_i · [parent active in P]
+            + Σ_v opt_v · [by_v ≤ P < by_v + lt_v] · [parent.active]   (vintage-expanded parent)
+
+`cap_i = solved_capacity(row)`; `[i active in P]` is PyPSA's own
+`get_active_assets(P)` (the static `active` column alone for `"ALL"`) —
+`activity.active_mask`, the SAME call the reserve margin's `_active` now
+delegates to. The vintage line reads the persisted breakdown
+`n.meta["vintage_results"][cls][parent]` (`initial_capacity`; per vintage
+`build_year`, `p_nom_opt`, and `lifetime`, which the restore now persists
+and which falls back to the parent's finite positive lifetime, else `inf`),
+used only when `initial + Σ opt == p_nom_opt(parent)` (rel 1e-9 / abs
+1e-6); the myopic strategy's `source: "myopic_freeze"` entries are
+breakdowns under the same rule; `apply_vintage_bounds` clears its own
+entries at every solve start so a re-solve without bounds cannot keep one.
+
+`CoptUnit.capacity_series` / `StorageSpec.capacity_series`: the `(H,)` MW
+series `c_{i,P(h)}`, `None` when constant at `capacity_mw = max_P c_{i,P}`
+(`p_nom_mw` for a store) — the scalar path, byte for byte. Membership is
+NOT per period: a row is in the fleet when `cap_max > 0` (or under
+`keep_zero_capacity`), so the CRN substreams survive a solve that changes
+what is active. `_membership_walk` yields `(g, cap_max, capacity_series,
+row)` and every consumer reads that one walk. The residual nets a must-take
+at `p_max_pu_h × c_h`; `vre_profiles` preserve the same product.
+
+**§2.3, amended.** `sample_capacity`: the column is `(profile or 1) ×
+capacity_series` when a series is present — same `np.add(where=)`
+broadcast, chain and consumption untouched; an all-zero block is
+bit-identical to excluding the unit there (E3).
+
+**§2.4, amended.** `_simulate_blocks`: per block, each store enters at its
+capacity in the block (dropped at 0, energy bound following the power
+fraction); without a store series the arrays are the fleet as built, once.
+
+**§3, amended.** `unit_nameplate_mw` is the best ACTIVE hour,
+`max_h(profile_h × c_h)`; `baseline_key` hashes the capacity series of
+every unit and store; `elcc_of_removal` is unchanged.
+
+**COPT (design §3.1).** `screening_analysis` evaluates the fleet PER BLOCK
+when any unit carries a series (one table per block at the block's scalar
+capacities, profile sliced; exact for piecewise-constant capacity), merging
+LOLE/EUE by sum, `lolp_max` by max, `by_period` by union, criticality rows
+by name (ΔEUE and € summed, severity recomputed), the split de-duplicated
+(`netted` if netted in any block, else `mixed`), `dist`/`residual` as dicts
+keyed by block; with no series it is the single-block path it was.
+
+**`portfolio.py`, amended.** `Member.capacity_by_period`; the activity
+check refuses only a member the engines count in a period the margin has
+no row for (`c_P > 0`); the capacity check compares the by-parent aggregate
+with `c_P`; `activity_mismatch` stays reachable as a tripwire (a credited
+row the snapshot does not know). `network_fingerprint` adds the static
+`active` columns, storage `build_year`/`lifetime`, and the persisted
+breakdown.
+
+**§4, amended.** `/results/copt` and the MC result carry `activity:
+{by_period: {label: {inactive: [names], partial: [names]}}, note}`
+(`activity.activity_summary`; `note` null when nothing is masked). The
+loops' `_hash` is `coupling.snapshot_hash`, which hashes the series.
+
+**§5, amended.** One chip on the COPT card (`copt-activity-note`) and on
+the MC panel (`mc-activity-note`): "n inactive in P, m partial in P", the
+sentence as title.
+
+**§6, amended.** `tests/test_adequacy_activity.py` (E1–E12 as numbered in
+the plan, every ★ bitten); B12 rewritten; live S27.

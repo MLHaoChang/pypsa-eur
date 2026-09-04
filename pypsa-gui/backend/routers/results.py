@@ -30,6 +30,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.economics import co2_intensity_map
 from services.pypsa_service import PyPSAService
+from services.adequacy.coupling import snapshot_hash as _snapshot_hash
 from services.serialization import (
     df_to_json,
     safe_float as _safe_float,
@@ -3370,6 +3371,8 @@ def post_mc(body: McRequest | None = None):
     record: dict = {"status": "running", "result": None, "error": None,
                     "started_at": time.time(), "thread": None}
 
+    from services.adequacy.activity import activity_summary as _activity_summary
+
     def worker():
         try:
             metrics = mc_adequacy(inputs, draws=draws, seed=seed,
@@ -3428,6 +3431,9 @@ def post_mc(body: McRequest | None = None):
                     "profile_units": [
                         str(u.name) for u in inputs.units
                         if getattr(u, "profile", None) is not None],
+                    # Phase 12d: the activity disclosure (see /copt).
+                    "activity": _activity_summary(
+                        inputs.units, inputs.storage, inputs.periods),
                 })
         except Exception as exc:                              # noqa: BLE001
             record.update(status="failed", result=None, error=str(exc),
@@ -3827,24 +3833,9 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
         the same seed and draw count, so reuse is exact where cost equality
         was a guess.
         """
-        import numpy as _np
-        h = hashlib.sha256()
-        for name, cap, prof in sorted(
-                (str(u.name), float(u.capacity_mw),
-                 # Phase 12c-pre: the sampler also reads the unit's
-                 # availability series; hash its bytes so "exactly what the
-                 # MC reads" stays true (shipped-code review, finding 5).
-                 b"" if getattr(u, "profile", None) is None
-                 else _np.asarray(u.profile, dtype=_np.float64).tobytes())
-                for u in mc_inputs.units):
-            h.update(f"{name}\x1f{cap!r}\x1e".encode() + prof + b"\x1e")
-        h.update(b"\x1d")
-        for row in sorted((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh))
-                          for s in mc_inputs.storage):
-            h.update(("\x1f".join(repr(v) for v in row) + "\x1e").encode())
-        h.update(b"\x1d")
-        h.update(mc_inputs.residual.tobytes())
-        return h.hexdigest()
+        # Phase 12d: one implementation for both loops, testable
+        # (`tests/test_adequacy_activity.py` E8).
+        return _snapshot_hash(mc_inputs)
 
     _margin_bound_flag = [False]
 
@@ -4511,24 +4502,9 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         bytes. NOT the objective: degenerate optima give equal cost for
         different plans. Equal hash ⇒ bit-identical MC under the same seed and
         draw count, so the controller's plateau reuse is exact."""
-        import numpy as _np
-        h = hashlib.sha256()
-        for name, cap, prof in sorted(
-                (str(u.name), float(u.capacity_mw),
-                 # Phase 12c-pre: the sampler also reads the unit's
-                 # availability series; hash its bytes so "exactly what the
-                 # MC reads" stays true (shipped-code review, finding 5).
-                 b"" if getattr(u, "profile", None) is None
-                 else _np.asarray(u.profile, dtype=_np.float64).tobytes())
-                for u in mc_inputs.units):
-            h.update(f"{name}\x1f{cap!r}\x1e".encode() + prof + b"\x1e")
-        h.update(b"\x1d")
-        for row in sorted((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh))
-                          for s in mc_inputs.storage):
-            h.update(("\x1f".join(repr(v) for v in row) + "\x1e").encode())
-        h.update(b"\x1d")
-        h.update(mc_inputs.residual.tobytes())
-        return h.hexdigest()
+        # Phase 12d: one implementation for both loops, testable
+        # (`tests/test_adequacy_activity.py` E8).
+        return _snapshot_hash(mc_inputs)
 
     def _margin_out_of_reach(m: float) -> str | None:
         """Is THIS margin impossible from the candidate set — the same
@@ -5077,6 +5053,8 @@ def get_copt():
     204 = nothing to convolve: no electrical generator carries resolvable
     occurrence data (see services/adequacy/occurrence.py).
     """
+    from services.adequacy.activity import activity_summary as _activity_summary
+    from services.adequacy.activity import period_blocks as _period_blocks
     from services.adequacy.copt import (
         K_EXACT,
         fleet_and_residual,
@@ -5147,6 +5125,10 @@ def get_copt():
             "k_exact": K_EXACT,
         },
         "fidelity_note": analysis["fidelity_note"],
+        # Phase 12d: which units the engines masked in which period, by
+        # build year / lifetime (and which are below nameplate, a later
+        # vintage not yet built), with the sentence that says so.
+        "activity": _activity_summary(units, (), _period_blocks(residual.index)),
         "voll_eur_per_mwh": voll,
     }
 

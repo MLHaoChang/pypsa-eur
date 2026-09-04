@@ -309,6 +309,27 @@ describe('McPanel', () => {
       .toMatch(/REWORDED-BY-BACKEND/)
   })
 
+  // Phase 12d: the MC result carries the same activity disclosure as the COPT.
+  it('renders the activity chip from the result payload, and none when nothing is masked', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue({
+      ...DONE,
+      result: { ...DONE.result!, activity: {
+        by_period: { '2030': { inactive: ['new'], partial: [] }, '2035': { inactive: [], partial: [] } },
+        note: 'The engines mask assets by build year and lifetime, as the LP and the reserve margin do — 2030: 1 inactive (new).',
+      } },
+    })
+    await openPanel()
+    const chip = await screen.findByTestId('mc-activity-note')
+    expect(chip.textContent).toBe('1 inactive in 2030')
+    expect(chip.getAttribute('title')).toMatch(/1 inactive \(new\)/)
+  })
+  it('shows no activity chip on a pre-phase result or a null note', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(DONE)
+    await openPanel()
+    await screen.findByTestId('mc-metrics')
+    expect(screen.queryByTestId('mc-activity-note')).toBeNull()
+  })
+
   // ★ Bite: the 409 handler shows a generic "busy" instead of the detail.
   it('names the blocker when a start is refused with 409', async () => {
     vi.mocked(resultsApi.startMc).mockRejectedValue(

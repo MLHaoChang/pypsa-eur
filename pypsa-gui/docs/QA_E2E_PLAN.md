@@ -522,6 +522,16 @@ mismatch and the fixes were re-applied from their patch. Restores are by
 saved copy and hash, never by `git checkout` — the rule already in force
 for the unit bites, now also for live ones.
 
+### S27 — The engines honour activity, live (area 27)
+| id | Assertion |
+|----|-----------|
+| S27.1 | On the Phase 12d F1 fixture built over the API (two 24 h periods 2030 / 2035, a flat 80 MW load, two 50 MW gas units at q = 0.10 and `new`, 40 MW at q = 0.20 with `build_year = 2035`), `GET /results/copt` lands on the closed form PER PERIOD — 2030 LOLE **4.56 h** (two units: LOLP 1 − 0.81) and 2035 **1.104 h** (three units: 0.01 + 2·0.09·0.2) — and its `activity.by_period` lists `new` as `inactive` in 2030 and nothing in 2035, with the sentence naming build year and lifetime. Before 12d both periods read 1.104 h |
+| S27.2 | `POST /results/mc` (400 draws) reports each period's hand value INSIDE that period's own `lole_ci`, and the result carries the same `activity` disclosure |
+
+**Bitten live** (recorded in the plan): with `screening_analysis`'s per-block
+path replaced by the single-table path, 2030 reads the 2035 value and S27.1
+fails; restored by hash.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

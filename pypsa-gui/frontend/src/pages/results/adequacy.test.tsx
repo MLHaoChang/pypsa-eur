@@ -115,6 +115,29 @@ describe('CoptChips — the screening row', () => {
     expect(chip.textContent).toBe('3 on a profile, 1 netted beyond the cap')
     expect(chip.getAttribute('title')).toMatch(/mixes them exactly per hour/)
   })
+  // Phase 12d: the engines mask by build year / lifetime; the chip counts
+  // what was masked per period and carries the payload's sentence.
+  it('names the masked units per period when the payload discloses activity', () => {
+    render(<CoptChips copt={coptPayload({
+      activity: {
+        by_period: { '2030': { inactive: ['new', 'late'], partial: ['wind'] },
+                     '2035': { inactive: [], partial: [] } },
+        note: 'The engines mask assets by build year and lifetime, as the LP and the reserve '
+          + 'margin do — 2030: 2 inactive (new, late); 1 below nameplate, a later vintage not '
+          + 'yet built (wind).',
+      },
+    })} proxyEnsMwh={null} />)
+    const chip = screen.getByTestId('copt-activity-note')
+    expect(chip.textContent).toBe('2 inactive in 2030, 1 partial in 2030')
+    expect(chip.getAttribute('title')).toMatch(/build year and lifetime/)
+  })
+  it('shows no activity chip when nothing is masked (null note) or on a pre-phase payload', () => {
+    render(<CoptChips copt={coptPayload()} proxyEnsMwh={null} />)
+    expect(screen.queryByTestId('copt-activity-note')).toBeNull()
+    render(<CoptChips copt={coptPayload({
+      activity: { by_period: { ALL: { inactive: [], partial: [] } }, note: null } })} proxyEnsMwh={null} />)
+    expect(screen.queryByTestId('copt-activity-note')).toBeNull()
+  })
   it('says nothing about profiles on a payload without the note (pre-phase or none)', () => {
     render(<CoptChips copt={coptPayload()} proxyEnsMwh={null} />)
     expect(screen.queryByTestId('copt-fidelity-note')).toBeNull()

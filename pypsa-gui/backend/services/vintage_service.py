@@ -162,6 +162,28 @@ def rename_asset(n, component_class: str, old_name: str, new_name: str) -> None:
 
 # ── Apply-at-solve-time ─────────────────────────────────────────────────────
 
+def _clear_bound_vintage_results(n) -> None:
+    """Remove every ``vintage_results`` entry without a ``source`` — the ones
+    ``_capture_and_drop_vintages`` writes — leaving entries other writers
+    tag (the myopic strategy's ``source: "myopic_freeze"``)."""
+    meta = getattr(n, "meta", None)
+    if not isinstance(meta, dict):
+        return
+    root = meta.get("vintage_results")
+    if not isinstance(root, dict):
+        return
+    for comp_class in list(root.keys()):
+        by_asset = root.get(comp_class)
+        if not isinstance(by_asset, dict):
+            root.pop(comp_class, None)
+            continue
+        for name in [k for k, v in by_asset.items()
+                     if not (isinstance(v, dict) and v.get("source"))]:
+            by_asset.pop(name, None)
+        if not by_asset:
+            root.pop(comp_class, None)
+
+
 def apply_vintage_bounds(
     n,
     undo_actions: list,
@@ -180,6 +202,14 @@ def apply_vintage_bounds(
     asset's `p_nom_extendable` flag (which we flip to False so it doesn't
     *also* get sized) is restored via the "col" undo entry.
     """
+    # Phase 12d: drop the breakdown THIS module wrote on a previous solve
+    # BEFORE any early return. With bounds removed, a re-solve used to keep
+    # the old per-vintage breakdown beside a parent the LP now sizes
+    # directly — and an engine reading it per period would score capacity
+    # by a plan that no longer exists (plan 12d v1 review, finding 6). The
+    # myopic strategy's own entries are its own to clear
+    # (`solver_service._clear_myopic_build_periods`).
+    _clear_bound_vintage_results(n)
     bucket = _ensure_meta_bucket(n)
     if not bucket:
         return 0
@@ -536,9 +566,24 @@ def apply_vintage_bounds(
                 for v_name in added_for_asset:
                     period_for_v = int(v_name.split("@")[-1])
                     bnds_v = periods_dict.get(str(period_for_v)) or {}
+                    # Phase 12d: the vintage's lifetime, read while the row
+                    # exists — the adequacy engines need it to know in which
+                    # periods this vintage's capacity is active once the row
+                    # is gone (`services.adequacy.activity`).
+                    # `df` was bound before `n.add` created the rows and
+                    # PyPSA may have replaced the frame since; read the LIVE
+                    # frame.
+                    try:
+                        live_df = getattr(n, attr)
+                        v_lifetime = float(live_df.at[v_name, "lifetime"])
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        v_lifetime = None
+                    if v_lifetime is not None and not math.isfinite(v_lifetime):
+                        v_lifetime = None
                     vintage_meta_for_asset.append({
                         "vintage_name": v_name,
                         "build_year": period_for_v,
+                        "lifetime": v_lifetime,
                         "p_nom_min": float(bnds_v.get("p_nom_min", 0.0)),
                         "p_nom_max": (
                             float(bnds_v["p_nom_max"])
@@ -759,6 +804,7 @@ def apply_vintage_bounds(
                         "periods": [
                             {
                                 "build_year": entry["build_year"],
+                                "lifetime": entry.get("lifetime"),
                                 "p_nom_opt": per_vintage_opt.get(entry["vintage_name"], 0.0),
                                 "p_nom_min": entry["p_nom_min"],
                                 "p_nom_max": entry["p_nom_max"],

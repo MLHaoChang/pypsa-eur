@@ -470,3 +470,42 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
         "eps_star": final["eps_permyriad"] if final is not None else None,
         "solves_used": solves,
     }
+
+
+# ── the loops' plan hash (Phase 12d: one implementation, testable) ────────
+
+def snapshot_hash(mc_inputs) -> str:
+    """sha256 over exactly what the MC reads — the sorted ``(name,
+    capacity_mw, profile bytes, capacity-series bytes)`` unit vector, the
+    sorted ``(name, p_nom_mw, e_nom_mwh, capacity-series bytes)`` storage
+    vector, and the residual bytes. NOT the objective: degenerate optima give
+    equal cost for different plans. Equal hash ⇒ bit-identical MC under the
+    same seed and draw count, so the loops' plateau reuse is exact. Both
+    certifying loops' ``_hash`` delegate here (12c-pre shipped-code review,
+    finding 5; 12d plan §2.6)."""
+    import hashlib
+    import numpy as _np
+    h = hashlib.sha256()
+    for name, cap, prof in sorted(
+            (str(u.name), float(u.capacity_mw),
+             # Phase 12c-pre: the sampler also reads the unit's
+             # availability series; hash its bytes so "exactly what the
+             # MC reads" stays true (shipped-code review, finding 5).
+             (b"" if getattr(u, "profile", None) is None
+              else _np.asarray(u.profile, dtype=_np.float64).tobytes())
+             # Phase 12d: …and its capacity series, in MW per hour.
+             + b"\x1e"
+             + (b"" if getattr(u, "capacity_series", None) is None
+                else _np.asarray(u.capacity_series, dtype=_np.float64).tobytes()))
+            for u in mc_inputs.units):
+        h.update(f"{name}\x1f{cap!r}\x1e".encode() + prof + b"\x1e")
+    h.update(b"\x1d")
+    for row, cs in sorted(
+            ((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh)),
+             b"" if getattr(s, "capacity_series", None) is None
+             else _np.asarray(s.capacity_series, dtype=_np.float64).tobytes())
+            for s in mc_inputs.storage):
+        h.update(("\x1f".join(repr(v) for v in row) + "\x1e").encode() + cs + b"\x1e")
+    h.update(b"\x1d")
+    h.update(mc_inputs.residual.tobytes())
+    return h.hexdigest()

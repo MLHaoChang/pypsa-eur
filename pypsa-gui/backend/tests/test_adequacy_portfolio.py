@@ -326,20 +326,24 @@ def test_B10_the_credits_are_the_margin_payloads_own_rows_for_the_members():
             assert r["credit_net_mw"] is None
 
 
-def test_B12_a_member_the_margin_masks_out_of_a_period_is_an_activity_mismatch():
-    """★ B12 (v3 review, finding 2). A farm with `build_year=2035` is masked
-    out of the 2030 margin but netted into the 2030 residual by the engines
-    (which ignore activity). The block refuses with `activity_mismatch`
-    naming the farm and the period, and prices nothing. Bite (verified):
-    drop the membership check → the comparison runs on unequal populations."""
+def test_B12_a_member_the_margin_masks_out_of_a_period_is_masked_by_the_engines_too():
+    """★ B12 (v3 review, finding 2; REWRITTEN in Phase 12d). A farm with
+    `build_year=2035` is masked out of the 2030 margin — and, since 12d, out
+    of the 2030 residual by the engines. The two sides agree: the block is
+    `ok`, the 2030 row is `no_contribution` (the group is available nowhere
+    in 2030) and 2035 is priced. Before 12d this refused with
+    `activity_mismatch`; that outcome is now the BITE (verified): net the
+    must-take without its capacity series."""
     from tests.test_adequacy_demand_basis import two_period_network
     from services.solver_service import SolverConfig
     n = two_period_network(wind_build_year=2035)
     sink = _solved(n, reserve_margin=0.15, multi_investment_periods=True)
-    block, _pop = _block_for(n, sink, cfg=SolverConfig(multi_investment_periods=True))
-    assert block["status"] == "activity_mismatch", block
-    assert "wind" in block["reason"] and "2030" in block["reason"]
-    assert block["periods"] == []
+    block, pop = _block_for(n, sink, cfg=SolverConfig(multi_investment_periods=True))
+    assert block["status"] == "ok", block["reason"]
+    assert pop["members"][0].capacity_by_period == (("2030", 0.0), ("2035", 100.0))
+    rows = {r["period"]: r for r in block["periods"]}
+    assert rows["2030"]["status"] == "no_contribution"
+    assert rows["2035"]["status"] == "ok"
 
 
 def test_B13_a_network_edited_after_the_solve_is_a_stale_report():

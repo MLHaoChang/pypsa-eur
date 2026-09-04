@@ -218,6 +218,13 @@ export interface ElccRow {
   baseline_lole_ci: [number, number]
 }
 
+/** Phase 12d: the engines' activity disclosure, on `/results/copt` and the
+ *  MC result alike. `note` is null when nothing is masked anywhere. */
+export interface ActivitySummary {
+  by_period: Record<string, { inactive: string[]; partial: string[] }>
+  note: string | null
+}
+
 export interface McResult {
   engine: string
   fidelity: string
@@ -228,6 +235,11 @@ export interface McResult {
   /** Phase 12c-pre: units whose outages were sampled ON their availability
    *  series rather than at nameplate. Absent on pre-phase payloads. */
   profile_units?: string[]
+  /** Phase 12d: which units / stores the engines masked in which period by
+   *  build year and lifetime (`inactive`), or scored below nameplate because
+   *  a later vintage is not yet built (`partial`), with the one sentence that
+   *  says so. Absent on pre-phase payloads. */
+  activity?: ActivitySummary
   /** Phase 12c: the profile-bearing fleet priced as ONE portfolio, per
    *  period, beside the reserve margin's own credit for the same group. A
    *  SIBLING of `elcc`, never a row in it; `null` when not requested. */

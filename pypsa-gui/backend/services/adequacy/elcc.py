@@ -112,14 +112,25 @@ _KINDS = ("generator", "storage_unit", "vre")
 def unit_nameplate_mw(u) -> float:
     """The capacity a firm block must bracket for one sampled unit: its
     nameplate, or for a profiled unit (Phase 12c-pre) its best hour
-    ``max_h(profile_h) × cap`` — never a ``(1−q)``-derated figure."""
+    ``max_h(profile_h) × cap`` — never a ``(1−q)``-derated figure. With a
+    capacity series (Phase 12d) it is the best ACTIVE hour,
+    ``max_h(profile_h × c_h)``: a unit built in one period brackets at its
+    full size there, not at a horizon average (E9)."""
     prof = getattr(u, "profile", None)
-    if prof is None:
+    cs = getattr(u, "capacity_series", None)
+    if prof is None and cs is None:
         return float(u.capacity_mw)
-    arr = np.asarray(prof, dtype=np.float64)
-    finite = arr[np.isfinite(arr)]
-    peak = float(finite.max()) if finite.size else 0.0
-    nameplate = max(peak, 0.0) * float(u.capacity_mw)
+    if cs is None:
+        arr = np.asarray(prof, dtype=np.float64)
+        finite = arr[np.isfinite(arr)]
+        peak = float(finite.max()) if finite.size else 0.0
+        nameplate = max(peak, 0.0) * float(u.capacity_mw)
+    else:
+        arr = np.asarray(cs, dtype=np.float64)
+        if prof is not None:
+            arr = np.asarray(prof, dtype=np.float64) * arr
+        finite = arr[np.isfinite(arr)]
+        nameplate = max(float(finite.max()) if finite.size else 0.0, 0.0)
     # The product, not only the peak, must be finite: a non-finite nameplate
     # is not JSON and brackets nothing (shipped-code review, finding 1).
     return nameplate if math.isfinite(nameplate) else 0.0
@@ -267,14 +278,22 @@ def baseline_key(inputs, *, draws, seed, cov_target, max_draws, batch,
     h = hashlib.sha256()
     for u in inputs.units:
         prof = getattr(u, "profile", None)
+        cs = getattr(u, "capacity_series", None)
         h.update(f"{u.name}\x1f{float(u.capacity_mw)!r}\x1f{float(u.q)!r}\x1f"
                  f"{float(u.mttr_hours)!r}\x1e".encode())
         h.update(b"" if prof is None else np.asarray(prof, dtype=np.float64).tobytes())
         h.update(b"\x1e")
+        # Phase 12d: the sampler reads the capacity series too (plan v1
+        # review, finding 4).
+        h.update(b"" if cs is None else np.asarray(cs, dtype=np.float64).tobytes())
+        h.update(b"\x1e")
     h.update(b"\x1d")
     for st in inputs.storage:
+        cs = getattr(st, "capacity_series", None)
         h.update(f"{st.name}\x1f{float(st.p_nom_mw)!r}\x1f{float(st.e_nom_mwh)!r}\x1f"
                  f"{float(st.eff_store)!r}\x1f{float(st.eff_dispatch)!r}\x1e".encode())
+        h.update(b"" if cs is None else np.asarray(cs, dtype=np.float64).tobytes())
+        h.update(b"\x1e")
     h.update(b"\x1d")
     h.update(np.ascontiguousarray(inputs.residual, dtype=np.float64).tobytes())
     h.update(np.ascontiguousarray(inputs.weights, dtype=np.float64).tobytes())

@@ -94,6 +94,12 @@ class StorageSpec:
     e_nom_mwh: float         # max_hours × p_nom_mw
     eff_store: float         # efficiency_store, default 1.0
     eff_dispatch: float      # efficiency_dispatch, default 1.0
+    # Phase 12d: power rating in MW per modelled hour, ``(H,)``, when it is
+    # not constant at ``p_nom_mw`` (inactive in a period by build year /
+    # lifetime, or a vintage built later). The energy bound follows the
+    # power fraction block by block. None is the scalar path.
+    capacity_series: np.ndarray | None = field(default=None, compare=False,
+                                               hash=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -141,35 +147,9 @@ def _efficiency(row, col: str) -> float:
     return v
 
 
-def _period_blocks(snapshots) -> tuple:
-    """Contiguous blocks of the snapshot axis: ``((label, start, end), ...)``.
-
-    On a MultiIndex horizon these are the investment periods in axis order —
-    the boundaries at which chronology RESTARTS (spec §2.4 step 1). Contiguity
-    is asserted, not assumed: a re-ordered axis would make "hour N of period P
-    is followed by hour 0 of P+1" true again in the arrays while being false in
-    the model, which is exactly the error the re-initialisation exists to
-    prevent.
-    """
-    n_h = len(snapshots)
-    if not isinstance(snapshots, pd.MultiIndex):
-        return (("ALL", 0, n_h),)
-    level = list(snapshots.get_level_values(0))
-    blocks: list[tuple] = []
-    start = 0
-    for i in range(1, n_h + 1):
-        if i == n_h or level[i] != level[start]:
-            label = level[start]
-            try:
-                label = int(label)
-            except (TypeError, ValueError):
-                label = str(label)
-            blocks.append((label, start, i))
-            start = i
-    labels = [b[0] for b in blocks]
-    assert len(set(labels)) == len(labels), (
-        f"snapshot periods are not contiguous: {labels}")
-    return tuple(blocks)
+# Phase 12d: the block construction lives beside the activity rule; the
+# name is kept here for its callers and tests.
+from services.adequacy.activity import period_blocks as _period_blocks  # noqa: E402
 
 
 def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
@@ -218,15 +198,21 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
 
     storage: list[StorageSpec] = []
     su = getattr(n, "storage_units", None)
+    blocks = _period_blocks(snapshots)
     if su is not None and not su.empty:
+        from services.adequacy.activity import ActivityContext
         elec_buses = set(electrical_columns(n, list(n.buses.index)))
+        su_ctx = ActivityContext(n, "storage_units", blocks)
         for s in su.index:
             row = su.loc[s]
             if is_slack_name(str(s)) or is_slack_carrier(row.get("carrier")):
                 continue
             if str(row.get("bus")) not in elec_buses:
                 continue
-            p_nom = _storage_capacity(row)
+            # Phase 12d: `solved_capacity`'s rule per period, through the
+            # same activity context the generator walk uses; `p_nom_mw` is
+            # the maximum over the blocks and the series carries the rest.
+            p_nom, su_series = su_ctx.capacity_series(s, row)
             if p_nom <= 0 and not keep_zero_capacity:
                 continue
             try:
@@ -241,6 +227,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 e_nom_mwh=max_hours * p_nom,
                 eff_store=_efficiency(row, "efficiency_store"),
                 eff_dispatch=_efficiency(row, "efficiency_dispatch"),
+                capacity_series=su_series,
             ))
 
     profiles: dict[str, np.ndarray] = {}
@@ -255,10 +242,13 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
     # that fails it is simply absent here, which _resolve turns into the
     # KeyError the route maps to 404.
     if vre_assets:
+        from services.adequacy.activity import ActivityContext
         from services.adequacy.copt import must_take_generators
         _must_take = set(must_take_generators(n))
+        gen_ctx = ActivityContext(n, "generators", blocks)
     else:
         _must_take = set()
+        gen_ctx = None
     for name in vre_assets:
         if gens is None or name not in gens.index:
             # Silently absent rather than raising: the route turns a missing
@@ -267,7 +257,11 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
             continue
         if name not in _must_take:
             continue
-        cap = _storage_capacity(gens.loc[name])
+        # Phase 12d: the SAME per-period capacity the walk netted into the
+        # residual (one function, `ActivityContext.capacity_series`), so
+        # un-netting the preserved profile is exact.
+        cap, cap_series = gen_ctx.capacity_series(name, gens.loc[name])
+        cap_h = cap if cap_series is None else cap_series
         if p_max_pu_t is not None and name in getattr(p_max_pu_t, "columns", []):
             avail = p_max_pu_t[name].reindex(snapshots).fillna(0.0).to_numpy()
         else:
@@ -277,13 +271,13 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 static = 1.0
             avail = np.full(len(snapshots), static, dtype=np.float64)
         profiles[str(name)] = np.ascontiguousarray(
-            np.asarray(avail, dtype=np.float64) * cap)
+            np.asarray(avail, dtype=np.float64) * cap_h)
 
     return MCInputs(
         units=tuple(units),
         residual=res,
         weights=w,
-        periods=_period_blocks(snapshots),
+        periods=blocks,
         storage=tuple(storage),
         nyears=float(horizon_years(n)),
         vre_profiles=profiles,
@@ -405,20 +399,41 @@ def sample_capacity(units, H, draws, seed, *, exclude=frozenset(),  # noqa: N803
     state_path = np.empty((H, draws), dtype=bool)
 
     for i, u in enumerate(units):
-        if getattr(u, "profile", None) is None:
+        prof = getattr(u, "profile", None)
+        cs = getattr(u, "capacity_series", None)
+        if prof is None and cs is None:
             cap = np.float32(u.capacity_mw)
-        else:
+        elif cs is None:
             # Phase 12c-pre: UP is the series' value that hour, DOWN is zero.
             # An (H, 1) column broadcasts over draws in the very same
             # `np.add(..., where=state_path)` below — the chain, its stream
             # and its consumption are untouched, and a unit without a
             # profile takes the scalar path byte-for-byte as before (M2).
-            prof = np.asarray(u.profile, dtype=np.float64)
+            prof = np.asarray(prof, dtype=np.float64)
             if prof.shape != (H,):
                 raise ValueError(
                     f"unit {u.name!r}: profile has shape {prof.shape}, "
                     f"expected ({H},)")
             cap = (prof * float(u.capacity_mw)).astype(np.float32)[:, None]
+        else:
+            # Phase 12d: UP is the capacity the unit HAS that hour (its
+            # series in MW — 0 in a period it is inactive in, a vintage's
+            # partial size before the rest is built), times the profile.
+            # Same column, same broadcast; an all-zero block is bit-identical
+            # to excluding the unit there (E3).
+            cs = np.asarray(cs, dtype=np.float64)
+            if cs.shape != (H,):
+                raise ValueError(
+                    f"unit {u.name!r}: capacity series has shape {cs.shape}, "
+                    f"expected ({H},)")
+            if prof is not None:
+                prof = np.asarray(prof, dtype=np.float64)
+                if prof.shape != (H,):
+                    raise ValueError(
+                        f"unit {u.name!r}: profile has shape {prof.shape}, "
+                        f"expected ({H},)")
+                cs = prof * cs
+            cap = cs.astype(np.float32)[:, None]
         q = float(u.q)
         included = i not in exclude
         if q <= 0.0:
@@ -526,18 +541,41 @@ def _simulate_blocks(inputs: MCInputs, *, draws: int, seed,
     # Back to hour-major for the dispatch loop (see sample_capacity's note).
     cap_t = np.ascontiguousarray(capacity.T)
 
-    stores = _active_storage(inputs, storage_enabled, exclude_storage)
-    n_store = len(stores)
-    p_nom = np.array([s.p_nom_mw for s in stores], dtype=np.float64)
-    e_nom = np.array([s.e_nom_mwh for s in stores], dtype=np.float64)
-    eff_s = np.array([max(s.eff_store, 1e-12) for s in stores], dtype=np.float64)
-    eff_d = np.array([max(s.eff_dispatch, 1e-12) for s in stores],
-                     dtype=np.float64)
-    single_order = np.zeros((1, draws), dtype=np.intp) if n_store == 1 else None
+    all_stores = _active_storage(inputs, storage_enabled, exclude_storage)
     firm = float(extra_firm_mw)
+    any_series = any(getattr(s, "capacity_series", None) is not None
+                     for s in all_stores)
+
+    def _store_arrays(start: int, end: int):
+        """The dispatch arrays for one block. Without a store series this is
+        the fleet as built (the pre-12d arrays, once); with one, each store
+        enters at its capacity IN THIS BLOCK — dropped at 0, its energy
+        bound following the power fraction — so a store built in 2035 is
+        not dispatched in 2030 (Phase 12d, E5)."""
+        if not any_series:
+            stores = all_stores
+            p = np.array([s.p_nom_mw for s in stores], dtype=np.float64)
+            e = np.array([s.e_nom_mwh for s in stores], dtype=np.float64)
+        else:
+            from services.adequacy.activity import block_capacity
+            stores, p_l, e_l = [], [], []
+            for s in all_stores:
+                c = block_capacity(s.p_nom_mw, s.capacity_series, start, end)
+                if c <= 0.0:
+                    continue
+                stores.append(s)
+                p_l.append(c)
+                e_l.append(s.e_nom_mwh * (c / s.p_nom_mw) if s.p_nom_mw > 0 else 0.0)
+            p = np.array(p_l, dtype=np.float64)
+            e = np.array(e_l, dtype=np.float64)
+        es = np.array([max(s.eff_store, 1e-12) for s in stores], dtype=np.float64)
+        ed = np.array([max(s.eff_dispatch, 1e-12) for s in stores], dtype=np.float64)
+        return len(stores), p, e, es, ed
 
     out: dict = {}
     for label, start, end in inputs.periods:
+        n_store, p_nom, e_nom, eff_s, eff_d = _store_arrays(start, end)
+        single_order = np.zeros((1, draws), dtype=np.intp) if n_store == 1 else None
         # float64 accumulators: EUE sums 8760 terms of very different
         # magnitudes and float32 would lose the small ones (global constraint).
         lole = np.zeros(draws, dtype=np.float64)

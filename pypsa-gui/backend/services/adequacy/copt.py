@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import itertools
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -68,6 +68,13 @@ class CoptUnit:
     # scalar truth value, and the identity of a unit is its name and numbers.
     profile: np.ndarray | None = field(default=None, compare=False,
                                        hash=False, repr=False)
+    # Phase 12d: the capacity in MW per modelled hour, ``(H,)``, when it is
+    # not constant at ``capacity_mw`` — an asset inactive in a period by
+    # build year / lifetime, or a vintage-expanded parent whose vintages
+    # are built over the horizon (``services.adequacy.activity``). None is
+    # the scalar path, byte-for-byte.
+    capacity_series: np.ndarray | None = field(default=None, compare=False,
+                                               hash=False, repr=False)
 
 
 #: Exact per-hour mixture for up to this many profiled units (``2^K`` states
@@ -77,15 +84,30 @@ K_EXACT = 8
 
 
 def _availability_mw(u: CoptUnit, H: int) -> np.ndarray:  # noqa: N803
-    """``a_{i,h} = profile_i(h) × cap_i`` as a float64 ``(H,)`` array. A unit
-    without a profile is available at ``cap`` every hour."""
+    """``a_{i,h} = profile_i(h) × c_{i,h}`` as a float64 ``(H,)`` array, with
+    ``c_{i,h}`` the unit's ``capacity_series`` (Phase 12d) or its constant
+    ``capacity_mw``. A unit without either is available at ``cap`` every
+    hour; a unit with a profile and no series takes the 12c-pre expression
+    unchanged."""
+    H = int(H)
+    cs = getattr(u, "capacity_series", None)
+    if cs is not None:
+        cs = np.asarray(cs, dtype=np.float64)
+        if cs.shape != (H,):
+            raise ValueError(
+                f"unit {u.name!r}: capacity series has shape {cs.shape}, "
+                f"expected ({H},)")
     if u.profile is None:
-        return np.full(int(H), float(u.capacity_mw), dtype=np.float64)
+        if cs is None:
+            return np.full(H, float(u.capacity_mw), dtype=np.float64)
+        return cs.copy()
     prof = np.asarray(u.profile, dtype=np.float64)
-    if prof.shape != (int(H),):
+    if prof.shape != (H,):
         raise ValueError(
             f"unit {u.name!r}: profile has shape {prof.shape}, expected ({H},)")
-    return prof * float(u.capacity_mw)
+    if cs is None:
+        return prof * float(u.capacity_mw)
+    return prof * cs
 
 
 def series_is_informative(values) -> bool:
@@ -394,7 +416,19 @@ def _membership_walk(n, elec_buses, *, keep_zero_capacity: bool = False):
     and contributes 0 MW, exactly the exclude-but-consume discipline
     ``elcc`` already uses. Default ``False`` — every existing surface (COPT,
     the MC study, ELCC, the pinned benchmark anchors) is unchanged.
+
+    **Phase 12d.** The walk yields ``(label, capacity_mw, capacity_series,
+    occurrence_row)``: ``capacity_mw`` is now ``max_P c_P`` over the period
+    blocks and ``capacity_series`` the ``(H,)`` MW series when ``c_P`` is not
+    constant (``services.adequacy.activity``: PyPSA's own activity mask per
+    period, and the persisted vintage breakdown). The ``cap > 0`` test is on
+    that maximum, so membership depends on the static ``active`` column and
+    on "unbuilt or inactive in every period" — both are ``cap_max = 0`` — and
+    on nothing per period. Every consumer (the reserve margin,
+    ``fleet_and_residual``, ``must_take_generators``, ``occurrence_units``,
+    ``portfolio_population``) reads this ONE walk (plan v1 review, finding 5).
     """
+    from services.adequacy.activity import ActivityContext, period_blocks
     from services.adequacy.occurrence import resolve_outage_params
     from services.adequacy.slack import slack_generator_mask
 
@@ -403,15 +437,16 @@ def _membership_walk(n, elec_buses, *, keep_zero_capacity: bool = False):
         return
     slack = slack_generator_mask(gens)
     params = resolve_outage_params(n, "generators")
+    ctx = ActivityContext(n, "generators", period_blocks(n.snapshots))
     for g in gens.index:
         if bool(slack.get(g, False)):
             continue
         if str(gens.at[g, "bus"]) not in elec_buses:
             continue
-        cap = _firm_capacity(gens, g)
+        cap, series = ctx.capacity_series(g, gens.loc[g])
         if cap <= 0 and not keep_zero_capacity:
             continue
-        yield g, cap, params.loc[g]
+        yield g, cap, series, params.loc[g]
 
 
 def must_take_generators(n) -> list[str]:
@@ -439,7 +474,7 @@ def must_take_generators(n) -> list[str]:
     if buses is None:
         return []
     elec_buses = set(electrical_columns(n, list(buses.index)))
-    return [str(g) for g, _cap, row in _membership_walk(n, elec_buses)
+    return [str(g) for g, _cap, _series, row in _membership_walk(n, elec_buses)
             if row["source"] == "missing"]
 
 
@@ -477,7 +512,7 @@ def occurrence_units(n) -> list[tuple[str, float, object]]:
     if buses is None:
         return []
     elec_buses = set(electrical_columns(n, list(buses.index)))
-    return [(str(g), cap, row) for g, cap, row in _membership_walk(n, elec_buses)
+    return [(str(g), cap, row) for g, cap, _series, row in _membership_walk(n, elec_buses)
             if row["source"] != "missing"]
 
 
@@ -555,25 +590,29 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
 
     units: list[CoptUnit] = []
     must_take = pd.Series(0.0, index=snapshots)
-    for g, cap, row in _membership_walk(n, elec_buses,
-                                        keep_zero_capacity=keep_zero_capacity):
+    for g, cap, series, row in _membership_walk(
+            n, elec_buses, keep_zero_capacity=keep_zero_capacity):
         if row["source"] != "missing":
             units.append(CoptUnit(
                 name=str(g), capacity_mw=cap, q=float(row["rate"]),
                 basis=str(row["basis"]), mttr_hours=float(row["mttr_hours"]),
                 source=str(row["source"]),
                 profile=_occurrence_profile(p_max_pu_t, g, snapshots),
+                capacity_series=series,
             ))
         else:
-            # Must-take: available output at its given hourly availability.
+            # Must-take: available output at its given hourly availability,
+            # times its capacity IN THAT HOUR (Phase 12d: the series in MW
+            # when the row is not active, or not fully built, everywhere).
+            cap_h = cap if series is None else series
             if p_max_pu_t is not None and g in getattr(p_max_pu_t, "columns", []):
-                avail = p_max_pu_t[g].reindex(snapshots).fillna(0.0) * cap
+                avail = p_max_pu_t[g].reindex(snapshots).fillna(0.0) * cap_h
             else:
                 try:
                     static = float(gens.at[g, "p_max_pu"]) if "p_max_pu" in gens.columns else 1.0
                 except (TypeError, ValueError):
                     static = 1.0
-                avail = pd.Series(static * cap, index=snapshots)
+                avail = pd.Series(static * cap_h, index=snapshots)
             must_take = must_take.add(avail, fill_value=0.0)
 
     demand = pd.Series(0.0, index=snapshots)
@@ -768,7 +807,92 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
     remainder, build the table over the two-state units, mix the profiled
     ones per hour, attribute. Returns ``metrics``, ``rows``, ``split``,
     ``dist``, ``residual`` (as evaluated) and ``fidelity_note``.
+
+    **Phase 12d.** When any unit carries a ``capacity_series`` the fleet is
+    evaluated PER PERIOD BLOCK: within a block every unit's capacity is one
+    constant ``c_{i,P}`` (asserted), so the block's fleet is the units with
+    ``c_{i,P} > 0`` at THAT scalar capacity (profile sliced to the block) and
+    the single-block pipeline above runs unchanged on the block's residual
+    and weights — EXACT for piecewise-constant capacity, where folding the
+    series into ``profile`` would have pushed every asset with a build year
+    into the ``2^k`` mixture and the netted approximation beyond ``K_EXACT``.
+    Merge: ``lole``/``eue`` summed, ``lolp_max`` the max, ``by_period`` the
+    union, criticality rows merged BY NAME (``ΔEUE`` and the € summed,
+    severity recomputed, a ``note`` kept if any block set one), the split
+    reported once per unit — ``netted`` if netted in any block, else
+    ``mixed`` — and ``dist`` / ``residual`` as dicts keyed by block label.
+    When no unit carries a series this is the single-block path, byte for
+    byte (plan v1 review, finding 8).
     """
+    units = list(units)
+    if not any(getattr(u, "capacity_series", None) is not None for u in units):
+        return _screen_block(units, residual_load, weights=weights, voll=voll,
+                             delta_mw=delta_mw, k_exact=k_exact)
+
+    from services.adequacy.activity import block_capacity, period_blocks
+
+    blocks = period_blocks(residual_load.index)
+    w_full = weights.reindex(residual_load.index).fillna(0.0)
+    per: dict = {}
+    for label, start, end in blocks:
+        block_units: list[CoptUnit] = []
+        for u in units:
+            cap = block_capacity(u.capacity_mw, u.capacity_series, start, end)
+            if cap <= 0.0:
+                continue
+            prof = None if u.profile is None else np.asarray(
+                u.profile, dtype=np.float64)[start:end]
+            block_units.append(replace(u, capacity_mw=cap, profile=prof,
+                                       capacity_series=None))
+        per[label] = _screen_block(
+            block_units, residual_load.iloc[start:end],
+            weights=w_full.iloc[start:end], voll=voll, delta_mw=delta_mw,
+            k_exact=k_exact)
+
+    lole = sum(a["metrics"]["lole_hours"] for a in per.values())
+    eue = sum(a["metrics"]["eue_mwh"] for a in per.values())
+    lolp_max = max((a["metrics"]["lolp_max"] for a in per.values()), default=0.0)
+    by_period: dict = {}
+    for a in per.values():
+        by_period.update(a["metrics"]["by_period"])
+    metrics = {"lole_hours": float(lole), "eue_mwh": float(eue),
+               "lolp_max": float(lolp_max), "by_period": by_period}
+
+    merged: dict[str, dict] = {}
+    for a in per.values():
+        for r in a["rows"]:
+            m = merged.get(r["name"])
+            if m is None:
+                merged[r["name"]] = {**r, "failure_mode": dict(r["failure_mode"])}
+                continue
+            m["delta_eue_mwh"] += r["delta_eue_mwh"]
+            m["criticality_eur_per_year"] += r["criticality_eur_per_year"]
+            if "note" in r and "note" not in m:
+                m["note"] = r["note"]
+    for m in merged.values():
+        fm = m["failure_mode"]
+        crit = m["criticality_eur_per_year"]
+        occ = float(fm.get("occurrence_per_year") or 0.0)
+        fm["criticality_eur_per_year"] = crit
+        fm["severity_eur"] = crit / occ if occ > 0 else 0.0
+    rows = sorted(merged.values(), key=lambda r: r["delta_eue_mwh"], reverse=True)
+
+    netted_names = {u.name for a in per.values() for u in a["split"].netted}
+    mixed_names = {u.name for a in per.values() for u in a["split"].mixed} - netted_names
+    split = FleetSplit(
+        table=tuple(u for u in units if u.name not in mixed_names | netted_names),
+        mixed=tuple(u for u in units if u.name in mixed_names),
+        netted=tuple(u for u in units if u.name in netted_names))
+    return {"metrics": metrics, "rows": rows, "split": split,
+            "dist": {label: a["dist"] for label, a in per.items()},
+            "residual": {label: a["residual"] for label, a in per.items()},
+            "fidelity_note": fidelity_note(split, k_exact=k_exact)}
+
+
+def _screen_block(units, residual_load: pd.Series, *, weights: pd.Series,
+                  voll: float, delta_mw: float, k_exact: int) -> dict:
+    """One fleet at constant capacities over one residual series — the
+    12c-pre pipeline, unchanged (``screening_analysis`` before Phase 12d)."""
     split = split_fleet(units, k_exact=k_exact)
     H = len(residual_load)
     res = residual_load

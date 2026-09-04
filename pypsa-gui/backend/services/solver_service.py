@@ -3375,7 +3375,7 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
         has_ext = "p_nom_extendable" in gens.columns
         has_pmp = "p_max_pu" in gens.columns
         has_pmax = "p_nom_max" in gens.columns
-        for g, _cap_unused, occ in _membership_walk(
+        for g, _cap_unused, _series_unused, occ in _membership_walk(
                 n, elec_buses, keep_zero_capacity=True):
             # The walk already applies `slack_generator_mask`; re-stating
             # it here is deliberate. This is the one exclusion whose
@@ -3496,13 +3496,15 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
 
     def _active(comp: str, P) -> pd.Series:
         """Activity mask for one component frame in period P. Masks BOTH
-        sides: a fixed asset not yet built is not a constant either."""
+        sides: a fixed asset not yet built is not a constant either.
+        Phase 12d: the mask itself is ``services.adequacy.activity.
+        active_mask`` — the SAME call the engines make — so the margin and
+        the engines agree by construction; the all-True guard stays here
+        (E12 pins the delegation; the import is deliberately lazy)."""
         df = getattr(n, comp, None)
         try:
-            c = getattr(n.components, comp)
-            if isinstance(P, str):
-                return c.get_active_assets()
-            return c.get_active_assets(int(P))
+            from services.adequacy import activity as _activity
+            return _activity.active_mask(n, comp, P)
         except Exception:
             idx = df.index if df is not None else pd.Index([])
             return pd.Series(True, index=idx, dtype=bool)

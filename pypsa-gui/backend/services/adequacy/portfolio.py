@@ -57,7 +57,11 @@ _CAP_ABS = 1e-6
 class Member:
     kind: str            # "vre" | "generator"
     name: str
-    capacity_mw: float   # solved_capacity — the engines' rule
+    capacity_mw: float   # max over the periods of the engines' per-period rule
+    # Phase 12d: ``((label, c_P), …)`` — the capacity the engines give the
+    # member in each period block (``services.adequacy.activity``); the
+    # comparison with the margin is per period on this, not on the maximum.
+    capacity_by_period: tuple = ()
 
 
 # ── population (in-request) ────────────────────────────────────────────
@@ -72,25 +76,40 @@ def portfolio_population(n, inputs) -> dict:
     must-take name whose column is informative (the route does that), or a
     must-take farm would be silently missing here.
     """
+    from services.adequacy.activity import ActivityContext, block_capacity
     from services.adequacy.copt import must_take_generators
 
     gens = getattr(n, "generators", None)
     p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+    blocks = tuple(inputs.periods)
 
     def _informative(name) -> bool:
         return (p_max_pu_t is not None
                 and name in getattr(p_max_pu_t, "columns", [])
                 and series_is_informative(p_max_pu_t[name]))
 
+    def _caps(cap_max: float, series) -> tuple:
+        return tuple((str(label), block_capacity(cap_max, series, start, end))
+                     for label, start, end in blocks)
+
     members: list[Member] = []
     unbuilt: list[str] = []
     must_take = list(must_take_generators(n))
+    # Phase 12d: the must-take half's capacity per period comes from the
+    # same function the walk and `snapshot_inputs` apply
+    # (`ActivityContext.capacity_series`), so the member's `c_P` is the
+    # capacity its preserved profile was built on.
+    gen_ctx = (ActivityContext(n, "generators", blocks)
+               if gens is not None and not gens.empty else None)
     for name in must_take:
         if name not in inputs.vre_profiles or not _informative(name):
             continue
-        cap = float(solved_capacity(gens.loc[name])) if gens is not None and name in gens.index else 0.0
+        if gen_ctx is not None and name in gens.index:
+            cap, series = gen_ctx.capacity_series(name, gens.loc[name])
+        else:
+            cap, series = 0.0, None
         if cap > 0.0:
-            members.append(Member("vre", str(name), cap))
+            members.append(Member("vre", str(name), float(cap), _caps(cap, series)))
         else:
             unbuilt.append(str(name))
     for u in inputs.units:
@@ -98,7 +117,8 @@ def portfolio_population(n, inputs) -> dict:
             continue
         cap = float(u.capacity_mw)
         if cap > 0.0:
-            members.append(Member("generator", str(u.name), cap))
+            members.append(Member("generator", str(u.name), cap,
+                                  _caps(cap, getattr(u, "capacity_series", None))))
         else:
             unbuilt.append(str(u.name))
     # The two walks above run at the default `keep_zero_capacity=False`, so
@@ -112,7 +132,7 @@ def portfolio_population(n, inputs) -> dict:
     if buses is not None:
         elec = set(electrical_columns(n, list(buses.index)))
         seen = {m.name for m in members} | set(unbuilt)
-        for g, cap, _row in _membership_walk(n, elec, keep_zero_capacity=True):
+        for g, cap, _series, _row in _membership_walk(n, elec, keep_zero_capacity=True):
             if float(cap) <= 0.0 and str(g) not in seen and _informative(g):
                 unbuilt.append(str(g))
     snapshot_names = set(must_take) | {str(u.name) for u in inputs.units} \
@@ -135,7 +155,9 @@ def network_fingerprint(n) -> str:
     h = hashlib.sha256()
     gens = getattr(n, "generators", None)
     if gens is not None and not gens.empty:
-        for col in ("p_nom", "p_nom_opt", "p_max_pu", "build_year", "lifetime"):
+        # Phase 12d: the static `active` column too — the engines now mask
+        # by it (E10).
+        for col in ("p_nom", "p_nom_opt", "p_max_pu", "build_year", "lifetime", "active"):
             if col in gens.columns:
                 h.update(col.encode())
                 h.update(np.ascontiguousarray(
@@ -172,10 +194,20 @@ def network_fingerprint(n) -> str:
             p_set_t.to_numpy(dtype=np.float64)).tobytes())
     su = getattr(n, "storage_units", None)
     if su is not None and not su.empty:
-        for col in ("p_nom", "p_nom_opt", "max_hours"):
+        for col in ("p_nom", "p_nom_opt", "max_hours", "build_year", "lifetime", "active"):
             if col in su.columns:
+                h.update(col.encode())
                 h.update(np.ascontiguousarray(
                     su[col].to_numpy(dtype=np.float64, na_value=np.nan)).tobytes())
+    # Phase 12d: the persisted vintage breakdown decides the engines'
+    # per-period capacity; a breakdown that changes under an unchanged frame
+    # (another solve) is a report the block must not compare against (E10).
+    meta = getattr(n, "meta", None)
+    vr = meta.get("vintage_results") if isinstance(meta, dict) else None
+    if vr:
+        import json
+        h.update(b"\x1dvintage_results")
+        h.update(json.dumps(vr, sort_keys=True, default=str).encode())
     return h.hexdigest()
 
 
@@ -341,18 +373,25 @@ def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_finger
                       and str(r.get("kind")) == "generator"]
             names_p = {_parent(r.get("name")) for r in rows_p}
             for m in members:
+                # Phase 12d: the engines' capacity IN THIS PERIOD. A member
+                # the engines give 0 here (inactive by build year / lifetime)
+                # and the margin has no row for is the two sides AGREEING —
+                # its period row will be `no_contribution`; only a member
+                # the engines count and the margin does not is a mismatch.
+                c_p = float(dict(m.capacity_by_period).get(label, m.capacity_mw))
                 mine = [r for r in rows_p if _parent(r.get("name")) == m.name]
                 if not mine:
-                    activity.append(f"{m.name} has no margin row in {label}")
+                    if c_p > 0.0:
+                        activity.append(f"{m.name} has no margin row in {label}")
                     continue
                 caps = [r.get("capacity_mw") for r in mine]
                 if any(c is None for c in caps):
                     capacity.append(f"{m.name} in {label}: payload capacity unknown")
                     continue
                 agg = float(sum(float(c) for c in caps))
-                if not math.isclose(agg, m.capacity_mw, rel_tol=_CAP_REL, abs_tol=_CAP_ABS):
+                if not math.isclose(agg, c_p, rel_tol=_CAP_REL, abs_tol=_CAP_ABS):
                     capacity.append(f"{m.name} in {label}: margin {agg:.6g} MW vs "
-                                    f"engines {m.capacity_mw:.6g} MW")
+                                    f"engines {c_p:.6g} MW")
             # A margin row the engines do not have is a mismatch only when
             # it carries capacity: an unbuilt extendable (0 MW) is in the
             # margin's walk (keep_zero_capacity) and legitimately absent from
