@@ -25,7 +25,11 @@ from services.adequacy.slack import (
     strip_slack_prefix,
 )
 from services.pypsa_service import PyPSAService
-from services.validation_service import has_errors, validate_for_run
+from services.validation_service import (
+    _check_nonfinite_bounds,
+    has_errors,
+    validate_for_run,
+)
 from services.vintage_service import apply_vintage_bounds
 
 # ── Load carrier canonicalisation ────────────────────────────────────────────
@@ -923,6 +927,29 @@ def run_simulation(
             # `assign_duals` with `KeyError: DatetimeIndex(...) not in index`
             # after a successful solve.
             _normalise_dynamic_indexes(network, phase)
+            # Phase 12f: `validate_for_run` above ran BEFORE
+            # `_reapply_user_ts_to_network` and before the reindex just done,
+            # and both MANUFACTURE non-finite cells from perfectly legal input
+            # — a finite 3-hour profile against a 5-snapshot horizon reindexes
+            # to `[0.5, 0.6, 0.7, NaN, NaN]`, and a flat frame against
+            # MultiIndex snapshots reindexes to all-NaN. A non-finite value in
+            # one of the five finite-default bounds MASKS its LP row, so the
+            # solve would build a plan the network cannot deliver. Re-checked
+            # here, where those cells first exist.
+            #
+            # A bare return is safe at THIS point only: `restore_modelling` is
+            # not bound until later, so there is nothing to undo. The two later
+            # checkpoints must raise instead — see them.
+            if config.mode == "lopf":
+                _nf = _check_nonfinite_bounds(network)
+                if _nf:
+                    for _i in _nf:
+                        log_queue.put(
+                            f"[VALIDATION] error: {_i.component_class} "
+                            f"{_i.name} — {_i.message} [{_i.code}]")
+                    phase(f"Validation failed: {len(_nf)} error(s). Aborting.")
+                    status, condition = "error", "validation_failed"
+                    return status, condition
             # Clear stale *_t.p_set persisted by a prior AC-PF dispatch fix.
             # PyPSA's create_model adds a `Generator-p_set` equality constraint
             # for every non-null row, locking dispatch. Plain LOPF still solves
@@ -1144,6 +1171,27 @@ def run_simulation(
                         f"Normalised {fixed_idx} stale dynamic index/indexes "
                         "after modelling assumptions, pre-LP."
                     )
+                # Phase 12f, the LAST gate before the LP. Step 4 of
+                # `_apply_modelling_assumptions` promotes flat snapshots to a
+                # MultiIndex, which is why the normalise above exists — and it
+                # reindexes to NaN exactly as the earlier one does, so a frame
+                # that was finite at the first two checkpoints can be
+                # non-finite here.
+                #
+                # This one RAISES rather than returning. `restore_modelling` is
+                # bound by now and the outer `finally` does NOT call it, so a
+                # bare return would leave the network carrying the vintage
+                # clones, the VOLL slack tier and recomputed capital costs that
+                # this run added. `except Exception` below restores them.
+                if config.mode == "lopf":
+                    _nf = _check_nonfinite_bounds(network)
+                    if _nf:
+                        _first = _nf[0]
+                        raise ValueError(
+                            f"validation_failed: {len(_nf)} LP bound(s) are "
+                            f"not finite after modelling assumptions — "
+                            f"{_first.component_class} {_first.name}: "
+                            f"{_first.message}")
                 # Last cooperative checkpoint before kicking off the LP. ARM the
                 # abort watcher across the whole solve try-body (the long native
                 # n.optimize() is what matters; post-solve diagnostics are also in
@@ -6430,6 +6478,18 @@ def _run_myopic_foresight(
                 f"Myopic [{i}/{len(periods)}] period {current_period}: "
                 f"normalised {fixed_idx} stale dynamic index/indexes pre-LP."
             )
+        # Phase 12f: the per-iteration twin of the pre-LP gate in
+        # `run_simulation`. This normalise reindexes to NaN exactly as the
+        # others do, so an iteration can be the first place a bound goes
+        # non-finite. RAISES, never returns: the caller is inside the modelling
+        # assumptions, and the driver's own handler is what unwinds them.
+        _nf = _check_nonfinite_bounds(network)
+        if _nf:
+            _first = _nf[0]
+            raise ValueError(
+                f"validation_failed: {len(_nf)} LP bound(s) are not finite at "
+                f"myopic period {current_period} — {_first.component_class} "
+                f"{_first.name}: {_first.message}")
         sns, weight_overrides = _build_iteration_snapshots(
             network, current_period, periods, cfg,
         )
