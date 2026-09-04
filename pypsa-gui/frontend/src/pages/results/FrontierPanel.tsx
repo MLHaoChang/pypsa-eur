@@ -43,13 +43,17 @@ export interface FrontierPayload {
   knee?: number | null
   voll_eur_per_mwh?: number
   targets_permyriad?: number[]
-  /** Phase 12e: whether the closing base re-solve RAN — not that the plan is
-   *  back. The engine has always computed it; the route used to discard it,
-   *  so a study that could not restore the user's plan said nothing. */
+  /** Phase 12e: whether the closing base re-solve put the user's plan back —
+   *  the engine has always computed something here and the route used to
+   *  discard it. Since the shipped-code review this means the re-solve ran
+   *  AND its termination condition is one the fleet can be read against, not
+   *  merely that nothing raised. */
   base_restored?: boolean | null
-  /** Phase 12e (shipped-code review, finding 13): the solver's own word on
-   *  that closing re-solve. `base_restored` says it did not raise; a status
-   *  that is not optimal means the plan is NOT back however the flag reads. */
+  /** Phase 12e (shipped-code review, findings 13 and S1): the solver's own
+   *  word on that closing re-solve, for the message. Whether the plan is back
+   *  is `base_restored` and is decided in the BACKEND — the frontend used to
+   *  re-derive it from this string, which is how the reading that
+   *  `SolverStatus.ok` means optimal got into two panels at once. */
   base_restore_status?: string | null
 }
 
@@ -57,11 +61,6 @@ export interface FrontierPayload {
 // an SVG stroke here, which silently renders the curve as a bare scatter —
 // the line simply never draws. Every other chart in this directory uses a
 // literal for the same reason.
-// A closing re-solve that RAN can still have failed to restore anything: an
-// `infeasible` re-solve does not raise. Only these statuses mean the plan is
-// back (shipped-code review, finding 13).
-const OPTIMAL_STATUS = new Set(['ok', 'optimal'])
-
 const CURVE = '#dc2626'   // matches the Lost load tab this panel lives on
 const KNEE = '#f59e0b'    // amber, so the economic point reads as distinct
 
@@ -198,17 +197,10 @@ export function FrontierPanel() {
             )}
             {payload?.base_restored === false && (
               <span className="text-[10px] text-warn" data-testid="frontier-not-restored">
-                The closing re-solve did not run — the network is on the last
-                swept target, not your own plan. Re-run your solve.
-              </span>
-            )}
-            {payload?.base_restored === true
-              && payload.base_restore_status != null
-              && !OPTIMAL_STATUS.has(payload.base_restore_status) && (
-              <span className="text-[10px] text-warn"
-                    data-testid="frontier-restore-not-optimal">
-                The closing re-solve came back “{payload.base_restore_status}”
-                — it ran but did not restore your plan. Re-run your solve.
+                The closing re-solve did not restore your plan
+                {payload.base_restore_status
+                  ? ` (${payload.base_restore_status})` : ''} — the network is
+                on the last swept target. Re-run your solve.
               </span>
             )}
             {rows.length > 0 && (

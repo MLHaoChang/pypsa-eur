@@ -619,34 +619,62 @@ def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
     drive — two portfolio call sites were mutation-invisible — and a new call
     site added later would slip past every one of them.
 
-    Bite (verified): drop `stop_event=None` from `elcc.metrics_at` or from
-    either portfolio call.
+    The exemption is ONE FUNCTION, not one file. It was written as
+    `rel != "routers/results.py"`, which exempted every call in that module —
+    including the coupling-loop and margin-loop replays at `post_coupling_loop`
+    and `post_margin_loop`, the two this very phase had to fix. Either could
+    have been changed back to forward a live flag with this test still green
+    (adversarial review of the review fixes, M1).
+
+    Bites (verified): drop `stop_event=None` from `elcc.metrics_at`, from
+    either portfolio call, or from either loop's `evaluate`.
     """
     import ast
     import pathlib
 
+    # The one call that MAY carry a live flag: the `/mc` worker's own baseline,
+    # which is the study the user is aborting.
+    ALLOWED = ("post_mc",)
+
     offenders: list[str] = []
+
+    def scan(rel: str, src: str, node, chain: tuple[str, ...]) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            chain = chain + (node.name,)
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call):
+                fn = child.func
+                name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+                if name == "mc_adequacy":
+                    where = f"{rel}:{child.lineno} ({'.'.join(chain) or '<module>'})"
+                    kw = {k.arg for k in child.keywords if k.arg}
+                    if "stop_event" not in kw:
+                        line = src.splitlines()[child.lineno - 1].strip()
+                        offenders.append(f"{where}: no stop_event — {line}")
+                    else:
+                        val = next(k.value for k in child.keywords
+                                   if k.arg == "stop_event")
+                        is_none = (isinstance(val, ast.Constant)
+                                   and val.value is None)
+                        if not is_none and not any(a in chain for a in ALLOWED):
+                            offenders.append(f"{where}: forwards a live flag")
+            scan(rel, src, child, chain)
+
+    seen_allowed = 0
     for rel in ("services/adequacy/elcc.py", "services/adequacy/portfolio.py",
                 "routers/results.py"):
         src = pathlib.Path(rel).read_text()
-        tree = ast.parse(src)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            fn = node.func
-            name = getattr(fn, "id", None) or getattr(fn, "attr", None)
-            if name != "mc_adequacy":
-                continue
-            kw = {k.arg for k in node.keywords if k.arg}
-            line = src.splitlines()[node.lineno - 1]
-            if "stop_event" not in kw:
-                offenders.append(f"{rel}:{node.lineno}: {line.strip()}")
-                continue
-            val = next(k.value for k in node.keywords if k.arg == "stop_event")
-            # the ONE call allowed to carry it is the /mc worker's baseline
-            is_none = isinstance(val, ast.Constant) and val.value is None
-            if not is_none and rel != "routers/results.py":
-                offenders.append(f"{rel}:{node.lineno}: forwards a flag")
+        scan(rel, src, ast.parse(src), ())
+    # The exemption must still match something, or a rename silently turns this
+    # into a test that no call site can pass.
+    for node in ast.walk(ast.parse(pathlib.Path("routers/results.py").read_text())):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and node.name in ALLOWED:
+            seen_allowed += 1
+    assert seen_allowed == len(ALLOWED), (
+        f"the exempted function(s) {ALLOWED} are not in routers/results.py any "
+        "more — this test is asserting nothing about them")
+
     assert not offenders, (
         "every mc_adequacy call outside the /mc worker's baseline must pass "
         "stop_event=None — a replay truncated by an abort breaks CRN:\n  "
@@ -709,3 +737,77 @@ def test_F1k_the_worksheet_ranking_is_deterministic_when_every_row_ties():
                for r in out["per_mode"]), \
         "fixture must tie every row, or the tie-break is not what is tested"
     assert got == sorted(got), got
+
+
+def test_F1m_a_sweep_on_a_network_with_no_link_still_runs_class_C():
+    """★ F1m (adversarial review of the review fixes, blocker B1). Making the
+    assemblers return `(rows, restore)` missed BOTH their empty early returns,
+    which kept the bare list — so on a network with **no eligible link
+    contingency**, which is any network with no Links at all, the worker's
+    `rows, restore_b = run_class_b_sweep(...)` raised "not enough values to
+    unpack" before class B produced anything. The generic handler wrote
+    `failed` with no rows, and class C — which had nothing to do with the
+    failure — never ran.
+
+    F1h could not see this: it fakes BOTH assemblers, so it exercises the
+    worker's control flow while routing around the real return shapes. This
+    one fakes NEITHER.
+
+    Bite (verified): restore `return []` in `run_class_b_sweep`.
+    """
+    import pypsa
+
+    import routers.results as R
+    from routers.simulation import _state
+    from services.adequacy.sweep import class_b_contingencies
+    from services.pypsa_service import PyPSAService
+
+    # One bus, one load, one generator — and no Link anywhere.
+    n = pypsa.Network()
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=10.0)
+    n.add("Generator", "g", bus="b", p_nom=200.0, marginal_cost=10.0,
+          carrier="gas")
+    n.add("Carrier", "gas")
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    assert class_b_contingencies(n) == [], "fixture must have no class-B work"
+
+    PyPSAService.set_network(n)
+    _state.pop("fmea_sweep", None)
+    _state["solver_config"] = _cfg()
+    _state["status"] = "idle"
+
+    R.post_fmea_sweep(body=R.FmeaSweepRequest(scenarios=[{
+        "id": "s", "name": "s", "kind": "parametric",
+        "frequency_per_year": 1.0, "electrical_load_multiplier": 1.2}]))
+    _state["fmea_sweep"]["thread"].join(timeout=600)
+    rec = _state["fmea_sweep"]
+
+    assert rec["status"] == "done", rec.get("error")
+    assert rec["error"] is None
+    # Class C ran: the scenario produced a row even though class B had none.
+    assert [r["id"] for r in rec["rows"]] == ["scenario:s"], rec["rows"]
+
+
+def test_F1m2_the_class_C_assembler_returns_the_pair_when_nothing_is_runnable():
+    """★ F1m2 (blocker B2) — the class-C twin, and the worse of the two. Its
+    early return handed back a LIST of status rows, so with exactly two
+    `profiles` scenarios the caller's `rows_c, restore = ...` *unpacked the
+    list*: `restore` became a scenario-row dict whose `.get("base_restored")`
+    reads a quiet `None`. One scenario raised, three raised differently, two
+    corrupted silently.
+
+    Bite (verified): restore `return rows` in `run_class_c_sweep`.
+    """
+    from services.adequacy import stress as ST
+
+    scen = [{"id": f"s{i}", "name": f"s{i}", "kind": "profiles",
+             "frequency_per_year": 1.0} for i in range(2)]
+    rows, restore = ST.run_class_c_sweep(object(), object(), _cfg(), scen)
+
+    assert [r["id"] for r in rows] == ["scenario:s0", "scenario:s1"]
+    assert all(r["status"] == "profiles_not_supported_yet" for r in rows)
+    # No sweep ran, so nothing was restored — and the flags say exactly that
+    # rather than claiming a re-solve that never happened.
+    assert restore == {"base_restored": None, "base_restore_status": None,
+                       "aborted": False}

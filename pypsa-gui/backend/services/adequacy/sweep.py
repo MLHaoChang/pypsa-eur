@@ -144,21 +144,56 @@ def _solve_once(cfg, n, lock, log_queue, sink: dict) -> None:
     sink["_condition"] = condition
 
 
+# The solver words that mean the foreground really is the user's plan again.
+#
+# It is the CONDITION that has to be read, never the status. `run_simulation`
+# returns linopy's `(SolverStatus, TerminationCondition)`, and `SolverStatus.ok`
+# covers `time_limit`, `iteration_limit`, `terminated_by_limit`, `suboptimal`
+# and `imprecise` as well as `optimal` — a re-solve that hit a MIP time limit
+# reports `ok` and leaves a dispatch that is NOT the user's plan. In the other
+# direction a genuinely infeasible re-solve reports status `warning` with the
+# word `infeasible` in the condition, so a caller reading the status alone
+# cannot even name what went wrong. The frontier's own point loop has always
+# read `_condition or _status` for exactly this reason.
+#
+# `ok` is here because a `mode="pf"` run legitimately reports `("ok", "ok")`,
+# and `lopf+ac_pf_ok` because a successful stage-2 AC power flow rewrites the
+# condition. A compound like `optimal; ac_pf_failed: …` starts with a clean
+# word and counts as restored: the LP dispatch — which is what the foreground
+# results are — did come back; the AC PF that failed afterwards is a separate
+# condition already reported on its own surface.
+#
+# This lives in ONE place because the two studies and two panels each used to
+# decide it for themselves, which is how the `ok`-means-optimal reading got
+# into three of them at once (shipped-code review of 12e, finding S1).
+_RESTORE_CLEAN_PREFIXES = ("optimal", "ok", "lopf+ac_pf_ok")
+
+
+def restore_is_clean(word) -> bool:
+    """Whether a closing re-solve's reported word means the plan is back."""
+    if word is None:
+        return False
+    return str(word).startswith(_RESTORE_CLEAN_PREFIXES)
+
+
 def _restore_base_guarded(network, lock, cfg, log_queue, final_state_update):
-    """The closing base re-solve, and whether it worked: ``(ok, status)``.
+    """The closing base re-solve: ``(restored, word)``.
+
+    ``restored`` means THE PLAN IS BACK — the re-solve ran AND its condition
+    is one the fleet can be read against (`restore_is_clean`). It does not
+    mean "it did not raise": a re-solve that comes back `infeasible`, or one
+    that stopped at a MIP time limit, raises nothing and restores nothing, and
+    the one thing the caller must not be told is that the foreground is the
+    user's plan when it demonstrably is not.
 
     A restore that raises is REPORTED, not propagated — the sweep's rows are
-    still a valid answer, and the one thing the caller must not be told is
-    that the foreground is the user's plan when it demonstrably is not. The
-    solver's own status rides along, because a re-solve that returns
-    ``infeasible`` did not raise and yet did not restore anything either
-    (Phase 12e §1).
+    still a valid answer.
     """
     from services.solver_service import run_simulation
 
     final_sink: dict = {}
     try:
-        status, _condition = run_simulation(
+        status, condition = run_simulation(
             cfg, network, lock, threading.Event(),
             log_queue if log_queue is not None else queue.SimpleQueue(),
             state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
@@ -169,7 +204,12 @@ def _restore_base_guarded(network, lock, cfg, log_queue, final_state_update):
             "is left on the last contingency and the foreground results do not "
             "describe the user's own config")
         return False, f"raised: {exc}"
-    return True, str(status)
+    word = str(condition or status)
+    if not restore_is_clean(word):
+        logger.warning(
+            "contingency sweep: the closing base re-solve returned %r — it ran "
+            "but did not restore the user's plan", word)
+    return restore_is_clean(word), word
 
 
 def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
@@ -353,7 +393,8 @@ def class_b_contingencies(n) -> list[dict]:
 
 
 def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
-                      final_state_update=None, stop_event=None) -> list[dict]:
+                      final_state_update=None,
+                      stop_event=None) -> tuple[list[dict], dict]:
     """
     Class-B rows: sweep every eligible link outage and price it first-order
     (see the module docstring's severity semantics):
@@ -367,7 +408,16 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
     """
     contingencies = class_b_contingencies(network)
     if not contingencies:
-        return []
+        # The 2-tuple on EVERY path. This early return kept the bare list when
+        # the rest of the function moved to `(rows, restore)`, and the caller
+        # unpacks — so a network with no eligible link (a network with no
+        # Links at all, the common case) raised "not enough values to unpack"
+        # inside the worker, which reported `failed` with no rows and skipped
+        # class C entirely. Nothing ran here, so nothing was restored: the
+        # network is untouched and the flags say so rather than claiming a
+        # re-solve that never happened.
+        return [], {"base_restored": None, "base_restore_status": None,
+                    "aborted": False}
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
     swept = run_contingency_sweep(
         network, lock, cfg, contingencies, stop_event=stop_event,

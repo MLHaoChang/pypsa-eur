@@ -233,17 +233,34 @@ def test_a_clean_sweep_still_reports_a_successful_restore(monkeypatch):
     assert res["base_restore_status"] == "ok"
 
 
-def test_F1i_a_frontier_restore_that_comes_back_infeasible_says_so(monkeypatch):
-    """★ F1i (shipped-code review, finding 13). `_restore_base` called
+@pytest.mark.parametrize(
+    ("returned", "word"),
+    [
+        # A genuinely infeasible re-solve: linopy reports status `warning` and
+        # puts the reason in the CONDITION. A caller reading the status cannot
+        # even name what happened, which is why the first fix for finding 13 —
+        # keeping `status` — still could not say "infeasible".
+        (("warning", "infeasible"), "infeasible"),
+        # The silent one. `SolverStatus.ok` covers `time_limit`,
+        # `iteration_limit`, `terminated_by_limit`, `suboptimal` and
+        # `imprecise` as well as `optimal`, so a MIP re-solve that hit its
+        # time limit reported `ok` and every consumer read that as "your plan
+        # is back". It is not: the dispatch left behind is a time-limited one.
+        (("ok", "time_limit"), "time_limit"),
+        (("ok", "suboptimal"), "suboptimal"),
+    ],
+)
+def test_F1i_a_frontier_restore_that_ran_without_restoring_says_so(
+        monkeypatch, returned, word):
+    """★ F1i (shipped-code review, findings 13 and S1). `_restore_base` called
     `run_simulation` and discarded its return value, reporting a bare `True`
-    for "it did not raise". A closing re-solve that comes back `infeasible`
-    does not raise and does not restore anything either: the network is left
-    on the last swept target while the record says the base is back — the one
-    reading the caller must never be given.
+    for "it did not raise" — and the first fix kept the STATUS, which is the
+    half that cannot distinguish `optimal` from `time_limit`.
 
-    The contingency sweep's `_restore_base_guarded` has carried the solver's
-    word since Phase 12e; this brings the frontier to the same shape. Bite
-    (verified): drop `base_restore_status` and return a bare bool again.
+    `base_restored` now means THE PLAN IS BACK: the re-solve ran AND came back
+    with a condition the fleet can be read against. Bites (both verified):
+    return a bare `True` again; or judge on `status` rather than
+    `condition or status`, which passes the first case and fails the others.
     """
     from services import solver_service as _solver
     from services.adequacy import sweep as _sweep
@@ -257,7 +274,7 @@ def test_F1i_a_frontier_restore_that_comes_back_infeasible_says_so(monkeypatch):
 
     def fake_run_simulation(*args, **kwargs):
         calls["restores"] += 1
-        return "infeasible", None            # did not raise; did not restore
+        return returned                      # did not raise; did not restore
 
     monkeypatch.setattr(_sweep, "_solve_once", fake_solve_once)
     monkeypatch.setattr(_solver, "run_simulation", fake_run_simulation)
@@ -269,10 +286,34 @@ def test_F1i_a_frontier_restore_that_comes_back_infeasible_says_so(monkeypatch):
                              log_queue=queue.SimpleQueue())
 
     assert calls["restores"] == 1
-    assert res["base_restore_status"] == "infeasible", res
-    # The flag still says the re-solve RAN — that is what it means — so the
-    # status is the only thing that can carry the bad news, and it does.
-    assert res["base_restored"] is True
+    assert res["base_restore_status"] == word, res
+    assert res["base_restored"] is False, res
+
+
+@pytest.mark.parametrize("returned", [("ok", "optimal"), ("ok", "ok"),
+                                      ("ok", "lopf+ac_pf_ok")])
+def test_F1i2_the_conditions_that_do_mean_the_plan_is_back(monkeypatch, returned):
+    """The other side of F1i, so the predicate is not simply "always false".
+    `ok`/`ok` is what a `mode="pf"` run reports and `lopf+ac_pf_ok` what a
+    successful stage-2 AC power flow rewrites the condition to — treating
+    either as a failed restore would warn on every healthy sweep."""
+    from services import solver_service as _solver
+    from services.adequacy import sweep as _sweep
+
+    def fake_solve_once(cfg, network, lock, log_queue, sink):
+        sink["_status"] = "ok"
+        sink["adequacy_report"] = _fake_report()
+
+    monkeypatch.setattr(_sweep, "_solve_once", fake_solve_once)
+    monkeypatch.setattr(_solver, "run_simulation",
+                        lambda *a, **k: returned)
+
+    n = _network()
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(solver_name="highs", voll=VOLL)
+    res = run_frontier_sweep(n, PyPSAService.get_lock(), cfg, [200.0],
+                             log_queue=queue.SimpleQueue())
+    assert res["base_restored"] is True, res
 
 
 def test_a_refused_config_never_touches_the_network(monkeypatch):

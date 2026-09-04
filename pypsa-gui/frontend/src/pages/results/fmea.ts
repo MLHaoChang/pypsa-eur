@@ -10,10 +10,11 @@ export interface ModesPayload {
   voll_eur_per_mwh?: number | null
   sweep_status?: string | null
   sweep_error?: string | null
-  /** Phase 12e (shipped-code review, finding 14): whether the sweep's closing
-   *  base re-solve RAN, and the solver's own word on it. `true` never meant
-   *  "your plan is back", only "it did not raise" — an `infeasible` re-solve
-   *  does neither. */
+  /** Phase 12e (shipped-code review, findings 14 and S1): whether the sweep's
+   *  closing base re-solve put the user's plan back, and the solver's own word
+   *  on it for the message. The backend decides the boolean — it reads the
+   *  termination CONDITION, because `SolverStatus.ok` also covers
+   *  `time_limit` and `suboptimal`. The frontend must not re-derive it. */
   sweep_base_restored?: boolean | null
   sweep_base_restore_status?: string | null
 }

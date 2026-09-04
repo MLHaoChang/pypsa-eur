@@ -511,7 +511,7 @@ body, so the names live in their defining modules.
 
 **A live gate that could not fail (12).** S28.3 asserted `/copt` finishes
 inside 10 s and called it a Part B cost check. It was neither: the fixture is
-12 generators with no profiles, so it answers in ~0.09 s (≈800× headroom), and
+12 generators with no profiles, so it answers in ~0.09 s (≈110× headroom), and
 with `k = 0` mixed units it never enters the binned path the claim is about. A
 wall-clock gate on a live server cannot fail on a fast machine and cannot pass
 on a slow one — the reason F2c counts operations instead — so the time is now
@@ -530,3 +530,68 @@ and is refused outright by n = 300.
 accumulated unrecorded across phases, including 12e's three aborts; nothing
 removed). `test_adequacy_mc_endpoint.py`'s ELCC status set was widened with
 `aborted`, which 12e added to the union without it.
+
+## The review fixes were themselves reviewed — one blocker, in two places
+
+The three fix commits went back to an adversarial reviewer, which confirmed
+the `_eue_cells` grid fix (70.02% error before, 5.5e-16 after), the sort key,
+the `run_simulation` unpack and every new test's falsifiability — and found a
+**blocker I had introduced**, plus a serious defect in the fix for finding 13
+itself.
+
+**The blocker (B1/B2): the tuple return missed both EMPTY early returns.**
+`run_class_b_sweep` still had `return []` when a network has no eligible link
+contingency — which is any network with no `Link` at all, the common case —
+and `run_class_c_sweep` still had `return rows` when every scenario is a
+`profiles` one. The callers unpack, so:
+
+- **B1** raised `not enough values to unpack` inside the worker before class B
+  produced anything. The generic handler wrote `status="failed"` with no rows,
+  and **class C never ran** — a failure in class B taking out a sweep that had
+  nothing to do with it. This worked before the fix commit; it is a regression
+  the fix introduced.
+- **B2** is worse than a crash at exactly two scenarios: `rows` is a list, so
+  `rows_c, restore = ...` *unpacks the list*, `restore` becomes a scenario-row
+  dict, and `restore.get("base_restored")` reads a quiet `None`. One scenario
+  raises, three raise differently, two corrupt silently.
+
+**Why nothing caught it.** F1h — written for this very review round — fakes
+BOTH assemblers, so it drives the worker's control flow while routing around
+the real return shapes entirely, and the only route-level sweep test always
+installs a Link with occurrence data. That is the *fifth* instance this phase
+of one error: a fixture that routes around the path the test names. **F1m**
+and **F1m2** fake neither.
+
+**The serious one (S1): the fix for finding 13 kept the wrong half.** It read
+`status, _condition = run_simulation(...)` and reported the STATUS — and
+linopy's `SolverStatus.ok` covers `time_limit`, `iteration_limit`,
+`terminated_by_limit`, `suboptimal` and `imprecise` as well as `optimal`. So a
+closing re-solve that hit a MIP time limit (`mip_time_limit_s` is a shipped
+setting) reported `ok`, every consumer read "your plan is back", and the
+foreground was a time-limited dispatch. In the other direction a genuinely
+infeasible re-solve reports status `warning` with `infeasible` in the
+CONDITION — so the banners promising to name the failure would have printed
+`warning`, and my own fixtures pinned `"infeasible"` as a *status*, a value
+production cannot emit. This module's own point loop has always read
+`_condition or _status`, for exactly this reason.
+
+Fixed by moving the judgement into ONE backend predicate, `restore_is_clean`,
+read by both studies: `base_restored` now means **the plan is back** (it ran
+AND the condition is one the fleet can be read against), and
+`base_restore_status` carries the word for the message. `ok` and
+`lopf+ac_pf_ok` are clean because a `mode="pf"` run reports `("ok", "ok")` and
+a successful stage-2 AC power flow rewrites the condition. Both frontends lose
+their copies of the vocabulary — re-deriving it in three places is how the
+same wrong reading got into all three. **F1i** is now parametrised over
+`(warning, infeasible)`, `(ok, time_limit)` and `(ok, suboptimal)`, with
+**F1i2** over the three conditions that do mean restored, so the predicate
+cannot degenerate to "always false".
+
+**Two minors, both real.** **M1**: F1j's static CRN wall exempted the whole of
+`routers/results.py` rather than the one function, so either loop's replay
+could have been changed back to forward a live flag with the test still green
+— the exemption is now the enclosing `post_mc`, and it asserts that the
+exempted name still exists so a rename cannot silently empty the test. **M2**:
+"~800× headroom" was attached to a 0.09 s measurement against a 10 s gate,
+which is 110×; the 800× figure belonged to a 12.5 ms reading. Corrected in all
+three places it appeared.

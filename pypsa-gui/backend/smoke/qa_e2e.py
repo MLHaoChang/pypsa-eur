@@ -4274,7 +4274,8 @@ def suite_S28():
     # NO WALL-CLOCK GATE. This check used to assert `copt_s < 10.0` and call
     # it a Part B cost check, which it was not on two counts (shipped-code
     # review, finding 12): this fixture is 12 generators with no profiles, so
-    # it takes ~10 ms and the gate had ~800x headroom, and it has k = 0 mixed
+    # it answers in ~0.09 s (the figure recorded in QA_E2E_PLAN.md) and the
+    # gate had ~110x headroom, and it has k = 0 mixed
     # units so it never enters the binned path the cost claim is about. A
     # timing gate on a live server cannot fail on a fast machine and cannot
     # pass on a slow one - the same reason F2c counts operations instead of

@@ -126,22 +126,23 @@ def _restore_base(network, lock, cfg, log_queue, final_state_update):
     state sink — the study must leave the foreground results exactly as the
     user's own solve would, not on whichever target happened to be swept last.
 
-    Returns ``(ok, status)``. A restore that raises is REPORTED
-    (``base_restored=False``), not propagated: the sweep's own answer is still
-    a valid answer, and the one thing the caller must not be told is that the
-    foreground is the user's plan when it demonstrably is not.
+    Returns ``(restored, word)``, the same shape and the same meaning as the
+    contingency sweep's ``_restore_base_guarded``, and through the same
+    predicate — ``restored`` means THE PLAN IS BACK, not merely that nothing
+    raised. This function used to discard ``run_simulation``'s return value
+    entirely and report a bare ``True`` for "it did not raise" (shipped-code
+    review, finding 13), and the first fix for that kept the STATUS, which is
+    the half that cannot tell `optimal` from `time_limit` (finding S1).
 
-    The solver's own status rides along, exactly as the contingency sweep's
-    ``_restore_base_guarded`` does. It has to: a re-solve that comes back
-    ``infeasible`` did not raise and did not restore anything either, and this
-    function used to discard that word and report a bare ``True`` — the one
-    reading the caller must never be given (shipped-code review, finding 13).
+    A restore that raises is REPORTED (``base_restored=False``), not
+    propagated: the sweep's own answer is still a valid answer.
     """
+    from services.adequacy.sweep import restore_is_clean
     from services.solver_service import run_simulation
 
     final_sink: dict = {}
     try:
-        status, _condition = run_simulation(
+        status, condition = run_simulation(
             cfg, network, lock, threading.Event(),
             log_queue if log_queue is not None else queue.SimpleQueue(),
             state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
@@ -152,7 +153,14 @@ def _restore_base(network, lock, cfg, log_queue, final_state_update):
             "on the last swept target and the foreground results do not "
             "describe the user's own config")
         return False, f"raised: {exc}"
-    return True, str(status)
+    # `_condition or _status` is what this module's own point loop reads, for
+    # the same reason: the condition is the word that distinguishes.
+    word = str(condition or status)
+    if not restore_is_clean(word):
+        logger.warning(
+            "frontier: the closing base re-solve returned %r — it ran but did "
+            "not restore the user's plan", word)
+    return restore_is_clean(word), word
 
 
 def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
@@ -161,9 +169,9 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
     """
     Returns ``{"points": [...], "warning": str|None, "base_restored": bool,
     "base_restore_status": str|None, "aborted": bool}``. ``base_restored``
-    says the closing re-solve did not RAISE; ``base_restore_status`` is the
-    solver's own word on it, and a status that is not optimal means the
-    foreground is not the user's plan however the flag reads.
+    says THE PLAN IS BACK — the closing re-solve ran and came back with a
+    condition the fleet can be read against; ``base_restore_status`` is the
+    solver's own word on it, for the message.
 
     ``stop_event`` (Phase 12e) is checked BETWEEN points and acted on with a
     ``break``, never an exception: the closing restore below must run on the

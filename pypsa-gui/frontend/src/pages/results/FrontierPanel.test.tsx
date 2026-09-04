@@ -135,26 +135,31 @@ describe('FrontierPanel — aborting a sweep', () => {
     expect(note).toMatch(/not the whole frontier/i)
   })
 
-  // ★ Bite: treat `base_restored === true` as "the plan is back". It only ever
-  // meant "the closing re-solve did not raise" — an `infeasible` re-solve does
-  // not raise and does not restore anything either (review finding 13).
-  it('warns when the closing re-solve RAN but did not restore the plan', async () => {
+  // ★ Bite: render nothing for `base_restored === false`, or drop the word
+  // from the copy. A sweep whose closing re-solve did not put the plan back
+  // leaves the network on the last swept target while the chart describes
+  // another one — and WHICH failure it was is what tells the user whether to
+  // re-run or to change the config, so the solver's word has to be on screen.
+  //
+  // The panel does NOT decide what counts as restored. `base_restored` is the
+  // backend's judgement, made on the termination condition, because
+  // `SolverStatus.ok` also covers `time_limit` and `suboptimal` — a reading
+  // this panel used to re-derive for itself and get wrong (review finding S1).
+  it('warns, with the solver\'s word, when the plan was not put back', async () => {
     vi.mocked(resultsApi.getFrontier).mockResolvedValue(DONE as never)
     renderPanel()
     await userEvent.setup().click(screen.getByRole('button', { name: /cost vs availability/i }))
     await waitFor(() => expect(resultsApi.getFrontier).toHaveBeenCalled())
-    expect(screen.queryByTestId('frontier-restore-not-optimal')).toBeNull()
+    expect(screen.queryByTestId('frontier-not-restored')).toBeNull()
     cleanup()
 
     vi.mocked(resultsApi.getFrontier).mockResolvedValue(
-      { ...DONE, base_restored: true, base_restore_status: 'infeasible' } as never)
+      { ...DONE, base_restored: false,
+        base_restore_status: 'time_limit' } as never)
     await openPanel()
-    // `base_restored` is TRUE here, so the plain not-restored notice must stay
-    // silent and only the status-aware one can carry this.
-    expect(screen.queryByTestId('frontier-not-restored')).toBeNull()
-    const note = (await screen.findByTestId('frontier-restore-not-optimal'))
+    const note = (await screen.findByTestId('frontier-not-restored'))
       .textContent ?? ''
-    expect(note).toMatch(/infeasible/)
+    expect(note).toMatch(/time_limit/)
     expect(note).toMatch(/did not restore your plan/i)
   })
 })

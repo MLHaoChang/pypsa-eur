@@ -196,7 +196,7 @@ def _parametric_mutate(scenario: dict):
 
 def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                       log_queue=None, final_state_update=None,
-                      stop_event=None) -> list[dict]:
+                      stop_event=None) -> tuple[list[dict], dict]:
     """
     Class-C rows via the shared driver. occurrence = the scenario's
     empirical ``frequency_per_year``; severity = ΔEUE × VoLL per event;
@@ -217,7 +217,13 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                          "delta_eue_mwh": None, "failure_mode": None,
                          "meta": {"name": sc.get("name", sc["id"])}})
     if not runnable:
-        return rows
+        # The 2-tuple on EVERY path — see the twin in `run_class_b_sweep`.
+        # This one is worse than a crash at two scenarios: `rows` is a list of
+        # status rows, so `rows_c, restore = ...` UNPACKS a two-element list
+        # and `restore` becomes a scenario row whose `.get("base_restored")`
+        # is a quiet `None`. No sweep ran, so nothing was restored.
+        return rows, {"base_restored": None, "base_restore_status": None,
+                      "aborted": False}
     contingencies = [
         {"id": f"scenario:{sc['id']}", "mutate": _parametric_mutate(sc),
          "meta": {"name": sc.get("name", sc["id"]),

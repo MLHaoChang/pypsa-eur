@@ -257,23 +257,30 @@ it('says a stopped sweep is stopped, and says it only then', async () => {
 // ★ Bite: drop either notice. A sweep whose closing re-solve failed leaves the
 // network on the last contingency while this table describes another plan, and
 // the `true`-but-not-optimal case is the one a bare boolean cannot express.
-it('warns when the closing re-solve failed, and when it ran without restoring', async () => {
-  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
-    per_mode: [COMPUTED], sweep_status: 'done', sweep_error: null,
-    sweep_base_restored: false, sweep_base_restore_status: 'raised: boom' })
+// ★ Bite: drop the notice, or drop the solver's word from its copy. A sweep
+// whose closing re-solve did not put the plan back leaves the network on the
+// last contingency while this table describes another plan.
+//
+// The tab does NOT decide what counts as restored — `sweep_base_restored` is
+// the backend's judgement, made on the termination condition, because
+// `SolverStatus.ok` also covers `time_limit` and `suboptimal`. This tab used
+// to re-derive that reading for itself and get it wrong (review finding S1),
+// which is why both a raised restore and a time-limited one are checked here
+// through the SAME flag.
+it('warns, with the solver\'s word, when the plan was not put back', async () => {
   renderTab()
-  expect(((await screen.findByTestId('sweep-not-restored')).textContent ?? ''))
-    .toMatch(/on the last contingency, not your own plan/i)
+  await screen.findByText('g1')
+  expect(screen.queryByTestId('sweep-not-restored')).toBeNull()
   cleanup()
 
-  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
-    per_mode: [COMPUTED], sweep_status: 'done', sweep_error: null,
-    sweep_base_restored: true, sweep_base_restore_status: 'infeasible' })
-  renderTab()
-  // `sweep_base_restored` is TRUE, so the plain notice must stay silent.
-  const note = (await screen.findByTestId('sweep-restore-not-optimal'))
-    .textContent ?? ''
-  expect(screen.queryByTestId('sweep-not-restored')).toBeNull()
-  expect(note).toMatch(/infeasible/)
-  expect(note).toMatch(/did not restore your plan/i)
+  for (const word of ['raised: boom', 'time_limit', 'infeasible']) {
+    vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
+      per_mode: [COMPUTED], sweep_status: 'done', sweep_error: null,
+      sweep_base_restored: false, sweep_base_restore_status: word })
+    renderTab()
+    const note = (await screen.findByTestId('sweep-not-restored')).textContent ?? ''
+    expect(note).toMatch(/did not restore your plan/i)
+    expect(note).toContain(word)
+    cleanup()
+  }
 })
