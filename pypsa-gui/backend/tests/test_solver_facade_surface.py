@@ -39,7 +39,9 @@ _FACADE_ORIGINS: dict[str, str | None] = {
     "SolverConfig": None,
     "run_simulation": None,               # the orchestrator
     "user_code_enabled": None,
-    "_canonical_load_carrier_key": None,  # routers/results.py
+    # _canonical_load_carrier_key moved WITH assumptions (Task 3): its only
+    # in-module caller is _apply_modelling_assumptions, and leaving it behind
+    # would have made assumptions.py import back from the façade.
 
     # ── Task 1 → services/solver/periodized_costs.py ─────────────────────────
     "_annuity": "services.solver.periodized_costs",
@@ -49,25 +51,30 @@ _FACADE_ORIGINS: dict[str, str | None] = {
     "with_periodized_cost_defaults": "services.solver.periodized_costs",
     "periodized_capital_costs": "services.solver.periodized_costs",
 
-    # ── Task 2 → services/solver/diagnostics.py ──────────────────────────────
-    "_diagnose_infeasibility": None,
-    "_log_global_constraint_shadow_prices": None,
+    # ── Task 4 → services/solver/diagnostics.py ──────────────────────────────
+    "_diagnose_infeasibility": "services.solver.diagnostics",
+    "_log_global_constraint_shadow_prices": "services.solver.diagnostics",
 
     # ── Task 3 → services/solver/objective.py ────────────────────────────────
     "_objective_conditioning": None,
 
-    # ── Task 4 → services/solver/assumptions.py ──────────────────────────────
-    "resolve_branch_outages": None,
-    "_apply_modelling_assumptions": None,
-    "_normalise_dynamic_indexes": None,
-    "_DISPATCH_FIX_ACCESSORS": None,
+    # ── Task 3 → services/solver/assumptions.py ──────────────────────────────
+    "resolve_branch_outages": "services.solver.assumptions",
+    "_apply_modelling_assumptions": "services.solver.assumptions",
+    "_normalise_dynamic_indexes": "services.solver.assumptions",
+    "_DISPATCH_FIX_ACCESSORS": "services.solver.assumptions",
+    "_canonical_load_carrier_key": "services.solver.assumptions",  # routers/results.py
 
-    # ── Task 5 → services/solver/myopic.py ───────────────────────────────────
+    # ── Task 2 → services/solver/vintage_store.py ────────────────────────────
+    # Its own module because BOTH assumptions and myopic read this store, so it
+    # belongs to neither; that is what makes the rest of the cut a DAG.
+    "_frozen_vintage_store": "services.solver.vintage_store",
+
+    # ── Task 7 → services/solver/myopic.py ───────────────────────────────────
     "_run_myopic_foresight": None,
     "_freeze_period_capacities": None,
     "_defer_future_vintage_builds": None,
     "_outages_active_in_period": None,
-    "_frozen_vintage_store": None,
 
     # ── Task 6 → services/solver/runtime.py ──────────────────────────────────
     "check_solver_availability": None,
@@ -160,3 +167,60 @@ def test_run_simulation_stays_a_module_attribute_of_solver_service():
     assert _FACADE_ORIGINS["run_simulation"] is None
     assert callable(solver_service.run_simulation)
     assert solver_service.run_simulation.__module__ == "services.solver_service"
+
+
+def test_no_call_site_was_left_behind_by_a_move():
+    """
+    Static undefined-name sweep (ruff F821) over `services/` and `routers/`.
+
+    This is the guard for the decomposition's characteristic defect: a helper
+    moves to a carved module and a caller is left behind referring to a name
+    that no longer exists in its module. Python binds globals at call time, so
+    the import still succeeds, the app still boots, and the break only surfaces
+    when that particular code path runs — for the solver, that means inside a
+    real solve, minutes into a suite, in a traceback that points at the caller
+    rather than at the move.
+
+    It caught exactly that during Task 3: the line range for the load-carrier
+    block silently swallowed `_safe_log`, which belongs with the log plumbing,
+    leaving five callers in `solver_service` referring to a name that had gone
+    to `assumptions.py`.
+
+    The six expected findings are the deliberate `cfg: "SolverConfig"` forward
+    references. `SolverConfig` stays in `solver_service` and the carved modules
+    type against it as a string precisely so they need no import for it —
+    string annotations are never evaluated at runtime. ruff resolves them
+    anyway and reports them; they are listed here rather than suppressed, so
+    that a SEVENTH finding fails this test.
+
+    ruff comes from the `dev` feature, which the `test` environment includes,
+    so the canonical `pixi run gui-tests` has it. If it is missing this fails
+    rather than skips — a skipped test reads as a green suite, which is how a
+    hole this size stays open.
+    """
+    import pathlib
+    import subprocess
+    import sys
+
+    backend = pathlib.Path(__file__).resolve().parent.parent
+    proc = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", "--isolated",
+         "--select", "F821", "--output-format", "concise",
+         "services", "routers"],
+        cwd=backend, capture_output=True, text=True,
+    )
+    assert "No module named" not in proc.stderr, (
+        "ruff is not importable here. It ships with the `dev` feature, which "
+        "the `test` environment includes — run the suite via `pixi run gui-tests`."
+    )
+
+    findings = [
+        line for line in proc.stdout.splitlines()
+        if line.strip() and "F821" in line
+    ]
+    unexpected = [f for f in findings if "Undefined name `SolverConfig`" not in f]
+
+    assert not unexpected, (
+        "undefined name(s) — a move almost certainly left a caller behind:\n  "
+        + "\n  ".join(unexpected)
+    )
