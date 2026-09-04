@@ -226,3 +226,123 @@ Two invariants gate every task:
   a conflict on every future upstream merge.
 - **No lazy function-body imports** to paper over a cycle. If a task needs one,
   the DAG is wrong and the task gets re-cut.
+
+---
+
+## Phase 2 addendum — lifting `routers/results.py` (written 2026-09-04, before the cut)
+
+Phase 1 moved code between modules and changed no call site. Phase 2 cannot
+make that claim: the body of every lifted handler changes, because the body
+today reads live router state from inside the arithmetic. These are the
+decisions that keep the change mechanical and auditable anyway.
+
+### The handler keeps the HTTP layer; the service gets the arithmetic
+
+Every computation handler has the same skeleton:
+
+```python
+n = PyPSAService.get_network()
+if not _dispatch_ready(n):
+    return _not_solved()            # 204
+cfg = _state["solver_config"]
+... several hundred lines ...
+```
+
+The first three statements are the HTTP layer — state acquisition and the
+freshness gate — and they stay in the handler, verbatim, with their comments.
+Everything else moves to `services/results/<name>.py::compute_<name>(...)`.
+The handler becomes:
+
+```python
+n = PyPSAService.get_network()
+if not _dispatch_ready(n):
+    return _not_solved()
+payload = compute_cost_breakdown(n, _state["solver_config"])
+return _not_solved() if payload is None else payload
+```
+
+### `None` is the "no content" sentinel
+
+Handler bodies return `_not_solved()` — a 204 `Response` — from the middle of
+the computation, sometimes inside nested `try` blocks. A service must not
+return an HTTP response, so each mid-body `return _not_solved()` becomes
+`return None` and the handler maps `None` back to 204.
+
+`None` rather than an exception, deliberately: several of those returns sit
+inside `try: ... except Exception: return _not_solved()`. Raising a sentinel
+exception from there would be caught by the enclosing handler and take a
+different branch. A `return` is a `return` whatever encloses it, so the
+control flow is identical. No handler today returns bare `None` as a payload,
+which is what makes the sentinel unambiguous — verified by AST over every
+`Return` node, nested defs excluded.
+
+### `_result_df` is injected, not imported
+
+`_result_df` prefers the LP-stage snapshot in `routers.simulation._state` over
+the live network. A service function must not reach into router state, and
+`services/asset_results/compute.py` already importing `_result_df` lazily from
+`routers.results` is a layering violation this phase does not add to.
+
+So every service function that needs it takes `result_df` as a keyword-only
+parameter and the handler passes `_result_df`. In the moved body the only
+change is the name: `_result_df(...)` → `result_df(...)`. A test can pass
+`lambda n, acc, attr, src: getattr(getattr(n, acc), attr)` and exercise the
+arithmetic on any network with no router, no state and no solve.
+
+The two shared helpers `lp_scaled_load_frame` and `corrected_marginal_prices`
+move to `services/results/load_frames.py` with the same `result_df` keyword.
+`routers/results.py` keeps same-signature wrappers that pass `_result_df`, so
+`routers/compare.py` and `services/asset_results/compute.py` — which import
+them by name from the router — are untouched.
+
+### Other `_state` reads become arguments
+
+`get_lcoh` reads `_state.get("solver_config") or SolverConfig()` mid-body;
+`get_load_results` passes `_state.get("solver_config")` inline into a call.
+Both become a `cfg` parameter evaluated in the handler with the identical
+expression. `_state.get` has no side effects and nothing between the gate and
+the read depends on `cfg`, so hoisting is semantics-preserving.
+
+### The logger keeps its name
+
+`logger.exception("results endpoint failed; returning 204 …")` lives inside
+several moved bodies. Service modules create
+`logging.getLogger("pypsa_gui.results")` — the same logger, not a child — so
+log records are byte-identical.
+
+### `_wants_slice` moves to `services/serialization.py`
+
+It is the `Query`-sentinel-aware companion of `slice_ts`, which already lives
+there. The router imports it back under its old alias.
+
+### What Phase 2 does NOT lift, and why
+
+- `get_objective_decomposition` calls the `get_cost_breakdown` *handler* and
+  inspects its return for a 204 `Response`. Lifting it means either a service
+  calling a router or a rewrite of that check. Deferred.
+- `get_losses_summary` imports `_build_snapshot_weights` from
+  `routers/compare.py`. That helper moves to `services/compare/` in Phase 3;
+  the lift waits for it.
+- `get_economics_by_carrier` delegates entirely to
+  `routers.compare._compute_economics_summary`. Phase 3.
+- `get_lost_load` and `get_ac_pf_status` are state readers with no arithmetic.
+- The eleven `_serve_ts` wrappers are already six lines each.
+
+### How the cut is proven
+
+The lesson from Phase 1 is applied: **boundaries by AST, never by line range.**
+The lift tool locates the three HTTP-layer statements as AST nodes, removes
+them by their exact line spans, applies the four rewrites above as text
+edits, then **re-parses the result and asserts its AST equals the AST produced
+by applying the same four rewrites as `NodeTransformer` passes over the
+original function.** Comments and formatting survive because the edit is
+textual; correctness is proven because the check is structural.
+
+On top of that, `tests/test_results_seam.py` calls each handler and its
+`compute_*` on the solved golden network and asserts JSON-identical output —
+the seam is transparent or the test says where it is not.
+
+### Layering rule, stricter than Phase 1
+
+Nothing under `services/results/` imports anything under `routers/`.
+`tests/test_results_facade_surface.py` enforces it.

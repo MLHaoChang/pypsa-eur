@@ -321,30 +321,98 @@ the three cycles were found before any code moved — but the line ranges used t
 *perform* the cuts were still hand-derived, and that is where the one real
 defect came from.
 
-## Phase 2 — `routers/results.py` (4,106 lines)
+## Phase 2 — `routers/results.py` (4,106 lines) — done
 
-Deferred behind Phase 1 deliberately: Phase 1 changes no call sites, while
-Phase 2 changes the body of every handler it touches, and the two should not
-share a review.
+Design decisions are in the spec's "Phase 2 addendum"; this is the record of
+what was done and how it was proven.
 
-Lift computation into `services/results/`, leaving thin handlers. The HTTP layer
-— decorator, status codes, `_not_solved()` / `_dispatch_ready()` guards, the
-`{detail, code: "solver_in_flight"}` contract — **does not move**.
+### Tasks
 
-| handler | lines | destination |
+- [x] **Task 9: tripwire** — `tests/test_results_facade_surface.py`. Pins the
+  28 handler names and their positional parameter lists (a snapshot of
+  `master`), because `services/chat_tools.py` resolves handlers with `getattr`
+  by name and then inspects `__code__.co_varnames` for `"source"`; the three
+  helpers other modules import by name; the handler → `compute_*` map; and the
+  layering rule that nothing under `services/results/` imports a router. Red
+  first on `ModuleNotFoundError`.
+- [x] **Task 10: seam test** — `tests/test_results_seam.py`. On the solved
+  golden network, calls every lifted handler AND its `compute_*` with what the
+  handler passes it, and asserts JSON-identical payloads (or 204 ↔ `None`).
+  One case passes a plain `getattr` lambda as `result_df` to prove the
+  arithmetic runs with no router state at all. Red first.
+- [x] **Task 11: `wants_slice`** → `services/serialization.py`, beside
+  `slice_ts`; router re-imports it under the old alias. Its `isinstance(int)`
+  guard is what lets handlers be called directly with `Query` sentinels, so it
+  had to move with the bodies.
+- [x] **Task 12: the lift** — twelve handlers and the two shared load-frame
+  helpers, by tool, not by hand.
+- [x] **Task 13: verify.**
+
+### What moved where
+
+| handler | compute function | lines |
 |---|---|---|
-| `get_cost_breakdown` | 207–734 (527) | `services/results/cost_breakdown.py` |
-| `get_emissions` | 1781–2136 (355) | `services/results/emissions.py` |
-| `get_lcoh` | 977–1319 (342) | `services/results/lcoh.py` |
-| `get_carrier_kpis` | 1515–1780 (265) | `services/results/carrier_kpis.py` |
-| `get_prices`, `get_price_drivers` | 2452–2800 (348) | `services/results/prices.py` |
-| `get_curtailment`, `get_lost_load` | 2801–2984 (183) | `services/results/curtailment.py` |
-| `get_losses_summary` | 1364–1514 (150) | `services/results/losses.py` |
+| `get_asset_economics` | `services/results/asset_economics.py` | 903 |
+| `get_cost_breakdown` | `services/results/cost_breakdown.py` | 538 |
+| `get_emissions` | `services/results/emissions.py` | 354 |
+| `get_prices`, `get_price_drivers` | `services/results/prices.py` | 347 |
+| `get_lcoh` | `services/results/lcoh.py` | 339 |
+| `get_carrier_kpis` | `services/results/carrier_kpis.py` | 269 |
+| `lp_scaled_load_frame`, `corrected_marginal_prices` | `services/results/load_frames.py` | 185 |
+| `get_curtailment` | `services/results/curtailment.py` | 154 |
+| `get_line_duals` | `services/results/line_duals.py` | 137 |
+| `get_unit_commitment` | `services/results/unit_commitment.py` | 124 |
+| `get_statistics` | `services/results/statistics.py` | 50 |
+| `get_load_results` | `services/results/loads.py` | 48 |
 
-Unlike Phase 1 this genuinely enables new tests: a 527-line cost computation
-reachable only through a solve-and-GET becomes callable directly. Those tests
-are **not** part of the refactor commits — the refactor proves itself against
-the existing suite, and new unit tests land afterwards.
+`routers/results.py`: **4,106 → 1,113 lines.** Every handler is still there
+with its decorator, docstring, signature, gate comments and `_state` reads;
+each is now five to eight lines.
+
+**Deferred to Phase 3**, because they compose router-level things:
+`get_objective_decomposition` (calls the `get_cost_breakdown` handler and
+checks its return for a 204), `get_losses_summary` (lazy-imports
+`_build_snapshot_weights` from `routers.compare`), `get_economics_by_carrier`
+(delegates to `routers.compare._compute_economics_summary`).
+
+### How the cut was proven
+
+The tool (`lift_results.py`, kept out of the repo — it ran once) locates the
+three HTTP-layer statements as AST nodes, removes them by exact span with the
+comment block above each carried into the regenerated handler, applies the
+four rewrites as text so comments and formatting survive, then **re-parses the
+result and asserts its AST equals the AST produced by the same four rewrites
+as `NodeTransformer` passes over the original.** All fourteen lifts passed
+that proof. Text edit for fidelity; structural check for correctness. That is
+the Phase 1 lesson — boundaries by AST, never by line range — applied to the
+cut itself, not only to its validation.
+
+One deliberate hand edit after the tool: `lcoh.py` inherited a function-body
+`from routers.compare import _build_snapshot_weights`, which the layering
+test caught. That helper is a documented thin wrapper over
+`services.period_utils.snapshot_weights`, which `lcoh` already imports, so
+the call became `snapshot_weights(n, "generators")` — the identical call one
+frame down.
+
+### Verification runs
+
+All in the pinned pip venv (`pypsa==1.1.2`, `linopy==0.8.0`, `pandas<3`),
+which **approximates** `pixi run gui-tests`.
+
+| point | collected | passed | failed | skipped |
+|---|---|---|---|---|
+| end of Phase 1 | 2,362 | 2,338 | 2 | 22 |
+| end of Phase 2 | 2,423 | 2,399 | 2 | 22 |
+
+Failing set byte-identical to the pre-refactor baseline: `test_app_paths.py`'s two macOS-path assertions, which cannot pass on Linux. The sixty-one new collected cases are the two Phase 2 test files.
+
+### What the seam makes possible (and was NOT done here)
+
+A 903-line asset-economics computation reachable only through a solve-and-GET
+is now `compute_asset_economics(n, cfg, result_df=...)`. The next unit test
+for a cost bug is a network and a call, not a fixture and an HTTP client. Those
+tests are deliberately not part of this refactor — it proves itself against
+the suite that existed before it.
 
 ## Phase 3 — `routers/compare.py` (2,781 lines)
 
