@@ -870,3 +870,48 @@ def test_F1n2_the_loops_read_the_condition_and_not_the_status():
     assert raw.count("restore_is_clean(word)") >= 4, (
         "both `_restore_closing` bodies must route through the shared"
         " predicate — found fewer uses than the two loops need")
+
+
+def test_F1p_every_studys_GET_actually_serves_the_restore_word():
+    """★ F1p. The four studies that re-solve to close now report `(restored,
+    word)`, and each panel prints the word — but every panel test mocks the
+    API, so not one of them would notice a GET that dropped the field on its
+    way to the wire. A route filter written as an ALLOWLIST would do exactly
+    that, silently, and the frontend would render "NOT restored" with no
+    reason for ever.
+
+    This is the fifth-instance guard: the recurring error all phase has been a
+    test whose fixture routes around the path it names, and a mocked panel
+    test routes around the whole backend. Bite (verified): change any of the
+    four GET filters to an allowlist that omits `base_restore_status`.
+    """
+    import routers.results as R
+    from routers.simulation import _state
+
+    cases = (
+        ("coupling_loop", R.get_coupling_loop),
+        ("margin_loop", R.get_margin_loop),
+        ("frontier", R.get_frontier),
+        ("fmea_sweep", R.get_fmea_sweep),
+    )
+    saved = {k: _state.get(k) for k, _ in cases}
+    try:
+        for key, getter in cases:
+            _state[key] = {
+                "status": "done", "error": None,
+                "base_restored": False,
+                "base_restore_status": "time_limit",
+                # the two the filter DOES exist to drop
+                "thread": object(), "stop_event": threading.Event(),
+            }
+            out = getter()
+            assert isinstance(out, dict), (key, out)
+            assert out.get("base_restore_status") == "time_limit", (key, out)
+            assert out.get("base_restored") is False, (key, out)
+            assert "thread" not in out and "stop_event" not in out, (key, out)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                _state.pop(k, None)
+            else:
+                _state[k] = v
