@@ -1937,6 +1937,32 @@ def reset_network(
 # changes (e.g. flipping `committable`) aren't supported here. For those, the
 # client should fall through to per-row PUT.
 
+# Phase 12f: the five LP bounds whose PyPSA class default is FINITE, so that
+# clearing one has a real value to write. Mirrors
+# `services.validation_service.FINITE_DEFAULT_BOUNDS`, which is the preflight
+# that catches whatever gets past this route.
+_FINITE_DEFAULT_BOUNDS = ("p_max_pu", "p_min_pu", "s_max_pu",
+                          "e_max_pu", "e_min_pu")
+
+
+def _finite_bound_default(component_class: str, col: str) -> float:
+    """What `n.add(component_class, ..., col=None)` would have written.
+
+    Read from PyPSA's own component defaults rather than hard-coded, so the
+    two cannot drift; the fallbacks are the measured values and exist only so
+    a PyPSA that reshapes `defaults` cannot turn this into a NaN write, which
+    is the exact defect the caller is fixing.
+    """
+    try:
+        from services.pypsa_service import PyPSAService
+        n = PyPSAService.get_network()
+        return float(n.components[component_class].defaults.at[col, "default"])
+    except Exception:                                         # noqa: BLE001
+        if col == "p_min_pu":
+            return -1.0 if component_class == "StorageUnit" else 0.0
+        return 0.0 if col == "e_min_pu" else 1.0
+
+
 @router.patch("/_bulk")
 def bulk_update(body: dict) -> dict:
     component_class = body.get("component_class", "")
@@ -2025,6 +2051,23 @@ def bulk_update(body: dict) -> dict:
                     coerced[col] = float("inf")
                 elif col == "e_sum_min":
                     coerced[col] = float("-inf")
+                elif col in _FINITE_DEFAULT_BOUNDS:
+                    # Phase 12f. NaN is not a valid "no bound" sentinel for
+                    # these five: PyPSA does not fall back to a default, it
+                    # MASKS the constraint row out of the LP, so clearing
+                    # `p_max_pu` used to leave a 100 MW unit free to dispatch
+                    # 500 MW. Their class default is finite, so "unset" has a
+                    # real value — and it is exactly what `n.add(attr=None)`
+                    # coerces to, verified for all five across Generator,
+                    # Link, StorageUnit, Store, Line and Transformer. Keyed by
+                    # (component, column) because `StorageUnit.p_min_pu` is
+                    # −1.0 where a Generator's is 0.0.
+                    #
+                    # `ramp_limit_*` deliberately still lands in the NaN branch
+                    # below: there the class default IS NaN and PyPSA masks the
+                    # row on purpose, which is the documented way to say "this
+                    # unit has no ramp limit".
+                    coerced[col] = _finite_bound_default(component_class, col)
                 else:
                     coerced[col] = float("nan")  # pandas treats this as missing
                 continue

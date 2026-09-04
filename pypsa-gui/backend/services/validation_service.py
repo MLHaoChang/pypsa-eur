@@ -1282,12 +1282,16 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
     n_snap = 0 if _snaps is None else int(len(_snaps))
     for comp in comps:
         cname = getattr(comp, "name", None) or getattr(comp, "list_name", "")
-        static = getattr(comp, "df", None)
+        # `static`/`dynamic` first: `df`/`pnl` are deprecated in PyPSA 1.0 and
+        # removed in 2.0, and reading them emits a DeprecationWarning per
+        # component per call. The old names stay as the fallback so this keeps
+        # working on an older PyPSA.
+        static = getattr(comp, "static", None)
         if static is None:
-            static = getattr(comp, "static", None)
-        dynamic = getattr(comp, "pnl", None)
+            static = getattr(comp, "df", None)
+        dynamic = getattr(comp, "dynamic", None)
         if dynamic is None:
-            dynamic = getattr(comp, "dynamic", None)
+            dynamic = getattr(comp, "pnl", None)
         for attr in FINITE_DEFAULT_BOUNDS:
             # static
             if static is not None and attr in getattr(static, "columns", []):
