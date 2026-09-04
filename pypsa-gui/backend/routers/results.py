@@ -3088,6 +3088,7 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
 
     stop_event = _threading.Event()
     record: dict = {"status": "running", "rows": [], "error": None,
+                    "base_restored": None, "base_restore_status": None,
                     "started_at": time.time(), "thread": None,
                     "stop_event": stop_event}
 
@@ -3096,10 +3097,11 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
             # Class B first with a private final sink; the LAST sweep's
             # closing base re-solve writes the REAL state sink, so
             # /results/lost_load etc. reflect base afterwards.
-            rows = run_class_b_sweep(
+            rows, restore_b = run_class_b_sweep(
                 n, lock, cfg, stop_event=stop_event,
                 final_state_update=None if scenarios else _state_update,
             )
+            restore = restore_b
             # Phase 12e: the worker runs TWO sweeps, so the flag is checked
             # BETWEEN them. Without this, breaking out of class B's
             # contingency loop returns here and class C runs in full — the
@@ -3108,13 +3110,22 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
             # foreground results are the pre-study ones; that is correct and
             # is what the user is looking at.
             if scenarios and not stop_event.is_set():
-                rows = rows + run_class_c_sweep(
+                rows_c, restore = run_class_c_sweep(
                     n, lock, cfg, scenarios, stop_event=stop_event,
                     final_state_update=_state_update,
                 )
+                rows = rows + rows_c
             record.update(
                 status="aborted" if stop_event.is_set() else "done",
-                rows=rows, finished_at=time.time(), error=None)
+                rows=rows, finished_at=time.time(), error=None,
+                # Phase 12e (shipped-code review, finding 1): whether the
+                # closing base re-solve ran, and what the solver said. A
+                # sweep whose restore FAILED leaves the network on the last
+                # contingency while the foreground results describe another
+                # plan — the user has to be told, and before this the guard
+                # swallowed the exception and the record still read `done`.
+                base_restored=restore.get("base_restored"),
+                base_restore_status=restore.get("base_restore_status"))
         except (SweepBudgetError, StressValidationError) as exc:
             record.update(
                 status="failed", rows=[], error=str(exc), finished_at=time.time())
@@ -4053,8 +4064,11 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
         # merely ignoring cov_target leaves the adaptive 2000-draw cap in play
         # and n_samples drifts between iterates, which breaks the common
         # random numbers the plateau reuse rests on.
+        # `stop_event` is NEVER passed here: this is a REPLAY of one batch
+        # sequence (see `mc_adequacy`'s note), and the loop's own abort is
+        # checked between iterates, never inside an evaluation.
         metrics = mc_adequacy(mc_inputs, draws=draws, seed=seed,
-                              max_draws=draws)
+                              max_draws=draws, stop_event=None)
         try:
             eval_state["floor"] = metrics.get("resolution_floor_h")
         except AttributeError:                                # noqa: BLE001
@@ -4835,8 +4849,11 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         `n_samples` would drift between iterates, breaking the common random
         numbers the plateau reuse rests on — and the same plan hash."""
         mc_inputs = _snapshot()
+        # `stop_event` is NEVER passed here: this is a REPLAY of one batch
+        # sequence (see `mc_adequacy`'s note), and the loop's own abort is
+        # checked between iterates, never inside an evaluation.
         metrics = mc_adequacy(mc_inputs, draws=draws, seed=seed,
-                              max_draws=draws)
+                              max_draws=draws, stop_event=None)
         try:
             eval_state["floor"] = metrics.get("resolution_floor_h")
         except AttributeError:                                # noqa: BLE001

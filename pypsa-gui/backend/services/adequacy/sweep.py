@@ -163,12 +163,12 @@ def _restore_base_guarded(network, lock, cfg, log_queue, final_state_update):
             log_queue if log_queue is not None else queue.SimpleQueue(),
             state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
         )
-    except Exception:                                         # noqa: BLE001
+    except Exception as exc:                                  # noqa: BLE001
         logger.exception(
             "contingency sweep: the closing base re-solve FAILED — the network "
             "is left on the last contingency and the foreground results do not "
             "describe the user's own config")
-        return False, "raised"
+        return False, f"raised: {exc}"
     return True, str(status)
 
 
@@ -410,4 +410,12 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
             "meta": meta,
         })
     rows.sort(key=lambda r: (r["delta_eue_mwh"] or 0.0), reverse=True)
-    return rows
+    # Phase 12e (shipped-code review, finding 1): the restore's outcome rides
+    # OUT of the engine. It was computed and dropped here, so a sweep whose
+    # closing re-solve failed reported `done` with rows and no error, while
+    # the network sat on the last contingency — strictly less visible than
+    # before the guard existed, when the exception at least reached the
+    # record as `failed`. The caller puts it on the wire.
+    return rows, {"base_restored": swept.get("base_restored"),
+                  "base_restore_status": swept.get("base_restore_status"),
+                  "aborted": bool(swept.get("aborted"))}

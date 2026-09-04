@@ -94,7 +94,7 @@ def _network() -> pypsa.Network:
 def test_cold_snap_prices_exactly(tmp_path):
     n = _network()
     PyPSAService.set_network(n)
-    rows = ST.run_class_c_sweep(
+    rows, _restore = ST.run_class_c_sweep(
         n, PyPSAService.get_lock(), SolverConfig(voll=VOLL),
         [_scenario()], log_queue=queue.SimpleQueue())
     assert len(rows) == 1
@@ -128,7 +128,7 @@ def test_renewable_multiplier_hits_profile_borne_availability(tmp_path):
     n.add("Generator", "wind1", bus="b", carrier="wind", p_nom=40.0)
     n.generators_t.p_max_pu = pd.DataFrame({"wind1": [1.0, 1.0]}, index=n.snapshots)
     PyPSAService.set_network(n)
-    rows = ST.run_class_c_sweep(
+    rows, _restore = ST.run_class_c_sweep(
         n, PyPSAService.get_lock(), SolverConfig(voll=VOLL),
         [_scenario()], log_queue=queue.SimpleQueue())
     assert rows[0]["delta_eue_mwh"] == pytest.approx((60.0 - 10.0) * N * WEIGHT, rel=1e-3)
@@ -275,7 +275,7 @@ def test_contingency_mutation_survives_the_user_ts_reapply(monkeypatch):
     scenario = {"id": "coldsnap", "kind": "parametric",
                 "frequency_per_year": 2.0,
                 "electrical_load_multiplier": 1.3}
-    rows = ST.run_class_c_sweep(
+    rows, _restore = ST.run_class_c_sweep(
         n, PyPSAService.get_lock(), SolverConfig(solver_name="highs", voll=VOLL),
         [scenario], log_queue=queue.SimpleQueue())
 

@@ -293,6 +293,13 @@ def elcc_of_portfolio(inputs, members, *, seed, draws, cov_target: float = 0.05,
         baseline_key = _key(inputs, draws=draws, seed=seed, cov_target=cov_target,
                             max_draws=max_draws, batch=batch, sim_kwargs=sim_kwargs)
     n_fixed = int(baseline["n_samples"])
+    # Phase 12e (shipped-code review, finding 6): BEFORE the shared Δ = 0
+    # probe, not only between periods. That probe is a full `n_fixed`-draw
+    # evaluation — minutes on a real study — and a run stopped before it
+    # would otherwise pay for one it can never use: measured one complete
+    # simulation with zero periods priced.
+    if stop_event is not None and stop_event.is_set():
+        return []
     zero_probe = mc_adequacy(
         reduced, draws=draws, seed=seed, cov_target=_NEVER_CONVERGE,
         max_draws=n_fixed, batch=batch, exclude=frozenset(exclude),

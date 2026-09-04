@@ -164,7 +164,7 @@ def test_class_b_rows_price_outages_first_order():
     criticality / occurrence — the f×S identity by construction."""
     n = _network()
     PyPSAService.set_network(n)
-    rows = S.run_class_b_sweep(n, PyPSAService.get_lock(), _cfg(),
+    rows, _restore = S.run_class_b_sweep(n, PyPSAService.get_lock(), _cfg(),
                                log_queue=queue.SimpleQueue())
     assert len(rows) == 1
     r = rows[0]
@@ -188,7 +188,7 @@ def test_class_b_zeroes_time_varying_availability_too():
     n = _network()
     n.links_t.p_max_pu = pd.DataFrame({"tie": [1.0, 1.0]}, index=n.snapshots)
     PyPSAService.set_network(n)
-    rows = S.run_class_b_sweep(n, PyPSAService.get_lock(), _cfg(),
+    rows, _restore = S.run_class_b_sweep(n, PyPSAService.get_lock(), _cfg(),
                                log_queue=queue.SimpleQueue())
     assert rows[0]["delta_eue_mwh"] == pytest.approx(STRANDED_MWH, rel=1e-3)
     assert float(n.links_t.p_max_pu["tie"].min()) == pytest.approx(1.0)

@@ -247,7 +247,11 @@ def test_F1b2_a_failing_restore_does_not_destroy_the_partial_rows(monkeypatch):
     out = SW.run_contingency_sweep(_FakeNetwork(), object(), _cfg(), conts)
     assert out["contingencies"], "the measured rows must survive the failed restore"
     assert out["base_restored"] is False
-    assert out["base_restore_status"] == "raised"
+    # the status carries the solver's own words, not just "raised" — a
+    # failing restore has to be diagnosable from the record (shipped-code
+    # review, finding 18)
+    assert out["base_restore_status"].startswith("raised: ")
+    assert "solver died in the restore" in out["base_restore_status"]
 
 
 def test_F1b3_the_row_assemblers_skip_what_a_partial_sweep_never_measured(monkeypatch):
@@ -266,7 +270,7 @@ def test_F1b3_the_row_assemblers_skip_what_a_partial_sweep_never_measured(monkey
                          "contingencies": {"c0": {"status": "ok", "eue_mwh": 1.0,
                                                   "delta_eue_mwh": 1.0, "meta": conts[0]["meta"]}},
                          "aborted": True, "base_restored": True})
-    rows = SW.run_class_b_sweep(object(), object(), _cfg())
+    rows, _restore = SW.run_class_b_sweep(object(), object(), _cfg())
     assert [r["id"] for r in rows] == ["c0"], rows
 
 
@@ -441,3 +445,207 @@ def test_F1g_an_aborted_sweeps_rows_still_reach_the_worksheet(
     assert r.status_code == 200, r.text
     ids = [m["mode_id"] for m in r.json()["per_mode"]]
     assert "link:L1:outage" in ids, ids
+
+
+# ── the gaps the shipped-code review found: behaviours no test could see ──
+
+def test_F1h_class_C_does_not_run_after_class_B_was_aborted(monkeypatch):
+    """★ F1h (shipped-code review, finding 5). The `/fmea_sweep` worker runs
+    TWO sweeps. Breaking out of class B's contingency loop returns to the
+    worker, and without a check there class C runs IN FULL — the abort would
+    stop one sweep, not the study. Bite (verified): drop the
+    `and not stop_event.is_set()` from the worker's class-C branch."""
+    import pypsa
+
+    import routers.results as R
+    from routers.simulation import _state
+    from services.adequacy import stress as ST_MOD
+    from services.adequacy import sweep as SW_MOD
+    from services.pypsa_service import PyPSAService
+
+    calls = {"b": 0, "c": 0}
+
+    def fake_b(*a, **k):
+        calls["b"] += 1
+        ev = k.get("stop_event")
+        if ev is not None:
+            ev.set()                      # the user pressed abort during B
+        return [], {"base_restored": True, "base_restore_status": "ok",
+                    "aborted": True}
+
+    def fake_c(*a, **k):
+        calls["c"] += 1
+        return [], {"base_restored": True, "base_restore_status": "ok",
+                    "aborted": False}
+
+    # The route imports both assemblers INSIDE the function body, so the
+    # names live in their defining modules, not in `routers.results`.
+    monkeypatch.setattr(SW_MOD, "run_class_b_sweep", fake_b)
+    monkeypatch.setattr(ST_MOD, "run_class_c_sweep", fake_c)
+
+    n = pypsa.Network()
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=10.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=50.0,
+          carrier="gas")
+    PyPSAService.set_network(n)
+    _state.pop("fmea_sweep", None)
+    _state["solver_config"] = _cfg()
+    _state["status"] = "idle"
+
+    out = R.post_fmea_sweep(
+        body=R.FmeaSweepRequest(scenarios=[{
+            "id": "s", "name": "s", "kind": "parametric",
+            "frequency_per_year": 1.0,
+            "electrical_load_multiplier": 1.2}]))
+    assert out["status"] == "running"
+    _state["fmea_sweep"]["thread"].join(timeout=60)
+
+    assert calls["b"] == 1
+    assert calls["c"] == 0, "class C ran after class B was aborted"
+    assert _state["fmea_sweep"]["status"] == "aborted"
+
+
+def test_F1d_an_abort_before_the_portfolio_buys_no_evaluation():
+    """★ F1d (shipped-code review, finding 6) — bounded work, COUNTED, never
+    timed. `elcc_of_portfolio`'s shared Δ = 0 probe is a full `n_fixed`-draw
+    evaluation, and it used to run before the first stop check: a study
+    stopped just before it paid for one complete simulation and priced zero
+    periods. Bite (verified): move the check back below the probe."""
+    H = 24
+    from services.adequacy.copt import CoptUnit
+    units = tuple(CoptUnit(f"g{i}", 60.0, 0.2, mttr_hours=24.0) for i in range(3))
+    idx = 2 * H
+    prof = np.zeros(idx)
+    prof[:H] = 40.0
+    inp = M.MCInputs(units=units, residual=np.full(idx, 150.0) - prof,
+                     weights=np.ones(idx),
+                     periods=(("2030", 0, H), ("2035", H, idx)),
+                     nyears=idx / 8760.0, vre_profiles={"farm": prof})
+    members = [P.Member("vre", "farm", 100.0, (("2030", 100.0), ("2035", 100.0)))]
+
+    baseline = M.mc_adequacy(inp, draws=8, seed=0, cov_target=1.0)
+    key = E.baseline_key(inp, draws=8, seed=0, cov_target=1.0,
+                         max_draws=M.MAX_DRAWS, batch=250)
+    ev = threading.Event()
+    ev.set()                                   # stopped before it even starts
+    sims = {"n": 0}
+    real_sb = M._simulate_blocks
+
+    def counting(*a, **kw):
+        sims["n"] += 1
+        return real_sb(*a, **kw)
+
+    M._simulate_blocks = counting
+    try:
+        rows = P.elcc_of_portfolio(inp, members, seed=0, draws=8,
+                                   cov_target=1.0, baseline=baseline,
+                                   baseline_key=key, stop_event=ev)
+    finally:
+        M._simulate_blocks = real_sb
+    assert rows == []
+    assert sims["n"] == 0, f"an already-stopped run still simulated {sims['n']} block(s)"
+
+
+def test_F1d2_a_truncated_portfolio_block_says_so(monkeypatch):
+    """★ F1d2 (shipped-code review, finding 5). `truncated` is the field that
+    stops a short `periods` list reading as a complete one — and nothing
+    asserted it at the BLOCK level, only that `elcc_of_portfolio` returned
+    fewer rows. Bite (verified): hardcode `truncated=False`."""
+    H = 24
+    from services.adequacy.copt import CoptUnit
+    units = tuple(CoptUnit(f"g{i}", 60.0, 0.2, mttr_hours=24.0) for i in range(3))
+    idx = 2 * H
+    prof = np.zeros(idx)
+    prof[:H] = 40.0
+    inp = M.MCInputs(units=units, residual=np.full(idx, 150.0) - prof,
+                     weights=np.ones(idx),
+                     periods=(("2030", 0, H), ("2035", H, idx)),
+                     nyears=idx / 8760.0, vre_profiles={"farm": prof})
+    pop = {"members": [P.Member("vre", "farm", 100.0,
+                                (("2030", 100.0), ("2035", 100.0)))],
+           "unbuilt": [], "snapshot_names": {"farm"}}
+    ev = threading.Event()
+    ev.set()
+    block = P.portfolio_block(inp, pop, margin_payload=None,
+                              snapshot_fingerprint="x", seed=0, draws=8,
+                              cov_target=1.0, baseline=None, baseline_key=None,
+                              stop_event=ev)
+    assert block["truncated"] is True, block
+    assert block["periods"] == []
+    # …and a run that priced every period is NOT truncated
+    block2 = P.portfolio_block(inp, pop, margin_payload=None,
+                               snapshot_fingerprint="x", seed=0, draws=8,
+                               cov_target=1.0, baseline=None, baseline_key=None)
+    assert block2["truncated"] is False
+    assert len(block2["periods"]) == 2
+
+
+def test_F1b4_the_class_C_assembler_skips_what_a_partial_sweep_never_measured(monkeypatch):
+    """★ (shipped-code review, finding 5) — the class-C twin of F1b3. An
+    aborted sweep's dict carries only what it reached; indexing every id
+    raised `KeyError` and lost every row. Bite (verified): index instead of
+    `.get`."""
+    from services.adequacy import stress as ST
+    from services.adequacy import sweep as SW
+
+    scen = [{"id": f"s{i}", "name": f"s{i}", "kind": "parametric",
+             "electrical_load_multiplier": 1.2,
+             "frequency_per_year": 1.0} for i in range(3)]
+    # `run_class_c_sweep` imports the driver from `sweep` inside its own body,
+    # so the patch has to land on the defining module.
+    monkeypatch.setattr(
+        SW, "run_contingency_sweep",
+        lambda *a, **k: {"base": {"eue_mwh": 0.0, "status": "ok"},
+                         "contingencies": {
+                             "scenario:s0": {"status": "ok", "eue_mwh": 1.0,
+                                             "delta_eue_mwh": 1.0,
+                                             "meta": {"name": "s0",
+                                                      "frequency_per_year": 1.0}}},
+                         "aborted": True, "base_restored": True,
+                         "base_restore_status": "ok"})
+    rows, restore = ST.run_class_c_sweep(object(), object(), _cfg(), scen)
+    assert [r["id"] for r in rows] == ["scenario:s0"], rows
+    assert restore["aborted"] is True
+
+
+def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
+    """★ (shipped-code review, finding 4). The CRN wall, asserted STATICALLY
+    over the source rather than through one engine: every `mc_adequacy(` call
+    outside the `/mc` worker's own baseline must pass `stop_event=None`
+    literally. A dynamic test can only cover the call sites it happens to
+    drive — two portfolio call sites were mutation-invisible — and a new call
+    site added later would slip past every one of them.
+
+    Bite (verified): drop `stop_event=None` from `elcc.metrics_at` or from
+    either portfolio call.
+    """
+    import ast
+    import pathlib
+
+    offenders: list[str] = []
+    for rel in ("services/adequacy/elcc.py", "services/adequacy/portfolio.py",
+                "routers/results.py"):
+        src = pathlib.Path(rel).read_text()
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+            if name != "mc_adequacy":
+                continue
+            kw = {k.arg for k in node.keywords if k.arg}
+            line = src.splitlines()[node.lineno - 1]
+            if "stop_event" not in kw:
+                offenders.append(f"{rel}:{node.lineno}: {line.strip()}")
+                continue
+            val = next(k.value for k in node.keywords if k.arg == "stop_event")
+            # the ONE call allowed to carry it is the /mc worker's baseline
+            is_none = isinstance(val, ast.Constant) and val.value is None
+            if not is_none and rel != "routers/results.py":
+                offenders.append(f"{rel}:{node.lineno}: forwards a flag")
+    assert not offenders, (
+        "every mc_adequacy call outside the /mc worker's baseline must pass "
+        "stop_event=None — a replay truncated by an abort breaks CRN:\n  "
+        + "\n  ".join(offenders))

@@ -579,14 +579,17 @@ with real period rows.
 
 **§3.3 (COPT attribution), amended — two independent changes.**
 
-*`attribute_criticality` no longer calls `deconvolve`.* On every fleet
-`/copt` can produce (Δ = 1 MW, MW-scale capacities, so `L/n ≳ 6`) the rebuild
-is 3.3–5× faster — measured across n = 2…300 and q = 0.02…0.499 — and more
-accurate: the deconvolution's mass guard admits `0.999 ≤ total ≤ 1.001` by
-construction, and the `2^k` mixture probes cells the plain path never
-reaches, so that error lands on ΔEUE (measured up to 1.04e-4 relative). This
-CHANGES numbers, within the guard's own band, and the rebuild is the kept
-side. `deconvolve` remains public for its round-trip test.
+*`attribute_criticality` no longer calls `deconvolve`.* On the fleets measured
+(n = 2…300, q = 0.02…0.499, Δ = 1 MW and MW-scale capacities) the rebuild is
+3.3–5× faster, and it is the accurate side. `deconvolve` accepts any table
+whose mass lands in `0.999 ≤ total ≤ 1.001`; that guard bounds the table's
+MASS, and **no bound on the resulting ΔEUE error follows from it** — an
+earlier revision of this section presented `1e-3` as if it were such a bound,
+which it is not. What is known is measured: the largest relative ΔEUE
+disagreement observed between the two routes is **3.8e-5**, on 45 × 100 MW at
+q = 0.05 with the residual at full nameplate, where the deconvolved table
+carries 7.2e-4 of surplus mass. This CHANGES numbers, and the rebuild is the
+kept side. `deconvolve` remains public for its round-trip test.
 
 *The counterfactual evaluations are binned when `k ≥ 2`.*
 `ES_d(x) = x·F_d[j] − Δ·G_d[j]` with `j = clip(ceil(x/Δ − ε), 0, n_d)`, and

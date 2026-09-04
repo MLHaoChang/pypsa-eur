@@ -23,11 +23,20 @@ for both the binning and the `deconvolve` deletion. They are not comparable:
   on my fixtures and **1.04e-4** on the review's (n = 20, q = 0.01, k = 8 —
   a textbook FOR and the shipped `K_EXACT`), the difference being how far that
   fixture's mass drifted *inside* the guard (1.000016779 there, 1.0000000005
-  here). **Any tolerance below the guard's own 1e-3 is unsound while the
-  reference contains the call.** The rebuild is the accurate side, so this
-  change improves the numbers — but it changes them visibly (59.8798 →
-  59.8860 MWh on the review's row), and "four orders below any physical claim"
-  was false.
+  here). The rebuild is the accurate side, so this change improves the
+  numbers — but it changes them visibly (59.8798 → 59.8860 MWh on the
+  review's row), and "four orders below any physical claim" was false.
+
+  > **Corrected after the shipped-code review (finding F2/F3).** This bullet
+  > originally read "**any tolerance below the guard's own 1e-3 is unsound
+  > while the reference contains the call**", which treats `1e-3` as a bound
+  > on the ΔEUE error. It is not one: the guard bounds the table's MASS, and
+  > nothing derives a ΔEUE bound from it. The two measurements above are
+  > themselves the counter-example — 1.68e-5 of mass error produced 1.04e-4 of
+  > ΔEUE error on the review's fixture, while 7.2e-4 of mass error produced
+  > only 3.8e-5 on a 45 × 100 MW / q = 0.05 fleet at full nameplate. The
+  > relation is not monotone, so no band on one bounds the other. Only the
+  > direction is defensible, and that is what F2e now pins.
 
 **Blocker 2 — the third sort site ranks on a different quantity.**
 `/fmea_modes` sorts on `criticality_eur_per_year` (`results.py:2961`), not
@@ -187,11 +196,17 @@ accumulate in one pass over the `2^k` states.
 * **Binning is exact**: worst rel **4.2e-11** at production scale, 2.2e-12 at
   benchmark scale. F2 pins it at **1e-8** against a reference that is the
   shipped mixture path **with the `deconvolve` call already removed**.
-* **The deletion changes numbers**, bounded by the shipped mass guard's own
-  1e-3 band (`copt.py:674`): measured 2.2e-13 here, 1.04e-4 on the review's
-  n = 20 / q = 0.01 / k = 8 fixture. Its own ★ (F2e) pins the delta at **1e-3**
-  with the guard named as the mechanism, and records that the rebuild is the
-  accurate side. No claim of bit-identity anywhere.
+* **The deletion changes numbers**: measured 2.2e-13 here, 1.04e-4 on the
+  review's n = 20 / q = 0.01 / k = 8 fixture, 3.8e-5 on 45 × 100 MW at
+  q = 0.05 with the residual at full nameplate. **As shipped, F2e pins the
+  DIRECTION, not a band** — the shipped rows must equal the rebuild's to
+  1e-12 on a fixture where the two routes provably disagree (that last
+  fixture), with the disagreement itself asserted `> 1e-6` so the test cannot
+  go vacuous. The earlier plan of pinning the delta at 1e-3 "with the guard
+  named as the mechanism" was wrong twice over: the guard bounds mass and not
+  ΔEUE, and on the fixture that version used the two routes agreed to 8e-15,
+  so neither the assertion nor its bite could fail. No claim of bit-identity
+  anywhere.
 
 **The switch: `binned iff k ≥ 2`, evaluated per period block.** v3's
 machine-measured constant does not exist — the implied crossover ranges from

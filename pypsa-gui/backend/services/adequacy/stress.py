@@ -262,4 +262,10 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
             "meta": meta,
         })
     rows.sort(key=lambda r: (r["delta_eue_mwh"] or 0.0), reverse=True)
-    return rows
+    # Phase 12e (shipped-code review, finding 1): the closing restore's
+    # outcome rides out beside the rows, as class B's does — a sweep whose
+    # re-solve failed must not report `done` while the network sits on the
+    # last scenario.
+    return rows, {"base_restored": swept.get("base_restored"),
+                  "base_restore_status": swept.get("base_restore_status"),
+                  "aborted": bool(swept.get("aborted"))}

@@ -9,12 +9,15 @@ Two independent changes, and they need two independent claims:
   mixed units, so binning them once and evaluating each counterfactual as a
   dot product over the grid is the same arithmetic. Pinned at rel 1e-8
   against the direct path (measured worst 6.2e-13 across the fixtures below).
-* **Deleting the `deconvolve` call CHANGES numbers**, and the bound is the
-  shipped mass guard: `deconvolve` accepts any table whose mass lands in
-  `0.999 ≤ total ≤ 1.001`, so a deconvolved table can carry ~1e-3 of mass
-  error by construction, and the `2^k` mixture probes cells the plain path
-  never reaches. Pinned at rel 1e-3 with the rebuild as the kept side, which
-  is the accurate one. No claim of bit-identity anywhere.
+* **Deleting the `deconvolve` call CHANGES numbers**, and what is pinned is
+  the DIRECTION, not a band. `deconvolve` accepts any table whose mass lands
+  in `0.999 ≤ total ≤ 1.001`; that guard bounds the table's MASS, and no
+  bound on the ΔEUE error follows from it — the measurements refute any such
+  reading (1.68e-5 of mass error moved ΔEUE by 1.04e-4 on one fleet, while
+  7.2e-4 of mass error moved it by only 3.8e-5 on another). So F2e asserts
+  that the shipped rows equal the REBUILD's to 1e-12 on a fixture where the
+  two routes provably disagree, and asserts that disagreement (`> 1e-6`) so
+  the test cannot go vacuous. No claim of bit-identity anywhere.
 
 The reference for the first claim is therefore the shipped mixture path with
 the `deconvolve` call ALREADY REMOVED (`_direct_reference` below) — comparing
@@ -141,13 +144,36 @@ def test_F2b_the_fold_is_what_makes_a_beyond_table_cell_count():
     """★ F2b. With the residual far beyond the table, every cell clips to the
     table's last index — and that index is where all the shortfall lives. The
     hand value is `Σ_h w_h · q · cap` per unit (the unit is the only thing
-    that can be down). Bite (verified): drop the fold in `_eue_binned` — every
-    ΔEUE reads 0.0."""
+    that can be down).
+
+    The binned evaluator is called DIRECTLY. Routing this through
+    `attribute_criticality` is what made an earlier version vacuous: the
+    fixture has no mixed units, so `len(mixed) >= BIN_MIN_MIXED` is false, the
+    switch sends it to the direct path, and `_eue_binned`'s fold — the thing
+    named in the bite — never runs (shipped-code review, finding F2b).
+
+    Bite (verified): drop the beyond-table fold in `_eue_binned` — every ΔEUE
+    reads 0.0.
+    """
     units = [C.CoptUnit(f"g{i}", 60.0, 0.1, mttr_hours=24.0) for i in range(4)]
     res = pd.Series(np.full(H, 5000.0), index=IDX)
     dist = C.build_copt(units, delta_mw=1.0)
-    rows = {r["name"]: r["delta_eue_mwh"]
-            for r in C.attribute_criticality(units, dist, res, weights=W, voll=0.0)}
+    r = res.to_numpy(dtype=np.float64)
+    w = W.to_numpy(dtype=np.float64)
+
+    cells = C._eue_cells(r, (), w, dist.delta_mw)
+    base = C._eue_binned(dist, cells)
+    for u in units:
+        without = C.build_copt([v for v in units if v.name != u.name],
+                               delta_mw=dist.delta_mw)
+        delta = max(base - C._eue_binned(
+            C._shift_deterministic(without, u.capacity_mw), cells), 0.0)
+        assert delta == pytest.approx(H * u.q * u.capacity_mw, rel=1e-9), u.name
+
+    # …and the shipped route (here: the direct path) agrees with it, so the
+    # hand value pins both sides of the switch on this fixture.
+    rows = {x["name"]: x["delta_eue_mwh"]
+            for x in C.attribute_criticality(units, dist, res, weights=W, voll=0.0)}
     for u in units:
         assert rows[u.name] == pytest.approx(H * u.q * u.capacity_mw, rel=1e-9)
 
@@ -254,22 +280,27 @@ def test_F2d_the_switch_picks_the_path_it_claims_to(monkeypatch):
 
 # ── F2e: what deleting the deconvolve call costs ────────────────────────
 
-def test_F2e_dropping_the_deconvolution_moves_numbers_within_the_mass_guards_band():
-    """★ F2e. The attribution no longer calls `deconvolve`, and that CHANGES
-    numbers on any fleet where the deconvolution used to succeed: its mass
-    guard admits `0.999 ≤ total ≤ 1.001` (`copt.deconvolve`), so the
-    deconvolved table can be up to ~1e-3 off in mass, and the `2^k` mixture
-    probes cells the plain path never reaches. The rebuild is the ACCURATE
-    side and is the one kept.
+def test_F2e_the_attribution_now_follows_the_rebuild_and_not_the_deconvolution():
+    """★ F2e (rewritten after the shipped-code review). `attribute_criticality`
+    no longer calls `deconvolve`, and on a fleet where the two routes DISAGREE
+    the shipped numbers must be the rebuild's, exactly.
 
-    Pinned at rel 1e-3 — the guard's own band — rather than at a float
-    tolerance, because a tighter bound is unsound while the alternative
-    implementation contains that guard. Bite (verified): restore the
-    deconvolve-first path and assert 1e-8 — it fails on the fixtures the
-    guard admits.
+    This pins a DIRECTION, not a bound. The earlier version asserted that the
+    shipped rows sat within `1e-3` of the deconvolved ones, justified by
+    `deconvolve`'s mass guard (`0.999 ≤ total ≤ 1.001`) — but that guard bounds
+    the table's MASS, and no bound on ΔEUE follows from it; worse, on the
+    fixture it used the two routes agreed to 8e-15, so the assertion could not
+    fail and neither could its bite.
+
+    The fixture here is chosen to discriminate: 45 × 100 MW at q = 0.05 with
+    the residual at full nameplate deconvolves to a table carrying 7.2e-4 of
+    surplus mass, and that moves ΔEUE by 3.8e-5 relative — 10 orders of
+    magnitude above the rebuild's own float noise. Bite (verified): restore
+    the deconvolve-first path in `attribute_criticality`; the shipped rows
+    then follow the deconvolution and the `1e-12` assertion fails.
     """
     units = _fleet(45, k=0, q=0.05, spread=False)
-    res = pd.Series(np.full(H, 2500.0), index=IDX)
+    res = pd.Series(np.full(H, 4500.0), index=IDX)
     dist = C.build_copt(units, delta_mw=1.0)
     r = res.to_numpy(dtype=np.float64)
     w = W.to_numpy(dtype=np.float64)
@@ -281,22 +312,34 @@ def test_F2e_dropping_the_deconvolution_moves_numbers_within_the_mass_guards_ban
     base = eue(dist)
     shipped = {x["name"]: x["delta_eue_mwh"]
                for x in C.attribute_criticality(units, dist, res, weights=W, voll=0.0)}
+
     n_deconv = 0
-    worst = 0.0
+    worst_shipped_vs_rebuild = 0.0
+    worst_deconv_vs_rebuild = 0.0
     for u in units:
+        without = C.build_copt([v for v in units if v.name != u.name],
+                               delta_mw=dist.delta_mw)
+        rebuild = max(base - eue(C._shift_deterministic(without, u.capacity_mw)), 0.0)
+        assert rebuild > 0.0, u.name
+        worst_shipped_vs_rebuild = max(
+            worst_shipped_vs_rebuild, abs(shipped[u.name] - rebuild) / rebuild)
         try:
             g = C.deconvolve(dist, capacity_mw=u.capacity_mw, q=u.q)
         except ValueError:
             continue
         n_deconv += 1
-        # the mass the guard admitted, and the ΔEUE it implies
+        # the mass the guard admitted…
         assert 0.999 <= float(g.probs.sum()) <= 1.001
-        old = max(base - eue(C._shift_deterministic(g, u.capacity_mw)), 0.0)
-        new = shipped[u.name]
-        if old > 0:
-            worst = max(worst, abs(old - new) / old)
+        dec = max(base - eue(C._shift_deterministic(g, u.capacity_mw)), 0.0)
+        worst_deconv_vs_rebuild = max(
+            worst_deconv_vs_rebuild, abs(dec - rebuild) / rebuild)
+
     assert n_deconv > 0, "fixture must be one where the deconvolution succeeds"
-    assert worst < 1e-3, worst
+    # …and the two routes really do disagree here, so the assertion below is
+    # not vacuous.
+    assert worst_deconv_vs_rebuild > 1e-6, worst_deconv_vs_rebuild
+    # The shipped attribution is the rebuild's, to float noise.
+    assert worst_shipped_vs_rebuild < 1e-12, worst_shipped_vs_rebuild
 
 
 def test_F2f_the_sort_key_breaks_exact_ties_by_name():
@@ -327,21 +370,39 @@ def test_F2f_the_sort_key_breaks_exact_ties_by_name():
 def test_F2g_the_block_merge_sort_breaks_exact_ties_by_name_too():
     """★ F2g. The 12d per-block path merges criticality rows by name and sorts
     them again, so the tie-break has to be on THAT sort too — the merged order
-    is what `/copt` serves on every multi-period network. Same construction as
-    F2f: `q = 0` makes every ΔEUE exactly 0.0, so the tie is exact and the
-    fleet order (not alphabetical) is what a missing tie-break leaves behind.
-    Bite (verified): sort the merged rows on `-delta_eue_mwh` alone."""
-    names = ["zulu", "alpha", "mike", "bravo", "yankee"]
+    is what `/copt` serves on every multi-period network. `q = 0` makes every
+    ΔEUE exactly 0.0, so the ties are exact.
+
+    The blocks hold DIFFERENT units, and that is the whole fixture. An earlier
+    version gave both blocks the same fleet, which made the test vacuous: each
+    block's rows come out of `attribute_criticality` already name-sorted, so
+    the merge dict was filled alphabetically and `sorted` — being stable —
+    returned alphabetical order whether or not the merge key had a tie-break
+    (shipped-code review, finding F2g). Here `mike`/`zulu` carry capacity only
+    in 2030 and `alpha`/`bravo` only in 2035, so the dict fills as
+    [mike, zulu, alpha, bravo] and only the merge sort's own name key can
+    recover alphabetical order.
+
+    Bite (verified): sort the merged rows on `-delta_eue_mwh` alone.
+    """
     n_h = 6
     idx = pd.MultiIndex.from_product(
         [[2030, 2035], pd.RangeIndex(n_h)], names=["period", "t"])
-    # a capacity series forces the per-block path (Phase 12d)
-    series = np.concatenate([np.full(n_h, 100.0), np.full(n_h, 80.0)])
-    units = [C.CoptUnit(nm, 100.0, 0.0, mttr_hours=24.0, capacity_series=series)
-             for nm in names]
+    first = np.concatenate([np.full(n_h, 100.0), np.zeros(n_h)])
+    second = np.concatenate([np.zeros(n_h), np.full(n_h, 100.0)])
+    units = [C.CoptUnit(nm, 100.0, 0.0, mttr_hours=24.0, capacity_series=ser)
+             for nm, ser in (("mike", first), ("zulu", first),
+                             ("alpha", second), ("bravo", second))]
     res = pd.Series(np.full(2 * n_h, 260.0), index=idx)
     w = pd.Series(np.ones(2 * n_h), index=idx)
     an = C.screening_analysis(units, res, weights=w, voll=0.0)
+
     assert set(an["dist"]) == {2030, 2035}, "fixture must take the per-block path"
-    assert all(r["delta_eue_mwh"] == 0.0 for r in an["rows"])
-    assert [r["name"] for r in an["rows"]] == sorted(names)
+    names = [r["name"] for r in an["rows"]]
+    assert sorted(names) == ["alpha", "bravo", "mike", "zulu"], names
+    assert all(r["delta_eue_mwh"] == 0.0 for r in an["rows"]), \
+        [(r["name"], r["delta_eue_mwh"]) for r in an["rows"]]
+    # The merge dict cannot have been filled alphabetically: 2030 contributes
+    # only mike/zulu and 2035 only alpha/bravo. Without the merge sort's name
+    # key the stable sort would hand back [mike, zulu, alpha, bravo].
+    assert names == ["alpha", "bravo", "mike", "zulu"], names

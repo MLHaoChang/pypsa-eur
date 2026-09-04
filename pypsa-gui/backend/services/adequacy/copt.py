@@ -829,13 +829,17 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
     for u in units:
         # Phase 12e: the rebuild, always. `deconvolve` is a Python loop over
         # the table while `build_copt` is n−1 vectorised convolutions, so on
-        # every fleet this route can produce (Δ = 1 MW, MW-scale capacities,
-        # so L/n ≳ 6) the rebuild is 3.3–5× faster — measured across
-        # n = 2…300 and q = 0.02…0.499 — AND more accurate: the deconvolution's
-        # mass guard admits ±1e-3 by construction (`deconvolve`), and the 2^k
-        # mixture probes cells the plain path never reaches, so that error
-        # lands on ΔEUE (measured up to 1.04e-4 relative). `deconvolve` stays
-        # for its round-trip test; the attribution no longer calls it.
+        # the fleets measured (n = 2…300, q = 0.02…0.499, Δ = 1 MW and
+        # MW-scale capacities) the rebuild is 3.3–5× faster — AND it is the
+        # accurate side. `deconvolve` accepts any table whose mass lands in
+        # 0.999…1.001, and that guard bounds the table's MASS only: no bound
+        # on the ΔEUE it implies follows from it. What is known is measured,
+        # not derived — the largest relative ΔEUE disagreement seen between
+        # the two routes is 3.8e-5, on 45 × 100 MW at q = 0.05 with the
+        # residual at full nameplate (pinned by F2e in
+        # tests/test_adequacy_copt_cost.py), where the deconvolved table
+        # carries 7.2e-4 of surplus mass. `deconvolve` stays for its
+        # round-trip test; the attribution no longer calls it.
         without = build_copt([v for v in units if v.name != u.name],
                              delta_mw=dist.delta_mw)
         perfect = _shift_deterministic(without, u.capacity_mw)
