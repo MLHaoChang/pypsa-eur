@@ -168,36 +168,115 @@ def _to_openai_messages(request: LLMRequest) -> list[dict[str, Any]]:
     return out
 
 
+class _TokenParamRefused(Exception):
+    """
+    Internal: the endpoint refused the completion-length parameter BY NAME.
+
+    Never escapes this module — `stream` catches it and retries once under
+    the other spelling. Raised only from the pre-body status check, so no
+    event has been yielded yet when it fires.
+    """
+
+
 class OpenAICompatProvider:
     name = "openai-compat"
 
+    # C-2 — the two spellings of the completion-length parameter. EXACTLY ONE
+    # is ever sent. The previous code sent both and a source comment claimed
+    # that was safe; it is not. OpenAI's refusal is PRESENCE-based — the error
+    # is `unsupported_parameter` naming `max_tokens` itself, because the
+    # model's supported-parameter set does not contain it — so adding the new
+    # name alongside does not help while the old one is still in the body.
+    _TOKEN_PARAM_LEGACY = "max_tokens"
+    _TOKEN_PARAM_COMPLETION = "max_completion_tokens"
+
     def __init__(self, base_url: str, api_key: str | None = None,
-                 http_client: Any | None = None) -> None:
+                 http_client: Any | None = None,
+                 token_param: str = "max_tokens") -> None:
         self._base = base_url.rstrip("/")
         self._key = api_key
         self._http = http_client  # tests inject MockTransport clients
+        # Server-derived from the profile's preset (`llm_config
+        # .derive_token_param`), never client-set. `max_tokens` is the default
+        # because it is what every local and OpenAI-compatible server accepts;
+        # only endpoints declared otherwise get the newer name.
+        self._token_param = (
+            token_param if token_param in
+            (self._TOKEN_PARAM_LEGACY, self._TOKEN_PARAM_COMPLETION)
+            else self._TOKEN_PARAM_LEGACY
+        )
+
+    def _other_token_param(self, used: str) -> str:
+        return (
+            self._TOKEN_PARAM_COMPLETION
+            if used == self._TOKEN_PARAM_LEGACY
+            else self._TOKEN_PARAM_LEGACY
+        )
+
+    @staticmethod
+    def _refused_the_token_param(body: bytes, param: str) -> bool:
+        """
+        True when a 400 body is specifically "that token parameter is not
+        supported here" — the ONE case worth retrying under the other name.
+
+        Deliberately narrow. A generic 400 (bad model, malformed request)
+        must surface immediately: silently re-sending it would double every
+        failed request and hide the real cause. Matched on the parameter name
+        appearing together with an unsupported-parameter signal, so it works
+        against vendors that word the message differently but keep the shape.
+        """
+        try:
+            text = body.decode("utf-8", "replace").lower()
+        except Exception:  # noqa: BLE001 — a body we cannot read is not a match
+            return False
+        if param.lower() not in text:
+            return False
+        return any(
+            marker in text for marker in
+            ("unsupported_parameter", "unsupported parameter",
+             "unrecognized_keys", "unknown parameter", "not supported")
+        )
 
     def _client(self):
         import httpx  # function-local: dev-only dep until plan 2 ships it
         return self._http or httpx.Client(timeout=httpx.Timeout(120.0,
                                                                 connect=10.0))
 
-    def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
-        import httpx
+    def _stream_payload(self, request: LLMRequest, token_param: str) -> dict:
         payload: dict[str, Any] = {
             "model": request.model,
-            # M6 (Task 2 live-vendor research): current GPT-5.x/o-series
-            # REQUIRE max_completion_tokens — max_tokens 400s there. Sending
-            # both keeps Ollama/LM Studio/vLLM (which want max_tokens and
-            # ignore the field they don't recognise) working unchanged.
-            "max_tokens": request.max_tokens,
-            "max_completion_tokens": request.max_tokens,
+            # C-2 — EXACTLY ONE completion-length parameter. See the class
+            # constants for why sending both is not a compatible superset.
+            token_param: request.max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
             "messages": _to_openai_messages(request),
         }
         if request.tools:
             payload["tools"] = _to_openai_tools(request.tools)
+        return payload
+
+    def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
+        """
+        One turn on the OpenAI wire, with a single adaptive retry (C-2).
+
+        `_stream_once` raises `_TokenParamRefused` ONLY from the pre-body
+        status check, before it has yielded anything — so retrying it cannot
+        replay events a consumer has already seen. Any other failure, and any
+        failure after the first yield, propagates untouched.
+        """
+        token_param = self._token_param
+        try:
+            yield from self._stream_once(request, token_param)
+        except _TokenParamRefused:
+            yield from self._stream_once(
+                request, self._other_token_param(token_param))
+
+    def _stream_once(
+        self, request: LLMRequest, token_param: str
+    ) -> Iterator[LLMEvent]:
+        import httpx
+        payload = self._stream_payload(request, token_param)
         headers = {"content-type": "application/json"}
         if self._key:
             headers["authorization"] = f"Bearer {self._key}"
@@ -220,6 +299,19 @@ class OpenAICompatProvider:
         try:
             with client.stream("POST", f"{self._base}/chat/completions",
                                json=payload, headers=headers) as resp:
+                if resp.status_code == 400:
+                    # C-2 — the endpoint may want the OTHER spelling. Only a
+                    # refusal that NAMES this parameter is retried, and only
+                    # once; anything else surfaces unchanged. `custom`
+                    # profiles have no preset declaration to read, so this is
+                    # what keeps one aimed at OpenAI from being dead on
+                    # arrival.
+                    body = resp.read()
+                    if self._refused_the_token_param(body, token_param):
+                        raise _TokenParamRefused(token_param)
+                    raise ProviderError(
+                        _kind_for_status(resp.status_code),
+                        f"HTTP {resp.status_code} from chat/completions")
                 if resp.status_code != 200:
                     raise ProviderError(
                         _kind_for_status(resp.status_code),
@@ -364,10 +456,11 @@ class OpenAICompatProvider:
         """
         import time
         import httpx
+        # C-2 — one token parameter, same rule as `stream`. The Test
+        # connection button must not 400 for a reason a real turn would not.
         payload: dict[str, Any] = {
             "model": model,
-            "max_tokens": 1,
-            "max_completion_tokens": 1,
+            self._token_param: 1,
             "stream": False,
             "messages": [{"role": "user", "content": "ping"}],
         }
@@ -395,6 +488,26 @@ class OpenAICompatProvider:
             return "unauthorized", None
         if resp.status_code == 404:
             return "model_not_found", None
+        if resp.status_code == 400 and self._refused_the_token_param(
+            resp.content, self._token_param
+        ):
+            # C-2 — same adaptive retry as `stream`, so a `custom` profile
+            # aimed at OpenAI does not report a bogus `invalid_request` from
+            # the one button an operator uses to check their configuration.
+            payload[self._other_token_param(self._token_param)] = payload.pop(
+                self._token_param
+            )
+            try:
+                retry = client.post(f"{self._base}/chat/completions",
+                                    json=payload, headers=headers)
+            except httpx.HTTPError:
+                return "unreachable", None
+            if retry.status_code == 200:
+                return "ok", (time.monotonic() - start) * 1000.0
+            if retry.status_code == 401:
+                return "unauthorized", None
+            if retry.status_code == 404:
+                return "model_not_found", None
         return "invalid_request", None
 
     def probe_models(self) -> list[str] | None:

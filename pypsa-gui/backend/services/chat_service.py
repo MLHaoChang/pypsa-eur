@@ -1806,7 +1806,12 @@ def _provider_for_profile(
             return None, "missing_api_key"
         return (
             llm_openai_compat.OpenAICompatProvider(
-                base_url, api_key=key_value
+                base_url, api_key=key_value,
+                # C-2 — server-derived from the preset, like `key_env`.
+                # Exactly one completion-length parameter goes on the wire;
+                # the provider retries once under the other spelling if this
+                # endpoint refuses it by name.
+                token_param=profile.token_param,
             ),
             None,
         )

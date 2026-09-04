@@ -603,8 +603,14 @@ def test_openai_compat_idless_tool_delta_gets_synthetic_id():
     assert tool["id"] == "__synth_0"
     assert tool["input"] == {"limit": 2}
 
-    assert captured["json"]["max_completion_tokens"] == _seam_request().max_tokens
+    # INVERTED BY C-2. This used to assert that BOTH `max_tokens` and
+    # `max_completion_tokens` were sent, pinning the defect as correct.
+    # Exactly one goes on the wire now: OpenAI refuses the PRESENCE of
+    # `max_tokens`, so "send both" is not a compatible superset. This
+    # provider is constructed without an explicit `token_param`, so it takes
+    # the broadly-compatible default.
     assert captured["json"]["max_tokens"] == _seam_request().max_tokens
+    assert "max_completion_tokens" not in captured["json"]
 
 
 def test_openai_compat_synthetic_id_disambiguates_on_collision():
@@ -965,3 +971,186 @@ def test_live_probe_openai_wire_through_a_saved_profile():
     assert names[0] == "session_init"
     assert "token" in names, f"no tokens streamed from a live call: {names}"
     assert names[-1] == "turn_done"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# C-2 — the OpenAI wire sent BOTH `max_tokens` and `max_completion_tokens`.
+#
+# The source comment claimed that was safe ("sending both keeps Ollama/LM
+# Studio/vLLM working unchanged"). The branch's own `presets.json:32` help
+# text, written from Task 2's live-vendor research, says the opposite:
+# "Current models require max_completion_tokens rather than max_tokens."
+#
+# OpenAI's rejection is PRESENCE-based, not substitution-based: the error is
+# `unsupported_parameter` naming `max_tokens` itself — the model's supported
+# parameter set simply does not contain it — so adding `max_completion_tokens`
+# alongside does not help, because `max_tokens` is still in the body. Every
+# client library in the ecosystem fixes this by REMOVING/renaming the
+# parameter, never by sending both.
+#
+# NOTE ON EVIDENCE: this is documentary, not a live call. ADR-0002 is still
+# unmet for this wire. That is exactly why the fix does not merely swap one
+# hardcoded name for another — it sends ONE parameter chosen from the
+# preset's declaration, and adapts if the endpoint says it guessed wrong.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _capture_openai_payload(token_param=None, status=200, body=None):
+    """Drive one stream against a MockTransport and return the sent payload."""
+    import json
+    import httpx
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    captured = {}
+
+    def handler(request):
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(
+            status,
+            content=body if body is not None else _sse_bytes(
+                b'{"choices":[{"delta":{"content":"hi"}}]}',
+                b'{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    kwargs = {} if token_param is None else {"token_param": token_param}
+    provider = OpenAICompatProvider(
+        "http://localhost:11434/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        **kwargs,
+    )
+    list(provider.stream(_seam_request()))
+    return captured["json"]
+
+
+def test_openai_wire_sends_only_max_tokens_by_default():
+    """
+    An unknown / local OpenAI-compatible endpoint gets `max_tokens` ONLY.
+    Ollama, LM Studio, vLLM and llama.cpp all take `max_tokens`; most do not
+    know `max_completion_tokens` at all.
+    """
+    payload = _capture_openai_payload()
+    assert payload["max_tokens"] == 64
+    assert "max_completion_tokens" not in payload, (
+        "both token parameters were sent; OpenAI rejects the PRESENCE of "
+        "max_tokens with unsupported_parameter"
+    )
+
+
+def test_openai_wire_sends_only_max_completion_tokens_when_declared():
+    """An endpoint declared as needing the new name gets ONLY the new name."""
+    payload = _capture_openai_payload(token_param="max_completion_tokens")
+    assert payload["max_completion_tokens"] == 64
+    assert "max_tokens" not in payload, (
+        "max_tokens was still present — this is the exact key OpenAI refuses"
+    )
+
+
+def test_openai_wire_retries_once_with_the_other_token_parameter():
+    """
+    ADAPTIVE FALLBACK. A `custom` profile aimed at OpenAI (a documented
+    workflow — the DashScope preset help tells people to use Custom for other
+    regions) has no preset declaration to read, so it guesses `max_tokens`
+    and is refused. It must recover on its own rather than being dead.
+    """
+    import json
+    import httpx
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    seen: list[dict] = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        seen.append(body)
+        if "max_tokens" in body:
+            return httpx.Response(400, json={"error": {
+                "code": "unsupported_parameter",
+                "param": "max_tokens",
+                "message": ("Unsupported parameter: 'max_tokens' is not "
+                            "supported with this model. Use "
+                            "'max_completion_tokens' instead."),
+            }})
+        return httpx.Response(200, content=_sse_bytes(
+            b'{"choices":[{"delta":{"content":"hi"}}]}',
+            b'{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+        ), headers={"content-type": "text/event-stream"})
+
+    provider = OpenAICompatProvider(
+        "https://api.openai.com/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    events = list(provider.stream(_seam_request()))
+
+    assert len(seen) == 2, f"expected one retry, got {len(seen)} attempts"
+    assert "max_tokens" in seen[0] and "max_completion_tokens" not in seen[0]
+    assert "max_completion_tokens" in seen[1] and "max_tokens" not in seen[1]
+    assert events[-1].type == "message_done"
+
+
+def test_a_400_that_is_not_about_the_token_parameter_is_not_retried():
+    """
+    DISCRIMINATION. The retry must be scoped to the token-parameter refusal —
+    a generic 400 must surface immediately, not be silently re-sent.
+    """
+    import json
+    import httpx
+    import pytest as _pytest
+    from services.llm_openai_compat import OpenAICompatProvider
+    from services.llm_provider import ProviderError
+
+    seen: list[dict] = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(400, json={"error": {
+            "code": "model_not_found",
+            "message": "The model does not exist.",
+        }})
+
+    provider = OpenAICompatProvider(
+        "https://api.openai.com/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with _pytest.raises(ProviderError):
+        list(provider.stream(_seam_request()))
+    assert len(seen) == 1, f"a non-token 400 was retried: {len(seen)} attempts"
+
+
+def test_connection_test_also_sends_only_one_token_parameter():
+    """The Test-connection button must not 400 for the same reason."""
+    import json
+    import httpx
+    from services.llm_openai_compat import OpenAICompatProvider
+
+    captured = {}
+
+    def handler(request):
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": "pong"}}]})
+
+    provider = OpenAICompatProvider(
+        "https://api.openai.com/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        token_param="max_completion_tokens",
+    )
+    verdict, _ms = provider.probe("gpt-5.6-sol")
+    assert verdict == "ok"
+    assert "max_completion_tokens" in captured["json"]
+    assert "max_tokens" not in captured["json"]
+
+
+def test_token_param_is_derived_from_the_preset_never_client_set():
+    """
+    Server-derived, like `key_env`: a profile cannot carry its own value, so
+    the openai preset always gets the new name and a local/custom endpoint
+    always gets the broadly-compatible one.
+    """
+    from services import llm_config
+    assert llm_config.derive_token_param("openai") == "max_completion_tokens"
+    assert llm_config.derive_token_param("ollama") == "max_tokens"
+    assert llm_config.derive_token_param("lmstudio") == "max_tokens"
+    assert llm_config.derive_token_param("moonshot") == "max_tokens"
+    assert llm_config.derive_token_param("custom") == "max_tokens"
+    assert llm_config.derive_token_param("not-a-preset") == "max_tokens"

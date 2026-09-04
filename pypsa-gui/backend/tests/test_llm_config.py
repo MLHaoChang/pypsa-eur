@@ -114,13 +114,25 @@ def test_presets_catalogue_shape():
                    "ollama", "lmstudio"}
     for p in presets:
         assert set(p) == {"id", "label", "wire", "base_url", "auth",
-                          "key_env", "tools", "vision", "suggested_models",
-                          "help"}
+                          "key_env", "token_param", "tools", "vision",
+                          "suggested_models", "help"}
         assert p["wire"] in ("anthropic", "openai")
+        # C-2 — every preset declares which completion-length parameter its
+        # endpoint wants, and exactly one of the two spellings is legal.
+        assert p["token_param"] in ("max_tokens", "max_completion_tokens")
         if p["auth"] == "none":
             assert p["key_env"] is None
         else:
             assert p["key_env"] == p["key_env"].upper()
+
+    by_id = {p["id"]: p for p in presets}
+    # The one preset that MUST carry the newer spelling: current OpenAI
+    # models refuse the presence of `max_tokens` outright (C-2). Everything
+    # else — local servers and the OpenAI-compatible vendors — takes the
+    # original, which is also the fallback for `custom`.
+    assert by_id["openai"]["token_param"] == "max_completion_tokens"
+    for other in ("moonshot", "dashscope", "ollama", "lmstudio"):
+        assert by_id[other]["token_param"] == "max_tokens"
 
 
 def test_local_presets_are_keyless():

@@ -121,6 +121,52 @@ class LLMProfile:
             return None
         return derive_key_env(self.id, self.preset)
 
+    @property
+    def token_param(self) -> str:
+        """
+        The completion-length parameter name this profile's endpoint wants.
+
+        Derived from `preset` exactly like `key_env` — nothing serializes it
+        and nothing reads it back off disk, so it can never be pointed
+        somewhere by editing JSON. See `derive_token_param`.
+        """
+        return derive_token_param(self.preset)
+
+
+# The two spellings of the completion-length parameter on the OpenAI wire.
+# `max_tokens` is the original and is what Ollama, LM Studio, vLLM and
+# llama.cpp accept; current OpenAI models replaced it with
+# `max_completion_tokens` and reject the PRESENCE of the old name with a 400
+# `unsupported_parameter`. Exactly one is ever sent — see
+# `llm_openai_compat.OpenAICompatProvider`.
+TOKEN_PARAM_LEGACY = "max_tokens"
+TOKEN_PARAM_COMPLETION = "max_completion_tokens"
+_TOKEN_PARAMS: frozenset[str] = frozenset(
+    [TOKEN_PARAM_LEGACY, TOKEN_PARAM_COMPLETION]
+)
+
+
+def derive_token_param(preset: str) -> str:
+    """
+    Which completion-length parameter an endpoint on this preset wants.
+
+    DERIVED FROM THE PRESET, never stored on a profile and never client-set —
+    the same rule `key_env` follows, for a weaker but similar reason: it is
+    part of how we speak to a vendor, not a user preference, and a profile
+    that could carry its own value would just be a way to make requests fail.
+
+    Anything not in the catalogue — `"custom"`, or a preset id from a newer
+    build — falls back to `max_tokens`, the broadly-compatible spelling. A
+    custom profile aimed at OpenAI therefore guesses wrong, which is why
+    `OpenAICompatProvider` retries once with the other spelling when the
+    endpoint refuses one by name.
+    """
+    entry = _preset_catalogue().get(preset)
+    declared = entry.get("token_param") if entry is not None else None
+    if declared in _TOKEN_PARAMS:
+        return declared
+    return TOKEN_PARAM_LEGACY
+
 
 def _preset_catalogue() -> dict[str, dict]:
     return {entry["id"]: entry for entry in load_presets() if isinstance(entry, dict) and "id" in entry}
