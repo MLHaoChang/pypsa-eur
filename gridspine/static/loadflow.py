@@ -179,20 +179,78 @@ def _bus_numbers(net):
     return {net.bus.at[i, "name"]: k + 1 for k, i in enumerate(net.bus.index)}
 
 
-def _branch_flow(net) -> pd.DataFrame:
-    """FROM-end flows keyed the way ``raw_writer.write_raw`` keys its records.
+def branch_keys(net) -> pd.DataFrame:
+    """Every branch, keyed the way ``raw_writer.write_raw`` keys its records.
 
-    The CKT convention is the whole point of this function, and it is not
-    obvious: the writer runs a SEPARATE ``_IdCounter`` for the branch section
-    and the transformer section, and each counter is keyed on the SORTED
-    bus-number pair — so two circuits between the same pair get '1' and '2'
-    even when one of them is written to_bus-first, and a transformer's CKT
-    sequence restarts independently of the lines'. Bus names (not numbers)
-    are carried here because that is what the .raw NAME field and every other
-    gridspine frame use; the numbers only ever appear inside the counter key.
+    Columns ``from_bus, to_bus, ckt, element_type, element_index`` — bus NAMES
+    plus the pandapower handle. Out-of-service branches are INCLUDED: the
+    writer still emits them (STAT=0) and its counter still counts them, so a
+    consumer that wants only live branches must filter AFTER keying or every
+    later circuit on that bus pair shifts by one.
+
+    This is the single authored copy of the branch identity on the `static/`
+    side; ``_branch_flow`` (load-flow results) and
+    ``contingency_set.branch_contingencies`` (outages) both call it. The CKT
+    convention is the whole point and it is not obvious: the writer runs a
+    SEPARATE ``_IdCounter`` for the branch section and the transformer
+    section, each keyed on the SORTED bus-number pair — so two circuits
+    between the same pair get '1' and '2' even when one is written
+    to_bus-first, and a transformer's CKT sequence restarts independently of
+    the lines'. Bus names (not numbers) are carried because that is what the
+    .raw NAME field and every other gridspine frame use; the numbers only
+    ever appear inside the counter key.
     """
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
+
+    def make_next(counter):
+        def nxt(a, b):
+            key = (min(a, b), max(a, b))
+            counter[key] = counter.get(key, 0) + 1
+            return str(counter[key])
+        return nxt
+
+    next_line_ckt, next_trafo_ckt = make_next({}), make_next({})
+    rows = []
+    for i in net.line.index:
+        f_name = name_of.at[net.line.at[i, "from_bus"]]
+        t_name = name_of.at[net.line.at[i, "to_bus"]]
+        rows.append({
+            "from_bus": f_name,
+            "to_bus": t_name,
+            "ckt": next_line_ckt(nums[f_name], nums[t_name]),
+            "element_type": "line",
+            "element_index": i,
+        })
+    for i in net.trafo.index:
+        hv_name = name_of.at[net.trafo.at[i, "hv_bus"]]
+        lv_name = name_of.at[net.trafo.at[i, "lv_bus"]]
+        rows.append({
+            # The writer emits transformers HV-first, so "from" is the HV side.
+            "from_bus": hv_name,
+            "to_bus": lv_name,
+            "ckt": next_trafo_ckt(nums[hv_name], nums[lv_name]),
+            "element_type": "trafo",
+            "element_index": i,
+        })
+    out = pd.DataFrame(
+        rows, columns=["from_bus", "to_bus", "ckt", "element_type", "element_index"]
+    )
+    dupes = out.duplicated(subset=["from_bus", "to_bus", "ckt"], keep=False)
+    if dupes.any():
+        # Reachable only when a line and a transformer share a bus pair: PSS/E
+        # keeps those in different record sections so the .raw stays legal,
+        # but this frame has one flat key space and a comparison would join
+        # the wrong rows. Fail loudly rather than silently fan out.
+        raise ContractError(
+            "duplicate branch keys (from_bus, to_bus, ckt): "
+            f"{sorted(set(map(tuple, out.loc[dupes, ['from_bus', 'to_bus', 'ckt']].values)))}"
+        )
+    return out
+
+
+def _branch_flow(net) -> pd.DataFrame:
+    """FROM-end flows on the ``branch_keys`` identity."""
     # Out-of-service branches are still written to the .raw (STAT=0), so they
     # must still get a row here or the key sets stop matching.
     #
@@ -209,50 +267,22 @@ def _branch_flow(net) -> pd.DataFrame:
     res_line = net.res_line.reindex(net.line.index)
     res_trafo = net.res_trafo.reindex(net.trafo.index)
 
-    def make_next(counter):
-        def nxt(a, b):
-            key = (min(a, b), max(a, b))
-            counter[key] = counter.get(key, 0) + 1
-            return str(counter[key])
-        return nxt
-
-    next_line_ckt, next_trafo_ckt = make_next({}), make_next({})
+    keys = branch_keys(net)
     rows = []
-    for i in net.line.index:
-        f_bus, t_bus = net.line.at[i, "from_bus"], net.line.at[i, "to_bus"]
-        f_name, t_name = name_of.at[f_bus], name_of.at[t_bus]
+    for key in keys.itertuples(index=False):
+        if key.element_type == "line":
+            res, p, q = res_line, "p_from_mw", "q_from_mvar"
+        else:
+            res, p, q = res_trafo, "p_hv_mw", "q_hv_mvar"
         rows.append({
-            "from_bus": f_name,
-            "to_bus": t_name,
-            "ckt": next_line_ckt(nums[f_name], nums[t_name]),
-            "p_from_mw": float(res_line.at[i, "p_from_mw"]),
-            "q_from_mvar": float(res_line.at[i, "q_from_mvar"]),
-            "loading_percent": float(res_line.at[i, "loading_percent"]),
+            "from_bus": key.from_bus,
+            "to_bus": key.to_bus,
+            "ckt": key.ckt,
+            "p_from_mw": float(res.at[key.element_index, p]),
+            "q_from_mvar": float(res.at[key.element_index, q]),
+            "loading_percent": float(res.at[key.element_index, "loading_percent"]),
         })
-    for i in net.trafo.index:
-        hv, lv = net.trafo.at[i, "hv_bus"], net.trafo.at[i, "lv_bus"]
-        hv_name, lv_name = name_of.at[hv], name_of.at[lv]
-        rows.append({
-            # The writer emits transformers HV-first, so "from" is the HV side.
-            "from_bus": hv_name,
-            "to_bus": lv_name,
-            "ckt": next_trafo_ckt(nums[hv_name], nums[lv_name]),
-            "p_from_mw": float(res_trafo.at[i, "p_hv_mw"]),
-            "q_from_mvar": float(res_trafo.at[i, "q_hv_mvar"]),
-            "loading_percent": float(res_trafo.at[i, "loading_percent"]),
-        })
-    out = pd.DataFrame(rows, columns=list(BRANCH_FLOW_COLUMNS))
-    dupes = out.duplicated(subset=["from_bus", "to_bus", "ckt"], keep=False)
-    if dupes.any():
-        # Reachable only when a line and a transformer share a bus pair: PSS/E
-        # keeps those in different record sections so the .raw stays legal,
-        # but this frame has one flat key space and the comparison would join
-        # the wrong rows. Fail loudly rather than silently fan out.
-        raise ContractError(
-            "duplicate branch keys (from_bus, to_bus, ckt): "
-            f"{sorted(set(map(tuple, out.loc[dupes, ['from_bus', 'to_bus', 'ckt']].values)))}"
-        )
-    return out
+    return pd.DataFrame(rows, columns=list(BRANCH_FLOW_COLUMNS))
 
 
 def run_lf(net) -> LFResult:
