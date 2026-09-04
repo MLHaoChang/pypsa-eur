@@ -557,6 +557,24 @@ describe('LoopPanel verdict', () => {
     expect(s).toMatch(/not/i)
   })
 
+  // ★ [S1, 12e shipped-code review] Bite: render "NOT restored" without the
+  // word. `base_restored` used to be decided from the solver STATUS, and
+  // `SolverStatus.ok` also covers `time_limit` and `suboptimal` — so a
+  // re-solve that hit the MIP time limit read as restored. The backend judges
+  // on the CONDITION now, and WHICH failure it was is what tells the user
+  // whether to re-run or to raise the limit, so the word has to be on screen.
+  it('names the solver\'s word when the plan was not put back', async () => {
+    for (const word of ['time_limit', 'infeasible', 'raised: boom']) {
+      vi.mocked(resultsApi.getCouplingLoop).mockResolvedValue(
+        { ...MET, base_restored: false, base_restore_status: word })
+      await openPanel()
+      const s = (await screen.findByTestId('loop-restored')).textContent ?? ''
+      expect(s).toContain(word)
+      expect(s).toMatch(/did not put your plan back/i)
+      cleanup()
+    }
+  })
+
   it('reports ε* and the solves the search actually spent', async () => {
     vi.mocked(resultsApi.getCouplingLoop).mockResolvedValue(MET)
     await openPanel()

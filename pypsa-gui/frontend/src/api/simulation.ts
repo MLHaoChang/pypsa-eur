@@ -399,6 +399,13 @@ export interface CouplingLoopPayload {
   max_solves: number
   restore: 'base' | 'final'
   base_restored: boolean
+  /** Phase 12e (shipped-code review, S1): the solver's own word on that
+   *  closing re-solve. `base_restored` used to read the solver STATUS, and
+   *  linopy's `SolverStatus.ok` also covers `time_limit` and `suboptimal` —
+   *  so a re-solve that hit the MIP time limit said "restored" while the
+   *  foreground was a time-limited dispatch. The backend now judges on the
+   *  termination CONDITION and this carries the word for the message. */
+  base_restore_status?: string | null
   /** 95% CI upper bound cleared the target. Reported, never iterated for. */
   confident: boolean
   eps_star: number | null
@@ -503,6 +510,13 @@ export interface MarginLoopPayload {
   max_solves: number
   restore: 'base' | 'final'
   base_restored: boolean
+  /** Phase 12e (shipped-code review, S1): the solver's own word on that
+   *  closing re-solve. `base_restored` used to read the solver STATUS, and
+   *  linopy's `SolverStatus.ok` also covers `time_limit` and `suboptimal` —
+   *  so a re-solve that hit the MIP time limit said "restored" while the
+   *  foreground was a time-limited dispatch. The backend now judges on the
+   *  termination CONDITION and this carries the word for the message. */
+  base_restore_status?: string | null
   confident: boolean
   /** The CERTIFIED MARGIN (a fraction), not `x` and not a cap. */
   lever_star: number | null

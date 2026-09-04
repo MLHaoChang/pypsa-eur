@@ -4144,6 +4144,11 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
         with PyPSAService.get_solver_state_lock():
             record["iterations"] = record["iterations"] + [row]
 
+    # The solver's own word on the closing re-solve, for the payload. A cell
+    # rather than a return value because `_restore_closing` returns a bool
+    # that four call sites already read (12e shipped-code review, S1).
+    _restore_word: list = [None]
+
     def _restore_closing(met: bool, eps_star) -> bool:
         """The closing re-solve — the route's job, on EVERY path (spec §3,
         §1.3's pattern). The loop mutates the network once per iterate, so
@@ -4155,6 +4160,7 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
         certified cap otherwise — so it falls back to base rather than
         applying a cap nothing verified.
         """
+        from services.adequacy.sweep import restore_is_clean
         from services.solver_service import run_simulation
 
         use_final = (restore == "final" and met and eps_star is not None)
@@ -4173,16 +4179,33 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
         else:
             final_cfg = base_cfg
         try:
-            status, _condition = run_simulation(
+            status, condition = run_simulation(
                 final_cfg, n, lock, _threading.Event(), _queue.SimpleQueue(),
                 state_update=_state_update)
-        except Exception:                                     # noqa: BLE001
+        except Exception as exc:                              # noqa: BLE001
             logger.exception(
                 "coupling loop: the closing re-solve FAILED — the network is "
                 "left on the last iterate's cap and the foreground results do "
                 "not describe the plan the verdict is about")
+            _restore_word[0] = f"raised: {exc}"
             return False
-        return status in ("ok", "optimal")
+        # The CONDITION, through the shared predicate — never `status`. This
+        # read `status in ("ok", "optimal")`, and linopy's `SolverStatus.ok`
+        # also covers `time_limit`, `iteration_limit`, `terminated_by_limit`,
+        # `suboptimal` and `imprecise`: a closing re-solve that hit the MIP
+        # time limit (`mip_time_limit_s` is a shipped setting) reported `ok`,
+        # so the panel said "restored" while the foreground was a time-limited
+        # dispatch. The frontier and the contingency sweep had the same bug and
+        # it was found there first (12e shipped-code review, S1); this is the
+        # same defect in the two loops, fixed the same way and through the same
+        # one predicate rather than a fourth copy of the vocabulary.
+        word = str(condition or status)
+        _restore_word[0] = word
+        if not restore_is_clean(word):
+            logger.warning(
+                "coupling loop: the closing re-solve returned %r — it ran but "
+                "did not restore the plan the verdict is about", word)
+        return restore_is_clean(word)
 
     def _verdict_copy(status: str, eps_star, rows=None) -> str:
         _margin_bound = _margin_bound_flag[0]
@@ -4287,6 +4310,10 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
                     solves_used=int((res or {}).get("solves_used") or 0),
                     resolution_floor_h=eval_state["floor"],
                     base_restored=bool(base_restored),
+                    # The solver's word, so a restore that RAN and still did
+                    # not put the plan back can be named rather than merely
+                    # denied (12e shipped-code review, S1).
+                    base_restore_status=_restore_word[0],
                     verdict=_verdict_copy(
                         status, eps_star,
                         (res or {}).get("iterations")),
@@ -5021,6 +5048,11 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         with PyPSAService.get_solver_state_lock():
             record["iterations"] = record["iterations"] + [_translate(row)]
 
+    # The solver's own word on the closing re-solve, for the payload. A cell
+    # rather than a return value because `_restore_closing` returns a bool
+    # that four call sites already read (12e shipped-code review, S1).
+    _restore_word: list = [None]
+
     def _restore_closing(met: bool, m_star) -> bool:
         """The closing re-solve — the route's job, on EVERY path. The loop
         mutates the network once per iterate, so without this it is left on
@@ -5032,6 +5064,7 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         `base_cfg`), because the study tuned one standard and the user asked
         for both.
         """
+        from services.adequacy.sweep import restore_is_clean
         from services.solver_service import run_simulation
 
         use_final = (restore == "final" and met and m_star is not None)
@@ -5049,16 +5082,25 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         else:
             final_cfg = base_cfg
         try:
-            status, _condition = run_simulation(
+            status, condition = run_simulation(
                 final_cfg, n, lock, _threading.Event(), _queue.SimpleQueue(),
                 state_update=_state_update)
-        except Exception:                                     # noqa: BLE001
+        except Exception as exc:                              # noqa: BLE001
             logger.exception(
                 "margin loop: the closing re-solve FAILED — the network is "
                 "left on the last iterate's margin and the foreground results "
                 "do not describe the plan the verdict is about")
+            _restore_word[0] = f"raised: {exc}"
             return False
-        return status in ("ok", "optimal")
+        # The CONDITION, through the shared predicate — see the coupling
+        # loop's twin for why the status is the wrong half to read.
+        word = str(condition or status)
+        _restore_word[0] = word
+        if not restore_is_clean(word):
+            logger.warning(
+                "margin loop: the closing re-solve returned %r — it ran but "
+                "did not restore the plan the verdict is about", word)
+        return restore_is_clean(word)
 
     def _both_standards_clause() -> str:
         try:
@@ -5204,6 +5246,7 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
                     solves_used=int((res or {}).get("solves_used") or 0),
                     resolution_floor_h=eval_state["floor"],
                     base_restored=bool(base_restored),
+                    base_restore_status=_restore_word[0],
                     verdict=_verdict_copy(status, m_star, rows_out),
                     warning=warning,
                     error=err,

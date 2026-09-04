@@ -553,6 +553,24 @@ describe('MarginLoopPanel verdict', () => {
       .toMatch(/not/i)
   })
 
+  // ★ [S1, 12e shipped-code review] Bite: render "NOT restored" without the
+  // word. `base_restored` used to be decided from the solver STATUS, and
+  // `SolverStatus.ok` also covers `time_limit` and `suboptimal` — so a
+  // re-solve that hit the MIP time limit read as restored. The backend judges
+  // on the CONDITION now, and WHICH failure it was is what tells the user
+  // whether to re-run or to raise the limit.
+  it('names the solver\'s word when the plan was not put back', async () => {
+    for (const word of ['time_limit', 'infeasible', 'raised: boom']) {
+      vi.mocked(resultsApi.getMarginLoop).mockResolvedValue(
+        { ...MET, base_restored: false, base_restore_status: word })
+      await openPanel()
+      const s = (await screen.findByTestId('margin-loop-restored')).textContent ?? ''
+      expect(s).toContain(word)
+      expect(s).toMatch(/did not put your plan back/i)
+      cleanup()
+    }
+  })
+
   it('renders the standing warning FROM THE PAYLOAD', async () => {
     vi.mocked(resultsApi.getMarginLoop).mockResolvedValue(
       { ...MET, warning: 'REWORDED-WARNING-V9' })

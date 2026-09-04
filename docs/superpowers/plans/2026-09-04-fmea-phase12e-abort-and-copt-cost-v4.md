@@ -595,3 +595,30 @@ exempted name still exists so a rename cannot silently empty the test. **M2**:
 "~800× headroom" was attached to a 0.09 s measurement against a 10 s gate,
 which is 110×; the 800× figure belonged to a 12.5 ms reading. Corrected in all
 three places it appeared.
+
+### S1 was in two more places than the review looked
+
+Fixing S1 in the frontier and the contingency sweep raised the obvious
+question of who else reads a closing re-solve's answer, and both loops do:
+`post_coupling_loop`'s and `post_margin_loop`'s `_restore_closing` each read
+`status, _condition = run_simulation(...)` and returned
+`status in ("ok", "optimal")`, discarding the condition exactly as the
+frontier did. So a closing re-solve that hit the MIP time limit —
+`mip_time_limit_s` is a shipped setting, wired through `_resolve_mip_kwargs` —
+returned `("ok", "time_limit")`, `base_restored` came back `True`, and both
+panels rendered *"restored"* over a network holding a time-limited dispatch.
+That is the study's own "single most misleading state", which its copy says it
+exists to prevent.
+
+These were never in the review's scope and predate Phase 12e (7 and 9). They
+are fixed here anyway: shipping a correct frontier and sweep beside two loops
+that lie in the same way would imply the loops had been checked. All four now
+judge through the one `restore_is_clean`, all four carry the solver's word,
+and all four panels print it — **`base_restored` means the plan is back, in
+every study that has one.**
+
+**F1n** pins the predicate's two directions and **F1n2** asserts statically
+over `routers/results.py` that no closing re-solve judges on the status,
+with comments stripped first: the fix's own comment quotes the expression it
+replaced, and a check that trips on prose about a defect rather than the
+defect is not a check.

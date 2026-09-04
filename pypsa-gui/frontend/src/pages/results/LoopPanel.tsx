@@ -557,7 +557,9 @@ export function LoopPanel() {
                 >
                   {payload.base_restored
                     ? `restored (${payload.restore})`
-                    : 'NOT restored — the closing re-solve failed, so the '
+                    : `NOT restored${payload.base_restore_status
+                        ? ` (${payload.base_restore_status})` : ''} — the closing re-solve `
+                      + 'did not put your plan back, so the '
                       + 'network you are holding is the last iterate\'s plan, '
                       + 'not the plan this verdict is about'}
                 </span>

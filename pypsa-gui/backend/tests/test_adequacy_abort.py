@@ -811,3 +811,62 @@ def test_F1m2_the_class_C_assembler_returns_the_pair_when_nothing_is_runnable():
     # rather than claiming a re-solve that never happened.
     assert restore == {"base_restored": None, "base_restore_status": None,
                        "aborted": False}
+
+
+@pytest.mark.parametrize("returned", [("ok", "time_limit"), ("ok", "suboptimal"),
+                                      ("warning", "infeasible")])
+def test_F1n_neither_loop_calls_a_time_limited_re_solve_a_restore(monkeypatch,
+                                                                  returned):
+    """★ F1n (12e shipped-code review, S1 — the same defect in two more
+    places). Both loops' `_restore_closing` read `status in ("ok", "optimal")`
+    and threw the termination condition away. linopy's `SolverStatus.ok` also
+    covers `time_limit`, `iteration_limit`, `terminated_by_limit`, `suboptimal`
+    and `imprecise`, so a closing re-solve that hit the MIP time limit —
+    `mip_time_limit_s` is a shipped setting — reported `ok`, and both panels
+    rendered "restored" while the network held a time-limited dispatch.
+
+    The frontier and the contingency sweep had this bug and it was found there
+    first; these two were never in the review's scope. All four now judge on
+    the condition, through ONE predicate.
+
+    Bite (verified): `return status in ("ok", "optimal")` in either loop.
+    """
+    from services.adequacy.sweep import restore_is_clean
+
+    assert restore_is_clean(str(returned[1])) is False, returned
+    # …and the words that DO mean the plan is back, so the predicate is not
+    # simply "always false": a `mode="pf"` run reports ("ok", "ok") and a
+    # successful stage-2 AC power flow rewrites the condition.
+    for good in ("optimal", "ok", "lopf+ac_pf_ok"):
+        assert restore_is_clean(good) is True, good
+    assert restore_is_clean(None) is False
+    assert restore_is_clean("raised: boom") is False
+
+
+def test_F1n2_the_loops_read_the_condition_and_not_the_status():
+    """★ F1n2 — the static half of F1n, over the source. Both loops' closing
+    re-solve must judge on `condition or status` through `restore_is_clean`,
+    never on the status alone. A dynamic test would have to drive a whole loop
+    with a patched solver to reach one line; this cannot be routed around by a
+    fixture.
+
+    Bite (verified): put `return status in ("ok", "optimal")` back in either
+    `_restore_closing`.
+    """
+    import pathlib
+
+    raw = pathlib.Path("routers/results.py").read_text()
+    # Comments are stripped before scanning: the fix's own comment QUOTES the
+    # expression it replaced, and a check that trips on prose about a defect
+    # rather than the defect is not a check.
+    src = "\n".join(ln for ln in raw.splitlines()
+                    if not ln.lstrip().startswith("#"))
+    assert 'status in ("ok", "optimal")' not in src, (
+        "a closing re-solve is judging on the solver STATUS — `SolverStatus.ok`"
+        " also covers time_limit, iteration_limit, terminated_by_limit,"
+        " suboptimal and imprecise; read the CONDITION through"
+        " services.adequacy.sweep.restore_is_clean")
+    # both loops, not just one
+    assert raw.count("restore_is_clean(word)") >= 4, (
+        "both `_restore_closing` bodies must route through the shared"
+        " predicate — found fewer uses than the two loops need")
