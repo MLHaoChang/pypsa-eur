@@ -72,22 +72,53 @@ test passes because of the control, not because there was nothing to redact.
 
 ## What is genuinely not finished
 
-### 1. ADR-0002 live probes — UNRUN. The plan cannot honestly be called done.
+### 1. ADR-0002 live probes — STILL UNMET. The plan cannot honestly be called done.
+
+> **Update 2026-09-04.** The Anthropic probe was RUN, not skipped, and it
+> **failed**: the machine's stored `ANTHROPIC_API_KEY` is revoked. Anthropic
+> returns `401 authentication_error: API key is invalid` for that key with
+> **no PyPSA code in the path** (plain `curl`), and the stored value is clean
+> — 108 chars, `sk-ant-` prefix, no whitespace, no quotes — so this is a dead
+> credential, not a mangled one. Verified identically under `-e default` and
+> `-e test`.
+>
+> What that DID establish: the probe harness works end to end, and the live
+> failure path is correct — a real upstream 401 maps to a terminal
+> `unauthorized` with the clean message `ANTHROPIC_API_KEY rejected by
+> Anthropic API` and no key material in the log line.
+>
+> What it did NOT establish, and this is the part that still blocks the ADR:
+> **no token has ever been streamed from a live model through this branch.**
+> The success path of the anthropic wire remains UNPROBED. Supply a valid key
+> and re-run before calling the branch done.
+>
+> One thing the probe surfaced and CLEARED, recorded so nobody re-opens it:
+> the terminal-error frame sequence is
+> `['session_init', 'error', 'session_done']`, which ends `session_done`
+> rather than the `turn_done` the pinned invariant names as a turn's last
+> frame. That is fine — `ChatPanel.tsx:1934` (`session_done`) and
+> `ChatPanel.tsx:1938` (`error`) both call `closeStream()`, so the composer
+> unlocks on a failed turn. The adjacent worry, that `voiceTurnRef` is
+> cleared only under `turn_done` and would make the NEXT turn speak aloud
+> after a failed voice turn, is also unfounded: `ChatPanel.tsx:1972`
+> re-assigns it from `dictatedRef` on every send.
 
 `docs/adr/0002-chat-changes-need-a-live-api-probe.md` states that no test in
 `backend/tests/` constructs a real client, so a green suite does **not** verify
 a chat change, and *"its absence is a defect in the change, not in the suite."*
 
 Both probes are written and drive the full production path (profile store →
-`_provider_for_profile` → `run_turn`). **Both skip**, because this environment
-has no `ANTHROPIC_API_KEY` and no local endpoint installed. Their skip reasons
-say the requirement is UNMET rather than "not configured" — a skip that reads
-as a pass is the failure mode the ADR exists to prevent.
+`_provider_for_profile` → `run_turn`). The anthropic probe now RUNS and fails
+on a revoked key (see the update above); the **openai probe still skips**,
+because no local endpoint is installed here. Their skip reasons say the
+requirement is UNMET rather than "not configured" — a skip that reads as a
+pass is the failure mode the ADR exists to prevent.
 
 To close it:
 
 ```bash
-# Anthropic wire — one short turn, negligible credit
+# Anthropic wire — one short turn, negligible credit.
+# `-e test` is the canonical env (the one `pixi run gui-tests` resolves to).
 PYPSA_GUI_TEST_LIVE_ANTHROPIC=1 ANTHROPIC_API_KEY=sk-ant-… \
   pixi run -e test python -m pytest \
   pypsa-gui/backend/tests/test_llm_provider_seam.py -k live_probe_anthropic -v
