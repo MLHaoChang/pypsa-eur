@@ -172,3 +172,53 @@ cannot pass it.
 **S29:** upload a profile containing a `null` over the API, solve, assert the
 served dispatch respects the asset's own ceiling and the disclosure names it —
 bitten live by removing the repair. `QA_E2E_PLAN.md:535` ends at S28.
+
+---
+
+## v4 REVIEW — rejected (4 blockers). Recorded rather than deleted.
+
+1. **"Non-destructive" is unimplementable.** The LP reads `n` directly
+   (`solver_service.py:1247`, `:1186`, `:6480`), so there is no seam to
+   substitute a frame into: H4 necessarily mutates. Both escapes break a
+   different v4 claim — mutating without an undo falsifies H1/H4b/H9
+   (measured: the engines' profile goes `0.0 → 1.0`, i.e. the H9 regression),
+   and repairing early enough for H5 is wiped at `:906`, where
+   `_reapply_user_ts_to_network` concats the raw `_user_ts` back
+   (`routers/network.py:2812`). This is v3's contradiction relocated.
+2. **The STATIC frame carries the same defect and v4 never mentions it.**
+   Measured: static `p_max_pu = NaN` with **no varying column at all**
+   dispatches `[500, 500, 500]` — 5× nameplate every hour. Reachable over
+   HTTP: `PATCH /network/_bulk` with `null` writes `float("nan")`
+   (`routers/network.py:2027`), which is what the bulk toolbar sends for a
+   blank cell (`BottomPanel.tsx:120`). And because H2 takes its repair value
+   *from* the static frame, a NaN static makes the repair a NaN-over-NaN
+   no-op — the fix's own source is broken.
+3. **`ramp_limit_*` was excluded on a rationale that contradicts H2.** v4
+   excluded it because the *class* default is NaN; H2's repair value is the
+   *asset's static*, which is well defined. Measured, static
+   `ramp_limit_up = 0.1`: `[0.1, NaN, 0.1, 0.1]` dispatches
+   `[0, 100, 100, 100]` against `[0, 10, 20, 30]` — one NaN hour removes the
+   ramp constraint for the **whole horizon**. Six pairs.
+4. **H7a's premise is false on the primary path.**
+   `_reapply_user_ts_to_network` runs at `:906`, before the repair point, and
+   its pre-pass at `routers/network.py:2723-2732` already performs the
+   unguarded flat→MultiIndex broadcast. So "today it is correctly all-NaN"
+   holds only where the reapply is skipped, and the shipped bug at `:2725` is
+   left unfixed.
+
+Majors: H2 can turn a solving network infeasible (static `p_min_pu = 0.5`
+with a NaN hour) and §3 does not say so; the record's behaviour across the
+helper's four invocations is unspecified; and H10 dropped
+`test_adequacy_reserve_margin.py` on a false premise — it has 20 `p_max_pu`
+references and builds outage-bearing networks.
+
+**Verdict on the approach, not just the version.** Four plans, fourteen
+blockers, none of which reached code. The errors are narrowing, but the
+finding that ends v4 is a scope finding: the defect is not "an availability
+hour" — it is **any non-finite value in any LP bound, in either the static or
+the dynamic frame, reachable from several HTTP surfaces**. A repair-based fix
+has to answer "what value?" separately for each of those, and every version so
+far has got that answer wrong in a new way. Rejecting non-finite values at the
+write boundaries needs no answer to that question at all, cannot make anything
+infeasible, and cannot loosen any standard. That is the pivot v5 should
+consider before another repair design.
