@@ -179,3 +179,94 @@ firm-capacity standard. Both are named so neither can return by accident.
 S29.3's construction is netCDF-with-a-dynamic-NaN, the only route that still
 produces a corrupt network once K1 and K2 land. Bitten live by removing the
 validator (S29.1) and the fallthrough (S29.2).
+
+---
+
+## v6 REVIEW — ACCEPT WITH CHANGES. Nine amendments, all measured.
+
+The reviewer enumerated every finite-default Input attribute in PyPSA 1.3.0 and
+counted **masked LP rows directly** (`labels == -1` per constraint) on a
+13-asset fixture across Generator/Link/StorageUnit/Store/Line/Transformer,
+fixed and extendable. The five are confirmed, in both frames — and `Line`/
+`Transformer` `s_max_pu` masks **both** the `-lower` and the `-upper` row, not
+just the upper. It then hooked `create_model` across **427 LP builds** in the
+backend suite. The amendments below are binding on implementation.
+
+1. **`Process` DOES have `p_min_pu`/`p_max_pu`.** §2's "checked" sentence is
+   wrong. K1's mapping stays keyed by `(component_class, column)` — `_bulk`
+   cannot reach Process (`routers/network.py:286`) — but **K4 walks by
+   attribute name over `n.iterate_components()`**, never an enumerated
+   component list, so Process and any future component are covered.
+2. **Measured and deferred, named so "exactly five" is not read as "nothing
+   else".** `StorageUnit.inflow`, `StorageUnit.state_of_charge_initial` and
+   `Store.e_initial` have finite defaults and each masks a storage
+   **energy-balance** row — objective 40 000 → 10 000 measured, a 200 MWh
+   battery becoming a free 300 MWh source. They are constraint *constants*,
+   not bounds, so they are out of scope here and recorded as the follow-on.
+   Also checked and already blocking ERRORs, so K4 must **not** duplicate
+   them: `p_nom_min`/`s_nom_min`/`e_nom_min` (`validation_service.py:389`),
+   `max_hours` (`:1304`), `Load.p_set` (`:308`).
+3. **The silence claim is restated.** Not "0 hits / 68 networks" but **"0 hits
+   among networks that reach `validate_for_run`"**. Two builds in the suite do
+   carry a dynamic NaN `p_max_pu` — `tests/test_adequacy_reserve_margin.py:1712`
+   and `:1737` — and survive only because their helper calls
+   `n.optimize.create_model()` directly (`:88`), bypassing preflight. A ★ pins
+   that the check lives in **preflight, not the LP-build path**, so they stay
+   green.
+4. **Four check points, and only the first may bare-return.**
+   `_apply_modelling_assumptions` (`:987`) step 4 (`:5239`) promotes
+   flat→MultiIndex, which is why `_normalise_dynamic_indexes` runs **again at
+   `:1141`** and manufactures NaN there too; myopic needs a fourth at `:6427`.
+   `restore_modelling` is bound at `:1004` and the `finally` at `:1604` does
+   **not** call it — so a bare `return` at `:1141`/`:6427` would leave the
+   network carrying vintage clones, VOLL slacks and recomputed `capital_cost`.
+   Those points **raise** (or call `restore_modelling()`); only `:925` returns.
+5. **K2 is five routes and THREE guard points**, not six: the `set_timeseries`
+   body, the `upload_timeseries` body, and `_apply_profile_upload`
+   (`routers/network.py:3663`) for all three profile routes — `_parse_upload`
+   is the wrong seam, it does not know the component or attribute.
+   **`POST /import/excel` is dropped**: measured, it cannot write a non-finite
+   bound at all, because `n.add` coerces both `None` and literal NaN to the
+   class default. A guard there is dead code.
+6. **A seventh write path must be guarded**: `services/chat_tools.py:2214`
+   (`apply_demand_from_excel`) writes `loads_t.p_set` and `_user_ts` directly,
+   bypassing every handler. Its only numeric gate is `pd.to_numeric(...,
+   errors="raise")`, which passes NaN through — verified.
+7. **`POST /import/csv` (`routers/io.py:217`) belongs beside netCDF in K3** —
+   it carries a dynamic NaN bound in intact. K4 is its safety net.
+8. **K5's discriminator must be named**: coverage-vs-corruption is decided by
+   `_user_ts`' finite coverage for that `(component, attribute, column)`
+   against `len(n.snapshots)`, reached by the lazy import
+   `solver_service.py:905` already uses. Without it K5a is unwritable.
+9. **K4d is re-fixtured and K6 corrected.** `POST /snapshots` already reapplies
+   (`routers/network.py:1352`), so the short-profile-plus-horizon NaN is
+   present *before* `:813` and does not separate the check points; the fixture
+   that does is a **flat `_t` frame against MultiIndex snapshots** — finite at
+   `:813`, `[0.5,0.6,0.7] → [nan]×6` after `:925`. And `routers/results.py:4664`
+   calls `_check_reserve_margin`, a single sub-validator — so the new check
+   must be **called** there, not merely added to the code filter at `:4665`.
+
+**Placement:** the check lives inside `_check_lopf`, and the later points are
+gated on `config.mode == "lopf"`, matching the LOPF-only rationale at
+`validation_service.py:1854`.
+
+**One deliberate tension, recorded:** §0 says a NaN `ramp_limit_*` is legal, and
+K1c writes one via `_bulk` — but K2 refuses a non-finite cell in *any* dynamic
+column, so the same value cannot be written through `PUT /timeseries`. Measured
+risk: 0 dynamic ramp columns across 427 builds. Deliberate.
+
+**Also verified sound, no action:** K1's coercion mapping is exact for all five
+across all six components (`n.add(attr=None)` and `n.add(attr=NaN)` both give
+the class default); K3's netCDF asymmetry (static NaN self-heals to 1.0,
+dynamic survives) and the same for `user_ts.json`; K1d's two premises
+(`tests/golden/fixture.py:53` leaves `discount_rate` NaN deliberately — v6
+cited `:52`, off by one — and `_bulk` accepts it); the failure card at
+`failure_taxonomy.py:31` already renders a named per-asset validation error;
+and no persistence hazard — `_backup_network_ts_to_user_ts`
+(`routers/network.py:2503`) only overwrites an absent or all-NaN entry, so a
+manufactured tail cannot overwrite a user's short profile.
+
+**Implementation caveat for K1a:** a static write is inert when the asset
+carries a dynamic column (PyPSA prefers `_t`), and `_bulk` does not clear it —
+so K1a's fixture must use an asset with **no profile**, or it passes for the
+wrong reason.
