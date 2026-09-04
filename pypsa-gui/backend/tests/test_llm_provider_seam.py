@@ -920,6 +920,52 @@ def test_openai_compat_unsupported_image_source_is_skipped_not_raised():
 # ─────────────────────────────────────────────────────────────────────────
 
 
+def _ensure_live_openai_profile(profile_id: str) -> None:
+    """
+    Make the named openai-wire profile exist in THIS session's app-data dir.
+
+    Without this the probe's own instructions cannot work. `conftest.py`
+    pins `PYPSAGUI_APP_DATA_DIR` to a fresh `mkdtemp` at import time, so a
+    profile the operator saved beforehand — exactly what the skip message
+    tells them to do — is invisible to the test process, and the probe fails
+    on a missing profile rather than on anything about the wire.
+
+    (Before C-4 this was worse than a confusing failure: `resolve_profile`
+    fell through to the ACTIVE profile, so the "openai wire" probe quietly
+    ran on the built-in ANTHROPIC profile and reported a result for a wire it
+    had never touched.)
+
+    Set `PYPSA_GUI_TEST_LIVE_OPENAI_BASE_URL` / `_MODEL` / `_PRESET` to
+    describe the endpoint; the profile is then created here. If the id
+    already resolves, nothing is touched.
+    """
+    from services import llm_config
+    try:
+        llm_config.resolve_profile(profile_id)
+        return
+    except llm_config.ProfileNotConfiguredError:
+        pass
+    model = os.environ.get("PYPSA_GUI_TEST_LIVE_OPENAI_MODEL")
+    if not model:
+        raise AssertionError(
+            f"profile {profile_id!r} is not configured in this test session's "
+            f"app-data dir, and PYPSA_GUI_TEST_LIVE_OPENAI_MODEL is unset so "
+            f"it cannot be created. See docs/superpowers/runbooks/"
+            f"local-openai-wire-probe.md"
+        )
+    llm_config.save_profiles([llm_config.LLMProfile(
+        id=profile_id,
+        label="Live probe endpoint",
+        preset=os.environ.get("PYPSA_GUI_TEST_LIVE_OPENAI_PRESET", "ollama"),
+        wire="openai",
+        base_url=os.environ.get("PYPSA_GUI_TEST_LIVE_OPENAI_BASE_URL"),
+        model=model,
+        tools=False, vision=False,
+        auth=os.environ.get("PYPSA_GUI_TEST_LIVE_OPENAI_AUTH", "none"),
+        fallback_model=None, max_output_tokens=None,
+    )], profile_id)
+
+
 def _live_probe_turn(profile_id: str) -> list[str]:
     """Drive one real turn through the production resolution path."""
     from services import chat_service
@@ -967,7 +1013,9 @@ def test_live_probe_openai_wire_through_a_saved_profile():
     that the profile store, key-slot derivation and provider construction are
     all exercised, not just the HTTP client.
     """
-    names = _live_probe_turn(os.environ["PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE"])
+    profile_id = os.environ["PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE"]
+    _ensure_live_openai_profile(profile_id)
+    names = _live_probe_turn(profile_id)
     assert names[0] == "session_init"
     assert "token" in names, f"no tokens streamed from a live call: {names}"
     assert names[-1] == "turn_done"
