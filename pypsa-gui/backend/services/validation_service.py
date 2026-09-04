@@ -19,6 +19,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 
 from services.carrier_catalog import CARRIER_CATALOG
@@ -1228,6 +1229,137 @@ def _check_p_max_pu_bounds(n) -> list[Issue]:
     return out
 
 
+# Phase 12f. The five LP bounds whose PyPSA class default is FINITE, and in
+# which a non-finite value therefore has no meaning.
+#
+# linopy does not clamp a bound it cannot read — it MASKS THAT CONSTRAINT ROW
+# OUT OF THE PROBLEM, so the asset is unconstrained there. Measured on PyPSA
+# 1.3.0 / HiGHS: `p_max_pu = [0.5, NaN, 1.0]` on a 100 MW unit against a 500 MW
+# load dispatches `[50, 500, 100]` — five times nameplate; `p_min_pu` with a
+# NaN hour runs a generator as a −900 MW load; a NaN STATIC `p_max_pu` gives
+# five times nameplate in every hour.
+#
+# The set is exactly these five because the defect is "NaN where NaN has no
+# meaning". `ramp_limit_up`/`down` are NOT here and must never be added: their
+# class default IS NaN, and `pypsa/optimization/constraints.py:1046` masks the
+# row on purpose — `no_up_limit = limit_up.isnull() & limit_start.isnull()` —
+# so a null ramp limit is the documented way to say "this unit has no ramp
+# limit". Including them would block every network in this repository: the
+# golden fixture alone carries eight non-finite `ramp_limit_*` cells and zero
+# on the five.
+#
+# Three more finite-default attributes mask a storage ENERGY-BALANCE row and
+# are deliberately out of scope, recorded rather than forgotten (plan v6,
+# amendment 2): `StorageUnit.inflow`, `StorageUnit.state_of_charge_initial`,
+# `Store.e_initial` — measured objective 40 000 → 10 000, a 200 MWh battery
+# becoming a free 300 MWh source. They are constraint constants, not bounds.
+#
+# Not duplicated here because each is already a blocking ERROR of its own:
+# `p_nom_min`/`s_nom_min`/`e_nom_min` (`_check_extendable_bounds`), `max_hours`
+# (`storage_max_hours_invalid`), `Load.p_set` (`load_p_set_nan`).
+FINITE_DEFAULT_BOUNDS = ("p_max_pu", "p_min_pu", "s_max_pu",
+                         "e_max_pu", "e_min_pu")
+
+
+def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
+    """``(component, attribute, name, n_bad, n_total)`` per offending column.
+
+    Walks by ATTRIBUTE NAME over every component rather than an enumerated
+    list, so `Process` — which does carry `p_min_pu`/`p_max_pu` — and any
+    component PyPSA adds later are covered without an edit here.
+
+    ``n_total`` is 1 for a static cell and the snapshot count for a dynamic
+    column, so the caller can say "3 of 5 hours" without re-deriving it.
+    """
+    hits: list[tuple[str, str, str, int, int]] = []
+    try:
+        comps = list(n.iterate_components())
+    except Exception:                                         # noqa: BLE001
+        return hits
+    # `or ()` would raise here: a pandas Index has no truth value, and a
+    # multi-period network's snapshots are a MultiIndex.
+    _snaps = getattr(n, "snapshots", None)
+    n_snap = 0 if _snaps is None else int(len(_snaps))
+    for comp in comps:
+        cname = getattr(comp, "name", None) or getattr(comp, "list_name", "")
+        static = getattr(comp, "df", None)
+        if static is None:
+            static = getattr(comp, "static", None)
+        dynamic = getattr(comp, "pnl", None)
+        if dynamic is None:
+            dynamic = getattr(comp, "dynamic", None)
+        for attr in FINITE_DEFAULT_BOUNDS:
+            # static
+            if static is not None and attr in getattr(static, "columns", []):
+                try:
+                    col = static[attr].to_numpy(dtype=float)
+                except (TypeError, ValueError):
+                    col = None
+                if col is not None:
+                    bad = ~np.isfinite(col)
+                    for name in static.index[bad]:
+                        hits.append((str(cname), attr, str(name), 1, 1))
+            # dynamic
+            frame = None
+            if dynamic is not None:
+                try:
+                    frame = dynamic.get(attr)
+                except AttributeError:
+                    frame = getattr(dynamic, attr, None)
+            if frame is None or not len(getattr(frame, "columns", [])):
+                continue
+            for name in frame.columns:
+                try:
+                    vals = frame[name].to_numpy(dtype=float)
+                except (TypeError, ValueError):
+                    continue
+                n_bad = int((~np.isfinite(vals)).sum())
+                if n_bad:
+                    hits.append((str(cname), attr, str(name), n_bad,
+                                 int(len(vals)) or n_snap))
+    return hits
+
+
+def _check_nonfinite_bounds(n) -> list[Issue]:
+    """★ Phase 12f. A non-finite value in one of the five finite-default LP
+    bounds is an ERROR, not a warning: the LP will otherwise build a plan the
+    network cannot deliver (five times nameplate, or a generator running as a
+    load), and this codebase reserves ERROR for exactly that.
+
+    Two shapes, because they read differently to the user. A column that
+    covers only part of the horizon is a COVERAGE problem — the user uploaded
+    a representative week and then extended the snapshots, which is a routine
+    workflow and not corrupt data — and its message says how much is covered.
+    Anything else is a value that has no meaning where it sits.
+    """
+    issues: list[Issue] = []
+    for comp, attr, name, n_bad, n_total in _nonfinite_bound_hits(n):
+        where = f"{comp} '{name}'"
+        if n_total > 1 and n_bad < n_total:
+            covered = n_total - n_bad
+            issues.append(_err(
+                "nonfinite_bound_partial_coverage", comp, name,
+                f"{where}: the '{attr}' series covers {covered} of {n_total} "
+                f"snapshots — {n_bad} hour(s) have no value. PyPSA does not "
+                "fall back to a default for those hours: it drops the bound "
+                "entirely, so the asset would be unconstrained there (a 100 MW "
+                "unit can dispatch 500 MW). Extend the series to the full "
+                "horizon, or shorten the horizon to match it.",
+            ))
+        else:
+            issues.append(_err(
+                "nonfinite_bound", comp, name,
+                f"{where}: '{attr}' is not a finite number"
+                + (f" in {n_bad} of {n_total} snapshots" if n_total > 1 else "")
+                + ". Unlike a ramp limit, this bound has no meaning when it is "
+                "unset — PyPSA drops the constraint rather than defaulting it, "
+                "so the asset would be unconstrained (a 100 MW unit can "
+                "dispatch 500 MW). Enter a value, or clear the field to "
+                "restore its default.",
+            ))
+    return issues
+
+
 def _check_lopf(n, solver_config) -> list[Issue]:
     out: list[Issue] = []
 
@@ -1239,6 +1371,10 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     out += _check_extendable_bounds(n.transformers, "Transformer", "s_nom", True)
     out += _check_transformer_types(n)
     out += _check_pmin_pmax(n)
+    # Phase 12f: LOPF-only, like the reserve-margin check below it — a PF run
+    # reads none of these bounds, so blocking one on them would be a refusal
+    # with no standard behind it.
+    out += _check_nonfinite_bounds(n)
     out += _check_unbounded_costs(n)
     out += _check_modelling_assumptions(n, solver_config)
     out += _check_sclopf(n, solver_config)
