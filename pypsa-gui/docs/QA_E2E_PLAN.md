@@ -668,3 +668,31 @@ round-1 typo created one called `create_from_template`. It overwrote nothing
 here (no project had that name) and was removed, but the same typo against an
 existing name would overwrite it. Reserving route-like names, or requiring an
 explicit create flag, would close this. Out of scope for this pass.
+
+## S29 — a missing LP bound is refused (Phase 12f)
+
+A non-finite value in one of the five bounds whose PyPSA class default is
+FINITE (`p_max_pu`, `p_min_pu`, `s_max_pu`, `e_max_pu`, `e_min_pu`) does not
+clamp anything — linopy **masks that constraint row out of the problem**, so
+the asset is unconstrained there. Measured: `p_max_pu = [0.5, NaN, 1.0]` on a
+100 MW unit against a 500 MW load dispatches `[50, **500**, 100]`, and a NaN
+`p_min_pu` hour runs a generator as a **−900 MW** load.
+
+`ramp_limit_*` is deliberately **not** one of the five — its class default *is*
+NaN and PyPSA masks the row on purpose, which is the documented way to say
+"this unit has no ramp limit". S29.3 exists to pin that: the golden fixture
+alone carries eight non-finite `ramp_limit_*` cells, so a check that errored on
+any non-finite bound would have blocked every network in the repository.
+
+| id | check |
+|----|-------|
+| S29.1 | `PUT /timeseries` with one `null` cell → **422**, and the body names both the column and the asset |
+| S29.2 | `PATCH /_bulk` clearing `p_max_pu` → 200, and it reads back **1.0** — PyPSA's own `None` coercion — not `null` |
+| S29.3 | clearing `ramp_limit_up` → 200 and the network still solves `optimal`; a NaN ramp limit must never be refused |
+| S29.4 | the solved dispatch respects the asset's own ceiling: **100.0 MW** over 3 snapshots on a 100 MW unit against a 500 MW load |
+
+**Bitten live** (recorded in the plan): removing `_reject_nonfinite_timeseries`
+from `set_timeseries` and restoring the `float("nan")` fallthrough in `_bulk`
+fails **all four** rows, each with the exact pre-12f symptom — the PUT is
+accepted 200, `p_max_pu` reads back `null`, and the corrupt network is then
+refused at solve with `validation_failed`.

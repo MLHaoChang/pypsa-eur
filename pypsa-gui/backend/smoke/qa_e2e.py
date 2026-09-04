@@ -4425,6 +4425,150 @@ def suite_S27():
     restore()
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
+
+def suite_S29():
+    """
+    A missing LP bound is refused, live (Phase 12f).
+
+    A non-finite value in one of the five bounds whose PyPSA class default is
+    FINITE does not clamp anything — linopy MASKS that constraint row out of
+    the problem, so the asset is unconstrained there. Measured off-line:
+    `p_max_pu = [0.5, NaN, 1.0]` on a 100 MW unit against a 500 MW load
+    dispatches `[50, 500, 100]`.
+
+    `ramp_limit_*` is deliberately NOT one of the five — its class default IS
+    NaN and PyPSA masks the row on purpose — which is why S29.3 exists: the
+    check must stay silent on a network that carries one.
+
+    Bitten live (recorded in the plan): drop `_reject_nonfinite_timeseries`
+    from `set_timeseries` and S29.1 reads 200; restore the `float("nan")`
+    fallthrough in `_bulk` and S29.2 reads `null`.
+    """
+    print("\nS29 - A missing LP bound is refused, live (area 29)")
+    name = "qa_e2e_nonfinite"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2, 3, 4):
+            skip(f"S29.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-01-01 02:00",
+                            "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "g", "bus": "b", "carrier": "gas",
+                            "p_nom": 100.0, "marginal_cost": 10.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "slack", "bus": "b", "carrier": "gas",
+                            "p_nom": 5000.0, "marginal_cost": 999.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 500.0})[0])
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2, 3, 4):
+            skip(f"S29.{i}", f"fixture build failed: {built}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    _, snaps = http("/api/network/snapshots")
+    idx = (snaps or {}).get("snapshots") or []
+
+    # S29.1 - a null cell in a time series is refused, and the body says where
+    st_put, put_body = http(
+        "/api/network/timeseries/generators/p_max_pu", method="PUT",
+        body={"index": idx, "columns": ["g"],
+              "data": [[0.5], [None], [1.0]]})
+    detail = str((put_body or {}).get("detail") or put_body)
+    record("S29.1",
+           st_put == 422 and "p_max_pu" in detail and "'g'" in detail,
+           f"PUT null -> {st_put} (want 422); names the column={('p_max_pu' in detail)}; "
+           f"names the asset={chr(39) + 'g' + chr(39) in detail}")
+
+    # S29.2 - clearing p_max_pu writes PyPSA's default, not NaN, and the
+    # network then solves BOUNDED. Before 12f this wrote NaN and the 100 MW
+    # unit dispatched 500 MW against the 500 MW load.
+    http("/api/network/_bulk", method="PATCH",
+         body={"component_class": "Generator", "names": ["g"],
+               "updates": {"p_max_pu": 0.4}})
+    st_bulk, _ = http("/api/network/_bulk", method="PATCH",
+                      body={"component_class": "Generator", "names": ["g"],
+                            "updates": {"p_max_pu": None}})
+    _, gens = http("/api/network/generators")
+    rows = gens.get("generators", []) if isinstance(gens, dict) else (gens or [])
+    got = None
+    for r in rows:
+        if isinstance(r, dict) and r.get("name") == "g":
+            got = r.get("p_max_pu")
+    record("S29.2",
+           st_bulk in (200, 201) and got == 1.0,
+           f"clear p_max_pu -> {st_bulk}; reads back {got!r} (want 1.0, not null)")
+
+    # S29.3 - the check is SILENT on a NaN ramp limit, which is PyPSA's own
+    # "no ramp limit". This is the row that keeps the phase shippable: an
+    # earlier version errored on any non-finite bound and would have blocked
+    # every network in the repo.
+    st_ramp, _ = http("/api/network/_bulk", method="PATCH",
+                      body={"component_class": "Generator", "names": ["g"],
+                            "updates": {"ramp_limit_up": None}})
+    st_solve, solve_body = http("/api/simulation/run", method="POST",
+                                body={"solver_name": "highs"})
+    ok_started = st_solve in (200, 201, 202)
+    st_fin, fin = _wait_solve() if ok_started else (0, {})
+    cond = str((fin or {}).get("condition") or "")
+    record("S29.3",
+           st_ramp in (200, 201) and ok_started and "validation_failed" not in cond,
+           f"clear ramp_limit_up -> {st_ramp}; solve condition={cond!r} "
+           "(a NaN ramp limit must NOT be refused)")
+
+    # S29.4 - and the solved dispatch respects the asset's own ceiling
+    st_g, gres = http("/api/results/generators")
+    cols = (gres or {}).get("columns") or []
+    data = (gres or {}).get("data") or []
+    peak = 0.0
+    found = False
+    if "g" in cols:
+        j = cols.index("g")
+        vals = [abs(float(row[j])) for row in data
+                if isinstance(row, list) and len(row) > j]
+        if vals:
+            peak, found = max(vals), True
+    record("S29.4",
+           st_g == 200 and found and peak <= 100.0 + 1e-6,
+           f"generators GET={st_g}; g peak dispatch {peak:.1f} MW over "
+           f"{len(data)} snapshot(s) (nameplate 100 — before 12f the NaN hour "
+           "reached 500)")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def _wait_solve(timeout=600):
+    """Poll /api/simulation/status until it leaves `running`."""
+    import time as _t
+    t0 = _t.time()
+    st, body = http("/api/simulation/status")
+    while _t.time() - t0 < timeout:
+        if str((body or {}).get("status") or "") != "running":
+            return st, body
+        _t.sleep(2)
+        st, body = http("/api/simulation/status")
+    return st, body
+
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -4518,6 +4662,8 @@ def main() -> int:
         suite_S27()
     if run("S28"):
         suite_S28()
+    if run("S29"):
+        suite_S29()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")
