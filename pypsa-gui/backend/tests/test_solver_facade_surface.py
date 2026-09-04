@@ -55,8 +55,8 @@ _FACADE_ORIGINS: dict[str, str | None] = {
     "_diagnose_infeasibility": "services.solver.diagnostics",
     "_log_global_constraint_shadow_prices": "services.solver.diagnostics",
 
-    # ── Task 3 → services/solver/objective.py ────────────────────────────────
-    "_objective_conditioning": None,
+    # ── Task 6 → services/solver/objective.py ────────────────────────────────
+    "_objective_conditioning": "services.solver.objective",
 
     # ── Task 3 → services/solver/assumptions.py ──────────────────────────────
     "resolve_branch_outages": "services.solver.assumptions",
@@ -71,17 +71,18 @@ _FACADE_ORIGINS: dict[str, str | None] = {
     "_frozen_vintage_store": "services.solver.vintage_store",
 
     # ── Task 7 → services/solver/myopic.py ───────────────────────────────────
-    "_run_myopic_foresight": None,
-    "_freeze_period_capacities": None,
-    "_defer_future_vintage_builds": None,
-    "_outages_active_in_period": None,
+    "_run_myopic_foresight": "services.solver.myopic",
+    "_freeze_period_capacities": "services.solver.myopic",
+    "_defer_future_vintage_builds": "services.solver.myopic",
+    "_outages_active_in_period": "services.solver.myopic",
 
-    # ── Task 6 → services/solver/runtime.py ──────────────────────────────────
-    "check_solver_availability": None,
-    "_AbortWatcher": None,
-    "_SolveHeartbeat": None,
-    "_RollingWindowFailureCatcher": None,
-    "_ThreadScopedQueueHandler": None,
+    # ── Task 5 → services/solver/runtime.py ──────────────────────────────────
+    "check_solver_availability": "services.solver.runtime",
+    "_AbortWatcher": "services.solver.runtime",
+    "_SolveHeartbeat": "services.solver.runtime",
+    "_RollingWindowFailureCatcher": "services.solver.runtime",
+    "_ThreadScopedQueueHandler": "services.solver.runtime",
+    "SolveAborted": "services.solver.runtime",
 }
 
 
@@ -186,12 +187,12 @@ def test_no_call_site_was_left_behind_by_a_move():
     leaving five callers in `solver_service` referring to a name that had gone
     to `assumptions.py`.
 
-    The six expected findings are the deliberate `cfg: "SolverConfig"` forward
+    The expected findings are the deliberate `cfg: "SolverConfig"` forward
     references. `SolverConfig` stays in `solver_service` and the carved modules
     type against it as a string precisely so they need no import for it —
     string annotations are never evaluated at runtime. ruff resolves them
     anyway and reports them; they are listed here rather than suppressed, so
-    that a SEVENTH finding fails this test.
+    that any finding naming a DIFFERENT symbol fails this test.
 
     ruff comes from the `dev` feature, which the `test` environment includes,
     so the canonical `pixi run gui-tests` has it. If it is missing this fails
