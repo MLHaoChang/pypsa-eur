@@ -552,3 +552,85 @@ def test_new_llm_routes_are_not_under_the_foreign_lock_gate():
         assert not any(path.startswith(p) for p in prefixes), path
         if exempt_fn is not None:
             assert not exempt_fn(path), path
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# A hand-edited profile file must not be able to 500 the settings pane.
+#
+# `llm_config._SLUG_RE` was `^[a-z0-9-]{1,48}$` matched with `.match()`, and
+# Python's `$` matches before a trailing newline — so an id of `"custom\n"`
+# passed validation on LOAD. `derive_key_env` then produced
+# `PYPSA_GUI_LLM_KEY__CUSTOM\n`, which `app_secrets.is_managed_key` refuses
+# (it is `\A`/`\Z` anchored), and `_profile_out`'s `app_secrets.status()`
+# call raised `SecretValueError` straight out of the route.
+#
+# This is the ROUTE-LEVEL consequence of the predicate defect asserted at its
+# definition in test_llm_config.py. It is kept as its own test because the
+# two fail for different reasons and a future re-widening of the slug class
+# could break this one while leaving the regex test green.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_a_hostile_profile_file_cannot_500_the_llm_settings_pane(
+    super_admin_client, tmp_path,
+):
+    """`GET /settings/llm` stays 200 and simply omits the unloadable entry."""
+    import json as _json
+
+    from services import llm_config
+
+    llm_config.profiles_path().parent.mkdir(parents=True, exist_ok=True)
+    llm_config.profiles_path().write_text(_json.dumps({
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            {"id": "custom\n", "label": "bad", "preset": "custom",
+             "wire": "openai", "base_url": "http://localhost:11434/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "bearer",
+             "fallback_model": None, "max_output_tokens": None},
+            {"id": "good-one", "label": "good", "preset": "custom",
+             "wire": "openai", "base_url": "http://localhost:11434/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "bearer",
+             "fallback_model": None, "max_output_tokens": None},
+        ],
+    }), encoding="utf-8")
+
+    resp = super_admin_client.get("/api/chat/settings/llm")
+    assert resp.status_code == 200, (
+        f"settings pane returned {resp.status_code}: {resp.text[:400]}"
+    )
+    ids = [p["id"] for p in resp.json()["profiles"]]
+    assert "custom\n" not in ids
+    # The valid sibling still loads — one bad entry must not take the rest down.
+    assert "good-one" in ids
+
+
+def test_a_percent_encoded_newline_in_the_profile_id_is_refused(
+    super_admin_client,
+):
+    """
+    The same slug hole, reachable over HTTP rather than by hand-editing.
+
+    `profile_id` is a PATH parameter copied straight into `LLMProfile.id`, and
+    Starlette percent-decodes it — so `.../profiles/custom%0A` arrives as
+    `"custom\\n"`. While `_SLUG_RE` was `$`-anchored, `save_profiles` accepted
+    it, the entry was PERSISTED, and `_profile_out` then raised
+    `SecretValueError` out of this very handler. Worse than the file case:
+    the bad entry stays on disk, so every subsequent `GET /settings/llm` 500s
+    too — a super-admin could permanently brick their own settings pane.
+
+    Must be a clean 422, and nothing may be written.
+    """
+    from services import llm_config
+
+    resp = super_admin_client.put(
+        "/api/chat/settings/llm/profiles/custom%0A",
+        json=_custom_profile_body(),
+    )
+    assert resp.status_code == 422, (
+        f"expected 422, got {resp.status_code}: {resp.text[:300]}"
+    )
+    # Nothing persisted, and the pane still works.
+    ids = {p.id for p in llm_config.load_profiles()[0]}
+    assert "custom\n" not in ids
+    assert super_admin_client.get("/api/chat/settings/llm").status_code == 200

@@ -143,3 +143,209 @@ def test_bearer_preset_locks_base_url_to_prevent_key_exfiltration(appdata):
     llm_config.save_profiles([ok], "openai-evil")
     profiles, _ = llm_config.load_profiles()
     assert {p.id for p in profiles} >= {"openai-evil"}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Profile-id anchoring — the guard at its DEFINITION, not through a caller.
+#
+# `_SLUG_RE` was `^[a-z0-9-]{1,48}$` matched with `.match()`. In Python `$`
+# also matches immediately BEFORE a trailing newline, so `"custom\n"` was
+# accepted as a valid profile id. That is the same defect class this branch
+# already fixed once in `app_secrets._LLM_KEY_SLOT_RE` (which is `\A`/`\Z`
+# anchored for exactly this reason) — probing it through one call site cannot
+# see it, so it is asserted here against the predicate itself.
+#
+# The consequence is not cosmetic: `derive_key_env` builds
+# `PYPSA_GUI_LLM_KEY__CUSTOM\n`, which `app_secrets.is_managed_key` correctly
+# refuses, so `routers/chat._profile_out` raises `SecretValueError` out of
+# `app_secrets.status()` and `GET /chat/settings/llm` 500s. `load_profiles`
+# promises the opposite ("one bad profile must not take every other profile
+# down with it") — see the route-level test in test_llm_settings_api.py.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "custom\n",       # trailing newline — what `$` let through
+        "custom\n\n",
+        "\ncustom",       # leading newline
+        "cus\ntom",       # embedded newline
+        "Custom",         # uppercase
+        "custom key",     # space
+        "custom_key",     # underscore is not in the class
+        "",               # empty
+        "a" * 49,         # over the length bound
+    ],
+)
+def test_slug_predicate_refuses_anything_but_the_documented_class(bad_id):
+    """The regex itself must refuse everything outside `[a-z0-9-]{1,48}`."""
+    from services import llm_config
+    assert not llm_config._SLUG_RE.match(bad_id), (
+        f"_SLUG_RE accepted {bad_id!r}, which is outside [a-z0-9-]{{1,48}}"
+    )
+
+
+def test_validate_profile_refuses_an_id_with_a_trailing_newline(appdata):
+    """
+    A trailing newline must be rejected by validation, not merely by the
+    downstream `is_managed_key` check it happens to trip over.
+    """
+    from services import llm_config
+    bad = llm_config.LLMProfile(
+        id="custom\n", label="x", preset="custom", wire="openai",
+        base_url="https://example.invalid/v1", model="m",
+        tools=True, vision=False, auth="bearer",
+        fallback_model=None, max_output_tokens=None)
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config._validate_profile(bad)
+
+
+def test_load_profiles_skips_a_file_entry_whose_id_has_a_trailing_newline(appdata):
+    """
+    A hand-edited file entry with a newline-terminated id is skipped, and the
+    surviving profiles still load — `load_profiles`'s stated guarantee.
+    """
+    from services import llm_config
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            {"id": "custom\n", "label": "bad", "preset": "custom",
+             "wire": "openai", "base_url": "https://example.invalid/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "bearer",
+             "fallback_model": None, "max_output_tokens": None},
+            {"id": "good-one", "label": "good", "preset": "custom",
+             "wire": "openai", "base_url": "https://example.invalid/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "bearer",
+             "fallback_model": None, "max_output_tokens": None},
+        ],
+    }), encoding="utf-8")
+    profiles, _active = llm_config.load_profiles()
+    ids = {p.id for p in profiles}
+    assert "custom\n" not in ids, "an id with a trailing newline was loaded"
+    assert "good-one" in ids, "the valid sibling entry was dropped too"
+
+
+def test_every_loaded_profiles_key_env_is_a_managed_key(appdata):
+    """
+    CROSS-MODULE INVARIANT. `routers/chat._profile_out` calls
+    `app_secrets.status(profile.key_env)`, which RAISES for a name
+    `is_managed_key` refuses. So every `key_env` `load_profiles` can produce
+    must be a managed name — otherwise the settings pane 500s on read.
+
+    Asserted over what the store actually yields for a hostile file, rather
+    than over a hand-picked id, so a future change to `derive_key_env` or to
+    the slug class is caught here even if neither test above is updated.
+    """
+    from services import app_secrets, llm_config
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            {"id": "custom\n", "label": "bad", "preset": "custom",
+             "wire": "openai", "base_url": "https://example.invalid/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "bearer",
+             "fallback_model": None, "max_output_tokens": None},
+        ],
+    }), encoding="utf-8")
+    profiles, _active = llm_config.load_profiles()
+    for profile in profiles:
+        key_env = profile.key_env
+        if key_env is None:
+            continue
+        assert app_secrets.is_managed_key(key_env), (
+            f"profile {profile.id!r} derives key_env {key_env!r}, which "
+            f"app_secrets refuses — app_secrets.status() will raise on it"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Preset spoofing — the gap the handover records as "not yet attacked".
+#
+# The shared-key exfiltration primitive the branch must not have is:
+#   preset that INHERITS a shared provider key  +  attacker-chosen base_url
+# `_validate_preset_base_url_lock` blocks the exact-match case. The question
+# left open was whether a near-miss preset id (case, whitespace, a zero-width
+# char, a homoglyph) could slip past the LOCK while still inheriting the
+# SHARED key from `derive_key_env`.
+#
+# It cannot, and the reason is structural rather than lucky: both functions
+# resolve the preset through the SAME exact-string `_preset_catalogue().get()`,
+# so a spoofed id misses in both — the lock is skipped, but the profile also
+# drops to its own private `PYPSA_GUI_LLM_KEY__<SLUG>` slot, which is not a
+# shared credential. Spoofing the preset COSTS you the shared key.
+#
+# That safety is entirely a consequence of the two lookups agreeing, which is
+# exactly the kind of coupling a later "helpful" change breaks on one side
+# only (e.g. making preset resolution case-insensitive in `derive_key_env`
+# alone). This test states the invariant so that drift is caught.
+# ─────────────────────────────────────────────────────────────────────────
+
+_SHARED_PROVIDER_KEYS = frozenset({
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+    "MOONSHOT_API_KEY", "DASHSCOPE_API_KEY",
+})
+
+
+@pytest.mark.parametrize(
+    "spoofed_preset",
+    [
+        "Anthropic",        # capitalised
+        "OPENAI",           # upper-cased
+        "openai ",          # trailing space
+        " openai",          # leading space
+        "openai​",     # zero-width space
+        "openai\n",         # trailing newline
+        "moonsh0t",         # digit homoglyph
+        "unknown-preset",   # simply not catalogued
+    ],
+)
+def test_a_spoofed_preset_can_never_inherit_a_shared_provider_key(
+    appdata, spoofed_preset,
+):
+    """
+    A profile whose preset does not EXACTLY name a catalogue entry must fall
+    back to its own namespaced slot — never a shared provider key — no matter
+    what base_url it carries.
+    """
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="evil", label="e", preset=spoofed_preset, wire="openai",
+        base_url="https://attacker.example/v1", model="m",
+        tools=True, vision=False, auth="bearer",
+        fallback_model=None, max_output_tokens=None)
+
+    try:
+        llm_config._validate_profile(profile)
+    except llm_config.ProfileValidationError:
+        return  # Refused outright — also a safe outcome.
+
+    # It validated, so the preset/base_url lock did not fire. The key slot
+    # must therefore be private to this profile.
+    assert profile.key_env not in _SHARED_PROVIDER_KEYS, (
+        f"preset {spoofed_preset!r} passed validation with an attacker "
+        f"base_url AND inherited the shared key {profile.key_env!r} — this "
+        f"is the exfiltration primitive _validate_preset_base_url_lock exists "
+        f"to prevent"
+    )
+
+
+@pytest.mark.parametrize(
+    "preset", ["anthropic", "openai", "moonshot", "dashscope"],
+)
+def test_an_exact_bearer_preset_is_locked_to_its_own_base_url(appdata, preset):
+    """The sibling half: an EXACT catalogue match cannot be repointed at all."""
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="evil", label="e", preset=preset, wire="openai",
+        base_url="https://attacker.example/v1", model="m",
+        tools=True, vision=False, auth="bearer",
+        fallback_model=None, max_output_tokens=None)
+    # Precondition: this preset really does carry a shared key, so the test
+    # is asserting about the dangerous case and not a vacuous one.
+    assert profile.key_env in _SHARED_PROVIDER_KEYS
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config._validate_profile(profile)

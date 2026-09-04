@@ -63,7 +63,22 @@ _BUILTIN_IDS: frozenset[str] = frozenset([BUILTIN_SONNET_ID, BUILTIN_OPUS_ID])
 _FILENAME = "llm-profiles.json"
 _FILE_VERSION = 1
 
-_SLUG_RE = re.compile(r"^[a-z0-9-]{1,48}$")
+# `\A`/`\Z`, never `^`/`$`: Python's `$` also matches immediately BEFORE a
+# trailing newline, so `^[a-z0-9-]{1,48}$` accepted an id of `"custom\n"`.
+# That id then derives `key_env == "PYPSA_GUI_LLM_KEY__CUSTOM\n"`, which
+# `app_secrets.is_managed_key` correctly refuses — and `_profile_out`'s
+# `app_secrets.status()` call raised straight out of the route, 500-ing the
+# super-admin's whole LLM settings pane.
+#
+# Reachable two ways, the second worse: a hand-edited `llm-profiles.json`
+# entry (which `load_profiles` promises to SKIP, not to propagate), and
+# `PUT /settings/llm/profiles/custom%0A` — `profile_id` is a percent-decoded
+# path parameter copied straight into `LLMProfile.id`, so that entry was
+# validated, PERSISTED, and every later `GET /settings/llm` 500ed too.
+#
+# Same defect, same fix, as `app_secrets._LLM_KEY_SLOT_RE`, which is anchored
+# this way for exactly this reason.
+_SLUG_RE = re.compile(r"\A[a-z0-9-]{1,48}\Z")
 _WIRE_VALUES = frozenset(["anthropic", "openai"])
 _AUTH_VALUES = frozenset(["bearer", "none"])
 _CREDENTIAL_QUERY_KEYS = frozenset(["key", "token", "api_key"])
