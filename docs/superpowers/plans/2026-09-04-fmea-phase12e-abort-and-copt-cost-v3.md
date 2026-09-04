@@ -323,3 +323,58 @@ flag.
 4. **The aborted-portfolio status.** A new block status widens a closed
    frontend union for a case only an abort produces; is a boolean
    `truncated` field better?
+
+
+## v3 REVIEW (2026-09-04, adversarial subagent) — REJECT, return for a v4
+### …but the DESIGN is buildable, and is not what was rejected
+
+The reviewer implemented both of §2's changes independently and reproduced
+them: exact to **4.2e-11** at production scale, and **2.1× / 6.3× / 3.7× /
+22.6×** faster at 300u-0p / 300u-8p / 100u-0p / 100u-8p, with the rebuild
+floor flat across regimes exactly as §0 blocker 2 predicted. Part A's
+mechanism — cooperative `break`, the sweep's restore outside its `finally`,
+the CRN wall around `mc_adequacy`, the GET filters, the `/fmea_modes` gate,
+`copy_context()` — was confirmed correct. What was rejected is §2's numbers,
+§2's switch rule and §4's tests.
+
+1. **BLOCKER — one tolerance for two different changes.** Binning is exact
+   (4.2e-11 measured at production scale; v3's stated 3.8e-13 was ~100×
+   understated). Deleting `deconvolve` is NOT: the shipped mass guard admits
+   `0.999 ≤ total ≤ 1.001` (`copt.py:674`), so a deconvolved table can carry
+   ~1e-3 of mass error by construction and the `2^k` mixture probes cells the
+   plain path never reaches — measured **1.04e-4** relative on an ordinary
+   fixture (n = 20, q = 0.01, k = 8: a textbook FOR and the shipped
+   `K_EXACT`), against v3's 1e-8 tolerance. The third consecutive version to
+   state a tolerance its own inputs refute (1e-12 → 1e-9 → 1e-8).
+2. **BLOCKER — the third sort site ranks on a different quantity.**
+   `/fmea_modes` sorts on `criticality_eur_per_year` (`results.py:2961`) and
+   `tests/test_adequacy_stress.py:210-211` asserts it; the list mixes class A
+   (monotone in ΔEUE) with class B (`q × ΔEUE × VoLL`) and class C, which are
+   not. v3's "the key goes on all three sites" would have re-ranked the FMEA
+   worksheet and failed a shipped test.
+
+Thirteen further findings, each measured: the crossover constant "~40" does
+not exist (implied values 10 → >210 on one machine) and mispredicted by up to
+3.3×, while the constant-free `k ≥ 2` rule gives up ≤0.14 s anywhere in a
+60-point sweep — and the switch must be evaluated PER BLOCK, since binned cost
+multiplies by the block count and direct does not; F2's own fixtures were all
+routed to the direct path by that switch, making the exactness test and both
+its bites vacuous; the aborted portfolio's PERIOD rows reach a second closed
+frontend union (`ElccPortfolioPeriodStatus` + `PORTFOLIO_PERIOD_LABEL`) that
+v3 did not name; "the rebuild is faster even when the deconvolution succeeds"
+is false unconditionally (the deconvolve path wins up to 3.9× when `L/n ≲ 3`
+and `q ≳ 0.4`, though never on a fleet `/copt` can produce); three `elcc.py`
+citations landed in an unrelated docstring; the three new routes break
+`test_golden_coverage.py`'s route allowlist; F2d still had no constructible
+bite AND change 1 destroys the exact ties the key exists to fix; F2c
+contradicted §2 by both re-measuring and never asserting a timing; v3 dropped
+v2's Routes paragraph so the three routes were never specified; F1d
+reintroduced a wall-clock assertion the plan forbids two sections later; the
+new restore guard had no bite; the boundary table omitted the portfolio; and
+the target is ~6.4 s on the reviewer's machine, not ~5 s.
+
+Superseded by **v4** (`...-v4.md`), which splits the exactness claim into two
+★s with their own tolerances (1e-8 for binning against a deconvolve-free
+reference; 1e-3 for the deletion with the mass guard named), keys
+`/fmea_modes` on `(-criticality_eur_per_year, mode_id)`, replaces the constant
+with `binned iff k ≥ 2` evaluated per block, and folds the remaining fifteen.
