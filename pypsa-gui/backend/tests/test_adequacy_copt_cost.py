@@ -88,7 +88,26 @@ F2_CASES = {
     "mixed_and_netted": dict(n=30, k=6, level=1650.4999687, delta=1.0, k_exact=2),
     "empty_table": dict(n=3, k=3, level=300.7, delta=1.0, k_exact=C.K_EXACT),
     "fold": dict(n=4, k=2, level=5000.0, delta=1.0, k_exact=C.K_EXACT),
+    # Every other case weights the hours equally, which makes `w` a constant
+    # factor that cancels out of the comparison — so nothing here pinned the
+    # per-hour weight entering the cells at all (shipped-code review, finding
+    # 9). This case gives the hours a non-uniform, non-degenerate weighting,
+    # including exact zeros: a zero-weight hour must contribute nothing to
+    # either side, and the two paths must still agree row for row.
+    "weighted": dict(n=30, k=4, level=1650.4999687, delta=1.0,
+                     k_exact=C.K_EXACT, weights="ramp_with_zeros"),
 }
+
+
+def _weights(kind):
+    """The weight vector a case asks for. `None` is the module's uniform `W`."""
+    if kind is None:
+        return W
+    if kind == "ramp_with_zeros":
+        v = np.linspace(0.25, 3.5, H)
+        v[::37] = 0.0                    # zero-weight hours, spread through
+        return pd.Series(v, index=IDX)
+    raise AssertionError(f"unknown weights kind {kind!r}")
 
 
 @pytest.mark.parametrize("case", sorted(F2_CASES))
@@ -107,16 +126,17 @@ def test_F2_the_binned_path_equals_the_direct_one(case):
     beyond-table fold in `_eue_binned`.
     """
     cfg = F2_CASES[case]
+    wts = _weights(cfg.get("weights"))
     units = _fleet(cfg["n"], k=cfg["k"])
     res = pd.Series(np.full(H, cfg["level"]) + 40 * np.sin(np.linspace(0, 9, H)),
                     index=IDX)
     split, res, dist = _split_and_table(
         units, k_exact=cfg["k_exact"], delta=cfg["delta"], residual=res)
-    ref = _direct_reference(list(split.table), dist, res, weights=W,
+    ref = _direct_reference(list(split.table), dist, res, weights=wts,
                             mixed=split.mixed, netted=split.netted)
 
     r = res.to_numpy(dtype=np.float64)
-    w = W.reindex(res.index).fillna(0.0).to_numpy(dtype=np.float64)
+    w = wts.reindex(res.index).fillna(0.0).to_numpy(dtype=np.float64)
     cells = C._eue_cells(r, split.mixed, w, dist.delta_mw)
     base = C._eue_binned(dist, cells)
     got: dict[str, float] = {}
@@ -179,6 +199,83 @@ def test_F2b_the_fold_is_what_makes_a_beyond_table_cell_count():
 
 
 # ── F2c: the operation count, machine-independently ─────────────────────
+
+def test_F2h_a_negative_availability_still_bins_exactly():
+    """★ F2h (shipped-code review, finding 7). `_eue_cells` sized its grid from
+    `r.max()`, which is only the largest `x` the mixture can produce when every
+    availability is non-negative. Nothing enforces that: `_availability_mw`
+    multiplies a profile by a capacity series and clamps neither, so one signed
+    hour makes some state's `x` exceed the residual, those cells clip into the
+    top bin, and when the TABLE OUTRUNS THE RESIDUAL `_eue_binned` reads them
+    at the wrong grid index instead of folding them.
+
+    The fixture is that shape deliberately: 10 × 100 MW against a 300 MW
+    residual, so the table (n = 1010) is far longer than the residual grid and
+    the mis-binning is visible rather than absorbed by the fold. Measured 70%
+    relative error before the fix. Bite (verified): size `n_max` from
+    `r.max()` alone.
+    """
+    n_h = 8
+    r = np.full(n_h, 300.0)
+    w = np.ones(n_h)
+    prof = np.full(n_h, 0.5)
+    prof[3] = -2.0                       # one hour of negative availability
+    mixed = (C.CoptUnit("m0", 100.0, 0.2, mttr_hours=24.0, profile=prof),
+             C.CoptUnit("m1", 100.0, 0.2, mttr_hours=24.0))
+    table = [C.CoptUnit(f"t{i}", 100.0, 0.1, mttr_hours=24.0) for i in range(10)]
+    dist = C.build_copt(table, delta_mw=1.0)
+    assert len(dist.probs) - 1 > n_h * 100, "table must outrun the residual grid"
+
+    _l, e = C.mixture_hourly(dist, r, mixed)
+    direct = float((e * w).sum())
+    binned = C._eue_binned(dist, C._eue_cells(r, mixed, w, dist.delta_mw))
+    assert direct > 0.0
+    assert abs(binned - direct) / direct < 1e-9, (binned, direct)
+
+
+def test_F2i_a_netted_row_is_right_even_though_only_its_base_is_binned():
+    """★ F2i (shipped-code review, finding 8). A netted unit's counterfactual
+    shifts the RESIDUAL, so it changes every cell and keeps the direct path
+    even when the call is binned. That makes its ΔEUE asymmetric —
+    `base_binned − perfect_direct`, one side from each evaluator — and nothing
+    pinned it: F2 compares only the rows it recomputes and skips the netted
+    ones outright.
+
+    Here the whole payload, netted rows included, is checked against a
+    fully-direct reference on a fixture that provably takes the binned path.
+    Bite (verified): make the binning approximate — e.g. bin with `floor`
+    instead of the grid rule — and the netted rows move, because the
+    approximation lands on their base with nothing to cancel it.
+    """
+    units = _fleet(30, k=6)
+    res = pd.Series(np.full(H, 1650.4999687) + 40 * np.sin(np.linspace(0, 9, H)),
+                    index=IDX)
+    split, res, dist = _split_and_table(units, k_exact=2, residual=res)
+    assert split.netted, "fixture must have netted units"
+    assert len(split.mixed) >= C.BIN_MIN_MIXED, "fixture must take the binned path"
+
+    ref = _direct_reference(list(split.table), dist, res, weights=W,
+                            mixed=split.mixed, netted=split.netted)
+    got = {r["name"]: r["delta_eue_mwh"]
+           for r in C.attribute_criticality(
+               list(split.table), dist, res, weights=W, voll=0.0,
+               mixed=split.mixed, netted=split.netted)}
+
+    netted_names = [u.name for u in split.netted]
+    assert set(netted_names) <= set(got)
+    assert all(ref[nm] > 0.0 for nm in netted_names), \
+        "fixture must give every netted row a non-zero ΔEUE to compare"
+    # The netted rows FIRST, so the bite names one of them rather than
+    # tripping on a table row and leaving this claim untested.
+    for name in netted_names:
+        assert abs(got[name] - ref[name]) / ref[name] < 1e-8, \
+            (name, got[name], ref[name])
+    for name, want in ref.items():
+        if want == 0.0:
+            assert got[name] == pytest.approx(0.0, abs=1e-9), name
+        else:
+            assert abs(got[name] - want) / abs(want) < 1e-8, (name, got[name], want)
+
 
 def test_F2c_the_attribution_makes_no_deconvolve_calls_and_one_mixture_pass_per_netted_unit(
         monkeypatch):

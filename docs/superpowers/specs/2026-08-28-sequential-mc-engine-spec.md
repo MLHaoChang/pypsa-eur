@@ -602,7 +602,13 @@ CONSTANT-FREE (`BIN_MIN_MIXED = 2`) because the crossover is not a fixed
 ratio — the direct path costs `α + β·H` per state with a large fixed `α`, so
 the implied crossover measured from ~10 at k = 0 to >210 at k = 3 on one
 machine; `k ≥ 2` gives up at most 0.14 s anywhere in a 60-point sweep. Netted
-units keep the direct path (their counterfactual shifts the residual). Rows
+units keep the direct path (their counterfactual shifts the residual, so it
+changes every cell and would need its own binning pass). Their ΔEUE is
+therefore ASYMMETRIC on a binned call — `base_binned − perfect_direct`, one
+side from each evaluator — which is sound only because the binning is exact
+and not an approximation; were it ever approximate, that subtraction would
+carry the error with nothing to cancel it. F2i pins the netted rows against a
+fully-direct reference on a binned fixture. Rows
 sort on `(-ΔEUE, name)` here and at the 12d block merge, so exactly-tied rows
 order identically; `/fmea_modes` keeps its own key,
 `(-criticality_eur_per_year, mode_id)`, because that is the quantity it ranks

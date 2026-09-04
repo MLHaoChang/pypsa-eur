@@ -2961,8 +2961,16 @@ def get_fmea_modes():
                                  "delta_eue_mwh": r.get("delta_eue_mwh")})
     if not per_mode:
         return Response(status_code=204)
-    per_mode.sort(key=lambda r: float(r.get("criticality_eur_per_year", 0.0)),
-                  reverse=True)
+    # Phase 12e (shipped-code review, finding 11): `(-criticality, mode_id)`,
+    # which is what the spec claimed and the code did not do. Sorting on
+    # criticality alone left exactly-tied rows in SOURCE order — class A from
+    # the COPT engine, then the sweep's B and C — and the tie is not a corner
+    # case here: with no VoLL set every criticality is €0/yr (see below), so
+    # the whole ranking ties and the order the worksheet renders depended on
+    # which classes happened to have been computed. `reverse=True` cannot be
+    # used with a tuple key: it would reverse the mode_id order too.
+    per_mode.sort(key=lambda r: (-float(r.get("criticality_eur_per_year", 0.0)),
+                                 str(r.get("mode_id", ""))))
     # VOLL travels with the rows so the worksheet can say WHY every
     # criticality is zero. Criticality is ΔEUE × VoLL × occurrence, so with
     # no VoLL set the whole ranking collapses to €0/yr — modes whose ΔEUE
@@ -3244,6 +3252,7 @@ def post_frontier(body: FrontierRequest | None = None):
     record: dict = {"status": "running", "points": [], "error": None,
                     "warning": None, "knee": None,
                     "targets_permyriad": targets, "base_restored": None,
+                    "base_restore_status": None,
                     "started_at": time.time(), "thread": None,
                     "stop_event": stop_event}
 
@@ -3261,6 +3270,7 @@ def post_frontier(body: FrontierRequest | None = None):
                 # not that the plan is back — and a study that could not
                 # restore the user's plan must say so.
                 base_restored=res.get("base_restored"),
+                base_restore_status=res.get("base_restore_status"),
                 finished_at=time.time(), error=None)
         except (FrontierBudgetError, FrontierConfigError) as exc:
             record.update(status="failed", points=[], error=str(exc),
@@ -3271,6 +3281,7 @@ def post_frontier(body: FrontierRequest | None = None):
             partial = getattr(exc, "frontier_result", None) or {}
             record.update(status="failed", points=partial.get("points") or [],
                           base_restored=partial.get("base_restored"),
+                          base_restore_status=partial.get("base_restore_status"),
                           error=str(exc), finished_at=time.time())
 
     _ctx = _contextvars.copy_context()

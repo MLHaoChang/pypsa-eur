@@ -736,8 +736,27 @@ def _eue_cells(residual, mixed, weights, delta_mw, *, fixed_up=frozenset()):
         avail = np.zeros((0, H))
         qs = np.zeros(0)
     free = [i for i in range(len(mixed)) if i not in fixed_up]
-    # one bin per grid index, plus one for everything beyond the longest table
-    n_max = int(np.ceil(max(float(r.max(initial=0.0)), 0.0) / delta_mw)) + 2
+    # One bin per grid index, plus one for everything beyond the longest
+    # table. The top bin has to cover the largest `x` the mixture can produce,
+    # which is NOT `r.max()` in general: `x = r − Σ s_i·a_i`, so a NEGATIVE
+    # availability (a signed profile, or a signed capacity series) makes some
+    # state's `x` exceed the residual. Binning on `r.max()` clipped those
+    # cells to the top bin, and when the table outruns the residual — a long
+    # fleet against a small load — `_eue_binned` then read them at the wrong
+    # grid index instead of folding them: measured 70% relative error on a
+    # 10-unit table with one hour of negative availability (shipped-code
+    # review, finding 7). Bounding the subtracted term below per hour removes
+    # the precondition rather than asserting it; for non-negative
+    # availabilities `x_max == r.max()` and this is the same `n_max` as before.
+    if len(mixed):
+        sub_min = np.zeros(H, dtype=np.float64)
+        for i in range(len(mixed)):
+            sub_min += avail[i] if i in fixed_up else np.minimum(avail[i], 0.0)
+        x_max = float((r - sub_min).max(initial=0.0))
+    else:
+        x_max = float(r.max(initial=0.0))
+    n_max = int(np.ceil(
+        max(x_max, float(r.max(initial=0.0)), 0.0) / delta_mw)) + 2
     A = np.zeros(n_max + 1, dtype=np.float64)
     B = np.zeros(n_max + 1, dtype=np.float64)
     for bits in itertools.product((0, 1), repeat=len(free)):
@@ -855,6 +874,17 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
             todo.append((u, _eue(dist, r, fixed_up=frozenset({i})), None))
     for u in netted:
         # Base residual already nets (1−q)·a; perfect availability nets a.
+        #
+        # These keep the DIRECT path even on a binned call: the counterfactual
+        # shifts the residual itself, so it changes every cell and would need
+        # its own `_eue_cells` pass — no cheaper than the mixture pass it would
+        # replace. That makes a netted row's ΔEUE asymmetric, `base_binned −
+        # perfect_direct`, which is sound only because the binning is exact
+        # rather than an approximation (F2; measured worst rel 6.2e-13). If
+        # binning ever became approximate, this subtraction would carry the
+        # approximation error with nothing to cancel it, and these rows would
+        # have to move to a binned counterfactual too (shipped-code review,
+        # finding 8; pinned by F2i).
         todo.append((u, _eue(dist, r - float(u.q) * _availability_mw(u, r.shape[0])),
                      NETTED_ROW_NOTE))
     for u, eue_perfect, note in todo:

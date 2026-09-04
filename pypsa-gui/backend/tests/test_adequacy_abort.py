@@ -305,7 +305,9 @@ def test_F1_the_frontier_stops_between_points_and_keeps_what_it_swept(monkeypatc
 
     def fake_restore(*a, **k):
         calls["restore"] += 1
-        return True
+        # `(ok, status)` since the shipped-code review's finding 13 — the
+        # frontier's restore reports the solver's word, not just "it ran".
+        return True, "ok"
 
     monkeypatch.setattr(SW, "_solve_once", fake_solve_once)
     monkeypatch.setattr(FR, "_restore_base", fake_restore)
@@ -649,3 +651,61 @@ def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
         "every mc_adequacy call outside the /mc worker's baseline must pass "
         "stop_event=None — a replay truncated by an abort breaks CRN:\n  "
         + "\n  ".join(offenders))
+
+
+def test_F1k_the_worksheet_ranking_is_deterministic_when_every_row_ties():
+    """★ F1k (shipped-code review, finding 11). The spec said `/fmea_modes`
+    ranks on `(-criticality_eur_per_year, mode_id)`; the code sorted on
+    criticality alone, which leaves exactly-tied rows in SOURCE order — class A
+    from the COPT engine first, then whatever the sweep contributed.
+
+    That tie is not a corner case. Criticality is ΔEUE × VoLL × occurrence, so
+    with no VoLL set EVERY row is €0/yr and the entire ranking ties; the order
+    the worksheet renders then depended on which classes had been computed.
+    The rows here are handed to the route already out of `mode_id` order, so
+    only the key can recover it. Bite (verified): sort on
+    `criticality_eur_per_year` with `reverse=True` and no second element.
+    """
+    import pypsa
+
+    import routers.results as R
+    from routers.simulation import _state
+    from services.pypsa_service import PyPSAService
+
+    # A network with no occurrence data anywhere: class A contributes nothing,
+    # so the only rows are the ones installed below.
+    n = pypsa.Network()
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=10.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=50.0,
+          carrier="gas")
+    PyPSAService.set_network(n)
+
+    def _row(mode_id):
+        return {"delta_eue_mwh": 0.0,
+                "failure_mode": {"mode_id": mode_id, "name": mode_id,
+                                 "component_class": "Network",
+                                 "failure_class": "B",
+                                 "occurrence_per_year": 1.0,
+                                 "occurrence_basis": "FOR",
+                                 "severity_eur": 0.0,
+                                 # every row ties, as a VoLL-less project does
+                                 "criticality_eur_per_year": 0.0,
+                                 "in_metric_scope": True,
+                                 "engine": "lp_proxy",
+                                 "fidelity": "deterministic_scenario"}}
+
+    ids = ["zulu", "alpha", "mike", "bravo"]
+    _state["fmea_sweep"] = {"status": "done",
+                            "rows": [_row(i) for i in ids]}
+    try:
+        out = R.get_fmea_modes()
+        got = [r["mode_id"] for r in out["per_mode"]]
+    finally:
+        _state.pop("fmea_sweep", None)
+
+    assert set(ids) <= set(got), got
+    assert all(float(r.get("criticality_eur_per_year", 0.0)) == 0.0
+               for r in out["per_mode"]), \
+        "fixture must tie every row, or the tie-break is not what is tested"
+    assert got == sorted(got), got

@@ -120,33 +120,39 @@ def non_convexity_warning(network, cfg) -> str | None:
     )
 
 
-def _restore_base(network, lock, cfg, log_queue, final_state_update) -> bool:
+def _restore_base(network, lock, cfg, log_queue, final_state_update):
     """
     The closing re-solve with the user's ORIGINAL config, through the real
     state sink — the study must leave the foreground results exactly as the
     user's own solve would, not on whichever target happened to be swept last.
 
-    Returns whether it actually succeeded. A restore that raises is REPORTED
+    Returns ``(ok, status)``. A restore that raises is REPORTED
     (``base_restored=False``), not propagated: the sweep's own answer is still
     a valid answer, and the one thing the caller must not be told is that the
     foreground is the user's plan when it demonstrably is not.
+
+    The solver's own status rides along, exactly as the contingency sweep's
+    ``_restore_base_guarded`` does. It has to: a re-solve that comes back
+    ``infeasible`` did not raise and did not restore anything either, and this
+    function used to discard that word and report a bare ``True`` — the one
+    reading the caller must never be given (shipped-code review, finding 13).
     """
     from services.solver_service import run_simulation
 
     final_sink: dict = {}
     try:
-        run_simulation(
+        status, _condition = run_simulation(
             cfg, network, lock, threading.Event(),
             log_queue if log_queue is not None else queue.SimpleQueue(),
             state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
         )
-    except Exception:                                         # noqa: BLE001
+    except Exception as exc:                                  # noqa: BLE001
         logger.exception(
             "frontier: the closing base re-solve FAILED — the network is left "
             "on the last swept target and the foreground results do not "
             "describe the user's own config")
-        return False
-    return True
+        return False, f"raised: {exc}"
+    return True, str(status)
 
 
 def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
@@ -154,7 +160,10 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
                        stop_event=None) -> dict:
     """
     Returns ``{"points": [...], "warning": str|None, "base_restored": bool,
-    "aborted": bool}``.
+    "base_restore_status": str|None, "aborted": bool}``. ``base_restored``
+    says the closing re-solve did not RAISE; ``base_restore_status`` is the
+    solver's own word on it, and a status that is not optimal means the
+    foreground is not the user's plan however the flag reads.
 
     ``stop_event`` (Phase 12e) is checked BETWEEN points and acted on with a
     ``break``, never an exception: the closing restore below must run on the
@@ -194,6 +203,7 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
     # Built up front and MUTATED in place so the record the exception path
     # hands back and the record the happy path returns are the same object.
     result = {"points": points, "warning": warning, "base_restored": False,
+              "base_restore_status": None,
               "aborted": False}
     try:
         for e in eps:
@@ -239,7 +249,7 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
             pass
         raise
     finally:
-        result["base_restored"] = _restore_base(
+        result["base_restored"], result["base_restore_status"] = _restore_base(
             network, lock, cfg, log_queue, final_state_update)
     return result
 

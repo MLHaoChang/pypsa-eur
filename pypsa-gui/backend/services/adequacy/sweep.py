@@ -261,7 +261,10 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
     # dispatch (and, if the caller wires the real state sink, the foreground
     # results) exactly as the user's own solve would.
     #
-    # Phase 12e: GUARDED, like the frontier's `_restore_base`. Unguarded, a
+    # Phase 12e: GUARDED, like the frontier's `_restore_base` — which since
+    # the shipped-code review's finding 13 also returns `(ok, status)`, so the
+    # two studies now report their closing re-solve in the same shape.
+    # Unguarded, a
     # restore that raises destroyed `results` entirely — including the partial
     # rows an abort exists to keep — and surfaced as an opaque `failed`.
     # `base_restored` records whether the re-solve RAN, and carries its solver

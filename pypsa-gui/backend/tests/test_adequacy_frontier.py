@@ -163,6 +163,10 @@ def _patched_sweep(monkeypatch, *, fail_on=None, restore_raises=False):
         calls["restores"] += 1
         if restore_raises:
             raise RuntimeError("the closing base re-solve failed too")
+        # The real `run_simulation` returns `(status, condition)`, and since
+        # the shipped-code review's finding 13 `_restore_base` reads the
+        # status rather than throwing it away — so the fake has to return one.
+        return "ok", None
 
     monkeypatch.setattr(_sweep, "_solve_once", fake_solve_once)
     monkeypatch.setattr(_solver, "run_simulation", fake_run_simulation)
@@ -225,6 +229,49 @@ def test_a_clean_sweep_still_reports_a_successful_restore(monkeypatch):
     res = run_frontier_sweep(n, PyPSAService.get_lock(), cfg, [200.0, 50.0],
                              log_queue=queue.SimpleQueue())
     assert calls == {"solves": 2, "restores": 1}
+    assert res["base_restored"] is True
+    assert res["base_restore_status"] == "ok"
+
+
+def test_F1i_a_frontier_restore_that_comes_back_infeasible_says_so(monkeypatch):
+    """★ F1i (shipped-code review, finding 13). `_restore_base` called
+    `run_simulation` and discarded its return value, reporting a bare `True`
+    for "it did not raise". A closing re-solve that comes back `infeasible`
+    does not raise and does not restore anything either: the network is left
+    on the last swept target while the record says the base is back — the one
+    reading the caller must never be given.
+
+    The contingency sweep's `_restore_base_guarded` has carried the solver's
+    word since Phase 12e; this brings the frontier to the same shape. Bite
+    (verified): drop `base_restore_status` and return a bare bool again.
+    """
+    from services import solver_service as _solver
+    from services.adequacy import sweep as _sweep
+
+    calls = {"solves": 0, "restores": 0}
+
+    def fake_solve_once(cfg, network, lock, log_queue, sink):
+        calls["solves"] += 1
+        sink["_status"] = "ok"
+        sink["adequacy_report"] = _fake_report()
+
+    def fake_run_simulation(*args, **kwargs):
+        calls["restores"] += 1
+        return "infeasible", None            # did not raise; did not restore
+
+    monkeypatch.setattr(_sweep, "_solve_once", fake_solve_once)
+    monkeypatch.setattr(_solver, "run_simulation", fake_run_simulation)
+
+    n = _network()
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(solver_name="highs", voll=VOLL)
+    res = run_frontier_sweep(n, PyPSAService.get_lock(), cfg, [200.0, 50.0],
+                             log_queue=queue.SimpleQueue())
+
+    assert calls["restores"] == 1
+    assert res["base_restore_status"] == "infeasible", res
+    # The flag still says the re-solve RAN — that is what it means — so the
+    # status is the only thing that can carry the bad news, and it does.
     assert res["base_restored"] is True
 
 
