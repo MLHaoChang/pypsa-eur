@@ -664,7 +664,7 @@ def _cov(mean: float, sem: float) -> float:
 
 def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
                 cov_target: float = 0.05, max_draws: int = MAX_DRAWS,
-                batch: int = 250, **sim_kwargs) -> dict:
+                batch: int = 250, stop_event=None, **sim_kwargs) -> dict:
     """
     Batch until ``CoV(mean LOLE) ≤ cov_target`` or ``max_draws`` (spec §2.5).
 
@@ -721,6 +721,24 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
             converged = True
             break
         if n_total >= cap:
+            break
+        # Phase 12e: checked at the BOTTOM of the loop, never the top — a
+        # check before the first `_simulate_blocks` leaves `parts[lab][0]`
+        # empty and `np.concatenate` below raises. Everything the payload
+        # reports (`n_samples`, `converged`, `resolution_floor_h`) is computed
+        # from the batches that actually ran, so a stopped run describes
+        # itself honestly.
+        #
+        # THE FLAG MUST NEVER REACH THIS FUNCTION FROM AN ELCC OR LOOP CALL
+        # SITE. `elcc.metrics_at`, `elcc_of_portfolio` and both certifying
+        # loops call `mc_adequacy` to REPLAY a baseline's batch sequence bit
+        # for bit — that replay is what common random numbers rest on. A
+        # truncated candidate compared against a full-budget baseline breaks
+        # CRN and returns a wrong `elcc_mw` with `status="ok"`, which
+        # `baseline_key` cannot catch because it hashes the arguments and
+        # never the result. Those callers pass `stop_event=None`; only the
+        # `/mc` worker's own baseline passes the flag.
+        if stop_event is not None and stop_event.is_set():
             break
         size = min(int(batch), cap - n_total)
         if size <= 0:

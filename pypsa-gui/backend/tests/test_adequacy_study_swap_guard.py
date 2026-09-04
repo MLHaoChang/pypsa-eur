@@ -213,25 +213,28 @@ def test_the_refusal_names_the_study_and_only_offers_a_real_remedy(
         client, install_network, session_state, key):
     """★ A3: never invent a control the user does not have.
 
-    Only `coupling_loop` and `margin_loop` expose an `/abort` route. The
-    Phase-7 sentence told EVERY blocked user to "abort it", which for the MC,
-    the frontier and the FMEA sweep names a button that does not exist — and
-    this phase would have propagated that to seven more routes.
+    The Phase-7 sentence told EVERY blocked user to "abort it", which for the
+    MC, the frontier and the FMEA sweep named a button that did not exist.
+    Phase 12e gave those three an `/abort` route, so the remedy is one
+    sentence again — and the assertion is now that the refusal names the
+    study AND offers the abort, for every key, because for every key that is
+    true. The route-equality test below is what keeps this honest: if a study
+    ever loses its abort route, `ABORTABLE_STUDIES` must shrink with it and
+    the remedy branches again.
 
-    Bite (verified): use the same remedy clause for every study.
+    Bite (verified): drop the study's name from the refusal.
     """
     install_network(_network())
+    assert key in ABORTABLE_STUDIES, (
+        f"{key} is not abortable, so the refusal must not offer an abort — "
+        "restore this test's two-branch assertion")
     with _LiveStudy(session_state(client), key):
         r = client.post("/api/network/reset")
         assert r.status_code == 409, r.text
         detail = r.json()["detail"]
         assert STUDY_LABELS[key] in detail, detail
-        if key in ABORTABLE_STUDIES:
-            assert "abort it" in detail, detail
-        else:
-            assert "cannot be aborted" in detail, (
-                f"{key} has no abort route, but the refusal offers one: "
-                + detail)
+        assert "abort it" in detail, detail
+        assert "cannot be aborted" not in detail, detail
 
 
 def test_abortable_studies_matches_the_routes_that_actually_exist():

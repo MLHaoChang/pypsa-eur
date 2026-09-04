@@ -532,6 +532,24 @@ for the unit bites, now also for live ones.
 path replaced by the single-table path, 2030 reads the 2035 value and S27.1
 fails; restored by hash.
 
+### S28 — Every study can be stopped, live (area 28)
+| id | Assertion |
+|----|-----------|
+| S28.1 | A sequential-MC study started with an ELCC asset (a baseline plus ~10 bisected evaluations over an annual horizon, so it is minutes long) is stopped mid-run: `POST /results/mc/abort` returns 200 with `aborting: true`, and the record reaches `status = "aborted"` — not `done`, which is what it read before the flag existed |
+| S28.2 | The status GET answers 200 throughout, and never carries `stop_event` or `thread`. The record now holds a `threading.Event`, and a GET that serialises one 500s on **every poll** of the surface the panel refreshes every two seconds |
+| S28.3 | The mesh reopens: the next study POST is accepted rather than 409 — the failure this feature exists to prevent, since an unstoppable study refuses every other study AND the foreground solve. And `/results/copt` on the same project answers well inside the 10 s gate (measured **0.09 s**), which is Part B |
+
+**Bitten live** (recorded in the plan): with the flag made inert in the `/mc`
+worker, S28.1 reads `status = "done"` — the study runs to completion and the
+abort does nothing.
+
+**A bite that did NOT bite, and why it is worth recording.** The first live
+bite removed the stop check from `mc_adequacy`'s batch loop, and S28 still
+passed: this fixture's study has an ELCC asset, so the *between-assets* check
+stops it even with the batch-loop check gone. That is defence in depth working
+as designed, not a test failing to test — but it means the bite has to target
+the boundary the fixture actually reaches, and the recorded bite does.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the

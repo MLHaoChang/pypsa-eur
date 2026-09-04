@@ -696,6 +696,86 @@ NETTED_ROW_NOTE = (
     "profiled unit's criticality up to 14x)")
 
 
+#: Bin the counterfactual evaluations when at least this many units are mixed
+#: (Phase 12e §2). A CONSTANT-FREE rule: the crossover between the binned and
+#: the direct path is not a fixed ratio — the direct path costs ``α + β·H`` per
+#: state with a large fixed ``α`` (numpy/Python overhead per ``mixture_hourly``
+#: call), so the implied crossover measured from ~10 at k=0 to >210 at k=3 on
+#: one machine. ``k ≥ 2`` is wrong on two measured points (n=300, k=2,
+#: H ≤ 168: direct wins 1.3–1.6×, ≤35 ms) and gives up at most 0.14 s anywhere
+#: in a 60-point sweep — against a floor of seconds. A machine-measured
+#: constant would drift; this cannot.
+BIN_MIN_MIXED = 2
+
+
+def _eue_cells(residual, mixed, weights, delta_mw, *, fixed_up=frozenset()):
+    """``(A, B)``: the ``2^k`` mixture's cells binned onto the table grid.
+
+    ``expected_shortfall_vec`` is a pure grid lookup,
+    ``ES_d(x) = x·F_d[j] − Δ·G_d[j]`` with
+    ``j = clip(ceil(x/Δ − 1e-12), 0, n_d)`` — and the ``x`` values depend only
+    on the residual and the mixed units, NOT on the distribution. So the cells
+    can be binned ONCE and every counterfactual becomes a dot product over the
+    grid (``_eue_binned``), instead of ``2^k`` passes over ``H`` per unit.
+
+        A[j] = Σ_{cells at j, x>0} P[s]·w_h·x     B[j] = Σ P[s]·w_h
+
+    Exact, not an approximation: same grid rule, same ``x ≤ 0`` behaviour
+    (``F[0] = G[0] = 0``, so a non-positive ``x`` lands on ``j = 0`` and
+    contributes nothing either way). Cells beyond a shorter table are folded
+    into its last index by ``_eue_binned``, exactly as ``clip`` does.
+    """
+    r = np.asarray(residual, dtype=np.float64)
+    H = r.shape[0]
+    w = np.asarray(weights, dtype=np.float64)
+    mixed = tuple(mixed)
+    if mixed:
+        avail = np.stack([_availability_mw(u, H) for u in mixed])
+        qs = np.array([float(u.q) for u in mixed], dtype=np.float64)
+    else:
+        avail = np.zeros((0, H))
+        qs = np.zeros(0)
+    free = [i for i in range(len(mixed)) if i not in fixed_up]
+    # one bin per grid index, plus one for everything beyond the longest table
+    n_max = int(np.ceil(max(float(r.max(initial=0.0)), 0.0) / delta_mw)) + 2
+    A = np.zeros(n_max + 1, dtype=np.float64)
+    B = np.zeros(n_max + 1, dtype=np.float64)
+    for bits in itertools.product((0, 1), repeat=len(free)):
+        s = np.ones(len(mixed), dtype=np.float64)
+        prob = 1.0
+        for i, b in zip(free, bits):
+            s[i] = float(b)
+            prob *= (1.0 - qs[i]) if b else qs[i]
+        if prob <= 0.0:
+            continue
+        x = r - (s[:, None] * avail).sum(axis=0) if len(mixed) else r
+        pos = x > 0.0
+        if not pos.any():
+            continue
+        xv = x[pos]
+        wv = w[pos] * prob
+        j = np.clip(np.ceil(xv / delta_mw - 1e-12), 0, n_max).astype(np.int64)
+        np.add.at(A, j, wv * xv)
+        np.add.at(B, j, wv)
+    return A, B
+
+
+def _eue_binned(dist: CapacityDistribution, cells) -> float:
+    """``Σ_j (A[j]·F[j] − Δ·B[j]·G[j])`` — one counterfactual, as a dot product
+    over the grid. Cells beyond this table's length fold into its last index,
+    which is what ``_grid_index``'s ``clip`` does per cell."""
+    A, B = cells
+    n = len(dist.probs)
+    if n + 1 >= A.shape[0]:
+        Ac = np.zeros(n + 1); Bc = np.zeros(n + 1)
+        Ac[:A.shape[0]] = A; Bc[:B.shape[0]] = B
+    else:
+        Ac = A[:n + 1].copy(); Bc = B[:n + 1].copy()
+        Ac[n] += A[n + 1:].sum(); Bc[n] += B[n + 1:].sum()
+    return float((Ac * dist._F[:n + 1]).sum()
+                 - dist.delta_mw * (Bc * dist._G[:n + 1]).sum())
+
+
 def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
                           residual_load: pd.Series, *, weights: pd.Series,
                           voll: float, mixed=(), netted=()) -> list[dict]:
@@ -734,19 +814,41 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         _lolp, eue_h = mixture_hourly(d, res, mixed, fixed_up=fixed_up)
         return float((eue_h * w).sum())
 
-    base_eue = _eue(dist, r)
+    # Phase 12e: bin the cells once and evaluate each counterfactual as a dot
+    # product over the grid (`_eue_cells` / `_eue_binned`) when the mixture is
+    # big enough to pay for it. `k < BIN_MIN_MIXED` keeps the direct path
+    # byte-for-byte. The switch is evaluated HERE — once per call, and
+    # `screening_analysis` calls this once per period block, so a block with
+    # few mixed units is not charged for a histogram it does not need.
+    binned = len(mixed) >= BIN_MIN_MIXED
+    cells = _eue_cells(r, mixed, w, dist.delta_mw) if binned else None
+
+    base_eue = _eue_binned(dist, cells) if binned else _eue(dist, r)
     rows: list[dict] = []
     todo: list[tuple[CoptUnit, float, str | None]] = []
     for u in units:
-        try:
-            without = deconvolve(dist, capacity_mw=u.capacity_mw, q=u.q)
-        except ValueError:
-            without = build_copt([v for v in units if v.name != u.name],
-                                 delta_mw=dist.delta_mw)
+        # Phase 12e: the rebuild, always. `deconvolve` is a Python loop over
+        # the table while `build_copt` is n−1 vectorised convolutions, so on
+        # every fleet this route can produce (Δ = 1 MW, MW-scale capacities,
+        # so L/n ≳ 6) the rebuild is 3.3–5× faster — measured across
+        # n = 2…300 and q = 0.02…0.499 — AND more accurate: the deconvolution's
+        # mass guard admits ±1e-3 by construction (`deconvolve`), and the 2^k
+        # mixture probes cells the plain path never reaches, so that error
+        # lands on ΔEUE (measured up to 1.04e-4 relative). `deconvolve` stays
+        # for its round-trip test; the attribution no longer calls it.
+        without = build_copt([v for v in units if v.name != u.name],
+                             delta_mw=dist.delta_mw)
         perfect = _shift_deterministic(without, u.capacity_mw)
-        todo.append((u, _eue(perfect, r), None))
+        todo.append((u, _eue_binned(perfect, cells) if binned
+                     else _eue(perfect, r), None))
     for i, u in enumerate(mixed):
-        todo.append((u, _eue(dist, r, fixed_up=frozenset({i})), None))
+        # A mixed unit's counterfactual FIXES its state up, which changes the
+        # cells — so it needs its own binning pass (k of them, not n).
+        if binned:
+            todo.append((u, _eue_binned(dist, _eue_cells(
+                r, mixed, w, dist.delta_mw, fixed_up=frozenset({i}))), None))
+        else:
+            todo.append((u, _eue(dist, r, fixed_up=frozenset({i})), None))
     for u in netted:
         # Base residual already nets (1−q)·a; perfect availability nets a.
         todo.append((u, _eue(dist, r - float(u.q) * _availability_mw(u, r.shape[0])),
@@ -778,7 +880,13 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         if note is not None:
             row["note"] = note
         rows.append(row)
-    rows.sort(key=lambda r: r["delta_eue_mwh"], reverse=True)
+    # Phase 12e: the name breaks EXACT ties, so a payload built twice orders
+    # identically. It does not make near-ties deterministic — two distinct
+    # units whose ΔEUE differ by less than the binning error can still swap,
+    # and after the deconvolve deletion two identical units may differ at
+    # ~1e-12 (each rebuild convolves a different subset in a different order)
+    # and are then not tied at all.
+    rows.sort(key=lambda r: (-r["delta_eue_mwh"], r["name"]))
     return rows
 
 
@@ -876,7 +984,7 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
         occ = float(fm.get("occurrence_per_year") or 0.0)
         fm["criticality_eur_per_year"] = crit
         fm["severity_eur"] = crit / occ if occ > 0 else 0.0
-    rows = sorted(merged.values(), key=lambda r: r["delta_eue_mwh"], reverse=True)
+    rows = sorted(merged.values(), key=lambda r: (-r["delta_eue_mwh"], r["name"]))
 
     # The merged split describes the fleet that was actually EVALUATED: a
     # unit with zero capacity in every block entered no table and gets no

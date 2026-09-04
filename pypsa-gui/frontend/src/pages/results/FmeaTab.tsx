@@ -7,7 +7,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Download, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Download, Plus, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -80,6 +80,12 @@ export default function FmeaTab() {
   )
 
   // Class B/C need LP re-solves — run on demand, budget-guarded server-side.
+  const abortSweep = useMutation({
+    mutationFn: () => resultsApi.abortFmeaSweep(),
+    onSuccess: () => void qc.invalidateQueries({
+      queryKey: nk(currentProject, 'results', 'fmea_modes') }),
+  })
+
   const sweep = useMutation({
     mutationFn: async () => {
       const reg = currentProject
@@ -176,6 +182,16 @@ export default function FmeaTab() {
           <RefreshCw size={11} className={sweepRunning ? 'animate-spin' : ''} />
           {sweepRunning ? 'Sweeping…' : 'Run B/C sweep'}
         </button>
+        {sweepRunning && (
+          <button
+            onClick={() => abortSweep.mutate()}
+            data-testid="sweep-abort"
+            className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-danger hover:text-danger"
+            title="Stops between contingencies — the solve already in flight finishes, the rows measured so far are kept, and the closing restore still runs."
+          >
+            <Square size={9} /> Abort
+          </button>
+        )}
         {(modes as ModesPayload | null | undefined)?.sweep_error && (
           <span className="text-[10px] text-danger">
             {(modes as ModesPayload).sweep_error}

@@ -247,7 +247,7 @@ def member_contributions(inputs, members) -> np.ndarray:
 def elcc_of_portfolio(inputs, members, *, seed, draws, cov_target: float = 0.05,
                       baseline=None, baseline_key=None, tol_mw=None,
                       max_draws: int | None = None, batch: int = 250,
-                      **sim_kwargs) -> list[dict]:
+                      stop_event=None, **sim_kwargs) -> list[dict]:
     """
     One row per period label of ``inputs.periods``: the last-in credit of the
     whole group, priced against that period's LOLE (plan §3.2). The removal
@@ -285,18 +285,26 @@ def elcc_of_portfolio(inputs, members, *, seed, draws, cov_target: float = 0.05,
     from services.adequacy.mc import MAX_DRAWS, mc_adequacy
     max_draws = MAX_DRAWS if max_draws is None else int(max_draws)
     if baseline is None:
+        # stop_event is NEVER forwarded into mc_adequacy from here — see
+        # its note: this baseline and every probe replay one batch sequence.
         baseline = mc_adequacy(inputs, draws=draws, seed=seed, cov_target=cov_target,
-                               max_draws=max_draws, batch=batch, **sim_kwargs)
+                               max_draws=max_draws, batch=batch, stop_event=None,
+                               **sim_kwargs)
         baseline_key = _key(inputs, draws=draws, seed=seed, cov_target=cov_target,
                             max_draws=max_draws, batch=batch, sim_kwargs=sim_kwargs)
     n_fixed = int(baseline["n_samples"])
     zero_probe = mc_adequacy(
         reduced, draws=draws, seed=seed, cov_target=_NEVER_CONVERGE,
         max_draws=n_fixed, batch=batch, exclude=frozenset(exclude),
-        extra_firm_mw=0.0, **sim_kwargs)
+        extra_firm_mw=0.0, stop_event=None, **sim_kwargs)
 
     rows: list[dict] = []
     for label, start, end in inputs.periods:
+        # Phase 12e: between periods. A stopped run keeps the periods it
+        # priced; `portfolio_block` marks the block `truncated` so a short
+        # `periods` list is never mistaken for a complete one.
+        if stop_event is not None and stop_event.is_set():
+            break
         nameplate = float(np.max(total[start:end], initial=0.0)) if end > start else 0.0
         if not math.isfinite(nameplate) or nameplate <= 0.0:
             from services.adequacy.elcc import _lole_of
@@ -314,7 +322,7 @@ def elcc_of_portfolio(inputs, members, *, seed, draws, cov_target: float = 0.05,
             nameplate_mw=nameplate, seed=seed, draws=draws,
             cov_target=cov_target, tol_mw=tol_mw, period=label,
             baseline=baseline, baseline_key=baseline_key,
-            max_draws=max_draws, batch=batch,
+            max_draws=max_draws, batch=batch, stop_event=stop_event,
             _zero_probe=zero_probe, **sim_kwargs)
         rows.append({"period": str(label), **row})
     return rows
@@ -334,12 +342,20 @@ def _parent(name: str) -> str:
 
 
 def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_fingerprint,
-                    seed, draws, cov_target, baseline, baseline_key, **sim_kwargs) -> dict:
+                    seed, draws, cov_target, baseline, baseline_key,
+                    stop_event=None, **sim_kwargs) -> dict:
     """
     The ``elcc_portfolio`` payload (A5): population, the comparison rows per
     period, and a status that names every refusal. ``margin_payload`` is the
     last solve's reserve-margin payload captured in the request (or None);
     ``snapshot_fingerprint`` is ``network_fingerprint(n)`` at request time.
+
+    ``truncated`` (Phase 12e) says the run was stopped before every period was
+    priced. It is a BOOLEAN beside the status, not a status of its own:
+    ``status`` is already load-bearing on the success path — a block can be
+    ``margin_unavailable`` and still carry period rows — so an ``aborted``
+    status would erase a real disclosure, and the panel renders the periods it
+    has regardless of it.
     """
     members: list[Member] = list(population.get("members") or [])
     unbuilt = list(population.get("unbuilt") or [])
@@ -365,6 +381,7 @@ def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_finger
         },
         "margin_available": margin_payload is not None,
         "periods": [],
+        "truncated": False,
         "load_basis": "lp",
     }
     if not members:
@@ -470,11 +487,14 @@ def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_finger
 
     rows_out = elcc_of_portfolio(inputs, members, seed=seed, draws=draws,
                                  cov_target=cov_target, baseline=baseline,
-                                 baseline_key=baseline_key, **sim_kwargs)
+                                 baseline_key=baseline_key,
+                                 stop_event=stop_event, **sim_kwargs)
     for r in rows_out:
         c = credits.get(r["period"], {"credit_gross_mw": None, "credit_net_mw": None})
         r["credit_gross_mw"] = c["credit_gross_mw"]
         r["credit_net_mw"] = c["credit_net_mw"]
         r["baseline_lole_ci"] = list(r["baseline_lole_ci"])
     block["periods"] = rows_out
+    # A short `periods` list must never read as a complete one.
+    block["truncated"] = len(rows_out) < len(inputs.periods)
     return block

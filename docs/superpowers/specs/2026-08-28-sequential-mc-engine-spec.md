@@ -535,3 +535,80 @@ sentence as title.
 
 **§6, amended.** `tests/test_adequacy_activity.py` (E1–E12 as numbered in
 the plan, every ★ bitten); B12 rewritten; live S27.
+
+## Amendment v1.8 — every study can be stopped; the attribution costs less (Phase 12e)
+
+**§4, amended — the abort surface.** All five studies now carry a
+`stop_event` and a `POST /results/{key}/abort` route with the loop routes'
+contract: body `{"status", "aborting"}`, 200 and idempotent even when the run
+is finishing or finished, 404 only when no run was ever recorded. The three
+new records' GETs filter `("thread", "stop_event")` — the event is a
+`threading.Event` and a GET that serialises it 500s on every poll.
+`ABORTABLE_STUDIES` is all five keys, so the blocked-action refusal is one
+sentence again; `blocking_study_detail` had offered an abort for all five
+since Phase 7, and that is true for the first time here.
+
+**The flag is cooperative and it is a `break`, never an exception.**
+`run_contingency_sweep`'s closing base re-solve sits OUTSIDE its
+`try/finally`, so an exception would skip the restore and leave the network
+on the last contingency. That re-solve is now guarded like the frontier's and
+reports `base_restored` plus the solver's own status — `True` never meant
+"the plan is back", only "it did not raise". `run_frontier_sweep` gains
+`aborted`; `run_class_b_sweep` / `run_class_c_sweep` skip ids a partial
+result dict does not carry (previously `KeyError`, surfaced as an opaque
+`failed`); `/results/fmea_modes` accepts `("done", "aborted")`, so an aborted
+sweep's rows still reach the worksheet. The three workers take the loops'
+pattern: a closed-over record, `copy_context()`, and publish-and-start under
+one `get_solver_state_lock()` hold.
+
+**Where the flag may NOT go.** `mc_adequacy(..., stop_event=None)` is
+honoured only for the `/mc` worker's own baseline. `elcc_of_removal`,
+`elcc_of_portfolio` and both certifying loops pass `None` explicitly: they
+call it to REPLAY a baseline's batch sequence bit for bit, and a truncated
+candidate measured against a full-budget baseline breaks common random
+numbers and returns a wrong `elcc_mw` with `status="ok"` — which
+`baseline_key` cannot catch, because it hashes the arguments and never the
+result. The check sits at the BOTTOM of the batch loop (at the top the
+per-period lists are empty and `np.concatenate` raises), between ELCC assets,
+between portfolio periods, and INSIDE the bisection `while` after both
+bracket ends are probed. A stopped bisection returns `status="aborted"` with
+`elcc_mw=None` and the bracket in its `reason` — the row's nine keys are a
+closed set. A stopped portfolio sets a boolean `truncated` on the block
+rather than a status, because `status` already carries refusals that coexist
+with real period rows.
+
+**§3.3 (COPT attribution), amended — two independent changes.**
+
+*`attribute_criticality` no longer calls `deconvolve`.* On every fleet
+`/copt` can produce (Δ = 1 MW, MW-scale capacities, so `L/n ≳ 6`) the rebuild
+is 3.3–5× faster — measured across n = 2…300 and q = 0.02…0.499 — and more
+accurate: the deconvolution's mass guard admits `0.999 ≤ total ≤ 1.001` by
+construction, and the `2^k` mixture probes cells the plain path never
+reaches, so that error lands on ΔEUE (measured up to 1.04e-4 relative). This
+CHANGES numbers, within the guard's own band, and the rebuild is the kept
+side. `deconvolve` remains public for its round-trip test.
+
+*The counterfactual evaluations are binned when `k ≥ 2`.*
+`ES_d(x) = x·F_d[j] − Δ·G_d[j]` with `j = clip(ceil(x/Δ − ε), 0, n_d)`, and
+the cells depend only on the residual and the mixed units — so they are
+binned once (`A[j] = Σ P[s]·w_h·x`, `B[j] = Σ P[s]·w_h`) and each
+counterfactual is a dot product, cells beyond a shorter table folded into its
+last index exactly as `clip` does. Exact: measured worst rel 6.2e-13 across
+off-grid, Δ ≠ 1, empty-table, fold and mixed+netted fixtures. The switch is
+CONSTANT-FREE (`BIN_MIN_MIXED = 2`) because the crossover is not a fixed
+ratio — the direct path costs `α + β·H` per state with a large fixed `α`, so
+the implied crossover measured from ~10 at k = 0 to >210 at k = 3 on one
+machine; `k ≥ 2` gives up at most 0.14 s anywhere in a 60-point sweep. Netted
+units keep the direct path (their counterfactual shifts the residual). Rows
+sort on `(-ΔEUE, name)` here and at the 12d block merge, so exactly-tied rows
+order identically; `/fmea_modes` keeps its own key,
+`(-criticality_eur_per_year, mode_id)`, because that is the quantity it ranks
+on and mixes classes whose criticality is not monotone in ΔEUE.
+
+Measured end to end at 8760 h: 300 units / 0 profiled **12.2 → 4.2 s**;
+300 / 8 profiled **37.8 → 4.3 s**; 100 units 1.0 → 0.25 s and 9.9 → 0.58 s.
+The floor is now the O(n²·L) rebuild, recorded as the next cost item.
+
+**§6, amended.** `tests/test_adequacy_abort.py` (F1, F1b, F1b2, F1b3, F1c,
+F1e, F1f–F1f4, F1g) and `tests/test_adequacy_copt_cost.py` (F2 ×5, F2b, F2c,
+F2c2, F2d, F2e, F2f, F2g); live S28.

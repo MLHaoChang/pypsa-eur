@@ -3282,8 +3282,12 @@ def suite_S20():
     st_swap, body_swap = http("/api/network/reset", method="POST")
     detail = str((body_swap or {}).get("detail", ""))
     named = "sequential-MC study" in detail
-    # The MC has no abort route, so the refusal must NOT offer one.
-    honest = "cannot be aborted" in detail and "or abort it" not in detail
+    # Phase 12e gave the MC an abort route, so the refusal must OFFER one —
+    # and must no longer say it cannot be aborted. Before 12e this assertion
+    # was its mirror image ("cannot be aborted" present, "or abort it"
+    # absent), which was the honest copy while the control did not exist.
+    # The rule is unchanged: never name a control the user does not have.
+    honest = "or abort it" in detail and "cannot be aborted" not in detail
     if not live_at_swap:
         skip("S20.2", "the MC study finished before the swap was attempted "
                       f"(status={(mc_at_swap or {}).get('status')}) — the "
@@ -4169,6 +4173,120 @@ def suite_S26():
     restore()
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
+def suite_S28():
+    """
+    Every study can be stopped, live (Phase 12e).
+
+    The plan's S28: start a sequential-MC study, abort it mid-run, and check
+    the three things an abort has to be true about — the record reaches
+    `aborted`, the mesh reopens (the next study POST is accepted rather than
+    409), and the status GET stays serialisable throughout, because the record
+    now carries a `threading.Event` and a GET that serialises one 500s on
+    every poll. Then `/results/copt` on the same project, which Part B made
+    cheap.
+
+    Bitten live (recorded in the plan): with the stop flag ignored in
+    `mc_adequacy`'s batch loop, the record never reaches `aborted` and the
+    subsequent POST is refused 409.
+    """
+    print("\nS28 - Every study can be stopped, live (area 28)")
+    name = "qa_e2e_abort"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2, 3):
+            skip(f"S28.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    # A fleet big enough that a 2000-draw study is still running a second
+    # later — the abort has to arrive mid-run to test anything.
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST", body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-12-31 23:00",
+                            "freq": "h"})[0])
+    for i in range(12):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": f"g{i}", "bus": "b", "carrier": "gas",
+                                "p_nom": 60.0, "marginal_cost": 10.0 + i,
+                                "outage_rate_value": 0.12,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 560.0})[0])
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2, 3):
+            skip(f"S28.{i}", f"fixture build failed: {built}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    # An ELCC asset makes the run minutes long — a baseline plus ~10 bisected
+    # evaluations — so the abort lands mid-run rather than after it.
+    st_post, _ = http("/api/results/mc", method="POST",
+                      body={"draws": 2000, "cov_target": 0.0001,
+                            "elcc_assets": [{"kind": "generator", "name": "g0"}]})
+    time.sleep(2.0)
+    st_get_live, live = http("/api/results/mc")
+    st_ab, ab = http("/api/results/mc/abort", method="POST")
+
+    deadline = time.time() + 120
+    final = None
+    get_ok = st_get_live == 200
+    while time.time() < deadline:
+        st_g, g = http("/api/results/mc")
+        if st_g != 200:
+            get_ok = False
+        if isinstance(g, dict) and g.get("status") in ("aborted", "done", "failed"):
+            final = g
+            break
+        time.sleep(1.0)
+
+    # S28.1 - the abort route answers, and the record reaches `aborted`
+    record("S28.1",
+           st_post == 200 and st_ab == 200
+           and isinstance(ab, dict) and ab.get("aborting") is True
+           and isinstance(final, dict) and final.get("status") == "aborted",
+           f"post={st_post} abort={st_ab} {ab}; final status="
+           f"{(final or {}).get('status')}")
+
+    # S28.2 - the GET never 500s while the record carries a stop event, and
+    # never leaks it
+    record("S28.2",
+           get_ok and isinstance(live, dict)
+           and "stop_event" not in (final or {}) and "thread" not in (final or {}),
+           f"live GET={st_get_live}; keys leaked="
+           f"{[k for k in (final or {}) if k in ('stop_event', 'thread')]}")
+
+    # S28.3 - the mesh reopens: the next study is accepted, not 409 - and
+    # /results/copt (Part B) answers well inside the old cost
+    t0 = time.time()
+    st_copt, copt = http("/api/results/copt")
+    copt_s = time.time() - t0
+    # Another MC rather than the frontier: the frontier refuses without a
+    # VoLL, and this check is about the MESH reopening, not about that.
+    st_next, next_body = http("/api/results/mc", method="POST",
+                              body={"draws": 8, "cov_target": 1.0})
+    record("S28.3",
+           st_next in (200, 201) and st_copt == 200 and copt_s < 10.0,
+           f"next study POST={st_next} {str(next_body)[:60]}; "
+           f"/copt={st_copt} in {copt_s:.2f}s (gate 10 s)")
+    http("/api/results/mc/abort", method="POST")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
 def suite_S27():
     """
     The engines honour activity, live (Phase 12d).
@@ -4381,6 +4499,8 @@ def main() -> int:
         suite_S26()
     if run("S27"):
         suite_S27()
+    if run("S28"):
+        suite_S28()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

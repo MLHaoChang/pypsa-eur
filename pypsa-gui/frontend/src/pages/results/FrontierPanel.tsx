@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as RTooltip, ReferenceDot,
 } from 'recharts'
-import { AlertTriangle, Activity } from 'lucide-react'
+import { AlertTriangle, Activity, Square } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -43,6 +43,10 @@ export interface FrontierPayload {
   knee?: number | null
   voll_eur_per_mwh?: number
   targets_permyriad?: number[]
+  /** Phase 12e: whether the closing base re-solve RAN — not that the plan is
+   *  back. The engine has always computed it; the route used to discard it,
+   *  so a study that could not restore the user's plan said nothing. */
+  base_restored?: boolean | null
 }
 
 // Literal hex, not a CSS custom property: `var(--…)` does not resolve inside
@@ -110,6 +114,12 @@ export function FrontierPanel() {
       queryKey: nk(currentProject, 'results', 'frontier') }),
   })
 
+  const abort = useMutation({
+    mutationFn: () => resultsApi.abortFrontier(),
+    onSuccess: () => void qc.invalidateQueries({
+      queryKey: nk(currentProject, 'results', 'frontier') }),
+  })
+
   const rows = payload?.points ?? []
   const chart = useMemo(
     () => rows.filter(r => r.status === 'ok' && r.point).map(r => ({
@@ -161,6 +171,22 @@ export function FrontierPanel() {
             >
               {running ? 'Studying…' : 'Run study'}
             </button>
+            {running && (
+              <button
+                onClick={() => abort.mutate()}
+                data-testid="frontier-abort"
+                className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-danger hover:text-danger"
+                title="Stops between targets — the solve already in flight finishes, the points swept so far are kept, and the closing restore still runs."
+              >
+                <Square size={9} /> Abort
+              </button>
+            )}
+            {payload?.base_restored === false && (
+              <span className="text-[10px] text-warn" data-testid="frontier-not-restored">
+                The closing re-solve did not run — the network is on the last
+                swept target, not your own plan. Re-run your solve.
+              </span>
+            )}
             {rows.length > 0 && (
               <button onClick={exportCsv}
                 className="px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent">

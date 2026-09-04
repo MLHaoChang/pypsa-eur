@@ -2951,7 +2951,10 @@ def get_fmea_modes():
     if isinstance(copt, dict):
         per_mode.extend(copt["per_mode"])
     sweep = _state.get("fmea_sweep")
-    if sweep and sweep.get("status") == "done":
+    # Phase 12e: an ABORTED sweep measured real contingencies before it was
+    # stopped, and the worksheet is where those rows are read. Dropping them
+    # here would make the abort silently lose work the user paid solves for.
+    if sweep and sweep.get("status") in ("done", "aborted"):
         for r in sweep.get("rows", []):
             if r.get("failure_mode"):
                 per_mode.append({**r["failure_mode"],
@@ -2997,7 +3000,7 @@ def get_fmea_sweep():
     st = _state.get("fmea_sweep")
     if not st:
         return Response(status_code=204)
-    return {k: v for k, v in st.items() if k != "thread"}
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
 
 
 class FmeaSweepRequest(_BaseModel):
@@ -3006,6 +3009,37 @@ class FmeaSweepRequest(_BaseModel):
     # the FOREGROUND network and carries no project name, so the sidecar is
     # read where authorization lives and re-validated here before running.
     scenarios: list = []
+
+
+@results_router.post("/fmea_sweep/abort")
+def post_fmea_sweep_abort():
+    """
+    Ask a running FMEA sweep to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("fmea_sweep")
+        if not st:
+            raise HTTPException(
+                404, "no FMEA sweep has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
 
 
 @results_router.post("/fmea_sweep")
@@ -3052,33 +3086,54 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
 
     scenarios = list(getattr(body, "scenarios", None) or [])
 
+    stop_event = _threading.Event()
+    record: dict = {"status": "running", "rows": [], "error": None,
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
+
     def worker():
         try:
             # Class B first with a private final sink; the LAST sweep's
             # closing base re-solve writes the REAL state sink, so
             # /results/lost_load etc. reflect base afterwards.
             rows = run_class_b_sweep(
-                n, lock, cfg,
+                n, lock, cfg, stop_event=stop_event,
                 final_state_update=None if scenarios else _state_update,
             )
-            if scenarios:
+            # Phase 12e: the worker runs TWO sweeps, so the flag is checked
+            # BETWEEN them. Without this, breaking out of class B's
+            # contingency loop returns here and class C runs in full — the
+            # abort would stop one sweep, not the study. When class C is
+            # skipped, class B ran with a private final sink, so the
+            # foreground results are the pre-study ones; that is correct and
+            # is what the user is looking at.
+            if scenarios and not stop_event.is_set():
                 rows = rows + run_class_c_sweep(
-                    n, lock, cfg, scenarios,
+                    n, lock, cfg, scenarios, stop_event=stop_event,
                     final_state_update=_state_update,
                 )
-            _state["fmea_sweep"].update(
-                status="done", rows=rows, finished_at=time.time(), error=None)
+            record.update(
+                status="aborted" if stop_event.is_set() else "done",
+                rows=rows, finished_at=time.time(), error=None)
         except (SweepBudgetError, StressValidationError) as exc:
-            _state["fmea_sweep"].update(
+            record.update(
                 status="failed", rows=[], error=str(exc), finished_at=time.time())
         except Exception as exc:  # noqa: BLE001
-            _state["fmea_sweep"].update(
+            record.update(
                 status="failed", rows=[], error=str(exc), finished_at=time.time())
 
-    t = _threading.Thread(target=worker, daemon=True, name="fmea-sweep")
-    _state["fmea_sweep"] = {"status": "running", "rows": [], "error": None,
-                            "started_at": time.time(), "thread": t}
-    t.start()
+    # The loops' pattern (see post_coupling_loop): the record is CLOSED OVER
+    # so a context switch cannot redirect the worker's writes away from the
+    # dict the poller reads, the request's context is carried so the closing
+    # restore's `_state_update` lands in the right project, and the record is
+    # published and the thread started under ONE lock hold.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="fmea-sweep")
+    record["thread"] = t
+    with PyPSAService.get_solver_state_lock():
+        _state["fmea_sweep"] = record
+        t.start()
     return {"status": "running"}
 
 
@@ -3097,7 +3152,38 @@ def get_frontier():
     st = _state.get("frontier")
     if not st:
         return Response(status_code=204)
-    return {k: v for k, v in st.items() if k != "thread"}
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/frontier/abort")
+def post_frontier_abort():
+    """
+    Ask a running frontier study to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("frontier")
+        if not st:
+            raise HTTPException(
+                404, "no frontier study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
 
 
 @results_router.post("/frontier")
@@ -3143,28 +3229,46 @@ def post_frontier(body: FrontierRequest | None = None):
     n = PyPSAService.get_network()
     lock = PyPSAService.get_lock()
 
+    stop_event = _threading.Event()
+    record: dict = {"status": "running", "points": [], "error": None,
+                    "warning": None, "knee": None,
+                    "targets_permyriad": targets, "base_restored": None,
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
+
     def worker():
         try:
-            res = run_frontier_sweep(n, lock, cfg, targets,
+            res = run_frontier_sweep(n, lock, cfg, targets, stop_event=stop_event,
                                      final_state_update=_state_update)
             voll = float(getattr(cfg, "voll", 0.0) or 0.0)
-            _state["frontier"].update(
-                status="done", points=res["points"], warning=res["warning"],
+            record.update(
+                status="aborted" if res.get("aborted") else "done",
+                points=res["points"], warning=res["warning"],
                 knee=knee_index(res["points"], voll), voll_eur_per_mwh=voll,
+                # Phase 12e: the engine has always computed this and the route
+                # threw it away. It says whether the closing re-solve RAN —
+                # not that the plan is back — and a study that could not
+                # restore the user's plan must say so.
+                base_restored=res.get("base_restored"),
                 finished_at=time.time(), error=None)
         except (FrontierBudgetError, FrontierConfigError) as exc:
-            _state["frontier"].update(status="failed", points=[], error=str(exc),
-                                      finished_at=time.time())
+            record.update(status="failed", points=[], error=str(exc),
+                          finished_at=time.time())
         except Exception as exc:                              # noqa: BLE001
-            _state["frontier"].update(status="failed", points=[], error=str(exc),
-                                      finished_at=time.time())
+            # The engine attaches its partial record to the exception so the
+            # completed points and the restore's outcome are not lost with it.
+            partial = getattr(exc, "frontier_result", None) or {}
+            record.update(status="failed", points=partial.get("points") or [],
+                          base_restored=partial.get("base_restored"),
+                          error=str(exc), finished_at=time.time())
 
-    t = _threading.Thread(target=worker, daemon=True, name="adequacy-frontier")
-    _state["frontier"] = {"status": "running", "points": [], "error": None,
-                          "warning": None, "knee": None,
-                          "targets_permyriad": targets,
-                          "started_at": time.time(), "thread": t}
-    t.start()
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-frontier")
+    record["thread"] = t
+    with PyPSAService.get_solver_state_lock():
+        _state["frontier"] = record
+        t.start()
     return {"status": "running", "targets_permyriad": targets}
 
 
@@ -3207,7 +3311,40 @@ def get_mc():
     st = _state.get("mc")
     if not st:
         return Response(status_code=204)
-    return {k: v for k, v in st.items() if k != "thread"}
+    # `stop_event` is a threading.Event: unserialisable, and the abort route's
+    # only handle on a live run. Same filter the loops' GETs use.
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/mc/abort")
+def post_mc_abort():
+    """
+    Ask a running sequential-MC study to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("mc")
+        if not st:
+            raise HTTPException(
+                404, "no sequential-MC study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
 
 
 @results_router.post("/mc")
@@ -3374,13 +3511,18 @@ def post_mc(body: McRequest | None = None):
     # `_state` inside it: `_state` resolves the *request-scoped* project
     # context, and a worker thread has no request context — it would resolve a
     # different dict and write its result where no reader looks.
+    stop_event = _threading.Event()
     record: dict = {"status": "running", "result": None, "error": None,
-                    "started_at": time.time(), "thread": None}
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
 
     def worker():
         try:
+            # The ONLY call in the codebase that may carry the flag: this
+            # is the study's own baseline, not a replay of one. Every ELCC
+            # and loop call passes `stop_event=None` (see `mc_adequacy`).
             metrics = mc_adequacy(inputs, draws=draws, seed=seed,
-                                  cov_target=cov_target)
+                                  cov_target=cov_target, stop_event=stop_event)
             # Phase 12c: the headline metrics ARE the baseline every ELCC
             # row needs, argument for argument; injected with a content key
             # the callee recomputes (the N+1 baseline, closed with CRN kept).
@@ -3391,11 +3533,16 @@ def post_mc(body: McRequest | None = None):
                                 batch=250)
             rows = []
             for kind, name in assets:
+                # Between assets: a stopped study keeps the rows it priced and
+                # never starts another. The bisection inside each asset is
+                # checked too, so the worst case is one probe, not one asset.
+                if stop_event.is_set():
+                    break
                 try:
                     rows.append(elcc_for_asset(
                         inputs, kind, name, seed=seed, draws=draws,
                         cov_target=cov_target, baseline=metrics,
-                        baseline_key=key))
+                        baseline_key=key, stop_event=stop_event))
                 except KeyError as exc:
                     # Belt-and-braces for the 404 the POST already raised
                     # synchronously: the only way to reach this is a name that
@@ -3415,9 +3562,11 @@ def post_mc(body: McRequest | None = None):
                 portfolio = portfolio_block(
                     inputs, population, margin_payload=margin_payload,
                     snapshot_fingerprint=snapshot_fp, seed=seed, draws=draws,
-                    cov_target=cov_target, baseline=metrics, baseline_key=key)
+                    cov_target=cov_target, baseline=metrics, baseline_key=key,
+                    stop_event=stop_event)
             record.update(
-                status="done", error=None, finished_at=time.time(),
+                status="aborted" if stop_event.is_set() else "done",
+                error=None, finished_at=time.time(),
                 result={
                     # A SIBLING payload, deliberately not folded into
                     # AdequacyReport: the MC is an engine-local study (like the
@@ -3443,10 +3592,16 @@ def post_mc(body: McRequest | None = None):
             record.update(status="failed", result=None, error=str(exc),
                           finished_at=time.time())
 
-    t = _threading.Thread(target=worker, daemon=True, name="adequacy-mc")
+    # The loops' pattern: the record is already closed over; Phase 12e adds
+    # the request's context (a bare Thread does not inherit the ContextVar the
+    # active project lives in) and publish-and-start under one lock hold.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-mc")
     record["thread"] = t
-    _state["mc"] = record
-    t.start()
+    with PyPSAService.get_solver_state_lock():
+        _state["mc"] = record
+        t.start()
     return {"status": "running", "draws": draws, "seed": seed,
             "cov_target": cov_target, "elcc_assets": len(assets),
             "elcc_portfolio": want_portfolio}

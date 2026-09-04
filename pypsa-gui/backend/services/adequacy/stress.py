@@ -195,7 +195,8 @@ def _parametric_mutate(scenario: dict):
 
 
 def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
-                      log_queue=None, final_state_update=None) -> list[dict]:
+                      log_queue=None, final_state_update=None,
+                      stop_event=None) -> list[dict]:
     """
     Class-C rows via the shared driver. occurrence = the scenario's
     empirical ``frequency_per_year``; severity = ΔEUE × VoLL per event;
@@ -224,10 +225,14 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
         for sc in runnable
     ]
     swept = run_contingency_sweep(
-        network, lock, cfg, contingencies,
+        network, lock, cfg, contingencies, stop_event=stop_event,
         log_queue=log_queue, final_state_update=final_state_update)
     for c in contingencies:
-        res = swept["contingencies"][c["id"]]
+        # Phase 12e: see the class-B assembler — an aborted sweep carries
+        # only what it reached, and the rest are skipped rather than raising.
+        res = swept["contingencies"].get(c["id"])
+        if res is None:
+            continue
         meta = c["meta"]
         if res["status"] not in ("ok", "optimal"):
             rows.append({"id": c["id"], "status": res["status"],

@@ -34,10 +34,13 @@ requirement, satisfied by integrating rather than sampling).
 from __future__ import annotations
 
 import dataclasses
+import logging
 import math
 import queue
 import threading
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 MAX_CONTINGENCIES = 20
 
@@ -141,9 +144,37 @@ def _solve_once(cfg, n, lock, log_queue, sink: dict) -> None:
     sink["_condition"] = condition
 
 
+def _restore_base_guarded(network, lock, cfg, log_queue, final_state_update):
+    """The closing base re-solve, and whether it worked: ``(ok, status)``.
+
+    A restore that raises is REPORTED, not propagated — the sweep's rows are
+    still a valid answer, and the one thing the caller must not be told is
+    that the foreground is the user's plan when it demonstrably is not. The
+    solver's own status rides along, because a re-solve that returns
+    ``infeasible`` did not raise and yet did not restore anything either
+    (Phase 12e §1).
+    """
+    from services.solver_service import run_simulation
+
+    final_sink: dict = {}
+    try:
+        status, _condition = run_simulation(
+            cfg, network, lock, threading.Event(),
+            log_queue if log_queue is not None else queue.SimpleQueue(),
+            state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
+        )
+    except Exception:                                         # noqa: BLE001
+        logger.exception(
+            "contingency sweep: the closing base re-solve FAILED — the network "
+            "is left on the last contingency and the foreground results do not "
+            "describe the user's own config")
+        return False, "raised"
+    return True, str(status)
+
+
 def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
                           log_queue=None,
-                          final_state_update=None) -> dict:
+                          final_state_update=None, stop_event=None) -> dict:
     """
     ``contingencies``: ``[{id, mutate(n) -> undo(), meta}, ...]``. Returns
     ``{"base": {eue_mwh, status}, "contingencies": {id: {delta_eue_mwh,
@@ -175,7 +206,8 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
         reserve_margin=None)
 
     unfreeze = freeze_capacities(network)
-    results: dict = {"base": {}, "contingencies": {}}
+    results: dict = {"base": {}, "contingencies": {}, "aborted": False,
+                     "base_restored": False}
     try:
         base_sink: dict = {}
         _solve_once(sweep_cfg, network, lock, log_queue, base_sink)
@@ -186,6 +218,13 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
         results["base"] = {"eue_mwh": base_eue,
                            "status": base_sink.get("_status")}
         for c in contingencies:
+            # Phase 12e: checked BETWEEN contingencies and acted on with a
+            # `break`, never an exception — the closing re-solve below sits
+            # outside the `finally`, so an exception here would skip the
+            # restore and leave the network on the last contingency.
+            if stop_event is not None and stop_event.is_set():
+                results["aborted"] = True
+                break
             undo = c["mutate"](network)
             sink: dict = {}
             # Tell the solver not to re-broadcast `_user_ts` over this
@@ -221,13 +260,14 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
     # Closing UNFROZEN base re-solve with the user's ORIGINAL config: leaves
     # dispatch (and, if the caller wires the real state sink, the foreground
     # results) exactly as the user's own solve would.
-    final_sink: dict = {}
-    from services.solver_service import run_simulation
-    run_simulation(
-        cfg, network, lock, threading.Event(),
-        log_queue if log_queue is not None else queue.SimpleQueue(),
-        state_update=final_state_update or (lambda **kw: final_sink.update(kw)),
-    )
+    #
+    # Phase 12e: GUARDED, like the frontier's `_restore_base`. Unguarded, a
+    # restore that raises destroyed `results` entirely — including the partial
+    # rows an abort exists to keep — and surfaced as an opaque `failed`.
+    # `base_restored` records whether the re-solve RAN, and carries its solver
+    # status: `True` never meant "the plan is back", only "it did not raise".
+    results["base_restored"], results["base_restore_status"] = _restore_base_guarded(
+        network, lock, cfg, log_queue, final_state_update)
     return results
 
 
@@ -310,7 +350,7 @@ def class_b_contingencies(n) -> list[dict]:
 
 
 def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
-                      final_state_update=None) -> list[dict]:
+                      final_state_update=None, stop_event=None) -> list[dict]:
     """
     Class-B rows: sweep every eligible link outage and price it first-order
     (see the module docstring's severity semantics):
@@ -327,11 +367,17 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
         return []
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
     swept = run_contingency_sweep(
-        network, lock, cfg, contingencies,
+        network, lock, cfg, contingencies, stop_event=stop_event,
         log_queue=log_queue, final_state_update=final_state_update)
     rows: list[dict] = []
     for c in contingencies:
-        res = swept["contingencies"][c["id"]]
+        # Phase 12e: an ABORTED sweep carries only the contingencies it got
+        # to. Skipping the rest keeps the partial rows the abort exists to
+        # preserve; indexing them raised `KeyError`, surfaced as an opaque
+        # `failed`, and lost everything.
+        res = swept["contingencies"].get(c["id"])
+        if res is None:
+            continue
         meta = c["meta"]
         if res["status"] not in ("ok", "optimal"):
             rows.append({"id": c["id"], "status": res["status"],

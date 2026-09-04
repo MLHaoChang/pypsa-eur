@@ -253,15 +253,18 @@ STUDY_LABELS = {
 
 # The studies a user can actually STOP.
 #
-# ★ Only these two have an `/abort` route and a `stop_event`; `mc`, `frontier`
-# and `fmea_sweep` have neither. This is load-bearing for the copy: the
-# Phase-7 refusal sentence said "Wait for it to finish, or abort it" for EVERY
-# study, which names a control that does not exist for three of the five. A
-# refusal must never invent an action the user cannot take.
+# ★ Every study has an `/abort` route and a `stop_event` since Phase 12e.
+# This was load-bearing for the copy while it was NOT true: the Phase-7
+# refusal sentence said "Wait for it to finish, or abort it" for every study,
+# naming a control that did not exist for three of the five, and the two-branch
+# remedy below existed to stop the refusal inventing an action the user could
+# not take. It is one sentence again — because the control now exists, not
+# because the distinction was dropped.
 #
 # Pinned by a test against the routes that actually exist, so this cannot
-# drift the day someone gives the MC an abort.
-ABORTABLE_STUDIES = ("coupling_loop", "margin_loop")
+# drift the day someone REMOVES an abort.
+ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
+                     "fmea_sweep")
 
 
 def record_is_running(record) -> bool:
@@ -342,6 +345,9 @@ def study_swap_refusal(state, action: str) -> str | None:
     label = STUDY_LABELS.get(key, key)
     remedy = ("Wait for it to finish, or abort it."
               if key in ABORTABLE_STUDIES else
+              # Unreachable since Phase 12e gave every study an abort, and
+              # kept rather than deleted: the branch is what makes the claim
+              # falsifiable if a study ever loses its route again.
               "It cannot be aborted, so wait for it to finish.")
     return (f"{label} is running on this network. Trying to {action} now "
             "would not stop it — the study holds the network it started on, "

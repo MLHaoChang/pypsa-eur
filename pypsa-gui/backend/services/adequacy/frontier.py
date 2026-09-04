@@ -150,9 +150,18 @@ def _restore_base(network, lock, cfg, log_queue, final_state_update) -> bool:
 
 
 def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
-                       log_queue=None, final_state_update=None) -> dict:
+                       log_queue=None, final_state_update=None,
+                       stop_event=None) -> dict:
     """
-    Returns ``{"points": [...], "warning": str|None, "base_restored": bool}``.
+    Returns ``{"points": [...], "warning": str|None, "base_restored": bool,
+    "aborted": bool}``.
+
+    ``stop_event`` (Phase 12e) is checked BETWEEN points and acted on with a
+    ``break``, never an exception: the closing restore below must run on the
+    abort path exactly as it does on the happy one, and the points already
+    swept are kept. The worst case after the click is therefore the in-flight
+    solve plus the restore solve — the restore is itself a full
+    ``run_simulation``, and an abort does not buy its way out of it.
 
     A point whose solve is not optimal is returned WITH its status and no
     numbers — an unreachable target is a real and interesting answer ("no
@@ -184,9 +193,13 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
     points: list[dict] = []
     # Built up front and MUTATED in place so the record the exception path
     # hands back and the record the happy path returns are the same object.
-    result = {"points": points, "warning": warning, "base_restored": False}
+    result = {"points": points, "warning": warning, "base_restored": False,
+              "aborted": False}
     try:
         for e in eps:
+            if stop_event is not None and stop_event.is_set():
+                result["aborted"] = True
+                break
             sweep_cfg = dataclasses.replace(cfg, ens_cap_permyriad=e)
             sink: dict = {}
             _solve_once(sweep_cfg, network, lock, log_queue, sink)

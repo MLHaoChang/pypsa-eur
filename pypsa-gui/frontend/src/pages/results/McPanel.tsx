@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Dices } from 'lucide-react'
+import { AlertTriangle, Dices, Square } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import type {
   ElccCandidate, ElccRow, McMetrics, McRequestBody, McStatus, ElccPortfolioBlock, ElccPortfolioPeriod,
@@ -190,12 +190,17 @@ const PORTFOLIO_PERIOD_LABEL: Record<ElccPortfolioPeriod['status'], string> = {
   unidentifiable: 'unidentifiable',
   not_bracketed: 'not bracketed',
   no_contribution: 'no contribution',
+  // Phase 12e: a period whose bisection was stopped. Without an entry here
+  // the cell renders `undefined` — the map is a Record over a closed union,
+  // so every widening of that union has to land here too.
+  aborted: 'stopped mid-bisection',
 }
 
 const STATUS_LABEL: Record<ElccRow['status'], string> = {
   ok: 'ok',
   unidentifiable: 'unidentifiable',
   not_bracketed: 'not_bracketed',
+  aborted: 'aborted',
 }
 
 // The one sentence that keeps the comparison honest: the three engines are
@@ -400,6 +405,12 @@ export function McPanel() {
   const assets = selectedAssets(candidates, selected)
   const atCap = maxAssets > 0 && (assets?.length ?? 0) >= maxAssets
 
+  const abort = useMutation({
+    mutationFn: () => resultsApi.abortMc(),
+    onSuccess: () => void qc.invalidateQueries({
+      queryKey: nk(currentProject, 'results', 'mc') }),
+  })
+
   const run = useMutation({
     // A bare `{}` when the field is empty or unparseable: every field has an
     // engine-side default, and inventing a frontend one would fork it. The
@@ -467,6 +478,16 @@ export function McPanel() {
             >
               {running ? 'Sampling…' : 'Run study'}
             </button>
+            {running && (
+              <button
+                onClick={() => abort.mutate()}
+                data-testid="mc-abort"
+                className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-danger hover:text-danger"
+                title="Stops at the next boundary — the batch or bisection probe already in flight finishes, and the rows priced so far are kept."
+              >
+                <Square size={9} /> Abort
+              </button>
+            )}
             {blocked && (
               <span className="text-[10px] text-warn" data-testid="mc-blocked">
                 Blocked: {blocked}

@@ -211,7 +211,7 @@ export interface ElccRow {
   /** null on every non-"ok" status; `reason` carries the refusal instead. */
   elcc_mw: number | null
   elcc_share: number | null
-  status: 'ok' | 'unidentifiable' | 'not_bracketed'
+  status: 'ok' | 'unidentifiable' | 'not_bracketed' | 'aborted'
   /** null iff status === "ok". */
   reason: string | null
   baseline_lole_h: number
@@ -250,7 +250,7 @@ export type ElccPortfolioStatus =
   | 'ok' | 'no_population' | 'activity_mismatch' | 'capacity_basis_mismatch'
   | 'stale_report' | 'margin_unavailable'
 export type ElccPortfolioPeriodStatus =
-  | 'ok' | 'unidentifiable' | 'not_bracketed' | 'no_contribution'
+  | 'ok' | 'unidentifiable' | 'not_bracketed' | 'no_contribution' | 'aborted'
 
 export interface ElccPortfolioPeriod {
   period: string
@@ -273,18 +273,30 @@ export interface ElccPortfolioBlock {
   /** null iff status === "ok"; a refusal names what it saw. */
   reason: string | null
   population: {
-    members: Array<{ kind: string; name: string; capacity_mw: number }>
+    members: Array<{
+      kind: string; name: string; capacity_mw: number
+      /** Phase 12d: what the engines gave the member in each period — the
+       *  quantity the block's comparison actually uses. */
+      capacity_by_period?: Array<{ period: string; capacity_mw: number }>
+    }>
     unbuilt: string[]
     n_vre: number
     n_generator: number
   }
   margin_available: boolean
   periods: ElccPortfolioPeriod[]
+  /** Phase 12e: the run was stopped before every period was priced, so
+   *  `periods` is short. A BOOLEAN beside the status, not a status of its
+   *  own — `status` already carries refusals like `margin_unavailable` that
+   *  coexist with real period rows. */
+  truncated?: boolean
   load_basis: string
 }
 
 export interface McStatus {
-  status: 'running' | 'done' | 'failed'
+  /** `aborted` since Phase 12e: stopped by `/results/mc/abort`, carrying the
+   *  headline metrics and whichever ELCC rows completed first. */
+  status: 'running' | 'done' | 'failed' | 'aborted'
   result: McResult | null
   error: string | null
   started_at?: number
@@ -924,6 +936,15 @@ export const resultsApi = {
   // already finishing: the controller checks the stop event between iterates,
   // so an abort costs at most the iterate in flight and the closing restore
   // still runs. 404 only when no loop has ever been recorded.
+  // Phase 12e: every study can be stopped. Same contract as the loops' —
+  // 200 and idempotent whatever the run's state, 404 only if none was ever run.
+  abortMc: () => client.post('/results/mc/abort')
+    .then(r => r.data as { status: string; aborting: boolean }),
+  abortFrontier: () => client.post('/results/frontier/abort')
+    .then(r => r.data as { status: string; aborting: boolean }),
+  abortFmeaSweep: () => client.post('/results/fmea_sweep/abort')
+    .then(r => r.data as { status: string; aborting: boolean }),
+
   abortCouplingLoop: () => client.post('/results/coupling_loop/abort')
     .then(r => r.data),
   // The MARGIN-driven loop (Phase 9; 204 = no margin loop has been run in

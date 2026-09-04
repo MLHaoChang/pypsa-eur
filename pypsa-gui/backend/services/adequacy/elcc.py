@@ -342,7 +342,7 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
                     tol_mw=None, cov_target: float = 0.05,
                     max_draws: int = MAX_DRAWS, batch: int = 250,
                     period=None, baseline=None, baseline_key=None,
-                    _zero_probe=None, **sim_kwargs) -> dict:
+                    _zero_probe=None, stop_event=None, **sim_kwargs) -> dict:
     """
     The credit of an arbitrary REMOVAL, expressed as firm MW (spec §3).
 
@@ -406,9 +406,12 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
                 "this evaluation's inputs and sampling parameters — a "
                 "baseline from another sample set would break the CRN replay")
     else:
+        # stop_event is NEVER forwarded: this call and every probe below
+        # replay one batch sequence, and a truncated replay breaks CRN
+        # (mc_adequacy's own note). An abort is honoured between PROBES.
         baseline = mc_adequacy(inputs, draws=draws, seed=seed,
                                cov_target=cov_target, max_draws=max_draws,
-                               batch=batch, **sim_kwargs)
+                               batch=batch, stop_event=None, **sim_kwargs)
     lole_base = _lole_of(baseline, period)
     n_fixed = int(baseline["n_samples"])
     floor = baseline["resolution_floor_h"]
@@ -452,7 +455,7 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
         return mc_adequacy(reduced_inputs, draws=draws, seed=seed,
                            cov_target=_NEVER_CONVERGE, max_draws=n_fixed,
                            batch=batch, exclude=exclude,
-                           exclude_storage=exclude_storage,
+                           exclude_storage=exclude_storage, stop_event=None,
                            extra_firm_mw=float(delta_mw), **sim_kwargs)
 
     def lole_at(delta_mw: float) -> float:
@@ -487,6 +490,20 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
     lo, hi = 0.0, nameplate
     steps = 0
     while hi - lo > tol and steps < _MAX_BISECTION_STEPS:
+        # Phase 12e: INSIDE the loop, after both bracket ends were probed
+        # above. `hi` is by the loop's own invariant the smallest Δ KNOWN to
+        # restore the baseline, so it is a true upper bound — but a bracket
+        # that was never closed is not a credit, so the row says `aborted`
+        # and carries `[lo, hi]` in its reason rather than a number. Checked
+        # between PROBES, each of which is a complete evaluation: the flag
+        # must not reach `mc_adequacy` itself (see its note).
+        if stop_event is not None and stop_event.is_set():
+            return _row(
+                nameplate=nameplate, baseline=baseline, status="aborted",
+                period=period,
+                reason=(f"the study was stopped mid-bisection: the credit is "
+                        f"between {lo:.4g} and {hi:.4g} MW, and only the upper "
+                        "end has been shown to restore the baseline LOLE"))
         mid = 0.5 * (lo + hi)
         if lole_at(mid) <= lole_base:
             hi = mid

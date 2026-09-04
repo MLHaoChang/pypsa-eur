@@ -306,3 +306,90 @@ flag.
 - The O(n²·L) rebuild; making `/copt` asynchronous; aborting mid-solve.
 - The static-CF flag and the derate NaN rule; the `validate` TOCTOU.
 - `/fmea_modes`' duplicate `/copt` cost and its separate query key.
+
+## 12e SHIPPED (2026-09-04)
+
+Built as planned. **Part A**: `stop_event` on all three records with the
+loops' pattern (closed-over record, `copy_context()`, publish-and-start under
+one lock hold); three `/abort` routes with the shipped contract; the three GET
+filters widened; `run_frontier_sweep` gains `aborted`, `run_contingency_sweep`
+gains `aborted` + a guarded `_restore_base_guarded` carrying the solver status;
+both row assemblers skip ids a partial dict lacks; `/fmea_modes` accepts
+`("done", "aborted")`; the sweep worker checks the flag between class B and
+class C; `mc_adequacy` checks at the bottom of its batch loop and every replay
+call site passes `stop_event=None`; the bisection checks inside its `while`
+and returns `aborted` with the bracket in `reason`; the portfolio stops
+between periods and sets `truncated`; `ABORTABLE_STUDIES` is all five and the
+A3 test is rewritten; three entries added to `ROUTE_SURFACES`. Frontend: abort
+buttons on the MC, frontier and sweep panels (the shipped pattern verbatim),
+`McStatus`/`ElccRow`/`ElccPortfolioPeriodStatus` widened with their label-map
+entries, `truncated` and `base_restored` typed, and a warning when the
+frontier's closing re-solve did not run.
+
+**Part B**: the `deconvolve` call deleted from `attribute_criticality`;
+`_eue_cells` / `_eue_binned` with `BIN_MIN_MIXED = 2`; `(-ΔEUE, name)` at both
+COPT sort sites (`/fmea_modes` keeps its own criticality key).
+
+**Measured, end to end, 8760 h** (`screening_analysis`, this machine):
+
+| fleet | before | after |
+|---|---|---|
+| 300 units, 0 profiled | 12.2 s | **4.24 s** |
+| 300 units, 8 profiled | 37.8 s | **4.32 s** |
+| 100 units, 0 profiled | 1.04 s | **0.25 s** |
+| 100 units, 8 profiled | 9.9 s | **0.58 s** |
+
+Flat across regimes, as §2 predicted, and below the 5–6.5 s the plan stated.
+Binning exactness re-measured against a deconvolve-free reference: worst rel
+**6.2e-13** over off-grid, Δ = 2.5, mixed+netted, empty-table and fold
+fixtures.
+
+**Tests.** `test_adequacy_abort.py` 15, `test_adequacy_copt_cost.py` 12.
+
+**Bites — 17, all bite.** Part B: floor instead of the grid rule; drop the
+fold; restore the per-unit mixture loop; invert the switch; `-ΔEUE` alone at
+the row sort; `-ΔEUE` alone at the block merge. Part A: forward the flag into
+`mc_adequacy`; return `ok` from a stopped bisection; check at the TOP of the
+batch loop; portfolio ignores the flag; sweep raises instead of breaking;
+unguarded restore; index instead of `.get`; frontier ignores the flag; 409 on
+a finished run; `stop_event` left in the GET filters (all three 500); the
+`("done",)` worksheet gate.
+
+**Three bites did not bite on the first attempt and were replaced, not
+counted.** (1) F2d asserted the FIXTURE (`k >= BIN_MIN_MIXED`) rather than
+which path ran, and both paths agree by construction — rewritten to count
+`mixture_hourly` calls. (2) F2f sorted a list in the test body, so it tested
+Python's `sorted` and no mutation of the engine could reach it — rewritten to
+drive `attribute_criticality` on a `q = 0` fleet, where every ΔEUE is exactly
+0.0 and the tie is real. (3) F1f needed TWO fixture corrections: a one-batch
+replay exits on `n_total >= max_draws` before any stop check, and an event
+armed BETWEEN evaluations lets the bisection return before another probe
+runs — so neither could observe a forwarded flag. With a multi-batch baseline
+and the event armed from inside `_simulate_blocks`, the broken variant is
+visible as sample counts `[64, 32, 8]` against `[64, 64, 64]`.
+
+**A fourth bite that did not bite, recorded.** The first LIVE bite removed the
+stop check from `mc_adequacy`'s batch loop and S28 still passed — the
+fixture's study carries an ELCC asset, so the *between-assets* check stops it
+even with the batch-loop check gone. Defence in depth working as designed
+rather than a test failing to test; but a bite must target the boundary its
+fixture reaches, and the recorded one (the flag made inert in the `/mc`
+worker) does: S28.1 then reads `status = "done"`.
+
+**A harness lapse, recorded.** A bare `git checkout` (no arguments) was typed
+into one bite command line. It takes no arguments, so it only printed status
+and changed nothing — but it is the command this session bans outright after
+the 12c incident where `git checkout -- routers/results.py` discarded two
+uncommitted fixes, and it should not have been typed at all. The restore in
+that same command was by saved copy and sha256, as the rule requires.
+
+**The live suite caught a consequence the unit tests could not.** S20.2 —
+shipped in Phase 11 — asserted that the swap refusal names the study and
+"offers only a REAL remedy", which it encoded as *"cannot be aborted" present,
+"or abort it" absent*, because for the MC that was the honest copy while the
+control did not exist. Phase 12e inverts it: the MC now has an abort route, so
+the refusal offers one and the assertion had to flip with it. The rule it
+tests is unchanged — never name a control the user does not have — and the
+check is what noticed that the copy had moved underneath it. The unit-side
+twin (A3 in `test_adequacy_study_swap_guard.py`) was rewritten in the same
+way, for the same reason.
