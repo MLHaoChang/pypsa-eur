@@ -3167,6 +3167,16 @@ def _run_turn_body(
     # Task 8 — `[]` when the profile's `tools` capability is off; see
     # _tools_payload_for_profile.
     tools = _tools_payload_for_profile(profile)
+    # C-1 — the ALLOWLIST the dispatch loop below enforces.
+    #
+    # Derived from `tools` (what this turn actually SENT), never from the
+    # catalogue and never from `profile.tools` alone: the guard has to answer
+    # "was this tool offered", and only the sent payload knows that. A
+    # `tools: false` profile sends `[]`, so the set is empty and every
+    # `tool_use` coming back is refused.
+    offered_tool_names = {
+        t.get("name") for t in tools if isinstance(t, dict)
+    }
     # A4 — orient the model on the P0-pinned turn context (not a later
     # active switch). Failure → omit; never abort the turn for meta.
     # Task 8 — `include_tools=profile.tools` trims the tool-chaining half of
@@ -3535,6 +3545,40 @@ def _run_turn_body(
                         "content": "project_switched_mid_turn",
                     })
                 break
+            # C-1 — CAPABILITY ENFORCEMENT AT THE DISPATCH SEAM.
+            #
+            # `profile.tools` was previously read only on OUTBOUND paths
+            # (request build, prompt trim, cache annotation); nothing checked
+            # the INBOUND `tool_use` blocks. An endpoint that returns tool_use
+            # despite being sent `tools=[]` had them executed — most of the
+            # catalogue carries no confirmation card, and a third of it mutates
+            # the user's projects. Since this branch's whole point is letting an
+            # operator aim the assistant at an arbitrary endpoint, that endpoint
+            # is attacker-controlled input, and `_validate_base_url` accepts
+            # plain `http`, so a MITM reaches it too.
+            #
+            # Refused BEFORE the call cap, the confirmation card and the
+            # dispatcher lookup on purpose: an unoffered tool must not be able
+            # to consume the turn's budget, and must never render a
+            # confirmation card — a card is how the USER authorises a tool the
+            # model asked for, and this tool was never on offer to ask for.
+            if tu.get("name") not in offered_tool_names:
+                yield "tool_error", {
+                    "tool_use_id": tu.get("id"),
+                    "tool_name": tu.get("name"),
+                    "error_kind": "tool_not_offered",
+                    "message": (
+                        "the endpoint requested a tool that was not offered "
+                        "for this turn; refusing to run it."
+                    ),
+                }
+                tool_results_for_next_turn.append({
+                    "type": "tool_result",
+                    "tool_use_id": tu.get("id"),
+                    "is_error": True,
+                    "content": "tool_not_offered",
+                })
+                continue
             tool_call_count += 1
             if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
                 yield "tool_error", {

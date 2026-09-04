@@ -349,3 +349,151 @@ def test_an_exact_bearer_preset_is_locked_to_its_own_base_url(appdata, preset):
     assert profile.key_env in _SHARED_PROVIDER_KEYS
     with pytest.raises(llm_config.ProfileValidationError):
         llm_config._validate_profile(profile)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S-M1 — the preset lock and the key derivation disagreed about which
+# presets carry a shared credential.
+#
+#   _validate_preset_base_url_lock  gated on  entry["auth"] != "bearer"
+#   derive_key_env                  decided from  entry["key_env"]
+#
+# Those are two different questions. The invariant survived only because no
+# SHIPPED preset has `auth != "bearer"` together with a non-null `key_env` —
+# i.e. it held by accident of the current catalogue, and was fail-open for
+# the next preset added. The lock exists to stop a shared provider key being
+# sent to an operator-chosen host, so it must key on the same thing the key
+# derivation does: whether this preset hands the profile a shared `key_env`.
+#
+# Asserted against a synthetic catalogue entry, because the point is exactly
+# the preset that does not exist yet.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def _catalogue_with_a_keyed_non_bearer_preset(monkeypatch):
+    """A preset whose `auth` is not "bearer" but which still names a shared key."""
+    from services import llm_config
+    entry = {
+        "id": "future-vendor",
+        "label": "Future Vendor",
+        "wire": "openai",
+        "base_url": "https://api.future-vendor.example/v1",
+        "auth": "header",          # not "bearer" — the lock used to skip on this
+        "key_env": "OPENAI_API_KEY",  # ...but it still hands over a SHARED key
+        "tools": True,
+        "vision": False,
+    }
+    shipped = llm_config.load_presets()  # captured BEFORE patching
+    monkeypatch.setattr(llm_config, "load_presets", lambda: [*shipped, entry])
+    return entry
+
+
+def test_a_non_bearer_preset_that_names_a_shared_key_is_still_locked(
+    appdata, _catalogue_with_a_keyed_non_bearer_preset,
+):
+    """
+    A preset that hands over a SHARED key must be locked to its own base_url,
+    whatever its `auth` value says.
+    """
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="evil", label="e", preset="future-vendor", wire="openai",
+        base_url="https://attacker.example/v1", model="m",
+        tools=True, vision=False, auth="bearer",
+        fallback_model=None, max_output_tokens=None)
+
+    # Precondition: this profile really does inherit the shared key, so the
+    # assertion below is about the dangerous case and not a vacuous one.
+    assert profile.key_env == "OPENAI_API_KEY"
+
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config._validate_profile(profile)
+
+
+def test_a_keyless_preset_is_still_free_to_be_repointed(
+    appdata, monkeypatch,
+):
+    """
+    THE SIBLING PATH. Tightening the lock must not start refusing a preset
+    that hands over NO shared key (`key_env: null`, e.g. Ollama/LM Studio) —
+    repointing one of those at another host leaks nothing, and forbidding it
+    would break the documented local-endpoint workflow.
+    """
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="my-ollama", label="Ollama elsewhere", preset="ollama",
+        wire="openai", base_url="http://192.168.1.50:11434/v1", model="qwen3",
+        tools=True, vision=False, auth="none",
+        fallback_model=None, max_output_tokens=None)
+    assert profile.key_env is None
+    llm_config._validate_profile(profile)  # must not raise
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S-M2 — a third-party key was shipped to Anthropic.
+#
+# The anthropic branch builds `anthropic.Anthropic(api_key=key_value)` and
+# never reads `profile.base_url` (chat_service.py:1750). Nothing validated
+# `wire` against `preset`, so `preset="openai", wire="anthropic"` resolved
+# `key_env=OPENAI_API_KEY` and sent that live key to `api.anthropic.com` on
+# every turn — and because `base_url` is IGNORED on that branch, Settings
+# showed a URL that was never contacted, so the operator could not tell.
+#
+# A catalogued preset declares its own `wire`; a profile may not contradict
+# it. `preset="custom"` declares none and stays free to pick either.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_a_profile_may_not_contradict_its_presets_declared_wire(appdata):
+    """`preset="openai"` + `wire="anthropic"` sends OPENAI_API_KEY to Anthropic."""
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="wire-mismatch", label="m", preset="openai", wire="anthropic",
+        base_url=None, model="claude-sonnet-5",
+        tools=True, vision=True, auth="bearer",
+        fallback_model=None, max_output_tokens=None)
+
+    # Precondition: this really does inherit OpenAI's shared key.
+    assert profile.key_env == "OPENAI_API_KEY"
+
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config._validate_profile(profile)
+
+
+@pytest.mark.parametrize(
+    "preset,wire",
+    [
+        ("anthropic", "anthropic"),
+        ("openai", "openai"),
+        ("moonshot", "openai"),
+        ("dashscope", "openai"),
+        ("ollama", "openai"),
+        ("lmstudio", "openai"),
+    ],
+)
+def test_every_shipped_preset_accepts_its_own_declared_wire(appdata, preset, wire):
+    """THE SIBLING PATH — the rule must not refuse any legitimate combination."""
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="ok-one", label="ok", preset=preset, wire=wire,
+        base_url=None, model="m", tools=True, vision=False,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    llm_config._validate_profile(profile)  # must not raise
+
+
+@pytest.mark.parametrize("wire", ["anthropic", "openai"])
+def test_a_custom_preset_declares_no_wire_and_may_pick_either(appdata, wire):
+    """`custom` owns its own key slot, so neither wire leaks a shared key."""
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="mine", label="mine", preset="custom", wire=wire,
+        base_url="https://example.invalid/v1", model="m",
+        tools=True, vision=False, auth="bearer",
+        fallback_model=None, max_output_tokens=None)
+    llm_config._validate_profile(profile)  # must not raise

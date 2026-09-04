@@ -206,7 +206,38 @@ def _validate_profile(profile: LLMProfile) -> None:
         )
     if profile.base_url is not None:
         _validate_base_url(profile.id, profile.base_url)
+    _validate_preset_wire_lock(profile)
     _validate_preset_base_url_lock(profile)
+
+
+def _validate_preset_wire_lock(profile: LLMProfile) -> None:
+    """
+    S-M2: a profile may not contradict its preset's declared `wire`.
+
+    `preset="openai", wire="anthropic"` resolved `key_env=OPENAI_API_KEY`
+    (from the preset) and then took the ANTHROPIC branch of
+    `_provider_for_profile`, which builds `anthropic.Anthropic(api_key=...)`
+    and does not read `base_url` at all — so a live OpenAI key went to
+    `api.anthropic.com` on every turn, and Settings displayed a `base_url`
+    that was never contacted, leaving the operator no way to notice.
+
+    `preset="custom"` (and any uncatalogued preset id) declares no wire and
+    keeps its free choice: it owns a private `PYPSA_GUI_LLM_KEY__<SLUG>` slot,
+    so neither wire can leak a shared credential.
+    """
+    if profile.preset == "custom":
+        return
+    entry = _preset_catalogue().get(profile.preset)
+    if entry is None:
+        return
+    declared = entry.get("wire")
+    if declared is not None and profile.wire != declared:
+        raise ProfileValidationError(
+            f"profile {profile.id!r}: wire must be {declared!r} for preset "
+            f"{profile.preset!r}, got {profile.wire!r} — a preset's key is "
+            f"resolved from the preset, so a mismatched wire would send that "
+            f"credential to the wrong provider"
+        )
 
 
 def _validate_preset_base_url_lock(profile: LLMProfile) -> None:
@@ -232,7 +263,20 @@ def _validate_preset_base_url_lock(profile: LLMProfile) -> None:
     if profile.preset == "custom" or profile.base_url is None:
         return
     entry = _preset_catalogue().get(profile.preset)
-    if entry is None or entry.get("auth") != "bearer":
+    if entry is None:
+        return
+    # S-M1 — gate on the SAME thing `derive_key_env` decides from.
+    #
+    # This used to skip on `entry["auth"] != "bearer"`, which is a different
+    # question from the one that matters: `derive_key_env` hands the profile
+    # `entry["key_env"]`, so what makes a repoint dangerous is whether this
+    # preset supplies a SHARED credential at all — not what its `auth` field
+    # is called. The two predicates agreed only by accident of the shipped
+    # catalogue (no entry has `auth != "bearer"` with a non-null `key_env`),
+    # leaving the lock fail-open for the next preset added. A keyless preset
+    # (`key_env: null` — Ollama, LM Studio) stays free to be repointed, which
+    # is the whole point of a local-endpoint preset.
+    if entry.get("key_env") is None:
         return
     preset_base_url = entry.get("base_url")
     if profile.base_url != preset_base_url:

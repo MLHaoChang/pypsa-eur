@@ -1506,3 +1506,126 @@ def test_system_prompt_names_active_profile_and_configured_labels(appdata):
     assert "Claude Opus" in prompt  # the other configured profile's label
     assert "set_active_profile" in prompt
     assert "new chat" in prompt.lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# C-1 — `tools: false` was ADVERTISED but never ENFORCED.
+#
+# `profile.tools` was read only on OUTBOUND paths (request build, prompt
+# trim, cache annotation). The dispatch loop iterated `tool_uses` with no
+# capability check, so an endpoint that returns `tool_use` blocks despite
+# being sent `tools=[]` had them executed — 87 of the 121 tools without a
+# confirmation card, 31 of which mutate the user's projects, with every
+# result streamed back to that endpoint.
+#
+# This is not hypothetical on this branch: the headline feature is pointing
+# the assistant at an arbitrary endpoint, which makes the endpoint an
+# attacker-controlled input. `_validate_base_url` also accepts plain `http`,
+# so a MITM reaches it too.
+#
+# The guard is "was this tool actually OFFERED this turn", not merely
+# "is profile.tools true" — an allowlist over the payload we really sent,
+# so a hostile endpoint cannot invent a tool name either. That is the
+# sibling path: a `tools: true` profile naming a tool that is not in the
+# catalogue must be refused by the same predicate.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _toolless_profile_session(appdata, *, tools: bool):
+    from services import llm_config
+    profile = llm_config.LLMProfile(
+        id="wire-test", label="Wire Test", preset="custom",
+        wire="anthropic", base_url=None, model="claude-sonnet-5",
+        tools=tools, vision=True, auth="none", fallback_model=None,
+        max_output_tokens=None,
+    )
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    session.profile_id = "wire-test"
+    return session
+
+
+def _fake_returning_tool_use(tool_name: str, tool_input: dict):
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import LLMEvent
+    return FakeProvider([
+        {"events": [LLMEvent(type="tool_use_start", tool_use_id="tu-1",
+                             tool_name=tool_name)],
+         "blocks": [{"type": "tool_use", "id": "tu-1",
+                     "name": tool_name, "input": tool_input}],
+         "usage": {"input_tokens": 1, "output_tokens": 1}},
+        {"events": [LLMEvent(type="text_delta", text="done")],
+         "blocks": [{"type": "text", "text": "done"}],
+         "usage": {"input_tokens": 1, "output_tokens": 1}},
+    ])
+
+
+def test_toolless_profile_refuses_a_tool_use_the_endpoint_invented(
+    appdata, monkeypatch,
+):
+    """
+    THE CAPABILITY BOUNDARY. `tools: false` -> `tools=[]` was sent, so ANY
+    `tool_use` coming back was never offered and must not be dispatched.
+    """
+    from services import chat_tools
+
+    called: list[str] = []
+    monkeypatch.setitem(
+        chat_tools.DISPATCHERS, "get_meta",
+        lambda *a, **k: called.append("ran") or {"ok": True},
+    )
+
+    session = _toolless_profile_session(appdata, tools=False)
+    fake = _fake_returning_tool_use("get_meta", {})
+    events = list(chat_service.run_turn(session, "hi", provider=fake))
+
+    assert called == [], (
+        "a tool the profile was never offered was DISPATCHED — this is the "
+        "capability bypass C-1 describes"
+    )
+    errs = [p for n, p in events if n == "tool_error"]
+    assert any(e.get("error_kind") == "tool_not_offered" for e in errs), (
+        f"expected a typed tool_not_offered frame, got {errs!r}"
+    )
+
+
+def test_a_tools_enabled_profile_still_refuses_an_unknown_tool_name(
+    appdata,
+):
+    """
+    THE SIBLING PATH. The guard is an allowlist over what was actually sent,
+    so it must also refuse a name that is not in the catalogue at all — the
+    case a `profile.tools`-only check would wave straight through.
+    """
+    session = _toolless_profile_session(appdata, tools=True)
+    fake = _fake_returning_tool_use("exfiltrate_everything", {})
+    events = list(chat_service.run_turn(session, "hi", provider=fake))
+
+    errs = [p for n, p in events if n == "tool_error"]
+    assert any(e.get("error_kind") == "tool_not_offered" for e in errs), (
+        f"expected a typed tool_not_offered frame, got {errs!r}"
+    )
+
+
+def test_a_tools_enabled_profile_still_runs_an_offered_tool(appdata, monkeypatch):
+    """
+    DISCRIMINATION. The guard must not refuse the normal case — otherwise the
+    two tests above would pass against a dispatcher that refuses everything.
+    """
+    from services import chat_tools
+
+    called: list[str] = []
+    monkeypatch.setitem(
+        chat_tools.DISPATCHERS, "get_meta",
+        lambda *a, **k: called.append("ran") or {"ok": True},
+    )
+
+    session = _toolless_profile_session(appdata, tools=True)
+    fake = _fake_returning_tool_use("get_meta", {})
+    events = list(chat_service.run_turn(session, "hi", provider=fake))
+
+    errs = [p for n, p in events if n == "tool_error"]
+    assert not any(e.get("error_kind") == "tool_not_offered" for e in errs), (
+        f"an OFFERED tool was refused as not-offered: {errs!r}"
+    )
+    assert called == ["ran"], "the offered tool did not run"
