@@ -295,3 +295,54 @@ ignoring the stop event.
    write through `_state[key].update` inside the worker, which the loops'
    comment calls "the anti-pattern this deliberately does not copy"), or does
    `study_swap_refusal` make that moot?
+
+
+## v2 REVIEW (2026-09-04, adversarial subagent) — REJECT, return for a v3
+
+Two blockers, both verified against the code before being recorded, and both
+the same class v1 was rejected for.
+
+1. **BLOCKER — the `deconvolve` precondition cannot exist, and it was the
+   wrong question.** The recursion steps back by `k1 = floor(cap/Δ)` per grid
+   index, so the amplification count is `L/k1` and the UNIT'S OWN CAPACITY is
+   in the predicate: at one table and one `q`, units below ~102 MW fail and
+   units above succeed. Two fleets identical in `L` and `q` measured 0/104
+   against 26/26. A `(length, q)` rule must skip successes or keep failures.
+   And the attempt is never worth making: `deconvolve` is a Python loop over
+   `L` while `build_copt` is `n−1` vectorised convolutions, so the rebuild is
+   faster EVEN WHEN THE DECONVOLUTION SUCCEEDS (re-measured here: 0.64 vs
+   0.14 ms/unit at n = 10 with 8/8 succeeding; 10.34 vs 5.15 at n = 200 with
+   8/8). v2's "every number is bit-identical" was also false — swapping a
+   succeeding deconvolve for the rebuild drifts ΔEUE by up to 9.4e-10 rel on
+   the review's fixture (2.2e-14 on mine), inside v2's own 1e-9 tolerance.
+2. **BLOCKER — the cost table was internally inconsistent.** Subtracting v2's
+   own rows leaves a residual rebuild term of 3.8 s at 0 profiled and 9.3 s at
+   8 profiled — the same O(n²·L) rebuild over the same table, which cannot
+   cost 2.4× more because eight units moved into the mixture. Re-measured
+   here: **4.16 s against 3.79 s**, flat. v2's "8.1 s → ~3.8 s" was BELOW the
+   floor it froze, and end to end both regimes land at ~5.2 s.
+
+Eleven further findings, each reproduced: the `fmea_sweep` abort would stop
+one sweep but not the study (the worker runs class B then class C, so class C
+would run in full); `ElccRow['status']` is a closed frontend union with a
+`Record` label map, so an `aborted` row renders `undefined` and v2 widened
+only `McStatus`; the bisection check as phrased could land before the bracket
+probes, leaving `hi` unprobed; the sweep's closing re-solve has no
+`_restore_base`-shaped guard, so a failing restore destroys the partial rows
+the abort exists to keep; F1d is vacuous (`record_is_running` reopens the mesh
+on thread death alone, so it passes with the flag ignored), F1b bites the one
+engine that cannot fail, and F2d's bite cannot fire (`list.sort` is stable and
+both paths build `todo` in the same order); the determinism key was applied at
+one of three sort sites; an aborted portfolio reports `status: "ok"` with
+periods missing; `post_frontier` and `post_fmea_sweep` write through
+`_state[key].update` without `copy_context()`, so "the record reaches
+`aborted`" is not a claim the poller can see; and the binned/direct switch
+stated two contradictory rules, of which "`mixed` non-empty" makes the
+common one-profiled-unit short-horizon case — 12d's own per-block regime —
+**1.5–1.9× slower**.
+
+Superseded by **v3** (`...-v3.md`), which deletes the `deconvolve` call
+outright rather than predicating it, states ONE cost target from the measured
+rebuild floor (~5 s at 300 units, profiled or not), switches on the measured
+crossover with the losing regime named, and answers the remaining eleven by
+number.
