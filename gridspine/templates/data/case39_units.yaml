@@ -1,14 +1,258 @@
-# IEEE 39-bus (New England) classic dynamic data, H on 100 MVA system base
-# (Athay et al. 1979 / standard case39 dynamic set). Tag: datasheet.
-# SLK_BUS_31 models grid import: excluded from pocket inertia (assumed).
+# IEEE 39-bus (New England) dynamic data, on the 100 MVA system base.
+#
+# PROVENANCE IS PER FIELD. Read the tags, not this comment.
+#
+# datasheet: the classic two-axis set (Athay, Podmore & Virmani 1979; Pai,
+#   "Energy Function Analysis for Power System Stability", 1989, Table 3.2),
+#   reproduced across the IEEE 39-bus literature. It gives H, Xd, Xq, X'd,
+#   X'q, Xl, T'do, T'qo. Generator-to-bus mapping: Gen1->BUS_39 (the
+#   aggregated interconnection equivalent, H=500), Gen2->BUS_31 (the slack),
+#   Gen3..9->BUS_32..38, Gen10->BUS_30. The H values are carried over
+#   unchanged from the increment-2 file. NOTE for the owner: the published
+#   table gives H=28.6 for the BUS_33 machine; this file has carried 38.6
+#   since increment 2 and it has NOT been changed here -- check against your
+#   source before a .dyr is exported.
+#
+# assumed: everything the classic set does not contain but a GENROU/GENSAL
+#   record requires. Rules used, so they can be revisited as one decision:
+#     xd_pp   = midpoint of x'd and xl, rounded to 4 dp (must satisfy
+#               xd > x'd > x''d > xl; the loader enforces it)
+#     t_do_pp = 0.05 s, t_qo_pp = 0.05 s   (typical subtransient values)
+#     s1 = 0.05, s12 = 0.30                (typical saturation, S(1.0)/S(1.2))
+#     d = 0.0                              (no mechanical damping term)
+#
+# G_BUS_30 is GENSAL, not GENROU: the classic set gives it T'qo = 0 and a
+# negligible X'q, i.e. no q-axis transient -- a salient-pole machine. Forcing
+# it into GENROU would require inventing a T'qo.
+#
+# SLK_BUS_31 models grid import: excluded from pocket inertia (assumed scope).
+#
+# W_*/S_* are the RES_LEDGER sites (ingest/pandapower_source.py). They are
+# inverters: no H, never in inertia. mbase_mva is the ledger's installed MW
+# read as MVA -- the same ledgered assumption the RAW writer's MBASE fallback
+# makes. k_sc / rx_sc are the IEC 60909 converter-source parameters (max
+# current ratio Ik''/In and R/X); typical values, assumed, for task 6.
 units:
-  G_BUS_30:   {h_s: 42.0,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  G_BUS_32:   {h_s: 35.8,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  G_BUS_33:   {h_s: 38.6,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  G_BUS_34:   {h_s: 26.0,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  G_BUS_35:   {h_s: 34.8,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  G_BUS_36:   {h_s: 26.4,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  G_BUS_37:   {h_s: 24.3,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  G_BUS_38:   {h_s: 34.5,  mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  G_BUS_39:   {h_s: 500.0, mbase_mva: 100.0, source: datasheet, include_in_inertia: true}
-  SLK_BUS_31: {h_s: 30.3,  mbase_mva: 100.0, source: datasheet, include_in_inertia: false}
+  G_BUS_30:
+    model: GENSAL
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 42.0,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.1,    source: datasheet}
+      xq:      {value: 0.069,  source: datasheet}
+      xd_p:    {value: 0.031,  source: datasheet}
+      xd_pp:   {value: 0.0218, source: assumed}
+      xl:      {value: 0.0125, source: datasheet}
+      t_do_p:  {value: 10.2,   source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  SLK_BUS_31:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: false
+    params:
+      h_s:     {value: 30.3,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.295,  source: datasheet}
+      xq:      {value: 0.282,  source: datasheet}
+      xd_p:    {value: 0.0697, source: datasheet}
+      xq_p:    {value: 0.170,  source: datasheet}
+      xd_pp:   {value: 0.0524, source: assumed}
+      xl:      {value: 0.035,  source: datasheet}
+      t_do_p:  {value: 6.56,   source: datasheet}
+      t_qo_p:  {value: 1.5,    source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  G_BUS_32:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 35.8,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.2495, source: datasheet}
+      xq:      {value: 0.237,  source: datasheet}
+      xd_p:    {value: 0.0531, source: datasheet}
+      xq_p:    {value: 0.0876, source: datasheet}
+      xd_pp:   {value: 0.0418, source: assumed}
+      xl:      {value: 0.0304, source: datasheet}
+      t_do_p:  {value: 5.7,    source: datasheet}
+      t_qo_p:  {value: 1.5,    source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  G_BUS_33:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 38.6,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.262,  source: datasheet}
+      xq:      {value: 0.258,  source: datasheet}
+      xd_p:    {value: 0.0436, source: datasheet}
+      xq_p:    {value: 0.166,  source: datasheet}
+      xd_pp:   {value: 0.0366, source: assumed}
+      xl:      {value: 0.0295, source: datasheet}
+      t_do_p:  {value: 5.69,   source: datasheet}
+      t_qo_p:  {value: 1.5,    source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  G_BUS_34:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 26.0,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.67,   source: datasheet}
+      xq:      {value: 0.62,   source: datasheet}
+      xd_p:    {value: 0.132,  source: datasheet}
+      xq_p:    {value: 0.166,  source: datasheet}
+      xd_pp:   {value: 0.093,  source: assumed}
+      xl:      {value: 0.054,  source: datasheet}
+      t_do_p:  {value: 5.4,    source: datasheet}
+      t_qo_p:  {value: 0.44,   source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  G_BUS_35:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 34.8,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.254,  source: datasheet}
+      xq:      {value: 0.241,  source: datasheet}
+      xd_p:    {value: 0.05,   source: datasheet}
+      xq_p:    {value: 0.0814, source: datasheet}
+      xd_pp:   {value: 0.0362, source: assumed}
+      xl:      {value: 0.0224, source: datasheet}
+      t_do_p:  {value: 7.3,    source: datasheet}
+      t_qo_p:  {value: 0.4,    source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  G_BUS_36:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 26.4,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.295,  source: datasheet}
+      xq:      {value: 0.292,  source: datasheet}
+      xd_p:    {value: 0.049,  source: datasheet}
+      xq_p:    {value: 0.186,  source: datasheet}
+      xd_pp:   {value: 0.0406, source: assumed}
+      xl:      {value: 0.0322, source: datasheet}
+      t_do_p:  {value: 5.66,   source: datasheet}
+      t_qo_p:  {value: 1.5,    source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  G_BUS_37:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 24.3,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.29,   source: datasheet}
+      xq:      {value: 0.28,   source: datasheet}
+      xd_p:    {value: 0.057,  source: datasheet}
+      xq_p:    {value: 0.0911, source: datasheet}
+      xd_pp:   {value: 0.0425, source: assumed}
+      xl:      {value: 0.028,  source: datasheet}
+      t_do_p:  {value: 6.7,    source: datasheet}
+      t_qo_p:  {value: 0.41,   source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  G_BUS_38:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 34.5,   source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.2106, source: datasheet}
+      xq:      {value: 0.205,  source: datasheet}
+      xd_p:    {value: 0.057,  source: datasheet}
+      xq_p:    {value: 0.0587, source: datasheet}
+      xd_pp:   {value: 0.0434, source: assumed}
+      xl:      {value: 0.0298, source: datasheet}
+      t_do_p:  {value: 4.79,   source: datasheet}
+      t_qo_p:  {value: 1.96,   source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  G_BUS_39:
+    model: GENROU
+    mbase_mva: 100.0
+    include_in_inertia: true
+    params:
+      h_s:     {value: 500.0,  source: datasheet}
+      d:       {value: 0.0,    source: assumed}
+      xd:      {value: 0.02,   source: datasheet}
+      xq:      {value: 0.019,  source: datasheet}
+      xd_p:    {value: 0.006,  source: datasheet}
+      xq_p:    {value: 0.008,  source: datasheet}
+      xd_pp:   {value: 0.0045, source: assumed}
+      xl:      {value: 0.003,  source: datasheet}
+      t_do_p:  {value: 7.0,    source: datasheet}
+      t_qo_p:  {value: 0.7,    source: datasheet}
+      t_do_pp: {value: 0.05,   source: assumed}
+      t_qo_pp: {value: 0.05,   source: assumed}
+      s1:      {value: 0.05,   source: assumed}
+      s12:     {value: 0.30,   source: assumed}
+  W_BUS_33:
+    model: inverter
+    mbase_mva: 600.0
+    include_in_inertia: false
+    params:
+      k_sc:  {value: 1.2, source: assumed}
+      rx_sc: {value: 0.1, source: assumed}
+  W_BUS_35:
+    model: inverter
+    mbase_mva: 600.0
+    include_in_inertia: false
+    params:
+      k_sc:  {value: 1.2, source: assumed}
+      rx_sc: {value: 0.1, source: assumed}
+  W_BUS_37:
+    model: inverter
+    mbase_mva: 600.0
+    include_in_inertia: false
+    params:
+      k_sc:  {value: 1.2, source: assumed}
+      rx_sc: {value: 0.1, source: assumed}
+  S_BUS_34:
+    model: inverter
+    mbase_mva: 500.0
+    include_in_inertia: false
+    params:
+      k_sc:  {value: 1.2, source: assumed}
+      rx_sc: {value: 0.1, source: assumed}
+  S_BUS_36:
+    model: inverter
+    mbase_mva: 500.0
+    include_in_inertia: false
+    params:
+      k_sc:  {value: 1.2, source: assumed}
+      rx_sc: {value: 0.1, source: assumed}
