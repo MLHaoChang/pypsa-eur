@@ -211,6 +211,74 @@ def test_E3_the_mc_masks_the_unit_bit_for_bit_and_lands_on_the_hand_values():
     assert lo <= LOLE_2035 <= hi, mc["by_period"][2035]
 
 
+def test_E3b_a_unit_with_BOTH_a_profile_and_a_series_is_sampled_on_their_product():
+    """★ E3b (shipped-code review, finding 2). The sampler's UP value for a
+    unit that carries both is `profile_h × c_h`, not either factor alone:
+    dropping the profile samples a profiled unit at full nameplate in every
+    active hour (optimistic), dropping the series samples an inactive unit
+    as present. Bites (verified): `cs = prof * cs` → `pass`, and
+    `cap = (prof * capacity_mw)` ignoring the series."""
+    prof = np.concatenate([np.full(H, 1.0), np.full(H, 0.6)])
+    n = activity_network(new_profile=prof)
+    inp = M.snapshot_inputs(n)
+    new = next(u for u in inp.units if u.name == "new")
+    assert new.profile is not None and new.capacity_series is not None
+
+    # one unit alone, q = 0 → deterministically up: the sampled capacity IS
+    # the product, hour by hour
+    solo = replace(new, q=0.0)
+    cap = M.sample_capacity([solo], 2 * H, 4, 0)
+    want = np.asarray(new.profile) * np.asarray(new.capacity_series)
+    assert np.allclose(cap[0], want.astype(np.float32))
+    assert cap[0][:H].max() == 0.0                  # inactive in 2030
+    assert cap[0][H:].max() == pytest.approx(0.6 * 40.0, rel=1e-6)
+    # neither factor alone reproduces it
+    assert not np.allclose(cap[0], np.asarray(new.profile) * 40.0)
+    assert not np.allclose(cap[0], np.asarray(new.capacity_series))
+    # …and in the full fleet the 2030 block is still the fleet without it
+    a = M._simulate_blocks(inp, draws=32, seed=5)
+    b = M._simulate_blocks(inp, draws=32, seed=5, exclude=frozenset({2}))
+    assert np.array_equal(a[2030][1], b[2030][1])
+    assert not np.array_equal(a[2035][1], b[2035][1])
+
+
+def test_E5b_a_store_at_a_partial_vintage_dispatches_partial_energy():
+    """★ E5b (shipped-code review, finding 3). A store whose capacity in a
+    block is a FRACTION of its maximum (an earlier vintage built, a later
+    one not) dispatches at that power AND at that energy — the reservoir
+    follows the power fraction. E5's store is 0-or-full and never
+    exercises it. Bite (verified): `e_l.append(s.e_nom_mwh)` — full energy
+    at partial power, pinned on the arrays AND visible in the EUE, because
+    a 2 h reservoir runs dry in a 24 h outage where a 6 h one does not."""
+    n = activity_network(store=True)
+    n.storage_units.loc["batt", ["build_year", "p_nom_extendable"]] = (2000, True)
+    n.storage_units.loc["batt", "p_nom_opt"] = 30.0
+    n.meta["vintage_results"] = {"StorageUnit": {"batt": {
+        "capacity_field": "p_nom", "initial_capacity": 10.0,
+        "periods": [{"build_year": 2035, "p_nom_opt": 20.0, "lifetime": 100.0}]}}}
+    inp = M.snapshot_inputs(n)
+    s = inp.storage[0]
+    assert (s.p_nom_mw, s.e_nom_mwh) == (30.0, 60.0)
+    assert (s.capacity_series[:H] == 10.0).all() and (s.capacity_series[H:] == 30.0).all()
+
+    # the arrays the dispatch actually runs on, per block
+    for label, start, end in inp.periods:
+        n_st, p, e, _es, _ed = M.block_store_arrays(
+            inp.storage, start, end, any_series=True)
+        want = (10.0, 20.0) if label == 2030 else (30.0, 60.0)   # 2 h × power
+        assert (n_st, p[0], e[0]) == (1, pytest.approx(want[0]), pytest.approx(want[1]))
+
+    # …and it shows in the EUE: against a store held at the FULL reservoir
+    # (the bite's behaviour) the 2030 shortfall is strictly larger.
+    bug = replace(s, capacity_series=np.where(
+        np.asarray(s.capacity_series) < 30.0, 10.0, 30.0), e_nom_mwh=60.0)
+    real = M._simulate_blocks(inp, draws=64, seed=7)
+    unscaled = M._simulate_blocks(
+        replace(inp, storage=(replace(bug, capacity_series=None, p_nom_mw=10.0),)),
+        draws=64, seed=7)
+    assert real[2030][1].sum() > unscaled[2030][1].sum()
+
+
 # ── E4: a must-take farm built later; the portfolio agrees with the margin ─
 
 E4_ELCC_MW = 83.203125     # draws 32 seed 1 AND draws 128 seed 0, on the code
@@ -358,8 +426,7 @@ def test_E6b_a_partially_built_vintage_scores_its_size_in_each_period():
     cfg = SolverConfig(multi_investment_periods=True, reserve_margin=0.5)
     inp = M.snapshot_inputs(n, vre_assets=must_take_generators(n), cfg=cfg)
     assert np.array_equal(inp.residual, np.array([80.0, 150.0, 80.0, 150.0, 60.0, 150.0, 60.0, 150.0]))
-    units = [C.CoptUnit("wind", 90.0, 0.0, capacity_series=series)]
-    summary = A.activity_summary(units, (), inp.periods)
+    summary = A.activity_summary(n, inp.periods)
     assert summary["by_period"]["2030"] == {"inactive": [], "partial": ["wind"]}
     assert summary["by_period"]["2040"] == {"inactive": [], "partial": []}
     assert "later vintage" in summary["note"]
@@ -518,6 +585,37 @@ def test_E10_the_fingerprint_covers_activity_and_the_breakdown(edit):
     assert P.network_fingerprint(n) != before
 
 
+def test_E10b_a_payload_from_an_earlier_engine_version_says_so():
+    """★ E10b (shipped-code review, finding 4). Every network's fingerprint
+    moved in 12d, and `last_reserve_margin` is persisted per project — so a
+    report written before the upgrade must be refused as what it is (an
+    older engine version), not as "the network has since changed", which
+    would be untrue. Bite (verified): drop the version prefix — the reason
+    then blames the user's network."""
+    from tests.test_adequacy_demand_basis import two_period_network
+    n = two_period_network()                       # `wind` is a real member
+    fp = P.network_fingerprint(n)
+    assert fp.startswith(f"{P.FINGERPRINT_VERSION}:")
+    inp = M.snapshot_inputs(n, vre_assets=must_take_generators(n))
+    pop = P.portfolio_population(n, inp)
+    assert pop["members"], "the fixture must have a population to reach the check"
+    old_payload = {"fingerprint": "d41d8cd98f00b204e9800998ecf8427e", "assets": [],
+                   "by_period": []}
+    block = P.portfolio_block(inp, pop, margin_payload=old_payload,
+                              snapshot_fingerprint=fp, seed=1, draws=8,
+                              cov_target=1.0, baseline=None, baseline_key=None)
+    assert block["status"] == "stale_report"
+    assert "earlier version of the adequacy engines" in block["reason"]
+    assert "has since changed" not in block["reason"]
+    # …while a same-version fingerprint that differs IS a changed network
+    changed = {**old_payload, "fingerprint": f"{P.FINGERPRINT_VERSION}:deadbeef"}
+    block2 = P.portfolio_block(inp, pop, margin_payload=changed,
+                               snapshot_fingerprint=fp, seed=1, draws=8,
+                               cov_target=1.0, baseline=None, baseline_key=None)
+    assert block2["status"] == "stale_report"
+    assert "has since changed" in block2["reason"]
+
+
 # ── E11: the routes disclose it ─────────────────────────────────────────
 
 def test_E11_the_copt_route_discloses_which_units_are_masked_where():
@@ -531,13 +629,62 @@ def test_E11_the_copt_route_discloses_which_units_are_masked_where():
     assert out["activity"]["by_period"] == {
         "2030": {"inactive": ["new"], "partial": []},
         "2035": {"inactive": [], "partial": []}}
-    assert "build year and lifetime" in out["activity"]["note"]
-    assert out["metrics"]["by_period"]["2030"]["lole_hours"] == pytest.approx(LOLE_2030) \
-        if "2030" in out["metrics"]["by_period"] else \
-        out["metrics"]["by_period"][2030]["lole_hours"] == pytest.approx(LOLE_2030)
+    assert "build year, lifetime and the active flag" in out["activity"]["note"]
+    by = {str(k): v for k, v in out["metrics"]["by_period"].items()}
+    assert by["2030"]["lole_hours"] == pytest.approx(LOLE_2030)
+    assert by["2035"]["lole_hours"] == pytest.approx(LOLE_2035)
     PyPSAService.set_network(activity_network(flat=True))
     out = R.get_copt()
     assert out["activity"] == {"by_period": {"ALL": {"inactive": [], "partial": []}}, "note": None}
+
+
+def test_E11b_the_disclosure_names_what_is_NOT_in_the_fleet():
+    """★ E11b (shipped-code review, finding 1). The three cases the engines
+    mask that never reach the sampled fleet — a MUST-TAKE farm commissioned
+    later (netted into the residual, not a unit), a row inactive in EVERY
+    period, and a statically `active=False` row (both dropped by membership
+    at `cap_max = 0`) — must still be disclosed, on `/copt` and on the MC
+    payload alike. An UNBUILT row is not masked and must NOT be listed.
+    Bite (verified): summarise the fleet (`units`/`storage`) instead of the
+    network — all three read `note: None`."""
+    import routers.results as R
+    from tests.test_adequacy_demand_basis import two_period_network
+    from services.pypsa_service import PyPSAService
+
+    # the must-take half
+    n = two_period_network(wind_build_year=2035)
+    cfg = SolverConfig(multi_investment_periods=True)
+    inp = M.snapshot_inputs(n, vre_assets=must_take_generators(n), cfg=cfg)
+    assert "wind" not in {u.name for u in inp.units}      # not in the fleet
+    got = A.activity_summary(n, inp.periods)
+    assert got["by_period"]["2030"]["inactive"] == ["wind"]
+    assert got["by_period"]["2035"] == {"inactive": [], "partial": []}
+    assert got["note"] and "wind" in got["note"]
+    PyPSAService.set_network(n)
+    assert R.get_copt()["activity"]["by_period"]["2030"]["inactive"] == ["wind"]
+
+    # inactive in EVERY period, and `active=False` on a flat axis: both are
+    # dropped by membership, and both are still disclosed
+    n2 = activity_network(new_build_year=2100)
+    i2 = M.snapshot_inputs(n2)
+    assert [u.name for u in i2.units] == ["base_a", "base_b"]
+    got2 = A.activity_summary(n2, i2.periods)
+    assert got2["by_period"]["2030"]["inactive"] == ["new"]
+    assert got2["by_period"]["2035"]["inactive"] == ["new"]
+    n3 = activity_network(flat=True, new_active=False)
+    i3 = M.snapshot_inputs(n3)
+    got3 = A.activity_summary(n3, i3.periods)
+    assert got3["by_period"]["ALL"]["inactive"] == ["new"]
+    assert "active flag" in got3["note"]
+
+    # …and an UNBUILT extendable is not masked: it is absent, not listed
+    n4 = activity_network(new_build_year=2000)
+    n4.generators.loc["new", ["p_nom", "p_nom_extendable", "p_nom_opt"]] = (0.0, True, 0.0)
+    i4 = M.snapshot_inputs(n4)
+    got4 = A.activity_summary(n4, i4.periods)
+    assert got4 == {"by_period": {"2030": {"inactive": [], "partial": []},
+                                 "2035": {"inactive": [], "partial": []}},
+                    "note": None}
 
 
 # ── E12: the margin's mask IS the engines' ──────────────────────────────

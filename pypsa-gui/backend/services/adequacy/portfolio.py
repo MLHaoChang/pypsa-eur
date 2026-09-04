@@ -48,6 +48,11 @@ import numpy as np
 from services.adequacy.copt import _availability_mw, series_is_informative, solved_capacity
 from services.adequacy.elcc import elcc_of_removal
 
+#: The fingerprint's version tag. Bump whenever the fields hashed by
+#: ``network_fingerprint`` change, so a payload written by an earlier
+#: version is reported as such rather than as a changed network.
+FINGERPRINT_VERSION = "v2"
+
 #: rel tolerance for the by-parent capacity aggregate (A4).
 _CAP_REL = 1e-9
 _CAP_ABS = 1e-6
@@ -153,6 +158,14 @@ def network_fingerprint(n) -> str:
     data ADDED to a farm, flipping its kind — compared silently (12c
     shipped-code review, finding 1)."""
     h = hashlib.sha256()
+    # Phase 12d: the digest is VERSIONED. The fields below changed in 12d
+    # (`active`, storage build year / lifetime, the persisted vintage
+    # breakdown), so every network's fingerprint moved — and
+    # `last_reserve_margin` is persisted per project, so a report written
+    # before the upgrade would otherwise be refused as "the network has
+    # since changed", which is untrue. The prefix lets `portfolio_block`
+    # tell the two apart and say which it is (shipped-code review,
+    # finding 4).
     gens = getattr(n, "generators", None)
     if gens is not None and not gens.empty:
         # Phase 12d: the static `active` column too — the engines now mask
@@ -208,7 +221,7 @@ def network_fingerprint(n) -> str:
         import json
         h.update(b"\x1dvintage_results")
         h.update(json.dumps(vr, sort_keys=True, default=str).encode())
-    return h.hexdigest()
+    return f"{FINGERPRINT_VERSION}:{h.hexdigest()}"
 
 
 # ── the group removal, per period ──────────────────────────────────────
@@ -335,7 +348,16 @@ def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_finger
         "status": "ok",
         "reason": None,
         "population": {
-            "members": [{"kind": m.kind, "name": m.name, "capacity_mw": m.capacity_mw}
+            "members": [{"kind": m.kind, "name": m.name,
+                         "capacity_mw": m.capacity_mw,
+                         # Phase 12d: the capacity the engines gave the
+                         # member in each period — what the comparison
+                         # below actually uses, so a refusal's numbers are
+                         # reproducible from the payload (shipped-code
+                         # review, finding 9).
+                         "capacity_by_period": [
+                             {"period": str(p), "capacity_mw": float(c)}
+                             for p, c in m.capacity_by_period]}
                         for m in members],
             "unbuilt": unbuilt,
             "n_vre": sum(1 for m in members if m.kind == "vre"),
@@ -357,11 +379,23 @@ def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_finger
     if margin_payload is not None:
         payload_fp = margin_payload.get("fingerprint")
         if payload_fp != snapshot_fingerprint:
-            block.update(status="stale_report",
-                         reason=("the last solve's reserve-margin payload describes a "
-                                 "network that has since changed (fingerprint "
-                                 f"{str(payload_fp)[:12]}… vs {snapshot_fingerprint[:12]}…); "
-                                 "solve again before comparing"))
+            old_version = not str(payload_fp or "").startswith(
+                f"{FINGERPRINT_VERSION}:")
+            block.update(
+                status="stale_report",
+                reason=(
+                    # An unversioned (or older-versioned) fingerprint is not
+                    # evidence the network changed — it is a report written
+                    # before the engines learned to read it (shipped-code
+                    # review, finding 4).
+                    "the last solve's reserve-margin payload was written by an "
+                    "earlier version of the adequacy engines, which described "
+                    "the network differently; solve again before comparing"
+                    if old_version else
+                    "the last solve's reserve-margin payload describes a "
+                    "network that has since changed (fingerprint "
+                    f"{str(payload_fp)[:15]}… vs {snapshot_fingerprint[:15]}…); "
+                    "solve again before comparing"))
             return block
         rows = list(margin_payload.get("assets") or [])
         by_period = {str(p.get("period")): p for p in (margin_payload.get("by_period") or [])}

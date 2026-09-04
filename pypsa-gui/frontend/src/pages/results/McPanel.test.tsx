@@ -315,7 +315,7 @@ describe('McPanel', () => {
       ...DONE,
       result: { ...DONE.result!, activity: {
         by_period: { '2030': { inactive: ['new'], partial: [] }, '2035': { inactive: [], partial: [] } },
-        note: 'The engines mask assets by build year and lifetime, as the LP and the reserve margin do — 2030: 1 inactive (new).',
+        note: 'The engines mask assets by build year, lifetime and the active flag, as the LP and the reserve margin do — 2030: 1 inactive (new).',
       } },
     })
     await openPanel()

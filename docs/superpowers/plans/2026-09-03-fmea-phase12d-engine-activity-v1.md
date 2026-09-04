@@ -532,3 +532,97 @@ keeping its own six lines). Runner and log: `scratchpad/bites12d`.
 passed / 43 failed, identical to master both ways; frontend 884/884 / 92
 files, `tsc` clean; live S15–S27 green; S27 bitten live (single-table
 `screening_analysis`: 2030 reads 1.104), restored by hash.
+
+### 12d SHIPPED-CODE REVIEW (2026-09-04, on `b67ab18`) — accept with fixes
+
+The reviewer re-derived every hand value by running the code (F1's per-period
+LOLE/EUE and both criticality splits, F2/F3 from real HiGHS solves, E4's
+credit — shown stable at four (draws, seed) pairs, so it is a bisection-grid
+value and not a knife edge), widened E0 to **18 fixtures × 2**
+(`keep_zero_capacity` off and on) and found `snapshot_inputs`,
+`fleet_and_residual`, `screening_analysis`, `sample_capacity`,
+`_simulate_blocks` and `elcc_candidates` **identical** old-vs-new on every
+fixture without activity — the only two that move are the two carrying a
+`*_2040` asset, which is the fix. It also verified the per-block merge is
+bit-identical to the single-block path when a constant series forces it, that
+an all-inactive block gives LOLP 1.0 (correct), that `exclude_storage` by name
+is applied before the per-block re-indexing (not a bug), and measured the
+walk's new `ActivityContext` at **+0–6 %** on a 300-generator three-period
+network (one `get_active_assets` per period, not per row). No blocker; nine
+findings, all reproduced, all fixed here.
+
+1. **SERIOUS — the disclosure was silent in the three cases that matter.**
+   `activity_summary` iterated the sampled fleet, so a MUST-TAKE farm
+   commissioned later (netted into the residual, never a unit) and any row
+   masked in EVERY period (`cap_max = 0`, dropped by membership — including
+   `active=False`) produced `note: null` and no chip while the engines had
+   moved the number. Measured on E4's own fixture. → The disclosure now
+   reads the NETWORK through the membership walk and an `ActivityContext`
+   over both frames, listing a row only when `solved_capacity > 0` (so
+   "unbuilt" and "masked" stay different statements); computed under the
+   lock at both routes. E11b pins all three cases plus the unbuilt
+   exclusion, on `/copt` and on the MC payload.
+2. **SERIOUS — the sampler's `profile × capacity_series` product was
+   untested**: dropping the profile factor (a profiled unit sampled at full
+   nameplate in every active hour) passed 110 tests. → E3b drives a unit
+   carrying both through `sample_capacity` and `_simulate_blocks`; both
+   mutations bite.
+3. **SERIOUS — the store's vintage-fraction energy bound was untested**:
+   unscaling it passed 72 tests. → `block_store_arrays` is now a module-level
+   function so the arrays can be pinned directly, and E5b pins `(p, e)` per
+   block AND an EUE difference on a case where a 2 h reservoir runs dry
+   where a 6 h one does not.
+4. **MODERATE — every network's fingerprint moved, and
+   `last_reserve_margin` is persisted per project** (`RESULT_STATE_KEYS`), so
+   a report written before 12d would have been refused as "the network has
+   since changed" — untrue. → The digest is versioned (`v2:<hex>`) and
+   `stale_report` says which case it is: an earlier engine version, or a
+   changed network. E10b pins both branches.
+5. **MINOR — a negative `initial_capacity` passed the consistency test** and
+   then yielded capacity above the row's `p_nom_opt` (the total used the raw
+   value, the return clamped it). → Clamped once, before the test.
+6. **MINOR — `active_mask` swallowed a non-`"ALL"` string label**, silently
+   returning the static column for a label that meant a period, against its
+   own docstring. → It raises; the non-integer fallback in
+   `capacity_by_period` is documented.
+7. **MINOR — the merged `split` described units no block evaluated**: a
+   zero-capacity row under `keep_zero_capacity` kept its place in
+   `split.table` but lost its criticality row. → The merged split is built
+   from the per-block splits.
+8. **MINOR — three stale docstrings**: `_membership_walk`'s yield tuple
+   (still "3-tuple"), the `inf` fallback's justification and its line
+   citation, and `_clear_myopic_build_periods`'s sentence about a clear 12d
+   had already moved. All corrected; the note's wording now says "build
+   year, lifetime and the active flag", since a static flag is neither of
+   the first two.
+9. **MINOR — `Member.capacity_by_period` was not on the wire**, so a
+   refusal's "margin X vs engines Y" was not reproducible from the payload.
+   → Emitted in `population.members`.
+10. **MINOR — E11's assertion was a conditional expression**, one edit from
+    vacuous. → Split, with the period keys normalised once.
+
+Found while fixing 1: the MC route's `activity_summary` import sat AFTER its
+first use — a `NameError` on every `/mc` call, which no test caught because
+the payload assertion ran through the engine, not the route. The import is
+now above the lock and E11b exercises the route.
+
+**Bites for the fixes (6, all bite):** summarise the fleet instead of the
+network (E11b); drop the profile factor, drop the series factor (E3b); full
+energy at partial power (E5b); no version prefix (E10b); the note's wording
+(E11). E5b's FIRST form did not bite — it recomputed `(p, e)` itself and its
+simulation half compared partial-against-full-size rather than scaled-against
+unscaled energy, and the bound never bound; rewritten against
+`block_store_arrays` and a case where it does.
+
+**Gates on the review fixes:** adequacy **584 passed** (the four new tests);
+full tree **2819 passed / 43 failed**, the failure set identical to master in
+both directions; frontend **884 / 92 files**, `tsc` clean.
+
+One harness lapse, recorded. The first attempt at both pytest gates ran from
+the FRONTEND directory — the session's cwd had followed an earlier `cd` — so
+the adequacy run collected nothing and tripped the empty-summary guard, and
+the tree run beside it was killed at 22 % under the contention, leaving a
+fails file of ZERO against a baseline of 43. A zero-failure diff against a
+known-nonzero baseline is a run that did not happen, not a green one; the
+same trap the 12b fixes hit, caught the same way. Both were re-run with an
+explicit `cd`, the tree alone.

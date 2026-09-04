@@ -236,7 +236,7 @@ export interface McResult {
    *  series rather than at nameplate. Absent on pre-phase payloads. */
   profile_units?: string[]
   /** Phase 12d: which units / stores the engines masked in which period by
-   *  build year and lifetime (`inactive`), or scored below nameplate because
+   *  build year, lifetime or the active flag (`inactive`), or scored below nameplate because
    *  a later vintage is not yet built (`partial`), with the one sentence that
    *  says so. Absent on pre-phase payloads. */
   activity?: ActivitySummary

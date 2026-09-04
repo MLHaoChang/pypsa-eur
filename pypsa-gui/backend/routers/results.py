@@ -3294,6 +3294,8 @@ def post_mc(body: McRequest | None = None):
     # The ONE snapshot, taken under the mutation lock (spec §1). Everything
     # after this line — validation and the worker alike — reads plain arrays,
     # so the network is free the moment the lock is released.
+    from services.adequacy.activity import activity_summary as _activity_summary
+
     n = PyPSAService.get_network()
     population = None
     snapshot_fp = None
@@ -3319,6 +3321,10 @@ def post_mc(body: McRequest | None = None):
                 n, vre_assets=vre_names, cfg=_state.get("solver_config"))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        # Phase 12d: computed HERE, from the network, under the lock — the
+        # worker never touches `n` (plan A9), and the must-take half of the
+        # disclosure is not in the fleet (shipped-code review, finding 1).
+        activity_block = _activity_summary(n, inputs.periods)
         if want_portfolio:
             # Everything the worker needs from the NETWORK and from request-
             # scoped state is captured here (plan 12c v3.1 A9): the
@@ -3370,8 +3376,6 @@ def post_mc(body: McRequest | None = None):
     # different dict and write its result where no reader looks.
     record: dict = {"status": "running", "result": None, "error": None,
                     "started_at": time.time(), "thread": None}
-
-    from services.adequacy.activity import activity_summary as _activity_summary
 
     def worker():
         try:
@@ -3431,9 +3435,9 @@ def post_mc(body: McRequest | None = None):
                     "profile_units": [
                         str(u.name) for u in inputs.units
                         if getattr(u, "profile", None) is not None],
-                    # Phase 12d: the activity disclosure (see /copt).
-                    "activity": _activity_summary(
-                        inputs.units, inputs.storage, inputs.periods),
+                    # Phase 12d: the activity disclosure (see /copt),
+                    # captured in the request.
+                    "activity": activity_block,
                 })
         except Exception as exc:                              # noqa: BLE001
             record.update(status="failed", result=None, error=str(exc),
@@ -5073,6 +5077,11 @@ def get_copt():
         # …and the membership read for `must_take`, under the same hold
         # (12c-0 shipped-code review, finding 4).
         n_must_take = len(must_take_generators(n))
+        # Phase 12d: the activity disclosure reads the NETWORK (must-take
+        # farms and rows dropped at zero capacity are not in the fleet —
+        # shipped-code review, finding 1), so it is taken under the same
+        # hold as the fleet it describes.
+        activity = _activity_summary(n, _period_blocks(residual.index))
     if not units:
         return Response(status_code=204)
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
@@ -5128,7 +5137,7 @@ def get_copt():
         # Phase 12d: which units the engines masked in which period, by
         # build year / lifetime (and which are below nameplate, a later
         # vintage not yet built), with the sentence that says so.
-        "activity": _activity_summary(units, (), _period_blocks(residual.index)),
+        "activity": activity,
         "voll_eur_per_mwh": voll,
     }
 

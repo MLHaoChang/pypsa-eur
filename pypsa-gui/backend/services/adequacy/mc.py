@@ -523,6 +523,36 @@ def _dispatch(deficit, soc, p_nom, e_nom, eff_store, eff_dispatch, order):
     return need - surplus
 
 
+def block_store_arrays(stores, start: int, end: int, *, any_series: bool):
+    """The dispatch arrays ``(n, p_nom, e_nom, eff_store, eff_dispatch)`` for
+    one period block. Without a store series this is the fleet as built (the
+    pre-12d arrays, once); with one, each store enters at its capacity IN
+    THIS BLOCK — dropped at 0, its energy bound following the POWER fraction
+    — so a store built in 2035 is not dispatched in 2030, and one at a
+    part-built vintage carries a proportionally smaller reservoir (Phase 12d;
+    module-level so the arrays can be pinned directly — shipped-code review,
+    finding 3)."""
+    if not any_series:
+        kept = list(stores)
+        p = np.array([s.p_nom_mw for s in kept], dtype=np.float64)
+        e = np.array([s.e_nom_mwh for s in kept], dtype=np.float64)
+    else:
+        from services.adequacy.activity import block_capacity
+        kept, p_l, e_l = [], [], []
+        for s in stores:
+            c = block_capacity(s.p_nom_mw, s.capacity_series, start, end)
+            if c <= 0.0:
+                continue
+            kept.append(s)
+            p_l.append(c)
+            e_l.append(s.e_nom_mwh * (c / s.p_nom_mw) if s.p_nom_mw > 0 else 0.0)
+        p = np.array(p_l, dtype=np.float64)
+        e = np.array(e_l, dtype=np.float64)
+    es = np.array([max(s.eff_store, 1e-12) for s in kept], dtype=np.float64)
+    ed = np.array([max(s.eff_dispatch, 1e-12) for s in kept], dtype=np.float64)
+    return len(kept), p, e, es, ed
+
+
 def _simulate_blocks(inputs: MCInputs, *, draws: int, seed,
                      exclude=frozenset(), extra_firm_mw: float = 0.0,
                      storage_enabled: bool = True,
@@ -547,30 +577,7 @@ def _simulate_blocks(inputs: MCInputs, *, draws: int, seed,
                      for s in all_stores)
 
     def _store_arrays(start: int, end: int):
-        """The dispatch arrays for one block. Without a store series this is
-        the fleet as built (the pre-12d arrays, once); with one, each store
-        enters at its capacity IN THIS BLOCK — dropped at 0, its energy
-        bound following the power fraction — so a store built in 2035 is
-        not dispatched in 2030 (Phase 12d, E5)."""
-        if not any_series:
-            stores = all_stores
-            p = np.array([s.p_nom_mw for s in stores], dtype=np.float64)
-            e = np.array([s.e_nom_mwh for s in stores], dtype=np.float64)
-        else:
-            from services.adequacy.activity import block_capacity
-            stores, p_l, e_l = [], [], []
-            for s in all_stores:
-                c = block_capacity(s.p_nom_mw, s.capacity_series, start, end)
-                if c <= 0.0:
-                    continue
-                stores.append(s)
-                p_l.append(c)
-                e_l.append(s.e_nom_mwh * (c / s.p_nom_mw) if s.p_nom_mw > 0 else 0.0)
-            p = np.array(p_l, dtype=np.float64)
-            e = np.array(e_l, dtype=np.float64)
-        es = np.array([max(s.eff_store, 1e-12) for s in stores], dtype=np.float64)
-        ed = np.array([max(s.eff_dispatch, 1e-12) for s in stores], dtype=np.float64)
-        return len(stores), p, e, es, ed
+        return block_store_arrays(all_stores, start, end, any_series=any_series)
 
     out: dict = {}
     for label, start, end in inputs.periods:

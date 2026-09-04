@@ -40,8 +40,11 @@ review, finding 6). A myopic strategy's ``source == "myopic_freeze"`` entry
 exists from its period onward for the parent's lifetime and did not exist
 before it, which is what the myopic LP saw (finding 3). ``lifetime`` absent
 from an entry (freeze entries; breakdowns written before this phase) falls
-back to the parent's finite positive lifetime, else ``inf`` — the two branches
-of the rule that created the row (``vintage_service.apply_vintage_bounds``).
+back to the parent's finite positive lifetime, else ``inf``. The rule that
+created the row inherits the parent's lifetime when it is finite and positive
+and otherwise gives the vintage "the rest of the horizon"
+(``vintage_service.apply_vintage_bounds``); ``inf`` is that second branch as
+seen from inside the horizon, which is the only place these blocks live.
 
 **What the engines carry.** ``capacity_series_h = c_{i,P(h)}`` in MW — an
 ``(H,)`` array, ``None`` when it is constant at ``capacity_mw = max_P c_{i,P}``
@@ -110,9 +113,19 @@ def active_mask(n, comp: str, period) -> pd.Series:
     one. No exception is swallowed here: on a well-formed network the only
     failures are a label PyPSA does not know or a frame without an
     ``active`` column, and both are caller bugs (v1 review, finding 9). The
-    reserve margin keeps its own all-True guard around this call."""
+    reserve margin keeps its own all-True guard around this call.
+
+    ``"ALL"`` is the only string label there is — the flat-axis block. Any
+    other string is a caller bug and raises rather than silently returning
+    the static column for a label that meant a period (shipped-code review,
+    finding 6)."""
     c = getattr(n.components, comp)
     if isinstance(period, str):
+        if period != "ALL":
+            raise ValueError(
+                f"active_mask: {period!r} is not a period label — the only "
+                "string block label is 'ALL' (the flat axis); an investment "
+                "period is an int")
         return c.get_active_assets()
     return c.get_active_assets(int(period))
 
@@ -149,6 +162,11 @@ def vintage_breakdown(n, comp: str, name: str, row) -> dict | None:
     initial = _finite(entry.get("initial_capacity"))
     if initial is None:
         return None
+    # Clamp ONCE, before the consistency test: certifying a total computed
+    # from a negative initial and then using max(initial, 0) would admit a
+    # breakdown whose capacity exceeds the row's own `p_nom_opt`
+    # (shipped-code review, finding 5).
+    initial = max(initial, 0.0)
     parent_lt = _row_value(row, "lifetime")
     fallback_lt = parent_lt if (parent_lt is not None and parent_lt > 0) else math.inf
     vintages: list[tuple] = []
@@ -170,7 +188,7 @@ def vintage_breakdown(n, comp: str, name: str, row) -> dict | None:
     p_nom_opt = _row_value(row, "p_nom_opt")
     if p_nom_opt is None or not math.isclose(total, p_nom_opt, rel_tol=_REL, abs_tol=_ABS):
         return None
-    return {"initial": max(initial, 0.0), "vintages": vintages}
+    return {"initial": initial, "vintages": vintages}
 
 
 class ActivityContext:
@@ -198,7 +216,10 @@ class ActivityContext:
         return bool(self._static.get(name, True))
 
     def capacity_by_period(self, name, row) -> list[float]:
-        """§1's rule, one value per block label."""
+        """§1's rule, one value per block label. A non-integer label (the
+        flat axis's ``"ALL"``) takes the plain rule: there is no period to
+        compare a build year against, so the vintage line does not apply and
+        the static ``active`` column decides alone."""
         from services.adequacy.copt import solved_capacity
 
         base = float(solved_capacity(row))
@@ -249,28 +270,69 @@ def block_capacity(cap_max: float, series, start: int, end: int) -> float:
     return float(seg[0])
 
 
-def activity_summary(units, storage, blocks) -> dict:
-    """The payload disclosure: per block label the names whose capacity in
-    the block is 0 (``inactive``) or strictly between 0 and their nameplate
-    (``partial`` — a later vintage not yet built), and one sentence, or
-    ``None`` for the note when nothing is masked anywhere."""
+def activity_summary(n, blocks) -> dict:
+    """The payload disclosure: per block label, the scope-admitted rows the
+    engines gave ZERO capacity in that period (``inactive``) and those they
+    gave less than their own maximum (``partial`` — a later vintage not yet
+    built), plus one sentence, or ``None`` for the note when nothing is
+    masked anywhere.
+
+    Read off the NETWORK rather than off the sampled fleet, because the three
+    cases that change the answer most are all absent from the fleet
+    (shipped-code review, finding 1): a MUST-TAKE farm commissioned later is
+    netted into the residual, never a unit; a row inactive in EVERY period,
+    and one with ``active=False``, are dropped by membership at
+    ``cap_max = 0`` before any fleet exists. A row whose capacity is zero
+    because nothing built it is NOT masked and is not listed — the test is
+    ``solved_capacity > 0``, so "unbuilt" and "masked" stay different
+    statements.
+    """
+    from services.adequacy.copt import _membership_walk, solved_capacity
+    from services.adequacy.metrics import electrical_columns
+    from services.adequacy.slack import is_slack_carrier, is_slack_name
+
+    blocks = tuple(blocks)
+    labels = [b[0] for b in blocks]
+    rows: list[tuple] = []          # (name, base, caps)
+
+    buses = getattr(n, "buses", None)
+    elec = set(electrical_columns(n, list(buses.index))) if buses is not None else set()
+    gens = getattr(n, "generators", None)
+    if gens is not None and not gens.empty:
+        gen_ctx = ActivityContext(n, "generators", blocks)
+        for g, _cap_max, _series, _row in _membership_walk(
+                n, elec, keep_zero_capacity=True):
+            row = gens.loc[g]
+            base = float(solved_capacity(row))
+            if base <= 0.0:
+                continue                      # unbuilt, not masked
+            rows.append((str(g), base, gen_ctx.capacity_by_period(g, row)))
+    su = getattr(n, "storage_units", None)
+    if su is not None and not su.empty:
+        su_ctx = ActivityContext(n, "storage_units", blocks)
+        for sname in su.index:
+            row = su.loc[sname]
+            if is_slack_name(str(sname)) or is_slack_carrier(row.get("carrier")):
+                continue
+            if str(row.get("bus")) not in elec:
+                continue
+            base = float(solved_capacity(row))
+            if base <= 0.0:
+                continue
+            rows.append((str(sname), base, su_ctx.capacity_by_period(sname, row)))
+
     by_period: dict = {}
     parts: list[str] = []
-    for label, start, end in blocks:
+    for i, label in enumerate(labels):
         inactive: list[str] = []
         partial: list[str] = []
-        for kind, rows in (("unit", units), ("store", storage)):
-            for r in rows:
-                cs = getattr(r, "capacity_series", None)
-                if cs is None:
-                    continue
-                cap_max = float(getattr(r, "capacity_mw", None)
-                                if kind == "unit" else getattr(r, "p_nom_mw", 0.0))
-                c = block_capacity(cap_max, cs, start, end)
-                if c <= 0.0:
-                    inactive.append(str(r.name))
-                elif c < cap_max * (1.0 - _CONST_TOL):
-                    partial.append(str(r.name))
+        for name, _base, caps in rows:
+            cap_max = max(caps) if caps else 0.0
+            c = caps[i] if i < len(caps) else 0.0
+            if c <= 0.0:
+                inactive.append(name)
+            elif cap_max > 0.0 and c < cap_max * (1.0 - _CONST_TOL):
+                partial.append(name)
         by_period[str(label)] = {"inactive": inactive, "partial": partial}
         if inactive or partial:
             bits = []
@@ -284,6 +346,7 @@ def activity_summary(units, storage, blocks) -> dict:
             parts.append(f"{label}: " + "; ".join(bits))
     note = None
     if parts:
-        note = ("The engines mask assets by build year and lifetime, as the LP "
-                "and the reserve margin do — " + ". ".join(parts) + ".")
+        note = ("The engines mask assets by build year, lifetime and the "
+                "active flag, as the LP and the reserve margin do — "
+                + ". ".join(parts) + ".")
     return {"by_period": by_period, "note": note}

@@ -122,14 +122,14 @@ describe('CoptChips — the screening row', () => {
       activity: {
         by_period: { '2030': { inactive: ['new', 'late'], partial: ['wind'] },
                      '2035': { inactive: [], partial: [] } },
-        note: 'The engines mask assets by build year and lifetime, as the LP and the reserve '
+        note: 'The engines mask assets by build year, lifetime and the active flag, as the LP and the reserve '
           + 'margin do — 2030: 2 inactive (new, late); 1 below nameplate, a later vintage not '
           + 'yet built (wind).',
       },
     })} proxyEnsMwh={null} />)
     const chip = screen.getByTestId('copt-activity-note')
     expect(chip.textContent).toBe('2 inactive in 2030, 1 partial in 2030')
-    expect(chip.getAttribute('title')).toMatch(/build year and lifetime/)
+    expect(chip.getAttribute('title')).toMatch(/build year, lifetime and the active flag/)
   })
   it('shows no activity chip when nothing is masked (null note) or on a pre-phase payload', () => {
     render(<CoptChips copt={coptPayload()} proxyEnsMwh={null} />)

@@ -5920,11 +5920,11 @@ def _clear_myopic_build_periods(n) -> None:
     """
     Drop `vintage_results` entries left by a PREVIOUS myopic run.
 
-    `apply_vintage_bounds` resets the whole dict at solve start, but it returns
-    early when the user has no per-period bounds — which is exactly the case
-    this feature exists for. Without this, a myopic run's build periods would
-    accumulate across solves and the Capacity Expansion chart would show
-    capacity that is no longer there.
+    `apply_vintage_bounds` clears the entries IT wrote at solve start (Phase
+    12d moved that clear ahead of its early returns), but it never touches
+    entries tagged with a `source` — this function's own. Without this, a
+    myopic run's build periods would accumulate across solves and the
+    Capacity Expansion chart would show capacity that is no longer there.
     """
     meta = getattr(n, "meta", None)
     if not isinstance(meta, dict):

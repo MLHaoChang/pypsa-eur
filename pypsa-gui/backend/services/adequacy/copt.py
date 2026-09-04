@@ -389,7 +389,8 @@ def _membership_walk(n, elec_buses, *, keep_zero_capacity: bool = False):
     """
     THE generator-membership decision, in one place (spec §3.1).
 
-    Yields ``(label, capacity_mw, occurrence_row)`` for every generator that
+    Yields ``(label, capacity_mw, capacity_series, occurrence_row)`` (the
+    third element is Phase 12d's, see below) for every generator that
     clears the scope tests — non-slack, at an electrical bus, positive firm
     capacity — in ``n.generators`` order. The branch each caller then takes is
     the SAME one-line test on the resolved occurrence row:
@@ -877,10 +878,18 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
         fm["severity_eur"] = crit / occ if occ > 0 else 0.0
     rows = sorted(merged.values(), key=lambda r: r["delta_eue_mwh"], reverse=True)
 
+    # The merged split describes the fleet that was actually EVALUATED: a
+    # unit with zero capacity in every block entered no table and gets no
+    # criticality row, so reporting it in `split.table` would describe a
+    # fleet the numbers do not come from (shipped-code review, finding 7).
+    # A unit netted in ANY block is reported netted — that is the disclosure
+    # the fidelity note exists to make.
     netted_names = {u.name for a in per.values() for u in a["split"].netted}
     mixed_names = {u.name for a in per.values() for u in a["split"].mixed} - netted_names
+    table_names = {u.name for a in per.values() for u in a["split"].table} \
+        - mixed_names - netted_names
     split = FleetSplit(
-        table=tuple(u for u in units if u.name not in mixed_names | netted_names),
+        table=tuple(u for u in units if u.name in table_names),
         mixed=tuple(u for u in units if u.name in mixed_names),
         netted=tuple(u for u in units if u.name in netted_names))
     return {"metrics": metrics, "rows": rows, "split": split,

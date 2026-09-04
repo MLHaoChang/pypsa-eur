@@ -516,9 +516,18 @@ row the snapshot does not know). `network_fingerprint` adds the static
 breakdown.
 
 **§4, amended.** `/results/copt` and the MC result carry `activity:
-{by_period: {label: {inactive: [names], partial: [names]}}, note}`
-(`activity.activity_summary`; `note` null when nothing is masked). The
-loops' `_hash` is `coupling.snapshot_hash`, which hashes the series.
+{by_period: {label: {inactive: [names], partial: [names]}}, note}` —
+`activity.activity_summary(n, blocks)`, which reads the NETWORK (the
+membership walk plus an `ActivityContext` over both frames), not the sampled
+fleet: a must-take farm commissioned later and any row masked in every period
+are absent from the fleet and are exactly the cases worth disclosing
+(shipped-code review, finding 1). A row is listed only when
+`solved_capacity > 0` — unbuilt is not masked. `note` null when nothing is
+masked. Both routes compute it under the lock. The loops' `_hash` is
+`coupling.snapshot_hash`, which hashes the series. `network_fingerprint` is
+VERSIONED (`v2:<hex>`) and `stale_report` distinguishes an earlier engine
+version from a changed network, because 12d moved every network's digest and
+the margin payload is persisted per project (finding 4).
 
 **§5, amended.** One chip on the COPT card (`copt-activity-note`) and on
 the MC panel (`mc-activity-note`): "n inactive in P, m partial in P", the
