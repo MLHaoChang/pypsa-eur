@@ -35,7 +35,8 @@
 | `services/solver/objective.py` | create | `extra_functionality` wrappers, objective scaling |
 | `services/solver/assumptions.py` | create | outages, MIP/presolve kwargs, modelling assumptions |
 | `services/solver/myopic.py` | create | limited-foresight loop |
-| `services/solver/runtime.py` | create | availability, abort, heartbeat, log handlers |
+| `services/solver/runtime.py` | create | availability, abort, heartbeat, log handlers, `_safe_log` |
+| `services/solver/vintage_store.py` | create | the per-thread freeze store both assumptions and myopic read |
 | `services/solver_service.py` | modify | orchestrator + `SolverConfig` + re-export façade |
 | `tests/test_solver_facade_surface.py` | create | the tripwire — every re-exported name |
 | `services/results/` | create | Phase 2 — computation lifted from `routers/results.py` |
@@ -72,194 +73,195 @@ before the work begins cannot tell you when the work broke something.
 
 ---
 
-## Task 1: `solver/periodized_costs.py` (279 lines)
+## The cut, verified before any code moved
 
-Goes first because `_annuity` lives here and Task 2 needs to import it from a
-module that is not `solver_service`.
+The task order below is not the one this plan was first written with. Before
+touching `solver_service.py` the cluster boundaries were checked by walking the
+module's AST, mapping every top-level name (functions, classes **and** module
+constants) to its cluster, and reporting every cross-cluster reference. That
+found **three cycles** in the original cut:
 
-The cluster is a true leaf. Across lines 3427–3705 it references only `math`,
-`pandas`, `numpy`, `Callable`, `contextmanager` and its own three helpers — and
-every `SolverConfig` annotation is already a string.
+| cycle | via | fix |
+|---|---|---|
+| `assumptions` ↔ `myopic` | `_frozen_vintage_store` (`:4791`), written by assumptions at `:4114,:4668` and by myopic at `:5007,:5049` | own leaf module `solver/vintage_store.py`, carrying `_frozen_vintage_local`, `_frozen_vintage_store` and `_MYOPIC_VINTAGE_SOURCE` |
+| `objective` → `solver_service` | `_safe_log` (`:40`), used only by objective at `:2705–:3364` | goes to `solver/runtime.py`, where the log-queue plumbing lives |
+| `assumptions` → `solver_service` | `_canonical_load_carrier_key` (`:55`) + its three `_LOAD_*` constants, used only at `:4340` | folded into `solver/assumptions.py`; `routers/results.py` keeps importing it from the façade |
+
+A first pass missed the third because it walked only `FunctionDef`/`ClassDef`
+and ignored module-level `Assign` nodes — which is how `_NOM_TRIPLES`,
+`_MYOPIC_VINTAGE_SOURCE` and the `_LOAD_*` frozensets stayed invisible. Constants
+create the same cycles functions do.
+
+The corrected cut is acyclic, and its topological sort **is** the task order:
+
+```
+periodized_costs → vintage_store → assumptions → diagnostics
+                                 → runtime → objective → myopic → solver_service
+```
+
+Tasks are sequenced so that every module's dependencies already exist when it
+is written. `tests/test_solver_facade_surface.py::test_carved_modules_never_import_back_from_solver_service`
+enforces the property from here on.
+
+---
+
+## Task 1: `solver/periodized_costs.py` (279 lines) — lines 3427–3705
+
+Goes first: it is the only cluster with **no** outgoing dependency at all.
+Across its 279 lines it references only `math`, `pandas`, `numpy`, `Callable`,
+`contextmanager` and its own three helpers, and every `SolverConfig` annotation
+is already a string. `_annuity` living here is also what unblocks diagnostics.
 
 **Moves:** `_annuity`, `_reference_build_year`, `_pv_factor_series`,
 `fill_periodized_cost_defaults`, `with_periodized_cost_defaults`,
 `periodized_capital_costs`.
 
-**External importers to keep working:** `routers/results.py`
-(`_pv_factor_series`, `_reference_build_year`, `periodized_capital_costs`,
-`with_periodized_cost_defaults`), `routers/compare.py`, `services/cost_totals.py`,
-`services/asset_results/compute.py`, `tests/qa_cost_decomp_overnight.py`,
-`tests/qa_results_summary_compare.py`, `tests/golden/fixture.py`,
-`tests/test_results_range.py`, `tests/test_compare_cross_surface.py`.
+**External importers:** `routers/results.py`, `routers/compare.py`,
+`services/cost_totals.py`, `services/asset_results/compute.py`,
+`tests/qa_cost_decomp_overnight.py`, `tests/qa_results_summary_compare.py`,
+`tests/golden/fixture.py`, `tests/test_results_range.py`,
+`tests/test_compare_cross_surface.py`.
 
-- [x] **Step 1: Extend the tripwire (red)**
-
-Add the six names to the façade test with their `services.solver.periodized_costs`
-origin. It fails on `ModuleNotFoundError` — the new module does not exist yet.
-
-- [x] **Step 2: Create the package and move the block verbatim**
-
-`services/solver/__init__.py` re-exports nothing: the façade is
-`solver_service`, and a second export surface would let call sites drift onto
-the package and defeat the whole design.
-
-Move lines 3427–3705 **unchanged** — same bodies, same order, same comments,
-same signatures. Add the module docstring documenting the seam, in the house
-style of `ac_pf_service.py`.
-
-- [x] **Step 3: Wire the façade**
-
-`from services.solver.periodized_costs import (...)` in `solver_service.py`,
-with a comment saying why the import exists (re-export for callers, not use).
-
-- [x] **Step 4: Tripwire green, then full suite**
-
-Failing set must equal the baseline exactly.
-
-- [x] **Step 5: Commit**
+- [ ] **Step 1: Flip the six names in `_FACADE_ORIGINS` (red)** — fails on `ModuleNotFoundError`.
+- [ ] **Step 2: Create the package; move lines 3427–3705 verbatim.** `services/solver/__init__.py` re-exports nothing: the façade is `solver_service`, and a second export surface would let call sites drift onto the package.
+- [ ] **Step 3: Wire the façade.**
+- [ ] **Step 4: Tripwire green, then full suite; failing set unchanged.**
+- [ ] **Step 5: Commit.**
 
 ---
 
-## Task 2: `solver/diagnostics.py` (1,158 lines)
+## Task 2: `solver/vintage_store.py` (42 lines) — lines 4769–4810
+
+Tiny, and it exists only to break the `assumptions` ↔ `myopic` cycle. Both
+clusters read the same per-thread freeze store, so it belongs to neither.
+
+**Moves:** `_frozen_vintage_local`, `_frozen_vintage_store`,
+`_MYOPIC_VINTAGE_SOURCE`, with the comment block explaining why the store is
+thread-local (B4's per-context solver locks let two `run_simulation` calls run
+concurrently; a process-wide dict raced and produced silent wrong vintage
+capacities). Needs `import threading`.
+
+**Watch:** `services/vintage_service.py:587` imports `_frozen_vintage_store`
+from `solver_service` **inside a function body**, with a comment naming the
+`solver_service ↔ vintage_service` cycle it avoids. That lazy import stays
+exactly as it is — this task does not get to reopen it, and the façade keeps
+it working.
+
+- [ ] **Steps 1–5** as Task 1.
+
+---
+
+## Task 3: `solver/assumptions.py` (1,050 lines) — lines 3706–4702, plus 28–37 and 55–80
+
+**Moves:** `resolve_branch_outages`, `_compute_loss_atol`,
+`_resolve_mip_kwargs`, `_resolve_presolve_kwargs`, `_normalise_dynamic_indexes`,
+`_clear_dispatch_fix`, `_sanitise_transformer_types`,
+`_apply_modelling_assumptions`, plus `_PRESOLVE_KEYS_BY_SOLVER`,
+`_MIP_KEYS_BY_SOLVER`, `_DISPATCH_FIX_ACCESSORS`, `_NOM_TRIPLES` — and the
+load-carrier canonicaliser (`_LOAD_ELECTRICAL_ALIASES`, `_LOAD_HEAT_TOKENS`,
+`_LOAD_HYDROGEN_TOKENS`, `_canonical_load_carrier_key`), whose only in-module
+consumer is `_apply_modelling_assumptions` at `:4340`.
+
+**Watch:** `services/ac_pf_service.py` imports `_DISPATCH_FIX_ACCESSORS` and
+`_normalise_dynamic_indexes` **from `solver_service`**. Leave it pointing at the
+façade — repointing it is a behaviour-neutral tidy-up that would put a fourth
+file in this task's diff.
+
+**External importers:** `services/ac_pf_service.py`,
+`services/validation_service.py`, `routers/results.py`
+(`_canonical_load_carrier_key`), `tests/test_myopic_build_period_visibility.py`.
+
+- [ ] **Steps 1–5** as Task 1.
+
+---
+
+## Task 4: `solver/diagnostics.py` (1,158 lines) — lines 1497–2654
 
 The biggest single win in the file and the lowest-risk: it writes log lines. It
-reads the solved network and formats strings onto a queue — it never mutates
-the network, never touches the LP, never influences a served result.
+reads the solved network and formats strings onto a queue — it never mutates the
+network, never touches the LP, never influences a served result. A defect here
+is visible in the solver log and nowhere else.
 
-**Moves:** `_diagnose_infeasibility`, `_log_global_constraint_shadow_prices`
-(1497–1655) and the whole post-solve family (1656–2654):
+**Moves:** `_diagnose_infeasibility`, `_log_global_constraint_shadow_prices`,
 `_log_curtailment_post_solve`, `_log_storage_post_solve`,
 `_log_sclopf_post_solve`, `_log_capacity_summary_post_solve`,
 `_log_line_post_solve`, `_log_corridor_summary_post_solve`,
 `_log_bus_balance_post_solve`, `_log_cost_decomposition_post_solve`,
 `_emit_core_post_solve_diagnostics`.
 
-**Interface into the rest of `solver_service`:** four call sites only —
-`_emit_core_post_solve_diagnostics`, `_log_cost_decomposition_post_solve`,
-`_log_sclopf_post_solve`, `_log_global_constraint_shadow_prices`.
-
-**Outward dependencies:** `_annuity` (now `solver.periodized_costs`) and
+**Interface:** five entry points only — the four post-solve emitters plus
+`_diagnose_infeasibility`. Outward it needs `_annuity` (Task 1) and
 `_period_utils`. `_per_period_split` is nested at `:2396` and travels with its
 parent.
 
 **External importers:** `tests/test_infeasibility_diagnosis.py`.
 
-- [ ] **Step 1: Extend the tripwire (red)**
-- [ ] **Step 2: Move the two blocks verbatim**
-- [ ] **Step 3: Wire the façade**
-- [ ] **Step 4: Tripwire green, then full suite; failing set unchanged**
-- [ ] **Step 5: Commit**
+- [ ] **Steps 1–5** as Task 1.
 
 ---
 
-## Task 3: `solver/objective.py` (772 lines)
+## Task 5: `solver/runtime.py` (341 lines) — lines 344–671, plus 40–52
 
-Higher risk than Tasks 1–2: these wrappers compose the `extra_functionality`
-callable handed to `n.optimize()` and `_rescale_results_for_objective` rewrites
-result magnitudes. A defect here moves numbers the frontend serves. Verify
-against `tests/test_objective_conditioning.py` and `tests/qa_objective_scale.py`
-specifically, not just the suite total.
-
-**Moves (2655–3426):** `_wrap_with_capex_budget`, `_wrap_with_curtailment_cost`,
-`_objective_conditioning`, `_log_objective_conditioning`,
-`_wrap_with_objective_scale`, `_rescale_results_for_objective`, and the
-`_COND_*` constants at 3095–3097.
-
-**External importers:** `tests/test_objective_conditioning.py`
-(`_objective_conditioning`).
-
-- [ ] **Step 1: Extend the tripwire (red)**
-- [ ] **Step 2: Move verbatim, constants included**
-- [ ] **Step 3: Wire the façade**
-- [ ] **Step 4: Full suite; failing set unchanged**
-- [ ] **Step 5: Commit**
-
----
-
-## Task 4: `solver/assumptions.py` (997 lines)
-
-**Moves (3706–4702):** `resolve_branch_outages`, `_compute_loss_atol`,
-`_resolve_mip_kwargs`, `_resolve_presolve_kwargs`, `_normalise_dynamic_indexes`,
-`_clear_dispatch_fix`, `_sanitise_transformer_types`,
-`_apply_modelling_assumptions`, plus `_PRESOLVE_KEYS_BY_SOLVER`,
-`_MIP_KEYS_BY_SOLVER`, `_DISPATCH_FIX_ACCESSORS`.
-
-**Watch:** `services/ac_pf_service.py` imports `_DISPATCH_FIX_ACCESSORS` and
-`_normalise_dynamic_indexes` **from `solver_service`**. Those imports must keep
-working through the façade — do not repoint `ac_pf_service` at the new module.
-Leaving it on the façade is deliberate: repointing it is a behaviour-neutral
-tidy-up that would put a fourth file in this task's diff.
-
-**External importers:** `services/ac_pf_service.py`,
-`services/validation_service.py` (`resolve_branch_outages`),
-`tests/test_myopic_build_period_visibility.py` (`_apply_modelling_assumptions`).
-
-- [ ] **Step 1: Extend the tripwire (red)**
-- [ ] **Step 2: Move verbatim**
-- [ ] **Step 3: Wire the façade**
-- [ ] **Step 4: Full suite; failing set unchanged**
-- [ ] **Step 5: Commit**
-
----
-
-## Task 5: `solver/myopic.py` (1,081 lines)
-
-Highest-risk cluster in the file: it mutates capacities between iterations and
-owns the frozen-vintage store. Twelve of the twenty baseline failures live in
-tests of this code (all traced to the pandas-3 drift, not to the code) — read
-the baseline diff carefully here rather than glancing at a count.
-
-**Moves (4703–5783):** `_build_iteration_snapshots`, `_frozen_vintage_store`,
-`_clear_myopic_build_periods`, `_record_myopic_build_period`,
-`_freeze_period_capacities`, `_capture_extendable_p_nom_opt_to_frozen_store`,
-`_defer_future_vintage_builds`, `_outages_active_in_period`,
-`_run_myopic_foresight`, `_patch_passive_branch_holes`, plus `_NOM_TRIPLES` and
-`_MYOPIC_VINTAGE_SOURCE`.
-
-**Watch:** `services/vintage_service.py:587` imports `_frozen_vintage_store`
-from `solver_service` inside a function body, with a comment naming the
-`solver_service ↔ vintage_service` cycle it avoids. That lazy import stays as
-it is — this task does not get to reopen it.
-
-**External importers:** `tests/test_cost_totals_contract.py`,
-`tests/test_myopic_horizon_cost.py`, `tests/test_myopic_feasibility.py`,
-`tests/test_myopic_build_period_visibility.py`,
-`tests/qa_myopic_sclopf.py`, `tests/qa_myopic_future_vintage_defer.py`,
-`services/vintage_service.py`.
-
-- [ ] **Step 1: Extend the tripwire (red)**
-- [ ] **Step 2: Move verbatim**
-- [ ] **Step 3: Wire the façade**
-- [ ] **Step 4: Full suite; failing set unchanged**
-- [ ] **Step 5: Commit**
-
----
-
-## Task 6: `solver/runtime.py` (328 lines)
-
-**Moves (344–671):** `check_solver_availability`, `_async_raise_in_thread`,
+**Moves:** `check_solver_availability`, `_async_raise_in_thread`,
 `_AbortWatcher`, `_SolveHeartbeat`, `SolveAborted`, `_check_stop`,
 `_RollingWindowFailureCatcher`, `_ThreadScopedQueueHandler`, and `_safe_log`
 from the head of the file.
 
-**Watch:** `SolveAborted` is an exception type caught by `except SolveAborted`
-in `run_simulation`. Re-export identity matters — a second class object would
-make the handler stop catching. The tripwire's `is` assertions cover this,
-which is why they are `is` and not `hasattr`.
+**Watch:** `SolveAborted` is caught by `except SolveAborted` in
+`run_simulation`. Re-export identity matters — a second class object would make
+that handler stop catching. The tripwire asserts `is`, not `hasattr`, for
+exactly this.
 
 **External importers:** `tests/test_solve_queue.py`, `tests/test_qa_step0a.py`,
-`tests/test_myopic_feasibility.py`, `routers/simulation.py`
-(`check_solver_availability`).
+`tests/test_myopic_feasibility.py`, `routers/simulation.py`.
 
-- [ ] **Step 1: Extend the tripwire (red)**
-- [ ] **Step 2: Move verbatim**
-- [ ] **Step 3: Wire the façade**
-- [ ] **Step 4: Full suite; failing set unchanged**
-- [ ] **Step 5: Commit**
+- [ ] **Steps 1–5** as Task 1.
 
 ---
 
-## Task 7: Verify the shape
+## Task 6: `solver/objective.py` (772 lines) — lines 2655–3426
+
+Higher risk than the rest: these wrappers compose the `extra_functionality`
+callable handed to `n.optimize()`, and `_rescale_results_for_objective` rewrites
+result magnitudes. A defect here moves numbers the frontend serves. Check
+`tests/test_objective_conditioning.py` and `tests/qa_objective_scale.py`
+specifically, not just the suite total.
+
+**Moves:** `_wrap_with_capex_budget`, `_wrap_with_curtailment_cost`,
+`_objective_conditioning`, `_log_objective_conditioning`,
+`_wrap_with_objective_scale`, `_rescale_results_for_objective`, and the
+`_COND_*` constants at `:3095–3097`. Depends on `_safe_log` (Task 5).
+
+- [ ] **Steps 1–5** as Task 1.
+
+---
+
+## Task 7: `solver/myopic.py` (1,146 lines) — lines 4703–4768 and 4811–5783
+
+Last, because it sits at the top of the DAG: it depends on runtime,
+diagnostics, objective, assumptions and vintage_store. Also the highest-risk
+cluster — it mutates capacities between iterations.
+
+Twelve of the twenty baseline failures are in tests of this code, all traced to
+the pandas-3 drift rather than to the code itself. Read the baseline diff here
+carefully rather than glancing at a count.
+
+**Moves:** `_build_iteration_snapshots`, `_clear_myopic_build_periods`,
+`_record_myopic_build_period`, `_freeze_period_capacities`,
+`_capture_extendable_p_nom_opt_to_frozen_store`, `_defer_future_vintage_builds`,
+`_outages_active_in_period`, `_run_myopic_foresight`,
+`_patch_passive_branch_holes`.
+
+**External importers:** `tests/test_cost_totals_contract.py`,
+`tests/test_myopic_horizon_cost.py`, `tests/test_myopic_feasibility.py`,
+`tests/test_myopic_build_period_visibility.py`, `tests/qa_myopic_sclopf.py`,
+`tests/qa_myopic_future_vintage_defer.py`.
+
+- [ ] **Steps 1–5** as Task 1.
+
+---
+
+## Task 8: Verify the shape
 
 - [ ] `wc -l services/solver_service.py` reports ~1,370, down from 5,783.
 - [ ] No carved module imports `solver_service` — `grep -rn "solver_service" services/solver/` returns only docstring prose.
