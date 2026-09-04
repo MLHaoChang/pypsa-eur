@@ -1629,3 +1629,100 @@ def test_a_tools_enabled_profile_still_runs_an_offered_tool(appdata, monkeypatch
         f"an OFFERED tool was refused as not-offered: {errs!r}"
     )
     assert called == ["ran"], "the offered tool did not run"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# C-4 — an unknown or deleted profile_id ran the turn on a DIFFERENT
+# provider, wire and model, with no error frame.
+#
+# `resolve_profile` fell through to `by_id[active_id]` for any id it did not
+# recognise. Its docstring called that intended, but `frontend/src/api/chat.ts`
+# states the contract as "the server resolves it and refuses an unconfigured
+# id" — a disproven claim written into source as fact.
+#
+# The user impact is the ADR-0001 shape at its worst: unresolvable renders as
+# SUCCESS. A user picks `local-ollama` believing their data stays on
+# localhost; the id no longer exists, so the prompt goes to whatever profile
+# is active — `api.moonshot.ai`, say — and every frame says the turn
+# succeeded.
+#
+# An OMITTED profile_id keeps meaning "the server's active profile", and a
+# free-text legacy `model` keeps its documented passthrough. Only an
+# EXPLICIT id that names nothing is refused.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_resolve_profile_refuses_an_unconfigured_id(appdata):
+    """The predicate itself: an explicit id that names nothing must raise."""
+    from services import llm_config
+    with pytest.raises(llm_config.ProfileNotConfiguredError):
+        llm_config.resolve_profile("no-such-profile")
+
+
+def test_resolve_profile_still_falls_back_when_no_id_is_given(appdata):
+    """SIBLING PATH — `None` still means "the active profile" (zero-config)."""
+    from services import llm_config
+    assert llm_config.resolve_profile(None).id == "anthropic-sonnet"
+    assert llm_config.resolve_active().id == "anthropic-sonnet"
+
+
+def test_legacy_model_passthrough_is_unchanged(appdata):
+    """
+    SIBLING PATH — free-text `model` is a documented passthrough contract and
+    must still resolve to the active profile with a warning, NOT raise.
+    """
+    from services import llm_config
+    assert llm_config.resolve_legacy_model("some-unknown-model").id == "anthropic-sonnet"
+    assert llm_config.resolve_legacy_model(None).id == "anthropic-sonnet"
+    assert llm_config.resolve_legacy_model(
+        llm_config.OPUS_MODEL).id == "anthropic-opus"
+
+
+def test_stream_refuses_an_unconfigured_profile_id_with_a_typed_frame(
+    appdata, client,
+):
+    """
+    THE USER-VISIBLE BOUNDARY. An explicit unconfigured id must produce a
+    typed error frame and run NO turn — never a silent switch to whatever
+    profile happens to be active.
+    """
+    resp = client.post(
+        "/api/chat/stream",
+        json={
+            "session_id": "sess-unknown-profile",
+            "profile_id": "deleted-profile",
+            "script": [{"type": "session_done"}],
+        },
+    )
+    assert resp.status_code == 200  # a non-2xx SSE body is discarded client-side
+    frames = _parse_sse(resp.content)
+    kinds = [p.get("error_kind") for n, p in frames if n == "error"]
+    assert "unknown_profile_id" in kinds, (
+        f"expected a typed unknown_profile_id frame, got {frames!r}"
+    )
+    # The session must NOT have been bound to the active profile behind the
+    # user's back — that silent substitution is the whole defect.
+    sess = chat_service.get_session("sess-unknown-profile")
+    assert sess is None or sess.profile_id != "anthropic-sonnet", (
+        "the turn was silently rebound to the active profile"
+    )
+
+
+def test_stream_with_no_profile_id_still_runs_normally(appdata, client):
+    """
+    DISCRIMINATION. Refusing an unconfigured id must not refuse the ordinary
+    zero-config turn, which sends no profile_id at all.
+    """
+    resp = client.post(
+        "/api/chat/stream",
+        json={
+            "session_id": "sess-still-fine",
+            "script": [{"type": "session_done"}],
+        },
+    )
+    assert resp.status_code == 200
+    frames = _parse_sse(resp.content)
+    kinds = [p.get("error_kind") for n, p in frames if n == "error"]
+    assert "unknown_profile_id" not in kinds, f"zero-config turn refused: {frames!r}"
+    assert frames[0][0] == "session_init"
+    assert frames[0][1]["profile_id"] == "anthropic-sonnet"

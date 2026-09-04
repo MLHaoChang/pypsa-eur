@@ -684,7 +684,24 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
             # this replaces.
             recorded_profile_id = last_rec.get("profile_id")
             if recorded_profile_id:
-                resolved_profile = llm_config.resolve_profile(recorded_profile_id)
+                try:
+                    resolved_profile = llm_config.resolve_profile(
+                        recorded_profile_id
+                    )
+                except llm_config.ProfileNotConfiguredError:
+                    # C-4 — the profile that turn ran under has since been
+                    # deleted. This is a READ of past turns, not a turn, so
+                    # there is nothing to refuse: fall back to exactly what a
+                    # record with no `profile_id` gets. The next `/stream`
+                    # re-binds and, if the client still names the dead id,
+                    # refuses it there — where a prompt would actually be sent.
+                    logger.info(
+                        "chat history: recorded profile is no longer "
+                        "configured; falling back to the legacy translation"
+                    )
+                    resolved_profile = llm_config.resolve_legacy_model(
+                        last_rec.get("model") or chat_service.DEFAULT_MODEL
+                    )
             else:
                 resolved_profile = llm_config.resolve_legacy_model(
                     last_rec.get("model") or chat_service.DEFAULT_MODEL
@@ -1023,13 +1040,27 @@ async def chat_stream(
     # was — `resolve_legacy_model` itself falls back to the active profile
     # on `None`/an unrecognized string, so an old client that sends neither
     # field keeps getting today's zero-config behaviour.
+    # C-4 — an explicit id that names nothing is REFUSED, not quietly served
+    # by the active profile. `run_turn` turns this into a typed error frame
+    # (never an HTTPException: a non-2xx SSE body is discarded client-side,
+    # so the frame is the only way the copy reaches the panel), and the
+    # session is left completely unbound/unrebound.
+    unknown_profile_id: str | None = None
+    target_profile = None
     if body.profile_id:
-        target_profile = llm_config.resolve_profile(body.profile_id)
+        try:
+            target_profile = llm_config.resolve_profile(body.profile_id)
+        except llm_config.ProfileNotConfiguredError:
+            unknown_profile_id = body.profile_id
     else:
         target_profile = llm_config.resolve_legacy_model(body.model)
 
     wire_conflict = False
-    if session.profile_id is None or session.bound_wire == target_profile.wire:
+    if unknown_profile_id is not None:
+        # Nothing to bind — the refusal is emitted by `run_turn` below and the
+        # session keeps whatever binding it already had.
+        pass
+    elif session.profile_id is None or session.bound_wire == target_profile.wire:
         # Unbound session (first turn) or a same-wire rebind — both allowed.
         # Messages are model-agnostic WITHIN a wire, so switching models
         # across turns on the same wire (this used to be the `if body.model:`
@@ -1063,7 +1094,14 @@ async def chat_stream(
 
     def _gen():
         try:
-            if wire_conflict:
+            if unknown_profile_id is not None:
+                # Never the stub, even with a script — the profile is refused
+                # before either path would run.
+                events = chat_service.run_turn(
+                    session, body.message or "",
+                    unknown_profile_id=unknown_profile_id,
+                )
+            elif wire_conflict:
                 # Never the stub, even if the caller also sent a script — a
                 # wire switch is refused before either path would run.
                 events = chat_service.run_turn(

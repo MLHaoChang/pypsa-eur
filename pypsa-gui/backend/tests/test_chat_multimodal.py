@@ -673,3 +673,171 @@ class TestReconstructNetworkFromImage:
         # gy = (200 - 50) * 0.25 = 37.5
         assert n.buses.loc["B_T1", "x"] == 25.0
         assert n.buses.loc["B_T1", "y"] == 37.5
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# C-3 — `reconstruct_network_from_image` was entirely profile-blind.
+#
+# It built an Anthropic client via `_build_anthropic_client()` and hardcoded
+# `DEFAULT_MODEL`, whatever profile the turn was actually running on. The
+# spec's capability-enforcement requirement was skipped for this tool; only a
+# redaction line landed.
+#
+# Two bad outcomes on a deployment that deliberately does not use Anthropic:
+# either it demands an ANTHROPIC_API_KEY the operator chose not to have, or —
+# when one happens to be in the environment — it silently bills a
+# `claude-sonnet-5` call AND ships the user's image to Anthropic, while the
+# user believes their chosen local profile is handling it.
+#
+# The tool speaks the Anthropic SDK's `messages.stream` directly, so it
+# cannot run on the openai wire without porting it to the provider seam
+# (blocked behind C-2, which questions whether that wire works at all).
+# Until then the honest behaviour is to REFUSE with the same
+# `capability_unsupported` shape `run_turn` already uses for vision — never
+# to silently substitute Anthropic.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _ModelRecordingVisionMessages(_VisionMessages):
+    def __init__(self, json_payload):
+        super().__init__(json_payload)
+        self.model_used = None
+
+    def stream(self, **kwargs):
+        self.model_used = kwargs.get("model")
+        return _VisionStream(self._json)
+
+
+class _ModelRecordingVisionClient:
+    def __init__(self, json_payload):
+        self.messages = _ModelRecordingVisionMessages(json_payload)
+
+
+_EMPTY_VISION_PAYLOAD = '{"buses": [], "lines": []}'
+
+
+@pytest.fixture
+def _bound_turn_profile(monkeypatch):
+    """Bind a turn profile the way `run_turn` does, and clear it after."""
+    from services import chat_tools as _ct
+
+    def _bind(**overrides):
+        from services import llm_config
+        fields = dict(
+            id="p", label="My Profile", preset="custom", wire="anthropic",
+            base_url=None, model="claude-sonnet-5", tools=True, vision=True,
+            auth="none", fallback_model=None, max_output_tokens=None,
+        )
+        fields.update(overrides)
+        profile = llm_config.LLMProfile(**fields)
+        _ct.set_turn_profile(profile)
+        return profile
+
+    yield _bind
+    _ct.set_turn_profile(None)
+
+
+class TestReconstructRespectsTheTurnProfile:
+    def _upload(self, tmp_projects_dir, install_network):
+        from tests.conftest import build_network
+        n = build_network()
+        install_network(n, name="P")
+        (tmp_projects_dir / "P").mkdir(parents=True, exist_ok=True)
+        (tmp_projects_dir / "P" / "network.nc").write_bytes(b"")
+        return upload_service.add_upload(
+            "P", _TINY_PNG, "topology.png", "image/png")
+
+    def test_refuses_when_the_turn_profile_is_not_anthropic_wire(
+        self, tmp_projects_dir, install_network, _bound_turn_profile,
+    ):
+        """An Ollama/LM Studio turn must not silently reach Anthropic."""
+        meta = self._upload(tmp_projects_dir, install_network)
+        _bound_turn_profile(wire="openai", label="Ollama (local)")
+
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.reconstruct_network_from_image(file_id=meta.file_id)
+        detail = exc.value.detail
+        assert detail["error_kind"] == "capability_unsupported", detail
+        # Names the LABEL only — never an id or a base_url (redaction is
+        # secrets-only and would not scrub either).
+        assert "Ollama (local)" in detail["message"]
+
+    def test_refuses_when_the_turn_profile_has_vision_disabled(
+        self, tmp_projects_dir, install_network, _bound_turn_profile,
+    ):
+        meta = self._upload(tmp_projects_dir, install_network)
+        _bound_turn_profile(vision=False, label="No Vision")
+
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.reconstruct_network_from_image(file_id=meta.file_id)
+        assert exc.value.detail["error_kind"] == "capability_unsupported"
+
+    def test_uses_the_turn_profiles_model_not_a_hardcoded_default(
+        self, tmp_projects_dir, install_network, _bound_turn_profile,
+    ):
+        """
+        DISCRIMINATION — a vision-capable Anthropic profile still works, and
+        the sub-call bills the model the user actually selected.
+        """
+        meta = self._upload(tmp_projects_dir, install_network)
+        _bound_turn_profile(model="claude-opus-5", label="Claude Opus")
+
+        client = _ModelRecordingVisionClient(_EMPTY_VISION_PAYLOAD)
+        result = chat_tools.reconstruct_network_from_image(
+            file_id=meta.file_id, client=client,
+        )
+        assert result["ok"] is True
+        assert client.messages.model_used == "claude-opus-5", (
+            f"vision sub-call used {client.messages.model_used!r}, not the "
+            f"turn profile's model"
+        )
+
+    def test_no_bound_profile_keeps_the_pre_existing_behaviour(
+        self, tmp_projects_dir, install_network,
+    ):
+        """
+        SIBLING PATH — called outside a turn (direct invocation, and every
+        pre-existing test in this file), there is no profile to honour and
+        the tool must behave exactly as before.
+        """
+        meta = self._upload(tmp_projects_dir, install_network)
+        client = _ModelRecordingVisionClient(_EMPTY_VISION_PAYLOAD)
+        result = chat_tools.reconstruct_network_from_image(
+            file_id=meta.file_id, client=client,
+        )
+        assert result["ok"] is True
+        assert client.messages.model_used == chat_service.DEFAULT_MODEL
+
+    def test_a_finished_turn_does_not_leave_its_profile_bound(
+        self, tmp_projects_dir, install_network, tmp_path, monkeypatch,
+    ):
+        """
+        The turn profile must not outlive the turn. Otherwise a tool called
+        outside a turn would silently inherit whatever ran before it — and in
+        a shared-process test session that makes the tool's behaviour depend
+        on test ORDER.
+        """
+        monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+        from services import chat_tools as _ct
+        from services import llm_config
+        from services.llm_fake import FakeProvider
+        from services.llm_provider import LLMEvent
+
+        profile = llm_config.LLMProfile(
+            id="leaky", label="Leaky", preset="custom", wire="anthropic",
+            base_url=None, model="claude-opus-5", tools=False, vision=True,
+            auth="none", fallback_model=None, max_output_tokens=None)
+        llm_config.save_profiles([profile], "anthropic-sonnet")
+
+        session = chat_service.ChatSession(model="claude-opus-5")
+        session.profile_id = "leaky"
+        fake = FakeProvider([{
+            "events": [LLMEvent(type="text_delta", text="hi")],
+            "blocks": [{"type": "text", "text": "hi"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }])
+        list(chat_service.run_turn(session, "hello", provider=fake))
+
+        assert _ct.turn_profile() is None, (
+            "the finished turn left its profile bound to this context"
+        )

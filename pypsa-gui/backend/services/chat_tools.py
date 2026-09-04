@@ -1423,6 +1423,29 @@ def set_acting_session(session_id) -> None:
     _ACTING_SESSION_ID.set(str(session_id) if session_id is not None else None)
 
 
+# C-3 — the LLMProfile this turn is running on, for tools that make their own
+# model sub-call. `reconstruct_network_from_image` is the only one today, and
+# it was entirely profile-blind: it built an Anthropic client and hardcoded
+# DEFAULT_MODEL no matter which provider the user had selected.
+#
+# Carried as a contextvar for the same reason the acting user is: tools run on
+# `chat_service._TOOL_EXECUTOR`, and the submit site already does
+# `contextvars.copy_context()`. `None` is a legal answer and means "not inside
+# a turn" (a direct call, or a test invoking the tool on its own), where there
+# is no profile to honour and the pre-profile behaviour is correct.
+_TURN_PROFILE: ContextVar[Any] = ContextVar("chat_turn_profile", default=None)
+
+
+def set_turn_profile(profile: Any) -> None:
+    """Bind the LLMProfile whose model a tool's own sub-call must use."""
+    _TURN_PROFILE.set(profile)
+
+
+def turn_profile() -> Any:
+    """The bound `LLMProfile`, or None outside a turn."""
+    return _TURN_PROFILE.get()
+
+
 @contextlib.contextmanager
 def _acting():
     """Yield ``(db, user)`` for one project-scoped call."""
@@ -2720,15 +2743,61 @@ def reconstruct_network_from_image(
             },
         )
 
+    # C-3 — honour the profile this turn is actually running on.
+    #
+    # This tool speaks the Anthropic SDK's `messages.stream` directly, so it
+    # cannot run on the openai wire without being ported to the provider seam.
+    # Until that port it REFUSES rather than silently substituting Anthropic:
+    # a silent substitution ships the user's image to a provider they did not
+    # choose and bills a model they did not select, while the deployment may
+    # deliberately have no Anthropic key at all. Same `capability_unsupported`
+    # shape `run_turn` uses for vision, and — same rule — the message names the
+    # profile LABEL only, never an id or base_url, because redaction is
+    # secrets-only and would scrub neither.
+    #
+    # `None` means "not inside a turn" (a direct call, or a test driving the
+    # tool on its own): there is no profile to honour, so the pre-profile
+    # behaviour stands unchanged.
+    profile = turn_profile()
+    if profile is not None:
+        if profile.wire != "anthropic":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "capability_unsupported",
+                    "message": (
+                        f"the {profile.label!r} profile cannot read a network "
+                        "diagram — this tool needs an Anthropic-wire profile. "
+                        "Switch to one, or add the components by hand."
+                    ),
+                },
+            )
+        if not profile.vision:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "capability_unsupported",
+                    "message": (
+                        f"the {profile.label!r} profile does not support image "
+                        "input (vision is disabled for this profile), so it "
+                        "cannot read a network diagram — switch to a "
+                        "vision-capable profile."
+                    ),
+                },
+            )
+
     if client is None:
         from services import chat_service
-        client, err = chat_service._build_anthropic_client()
+        client, err = chat_service._anthropic_client_for_profile(profile)
         if client is None:
             raise HTTPException(
                 status_code=503,
                 detail={
                     "error_kind": err or "internal_error",
-                    "message": "vision sub-call requires ANTHROPIC_API_KEY",
+                    "message": (
+                        "vision sub-call could not build a client for the "
+                        "profile this chat is running on"
+                    ),
                 },
             )
 
@@ -2753,8 +2822,12 @@ def reconstruct_network_from_image(
     async def _ask_vision() -> dict:
         from services.chat_service import DEFAULT_MODEL  # noqa: PLC0415
 
+        # C-3 — the turn profile's own model, so the sub-call bills what the
+        # user selected. DEFAULT_MODEL only when there is no bound profile.
+        vision_model = profile.model if profile is not None else DEFAULT_MODEL
+
         with client.messages.stream(
-            model=DEFAULT_MODEL,
+            model=vision_model,
             max_tokens=2048,
             system="You return ONLY raw JSON when asked.",
             messages=[{"role": "user", "content": user_content}],

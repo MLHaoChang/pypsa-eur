@@ -88,6 +88,10 @@ class ProfileValidationError(ValueError):
     """A profile (or the set being saved) fails validation."""
 
 
+class ProfileNotConfiguredError(ProfileValidationError):
+    """An explicitly-named profile id does not exist in the current store."""
+
+
 @dataclass(frozen=True)
 class LLMProfile:
     id: str  # slug [a-z0-9-]{1,48}
@@ -499,16 +503,33 @@ def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
 
 def resolve_profile(profile_id: str | None) -> LLMProfile:
     """
-    The profile named by `profile_id`, or the active profile if `profile_id`
-    is None or names nothing in the current store.
+    The profile named by `profile_id`, or the active profile when
+    `profile_id` is None.
+
+    C-4 — an EXPLICIT id that names nothing raises `ProfileNotConfiguredError`
+    rather than falling through to the active profile. The old fall-through
+    was documented as intended, but it made an unresolvable selection render
+    as SUCCESS: a user picks `local-ollama` believing their data stays on
+    localhost, the id no longer exists, and the prompt goes to whatever
+    profile is active — a different provider, wire and model — with every
+    frame reporting a normal turn. That is the ADR-0001 shape, and
+    `frontend/src/api/chat.ts` already stated the refusing contract as fact.
+
+    `None` still means "the active profile", which is what the zero-config
+    path and `resolve_active()` rely on.
 
     Legacy model strings (pre-profile chat sessions that stored a bare model
     name rather than a profile id) are NOT handled here — that translation is
-    Task 7's, in the chat harness that still has the legacy value to look at.
+    Task 7's, in the chat harness that still has the legacy value to look at,
+    and it keeps its documented free-text passthrough.
     """
     profiles, active_id = load_profiles()
     by_id = {p.id: p for p in profiles}
-    if profile_id is not None and profile_id in by_id:
+    if profile_id is not None:
+        if profile_id not in by_id:
+            raise ProfileNotConfiguredError(
+                f"no configured profile {profile_id!r}"
+            )
         return by_id[profile_id]
     return by_id[active_id]
 

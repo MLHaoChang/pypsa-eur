@@ -1678,6 +1678,53 @@ def _filter_non_portable_blocks(content: Any, wire: str) -> Any:
     ]
 
 
+def _anthropic_client_for_profile(profile: Any | None) -> tuple[Any, str | None]:
+    """
+    `(anthropic SDK client, error_kind|None)` for an anthropic-wire profile.
+
+    Extracted from `_provider_for_profile` (C-3) so the vision sub-call in
+    `chat_tools.reconstruct_network_from_image` resolves its credentials the
+    SAME way a turn does, instead of always reaching for the ambient
+    `ANTHROPIC_API_KEY`. One source of truth, so the two cannot drift.
+
+    `profile is None` means "no profile bound" — a direct call outside a turn —
+    and takes the plain `_build_anthropic_client()` path, i.e. exactly the
+    pre-profile behaviour.
+
+      * the built-in `ANTHROPIC_API_KEY` slot -> the EXISTING
+        `_build_anthropic_client()` call, reached through the module attribute
+        so a test that monkeypatches `chat_service._build_anthropic_client`
+        still sees its double. Byte-identical zero-config behaviour, including
+        `missing_api_key` and `sdk_not_installed`.
+      * any OTHER key slot -> `anthropic.Anthropic(api_key=<slot value>)`.
+        The ONE sanctioned explicit `api_key=` kwarg in this codebase:
+        `llm_anthropic.build_client` never passes the key explicitly (so a
+        literal value cannot land in a repr or a log) because the SDK reads the
+        one blessed env var itself; a custom slot has no SDK-known name, so
+        passing it explicitly is the only way to honour it.
+      * `auth == "bearer"` with an empty/unset slot -> `(None, "missing_api_key")`.
+    """
+    if profile is None or profile.key_env == "ANTHROPIC_API_KEY":
+        return _build_anthropic_client()
+    key_value = os.environ.get(profile.key_env) if profile.key_env else None
+    if profile.auth == "bearer" and not key_value:
+        return None, "missing_api_key"
+    try:
+        import anthropic  # noqa: PLC0415
+    except ImportError:
+        return None, "sdk_not_installed"
+    try:
+        # Sanctioned explicit api_key= kwarg — see docstring above.
+        built = anthropic.Anthropic(api_key=key_value)
+    except Exception as exc:  # noqa: BLE001 — surface as typed error kind
+        logger.warning(
+            "chat: anthropic client init failed for profile %r: %s",
+            profile.id, _redact_for_log(exc),
+        )
+        return None, "unauthorized"
+    return built, None
+
+
 def _provider_for_profile(
     profile: Any, client: Any | None = None
 ) -> tuple[Any, str | None]:
@@ -1726,34 +1773,9 @@ def _provider_for_profile(
     if profile.wire == "anthropic":
         if client is not None:
             return llm_anthropic.AnthropicProvider(client), None
-        if profile.key_env == "ANTHROPIC_API_KEY":
-            # The built-in slot: route through the SAME call the inline
-            # construction site always used, so this branch's error
-            # behaviour (missing_api_key / sdk_not_installed / unauthorized)
-            # is byte-identical to pre-Task-6 zero-config chat, not merely
-            # equivalent.
-            built, err = _build_anthropic_client()
-            if built is None:
-                return None, err
-            return llm_anthropic.AnthropicProvider(built), None
-        key_value = (
-            os.environ.get(profile.key_env) if profile.key_env else None
-        )
-        if profile.auth == "bearer" and not key_value:
-            return None, "missing_api_key"
-        try:
-            import anthropic  # noqa: PLC0415
-        except ImportError:
-            return None, "sdk_not_installed"
-        try:
-            # Sanctioned explicit api_key= kwarg — see docstring above.
-            built = anthropic.Anthropic(api_key=key_value)
-        except Exception as exc:  # noqa: BLE001 — surface as typed error frame
-            logger.warning(
-                "chat: anthropic client init failed for profile %r: %s",
-                profile.id, _redact_for_log(exc),
-            )
-            return None, "unauthorized"
+        built, err = _anthropic_client_for_profile(profile)
+        if built is None:
+            return None, err
         return llm_anthropic.AnthropicProvider(built), None
 
     if profile.wire == "openai":
@@ -2619,6 +2641,7 @@ def run_turn(
     attachment_file_ids: list[str] | None = None,
     ui_context: dict[str, Any] | None = None,
     wire_conflict: bool = False,
+    unknown_profile_id: str | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -2679,6 +2702,25 @@ def run_turn(
     — `frontend/src/api/chat.ts` discards a non-2xx SSE body, so the typed
     frame is the only way the guidance copy reaches the panel.
     """
+    # C-4 — the caller named a profile that is not configured. Like
+    # `wire_conflict` this is NOT a turn: two frames, nothing touched. It is
+    # refused rather than silently served by the ACTIVE profile, because a
+    # silent substitution sends the user's prompt to a different provider,
+    # wire and model while every frame reports success — the exact
+    # "unresolvable renders as success" shape ADR-0001 exists to forbid.
+    if unknown_profile_id is not None:
+        yield "error", {
+            "error_kind": "unknown_profile_id",
+            "message": (
+                "the model profile this chat asked for is no longer "
+                "configured, so the message was not sent — it would "
+                "otherwise have gone to a different provider. Pick a "
+                "profile from the model menu and try again."
+            ),
+        }
+        yield "session_done", {"reason": "unknown_profile_id"}
+        return
+
     if wire_conflict:
         yield "error", {
             "error_kind": "profile_switch_requires_new_chat",
@@ -2754,6 +2796,14 @@ def run_turn(
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
+        # C-3 — the turn's profile must not outlive the turn. A tool invoked
+        # OUTSIDE a turn (a direct call, a test) has no profile to honour and
+        # must take the pre-profile path; leaving a stale value bound would
+        # make that depend on whatever ran in this context before it. Pure
+        # side-effect, so the yielded frame ORDER several tests pin
+        # byte-exactly is unchanged on every exit.
+        from services import chat_tools as _chat_tools  # noqa: PLC0415
+        _chat_tools.set_turn_profile(None)
         # Every exit reached from inside this process is an end the user can
         # observe, so none of them should leave a "this turn was interrupted"
         # record behind. Only a crash skips this line — which is the point.
@@ -2891,6 +2941,13 @@ def _run_turn_body(
     # every path (a FakeProvider-injected test still wants its scripted A8
     # scenario to fire off `profile.fallback_model`).
     profile = _resolve_turn_profile(session)
+    # C-3 — publish the turn's profile to the tool layer. A tool that makes
+    # its own model sub-call (`reconstruct_network_from_image`) must bill the
+    # model the user selected and must not silently reach a provider they did
+    # not choose. Set here, once the profile is resolved and before any tool
+    # can be dispatched; the executor submit site already copies the context.
+    from services import chat_tools as _chat_tools  # noqa: PLC0415
+    _chat_tools.set_turn_profile(profile)
 
     if provider is None:
         # `_provider_for_profile` reproduces the exact priority this branch

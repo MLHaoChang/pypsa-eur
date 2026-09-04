@@ -89,10 +89,19 @@ def test_non_bool_capability_field_is_skipped_builtins_still_load(appdata):
     assert active == "anthropic-sonnet"
 
 
-def test_resolve_unknown_falls_back_to_active(appdata):
+def test_resolve_unknown_is_refused_and_set_active_moves_the_pointer(appdata):
+    """
+    INVERTED BY C-4. This test used to assert
+    `resolve_profile("nope").id == "anthropic-sonnet"` — i.e. it pinned the
+    silent fall-through as correct, which is how the defect survived review.
+    An unresolvable selection must not render as a successful turn on a
+    different provider; `frontend/src/api/chat.ts` already documented the
+    refusing contract. The `set_active` half below was always right and is
+    kept unchanged.
+    """
     from services import llm_config
-    assert llm_config.resolve_profile("nope").id == "anthropic-sonnet"
-    llm_config_profiles, _ = llm_config.load_profiles()
+    with pytest.raises(llm_config.ProfileNotConfiguredError):
+        llm_config.resolve_profile("nope")
     llm_config.set_active("anthropic-opus")
     assert llm_config.resolve_active().id == "anthropic-opus"
 

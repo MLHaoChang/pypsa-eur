@@ -41,7 +41,10 @@ export interface ChatStreamRequest {
   message?: string
   /**
    * Which configured profile to bind this session to. Preferred over
-   * `model`; the server resolves it and refuses an unconfigured id.
+   * `model`; the server resolves it and refuses an unconfigured id — as a
+   * typed `unknown_profile_id` error frame on a 200 SSE stream, not a 4xx,
+   * since a non-2xx SSE body is discarded here. No turn is run and the
+   * session keeps whatever profile it was already bound to.
    * OMIT IT to mean "the server's active profile" — sending one
    * unconditionally would re-assert a stale choice every turn and undo both
    * an admin's `set_active_profile` and any A8 fallback.
