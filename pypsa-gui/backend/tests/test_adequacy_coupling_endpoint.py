@@ -565,8 +565,16 @@ def test_the_completed_payload_carries_the_studys_own_shape(
     assert body["final"] == row
 
     # §3's normative CRN call: one batch of exactly N draws.
+    # `stop_event=None` is passed EXPLICITLY since Phase 12e, and belongs in
+    # this contract rather than being tolerated by it: this call is a REPLAY of
+    # the baseline's batch sequence, which is what the loop's common random
+    # numbers rest on, so a live flag here would truncate the replay and return
+    # a wrong answer with `status="ok"`. The value is the default, so nothing
+    # about the call changed — but the explicitness is the point, and
+    # `test_F1j_no_replay_call_site_can_forward_the_stop_flag` enforces it
+    # statically over the source.
     assert stubs.mc_kwargs == [{"draws": DRAWS, "seed": SEED,
-                                "max_draws": DRAWS}]
+                                "max_draws": DRAWS, "stop_event": None}]
 
 
 def test_a_multi_period_evaluation_adds_the_per_period_caveat(
