@@ -25,6 +25,11 @@ except (AttributeError, ValueError):
 import pandas as pd
 import pypsa
 from routers import simulation as sim_router
+# The results serializers live in `routers/results.py` — they were carved out
+# of `routers/simulation.py` and this driver still reached for them there, so
+# every scenario below crashed on an AttributeError. `sim_router` is still the
+# right home for `_state`, which is why both imports are here.
+from routers import results as results_router
 from services.pypsa_service import PyPSAService
 from services.solver_service import SolverConfig
 
@@ -43,13 +48,26 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
         print(f"  [FAIL] {label}" + (f" — {msg}" if msg else ""))
 
 
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
+
 def _has_in(path_str: str, snippet: str) -> bool:
     return snippet in (REPO / path_str).read_text(encoding="utf-8")
 
 
 def test_c1_lost_load_voll() -> None:
     print("\n[C1] lost_load emits voll_eur_per_mwh")
-    ok = _has_in("backend/routers/simulation.py",
+    # `/results/lost_load` is served from `routers/results.py` — the read-only
+    # serializers were carved out of `routers/simulation.py`, which this
+    # assertion still named.
+    ok = _has_in("backend/routers/results.py",
                  "voll_eur_per_mwh")
     _step("voll_eur_per_mwh in /results/lost_load payload", ok)
     ok2 = _has_in("frontend/src/api/simulation.ts", "voll_eur_per_mwh: number")
@@ -70,7 +88,10 @@ def test_c2_lines_table_s_nom_opt() -> None:
 
 def test_c3_line_duals_voll_bound() -> None:
     print("\n[C3] line_duals returns voll_bound_hours per line")
-    text = (REPO / "backend" / "routers" / "simulation.py").read_text(encoding="utf-8")
+    # `get_line_duals`' body now lives in `services/results/line_duals.py`
+    # (out of simulation.py into results.py, then into a service by the
+    # 2026-09-04 decomposition).
+    text = (REPO / "backend" / "services" / "results" / "line_duals.py").read_text(encoding="utf-8")
     has_field = '"voll_bound_hours": voll_bound' in text
     has_threshold = "VOLL_THRESHOLD = 10_000" in text
     _step("voll_bound_hours field emitted", has_field)
@@ -83,15 +104,22 @@ def test_c3_line_duals_voll_bound() -> None:
 
 def test_c4_carrier_lowercase() -> None:
     print("\n[C4] carrier names are lowercase across endpoints")
-    text = (REPO / "backend" / "routers" / "simulation.py").read_text(encoding="utf-8")
+    # These three lowercasing rules used to be read out of one file. They never
+    # all lived there: the co2_by_carrier one is in the SOLVER's cost-decomposition
+    # logging, not in any results endpoint, so that assertion was already reading
+    # the wrong source before the 2026-09-04 decomposition moved the other two
+    # into services. Each is now checked where it actually lives.
+    cb_text = (REPO / "backend" / "services" / "results" / "cost_breakdown.py").read_text(encoding="utf-8")
+    em_text = (REPO / "backend" / "services" / "results" / "emissions.py").read_text(encoding="utf-8")
+    solver_text = (REPO / "backend" / "services" / "solver" / "diagnostics.py").read_text(encoding="utf-8")
     # cost_breakdown lowers carrier:
-    has_cb_lower = 'carrier = carrier.lower() if carrier else ""' in text
+    has_cb_lower = 'carrier = carrier.lower() if carrier else ""' in cb_text
     # emissions lowers carrier:
     has_em_lower = (
-        '(str(gens.at[name, "carrier"]) if "carrier" in gens.columns else "").lower()' in text
+        '(str(gens.at[name, "carrier"]) if "carrier" in gens.columns else "").lower()' in em_text
     )
     # co2_by_carrier keys lowered
-    has_co2_lower = 'str(k).lower(): float(v)' in text
+    has_co2_lower = 'str(k).lower(): float(v)' in solver_text
     _step("cost_breakdown normalises carrier to lowercase", has_cb_lower)
     _step("emissions normalises gen carrier to lowercase", has_em_lower)
     _step("co2_by_carrier lookup keys lowercased", has_co2_lower)
@@ -156,7 +184,7 @@ def test_live_endpoint_smoke() -> None:
     n.optimize(solver_name="highs")
     PyPSAService.set_network(n)
     sim_router._state["solver_config"] = SolverConfig()
-    res = sim_router.get_cost_breakdown()
+    res = results_router.get_cost_breakdown()
     by_c = res.get("by_carrier", []) if isinstance(res, dict) else []
     carriers = {r.get("carrier") for r in by_c}
     _step("by_carrier rows are lowercase",
@@ -179,7 +207,7 @@ def main() -> int:
         try:
             fn()
         except Exception as e:
-            print(f"  {label} crashed: {type(e).__name__}: {e}")
+            _crashed("{label}", e)
     print()
     print("=" * 60)
     print(f"Total: {PASS_COUNT + FAIL_COUNT}  Pass: {PASS_COUNT}  Fail: {FAIL_COUNT}")

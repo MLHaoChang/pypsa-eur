@@ -24,6 +24,11 @@ except (AttributeError, ValueError):
 import pandas as pd
 import pypsa
 from routers import simulation as sim_router
+# The results serializers live in `routers/results.py` — they were carved out
+# of `routers/simulation.py` and this driver still reached for them there, so
+# every scenario below crashed on an AttributeError. `sim_router` is still the
+# right home for `_state`, which is why both imports are here.
+from routers import results as results_router
 from services.pypsa_service import PyPSAService
 from services.solver_service import SolverConfig
 
@@ -40,6 +45,16 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
         FAIL_COUNT += 1
         print(f"  [FAIL] {label}" + (f" — {msg}" if msg else ""))
 
+
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
 
 def _install(n: pypsa.Network) -> None:
     PyPSAService.set_network(n)
@@ -111,7 +126,7 @@ def test_carrier_kpis_multi_period() -> None:
     n = _build_multi_period_network()
     _solve_with_subsidy(n)
     _install(n)
-    payload = sim_router.get_carrier_kpis()
+    payload = results_router.get_carrier_kpis()
     rows = payload.get("rows", []) if isinstance(payload, dict) else []
     _step("returns non-empty rows on multi-period",
           len(rows) > 0,
@@ -137,7 +152,7 @@ def test_prices_merit_order_relaxed() -> None:
     n = _build_multi_period_network()
     _solve_with_subsidy(n)
     _install(n)
-    payload = sim_router.get_prices()
+    payload = results_router.get_prices()
     if not isinstance(payload, dict) or "data" not in payload:
         _step("prices endpoint returns data", False, str(payload)[:200])
         return
@@ -192,15 +207,15 @@ def main() -> int:
     try:
         test_overview_voll_currency()
     except Exception as e:
-        print(f"  A1 crashed: {type(e).__name__}: {e}")
+        _crashed("A1", e)
     try:
         test_carrier_kpis_multi_period()
     except Exception as e:
-        print(f"  A3 crashed: {type(e).__name__}: {e}")
+        _crashed("A3", e)
     try:
         test_prices_merit_order_relaxed()
     except Exception as e:
-        print(f"  A2 crashed: {type(e).__name__}: {e}")
+        _crashed("A2", e)
     print()
     print("=" * 60)
     print(f"Total: {PASS_COUNT + FAIL_COUNT}  Pass: {PASS_COUNT}  Fail: {FAIL_COUNT}")

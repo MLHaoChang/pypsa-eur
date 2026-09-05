@@ -24,6 +24,11 @@ except (AttributeError, ValueError):
 import pandas as pd
 import pypsa
 from routers import simulation as sim_router
+# The results serializers live in `routers/results.py` — they were carved out
+# of `routers/simulation.py` and this driver still reached for them there, so
+# every scenario below crashed on an AttributeError. `sim_router` is still the
+# right home for `_state`, which is why both imports are here.
+from routers import results as results_router
 from services.pypsa_service import PyPSAService
 from services.solver_service import SolverConfig
 
@@ -40,6 +45,16 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
         FAIL_COUNT += 1
         print(f"  [FAIL] {label}" + (f" — {msg}" if msg else ""))
 
+
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
 
 def _install(n: pypsa.Network) -> None:
     PyPSAService.set_network(n)
@@ -75,7 +90,7 @@ def test_b1_capex_expansion() -> None:
     n = _build_expansion_network()
     n.optimize(solver_name="highs")
     _install(n)
-    res = sim_router.get_cost_breakdown()
+    res = results_router.get_cost_breakdown()
     if not isinstance(res, dict):
         _step("cost_breakdown returns dict", False, str(res)[:200])
         return
@@ -118,7 +133,7 @@ def test_b3_curtailment_filtered() -> None:
           p_nom=50.0, marginal_cost=0.0, capital_cost=0.0, p_max_pu=0.5)
     n.optimize(solver_name="highs")
     _install(n)
-    res = sim_router.get_curtailment()
+    res = results_router.get_curtailment()
     if not isinstance(res, dict):
         _step("curtailment endpoint returns payload", False, str(res)[:120])
         return
@@ -131,7 +146,13 @@ def test_b3_curtailment_filtered() -> None:
 def test_b4_line_duals_years_scaling() -> None:
     print("\n[B4] get_line_duals applies investment_period_weightings.years")
     repo = pathlib.Path(__file__).resolve().parent.parent.parent
-    path = repo / "backend" / "routers" / "simulation.py"
+    # `get_line_duals`' arithmetic lives in `services/results/line_duals.py`.
+    # It has moved twice: out of `routers/simulation.py` into `routers/results.py`
+    # when the read-only serializers were carved out, and out of the router into
+    # a service by the 2026-09-04 decomposition. This assertion still named the
+    # ORIGINAL file, so it read a source that no longer contains the code and
+    # reported "missing year multiplier" no matter what the code did.
+    path = repo / "backend" / "services" / "results" / "line_duals.py"
     text = path.read_text(encoding="utf-8")
     has_period_weight = "period_weight_series" in text and "row_w = row_w * period_weight_series" in text
     _step("line_duals multiplies congestion rent by years weights",
@@ -142,7 +163,9 @@ def test_b4_line_duals_years_scaling() -> None:
 def test_b5_price_drivers_voll_heuristic() -> None:
     print("\n[B5] price_drivers detects high-price load_shedding heuristic")
     repo = pathlib.Path(__file__).resolve().parent.parent.parent
-    path = repo / "backend" / "routers" / "simulation.py"
+    # Same history as B4: `get_price_drivers`' body is now in
+    # `services/results/prices.py`, not in the router it was first written in.
+    path = repo / "backend" / "services" / "results" / "prices.py"
     text = path.read_text(encoding="utf-8")
     has_mc_multiplier = "MAX_MC_MULTIPLIER" in text
     has_load_shedding_check = 'diag = "load_shedding"' in text and "MAX_MC_MULTIPLIER * best_mc" in text
@@ -174,7 +197,7 @@ def test_b6_storage_emissions() -> None:
           cyclic_state_of_charge=False)
     n.optimize(solver_name="highs")
     _install(n)
-    res = sim_router.get_emissions()
+    res = results_router.get_emissions()
     if not isinstance(res, dict):
         _step("emissions returns dict", False, str(res)[:120])
         return
@@ -214,7 +237,7 @@ def main() -> int:
         try:
             fn()
         except Exception as e:
-            print(f"  {label} crashed: {type(e).__name__}: {e}")
+            _crashed("{label}", e)
     print()
     print("=" * 60)
     print(f"Total: {PASS_COUNT + FAIL_COUNT}  Pass: {PASS_COUNT}  Fail: {FAIL_COUNT}")

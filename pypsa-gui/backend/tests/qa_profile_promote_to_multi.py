@@ -46,6 +46,16 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
         print(f"  [FAIL] {label}" + (f" — {msg}" if msg else ""))
 
 
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
+
 def _solar_shape(snapshots: pd.DatetimeIndex) -> np.ndarray:
     """Sinusoidal solar profile — peaks at noon, zero at night. Average ~0.2."""
     hours = snapshots.hour.values.astype(float)
@@ -140,13 +150,13 @@ def main() -> int:
     try:
         test_flat_to_multi_profile_preserved()
     except Exception as e:
-        print(f"  scenario 1 crashed: {type(e).__name__}: {e}")
+        _crashed("scenario 1", e)
         import traceback; traceback.print_exc()
     net_router._user_ts.clear()
     try:
         test_reapply_no_index_drift_on_double_call()
     except Exception as e:
-        print(f"  scenario 2 crashed: {type(e).__name__}: {e}")
+        _crashed("scenario 2", e)
         import traceback; traceback.print_exc()
     print()
     print("=" * 60)
