@@ -703,3 +703,32 @@ separately (the `_bulk` literal check off, `allow_inf_nan=True`): S29.5 reads
 created. And S29.6 earned its place before it was bitten: on the first fixed
 build it read **500**, because starlette's JSON encoder refuses to write the
 `inf` that pydantic echoes in its error body — the app owns that handler now.
+
+## S30 — a NaN in any finite-default LP input is refused (Phase 12g)
+
+12f refused NaN in five bounds. Measuring the next backlog item — three storage
+constants that mask an energy-balance row — widened it: on two fixtures a NaN in
+**23** distinct finite-default input attributes silently changes the plan and
+one crashes the build, and a NaN `GlobalConstraint.constant` **deletes a CO2
+cap** (gas 100 → 300 MWh). PyPSA's own `n.add(attr=None)` and `n.add(attr=NaN)`
+write the class default for every one, so NaN is never "unset" there. The set
+is read from PyPSA's metadata over a pinned component set (the seven LP
+components plus GlobalConstraint), censused clean on **392 of 392** suite
+networks and the golden fixture.
+
+| id | check |
+|----|-------|
+| S30.1 | `PATCH /_bulk` clearing `state_of_charge_initial` → 200 and it reads back **0.0**, not null (a NaN there masks the energy balance's right-hand side) |
+| S30.2 | clearing `marginal_cost` → 200 and it reads back **0.0** (a NaN cost drops the cost term — the unit is free) |
+| S30.3 | `_bulk` with a JSON `NaN` literal in `inflow` → **422**, value untouched |
+| S30.4 | `POST /storage_units` with `inflow: Infinity` → **422**, nothing created |
+| S30.5 | a 2-of-3-row `inflow` series is accepted at the PUT (coverage is preflight's call), and **Run refuses it** `validation_failed`, naming the unit and `inflow`. Before 12g the solve ran `optimal` dispatching from an empty store (measured on shipped code by the plan's review) |
+| S30.6 | `PUT /timeseries/storage_units/inflow` with a null hour → **422** (pin of the 12f-review rule for this phase's attributes) |
+
+**Bitten live** (recorded in the plan): restoring the five-only walk and the
+five-only `_bulk` mapping fails **S30.1, S30.2 and S30.5** with the exact
+pre-12g symptoms — `state_of_charge_initial` and `marginal_cost` read back
+`null`, and the 2-of-3 inflow series solves `optimal` with the balance masked —
+while S30.3, S30.4 and S30.6 stay green because the literal check, the schema
+and the time-series rule are separate guards the bite leaves in place.
+Restore by hash.

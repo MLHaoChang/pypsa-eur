@@ -4587,6 +4587,137 @@ def suite_S29():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
 
+def suite_S30():
+    """
+    A NaN in ANY finite-default LP input is refused, live (Phase 12g).
+
+    12f refused NaN in five bounds; measuring the next backlog item widened it
+    to every numeric input whose PyPSA class default is finite — a NaN there is
+    never "unset" (PyPSA's own `n.add(attr=None)` writes the default), and it
+    drops a term or a constraint row at solve time: a 2-of-3 inflow series
+    masks that hour's energy balance (measured: dispatch from an empty store).
+
+    Bitten live (recorded in the plan): restore the five-only walk and S30.5
+    solves `optimal` with the balance masked; restore the five-only `_bulk`
+    mapping and S30.1/S30.2 read back null.
+    """
+    print("\nS30 - A NaN in any finite-default LP input is refused, live (area 30)")
+    name = "qa_e2e_nonfinite_inputs"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2, 3, 4, 5, 6):
+            skip(f"S30.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST", body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-01-01 02:00",
+                            "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "g", "bus": "b", "carrier": "gas",
+                            "p_nom": 200.0, "marginal_cost": 10.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    built.append(http("/api/network/storage_units", method="POST",
+                      body={"name": "su", "bus": "b", "carrier": "gas",
+                            "p_nom": 100.0, "max_hours": 2.0,
+                            "state_of_charge_initial": 50.0})[0])
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2, 3, 4, 5, 6):
+            skip(f"S30.{i}", f"fixture build failed: {built}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    def _read(comp, asset, col):
+        _, rows = http(f"/api/network/{comp}")
+        rows = rows.get(comp, []) if isinstance(rows, dict) else (rows or [])
+        for r in rows:
+            if isinstance(r, dict) and r.get("name") == asset:
+                return r.get(col)
+        return "<absent>"
+
+    # S30.1 - clearing state_of_charge_initial writes PyPSA's default 0.0
+    st1, _ = http("/api/network/_bulk", method="PATCH",
+                  body={"component_class": "StorageUnit", "names": ["su"],
+                        "updates": {"state_of_charge_initial": None}})
+    got1 = _read("storage_units", "su", "state_of_charge_initial")
+    record("S30.1", st1 in (200, 201) and got1 == 0.0,
+           f"clear state_of_charge_initial -> {st1}; reads back {got1!r} (want 0.0, not null)")
+
+    # S30.2 - clearing marginal_cost writes 0.0, not NaN (a NaN cost made the unit free)
+    st2, _ = http("/api/network/_bulk", method="PATCH",
+                  body={"component_class": "Generator", "names": ["g"],
+                        "updates": {"marginal_cost": None}})
+    got2 = _read("generators", "g", "marginal_cost")
+    record("S30.2", st2 in (200, 201) and got2 == 0.0,
+           f"clear marginal_cost -> {st2}; reads back {got2!r} (want 0.0, not null)")
+    http("/api/network/_bulk", method="PATCH",
+         body={"component_class": "Generator", "names": ["g"],
+               "updates": {"marginal_cost": 10.0}})
+
+    # S30.3 - a NaN literal in inflow is refused, value untouched
+    st3, _ = http("/api/network/_bulk", method="PATCH",
+                  body={"component_class": "StorageUnit", "names": ["su"],
+                        "updates": {"inflow": float("nan")}})
+    got3 = _read("storage_units", "su", "inflow")
+    record("S30.3", st3 == 422 and got3 == 0.0,
+           f"_bulk inflow=NaN -> {st3} (want 422); inflow reads back {got3!r} (want 0.0)")
+
+    # S30.4 - the create schema refuses Infinity in a finite-default field
+    st4, _ = http("/api/network/storage_units", method="POST",
+                  body={"name": "su_inf", "bus": "b", "carrier": "gas", "p_nom": 10.0,
+                        "max_hours": 2.0, "inflow": float("inf")})
+    created = _read("storage_units", "su_inf", "name")
+    record("S30.4", st4 == 422 and created == "<absent>",
+           f"POST storage_unit inflow=Infinity -> {st4} (want 422); created={created != '<absent>'}")
+
+    # S30.5 - a 2-of-3-row inflow series is accepted at the PUT (coverage is
+    # preflight's call), and Run then refuses it naming the unit and `inflow`.
+    # Before 12g this solved `optimal` dispatching from an empty store.
+    _, snaps = http("/api/network/snapshots")
+    idx = (snaps or {}).get("snapshots") or []
+    st5p, _ = http("/api/network/timeseries/storage_units/inflow", method="PUT",
+                   body={"index": idx[:2], "columns": ["su"], "data": [[0.0], [0.0]]})
+    # The preflight route judges the RAW network — the surface the Validate
+    # panel and both loops' guards read — so the refusal is named there (the
+    # S21 lesson), and Run must agree.
+    st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+    hits = [i for i in ((pf or {}).get("issues") or [])
+            if str(i.get("code", "")).startswith("nonfinite_storage_constant")
+            and i.get("name") == "su" and "inflow" in str(i.get("message", ""))]
+    st5, _ = http("/api/simulation/run", method="POST", body={"solver_name": "highs"})
+    ok_started = st5 in (200, 201, 202)
+    st_fin, fin = _wait_solve() if ok_started else (0, {})
+    cond5 = str((fin or {}).get("condition") or "")
+    record("S30.5",
+           st5p in (200, 201) and st_pf == 200 and len(hits) == 1
+           and ok_started and "validation_failed" in cond5,
+           f"PUT 2-of-3 inflow -> {st5p}; preflight names su+inflow: {len(hits)} issue(s) "
+           f"[{(hits[0].get('code') if hits else '-')}]; run condition={cond5!r} "
+           "(want validation_failed; before 12g: optimal, dispatch from an empty store)")
+
+    # S30.6 - a null inflow hour is refused at the PUT (pin of the 12f-review rule)
+    st6, _ = http("/api/network/timeseries/storage_units/inflow", method="PUT",
+                  body={"index": idx, "columns": ["su"], "data": [[0.0], [None], [0.0]]})
+    record("S30.6", st6 == 422, f"PUT null inflow hour -> {st6} (want 422)")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
 def _wait_solve(timeout=600):
     """Poll /api/simulation/status until it leaves `running`."""
     import time as _t
@@ -4695,6 +4826,8 @@ def main() -> int:
         suite_S28()
     if run("S29"):
         suite_S29()
+    if run("S30"):
+        suite_S30()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

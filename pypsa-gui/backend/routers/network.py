@@ -1945,22 +1945,41 @@ _FINITE_DEFAULT_BOUNDS = ("p_max_pu", "p_min_pu", "s_max_pu",
                           "e_max_pu", "e_min_pu")
 
 
-def _finite_bound_default(component_class: str, col: str) -> float:
-    """What `n.add(component_class, ..., col=None)` would have written.
-
-    Read from PyPSA's own component defaults rather than hard-coded, so the
-    two cannot drift; the fallbacks are the measured values and exist only so
-    a PyPSA that reshapes `defaults` cannot turn this into a NaN write, which
-    is the exact defect the caller is fixing.
+def _finite_input_meta(component_class: str, col: str):
+    """``(default, type)`` for ``col`` when it is a numeric INPUT attribute of
+    ``component_class`` whose PyPSA class default is finite — the set Phase
+    12g refuses NaN in — else ``None``. Read from PyPSA's own component
+    metadata (`services.validation_service.finite_default_inputs`), so the
+    two cannot drift; 12f's five bounds are the fallback so a PyPSA that
+    reshapes `defaults` cannot turn a clear into a NaN write, which is the
+    exact defect this exists to fix.
     """
     try:
         from services.pypsa_service import PyPSAService
+        from services.validation_service import finite_default_inputs
         n = PyPSAService.get_network()
-        return float(n.components[component_class].defaults.at[col, "default"])
+        meta = finite_default_inputs(n.components[component_class])
+        if col in meta:
+            dv, _varying, typ = meta[col]
+            return float(dv), typ
+        return None
     except Exception:                                         # noqa: BLE001
+        if col not in _FINITE_DEFAULT_BOUNDS:
+            return None
         if col == "p_min_pu":
-            return -1.0 if component_class == "StorageUnit" else 0.0
-        return 0.0 if col == "e_min_pu" else 1.0
+            return (-1.0 if component_class == "StorageUnit" else 0.0), "float"
+        return (0.0 if col == "e_min_pu" else 1.0), "float"
+
+
+def _finite_bound_default(component_class: str, col: str) -> float:
+    """12f's name, kept for its callers: the class default of one of the five
+    bounds, through the metadata."""
+    meta = _finite_input_meta(component_class, col)
+    if meta is not None:
+        return meta[0]
+    if col == "p_min_pu":
+        return -1.0 if component_class == "StorageUnit" else 0.0
+    return 0.0 if col == "e_min_pu" else 1.0
 
 
 @router.patch("/_bulk")
@@ -2047,7 +2066,15 @@ def bulk_update(body: dict) -> dict:
                 # v_ang_max) — clearing those to inf is likewise their PyPSA
                 # default, so the resulting network is valid. Everything else
                 # keeps NaN ("missing"), as before.
-                if col.endswith("_max") or col == "lifetime":
+                # Phase 12g: the finite-default metadata decides FIRST. The
+                # suffix rules below target ±inf-default columns (`p_nom_max`,
+                # `lifetime`, `e_sum_min`) — but `Transformer.phase_shift_max`
+                # ends in `_max` and defaults to 0.0, and clearing it to `inf`
+                # made the next solve refuse the value `_bulk` itself wrote.
+                _meta = _finite_input_meta(component_class, col)
+                if _meta is not None:
+                    coerced[col] = _meta[0]
+                elif col.endswith("_max") or col == "lifetime":
                     coerced[col] = float("inf")
                 elif col == "e_sum_min":
                     coerced[col] = float("-inf")
@@ -2083,12 +2110,15 @@ def bulk_update(body: dict) -> dict:
             # `null` branch above. It masks the LP row exactly as a cleared
             # cell did, so it is refused here — the same answer the time-
             # series routes give — rather than accepted and refused at solve.
-            if col in _FINITE_DEFAULT_BOUNDS and not math.isfinite(coerced[col]):
+            if not math.isfinite(coerced[col]) and (
+                    col in _FINITE_DEFAULT_BOUNDS
+                    or _finite_input_meta(component_class, col) is not None):
+                # Phase 12g: every finite-default input, not only the five.
                 raise HTTPException(
                     422,
                     f"Column '{col}' must be a finite number; got {value!r}. "
-                    "PyPSA does not default a non-finite bound, it drops the "
-                    "constraint, leaving the asset unbounded. Send null to "
+                    "PyPSA does not default a non-finite value here, it drops "
+                    "the term or the constraint that reads it. Send null to "
                     "restore the default.")
             continue
         # Strings / objects pass through. We still cast to str if the user
@@ -2106,6 +2136,12 @@ def bulk_update(body: dict) -> dict:
             if isinstance(new_carrier, str):
                 ensure_carrier(n, new_carrier)
         for col, value in coerced.items():
+            # Phase 12g, measured and left alone: pandas 3.0.5 keeps an int64
+            # column int64 when the written value is integral (`0`, `0.0`,
+            # `2030.0` alike) and upcasts only on NaN — so `build_year`
+            # cleared to its default 0 stays `int64` with no help. A dtype
+            # restore written here on the plan review's contrary probe did
+            # not bite and was removed.
             df.loc[name_strs, col] = value
 
     # One audit entry per bulk op (not per component). Pretty-print the values

@@ -11,6 +11,14 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_valida
 # the schema boundary so the rest of the backend sees a plain `float`.
 # Without this, every "Apply" with one of those fields blanked 422s the
 # whole PUT — surfaced by QA G1.
+# Phase 12g: a float field that maps onto a PyPSA attribute whose class
+# default is FINITE. pydantic's plain `float` accepts the JSON `NaN`/`Infinity`
+# literals and the strings "nan"/"inf", and a non-finite value in such an
+# attribute is never PyPSA's "unset" (its unset IS the finite default) — it
+# drops a term or a constraint row at solve time. Refused at the boundary, 422.
+# The `int` fields of the same set (`build_year`, `min_up_time`, `tap_side`…)
+# already refuse non-finite values as `int` and stay `int`.
+Finite = Annotated[float, Field(allow_inf_nan=False)]
 _NoneToPosInf = Annotated[float, BeforeValidator(
     lambda v: float("inf") if v is None else v
 )]
@@ -68,17 +76,17 @@ class LineCreate(BaseModel):
     mttr_hours: float | None = None
     bus0: str
     bus1: str
-    length: float = 1.0
+    length: Finite = 1.0
     type: str = ""
-    r: float = 0.0
-    x: float = 0.01
-    b: float = 0.0
-    s_nom: float = 0.0
+    r: Finite = 0.0
+    x: Finite = 0.01
+    b: Finite = 0.0
+    s_nom: Finite = 0.0
     s_nom_extendable: bool = False
-    s_nom_min: float = 0.0
+    s_nom_min: Finite = 0.0
     s_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    capital_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MVA/yr (PyPSA-native)
+    capital_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MVA/yr (PyPSA-native)
     # Lump-sum construction cost (€/MVA). NaN means "unset" — PyPSA's
     # native annuity (overnight × annuity(rate, life)) takes over when
     # this is set; otherwise capital_cost is used directly.
@@ -87,7 +95,7 @@ class LineCreate(BaseModel):
     # discount_rate at solve time. PyPSA's consistency check requires this
     # to be set per-asset whenever overnight_cost is.
     discount_rate: float | None = None
-    terrain_factor: float = 1.0
+    terrain_factor: Finite = 1.0
     carrier: str = "AC"
     # PyPSA vintage attributes — same defaults as Generators / Storage /
     # Links / Stores so multi-period validators don't single lines out.
@@ -127,7 +135,7 @@ class LinkCreate(BaseModel):
     bus3: str = ""
     bus4: str = ""
     carrier: str = ""
-    efficiency: float = 1.0
+    efficiency: Finite = 1.0
     # Secondary efficiencies for multi-output Links (CHP plants etc).
     # Only enter the energy balance when the corresponding bus2/bus3/bus4 is
     # set. `_NoneToOne` coerces null → 1.0 so the frontend's full-object
@@ -135,13 +143,13 @@ class LinkCreate(BaseModel):
     # configured (heat-pump case).
     efficiency2: _NoneToOne = 1.0
     efficiency3: _NoneToOne = 1.0
-    p_nom: float = 0.0
+    p_nom: Finite = 0.0
     p_nom_extendable: bool = False
-    p_nom_min: float = 0.0
+    p_nom_min: Finite = 0.0
     p_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    marginal_cost: float = 0.0
-    capital_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
+    marginal_cost: Finite = 0.0
+    capital_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MW; NaN = unset
     # Per-asset discount rate used by PyPSA's native annuity when
     # overnight_cost is set. NaN ⇒ fall back to solver config's global
@@ -152,8 +160,8 @@ class LinkCreate(BaseModel):
     # non-finite value in a finite-default LP bound MASKS its constraint
     # row rather than defaulting — the asset is left unbounded. Refused at
     # the boundary (422) as `PUT /timeseries` and `PATCH /_bulk` refuse it.
-    p_min_pu: float = Field(default=0.0, allow_inf_nan=False)
-    p_max_pu: float = Field(default=1.0, allow_inf_nan=False)
+    p_min_pu: Finite = Field(default=0.0, allow_inf_nan=False)
+    p_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
 
@@ -179,15 +187,15 @@ class GeneratorCreate(BaseModel):
     # the auto-slack picker in solver_service. Validation in Phase 7 will
     # ensure at least one Slack exists when run_ac_pf_after_lopf is on.
     control: str = "PQ"
-    p_nom: float = 0.0
+    p_nom: Finite = 0.0
     p_nom_extendable: bool = False
-    p_nom_min: float = 0.0
+    p_nom_min: Finite = 0.0
     p_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    p_min_pu: float = Field(default=0.0, allow_inf_nan=False)
-    p_max_pu: float = Field(default=1.0, allow_inf_nan=False)
-    marginal_cost: float = 0.0
-    capital_cost: float = 0.0
-    fom_cost: float = 0.0           # fixed O&M, €/MW/yr (PyPSA-native)
+    p_min_pu: Finite = Field(default=0.0, allow_inf_nan=False)
+    p_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
+    marginal_cost: Finite = 0.0
+    capital_cost: Finite = 0.0
+    fom_cost: Finite = 0.0           # fixed O&M, €/MW/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MW; NaN = unset
     # Per-asset discount rate used by PyPSA's native annuity when
     # overnight_cost is set. NaN ⇒ fall back to solver config's global
@@ -199,12 +207,12 @@ class GeneratorCreate(BaseModel):
     #   Σ curtailment_cost × (p_max_pu × p_nom_opt − p)
     # to the objective. Only honoured for generators where the value is > 0.
     curtailment_cost: float = 0.0   # €/MWh of curtailed renewable energy
-    efficiency: float = 1.0
+    efficiency: Finite = 1.0
     committable: bool = False
     ramp_limit_up: float | None = None
     ramp_limit_down: float | None = None
-    start_up_cost: float = 0.0
-    shut_down_cost: float = 0.0
+    start_up_cost: Finite = 0.0
+    shut_down_cost: Finite = 0.0
     min_up_time: int = 0
     min_down_time: int = 0
     # Per-generator annual energy floor / ceiling (MWh). PyPSA enforces
@@ -234,24 +242,24 @@ class StorageUnitCreate(BaseModel):
     mttr_hours: float | None = None
     bus: str
     carrier: str = ""
-    p_nom: float = 0.0
+    p_nom: Finite = 0.0
     p_nom_extendable: bool = False
-    p_nom_min: float = 0.0
+    p_nom_min: Finite = 0.0
     p_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    max_hours: float = 6.0
-    efficiency_store: float = 0.9
-    efficiency_dispatch: float = 0.9
-    standing_loss: float = 0.0
+    max_hours: Finite = 6.0
+    efficiency_store: Finite = 0.9
+    efficiency_dispatch: Finite = 0.9
+    standing_loss: Finite = 0.0
     cyclic_state_of_charge: bool = True
-    state_of_charge_initial: float = 0.5
+    state_of_charge_initial: Finite = 0.5
     # Exogenous energy input to the storage SoC equation (MW). Constant value
     # set here; time-varying inflows go through `storage_units_t.inflow` via
     # the generic /timeseries upload endpoint. Required to model hydro
     # reservoirs — without it a "reservoir" is just a battery with no fuel.
-    inflow: float = 0.0
-    capital_cost: float = 0.0
-    marginal_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
+    inflow: Finite = 0.0
+    capital_cost: Finite = 0.0
+    marginal_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MW; NaN = unset
     # Per-asset discount rate used by PyPSA's native annuity when
     # overnight_cost is set. NaN ⇒ fall back to solver config's global
@@ -276,22 +284,22 @@ class StoreCreate(BaseModel):
     mttr_hours: float | None = None
     bus: str
     carrier: str = ""
-    e_nom: float = 0.0
+    e_nom: Finite = 0.0
     e_nom_extendable: bool = False
-    e_nom_min: float = 0.0
+    e_nom_min: Finite = 0.0
     e_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    e_min_pu: float = Field(default=0.0, allow_inf_nan=False)
-    e_max_pu: float = Field(default=1.0, allow_inf_nan=False)
-    e_initial: float = 0.0
+    e_min_pu: Finite = Field(default=0.0, allow_inf_nan=False)
+    e_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
+    e_initial: Finite = 0.0
     e_cyclic: bool = False
-    capital_cost: float = 0.0
-    marginal_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MWh/yr (PyPSA-native)
+    capital_cost: Finite = 0.0
+    marginal_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MWh/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MWh; NaN = unset
     # Per-asset discount rate; NaN ⇒ fall back to solver config's global
     # discount_rate at solve time (transient fill).
     discount_rate: float | None = None
-    standing_loss: float = 0.0
+    standing_loss: Finite = 0.0
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
 
@@ -300,9 +308,9 @@ class LoadCreate(BaseModel):
     name: str
     bus: str
     carrier: str = ""
-    p_set: float = 0.0
-    q_set: float = 0.0
-    sign: float = -1.0
+    p_set: Finite = 0.0
+    q_set: Finite = 0.0
+    sign: Finite = -1.0
 
 
 class TransformerCreate(BaseModel):
@@ -310,17 +318,17 @@ class TransformerCreate(BaseModel):
     bus0: str
     bus1: str
     type: str = ""
-    s_nom: float = 0.0
-    r: float = 0.0
-    x: float = 0.1
-    tap_ratio: float = 1.0
+    s_nom: Finite = 0.0
+    r: Finite = 0.0
+    x: Finite = 0.1
+    tap_ratio: Finite = 1.0
     tap_side: int = 0
-    phase_shift: float = 0.0
+    phase_shift: Finite = 0.0
     s_nom_extendable: bool = False
-    s_nom_min: float = 0.0
+    s_nom_min: Finite = 0.0
     s_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    capital_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MVA/yr (PyPSA-native)
+    capital_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MVA/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MVA; NaN = unset
     # Per-asset discount rate; NaN ⇒ fall back to solver config's global
     # discount_rate at solve time (transient fill).

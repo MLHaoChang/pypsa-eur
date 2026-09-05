@@ -637,7 +637,7 @@ class ValidationRefused(Exception):
         self.where = where
         self.issues = list(issues)
         super().__init__(
-            f"validation_failed: {len(self.issues)} LP bound(s) are not finite "
+            f"validation_failed: {len(self.issues)} LP input(s) are not finite "
             f"{where}")
 
 

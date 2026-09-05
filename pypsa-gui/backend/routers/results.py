@@ -4688,8 +4688,12 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         # produces can never appear in `margin_issues`.
         margin_issues = margin_issues + _check_nonfinite_bounds(n)
     for iss in margin_issues:
-        if iss.code in ("reserve_margin_unpriceable_assets",
-                        "nonfinite_bound", "nonfinite_bound_partial_coverage"):
+        # Phase 12g: every `nonfinite_*` code, by prefix. The first version
+        # listed the two 12f codes literally, so each category 12g adds would
+        # have slipped past this guard and the loop would have spent its
+        # budget refusing — the K6 outcome this guard exists to prevent.
+        if iss.code == "reserve_margin_unpriceable_assets" \
+                or iss.code.startswith("nonfinite_"):
             raise HTTPException(422, iss.message)
 
     # The ceiling: a margin is achievable iff EVERY period can reach it, so

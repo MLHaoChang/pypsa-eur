@@ -1260,10 +1260,164 @@ def _check_p_max_pu_bounds(n) -> list[Issue]:
 FINITE_DEFAULT_BOUNDS = ("p_max_pu", "p_min_pu", "s_max_pu",
                          "e_max_pu", "e_min_pu")
 
+# ── Phase 12g: the rule, widened to every finite-default LP input ──────────
+#
+# 12f refused NaN in five BOUNDS. Measuring the premise of the next backlog
+# item ("three storage constants mask an energy-balance row") widened it: on
+# two fixtures a NaN in twenty-three distinct finite-default attributes changes
+# the plan silently and one crashes the build, through five mechanisms — a
+# cost term dropped (the unit is free), a conversion term dropped, the SoC
+# carry-over dropped (the store forgets its charge), a balance right-hand side
+# dropped (the store is a free source; a CO2 cap vanishes), an asset dropped
+# from the nodal balance (`sign`). What they share: PyPSA's own `n.add(attr=None)`
+# and `n.add(attr=NaN)` both write the class default for every one of them, so
+# for an attribute whose default is FINITE, NaN is never PyPSA's spelling of
+# "unset" — its spelling of unset IS the default. A NaN cell there can only be
+# manufactured by a write that bypasses `n.add`.
+#
+# The set is read from PyPSA's component metadata, never enumerated by hand:
+# `status` starts with "Input", numeric type, finite default. Every attribute
+# whose default is NaN or ±inf is out by construction — `ramp_limit_*`,
+# `Generator.p_set`, `state_of_charge_set`, `*_nom_max`, `lifetime` — and so
+# is every custom GUI column (`outage_rate_value`, `discount_rate`, …), which
+# the table does not describe. Censused before it was trusted: 392 of 392
+# networks reaching `optimize()` in the full suite carry no such cell, and
+# neither does the golden fixture.
+#
+# The component set is PINNED, not "everything": the review of plan v1 found
+# the walk would otherwise reach `Bus.v_nom` (checked elsewhere), Carrier
+# (checked elsewhere), Shunt and LineType (PF-only) — and found that
+# `GlobalConstraint.constant`, finite default 0.0, silently DELETES a CO2 cap
+# when NaN (measured gas 100 → 300 MWh), so it is in.
+NONFINITE_INPUT_COMPONENTS = ("Generator", "Link", "Line", "Transformer",
+                              "StorageUnit", "Store", "Load", "GlobalConstraint")
 
-def _dynamic_column_as_read(frame, name, snaps):
-    """The values PyPSA would READ for ``name`` over ``snaps``, or ``None``
-    when the frame is not in force for this network.
+# `(component, attribute)` pairs a SPECIFIC check already refuses when NaN
+# (`*_efficiency_invalid`, `storage_max_hours_invalid`, `line_x_invalid`,
+# `load_p_set_nan`). The generic walk skips them so the user reads one
+# sentence. The review of plan v1 rejected the alternative — dropping the
+# generic issue when an existing message "names the attribute" — because
+# Line's attributes are single letters and `line_x_invalid`'s message contains
+# `b` (in "be"), `r` ("reactance") and `g` ("got"). `*_nom` is owned
+# row-conditionally: `_check_extendable_bounds` refuses a non-finite nominal
+# only on a NON-extendable row, so an extendable row's NaN `p_nom` is the
+# generic walk's (with the neutral sentence — the LP does not read it there).
+_OWNED_BY_SPECIFIC_CHECK = frozenset({
+    ("Generator", "efficiency"), ("Link", "efficiency"),
+    ("StorageUnit", "efficiency_store"), ("StorageUnit", "efficiency_dispatch"),
+    ("StorageUnit", "max_hours"),
+    ("Line", "x"), ("Transformer", "x"),
+    ("Load", "p_set"),
+})
+_NOM_ATTR = {"Generator": "p_nom", "Link": "p_nom", "StorageUnit": "p_nom",
+             "Store": "e_nom", "Line": "s_nom", "Transformer": "s_nom"}
+
+_COST_ATTRS = frozenset({"marginal_cost", "marginal_cost_quadratic",
+                         "marginal_cost_storage", "spill_cost", "stand_by_cost",
+                         "start_up_cost", "shut_down_cost", "capital_cost",
+                         "fom_cost"})
+_STORAGE_CONSTANTS = frozenset({"inflow", "state_of_charge_initial", "e_initial"})
+_MULTIPORT_RE = re.compile(r"^(efficiency|delay)(\d+)$")
+
+
+def _nonfinite_category(component: str, attr: str, default) -> tuple[str, str]:
+    """``(code, consequence)`` for a non-finite cell in ``attr``.
+
+    One code per consequence CATEGORY, because "a 100 MW unit can dispatch
+    500 MW" is the wrong sentence for a missing cost; and one consequence
+    sentence per attribute within it, because the review of plan v1 measured
+    three of the category sentences false (`standing_loss` NaN does not make a
+    store lossless — it drops the carry-over, so the store forgets its charge
+    every hour; `up_time_before` NaN ADDS a ramp constraint; `delay` NaN drops
+    the receiving end). Attributes the LP never reads get a neutral sentence
+    rather than a consequence that is not true.
+    """
+    dflt = f"{default:g}" if isinstance(default, (int, float)) else str(default)
+    if attr in FINITE_DEFAULT_BOUNDS:
+        return ("nonfinite_bound",
+                "PyPSA drops the constraint rather than defaulting it, so the "
+                "asset would be unconstrained (a 100 MW unit can dispatch 500 MW)")
+    if attr in _COST_ATTRS:
+        return ("nonfinite_cost",
+                "the cost term is dropped from the objective, so the asset is "
+                "dispatched or built as if it were free")
+    if attr == "standing_loss":
+        return ("nonfinite_efficiency",
+                "the carry-over of stored energy between hours is dropped, so "
+                "the store forgets its charge every hour and cannot shift energy")
+    if attr in ("efficiency", "efficiency_store", "efficiency_dispatch") \
+            or _MULTIPORT_RE.match(attr) and attr.startswith("efficiency"):
+        return ("nonfinite_efficiency",
+                "the conversion term is dropped from the energy balance")
+    if attr in _STORAGE_CONSTANTS:
+        return ("nonfinite_storage_constant",
+                "the energy balance's right-hand side is dropped for that row, "
+                "so the store becomes a free source of energy")
+    if component == "GlobalConstraint" and attr == "constant":
+        return ("nonfinite_storage_constant",
+                "the constraint row is dropped, so the cap or floor it "
+                "expresses vanishes from the problem")
+    if attr in ("up_time_before", "down_time_before"):
+        return ("nonfinite_input",
+                "PyPSA reads it as 'the unit was off', which adds a start-up "
+                "ramp constraint the plan did not ask for")
+    if _MULTIPORT_RE.match(attr) or attr == "delay":
+        return ("nonfinite_input",
+                "the receiving end is dropped from the nodal balance, so the "
+                "link consumes and delivers nothing")
+    if attr == "sign":
+        return ("nonfinite_input",
+                "the asset is dropped from the nodal balance entirely")
+    return ("nonfinite_input",
+            f"PyPSA gives this attribute a finite default ({dflt}) and cannot "
+            "represent 'unset' here")
+
+
+_NUMERIC_TYPES = ("float", "int", "static or series", "series",
+                  "static or piecewise or series")
+
+
+def finite_default_inputs(comp_or_defaults) -> dict[str, tuple[float, bool, str]]:
+    """``{attribute: (default, varying, type)}`` for every numeric INPUT
+    attribute of a component whose class default is finite — read from the
+    component's own metadata (``defaults``, or the older ``attrs``) so the set
+    follows the installed PyPSA and a multi-port link's ``efficiency2``/``delay2``
+    appear when the network has one.
+
+    Falls back to 12f's five bounds when the table is unreadable: a check
+    that quietly covered nothing on a PyPSA that reshaped its metadata would
+    be a check removed without a trace.
+    """
+    d = getattr(comp_or_defaults, "defaults", None)
+    if d is None:
+        d = getattr(comp_or_defaults, "attrs", None)
+    if d is None:
+        d = comp_or_defaults
+    out: dict[str, tuple[float, bool, str]] = {}
+    try:
+        for attr, row in d.iterrows():
+            status = str(row.get("status", "")).strip()
+            if not status.startswith("Input"):
+                continue
+            typ = str(row.get("type", "")).strip()
+            if typ not in _NUMERIC_TYPES:
+                continue
+            try:
+                dv = float(row.get("default"))
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(dv):
+                continue
+            out[str(attr)] = (dv, bool(row.get("varying", False)), typ)
+    except Exception:                                         # noqa: BLE001
+        return {b: (1.0 if b.endswith("max_pu") else 0.0, True, "static or series")
+                for b in FINITE_DEFAULT_BOUNDS}
+    return out
+
+
+def _dynamic_frame_as_read(frame, snaps):
+    """The frame PyPSA would READ over ``snaps``, aligned ONCE for every
+    column, or ``None`` when the frame is not in force for this network.
 
     A dynamic frame is judged against the horizon, not against itself: the
     LP reads `_t` reindexed onto `n.snapshots` (measured — a 2-row frame on a
@@ -1280,34 +1434,38 @@ def _dynamic_column_as_read(frame, name, snaps):
         it is not in force and the static cell governs → ``None``;
       * anything else → ``reindex`` (a duplicate-label index cannot be
         reindexed and is judged as it stands).
+
+    Aligned per frame rather than per column (plan-v1 review, finding 11):
+    on an 8 760 h network with 900 assets the per-column form cost 117 ms
+    per call against 21 ms.
     """
-    import pandas as _pd
-    col = frame[name]
-    if snaps is None or not len(snaps) or col.index.equals(snaps):
-        return col.to_numpy(dtype=float)
-    frame_multi = isinstance(col.index, _pd.MultiIndex)
-    snaps_multi = isinstance(snaps, _pd.MultiIndex)
+    if snaps is None or not len(snaps) or frame.index.equals(snaps):
+        return frame
+    frame_multi = isinstance(frame.index, pd.MultiIndex)
+    snaps_multi = isinstance(snaps, pd.MultiIndex)
     if frame_multi and not snaps_multi:
         return None
     if snaps_multi and not frame_multi:
-        pos = col.index.get_indexer(snaps.get_level_values(-1))
-        vals = col.to_numpy(dtype=float)
-        out = np.full(len(pos), np.nan)
-        hit = pos >= 0
-        out[hit] = vals[pos[hit]]
-        return out
+        pos = frame.index.get_indexer(snaps.get_level_values(-1))
+        out = frame.iloc[np.where(pos >= 0, pos, 0)].to_numpy(dtype=float, copy=True)
+        out[pos < 0, :] = np.nan
+        return pd.DataFrame(out, index=snaps, columns=frame.columns)
     try:
-        return col.reindex(snaps).to_numpy(dtype=float)
+        return frame.reindex(snaps)
     except Exception:                                         # noqa: BLE001
-        return col.to_numpy(dtype=float)
+        return frame
 
 
-def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
-    """``(component, attribute, name, n_bad, n_total)`` per offending column.
+def _dynamic_column_as_read(frame, name, snaps):
+    """Single-column form of `_dynamic_frame_as_read`, kept for callers that
+    judge one series."""
+    aligned = _dynamic_frame_as_read(frame[[name]], snaps)
+    return None if aligned is None else aligned[name].to_numpy(dtype=float)
 
-    Walks by ATTRIBUTE NAME over every component rather than an enumerated
-    list, so `Process` — which does carry `p_min_pu`/`p_max_pu` — and any
-    component PyPSA adds later are covered without an edit here.
+
+def _nonfinite_input_hits(n) -> list[tuple[str, str, str, int, int]]:
+    """``(component, attribute, name, n_bad, n_total)`` per offending cell or
+    column, over every finite-default numeric input of the pinned components.
 
     ``n_total`` is 1 for a static cell and the snapshot count for a dynamic
     column, so the caller can say "3 of 5 hours" without re-deriving it.
@@ -1315,13 +1473,10 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
     hits: list[tuple[str, str, str, int, int]] = []
     # `n.components.values()` first: `iterate_components` is deprecated in
     # PyPSA 1.0 and removed in 2.0. The old call stays as the fallback for an
-    # older PyPSA. The first version of this walk was
-    # `[n.components[c] for c in n.components]`, which iterates the `Components`
-    # OBJECTS — unhashable, so the lookup raised `TypeError` every time and the
-    # fallback ran instead, with its DeprecatedWarning; that is what the
-    # shipped-code review found. And when neither path works this RAISES: a
-    # safety check that quietly returns an empty list on a PyPSA that reshaped
-    # its API is a safety check that has been removed without a trace.
+    # older PyPSA. (The first version iterated `n.components` itself, which
+    # yields the unhashable `Components` objects, raised every time and ran
+    # the fallback with its DeprecatedWarning.) When neither path works this
+    # RAISES rather than returning an empty list.
     try:
         comps = list(n.components.values())
     except Exception:                                         # noqa: BLE001
@@ -1331,24 +1486,62 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
     _snaps = getattr(n, "snapshots", None)
     n_snap = 0 if _snaps is None else int(len(_snaps))
     for comp in comps:
-        cname = getattr(comp, "name", None) or getattr(comp, "list_name", "")
-        # `static`/`dynamic` first: `df`/`pnl` are deprecated in PyPSA 1.0 and
-        # removed in 2.0, and reading them emits a DeprecationWarning per
-        # component per call. The old names stay as the fallback so this keeps
-        # working on an older PyPSA.
+        cname = str(getattr(comp, "name", None) or getattr(comp, "list_name", ""))
+        if cname not in NONFINITE_INPUT_COMPONENTS:
+            continue
         static = getattr(comp, "static", None)
         if static is None:
             static = getattr(comp, "df", None)
         dynamic = getattr(comp, "dynamic", None)
         if dynamic is None:
             dynamic = getattr(comp, "pnl", None)
-        static_names = set()
+        inputs = finite_default_inputs(comp)
+        static_names: set[str] = set()
         if static is not None:
             try:
                 static_names = {str(x) for x in static.index}
             except Exception:                                 # noqa: BLE001
                 static_names = set()
-        for attr in FINITE_DEFAULT_BOUNDS:
+        nom = _NOM_ATTR.get(cname)
+        ext_col = f"{nom}_extendable" if nom else None
+
+        def _owned(attr: str, name, dynamic: bool = False) -> bool:
+            """Whether a specific check already refuses NaN in this cell.
+
+            The efficiency checks read the STATIC column only — the anti-gap
+            test found a dynamic NaN `efficiency` refused by nobody on its
+            first run — so ownership of a dynamic cell is narrower: only
+            `Load.p_set`, whose `load_p_set_nan` reads the series.
+            """
+            if (cname, attr) in _OWNED_BY_SPECIFIC_CHECK:
+                if not dynamic:
+                    return True
+                return (cname, attr) == ("Load", "p_set")
+            if nom and attr == nom and static is not None \
+                    and ext_col in getattr(static, "columns", []):
+                try:
+                    return not bool(static.at[name, ext_col])
+                except Exception:                             # noqa: BLE001
+                    return False
+            return False
+
+        def _port_absent(attr: str, name) -> bool:
+            """`efficiency{i}`/`delay{i}` on a row whose `bus{i}` is empty is
+            inert (the port does not exist) — the same gate
+            `link_efficiency_invalid` applies."""
+            m = _MULTIPORT_RE.match(attr)
+            if not m or static is None:
+                return False
+            bus_col = f"bus{m.group(2)}"
+            if bus_col not in getattr(static, "columns", []):
+                return True
+            try:
+                v = static.at[name, bus_col]
+            except Exception:                                 # noqa: BLE001
+                return True
+            return v is None or (isinstance(v, float) and np.isnan(v)) or str(v) == ""
+
+        for attr in inputs:
             # The dynamic frame is resolved FIRST because the static branch
             # needs to know which names it shadows.
             frame = None
@@ -1357,29 +1550,24 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
                     frame = dynamic.get(attr)
                 except AttributeError:
                     frame = getattr(dynamic, attr, None)
-            # A MultiIndex frame on a flat network is dropped by the reapply
-            # and so is not in force: it shadows nothing.
-            if frame is not None and _snaps is not None:
-                try:
-                    if isinstance(frame.index, pd.MultiIndex) \
-                            and not isinstance(_snaps, pd.MultiIndex):
-                        frame = None
-                except Exception:                             # noqa: BLE001
-                    pass
-            dyn_names = set()
+            if frame is not None and not len(getattr(frame, "columns", [])):
+                frame = None
+            aligned = None
             if frame is not None:
                 try:
-                    dyn_names = {str(x) for x in frame.columns}
+                    aligned = _dynamic_frame_as_read(frame, _snaps)
+                except Exception:                             # noqa: BLE001
+                    aligned = None
+            dyn_names: set[str] = set()
+            if aligned is not None:
+                try:
+                    dyn_names = {str(x) for x in aligned.columns}
                 except Exception:                             # noqa: BLE001
                     dyn_names = set()
-            # static — SKIPPING any asset that carries a dynamic column for
-            # the same attribute. PyPSA reads `_t` in preference to the static
-            # cell, so a static NaN under a finite profile is inert: the LP
-            # never sees it. Flagging it would fail every project saved
-            # before 12f in which `_bulk` cleared a profiled asset's bound
-            # (pre-12f that wrote NaN and left the profile alone), and the
-            # message would describe a value the solve does not read. The
-            # dynamic branch below still judges the profile itself.
+            # static — SKIPPING any asset that carries a dynamic column in
+            # force for the same attribute: PyPSA reads `_t` first, so the
+            # static cell is inert beneath it and the dynamic branch judges
+            # the column against the horizon instead.
             if static is not None and attr in getattr(static, "columns", []):
                 try:
                     col = static[attr].to_numpy(dtype=float)
@@ -1388,37 +1576,48 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
                 if col is not None:
                     bad = ~np.isfinite(col)
                     for name in static.index[bad]:
-                        if str(name) in dyn_names:
+                        if str(name) in dyn_names or _owned(attr, name) \
+                                or _port_absent(attr, name):
                             continue
-                        hits.append((str(cname), attr, str(name), 1, 1))
-            # dynamic — SKIPPING a column whose name is not an asset of the
-            # component. PyPSA warns about such a "ghost" column and ignores
-            # it (measured: the solve is `optimal` and unchanged), so a NaN
-            # there masks nothing, and naming a non-existent asset would send
-            # the user's "View" jump nowhere.
-            if frame is None or not len(getattr(frame, "columns", [])):
+                        hits.append((cname, attr, str(name), 1, 1))
+            # dynamic — vectorised over the aligned block; SKIPPING a column
+            # whose name is not an asset of the component (a ghost column
+            # PyPSA warns about and ignores).
+            if aligned is None:
                 continue
-            for name in frame.columns:
+            try:
+                block = aligned.to_numpy(dtype=float)
+            except (TypeError, ValueError):
+                continue
+            if block.ndim != 2 or not block.size:
+                if block.ndim == 2 and block.shape[0] == 0:
+                    # zero-row frame: every column is NaN over the horizon
+                    for name in aligned.columns:
+                        if static is not None and str(name) not in static_names:
+                            continue
+                        if _owned(attr, name, dynamic=True) or _port_absent(attr, name):
+                            continue
+                        hits.append((cname, attr, str(name), n_snap, n_snap))
+                continue
+            n_bad_per_col = (~np.isfinite(block)).sum(axis=0)
+            n_total = int(block.shape[0]) or n_snap
+            for k, name in enumerate(aligned.columns):
+                n_bad = int(n_bad_per_col[k])
+                if not n_bad:
+                    continue
                 if static is not None and str(name) not in static_names:
                     continue
-                try:
-                    vals = _dynamic_column_as_read(frame, name, _snaps)
-                except (TypeError, ValueError):
+                if _owned(attr, name, dynamic=True) or _port_absent(attr, name):
                     continue
-                if vals is None:
-                    continue
-                n_bad = int((~np.isfinite(vals)).sum())
-                if n_bad:
-                    hits.append((str(cname), attr, str(name), n_bad,
-                                 int(len(vals)) or n_snap))
+                hits.append((cname, attr, str(name), n_bad, n_total))
     return hits
 
 
-def _check_nonfinite_bounds(n) -> list[Issue]:
-    """★ Phase 12f. A non-finite value in one of the five finite-default LP
-    bounds is an ERROR, not a warning: the LP will otherwise build a plan the
-    network cannot deliver (five times nameplate, or a generator running as a
-    load), and this codebase reserves ERROR for exactly that.
+def _check_nonfinite_inputs(n) -> list[Issue]:
+    """★ Phase 12f/12g. A non-finite value in a finite-default LP input is an
+    ERROR, not a warning: the LP will otherwise build a plan the network
+    cannot deliver (five times nameplate, a free store, a vanished cap), and
+    this codebase reserves ERROR for exactly that.
 
     Two shapes, because they read differently to the user. A column that
     covers only part of the horizon is a COVERAGE problem — the user uploaded
@@ -1427,31 +1626,44 @@ def _check_nonfinite_bounds(n) -> list[Issue]:
     Anything else is a value that has no meaning where it sits.
     """
     issues: list[Issue] = []
-    for comp, attr, name, n_bad, n_total in _nonfinite_bound_hits(n):
+    meta_cache: dict[str, dict] = {}
+    for comp, attr, name, n_bad, n_total in _nonfinite_input_hits(n):
+        if comp not in meta_cache:
+            try:
+                meta_cache[comp] = finite_default_inputs(n.components[comp])
+            except Exception:                                 # noqa: BLE001
+                meta_cache[comp] = {}
+        default = meta_cache[comp].get(attr, (None, None, None))[0]
+        code, consequence = _nonfinite_category(comp, attr, default)
         where = f"{comp} '{name}'"
+        restore = (f"clear the field to restore its default ({default:g})"
+                   if isinstance(default, (int, float)) else
+                   "clear the field to restore its default")
         if n_total > 1 and n_bad < n_total:
             covered = n_total - n_bad
             issues.append(_err(
-                "nonfinite_bound_partial_coverage", comp, name,
+                f"{code}_partial_coverage", comp, name,
                 f"{where}: the '{attr}' series covers {covered} of {n_total} "
                 f"snapshots — {n_bad} hour(s) have no value. PyPSA does not "
-                "fall back to a default for those hours: it drops the bound "
-                "entirely, so the asset would be unconstrained there (a 100 MW "
-                "unit can dispatch 500 MW). Extend the series to the full "
-                "horizon, or shorten the horizon to match it.",
+                f"fall back to a default for those hours: {consequence}. "
+                "Extend the series to the full horizon, or shorten the "
+                "horizon to match it.",
             ))
         else:
             issues.append(_err(
-                "nonfinite_bound", comp, name,
+                code, comp, name,
                 f"{where}: '{attr}' is not a finite number"
                 + (f" in {n_bad} of {n_total} snapshots" if n_total > 1 else "")
-                + ". Unlike a ramp limit, this bound has no meaning when it is "
-                "unset — PyPSA drops the constraint rather than defaulting it, "
-                "so the asset would be unconstrained (a 100 MW unit can "
-                "dispatch 500 MW). Enter a value, or clear the field to "
-                "restore its default.",
+                + f". PyPSA does not default it at solve time: {consequence}. "
+                f"Enter a value, or {restore}.",
             ))
     return issues
+
+
+# 12f's names, kept: the three solver checkpoints and both loop guards import
+# them, and through the alias they now cover the whole input set.
+_nonfinite_bound_hits = _nonfinite_input_hits
+_check_nonfinite_bounds = _check_nonfinite_inputs
 
 
 def _check_lopf(n, solver_config) -> list[Issue]:
@@ -1468,7 +1680,7 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     # Phase 12f: LOPF-only, like the reserve-margin check below it — a PF run
     # reads none of these bounds, so blocking one on them would be a refusal
     # with no standard behind it.
-    out += _check_nonfinite_bounds(n)
+    out += _check_nonfinite_inputs(n)
     out += _check_unbounded_costs(n)
     out += _check_modelling_assumptions(n, solver_config)
     out += _check_sclopf(n, solver_config)

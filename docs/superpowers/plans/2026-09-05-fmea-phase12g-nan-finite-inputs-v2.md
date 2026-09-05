@@ -308,3 +308,87 @@ recorded, and the seven required amendments are incorporated into the build.
 **What moves for a user (recorded, per finding 10):** a project imported from a PyPSA-Eur netCDF whose dynamic frames carry a NaN `efficiency` or whose static frame carries a NaN `length` (netCDF heals the static one on the GUI's own round trip, but a *first* import reads what the file holds) is refused at preflight with the attribute named, where before it solved with the term dropped. That is the phase's intent, and the message says what to do.
 
 **Codes (final):** `nonfinite_bound`, `nonfinite_cost`, `nonfinite_efficiency`, `nonfinite_storage_constant` (incl. `GlobalConstraint.constant`), `nonfinite_input`, each with a `_partial_coverage` twin for a dynamic column that covers part of the horizon. The consequence sentence is per attribute within a category, from one table.
+
+---
+
+## BUILT — what shipped, what the build found, and the bite log
+
+**Shipped (backend only; the frontend renders validation codes generically, so
+no panel change):**
+
+- `validation_service.py`: `NONFINITE_INPUT_COMPONENTS` (the seven + GlobalConstraint,
+  pinned); `finite_default_inputs(component)` reads the metadata (status `Input`,
+  numeric type, finite default; falls back to the five, never to nothing);
+  `_nonfinite_input_hits` walks that set with 12f's static/dynamic branches,
+  the horizon-coverage judgement now **aligned once per frame** and vectorised
+  (`_dynamic_frame_as_read`), the shadow and ghost rules, an **ownership set**
+  instead of a text-matching dedupe (finding 4), `efficiency{i}`/`delay{i}`
+  gated on `bus{i}` (finding 6), and `*_nom` owned only on a non-extendable row;
+  `_check_nonfinite_inputs` emits one code per category with a per-attribute
+  consequence sentence (finding 3), `_partial_coverage` twins for dynamic
+  columns. 12f's names are aliases, so the three solver checkpoints and both
+  loop guards widened for free.
+- `routers/network.py`: `_finite_input_meta` (metadata first, the five as
+  fallback); the `_bulk` null branch consults it **before** the `_max`/`lifetime`/
+  `e_sum_min` suffix rules (finding 5); the non-finite-literal refusal covers the
+  set; custom and NaN-default columns still clear to NaN.
+- `models/schemas.py`: `Finite = Annotated[float, Field(allow_inf_nan=False)]`
+  on the **58** float fields the metadata names; the 9 `int` fields stay `int`
+  (finding 7).
+- `routers/results.py`: the margin loop's guard filters `nonfinite_*` by prefix
+  (finding 1). `solver_service.py`: `ValidationRefused` says "input(s)".
+
+**What the build found.** The anti-gap witness (J1c, 154 cells) failed on its
+first run for four of them — a **dynamic** NaN `efficiency` on Generator, Link
+and StorageUnit (`efficiency_store`/`_dispatch`) was refused by nobody: the
+specific efficiency checks read the static column only, and the ownership skip
+had removed the dynamic column from the generic walk too. Ownership is
+static-only for those attributes now, `Load.p_set` (whose `load_p_set_nan`
+reads the series) being the one dynamic cell a specific check owns. That is
+exactly what the plan said the test was for, and it earned its place before
+any bite was run.
+
+**A review finding that did not hold, recorded (finding 9).** The reviewer
+measured pandas 3 upcasting an int64 column on any `.loc` write; a dtype
+restore was built for it, and its bite **did not bite**. Measured on the exact
+form `_bulk` uses (`df.loc[[name], col] = value`, pandas 3.0.5): `0`, `0.0`,
+`np.int64(0)` and `2030.0` all keep `int64`; only NaN upcasts. The restore was
+removed as dead code and J2c is a pin of the measured behaviour, not a ★.
+
+**Census over the implemented set** (the seven + GlobalConstraint), re-run per
+finding 2 — **392 of 392 networks clean, golden fixture clean**, over
+`('Generator', 'Link', 'Line', 'Transformer', 'StorageUnit', 'Store', 'Load',
+'GlobalConstraint')`. The "0 hits" claim now covers exactly what ships. That
+run's own summary read 44 failed against the 43-failure baseline; the extra
+one, `test_every_destructive_step_of_a_swap_route_runs_AFTER_its_precheck`,
+reads the routers' source at test time and my `routers/network.py` edits
+landed while it ran — it passes 7/7 on the finished code, and the gate proper
+was started after the last source edit. Recorded because a harness overlap
+that looks like a regression is the kind of thing this program writes down.
+
+**Bite log (every ★, applied to the shipped files, restored by hash):**
+
+| bite | variant | result |
+|---|---|---|
+| B1a/J1a | every attribute reports `nonfinite_input` | BIT |
+| B1b/J1b | dynamic columns judged for the five only | BIT |
+| B1c/J1c | walk restricted to the five | BIT — 3 of the sampled cells silent |
+| B1d/J1d | `("Line", "b")` added to the owned set | BIT — the `b` error vanishes |
+| B1e/J1e | `Input`-status clause dropped | BIT — counts change |
+| B1f/J1f | `bus{i}` port gate dropped | BIT — the two-port link is refused |
+| B1g/J1g | `p_nom` owned unconditionally | BIT — the extendable case is silent |
+| B2a/J2a | `_bulk` mapping restored to the five | BIT — 3 cases read NaN / inf |
+| B2c/J2c | dtype restore dropped | **DID NOT BITE** — pandas keeps int64 unaided; restore removed, test demoted to a pin |
+| B2d/J2d | literal check restricted to the five | BIT |
+| B4a/J4a | `inflow` annotation dropped | BIT |
+| B5a/J5a | margin guard's literal tuple restored | BIT — the 3 margin cases start a study |
+| B6a/J6a | walk restricted to the five | BIT — `('ok', 'optimal')` on the masked balance |
+
+**Gates:** backend tree **3 111 passed, 43 failed** — the 43 environmental
+failures of the baseline, both set differences empty; live **S15–S30: 69 pass,
+0 fail, 1 known skip**, S30 6/6 on its first run. **Bitten live:** restoring
+the five-only walk and the five-only `_bulk` mapping fails S30.1, S30.2 and
+S30.5 with the pre-12g symptoms (`null`, `null`, `optimal` on the masked
+balance); S30.3/S30.4/S30.6 stay green under that bite because their guards
+(the literal check, the schema, the time-series rule) are separate. Restore by
+hash, MATCH on both files.
