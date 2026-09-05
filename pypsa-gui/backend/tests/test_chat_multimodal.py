@@ -841,3 +841,64 @@ class TestReconstructRespectsTheTurnProfile:
         assert _ct.turn_profile() is None, (
             "the finished turn left its profile bound to this context"
         )
+
+    def test_the_vision_client_uses_the_profiles_OWN_key_slot(
+        self, tmp_projects_dir, install_network, _bound_turn_profile,
+        monkeypatch,
+    ):
+        """
+        C-3's CREDENTIAL half, which a mutation audit found untested.
+
+        Every other test in this class injects `client=`, so the
+        `if client is None` branch — the entire reason
+        `_anthropic_client_for_profile` was extracted — never executed. Its
+        docstring's claim that the sub-call "resolves its credentials the SAME
+        way a turn does, instead of always reaching for the ambient
+        ANTHROPIC_API_KEY" was unverified: reverting the call to
+        `_build_anthropic_client()` left every test passing.
+
+        A custom anthropic-wire profile owns a private
+        `PYPSA_GUI_LLM_KEY__<SLUG>` slot. The sub-call must use THAT, not the
+        instance-wide Anthropic key — otherwise a deployment that deliberately
+        separates them silently bills and authenticates against the wrong one.
+        """
+        import sys
+
+        meta = self._upload(tmp_projects_dir, install_network)
+        profile = _bound_turn_profile(
+            id="vision-slot", preset="custom", auth="bearer",
+            label="Private Slot", model="claude-opus-5")
+        assert profile.key_env == "PYPSA_GUI_LLM_KEY__VISION_SLOT"
+
+        monkeypatch.setenv("PYPSA_GUI_LLM_KEY__VISION_SLOT", "sk-ant-profile-slot-value")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ambient-instance-wide")
+
+        seen_keys: list = []
+
+        class _FakeAnthropic:
+            def __init__(self, api_key=None, **kw):
+                seen_keys.append(api_key)
+                self.messages = _ModelRecordingVisionMessages(_EMPTY_VISION_PAYLOAD)
+
+        fake_mod = type(sys)("anthropic")
+        fake_mod.Anthropic = _FakeAnthropic
+        monkeypatch.setitem(sys.modules, "anthropic", fake_mod)
+
+        # The ambient path must not be what answers this.
+        built_ambient: list = []
+        monkeypatch.setattr(
+            chat_service, "_build_anthropic_client",
+            lambda: (built_ambient.append(True), (None, "missing_api_key"))[1],
+        )
+
+        result = chat_tools.reconstruct_network_from_image(file_id=meta.file_id)
+
+        assert result["ok"] is True
+        assert built_ambient == [], (
+            "the vision sub-call went through `_build_anthropic_client()` — "
+            "it is reaching for the ambient ANTHROPIC_API_KEY instead of the "
+            "profile's own key slot"
+        )
+        assert seen_keys == ["sk-ant-profile-slot-value"], (
+            f"client was built with {seen_keys!r}, not the profile's slot value"
+        )

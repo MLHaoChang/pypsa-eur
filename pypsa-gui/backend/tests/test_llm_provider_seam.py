@@ -1137,7 +1137,23 @@ def test_openai_wire_retries_once_with_the_other_token_parameter():
     assert events[-1].type == "message_done"
 
 
-def test_a_400_that_is_not_about_the_token_parameter_is_not_retried():
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Neither the parameter name nor an unsupported-parameter marker.
+        {"error": {"code": "model_not_found",
+                   "message": "The model does not exist."}},
+        # STRENGTHENED: contains a marker ("not supported") but NOT the token
+        # parameter's name. The original fixture had neither, so only the
+        # marker half of `_refused_the_token_param` was exercised — a mutation
+        # audit deleted the `param not in text` check and this test still
+        # passed. A vendor saying "tools are not supported in your region"
+        # would then have been silently re-sent under the other spelling.
+        {"error": {"code": "unsupported_country_region_territory",
+                   "message": "Tools are not supported in your region."}},
+    ],
+)
+def test_a_400_that_is_not_about_the_token_parameter_is_not_retried(body):
     """
     DISCRIMINATION. The retry must be scoped to the token-parameter refusal —
     a generic 400 must surface immediately, not be silently re-sent.
@@ -1152,10 +1168,7 @@ def test_a_400_that_is_not_about_the_token_parameter_is_not_retried():
 
     def handler(request):
         seen.append(json.loads(request.content))
-        return httpx.Response(400, json={"error": {
-            "code": "model_not_found",
-            "message": "The model does not exist.",
-        }})
+        return httpx.Response(400, json=body)
 
     provider = OpenAICompatProvider(
         "https://api.openai.com/v1",

@@ -354,14 +354,28 @@ def test_a_spoofed_preset_can_never_inherit_a_shared_provider_key(
 
 
 @pytest.mark.parametrize(
-    "preset", ["anthropic", "openai", "moonshot", "dashscope"],
+    "preset,wire",
+    [
+        # CORRECTED: every param used to be built with `wire="openai"`, but
+        # the `anthropic` preset declares `wire="anthropic"` — so once
+        # `_validate_preset_wire_lock` was added (S-M2) it ran FIRST and
+        # raised, and the [anthropic] case proved nothing about the base_url
+        # lock it names. A mutation audit confirmed it: with the base_url lock
+        # fully disabled, [openai], [moonshot] and [dashscope] failed while
+        # [anthropic] PASSED. Each preset now carries its OWN declared wire,
+        # so only the lock under test can be what refuses.
+        ("anthropic", "anthropic"),
+        ("openai", "openai"),
+        ("moonshot", "openai"),
+        ("dashscope", "openai"),
+    ],
 )
-def test_an_exact_bearer_preset_is_locked_to_its_own_base_url(appdata, preset):
+def test_an_exact_bearer_preset_is_locked_to_its_own_base_url(appdata, preset, wire):
     """The sibling half: an EXACT catalogue match cannot be repointed at all."""
     from services import llm_config
 
     profile = llm_config.LLMProfile(
-        id="evil", label="e", preset=preset, wire="openai",
+        id="evil", label="e", preset=preset, wire=wire,
         base_url="https://attacker.example/v1", model="m",
         tools=True, vision=False, auth="bearer",
         fallback_model=None, max_output_tokens=None)
