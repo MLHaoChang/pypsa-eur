@@ -1726,3 +1726,196 @@ def test_stream_with_no_profile_id_still_runs_normally(appdata, client):
     assert "unknown_profile_id" not in kinds, f"zero-config turn refused: {frames!r}"
     assert frames[0][0] == "session_init"
     assert frames[0][1]["profile_id"] == "anthropic-sonnet"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# TWO TURNS THROUGH THE ROUTER — the seam the closing review named.
+#
+# The review's own closing lesson: Task 7's A8 hoist is tested by calling
+# `chat_service` directly, and Task 7's router binding is tested by driving
+# `/stream`. Both green. NEITHER CROSSES. C-8, C-9 and C-12 are all that one
+# shape — state a first turn establishes, silently undone by the second.
+#
+# Every test below drives TWO real `/stream` requests against the same
+# session, because one request cannot see any of these defects.
+# ═════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture()
+def _fast_retries(monkeypatch):
+    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 2)
+
+
+def _ok_turn(text="ok"):
+    from services.llm_provider import LLMEvent
+    return {"events": [LLMEvent(type="text_delta", text=text)],
+            "blocks": [{"type": "text", "text": text}],
+            "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+
+def _rate_limited():
+    from services.llm_provider import ProviderError
+    return ProviderError("rate_limited", "429 slow down")
+
+
+def test_a8_fallback_survives_the_next_turn(
+    appdata, client, fake_provider_for_profile, _fast_retries,
+):
+    """
+    C-8. Turn 1 rate-limits on Opus and the user is TOLD we fell back to
+    Sonnet. Turn 2 — sending neither `profile_id` nor `model`, which is what
+    the frontend actually does — must not silently put them back on the
+    rate-limited model.
+
+    The router assigned `session.model = target_profile.model` on EVERY turn,
+    where master did it only `if body.model:`. So the fallback lasted exactly
+    one turn and the next request went straight back to Opus.
+    """
+    # The instance-wide active profile IS Opus — the realistic case, and the
+    # one that discriminates: with the default (Sonnet) active, a rebind on
+    # turn 2 lands on Sonnet by COINCIDENCE and hides the defect entirely.
+    from services import llm_config
+    llm_config.set_active("anthropic-opus")
+
+    # Turn 1: bind Opus explicitly, exhaust retries, take the A8 fallback.
+    fake_provider_for_profile(
+        [_rate_limited(), _rate_limited(), _rate_limited(), _ok_turn("fell back")]
+    )
+    r1 = client.post("/api/chat/stream", json={
+        "session_id": "sess-a8", "profile_id": "anthropic-opus",
+        "message": "hello",
+    })
+    assert r1.status_code == 200
+    kinds = [n for n, _ in _parse_sse(r1.content)]
+    assert "model_fallback" in kinds, f"A8 never fired: {kinds}"
+
+    sess = chat_service.get_session("sess-a8")
+    assert sess.model == chat_service.DEFAULT_MODEL, "A8 did not switch the model"
+
+    # Turn 2: the real client sends neither field.
+    provider = fake_provider_for_profile([_ok_turn("second")])
+    r2 = client.post("/api/chat/stream", json={
+        "session_id": "sess-a8", "message": "again",
+    })
+    assert r2.status_code == 200
+
+    assert sess.model == chat_service.DEFAULT_MODEL, (
+        "the A8 fallback was undone by the next turn — the user was told they "
+        "were moved off the rate-limited model and then sent back to it"
+    )
+    assert provider.requests[0].model == chat_service.DEFAULT_MODEL, (
+        f"turn 2 was actually SENT to {provider.requests[0].model!r}"
+    )
+
+
+def test_omitting_profile_id_does_not_repoint_a_bound_session(
+    appdata, client, fake_provider_for_profile,
+):
+    """
+    C-9. `frontend/src/api/chat.ts` documents omitting `profile_id` as meaning
+    "the server's active profile", and warns that sending one unconditionally
+    "would re-assert a stale choice every turn". `set_active_profile`'s own
+    note promises the opposite direction too: "This chat stays on the model it
+    started with — start a new chat to use it."
+
+    Both are broken by the same line. With `profile_id` omitted the router
+    resolved the INSTANCE-WIDE active profile and rebound the session to it,
+    so an admin flipping the active profile silently moved every chat already
+    in flight.
+    """
+    from services import llm_config
+
+    fake_provider_for_profile([_ok_turn()])
+    client.post("/api/chat/stream", json={
+        "session_id": "sess-c9", "profile_id": "anthropic-opus",
+        "message": "first",
+    })
+    sess = chat_service.get_session("sess-c9")
+    assert sess.profile_id == "anthropic-opus"
+
+    # A super-admin flips the instance-wide active profile mid-conversation.
+    llm_config.set_active("anthropic-sonnet")
+
+    provider = fake_provider_for_profile([_ok_turn()])
+    client.post("/api/chat/stream", json={
+        "session_id": "sess-c9", "message": "second",
+    })
+
+    assert sess.profile_id == "anthropic-opus", (
+        "the running chat was re-pointed at the newly-active profile, which "
+        "is exactly what set_active_profile promises does NOT happen"
+    )
+    assert provider.requests[0].model == chat_service.OPUS_MODEL, (
+        f"turn 2 was sent to {provider.requests[0].model!r}, not the profile "
+        f"this session is bound to"
+    )
+
+
+def test_an_explicit_profile_id_still_rebinds_on_the_same_wire(
+    appdata, client, fake_provider_for_profile,
+):
+    """
+    DISCRIMINATION. The two tests above must not be satisfiable by a router
+    that simply stops rebinding. An EXPLICIT same-wire `profile_id` on turn 2
+    is a deliberate user choice and must still take effect.
+    """
+    fake_provider_for_profile([_ok_turn()])
+    client.post("/api/chat/stream", json={
+        "session_id": "sess-rebind", "profile_id": "anthropic-sonnet",
+        "message": "first",
+    })
+    sess = chat_service.get_session("sess-rebind")
+    assert sess.profile_id == "anthropic-sonnet"
+
+    provider = fake_provider_for_profile([_ok_turn()])
+    client.post("/api/chat/stream", json={
+        "session_id": "sess-rebind", "profile_id": "anthropic-opus",
+        "message": "second",
+    })
+    assert sess.profile_id == "anthropic-opus", "an explicit switch was ignored"
+    assert provider.requests[0].model == chat_service.OPUS_MODEL
+
+
+def test_an_explicit_legacy_model_still_takes_effect_on_turn_two(
+    appdata, client, fake_provider_for_profile,
+):
+    """
+    DISCRIMINATION, legacy half. `model` is a documented free-text passthrough
+    an older client may still send; naming one explicitly must still switch.
+    """
+    fake_provider_for_profile([_ok_turn()])
+    client.post("/api/chat/stream", json={
+        "session_id": "sess-legacy", "message": "first",
+    })
+    sess = chat_service.get_session("sess-legacy")
+    assert sess.model == chat_service.DEFAULT_MODEL
+
+    provider = fake_provider_for_profile([_ok_turn()])
+    client.post("/api/chat/stream", json={
+        "session_id": "sess-legacy", "model": chat_service.OPUS_MODEL,
+        "message": "second",
+    })
+    assert sess.model == chat_service.OPUS_MODEL, "an explicit model was ignored"
+    assert provider.requests[0].model == chat_service.OPUS_MODEL
+
+
+def test_a_first_turn_with_nothing_named_still_binds_the_active_profile(
+    appdata, client, fake_provider_for_profile,
+):
+    """
+    DISCRIMINATION, zero-config half. An UNBOUND session naming nothing must
+    still adopt the active profile — this is the default path every existing
+    chat takes, and hard constraint 2 says it must not change.
+    """
+    from services import llm_config
+    llm_config.set_active("anthropic-opus")
+
+    provider = fake_provider_for_profile([_ok_turn()])
+    client.post("/api/chat/stream", json={
+        "session_id": "sess-fresh", "message": "first",
+    })
+    sess = chat_service.get_session("sess-fresh")
+    assert sess.profile_id == "anthropic-opus"
+    assert provider.requests[0].model == chat_service.OPUS_MODEL

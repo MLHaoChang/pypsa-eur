@@ -515,6 +515,18 @@ it('TOOL_ERROR_BANNER_KINDS (the tool_error routing allowlist) is fully covered 
 })
 
 it('missing_api_key still renders the inline ApiKeySetup form (load-bearing for the packaged app)', async () => {
+  // C-12 — this now describes the PACKAGED APP faithfully. That deployment is
+  // zero-config on a BUILT-IN profile (`anthropic-sonnet`), which is the only
+  // case where ANTHROPIC_API_KEY really is the missing key and this inline
+  // form is the right answer. The fixture previously used the invented id
+  // `anthropic-main`, so the test passed only because the form rendered
+  // unconditionally — i.e. it was pinning the defect rather than the
+  // property it names. The property itself is preserved and now actually
+  // exercised.
+  vi.mocked(getChatProfiles).mockResolvedValue({
+    profiles: [{ id: 'anthropic-sonnet', label: 'Claude Sonnet', wire: 'anthropic' }],
+    active_profile_id: 'anthropic-sonnet',
+  })
   renderPanel()
   await screen.findByText('Claude Sonnet')
   seedError('missing_api_key', 'ANTHROPIC_API_KEY is not set')
@@ -625,9 +637,17 @@ it('missing_api_key body names the ACTIVE profile (not hardcoded to Anthropic)',
 
   const banner = await screen.findByTestId('chat-error-banner')
   expect(banner.textContent).toContain('Currently using the "GPT-5" profile.')
-  // ApiKeySetup keeps rendering unconditionally on this kind — the brief
-  // states that behaviour is load-bearing and must not change in this task.
-  expect(await screen.findByTestId('chat-api-key-input')).toBeTruthy()
+  // INVERTED BY C-12. This used to assert that an ANTHROPIC_API_KEY form
+  // rendered here, justified as "load-bearing and must not change in this
+  // task" — but that was Task 14's scope note, and Task 15 then built the
+  // deep-link branch for exactly this case. Pinning the old behaviour is what
+  // kept that branch from ever firing.
+  //
+  // The turn ran on GPT-5. Pasting an Anthropic key would change nothing, so
+  // offering that form is worse than useless — it sends the user to fix the
+  // wrong credential. They get the deep-link to the profile's own key field.
+  expect(await screen.findByTestId('chat-api-key-open-settings')).toBeTruthy()
+  expect(screen.queryByTestId('chat-api-key-input')).toBeNull()
 })
 
 it('missing_api_key names the server-active profile when no explicit pick was made', async () => {

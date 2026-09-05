@@ -64,7 +64,27 @@ function isForbidden(error: unknown): boolean {
   return (error as { response?: { status?: number } })?.response?.status === 403
 }
 
-export default function ApiKeySetup() {
+/**
+ * C-12 — `sessionProfile` is the profile the FAILED TURN ran on.
+ *
+ * `missing_api_key` is raised by a turn, and a turn runs on the session's
+ * bound profile — which any member's chat may legitimately differ from the
+ * instance-wide active one a super-admin picked. This component branched on
+ * `getChatHealth().active_profile` while ChatPanel's banner body named
+ * `selectedProfileMeta.label`, so the two halves of one banner answered
+ * different questions: a user on a local endpoint, on an instance still
+ * defaulting to built-in Claude, was told their Ollama profile needed a key
+ * and then handed a form that sets ANTHROPIC_API_KEY. The Task-15 deep-link
+ * built for that case never fired.
+ *
+ * `null`/omitted keeps the old behaviour — fall back to health's active
+ * profile — for callers that have no session profile resolved yet.
+ */
+export default function ApiKeySetup({
+  sessionProfile = null,
+}: {
+  sessionProfile?: { id: string; label: string } | null
+} = {}) {
   const qc = useQueryClient()
   const setError = useChatStore((s) => s.setError)
   const requestSettingsSection = useUIStore((s) => s.requestSettingsSection)
@@ -125,12 +145,17 @@ export default function ApiKeySetup() {
   // to `true` (builtin, i.e. today's form) once `health` SETTLES without a
   // usable `active_profile` — a real failure here must not permanently hide
   // the one feature `missing_api_key` exists to fix.
-  if (health.isLoading) return null
-  const isBuiltinActive = !health.data?.active_profile
-    || BUILTIN_ANTHROPIC_PROFILE_IDS.has(health.data.active_profile.id)
+  // C-12 — the profile the TURN used decides the branch; health's
+  // instance-wide active profile is only the fallback when the session has
+  // none resolved. Waiting on `health` is still right in that fallback case,
+  // but a known session profile answers the question outright.
+  if (!sessionProfile && health.isLoading) return null
+  const decidingProfile = sessionProfile ?? health.data?.active_profile ?? null
+  const isBuiltinActive =
+    !decidingProfile || BUILTIN_ANTHROPIC_PROFILE_IDS.has(decidingProfile.id)
 
   if (!isBuiltinActive) {
-    const label = health.data?.active_profile?.label ?? 'the active model'
+    const label = decidingProfile?.label ?? 'the active model'
     return (
       <div className="mt-2" data-testid="chat-api-key-setup">
         <p className="text-[11px] text-muted">

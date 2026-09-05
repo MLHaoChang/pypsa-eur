@@ -77,11 +77,11 @@ beforeEach(() => {
   vi.mocked(getChatHealth).mockResolvedValue(health())
 })
 
-function renderSetup() {
+function renderSetup(props: { sessionProfile?: { id: string; label: string } | null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <ApiKeySetup />
+      <ApiKeySetup {...props} />
     </QueryClientProvider>,
   )
 }
@@ -211,5 +211,67 @@ describe('ApiKeySetup', () => {
       expect(useUIStore.getState().activeSlidePanel).toBe('settings')
       expect(useUIStore.getState().settingsSectionRequest).toBe('assistant-model')
     })
+  })
+})
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// C-12 — the banner and the form answered two DIFFERENT questions.
+//
+// `missing_api_key` fires from a turn, and a turn runs on the SESSION's
+// profile. ChatPanel's banner body says so: it names
+// `selectedProfileMeta.label`. But this component branched on
+// `getChatHealth().active_profile` — the INSTANCE-WIDE setting a super-admin
+// picks, which any member's session may legitimately differ from.
+//
+// So a user whose chat is bound to a local endpoint, on an instance whose
+// active profile is still built-in Claude, was told their Ollama profile
+// needs a key and then handed a form that sets ANTHROPIC_API_KEY. The Task-15
+// deep-link built for exactly this case never fired.
+//
+// The session's profile is the authority, because it is the one the failed
+// turn actually used. Health's active profile stays the fallback for when the
+// session's is not resolved yet.
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('C-12 — the form follows the profile the TURN used', () => {
+  it('deep-links when the SESSION profile is not a built-in, whatever is active instance-wide', async () => {
+    vi.mocked(getApiKeySettings).mockResolvedValue(settings())
+    vi.mocked(getChatHealth).mockResolvedValue(
+      health({ active_profile: { id: 'anthropic-sonnet', label: 'Claude Sonnet', wire: 'anthropic' } }),
+    )
+
+    renderSetup({ sessionProfile: { id: 'ollama-local', label: 'Local Ollama' } })
+
+    // Must NOT offer the Anthropic key form — that key is not what this turn
+    // was missing, and saving it would change nothing.
+    expect(await screen.findByTestId('chat-api-key-open-settings')).toBeTruthy()
+    expect(screen.queryByTestId('chat-api-key-input')).toBeNull()
+    expect(document.body.textContent).toContain('Local Ollama')
+  })
+
+  it('offers the inline form when the SESSION profile is a built-in, whatever is active instance-wide', async () => {
+    vi.mocked(getApiKeySettings).mockResolvedValue(settings())
+    vi.mocked(getChatHealth).mockResolvedValue(
+      health({ active_profile: { id: 'ollama-local', label: 'Local Ollama', wire: 'openai' } }),
+    )
+
+    renderSetup({ sessionProfile: { id: 'anthropic-sonnet', label: 'Claude Sonnet' } })
+
+    // The turn ran on built-in Claude, so ANTHROPIC_API_KEY really is the
+    // missing one and the first-run form is the right answer.
+    expect(await screen.findByTestId('chat-api-key-input')).toBeTruthy()
+    expect(screen.queryByTestId('chat-api-key-open-settings')).toBeNull()
+  })
+
+  it('falls back to the instance-wide active profile when the session has none', async () => {
+    vi.mocked(getApiKeySettings).mockResolvedValue(settings())
+    vi.mocked(getChatHealth).mockResolvedValue(
+      health({ active_profile: { id: 'ollama-local', label: 'Local Ollama', wire: 'openai' } }),
+    )
+
+    renderSetup({ sessionProfile: null })
+
+    expect(await screen.findByTestId('chat-api-key-open-settings')).toBeTruthy()
   })
 })

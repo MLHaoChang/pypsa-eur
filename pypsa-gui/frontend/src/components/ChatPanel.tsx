@@ -643,6 +643,7 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
 function ErrorBanner({
   onRetry,
   activeProfileLabel,
+  sessionProfile,
 }: {
   onRetry: () => void
   // Fix round 1 (Task 14) — the brief's `missing_api_key` broadening: body
@@ -651,6 +652,12 @@ function ErrorBanner({
   // `selectedProfileMeta` the parent already derives from `useChatProfiles()`
   // — never an id or base_url, and no second query added here.
   activeProfileLabel: string | null
+  // C-12 — the same profile the body names, passed on to `ApiKeySetup` so the
+  // banner's TEXT and its FORM answer one question rather than two. It used to
+  // branch on the instance-wide active profile from `/chat/health`, which a
+  // member's session may legitimately differ from — so the body could name a
+  // local endpoint while the form below it offered to set ANTHROPIC_API_KEY.
+  sessionProfile: { id: string; label: string } | null
 }) {
   const error = useChatStore((s) => s.error)
   const setError = useChatStore((s) => s.setError)
@@ -713,7 +720,7 @@ function ErrorBanner({
         than on a settings page, because this is where the user is when they
         find out.
       */}
-      {error.error_kind === 'missing_api_key' && <ApiKeySetup />}
+      {error.error_kind === 'missing_api_key' && <ApiKeySetup sessionProfile={sessionProfile} />}
       <div className="flex items-center gap-3 mt-2">
         {/* The failure modes above are the ONLY place a user could previously
             end up with their question on screen, an error on screen, and
@@ -2512,7 +2519,15 @@ export default function ChatPanel() {
           </button>
         </div>
       )}
-      <ErrorBanner onRetry={onRetryLastTurn} activeProfileLabel={selectedProfileMeta?.label ?? null} />
+      <ErrorBanner
+        onRetry={onRetryLastTurn}
+        activeProfileLabel={selectedProfileMeta?.label ?? null}
+        sessionProfile={
+          selectedProfileMeta
+            ? { id: selectedProfileMeta.id, label: selectedProfileMeta.label }
+            : null
+        }
+      />
       {historyGap > 0 && (
         <div
           role="status"

@@ -1055,10 +1055,34 @@ async def chat_stream(
     else:
         target_profile = llm_config.resolve_legacy_model(body.model)
 
+    # C-8 / C-9 — a BOUND session whose caller named neither `profile_id` nor
+    # `model` keeps the binding it already has.
+    #
+    # This branch used to fall through to the rebind below, which re-resolved
+    # the INSTANCE-WIDE active profile and reassigned
+    # `profile_id`/`bound_wire`/`model` on every single turn. Two documented
+    # promises were broken by that one line:
+    #
+    #   * the A8 fallback lasted exactly one turn. The user was told "falling
+    #     back to Sonnet" after Opus rate-limited, and the very next turn put
+    #     them back on the rate-limited model (C-8). `master` avoided this by
+    #     assigning `session.model` only `if body.model:`.
+    #   * an admin's `set_active_profile` silently moved every chat already in
+    #     flight (C-9) — the exact opposite of that tool's own promise, "This
+    #     chat stays on the model it started with", and of the contract in
+    #     `frontend/src/api/chat.ts` that omitting `profile_id` must not
+    #     "re-assert a stale choice every turn".
+    #
+    # Naming either field is still an explicit choice and still rebinds; an
+    # UNBOUND session still adopts the active profile, which is the
+    # zero-config path.
+    caller_named_a_target = bool(body.profile_id) or bool(body.model)
     wire_conflict = False
     if unknown_profile_id is not None:
         # Nothing to bind — the refusal is emitted by `run_turn` below and the
         # session keeps whatever binding it already had.
+        pass
+    elif session.profile_id is not None and not caller_named_a_target:
         pass
     elif session.profile_id is None or session.bound_wire == target_profile.wire:
         # Unbound session (first turn) or a same-wire rebind — both allowed.
