@@ -665,7 +665,7 @@ it('missing_api_key names the server-active profile when no explicit pick was ma
 // never refused an unconfigured id — and the C-4/F4 fixes made it an ordinary
 // path: every chat bound to a profile a super-admin deletes hits it on every
 // turn.
-it('unknown_profile_id renders real copy and an action, not the raw kind', async () => {
+it('unknown_profile_id renders real copy, and no dead-end Settings button', async () => {
   renderPanel()
   await screen.findByText('Claude Sonnet')
   seedError('unknown_profile_id', 'the model profile this chat was using is no longer configured')
@@ -673,5 +673,21 @@ it('unknown_profile_id renders real copy and an action, not the raw kind', async
   const banner = await screen.findByTestId('chat-error-banner')
   expect(banner.textContent).not.toContain('unknown_profile_id')
   expect(banner.textContent).toContain('That model profile no longer exists')
-  expect(await screen.findByTestId('chat-error-open-settings')).toBeTruthy()
+  // CORRECTED: the first version of this test asserted an 'open-settings'
+  // action. That button was a dead end — `fetchLLMSettingsOrNull` maps the
+  // 403 an ordinary member gets to `null`, and the target section renders
+  // nothing, so it opened an empty panel. Both server emitters already say
+  // "Pick a profile from the model menu", which every member can reach.
+  expect(screen.queryByTestId('chat-error-open-settings')).toBeNull()
+})
+
+// N-6 — the gap that let `internal_error` through. A completeness test
+// already existed for TOOL_ERROR_BANNER_KINDS but not for
+// RETRYABLE_ERROR_KINDS, so a kind could be listed as retryable — getting a
+// retry button — while having no copy, and the banner rendered the raw
+// snake_case kind above that button. Both directions of the same drift.
+it('every retryable error kind has banner copy', async () => {
+  const { KIND_COPY, RETRYABLE_ERROR_KINDS_FOR_TEST } = await import('./ChatPanel')
+  const missing = [...RETRYABLE_ERROR_KINDS_FOR_TEST].filter((k) => !(k in KIND_COPY))
+  expect(missing).toEqual([])
 })

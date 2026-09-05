@@ -469,6 +469,9 @@ class ChatSession:
     # real value" shape ADR-0001 forbids. This wire is new on this branch,
     # so the state is new too.
     usage_reported: bool = False
+    # W-3 — turns started on this session, the fallback bound for an endpoint
+    # that never reports usage. See the ceiling in `_run_turn_body`.
+    turns_started: int = 0
     usage_acc: dict[str, int] = field(
         default_factory=lambda: {
             "input_tokens": 0,
@@ -2934,6 +2937,31 @@ def _run_turn_body(
 
     def _project_switched() -> bool:
         return PyPSAService.get_active_context().loaded_project != turn_project_holder[0]
+
+    # W-3 — the fallback ceiling, for an endpoint that never reports usage.
+    #
+    # The token ceiling below counts numbers `usage_reported` now formally
+    # admits may never have been measured: `stream_options.include_usage` is
+    # a REQUEST, not a guarantee, so on such an endpoint `usage_acc` is
+    # structurally pinned at 0 and neither this gate nor the daily one can
+    # ever fire. Measured: 12 turns, nothing refused. The module header says
+    # "the server enforces a token-count ceiling so a misbehaving model +
+    # tool-use loop cannot burn unbounded budget" — this restores that
+    # intent where token counting is impossible, by counting the one thing
+    # that is always countable.
+    #
+    # Applies ONLY while nothing has been reported. The moment an endpoint
+    # reports anything, the token ceiling is the more precise bound and this
+    # one steps aside — asserted by its own sibling test.
+    if not session.usage_reported and session.turns_started >= MAX_TURNS_PER_SESSION:
+        yield "session_done", {
+            "reason": "budget_exhausted",
+            "kind": "turns",
+            "limit": MAX_TURNS_PER_SESSION,
+        }
+        return
+    with session._lock:
+        session.turns_started += 1
 
     # Cap enforcement — refuse to start a new turn if the session output
     # budget is already exhausted.

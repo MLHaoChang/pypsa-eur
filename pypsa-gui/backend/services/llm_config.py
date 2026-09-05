@@ -347,10 +347,23 @@ def _validate_base_url(profile_id: str, base_url: str) -> None:
     # down every turn, `GET /settings/llm`, `GET /chat/profiles` and
     # `/history`, with no in-app way to delete the entry, because every route
     # that could calls `load_profiles` first.
+    if not isinstance(base_url, str):
+        # An unquoted JSON scalar (`"base_url": 8080`) reaches `urlsplit` as an
+        # int/bool/float and raises AttributeError, not ValueError — so the
+        # W-5 translation below never saw it and `load_profiles` still raised.
+        # Type-check first: every other field is already contained by
+        # `_strict_bool` or an enum check, and base_url was the only escape.
+        raise ProfileValidationError(
+            f"profile {profile_id!r}: base_url must be a string or null, got "
+            f"{type(base_url).__name__}"
+        )
     try:
         parts = urlsplit(base_url)
         query = parse_qs(parts.query)
-    except ValueError as exc:
+    except (ValueError, TypeError, AttributeError) as exc:
+        # Belt and braces: the parser's exception TYPE is not part of its
+        # contract, so translate anything it throws rather than enumerating
+        # what it happens to throw today.
         raise ProfileValidationError(
             f"profile {profile_id!r}: base_url is not a parsable URL"
         ) from exc

@@ -525,6 +525,9 @@ function ConfirmationCard() {
 const RETRYABLE_ERROR_KINDS = new Set([
   'rate_limited', 'upstream_error', 'internal_error', 'tool_call_cap_exceeded',
 ])
+// Exported for the completeness test only (N-6): a kind listed here without
+// KIND_COPY renders a retry button under a raw snake_case title.
+export const RETRYABLE_ERROR_KINDS_FOR_TEST = RETRYABLE_ERROR_KINDS
 
 /**
  * Task 14 — single source of truth for the error banner's copy.
@@ -569,18 +572,23 @@ export const KIND_COPY: Record<
   // `unknown_profile_id` matters most: C-4 made it a REACHABLE path (before
   // that fix the server never refused an unconfigured id at all), and it
   // fires for every open chat the moment a super-admin deletes a profile.
-  unknown_profile_id: {
-    title: 'That model profile no longer exists',
-    action: 'open-settings',
-  },
+  // No action: the deep-link target renders `null` for an ordinary member (a
+  // 403 maps to null in `fetchLLMSettingsOrNull`), so the button opened an
+  // empty panel — and both server emitters already say "Pick a profile from
+  // the model menu", which is the member-visible chat-header dropdown.
+  unknown_profile_id: { title: 'That model profile no longer exists' },
   not_authorized: { title: 'Not allowed for your account' },
-  invalid_request: {
-    title: 'The model endpoint rejected the request',
-    action: 'open-settings',
-  },
+  tool_not_offered: { title: 'The model asked for a tool it was not offered' },
+  invalid_request: { title: 'The model endpoint rejected the request' },
   upstream_error: { title: 'The model endpoint returned an error' },
+  // Was reachable from three emitters AND already listed in
+  // RETRYABLE_ERROR_KINDS above — the file knew the kind in one constant and
+  // not the other, so the retry button appeared under a raw snake_case title.
+  internal_error: { title: 'Something went wrong on the server' },
+  turn_already_in_flight: { title: 'A turn is already running' },
+  project_switched_mid_turn: { title: 'The active project changed mid-turn' },
+  unknown_session: { title: 'That chat session is no longer known' },
   sdk_not_installed: { title: 'Provider SDK is not installed' },
-  tool_running: { title: 'A tool is still running' },
   solver_in_flight: { title: 'Solver in flight' },
   parallel_destructive_not_allowed: { title: 'Multiple destructive actions in one turn' },
   tool_call_cap_exceeded: { title: 'Tool call limit reached this turn' },
@@ -665,6 +673,14 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
+  // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
+  // converts to `tool_error` frames — so copy alone was unreachable and the
+  // user got the truncated gray tool line. Same shape as the
+  // `inactive_acting_user` correction above; this is its sibling.
+  'not_authorized', 'unknown_profile_id',
+  // Emitted by the capability guard when an endpoint asks for a tool that was
+  // never offered for this turn.
+  'tool_not_offered',
   // Phase D — upload-tool errors. Same routing as the chat-stream 'error'
   // frame, so a single user mental model handles every failure surface.
   'file_too_large', 'empty_file', 'invalid_filename',

@@ -2153,3 +2153,107 @@ def test_a_refused_parallel_destructive_batch_also_consumes_the_budget(appdata):
         f"the turn never terminated — {provider.calls} calls to the endpoint"
     )
     assert events[-1][0] == "session_done"
+
+
+class _NoUsageProvider:
+    """An endpoint that streams fine but never reports usage."""
+
+    name = "no-usage"
+
+    def __init__(self):
+        self.calls = 0
+
+    def stream(self, request):
+        from services.llm_provider import LLMEvent
+        self.calls += 1
+        yield LLMEvent(type="text_delta", text="ok")
+        yield LLMEvent(type="message_done",
+                       blocks=[{"type": "text", "text": "ok"}], usage={})
+
+
+def test_an_endpoint_that_reports_no_usage_still_hits_a_session_ceiling(
+    appdata, monkeypatch,
+):
+    """
+    W-3 established the ground truth and then did not use it.
+
+    `stream_options.include_usage` is a request, not a guarantee. On an
+    endpoint that never reports, `usage_acc["output_tokens"]` is structurally
+    pinned at 0, so `MAX_OUTPUT_TOKENS_PER_SESSION` — and the daily cap, which
+    sums the same numbers off chat.jsonl — can never fire. The module header
+    states the intent this violates: "the server enforces a token-count
+    ceiling so a misbehaving model + tool-use loop cannot burn unbounded
+    budget."
+
+    `MAX_TURNS_PER_SESSION` was defined and referenced nowhere. It is the
+    fallback bound for exactly this case: when we cannot count tokens, count
+    turns.
+    """
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="nousage", label="No Usage", preset="custom", wire="anthropic",
+        base_url=None, model="claude-sonnet-5", tools=False, vision=True,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+    monkeypatch.setattr(chat_service, "MAX_TURNS_PER_SESSION", 5)
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    session.profile_id = "nousage"
+    provider = _NoUsageProvider()
+
+    reasons = []
+    for _ in range(12):
+        for name, payload in chat_service.run_turn(session, "hi", provider=provider):
+            if name == "session_done":
+                reasons.append(payload.get("reason"))
+
+    assert session.usage_reported is False, "fixture is wrong; usage was reported"
+    assert "budget_exhausted" in reasons, (
+        f"a no-usage endpoint ran {provider.calls} turns unbounded — the "
+        f"session ceiling never fired because it counts tokens nobody "
+        f"measured. reasons={reasons}"
+    )
+    assert provider.calls <= 6, f"ceiling fired too late: {provider.calls} turns"
+
+
+def test_the_turn_ceiling_does_not_fire_when_usage_IS_reported(appdata, monkeypatch):
+    """
+    DISCRIMINATION. The turn-count fallback must apply ONLY where token
+    counting is impossible — an endpoint that reports usage keeps being
+    governed by the token ceiling, which is the more precise bound.
+    """
+    from services import llm_config
+    from services.llm_provider import LLMEvent
+
+    class _WithUsage(_NoUsageProvider):
+        def stream(self, request):
+            self.calls += 1
+            yield LLMEvent(type="text_delta", text="ok")
+            yield LLMEvent(type="message_done",
+                           blocks=[{"type": "text", "text": "ok"}],
+                           usage={"input_tokens": 1, "output_tokens": 1})
+
+    profile = llm_config.LLMProfile(
+        id="withusage", label="With Usage", preset="custom", wire="anthropic",
+        base_url=None, model="claude-sonnet-5", tools=False, vision=True,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+    monkeypatch.setattr(chat_service, "MAX_TURNS_PER_SESSION", 5)
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    session.profile_id = "withusage"
+    provider = _WithUsage()
+
+    reasons = []
+    for _ in range(8):
+        for name, payload in chat_service.run_turn(session, "hi", provider=provider):
+            if name == "session_done":
+                reasons.append(payload.get("reason"))
+
+    assert session.usage_reported is True
+    assert "budget_exhausted" not in reasons, (
+        "the turn-count fallback fired on an endpoint that DOES report usage; "
+        "it must only cover the case where tokens cannot be counted"
+    )
+    assert provider.calls == 8

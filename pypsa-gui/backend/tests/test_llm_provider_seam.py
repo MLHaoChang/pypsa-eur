@@ -461,6 +461,7 @@ def test_stable_markers_reach_all_sites_via_fake():
     assert 0 <= second.history_stable_anchor < len(second.messages)
 
 
+import json
 import os
 import pytest
 
@@ -1239,3 +1240,63 @@ def test_a_second_token_param_refusal_does_not_escape_the_module():
     with _pytest.raises(ProviderError):
         list(provider.stream(_seam_request()))
     assert len(seen) == 2, f"expected exactly one retry, got {len(seen)} sends"
+
+
+def test_the_preset_token_param_actually_reaches_the_provider(appdata_seam):
+    """
+    THE JOIN. C-2 was tested in three disconnected slices — the presets.json
+    data, the pure `derive_token_param`, and the provider given a
+    `token_param` the TEST ITSELF passed — and nothing asserted they were
+    wired together. A mutation audit deleted
+    `token_param=profile.token_param` from `_provider_for_profile`, the only
+    place a profile's derived value reaches the provider, and all 207 tests
+    in the five LLM suites still passed: the `openai` preset silently
+    reverted to `max_tokens`, which is the exact bug C-2 exists to fix.
+
+    This drives the real construction path and asserts the parameter that
+    ends up on the wire, so the wiring cannot vanish silently again.
+    """
+    from services import chat_service, llm_config
+
+    profile = llm_config.LLMProfile(
+        id="oai-join", label="OpenAI", preset="openai", wire="openai",
+        base_url=None, model="gpt-5.6-sol", tools=False, vision=False,
+        auth="bearer", fallback_model=None, max_output_tokens=None)
+    # Precondition: the preset really does declare the newer spelling, so a
+    # regression to the default would be visible rather than coincidental.
+    assert profile.token_param == "max_completion_tokens"
+
+    os.environ["OPENAI_API_KEY"] = "sk-test-join-0123456789"
+    try:
+        provider, err = chat_service._provider_for_profile(profile)
+    finally:
+        os.environ.pop("OPENAI_API_KEY", None)
+    assert err is None and provider is not None
+
+    assert provider._token_param == "max_completion_tokens", (
+        "the profile's derived token_param did not reach the provider — "
+        "`_provider_for_profile` is not passing it through"
+    )
+
+    # And prove it on the wire, not just on the attribute.
+    import httpx
+    captured = {}
+
+    def handler(request):
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, content=_sse_bytes(
+            b'{"choices":[{"delta":{"content":"hi"}}]}',
+            b'{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+        ), headers={"content-type": "text/event-stream"})
+
+    provider._http = httpx.Client(transport=httpx.MockTransport(handler))
+    list(provider.stream(_seam_request()))
+    assert "max_completion_tokens" in captured["json"]
+    assert "max_tokens" not in captured["json"]
+
+
+@pytest.fixture()
+def appdata_seam(tmp_path, monkeypatch):
+    """Per-test app-data dir, so profile writes never touch the session one."""
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+    return tmp_path

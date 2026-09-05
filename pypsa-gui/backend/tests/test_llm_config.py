@@ -571,3 +571,42 @@ def test_one_unparsable_entry_does_not_take_the_whole_file_down(appdata):
     assert "broken" not in ids
     assert "good-two" in ids, "the valid sibling entry was dropped too"
     assert {"anthropic-sonnet", "anthropic-opus"} <= ids
+
+
+@pytest.mark.parametrize("bad_value", [8080, True, 3.5])
+def test_a_non_string_base_url_is_a_validation_error_not_an_attributeerror(bad_value):
+    """
+    W-5 was INCOMPLETE. It translated the `ValueError` `urlsplit` raises on a
+    malformed *string*, but an unquoted JSON scalar — `"base_url": 8080` — makes
+    `urlsplit` raise `AttributeError` ('int' object has no attribute 'decode'),
+    which neither the new catch nor the widened per-entry guard covers. The
+    parametrised test that shipped with W-5 only used strings, so it was
+    structurally incapable of seeing this.
+    """
+    from services import llm_config
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config._validate_base_url("p", bad_value)
+
+
+@pytest.mark.parametrize("bad_value", [8080, True, 3.5])
+def test_a_non_string_base_url_entry_is_skipped_not_fatal(appdata, bad_value):
+    """`load_profiles` keeps its NEVER-raises promise for wrong JSON types too."""
+    from services import llm_config
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            {"id": "typed-wrong", "label": "bad", "preset": "custom",
+             "wire": "openai", "base_url": bad_value, "model": "m",
+             "tools": True, "vision": False, "auth": "none",
+             "fallback_model": None, "max_output_tokens": None},
+            {"id": "good-three", "label": "good", "preset": "custom",
+             "wire": "openai", "base_url": "http://localhost:11434/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "none",
+             "fallback_model": None, "max_output_tokens": None},
+        ],
+    }), encoding="utf-8")
+    profiles, _active = llm_config.load_profiles()   # must not raise
+    ids = {p.id for p in profiles}
+    assert "typed-wrong" not in ids
+    assert "good-three" in ids
