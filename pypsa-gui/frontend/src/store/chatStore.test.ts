@@ -13,6 +13,7 @@ describe('chatStore Track A (A1 tool_progress)', () => {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_create_tokens: 0,
+        reported: true,
       },
       streaming: false,
       error: null,
@@ -67,7 +68,7 @@ describe('chatStore profile switching (Task 13)', () => {
       toolProgress: {},
       usage: {
         input_tokens: 0, output_tokens: 0,
-        cache_read_tokens: 0, cache_create_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: true,
       },
       streaming: false,
       error: null,
@@ -98,7 +99,7 @@ describe('chatStore profile switching (Task 13)', () => {
       error: { error_kind: 'rate_limited', message: 'slow down' },
       usage: {
         input_tokens: 10, output_tokens: 20,
-        cache_read_tokens: 1, cache_create_tokens: 2,
+        cache_read_tokens: 1, cache_create_tokens: 2, reported: true,
       },
     })
     useChatStore.getState().startNewChat()
@@ -111,6 +112,10 @@ describe('chatStore profile switching (Task 13)', () => {
     expect(s.usage).toEqual({
       input_tokens: 0, output_tokens: 0,
       cache_read_tokens: 0, cache_create_tokens: 0,
+      // W-3 — a new chat has measured nothing YET, which is not the same as
+      // an endpoint that measured zero. The reset must clear the flag too,
+      // or the fresh session would inherit the old one's credibility.
+      reported: false,
     })
   })
 

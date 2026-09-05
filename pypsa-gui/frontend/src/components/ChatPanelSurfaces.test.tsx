@@ -59,7 +59,7 @@ beforeEach(() => {
     streaming: false, streamCleanup: null,
     usage: {
       input_tokens: 0, output_tokens: 0,
-      cache_read_tokens: 0, cache_create_tokens: 0,
+      cache_read_tokens: 0, cache_create_tokens: 0, reported: true,
     },
   })
   vi.mocked(getChatHistory).mockResolvedValue({
@@ -195,7 +195,7 @@ it('says so when part of the transcript could not be read', async () => {
       user: 'hello', assistant: [{ type: 'text', text: 'hi' }],
       usage: {
         input_tokens: 1, output_tokens: 1,
-        cache_read_tokens: 0, cache_create_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: true,
       },
     }],
     last_session_id: 's1', bound_project: 'Demo',
@@ -225,7 +225,7 @@ it('can give up meter width without pushing the header controls out', async () =
     useChatStore.setState({
       usage: {
         input_tokens: 1_234_567, output_tokens: 234_567,
-        cache_read_tokens: 12_345_678, cache_create_tokens: 98_765,
+        cache_read_tokens: 12_345_678, cache_create_tokens: 98_765, reported: true,
       },
     })
   })

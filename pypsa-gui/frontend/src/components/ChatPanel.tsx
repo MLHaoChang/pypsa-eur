@@ -317,16 +317,35 @@ interface TurnDoneFrame {
     input_tokens?: number
     output_tokens?: number
     cache_read_tokens?: number
+    reported?: boolean
     cache_create_tokens?: number
   }
 }
 
 function UsageMeter() {
   const usage = useChatStore((s) => s.usage)
+  // W-3 (ADR-0001) — an endpoint that never reported usage is UNKNOWN, not
+  // zero. `stream_options.include_usage` is a request, not a guarantee, and
+  // an OpenAI-compatible server may simply omit the chunk; rendering the
+  // zero-initialised totals would state a measurement nobody made, and would
+  // read identically to a session that genuinely used nothing.
+  if (!usage.reported) {
+    return (
+      <span
+        className="font-mono text-[10px] text-muted truncate min-w-0"
+        data-testid="chat-usage-meter"
+        data-usage-available="false"
+        title="This model endpoint did not report token usage for this session."
+      >
+        tokens n/a
+      </span>
+    )
+  }
   return (
     <span
       className="font-mono text-[10px] text-muted truncate min-w-0"
       data-testid="chat-usage-meter"
+      data-usage-available="true"
       title="Tokens this session: input / output / read from cache"
     >
       {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
@@ -545,6 +564,23 @@ export const KIND_COPY: Record<
   missing_api_key: { title: 'API key missing' },
   // P-2 — the acting account stopped being active mid-turn.
   inactive_acting_user: { title: 'Account is no longer active' },
+  // W-1 — kinds the server can genuinely emit that had no entry, so the
+  // banner printed the raw snake_case kind as its title with no action.
+  // `unknown_profile_id` matters most: C-4 made it a REACHABLE path (before
+  // that fix the server never refused an unconfigured id at all), and it
+  // fires for every open chat the moment a super-admin deletes a profile.
+  unknown_profile_id: {
+    title: 'That model profile no longer exists',
+    action: 'open-settings',
+  },
+  not_authorized: { title: 'Not allowed for your account' },
+  invalid_request: {
+    title: 'The model endpoint rejected the request',
+    action: 'open-settings',
+  },
+  upstream_error: { title: 'The model endpoint returned an error' },
+  sdk_not_installed: { title: 'Provider SDK is not installed' },
+  tool_running: { title: 'A tool is still running' },
   solver_in_flight: { title: 'Solver in flight' },
   parallel_destructive_not_allowed: { title: 'Multiple destructive actions in one turn' },
   tool_call_cap_exceeded: { title: 'Tool call limit reached this turn' },
@@ -1933,6 +1969,10 @@ export default function ChatPanel() {
             output_tokens: d.usage.output_tokens ?? 0,
             cache_read_tokens: d.usage.cache_read_tokens ?? 0,
             cache_create_tokens: d.usage.cache_create_tokens ?? 0,
+            // W-3 — the server says whether these numbers are a measurement
+            // or an initialisation. An older backend omits the field; treat
+            // that as reported, which is the pre-W-3 rendering.
+            reported: d.usage.reported ?? true,
           })
         }
         closeStream()

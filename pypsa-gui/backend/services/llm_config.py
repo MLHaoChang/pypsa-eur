@@ -339,7 +339,21 @@ def _validate_preset_base_url_lock(profile: LLMProfile) -> None:
 
 
 def _validate_base_url(profile_id: str, base_url: str) -> None:
-    parts = urlsplit(base_url)
+    # W-5 — `urlsplit`/`parse_qs` raise a BARE `ValueError` on a malformed
+    # URL (`http://[::1` -> "Invalid IPv6 URL"). `load_profiles`' per-entry
+    # guard catches `ProfileValidationError`, which IS a `ValueError`
+    # subclass — so a bare one slipped past it and out of a function whose
+    # docstring promises it NEVER raises. One hand-edited entry then took
+    # down every turn, `GET /settings/llm`, `GET /chat/profiles` and
+    # `/history`, with no in-app way to delete the entry, because every route
+    # that could calls `load_profiles` first.
+    try:
+        parts = urlsplit(base_url)
+        query = parse_qs(parts.query)
+    except ValueError as exc:
+        raise ProfileValidationError(
+            f"profile {profile_id!r}: base_url is not a parsable URL"
+        ) from exc
     if parts.scheme not in ("http", "https"):
         raise ProfileValidationError(
             f"profile {profile_id!r}: base_url scheme must be http or https, got {parts.scheme!r}"
@@ -351,7 +365,6 @@ def _validate_base_url(profile_id: str, base_url: str) -> None:
         raise ProfileValidationError(
             f"profile {profile_id!r}: base_url must not contain userinfo (user:pass@host)"
         )
-    query = parse_qs(parts.query)
     leaked = _CREDENTIAL_QUERY_KEYS & {key.lower() for key in query}
     if leaked:
         raise ProfileValidationError(
@@ -482,7 +495,8 @@ def load_profiles() -> tuple[list[LLMProfile], str]:
             if profile.id in seen_ids:
                 raise ProfileValidationError(f"duplicate profile id {profile.id!r}")
             _validate_profile(profile)
-        except (KeyError, TypeError, ProfileValidationError) as exc:
+        except (KeyError, TypeError, ValueError) as exc:  # W-5: ValueError covers
+            # ProfileValidationError AND any bare one a parser leaks.
             logger.warning("llm profiles: skipping an invalid profile entry: %s", exc)
             continue
         profiles.append(profile)

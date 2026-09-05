@@ -658,3 +658,20 @@ it('missing_api_key names the server-active profile when no explicit pick was ma
   const banner = await screen.findByTestId('chat-error-banner')
   expect(banner.textContent).toContain('Currently using the "Claude Sonnet" profile.')
 })
+
+// W-1 — `unknown_profile_id` had no KIND_COPY entry, so the banner printed
+// the raw snake_case kind as its bold title with no action. It was
+// UNREACHABLE at 93ddbf79 — C-4 was precisely the finding that the server
+// never refused an unconfigured id — and the C-4/F4 fixes made it an ordinary
+// path: every chat bound to a profile a super-admin deletes hits it on every
+// turn.
+it('unknown_profile_id renders real copy and an action, not the raw kind', async () => {
+  renderPanel()
+  await screen.findByText('Claude Sonnet')
+  seedError('unknown_profile_id', 'the model profile this chat was using is no longer configured')
+
+  const banner = await screen.findByTestId('chat-error-banner')
+  expect(banner.textContent).not.toContain('unknown_profile_id')
+  expect(banner.textContent).toContain('That model profile no longer exists')
+  expect(await screen.findByTestId('chat-error-open-settings')).toBeTruthy()
+})

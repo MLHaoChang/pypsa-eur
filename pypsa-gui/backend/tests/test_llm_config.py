@@ -518,3 +518,56 @@ def test_a_custom_preset_declares_no_wire_and_may_pick_either(appdata, wire):
         tools=True, vision=False, auth="bearer",
         fallback_model=None, max_output_tokens=None)
     llm_config._validate_profile(profile)  # must not raise
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# W-5 — `load_profiles` is documented "NEVER raises", and did.
+#
+# `urlsplit("http://[::1")` raises a BARE `ValueError` ("Invalid IPv6 URL").
+# The per-entry guard in `load_profiles` caught
+# `(KeyError, TypeError, ProfileValidationError)` — and because
+# `ProfileValidationError` IS a `ValueError` subclass, that reads as though
+# ValueErrors are handled. A bare one is not, and escaped.
+#
+# Blast radius is the whole chat surface: every turn, `GET /settings/llm`,
+# `GET /chat/profiles` and `/history` all call `load_profiles`, and so does
+# every route that could DELETE the offending entry — so there was no in-app
+# repair. Filed previously as "S-L2: malformed IPv6 base_url -> 500", which
+# understated it.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "bad_url",
+    ["http://[::1", "http://[fe80::1", "https://[not-ipv6"],
+)
+def test_a_malformed_url_is_a_validation_error_not_a_bare_valueerror(bad_url):
+    """At the predicate: the parser's ValueError must be translated."""
+    from services import llm_config
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config._validate_base_url("p", bad_url)
+
+
+def test_one_unparsable_entry_does_not_take_the_whole_file_down(appdata):
+    """`load_profiles` keeps its NEVER-raises promise, and its siblings load."""
+    from services import llm_config
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            {"id": "broken", "label": "bad", "preset": "custom",
+             "wire": "openai", "base_url": "http://[::1", "model": "m",
+             "tools": True, "vision": False, "auth": "none",
+             "fallback_model": None, "max_output_tokens": None},
+            {"id": "good-two", "label": "good", "preset": "custom",
+             "wire": "openai", "base_url": "http://localhost:11434/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "none",
+             "fallback_model": None, "max_output_tokens": None},
+        ],
+    }), encoding="utf-8")
+
+    profiles, _active = llm_config.load_profiles()   # must not raise
+    ids = {p.id for p in profiles}
+    assert "broken" not in ids
+    assert "good-two" in ids, "the valid sibling entry was dropped too"
+    assert {"anthropic-sonnet", "anthropic-opus"} <= ids

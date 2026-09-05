@@ -460,6 +460,15 @@ class ChatSession:
     # cleared in run_turn's try/finally so a concurrent second run_turn on the
     # same session_id (two tabs) is rejected with turn_already_in_flight.
     _turn_in_flight: bool = field(default=False)
+    # W-3 (ADR-0001) — whether the provider has EVER reported usage for this
+    # session. `stream_options.include_usage` is a request, not a guarantee:
+    # an OpenAI-compatible endpoint that omits the usage chunk leaves
+    # `usage_acc` at its zero initialisation, and shipping that renders as
+    # "0 in / 0 out · 0 cached" — indistinguishable from a legitimately
+    # unused session, which is precisely the "unresolvable rendered as a
+    # real value" shape ADR-0001 forbids. This wire is new on this branch,
+    # so the state is new too.
+    usage_reported: bool = False
     usage_acc: dict[str, int] = field(
         default_factory=lambda: {
             "input_tokens": 0,
@@ -667,6 +676,11 @@ class ChatSession:
             for k, v in deltas.items():
                 if k in self.usage_acc:
                     self.usage_acc[k] += int(v)
+                    # W-3 — a real report arrived, so the totals below now
+                    # mean something. Set on any recognised key, including an
+                    # honest zero: "the endpoint told us zero" is a different
+                    # fact from "the endpoint never told us".
+                    self.usage_reported = True
 
     def push_result_ref(self, ref: dict[str, Any]) -> None:
         with self._lock:
@@ -1437,6 +1451,9 @@ def agent_loop_stub(
         if kind == "turn_done":
             with session._lock:
                 usage_snapshot = dict(session.usage_acc)
+                # W-3 — ships alongside the totals so the client can
+                # tell "nothing used" from "never reported".
+                usage_snapshot["reported"] = session.usage_reported
             yield "turn_done", {
                 "turn_id": step.get("turn_id"),
                 "usage": usage_snapshot,
@@ -3510,6 +3527,9 @@ def _run_turn_body(
             # No further tools requested — turn is complete.
             with session._lock:
                 usage_snapshot = dict(session.usage_acc)
+                # W-3 — ships alongside the totals so the client can
+                # tell "nothing used" from "never reported".
+                usage_snapshot["reported"] = session.usage_reported
             # Persist the completed turn to chat.jsonl for replay across
             # backend restarts and other browser tabs. Best-effort: a
             # persistence failure must not abort the turn (the user already
@@ -3575,6 +3595,14 @@ def _run_turn_body(
         ]
         offenders = find_parallel_destructive(all_tool_uses)
         if offenders:
+            # W-2 — count the refused batch, for the same reason the
+            # `tool_not_offered` refusal counts (F1): this `continue`s the
+            # agentic loop, so an endpoint that answers every request with two
+            # destructive calls otherwise drives it forever, re-POSTing the
+            # whole growing conversation and the auth header each pass.
+            # Nothing here executes — the guard works — but "refused" must
+            # still cost budget or the cap is not a bound at all.
+            tool_call_count += len(all_tool_uses)
             tool_results = []
             for call in all_tool_uses:
                 yield "tool_error", {
@@ -3596,6 +3624,16 @@ def _run_turn_body(
             messages.append({"role": "user", "content": tool_results})
             with session._lock:
                 session.append_history_message({"role": "user", "content": tool_results})
+            if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
+                yield "error", {
+                    "error_kind": "tool_call_cap_exceeded",
+                    "message": (
+                        f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                        "one turn; refusing further dispatch this turn."
+                    ),
+                }
+                yield "session_done", {"reason": "tool_call_cap_exceeded"}
+                return
             continue
 
         # Dispatch each tool sequentially. Before EACH dispatch, re-check that

@@ -2089,3 +2089,67 @@ def test_a_session_bound_to_a_deleted_profile_refuses_cleanly(
     # And the id must not be echoed back to the client in the message.
     for _n, p in frames:
         assert "doomed" not in str(p.get("message", ""))
+
+
+class _EndlessParallelDestructiveProvider:
+    """Answers every request with TWO destructive tool calls."""
+
+    name = "endless-parallel"
+
+    def __init__(self):
+        self.calls = 0
+
+    def stream(self, request):
+        from services.llm_provider import LLMEvent
+        self.calls += 1
+        n = self.calls
+        blocks = [
+            {"type": "tool_use", "id": f"d{n}a", "name": "delete_project",
+             "input": {"name": "a"}},
+            {"type": "tool_use", "id": f"d{n}b", "name": "delete_project",
+             "input": {"name": "b"}},
+        ]
+        for b in blocks:
+            yield LLMEvent(type="tool_use_start", tool_use_id=b["id"],
+                           tool_name=b["name"])
+        yield LLMEvent(type="message_done", blocks=blocks,
+                       usage={"input_tokens": 1, "output_tokens": 1})
+
+
+def test_a_refused_parallel_destructive_batch_also_consumes_the_budget(appdata):
+    """
+    W-2 — the SIBLING of F1, and the one I did not check when fixing F1.
+
+    F1 moved the `tool_not_offered` refusal below `tool_call_count += 1` and
+    justified it as "the cap is the only per-turn bound there is; nothing may
+    skip it". Twenty lines above, the `parallel_destructive_not_allowed`
+    refusal still `continue`d the agentic loop without reaching that counter.
+
+    Nothing executes — the guard does its job — but the turn never ends, and
+    every pass re-POSTs the whole growing conversation and the Authorization
+    header. This predates the branch; what the branch changed is WHO can
+    drive it, since the endpoint is now operator-chosen and `_validate_base_url`
+    accepts plain http.
+    """
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="par-x", label="Par", preset="custom", wire="anthropic",
+        base_url=None, model="claude-sonnet-5", tools=True, vision=True,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    session.profile_id = "par-x"
+    provider = _EndlessParallelDestructiveProvider()
+
+    events = []
+    for event in chat_service.run_turn(session, "delete both", provider=provider):
+        events.append(event)
+        if len(events) > 400:
+            break
+
+    assert provider.calls <= chat_service.MAX_TOOL_CALLS_PER_TURN + 2, (
+        f"the turn never terminated — {provider.calls} calls to the endpoint"
+    )
+    assert events[-1][0] == "session_done"

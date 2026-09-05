@@ -51,6 +51,17 @@ export interface ChatUsageAcc {
   output_tokens: number
   cache_read_tokens: number
   cache_create_tokens: number
+  /**
+   * W-3 (ADR-0001) — whether the provider ever REPORTED usage this session.
+   *
+   * `stream_options.include_usage` is a request, not a guarantee: an
+   * OpenAI-compatible endpoint may simply omit the usage chunk. Without this
+   * flag the zero-initialised totals render as "0 in / 0 out · 0 cached",
+   * which is indistinguishable from a session that genuinely used nothing —
+   * an unresolvable value rendered as a real one. `false` must render as
+   * unavailable, never as zeros.
+   */
+  reported: boolean
 }
 
 export interface ChatErrorState {
@@ -273,6 +284,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     output_tokens: 0,
     cache_read_tokens: 0,
     cache_create_tokens: 0,
+      reported: false,
   },
   streaming: false,
   error: null,
@@ -339,6 +351,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       output_tokens: s.usage.output_tokens + (delta.output_tokens ?? 0),
       cache_read_tokens: s.usage.cache_read_tokens + (delta.cache_read_tokens ?? 0),
       cache_create_tokens: s.usage.cache_create_tokens + (delta.cache_create_tokens ?? 0),
+      // Sticky: one real report in a session makes the totals meaningful,
+      // and a later turn on an endpoint that reports nothing must not erase
+      // what earlier turns legitimately measured.
+      reported: s.usage.reported || (delta.reported ?? false),
     },
   })),
   setStreaming: (v) => set({ streaming: v }),
@@ -427,7 +443,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       toolProgress: {},
       usage: {
         input_tokens: 0, output_tokens: 0,
-        cache_read_tokens: 0, cache_create_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
       },
       streaming: false,
       error: null,
@@ -451,7 +467,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       error: null,
       usage: {
         input_tokens: 0, output_tokens: 0,
-        cache_read_tokens: 0, cache_create_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
       },
       suppressHydrationOnce: true,
       // Always increments — see the field comment. This is the value the
