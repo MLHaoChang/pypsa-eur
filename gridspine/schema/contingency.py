@@ -18,7 +18,11 @@ Contingency results
     missing row, and never a row whose severity happens to read benign. An
     absent row and a survived contingency are indistinguishable downstream,
     which is why the validator enforces the sentinel in both directions:
-    diverged rows must carry it, converged rows must not.
+    diverged rows must carry it, converged rows must not. ``islanded`` marks
+    the outages that split the grid (11 of case39's 46 branch outages do —
+    nine radial generator connections and two that cut off a whole pocket);
+    an islanded row is never converged, and the flag is what separates that
+    topology fact, identical in every hour, from a numerical divergence.
 
 Fault levels
     One row per (bus, case) from IEC 60909, ``case`` in {max, min}. A fault
@@ -57,6 +61,7 @@ CONTINGENCY_RESULT_COLUMNS = {
     "contingency_id": "object",
     "hour": "int64",
     "converged": "bool",
+    "islanded": "bool",
     "max_branch_loading_pct": "float64",
     "min_vm_pu": "float64",
     "max_vm_pu": "float64",
@@ -163,6 +168,9 @@ def validate_contingency_results(df: pd.DataFrame) -> pd.DataFrame:
         raise ContractError(
             f"converged must be exactly True or False, got {bad_conv[:5]!r}"
         )
+    bad_isl = [v for v in out["islanded"] if not isinstance(v, (bool, np.bool_))]
+    if bad_isl:
+        raise ContractError(f"islanded must be exactly True or False, got {bad_isl[:5]!r}")
     _integral(out["hour"], "hour")
     n_viol = _integral(out["n_violations"], "n_violations")
     if (n_viol < 0).any():
@@ -203,6 +211,17 @@ def validate_contingency_results(df: pd.DataFrame) -> pd.DataFrame:
         raise ContractError("min_vm_pu and max_vm_pu must be > 0")
     if (conv_rows["min_vm_pu"] > conv_rows["max_vm_pu"]).any():
         raise ContractError("min_vm_pu exceeds max_vm_pu")
+
+    # An islanded outage has no post-contingency flow to report on the whole
+    # grid, so it is never "converged" — but it is a TOPOLOGY fact, identical in
+    # every hour, and the flag lets a reader (and the ranking) tell it from a
+    # numerical divergence.
+    islanded_converged = out["islanded"] & converged
+    if islanded_converged.any():
+        raise ContractError(
+            "islanded rows cannot be converged: "
+            f"{out.loc[islanded_converged, 'contingency_id'].tolist()}"
+        )
 
     # The cross-field rule, both directions.
     diverged_benign = (~converged) & (sev != NON_CONVERGED_SEVERITY)

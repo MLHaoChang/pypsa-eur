@@ -1,0 +1,248 @@
+"""Stage 2: full AC N-1 screening of a snapshot-applied net.
+
+Branch outages run through lightsim2grid's ``ContingencyAnalysisCPP`` on a
+GridModel built from the pandapower net — one batched solve for every branch,
+matching pandapower to 1e-10 in |V| on the connected cases (probed). Unit
+outages run through pandapower on a copy, because a generator is not a branch
+id and its lost MW has to land on the slack. Both paths report ONE loading
+definition, ``branch_loading_pct``: from/HV-side current over rating, the
+side lightsim2grid returns. pandapower's own ``loading_percent`` is the max
+of both ends, so ours is never above it and typically a few percent below;
+the test pins that band by measurement.
+
+ISLANDED is a topology fact, not a solver failure. When an outage splits the
+grid lightsim2grid reports ``is_grid_connected_after_contingency == 0`` and
+all-zero voltages; it does not solve the surviving island. Such a row is
+``islanded=True, converged=False`` with the sentinel severity — never a
+missing row — and the flag exists because these outages are identical in
+every hour (11 of case39's 46: nine radial generator connections and two that
+cut off the BUS_19/BUS_20 pocket) and a ranking that could not tell them from
+a divergence would carry them as a constant floor.
+
+Severity is defined ONCE, here, and the report quotes it:
+
+    severity = sum over branches of max(0, loading/100 - 1)
+             + sum over buses of max(0, (V_MIN - V)/0.1, (V - V_MAX)/0.1)
+
+Dimensionless, zero without violations, monotone in overload depth and in
+voltage excursion. Non-convergence and islanding take ``NON_CONVERGED_SEVERITY``.
+
+THE stage-order guard: the net must already carry the hour — loads, every gen
+setpoint, every RES output matching the tables — or the screen refuses. It
+checks; it does not apply. A screen of case39's native peak labelled as some
+other hour is the increment-1 defect in a new file.
+
+The caller's net is never mutated: everything happens on a deep copy.
+
+Allowed to import pandapower and lightsim2grid (``static/``); never pypsa.
+"""
+import copy
+
+import numpy as np
+import pandapower as pp
+import pandas as pd
+from lightsim2grid.contingencyAnalysis import ContingencyAnalysisCPP
+from lightsim2grid.gridmodel import init_from_pandapower
+
+from gridspine.schema.contingency import (
+    NON_CONVERGED_SEVERITY,
+    validate_contingency_results,
+    validate_contingency_set,
+)
+from gridspine.schema.contracts import ContractError
+from gridspine.schema.dispatch import validate_dispatch, validate_loads
+from gridspine.static.loadflow import branch_keys
+
+V_MIN_PU = 0.9
+V_MAX_PU = 1.1
+V_BAND_PU = 0.1          # one excursion unit = 0.1 pu beyond a limit
+LOADING_MAX_PCT = 100.0
+
+_LS2G_MAX_ITER = 20
+_LS2G_TOL = 1e-8
+_P_TOL_MW = 1e-3
+
+N1_LEDGER = (
+    "N-1 branch outages solved by lightsim2grid ContingencyAnalysisCPP on a "
+    "GridModel from the pandapower net, initialised at the base-case voltages; "
+    "unit outages solved by pandapower with the unit out of service and the "
+    "lost MW picked up by the slack",
+    "branch loading is FROM/HV-side current over rating (lines: i_from / "
+    "(max_i_ka x df x parallel); transformers: i_hv x sqrt(3) x vn_hv / "
+    "(sn_mva x df x parallel)) — lightsim2grid returns the from side only, so "
+    "this is never above pandapower's two-sided loading_percent and is up to "
+    "~6 percentage points below it on case39 (measured 6.08 at hour 0)",
+    "an outage that splits the grid is ISLANDED: recorded converged=False with "
+    "the sentinel severity, the surviving island is not solved; on case39 that "
+    "is 11 of 46 branch outages in every hour",
+    f"violations: branch loading > {LOADING_MAX_PCT:g} %, bus voltage outside "
+    f"[{V_MIN_PU}, {V_MAX_PU}] pu (assumed limits for the 39-bus case)",
+    "severity = sum max(0, loading/100 - 1) + sum max(0, (Vmin - V)/0.1, "
+    "(V - Vmax)/0.1); non-convergence and islanding carry NON_CONVERGED_SEVERITY",
+)
+
+
+def branch_loading_pct(net, i_from_ka, i_hv_ka) -> np.ndarray:
+    """From/HV-side loading in percent, lines then transformers, in table order."""
+    line, trafo = net.line, net.trafo
+    l_df = line["df"].values if "df" in line.columns else 1.0
+    l_par = line["parallel"].values if "parallel" in line.columns else 1.0
+    line_pct = np.asarray(i_from_ka, dtype=float) / (line["max_i_ka"].values * l_df * l_par) * 100.0
+    t_df = trafo["df"].values if "df" in trafo.columns else 1.0
+    t_par = trafo["parallel"].values if "parallel" in trafo.columns else 1.0
+    i_rated_hv = trafo["sn_mva"].values * t_df * t_par / (np.sqrt(3.0) * trafo["vn_hv_kv"].values)
+    trafo_pct = np.asarray(i_hv_ka, dtype=float) / i_rated_hv * 100.0
+    return np.concatenate([line_pct, trafo_pct])
+
+
+def severity(loading_pct, vm_pu) -> float:
+    ld = np.asarray(loading_pct, dtype=float)
+    vm = np.asarray(vm_pu, dtype=float)
+    over = np.clip(ld / LOADING_MAX_PCT - 1.0, 0.0, None)
+    low = np.clip((V_MIN_PU - vm) / V_BAND_PU, 0.0, None)
+    high = np.clip((vm - V_MAX_PU) / V_BAND_PU, 0.0, None)
+    return float(np.nansum(over) + np.nansum(low) + np.nansum(high))
+
+
+def _n_violations(loading_pct, vm_pu) -> int:
+    ld = np.asarray(loading_pct, dtype=float)
+    vm = np.asarray(vm_pu, dtype=float)
+    return int(np.nansum(ld > LOADING_MAX_PCT) + np.nansum((vm < V_MIN_PU) | (vm > V_MAX_PU)))
+
+
+def _check_net_carries_hour(net, dispatch, loads, hour, registry) -> None:
+    at_hour = dispatch[dispatch["hour"] == hour].set_index("unit_id")
+    load_rows = loads[loads["hour"] == hour]
+    if at_hour.empty or load_rows.empty:
+        raise ContractError(f"dispatch/loads tables have no rows for hour {hour}")
+    net_load, table_load = float(net.load["p_mw"].sum()), float(load_rows["p_mw"].sum())
+    if abs(net_load - table_load) > _P_TOL_MW:
+        raise ContractError(
+            f"net does not carry hour {hour}: net.load total {net_load:.3f} MW vs "
+            f"loads table {table_load:.3f} MW — apply_snapshot first"
+        )
+    gen_idx = {net.gen.at[i, "name"]: i for i in net.gen.index}
+    sgen = getattr(net, "sgen", None)
+    sgen_idx = {sgen.at[i, "name"]: i for i in sgen.index} if sgen is not None else {}
+    for unit_id, rec in registry.iterrows():
+        if rec["kind"] == "gen":
+            table, idx = net.gen, gen_idx.get(unit_id)
+        elif rec["kind"] == "res":
+            table, idx = sgen, sgen_idx.get(unit_id)
+        else:
+            continue
+        if idx is None or unit_id not in at_hour.index:
+            raise ContractError(f"unit {unit_id} missing from the net or the dispatch at hour {hour}")
+        want, have = float(at_hour.at[unit_id, "p_mw"]), float(table.at[idx, "p_mw"])
+        if abs(want - have) > _P_TOL_MW:
+            raise ContractError(
+                f"net does not carry hour {hour}: {unit_id} p_mw {have:.3f} on the net vs "
+                f"{want:.3f} in the dispatch — apply_snapshot first"
+            )
+
+
+def _row(cid, hour, *, converged, islanded, loading=None, vm=None):
+    if not converged:
+        return {
+            "contingency_id": cid, "hour": hour, "converged": False, "islanded": bool(islanded),
+            "max_branch_loading_pct": np.nan, "min_vm_pu": np.nan, "max_vm_pu": np.nan,
+            "n_violations": 0, "severity": NON_CONVERGED_SEVERITY,
+        }
+    return {
+        "contingency_id": cid, "hour": hour, "converged": True, "islanded": False,
+        "max_branch_loading_pct": float(np.nanmax(loading)),
+        "min_vm_pu": float(np.nanmin(vm)), "max_vm_pu": float(np.nanmax(vm)),
+        "n_violations": _n_violations(loading, vm), "severity": severity(loading, vm),
+    }
+
+
+def _screen_branches(work, branch_rows, hour, nl) -> dict:
+    """One batched lightsim2grid solve; rows keyed by contingency_id."""
+    keys = branch_keys(work)
+    # branch_keys is lines then trafos in table order — exactly lightsim2grid's ids.
+    ls2g_id = {(k.from_bus, k.to_bus, k.ckt): pos for pos, k in enumerate(keys.itertuples(index=False))}
+    wanted = {}
+    for r in branch_rows.itertuples(index=False):
+        key = (r.from_bus, r.to_bus, str(r.ckt))
+        if key not in ls2g_id:
+            raise ContractError(
+                f"contingency {r.contingency_id} names a branch not on the net: {key}"
+            )
+        wanted[r.contingency_id] = ls2g_id[key]
+    if not wanted:
+        return {}
+
+    gm = init_from_pandapower(work)
+    ca = ContingencyAnalysisCPP(gm)
+    ca.add_all_n1()   # row k of every result is branch id k; no insertion-order assumption
+    ca.compute(work._ppc["internal"]["V"], _LS2G_MAX_ITER, _LS2G_TOL)
+    ca.compute_flows()
+    amps = np.asarray(ca.get_flows())
+    volts = np.asarray(ca.get_voltages())
+    connected = np.asarray(ca.is_grid_connected_after_contingency()).astype(bool)
+
+    out = {}
+    for cid, k in wanted.items():
+        if not connected[k]:
+            out[cid] = _row(cid, hour, converged=False, islanded=True)
+            continue
+        vm = np.abs(volts[k])
+        if vm.size == 0 or np.nanmin(vm) <= 0.0:
+            out[cid] = _row(cid, hour, converged=False, islanded=False)
+            continue
+        loading = branch_loading_pct(work, amps[k, :nl], amps[k, nl:])
+        out[cid] = _row(cid, hour, converged=True, islanded=False, loading=loading, vm=vm)
+    return out
+
+
+def _screen_units(work, unit_rows, hour, registry) -> dict:
+    """pandapower per unit outage on a fresh copy of the snapshot net."""
+    gen_idx = {work.gen.at[i, "name"]: i for i in work.gen.index}
+    sgen = getattr(work, "sgen", None)
+    sgen_idx = {sgen.at[i, "name"]: i for i in sgen.index} if sgen is not None else {}
+    out = {}
+    for r in unit_rows.itertuples(index=False):
+        uid = r.element_ids[0]
+        if uid in gen_idx:
+            table, idx = "gen", gen_idx[uid]
+        elif uid in sgen_idx:
+            table, idx = "sgen", sgen_idx[uid]
+        else:
+            raise ContractError(f"contingency {r.contingency_id} names a unit not on the net: {uid}")
+        w = copy.deepcopy(work)
+        getattr(w, table).at[idx, "in_service"] = False
+        try:
+            pp.runpp(w)
+        except pp.LoadflowNotConverged:
+            out[r.contingency_id] = _row(r.contingency_id, hour, converged=False, islanded=False)
+            continue
+        loading = branch_loading_pct(w, w.res_line["i_from_ka"].values, w.res_trafo["i_hv_ka"].values)
+        out[r.contingency_id] = _row(
+            r.contingency_id, hour, converged=True, islanded=False,
+            loading=loading, vm=w.res_bus["vm_pu"].values,
+        )
+    return out
+
+
+def screen_n1(net, contingencies, dispatch, loads, hour, registry) -> pd.DataFrame:
+    """Validated results, one row per N-1 contingency, in the set's order."""
+    cset = validate_contingency_set(contingencies)
+    dispatch = validate_dispatch(dispatch)
+    loads = validate_loads(loads)
+    hour = int(hour)
+    if (cset["order"] != 1).any():
+        raise ContractError("screen_n1 takes an N-1 set; got rows with order != 1")
+    _check_net_carries_hour(net, dispatch, loads, hour, registry)
+
+    work = copy.deepcopy(net)
+    try:
+        pp.runpp(work)
+    except pp.LoadflowNotConverged as exc:
+        raise ContractError(f"base case at hour {hour} does not converge; nothing to screen") from exc
+    nl = len(work.line)
+
+    rows = {}
+    rows.update(_screen_branches(work, cset[cset["kind"] == "branch"], hour, nl))
+    rows.update(_screen_units(work, cset[cset["kind"] == "unit"], hour, registry))
+    ordered = [rows[cid] for cid in cset["contingency_id"]]
+    return validate_contingency_results(pd.DataFrame(ordered))

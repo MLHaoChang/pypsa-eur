@@ -323,6 +323,7 @@ def test_bundle_writes_optional_screening_and_fault_files_when_given(snapshot, t
         "contingency_id": ["BUS_01-BUS_02-1", "G_BUS_30"],
         "hour": [HOUR, HOUR],
         "converged": [True, False],
+        "islanded": [False, True],
         "max_branch_loading_pct": [80.0, float("nan")],
         "min_vm_pu": [0.97, float("nan")],
         "max_vm_pu": [1.05, float("nan")],
@@ -338,7 +339,7 @@ def test_bundle_writes_optional_screening_and_fault_files_when_given(snapshot, t
 
 def test_bundle_validates_optional_screening(snapshot, tmp_path):
     bad = pd.DataFrame({
-        "contingency_id": ["X"], "hour": [HOUR], "converged": ["False"],
+        "contingency_id": ["X"], "hour": [HOUR], "converged": ["False"], "islanded": [False],
         "max_branch_loading_pct": [1.0], "min_vm_pu": [1.0], "max_vm_pu": [1.0],
         "n_violations": [0], "severity": [0.0],
     })

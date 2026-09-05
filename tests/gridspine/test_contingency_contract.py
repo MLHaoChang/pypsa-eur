@@ -45,6 +45,7 @@ def _good_results():
         "contingency_id": ["BUS_01-BUS_02-1", "G_BUS_30", "BUS_02-BUS_03-1"],
         "hour": [19, 19, 19],
         "converged": [True, True, False],
+        "islanded": [False, False, False],
         "max_branch_loading_pct": [87.5, 104.2, np.nan],
         "min_vm_pu": [0.97, 0.94, np.nan],
         "max_vm_pu": [1.05, 1.06, np.nan],
@@ -290,8 +291,30 @@ def test_results_converged_row_may_not_carry_the_sentinel():
 
 def test_results_reject_duplicate_contingency_hour():
     df = _good_results()
-    df.loc[len(df)] = ["G_BUS_30", 19, True, 50.0, 0.99, 1.01, 0, 0.0]
+    df.loc[len(df)] = ["G_BUS_30", 19, True, False, 50.0, 0.99, 1.01, 0, 0.0]
     with pytest.raises(ContractError, match="duplicate"):
+        validate_contingency_results(df)
+
+
+def test_results_reject_islanded_as_string():
+    df = _good_results().astype({"islanded": "object"})
+    df.loc[2, "islanded"] = "True"
+    with pytest.raises(ContractError, match="islanded must be exactly True or False"):
+        validate_contingency_results(df)
+
+
+def test_results_accept_an_islanded_diverged_row():
+    df = _good_results()
+    df.loc[2, "islanded"] = True
+    out = validate_contingency_results(df)
+    assert bool(out.loc[2, "islanded"]) and not bool(out.loc[2, "converged"])
+
+
+def test_results_reject_an_islanded_row_that_claims_convergence():
+    """Islanding is a topology fact: there is no whole-grid flow to have converged."""
+    df = _good_results()
+    df.loc[0, "islanded"] = True
+    with pytest.raises(ContractError, match="islanded rows cannot be converged"):
         validate_contingency_results(df)
 
 
