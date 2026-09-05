@@ -8,7 +8,7 @@
 // AssistantModelSettings — uncovered. This file pins that branch, plus the
 // existing local-only and both-unavailable branches for a complete matrix.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
@@ -62,7 +62,14 @@ const LLM_PAYLOAD: LLMSettingsPayload = {
 }
 
 function renderSidebar() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // `retryDelay: 0` matters: `useLLMSettings` sets its OWN `retry: 2`, which
+  // overrides the client's `retry: false`, but it sets no `retryDelay` — so
+  // without this an error case spends ~3s in exponential backoff and the
+  // assertion runs before `isError` settles. The retry COUNT is the hook's
+  // deliberate choice; the wall-clock delay is not what these tests are about.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, retryDelay: 0 } },
+  })
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
@@ -112,5 +119,41 @@ describe('Sidebar Settings row — gates on EITHER surface (Task 15)', () => {
     renderSidebar()
 
     expect(await screen.findByRole('button', { name: 'Settings' })).toBeTruthy()
+  })
+})
+
+// C-11 — the two-layer outage state was unreachable on exactly the
+// deployment it was written for.
+//
+// `useLLMSettingsAvailable` was `data != null`, and `data` is null on BOTH
+// "not for you" (403/404, which `fetchLLMSettingsOrNull` maps to null) and a
+// genuine outage (5xx/network, which surfaces as `isError`). Only the first
+// should hide the door. On a web deployment — local-settings 404s, so this is
+// the only gate — an llm-settings 500 hid the Settings row entirely, and with
+// `staleTime: Infinity` and no refetch-on-focus it stayed hidden for the rest
+// of the session. The outage copy built inside AssistantModelSettings could
+// never be seen by the person it was written for.
+describe('Sidebar Settings row — an OUTAGE must not hide the door (C-11)', () => {
+  it('is present when llm-settings ERRORS on a web deployment', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    vi.mocked(fetchLLMSettingsOrNull).mockRejectedValue(new Error('500'))
+    renderSidebar()
+
+    await screen.findByText('Solver Settings')
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeNull()
+    })
+  })
+
+  it('stays absent for a member the route simply is not for', async () => {
+    // DISCRIMINATION — a 403 maps to a RESOLVED null, not an error. That is
+    // "not for you", and the row must stay hidden; widening the gate must not
+    // start showing an empty pane to every ordinary member.
+    vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
+    renderSidebar()
+
+    await screen.findByText('Solver Settings')
+    expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull()
   })
 })

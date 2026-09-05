@@ -98,14 +98,32 @@ function verdictCopy(
   }
 }
 
-/** A profile's key status line — never the value, per the file header. */
+/**
+ * A profile's key status line — never the value, per the file header.
+ *
+ * C-7 / W-4 — `key_present` is the ONLY field that answers "is there a key",
+ * and this function used to ignore it, inferring from `auth`/`key_hint`/`id`
+ * instead. That gave two wrong answers:
+ *
+ *   * a built-in with nothing configured anywhere still claimed "Uses
+ *     ANTHROPIC_API_KEY from the environment" — the one screen built to tell
+ *     an admin why chat is broken, asserting a credential source that does
+ *     not exist;
+ *   * a key too short to hint (`app_secrets.status()` returns `hint=None`
+ *     under 4 characters while `configured` stays true) read as "No key set",
+ *     rendered next to a Clear button, since that button DOES gate on
+ *     `key_present`.
+ *
+ * Presence first, then how much we can say about it.
+ */
 function keyStatusText(profile: LLMProfileOut): string {
   if (profile.auth === 'none') return 'No key needed'
+  if (!profile.key_present) return 'No key set'
   if (profile.key_hint) return `Key set — ending ${profile.key_hint}`
   if (BUILTIN_ANTHROPIC_PROFILE_IDS.has(profile.id)) {
     return 'Uses ANTHROPIC_API_KEY from the environment'
   }
-  return 'No key set'
+  return 'Key set'
 }
 
 function slugify(label: string): string {

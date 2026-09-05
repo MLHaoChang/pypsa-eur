@@ -316,3 +316,55 @@ describe('AssistantModelSettings', () => {
     expect(useUIStore.getState().settingsSectionRequest).toBe('some-other-section')
   })
 })
+
+// C-7 / W-4 — `keyStatusText` never read `key_present`, so it stated a
+// credential source from `auth`/`key_hint`/`id` alone. Two wrong answers:
+//
+//  (a) a built-in profile with nothing configured ANYWHERE still claimed
+//      "Uses ANTHROPIC_API_KEY from the environment" — the one screen built
+//      to tell an admin why chat is broken asserting a source that does not
+//      exist;
+//  (b) `key_present: true, key_hint: null` fell through to "No key set". That
+//      is reachable: `app_secrets.status()` emits `hint=None` for a value
+//      under 4 characters while `configured` stays true. The row then reads
+//      "No key set" NEXT TO a Clear button, since that button does gate on
+//      `key_present`.
+//
+// The existing fixtures only ever paired present+hint and absent+no-hint, so
+// neither mismatch was representable.
+describe('C-7 / W-4 — key status follows key_present', () => {
+  it('a built-in with no key anywhere does not claim an environment key', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue({
+      active_profile_id: 'anthropic-sonnet',
+      profiles: [{
+        id: 'anthropic-sonnet', label: 'Claude Sonnet', preset: 'anthropic',
+        wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
+        tools: true, vision: true, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_required: true, key_present: false, key_hint: null,
+      }],
+      presets: [],
+    })
+    renderSection()
+    expect(await screen.findByText('Claude Sonnet')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('from the environment')
+    expect(document.body.textContent).toContain('No key set')
+  })
+
+  it('a key too short to hint still reads as set, not as missing', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue({
+      active_profile_id: 'custom-one',
+      profiles: [{
+        id: 'custom-one', label: 'My Endpoint', preset: 'custom',
+        wire: 'openai', base_url: 'https://example.invalid/v1', model: 'm',
+        tools: true, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_required: true, key_present: true, key_hint: null,
+      }],
+      presets: [],
+    })
+    renderSection()
+    expect(await screen.findByText('My Endpoint')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('No key set')
+  })
+})

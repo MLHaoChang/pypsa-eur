@@ -19,8 +19,10 @@
  * `useLocalSettingsAvailable` (hooks/useLocalSettings.ts) still folds
  * `isError` into "unavailable" — a pre-existing, deliberate choice this task
  * does not widen; see that hook's own header. `useLLMSettingsAvailable`
- * below matches it (nav-row gating is unchanged by this fix — only the
- * settings SECTION's own render gained the distinct outage state).
+ * below matches it for the 403 case. C-11 later corrected the OUTAGE case:
+ * nav-row gating now also admits `isError`, because gating it out made the
+ * settings SECTION's own outage state unreachable on the one deployment
+ * where this is the only gate.
  *
  * `staleTime: Infinity`: nothing here changes except through mutations this
  * same section performs, which invalidate the key explicitly after a write.
@@ -44,10 +46,26 @@ export function useLLMSettings() {
   })
 }
 
-/** True only once we know the route exists AND answers for this user. */
+/**
+ * True once we know the route exists and answers for this user, OR when it
+ * failed in a way that is worth telling them about.
+ *
+ * C-11 — this was `data != null`, and `data` is null on BOTH "not for you"
+ * (403/404, which `fetchLLMSettingsOrNull` maps to a RESOLVED null) and a
+ * genuine outage (5xx/network, which surfaces as `isError`). Only the first
+ * should hide the door. On a web deployment — where local-settings 404s, so
+ * this is the only gate — an llm-settings 500 hid the Settings row entirely,
+ * and with `staleTime: Infinity` and no refetch-on-focus it stayed hidden for
+ * the rest of the session. The two-layer outage state built inside
+ * AssistantModelSettings could therefore never be reached by the person it
+ * was written for.
+ *
+ * A 403 still hides the row, so widening this does not start showing an empty
+ * pane to every ordinary member — asserted by its own sibling test.
+ */
 export function useLLMSettingsAvailable(): boolean {
-  const { data } = useLLMSettings()
-  return data != null
+  const { data, isError } = useLLMSettings()
+  return data != null || isError
 }
 
 export function useInvalidateLLMSettings() {
