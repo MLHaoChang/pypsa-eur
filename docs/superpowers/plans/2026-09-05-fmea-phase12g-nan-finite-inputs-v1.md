@@ -141,8 +141,19 @@ to catch NaN on the way; none of them covers a dynamic column.
 network that reaches `optimize()` during the full backend suite, plus the golden
 fixture, is censused for NaN cells in *any* of the 118 finite-default input
 attributes (`scratchpad/nan12g.py`, a pytest plugin hooking `OptimizationAccessor.__call__`).
-**Result:** *(appended below when the run completes — the plan is not accepted
-without it.)*
+**Result (full tree, 43 failed / 2923 passed as the baseline, 23 min):**
+
+| | |
+|---|---|
+| networks reaching `optimize()` | **392** |
+| networks with a NaN in any finite-default input, static or dynamic | **0** |
+| golden fixture (direct scan) | **clean** |
+
+So the blanket rule refuses nothing that solves today, anywhere in the suite —
+the opposite of the ramp-limit outcome, and for the reason §0 gives: every
+fixture is built through `n.add`, which never writes NaN into these columns, and
+netCDF persistence heals a static one. The cells this phase refuses are the ones
+only a bypassing write can create.
 
 ## 1. The rule
 
