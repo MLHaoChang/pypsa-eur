@@ -1,4 +1,11 @@
-"""N-1 severity over the year, in DC — the fifth ranking criterion.
+"""N-1 severity over the year, in DC — the measured proxy for the fifth criterion.
+
+Since follow-ups F2 the ranking's ``max_n1_severity`` reads the AC screen's own
+number (``static.contingency.n1_severity_ac``); this column stays in the metrics
+table so the DC-vs-AC disagreement is measured over every hour of every run
+(the driver's ``n1_severity_ac_pass`` manifest entry). On the v3 year the DC
+proxy was anticorrelated with AC over the selected hours (rho -0.57) and
+uncorrelated over 100 spread hours (rho -0.01).
 
 For each hour: bus injections P from the dispatch and loads tables (units
 placed by the registry, loads by bus), DC branch flows f = PTDF @ P, single-
@@ -45,6 +52,9 @@ SEVERITY_LEDGER = (
     "does not exercise the reordering the blind spot could cause; re-measure on "
     "the UC-dispatched year's selected hours (task 13). This is the "
     "dc_severity_blind_spot the ledger README declares",
+    "since follow-ups F2 the ranking's max_n1_severity reads the AC screen's "
+    "n1_severity_ac, not this DC column; n1_severity_dc stays in metrics.csv as "
+    "the proxy whose year-wide rank agreement with AC the manifest reports",
 )
 
 

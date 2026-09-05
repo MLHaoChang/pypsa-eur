@@ -51,8 +51,14 @@ from gridspine.schema.contingency import (
 )
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
-from gridspine.static.loadflow import branch_keys
+from gridspine.static.loadflow import apply_snapshot, branch_keys
 from gridspine.static.lodf import dc_base, dc_loading_pct, n2_dc_flows
+
+class BaseCaseNotConverged(ContractError):
+    """The hour's own load flow does not converge, so there is nothing to screen.
+    A ContractError to the screen; the year pass (`n1_severity_ac`) catches this
+    one and records a NaN, because one bad hour must not lose the year."""
+
 
 V_MIN_PU = 0.9
 V_MAX_PU = 1.1
@@ -66,8 +72,13 @@ _P_TOL_MW = 1e-3
 N1_LEDGER = (
     "N-1 branch outages solved by lightsim2grid ContingencyAnalysisCPP on a "
     "GridModel from the pandapower net, initialised at the base-case voltages; "
-    "unit outages solved by pandapower with the unit out of service and the "
-    "lost MW picked up by the slack",
+    "unit outages solved on the same GridModel (deactivate, ac_pf from the "
+    "base-case voltages, reactivate) with the lost MW picked up by the slack; "
+    "pandapower is the oracle both paths are held to in the tests (1e-6 pu / "
+    "1e-6 rel loading, all-on and decommitted grids)",
+    "n1_severity_ac: per hour, the worst converged non-islanded N-1 row's "
+    "severity from this screen — the number max_n1_severity ranks on (F2); "
+    "a base case that does not converge is a NaN, reported by the driver",
     "the GridModel re-applies gen.in_service and sgen.in_service after "
     "init_from_pandapower: lightsim2grid 0.10.1's ext_grid slack adder "
     "re-initialises the generator container and drops the flags, which left "
@@ -199,8 +210,8 @@ def _row(cid, hour, *, converged, islanded, loading=None, vm=None):
     }
 
 
-def _screen_branches(work, branch_rows, hour, nl) -> dict:
-    """One batched lightsim2grid solve; rows keyed by contingency_id."""
+def _screen_branches(work, gm, v0, branch_rows, hour, nl) -> dict:
+    """One batched lightsim2grid solve on the shared GridModel; rows keyed by contingency_id."""
     keys = branch_keys(work)
     # branch_keys is lines then trafos in table order — exactly lightsim2grid's ids.
     ls2g_id = {(k.from_bus, k.to_bus, k.ckt): pos for pos, k in enumerate(keys.itertuples(index=False))}
@@ -215,10 +226,9 @@ def _screen_branches(work, branch_rows, hour, nl) -> dict:
     if not wanted:
         return {}
 
-    gm = gridmodel_for(work)
     ca = ContingencyAnalysisCPP(gm)
     ca.add_all_n1()   # row k of every result is branch id k; no insertion-order assumption
-    ca.compute(work._ppc["internal"]["V"], _LS2G_MAX_ITER, _LS2G_TOL)
+    ca.compute(v0, _LS2G_MAX_ITER, _LS2G_TOL)
     ca.compute_flows()
     amps = np.asarray(ca.get_flows())
     volts = np.asarray(ca.get_voltages())
@@ -243,33 +253,88 @@ def _screen_branches(work, branch_rows, hour, nl) -> dict:
     return out
 
 
-def _screen_units(work, unit_rows, hour, registry) -> dict:
-    """pandapower per unit outage on a fresh copy of the snapshot net."""
-    gen_idx = {work.gen.at[i, "name"]: i for i in work.gen.index}
+def _screen_units(work, gm, v0, unit_rows, hour, nl) -> dict:
+    """Unit outages on the shared GridModel: deactivate, solve from the base-case
+    voltages, read the from/HV-side currents, reactivate. lightsim2grid ids are
+    the pandapower table positions (gens in table order, then the slack it adds
+    from ext_grid; sgens in table order), so the mapping is positional and
+    `gridmodel_for` has already checked the status vectors against the net. A
+    unit that is off in the hour is deactivated again (a no-op) and left off.
+
+    pandapower used to solve these on a deep copy per unit (~0.4 s of the 0.5 s
+    the screen cost); it remains the oracle in the tests. An empty solve is a
+    recorded collapse: converged=False, islanded=False (G_BUS_39, ruling 16).
+    """
+    gen_pos = {work.gen.at[i, "name"]: pos for pos, i in enumerate(work.gen.index)}
     sgen = getattr(work, "sgen", None)
-    sgen_idx = {sgen.at[i, "name"]: i for i in sgen.index} if sgen is not None else {}
+    sgen_pos = {sgen.at[i, "name"]: pos for pos, i in enumerate(sgen.index)} if sgen is not None else {}
+    gen_on = work.gen["in_service"].to_numpy(dtype=bool)
+    sgen_on = sgen["in_service"].to_numpy(dtype=bool) if sgen is not None else np.zeros(0, dtype=bool)
     out = {}
     for r in unit_rows.itertuples(index=False):
         uid = r.element_ids[0]
-        if uid in gen_idx:
-            table, idx = "gen", gen_idx[uid]
-        elif uid in sgen_idx:
-            table, idx = "sgen", sgen_idx[uid]
+        if uid in gen_pos:
+            pos, was_on = gen_pos[uid], bool(gen_on[gen_pos[uid]])
+            off, on = gm.deactivate_gen, gm.reactivate_gen
+        elif uid in sgen_pos:
+            pos, was_on = sgen_pos[uid], bool(sgen_on[sgen_pos[uid]])
+            off, on = gm.deactivate_sgen, gm.reactivate_sgen
         else:
             raise ContractError(f"contingency {r.contingency_id} names a unit not on the net: {uid}")
-        w = copy.deepcopy(work)
-        getattr(w, table).at[idx, "in_service"] = False
+        off(pos)
         try:
-            pp.runpp(w)
-        except pp.LoadflowNotConverged:
-            out[r.contingency_id] = _row(r.contingency_id, hour, converged=False, islanded=False)
-            continue
-        loading = branch_loading_pct(w, w.res_line["i_from_ka"].values, w.res_trafo["i_hv_ka"].values)
+            v = np.asarray(gm.ac_pf(v0, _LS2G_MAX_ITER, _LS2G_TOL))
+            if v.size == 0:
+                out[r.contingency_id] = _row(r.contingency_id, hour, converged=False, islanded=False)
+                continue
+            i_line = np.asarray(gm.get_lineor_res()[3])
+            i_trafo = np.asarray(gm.get_trafohv_res()[3])
+        finally:
+            if was_on:
+                on(pos)
+        loading = branch_loading_pct(work, i_line, i_trafo)
         out[r.contingency_id] = _row(
-            r.contingency_id, hour, converged=True, islanded=False,
-            loading=loading, vm=w.res_bus["vm_pu"].values,
+            r.contingency_id, hour, converged=True, islanded=False, loading=loading, vm=np.abs(v),
         )
     return out
+
+
+def n1_severity_ac(net, contingencies, dispatch, loads, registry, hours=None) -> pd.Series:
+    """The AC screen's worst N-1 severity per hour, over the year — the column
+    `max_n1_severity` ranks on.
+
+    Per hour: `apply_snapshot` on a work copy of the net, `screen_n1`, and the
+    maximum `severity` over converged non-islanded rows — the same number the
+    driver reports per selected hour as `n1_worst_severity`, from the same code
+    path. A base case that does not converge is a NaN (reported by the driver);
+    any other error propagates. `hours` defaults to every hour in the dispatch;
+    an hour not in the tables is refused.
+
+    Cost measured on case39 (2026-09-05, 4 cores): ~70 ms per hour, ~10 min for
+    8760 h — the reason F2 could replace the DC proxy of increment 3.
+    """
+    dispatch = validate_dispatch(dispatch)
+    loads = validate_loads(loads)
+    have = sorted(set(int(h) for h in dispatch["hour"]))
+    if hours is None:
+        hours = have
+    else:
+        hours = sorted(int(h) for h in hours)
+        missing = sorted(set(hours) - set(have))
+        if missing:
+            raise ContractError(f"n1_severity_ac: hours not in the dispatch table: {missing[:10]}")
+    work = copy.deepcopy(net)
+    out = {}
+    for hour in hours:
+        apply_snapshot(work, dispatch, loads, hour=hour, registry=registry)
+        try:
+            rows = screen_n1(work, contingencies, dispatch, loads, hour, registry)
+        except BaseCaseNotConverged:
+            out[hour] = np.nan
+            continue
+        ok = rows[rows["converged"] & ~rows["islanded"]]
+        out[hour] = float(ok["severity"].max()) if len(ok) else np.nan
+    return pd.Series(out, name="n1_severity_ac", dtype=float).rename_axis("hour")
 
 
 def screen_n1(net, contingencies, dispatch, loads, hour, registry) -> pd.DataFrame:
@@ -286,12 +351,14 @@ def screen_n1(net, contingencies, dispatch, loads, hour, registry) -> pd.DataFra
     try:
         pp.runpp(work)
     except pp.LoadflowNotConverged as exc:
-        raise ContractError(f"base case at hour {hour} does not converge; nothing to screen") from exc
+        raise BaseCaseNotConverged(f"base case at hour {hour} does not converge; nothing to screen") from exc
     nl = len(work.line)
+    gm = gridmodel_for(work)
+    v0 = work._ppc["internal"]["V"]
 
     rows = {}
-    rows.update(_screen_branches(work, cset[cset["kind"] == "branch"], hour, nl))
-    rows.update(_screen_units(work, cset[cset["kind"] == "unit"], hour, registry))
+    rows.update(_screen_branches(work, gm, v0, cset[cset["kind"] == "branch"], hour, nl))
+    rows.update(_screen_units(work, gm, v0, cset[cset["kind"] == "unit"], hour, nl))
     ordered = [rows[cid] for cid in cset["contingency_id"]]
     return validate_contingency_results(pd.DataFrame(ordered))
 
@@ -367,7 +434,7 @@ def _n2_prepare(net, candidates, dispatch, loads, hour, registry):
     try:
         pp.runpp(work)
     except pp.LoadflowNotConverged as exc:
-        raise ContractError(f"base case at hour {hour} does not converge; nothing to screen") from exc
+        raise BaseCaseNotConverged(f"base case at hour {hour} does not converge; nothing to screen") from exc
     state = dc_base(work)
     pos = _branch_positions(state)
     pairs = []

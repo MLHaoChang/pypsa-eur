@@ -34,7 +34,7 @@ def _metrics(n=40):
     df["ibr_share"] = np.linspace(0.05, 0.60, n)          # max at the last hour, no ties
     df["load_mw"] = 3000.0 + 37.0 * hours                  # max at the last hour, no ties
     df["import_mw"] = np.where(hours % 2 == 0, 0.0, hours)  # max at odd late hours, no ties
-    df["n1_severity_dc"] = 0.01 * hours                    # no ties
+    df["n1_severity_ac"] = 0.01 * hours                    # no ties
     assert set(RANKED_COLUMNS) <= set(df.columns)
     return df
 

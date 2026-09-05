@@ -122,10 +122,11 @@ def metrics(dispatch, loads, unit_params, registry):
 
 @pytest.fixture
 def ranked_metrics(metrics):
-    """`snapshot_metrics` plus the fifth criterion the driver joins on
-    (ranking/severity, increment 3). h3 is the most severe, so it gains a
-    second reason and the k=1 selection stays {1, 2, 3}."""
-    return metrics.assign(n1_severity_dc=[0.0, 0.1, 0.2, 0.5])
+    """`snapshot_metrics` plus the fifth criterion the driver joins on — the
+    AC screen's worst N-1 severity per hour (static/contingency.n1_severity_ac,
+    follow-ups F2; DC until then). h3 is the most severe, so it gains a second
+    reason and the k=1 selection stays {1, 2, 3}."""
+    return metrics.assign(n1_severity_ac=[0.0, 0.1, 0.2, 0.5])
 
 
 # --- metrics: shape -------------------------------------------------------

@@ -17,6 +17,13 @@ records and not only the LOAD total: `max_load_mw` puts the annual peak in
 every selection, and at the peak hour the scaled demand IS the native demand,
 so a load-only check stays green under that mutation for exactly the hour a
 reader would look at first.
+
+RUNTIME, MEASURED (4 cores, 2026-09-05): the module fixture took 327 s before
+follow-ups F2 (336 h, k=2, screening on — the increment-2 "<120 s" budget was
+gone once Task 13 put N-2 and fault levels on every selected hour) and 334 s
+after it, with the AC N-1 screen now run at all 336 hours for the ranking;
+23 tests in 349 s. A change that pushes this module past ~6 min is a defect
+to measure, not to wait out.
 """
 import json
 
@@ -47,7 +54,7 @@ UNITS = N_GEN + N_SLACK + N_RES
 
 METRIC_COLUMNS = (
     "load_mw", "import_mw", "inertia_mws", "inertia_excl_equiv_mws", "ibr_share",
-    "n1_severity_dc",
+    "n1_severity_dc", "n1_severity_ac",
 )
 
 
@@ -128,6 +135,35 @@ def test_selection_is_a_union_of_criteria_and_not_exactly_k(study):
         assert set(reasons) <= set(CRITERIA)
         fired |= set(reasons)
     assert fired == set(CRITERIA)
+
+
+def test_max_n1_severity_ranks_on_the_ac_screens_own_number(study):
+    """F2: the hours selected for `max_n1_severity` are the AC column's top-K
+    (spread ties aside), and the AC column at each selected hour IS the
+    screen's worst converged non-islanded N-1 severity from that hour's
+    bundle screening — one number, two places, equal."""
+    metrics = pd.read_csv(study.artifacts["metrics"]).set_index("hour")
+    ac = metrics["n1_severity_ac"].dropna()
+    by_reason = [int(h) for h, r in zip(study.selected["hour"], study.selected["reasons"]) if "max_n1_severity" in r]
+    assert len(by_reason) == K
+    assert int(ac.idxmax()) in by_reason
+    assert set(by_reason) <= set(ac.sort_values(ascending=False).index[: 5 * K].tolist())
+    for hour in study.selected["hour"]:
+        hour = int(hour)
+        rows = study.screening[hour]
+        n1 = rows[~rows["contingency_id"].str.contains("--")]
+        ok = n1[n1["converged"] & ~n1["islanded"]]
+        assert metrics.at[hour, "n1_severity_ac"] == pytest.approx(float(ok["severity"].max()), rel=1e-9), hour
+
+
+def test_manifest_reports_the_ac_year_pass_and_the_dc_proxy_check_over_all_hours(study):
+    m = json.loads(study.artifacts["manifest"].read_text())
+    p = m["n1_severity_ac_pass"]
+    assert p["hours"] == HOURS
+    assert p["hours_not_converged"] == []
+    assert p["seconds"] > 0
+    assert -1.0 <= p["spearman_rho_dc_vs_ac"] <= 1.0
+    assert 0 <= p["worst_rank_gap_dc_vs_ac"] < HOURS
 
 
 def test_selected_csv_carries_the_reasons_and_the_convergence_flag(study):

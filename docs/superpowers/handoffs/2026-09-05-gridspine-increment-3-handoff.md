@@ -74,7 +74,9 @@ n2_candidates(n1)                  # all pairs, id "a--b"; 1035 on case39
 branch_keys(net)                   # the ONE branch identity on the static side (lines then trafos, table order); _branch_flow and the contingency set both call it
 
 # static/contingency.py
-screen_n1(net, cset, dispatch, loads, hour, registry) -> results        # refuses a net that does not carry the hour
+gridmodel_for(work) -> GridModel   # the ONE place lightsim2grid is built; re-applies gen/sgen in_service (ruling 31) and checks the status vectors
+screen_n1(net, cset, dispatch, loads, hour, registry) -> results        # refuses a net that does not carry the hour; branch AND unit outages on the GridModel (F2)
+n1_severity_ac(net, cset, dispatch, loads, registry, hours=None) -> Series   # the screen's worst N-1 severity at EVERY hour; NaN for a diverging base (BaseCaseNotConverged)
 screen_n2(net, n2, dispatch, loads, hour, registry, prune_threshold_pct) -> (results, prune_log)
 measure_prune_threshold(net, n2, dispatch, loads, hour, registry) -> (threshold, report)
 branch_loading_pct(net, i_from_ka, i_hv_ka)   # FROM/HV-side, both solver paths
@@ -94,8 +96,8 @@ set_sc_params(net, registry, templates)   # asserts coverage element by element
 scr(fault_levels, registry, templates)     # installed capacity from the template, never dispatched; bands reported, not gates
 
 # ranking/severity.py
-n1_severity_dc(dispatch, loads, registry, sens) -> Series      # pass 1: DC ranks the year
-# ranking/select.py: _RANKING has FIVE criteria; selection is k..5k; boundary ties are spread by farthest-point over hour-of-year
+n1_severity_dc(dispatch, loads, registry, sens) -> Series      # the DC proxy, kept in metrics.csv; its year-wide rank agreement with n1_severity_ac is in the manifest (n1_severity_ac_pass)
+# ranking/select.py: _RANKING has FIVE criteria; max_n1_severity reads n1_severity_ac since F2; selection is k..5k; boundary ties are spread by farthest-point over hour-of-year
 
 # templates/unit_params.py
 load_unit_templates(path) -> UnitTemplates(units, params)      # per-FIELD provenance; GENROU/GENSAL/inverter/legacy

@@ -33,6 +33,8 @@ The full-year study (2026-09-04, 61 windows, 1 h 52 m, all optimal) produced thr
 
 ### Locked decision: DC ranks the year, AC verifies the selection
 
+> **Superseded 2026-09-05 (follow-ups plan F2).** The premise below was measured false on case39: all 46 branch outages take ~4 ms per hour in lightsim2grid and a unit outage ~0.3 ms on the same GridModel; the 0.5 s the screen cost was pandapower's per-unit deep copy. The AC screen now runs at every hour (`static/contingency.n1_severity_ac`, 136 ms/hour on the v3 dispatch, ~20 min per year) and `max_n1_severity` ranks on it. The DC column stays as the measured proxy: on the v3 year it was anticorrelated with AC over the selected hours (rho −0.57) and uncorrelated over 100 spread hours (rho −0.01). Task 8's blind-spot measurement is therefore reported over ALL hours of every run. The "≤4 AC snapshots per test" rule is replaced by the measured module budget in the follow-ups plan.
+
 "N-1 severity joins the ranking" is circular as written — severity decides which snapshots to study, but a full AC N-1 sweep over 8760 hours x 46 branches (35 lines + 11 transformers) is 402 960 load flows and is not affordable at any point in this pipeline.
 
 **Resolution: two passes with different fidelities.**

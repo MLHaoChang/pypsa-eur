@@ -27,6 +27,8 @@ import dataclasses
 import json
 from pathlib import Path
 
+import time
+
 import numpy as np
 import pandas as pd
 
@@ -58,7 +60,13 @@ from gridspine.ranking.select import select_snapshots, validate_selection
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dc import save_dc_sensitivities
 from gridspine.schema.errors import StageError
-from gridspine.static.contingency import N1_LEDGER, measure_prune_threshold, screen_n1, screen_n2
+from gridspine.static.contingency import (
+    N1_LEDGER,
+    measure_prune_threshold,
+    n1_severity_ac,
+    screen_n1,
+    screen_n2,
+)
 from gridspine.static.contingency_set import (
     EXT_GRID_EXCLUSION_LEDGER,
     branch_contingencies,
@@ -131,7 +139,20 @@ def res_cf_for(net, hours: int) -> dict:
     return cf
 
 
-def _ledger(unit_params, screen: bool = True) -> list:
+def _dc_vs_ac(dc: pd.Series, ac: pd.Series) -> dict:
+    """Spearman rho and the worst rank gap between the DC proxy and the AC
+    number over the hours where both are finite; None when the comparison is
+    meaningless (fewer than three hours, or a constant side)."""
+    both = pd.concat([dc.rename("dc"), ac.rename("ac")], axis=1).dropna()
+    if len(both) >= 3 and both["dc"].nunique() > 1 and both["ac"].nunique() > 1:
+        rho = float(both["dc"].rank().corr(both["ac"].rank(), method="pearson"))
+        gap = int((both["dc"].rank() - both["ac"].rank()).abs().max())
+    else:
+        rho, gap = None, None
+    return {"hours_compared": int(len(both)), "spearman_rho_dc_vs_ac": rho, "worst_rank_gap_dc_vs_ac": gap}
+
+
+def _ledger(unit_params, screen: bool = True, ac_pass: dict | None = None) -> list:
     """The report appendix: what was measured, what was assumed, by whom.
 
     `planning.LEDGER` is carried in full so the increment-1 assumptions that
@@ -164,6 +185,18 @@ def _ledger(unit_params, screen: bool = True) -> list:
         "inertia_mws is the absolute figure to quote",
         "selection is the UNION of the k most extreme hours under each "
         "criterion, so it holds between k and 5k hours, never exactly k",
+        "max_n1_severity ranks on n1_severity_ac: the AC N-1 screen (branch and "
+        "unit outages, overload depth plus voltage excursion) run at EVERY hour "
+        "of the year on the same contingency set the selected hours are screened "
+        "with (follow-ups F2); n1_severity_dc is the DC proxy kept for the "
+        "year-wide comparison"
+        + (
+            f" — measured this run: Spearman rho = "
+            f"{'n/a' if ac_pass.get('spearman_rho_dc_vs_ac') is None else f'{ac_pass['spearman_rho_dc_vs_ac']:.2f}'}, "
+            f"worst rank gap {ac_pass.get('worst_rank_gap_dc_vs_ac')} over "
+            f"{ac_pass.get('hours_compared')} hours, AC pass {ac_pass.get('seconds')} s"
+            if ac_pass else ""
+        ),
         *SEVERITY_LEDGER,
         *EXT_GRID_EXCLUSION_LEDGER,
         *(
@@ -236,16 +269,31 @@ def run_year_study(
         art["dc_sensitivities"] = outdir / "dc_sensitivities.npz"
         save_dc_sensitivities(sens, art["dc_sensitivities"])
         metrics["n1_severity_dc"] = n1_severity_dc(dispatch, loads, registry, sens)
+        # Follow-ups F2: the ranking's severity criterion is the AC screen's own
+        # number at every hour (static/contingency.n1_severity_ac). The DC column
+        # stays as the proxy whose agreement with it is measured over the whole
+        # year, below. The contingency set is the same one the selected hours are
+        # screened with, so the column at a selected hour IS that hour's
+        # n1_worst_severity.
+        n1_set = pd.concat(
+            [branch_contingencies(net), unit_contingencies(registry)], ignore_index=True
+        )
+        t_ac = time.perf_counter()
+        metrics["n1_severity_ac"] = n1_severity_ac(net, n1_set, dispatch, loads, registry)
+        ac_seconds = time.perf_counter() - t_ac
         art["metrics"] = outdir / "metrics.csv"
         metrics.to_csv(art["metrics"])
+        ac_pass = _dc_vs_ac(metrics["n1_severity_dc"], metrics["n1_severity_ac"])
+        ac_pass.update({
+            "seconds": round(ac_seconds, 1),
+            "hours": int(len(metrics)),
+            "hours_not_converged": [int(h) for h in metrics.index[metrics["n1_severity_ac"].isna()]],
+        })
 
         selection = validate_selection(select_snapshots(metrics, k=k), metrics)
 
         templates = load_unit_templates()
         if screen:
-            n1_set = pd.concat(
-                [branch_contingencies(net), unit_contingencies(registry)], ignore_index=True
-            )
             n2_set = n2_candidates(branch_contingencies(net))
         screening, faults, strength, thresholds, ac_severity = {}, {}, {}, {}, {}
 
@@ -307,15 +355,13 @@ def run_year_study(
             # this run actually selected — which is why bundles are written in a
             # second pass, after every hour has been screened.
             dc = metrics.loc[hours_selected, "n1_severity_dc"]
-            ac = pd.Series({h: ac_severity[h] for h in hours_selected}).dropna()
-            both = dc.loc[ac.index]
-            if len(ac) >= 3 and both.nunique() > 1 and ac.nunique() > 1:
-                rho = float(both.rank().corr(ac.rank(), method="pearson"))
-                gap = int((both.rank() - ac.rank()).abs().max())
-            else:
-                rho, gap = None, None
-            blind_spot = {"hours": len(hours_selected), "hours_compared": int(len(ac)),
-                          "spearman_rho": rho, "worst_rank_gap": gap}
+            ac = pd.Series({h: ac_severity[h] for h in hours_selected})
+            cmp = _dc_vs_ac(dc, ac)
+            rho, gap = cmp["spearman_rho_dc_vs_ac"], cmp["worst_rank_gap_dc_vs_ac"]
+            blind_spot = {"hours": len(hours_selected), "hours_compared": cmp["hours_compared"],
+                          "spearman_rho": rho, "worst_rank_gap": gap,
+                          "year_spearman_rho": ac_pass["spearman_rho_dc_vs_ac"],
+                          "year_worst_rank_gap": ac_pass["worst_rank_gap_dc_vs_ac"]}
             thr_vals = [thresholds[h] for h in hours_selected]
             measurements = {
                 "n2_prune_threshold": (
@@ -325,13 +371,17 @@ def run_year_study(
                     f"N-2 was verified at {n2_prune_threshold_pct:g} % (every connected pair)"
                 ),
                 "dc_severity_blind_spot": (
-                    f"DC n1_severity_dc vs AC worst N-1 severity over the {len(ac)} selected "
+                    f"DC n1_severity_dc vs AC worst N-1 severity over the {cmp['hours_compared']} selected "
                     f"hours with a converged N-1 row: Spearman rho = "
                     f"{'n/a' if rho is None else f'{rho:.2f}'}, worst rank gap "
-                    f"{'n/a' if gap is None else gap} (measured on UC-dispatched hours)"
+                    f"{'n/a' if gap is None else gap}; over all {ac_pass['hours_compared']} hours of the "
+                    f"year: rho = "
+                    f"{'n/a' if ac_pass['spearman_rho_dc_vs_ac'] is None else f'{ac_pass['spearman_rho_dc_vs_ac']:.2f}'}, "
+                    f"worst rank gap {ac_pass['worst_rank_gap_dc_vs_ac']} (measured on UC-dispatched hours; "
+                    f"the ranking reads the AC column)"
                 ),
             }
-            ledger = _ledger(unit_params, screen=True)
+            ledger = _ledger(unit_params, screen=True, ac_pass=ac_pass)
             stage = "handoff"
             for hour in hours_selected:
                 apply_snapshot(net, dispatch, loads, hour=hour, registry=registry)
@@ -370,6 +420,7 @@ def run_year_study(
         art["manifest"] = outdir / "manifest.json"
         art["manifest"].write_text(json.dumps({
             "screen": bool(screen),
+            "n1_severity_ac_pass": ac_pass,
             **extra,
             "stages": STAGES,
             "network": "pandapower case39_res, canonical names",
@@ -385,7 +436,7 @@ def run_year_study(
             ],
             "load_consistency": "per-snapshot loads artifact (increment 2)",
             "artifacts": {name: p.name for name, p in sorted(art.items())},
-            "ledger": _ledger(unit_params, screen=screen),
+            "ledger": _ledger(unit_params, screen=screen, ac_pass=ac_pass),
         }, indent=2))
         return StudyResult(
             selected=selection, artifacts=art, lf_results=lf_results,

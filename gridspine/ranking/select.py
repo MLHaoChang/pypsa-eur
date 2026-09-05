@@ -34,8 +34,14 @@ _RANKING = (
     ("max_ibr_share", "ibr_share", "max"),
     ("max_load_mw", "load_mw", "max"),
     ("max_import_mw", "import_mw", "max"),
-    # Increment 3: the worst single-outage DC overload depth (ranking/severity).
-    ("max_n1_severity", "n1_severity_dc", "max"),
+    # Follow-ups F2: the AC screen's worst single-outage severity per hour
+    # (static/contingency.n1_severity_ac) — overload depth PLUS voltage
+    # excursion, the number the selected hours' screening reports. Increment 3
+    # ranked on the DC proxy n1_severity_dc; on the v3 year it was
+    # anticorrelated with the AC number over the selected hours (rho -0.57) and
+    # uncorrelated over 100 spread hours (rho -0.01). The DC column stays in the
+    # metrics table as the measured proxy.
+    ("max_n1_severity", "n1_severity_ac", "max"),
 )
 
 CRITERIA = tuple(reason for reason, _col, _dir in _RANKING)
@@ -60,8 +66,10 @@ def select_snapshots(metrics: pd.DataFrame, k: int = 5) -> pd.DataFrame:
         The k HIGHEST `import_mw` hours — greatest reliance on the external
         connection.
     ``max_n1_severity``
-        The k HIGHEST `n1_severity_dc` hours — the worst single-outage DC
-        overload depth (increment 3; ``ranking.severity``).
+        The k HIGHEST `n1_severity_ac` hours — the worst single-outage AC
+        severity, overload depth plus voltage excursion (follow-ups F2;
+        ``static.contingency.n1_severity_ac``; the DC proxy of increment 3 is
+        ``ranking.severity.n1_severity_dc`` and stays in the metrics table).
 
     Parameters
     ----------
