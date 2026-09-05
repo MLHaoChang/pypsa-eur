@@ -412,3 +412,92 @@ The three `/results` handlers deferred in Phase 2 — `get_losses_summary`,
 `get_economics_by_carrier`, `get_objective_decomposition` — depended on
 `routers.compare`. With the engine in `services/compare/`, they can be lifted
 by the Phase 2 tool as a follow-up in this phase.
+
+---
+
+## Phase 4 addendum — `routers/network.py` (written 2026-09-04, before the cut)
+
+### The earlier assessment was wrong, and here is the correction
+
+Phase 1's cluster map called `network.py` "the weakest candidate": ~90
+near-identical CRUD routes, "long but not deep", with the note to reassess
+whether it earns its diff. Reassessed by AST rather than by eye, that reading
+undercounted the file badly. The CRUD half is exactly as described — but
+underneath it sit **1,283 lines of pure helper code in four cohesive clusters**,
+none of which touches router state at all:
+
+| cluster | lines | outward dependencies |
+|---|---|---|
+| user time-series store | 811 | `PyPSAService` (a service), its own module state |
+| profile shapes + carrier classification | 299 | pandas, numpy, `HTTPException` |
+| geometry (haversine, coords, impedance preview) | 140 | `math` only |
+| transformer voltage / type rules | 79 | `HTTPException` |
+
+So the scope is: **extract those four, leave the ~80 CRUD routes and their
+factory alone.** The routes are individually short and genuinely are what the
+earlier note said they were.
+
+### Every cluster is a pure move
+
+This is the first phase with **no rewrites at all**. None of these functions
+reads `routers.simulation._state`, and the only service they touch is
+`PyPSAService`, which a service may import. So each block moves byte for byte
+and `routers.network` re-exports the identical objects — verified for all 49
+definitions, not asserted.
+
+`_build_period_multiindex` gets its own module, `services/snapshot_index.py`,
+because the snapshot routes AND `_ensure_snapshots_cover_user_ts` both build
+that index: it belongs to neither and sits below both. Same reasoning that gave
+`services/solver/vintage_store.py` its own file in Phase 1.
+
+### The hazard: `_user_ts` is shared mutable state
+
+`services/chat_tools.py` does, inside a function body:
+
+```python
+from routers.network import _user_ts, _user_ts_lock
+...
+_user_ts[("loads", "p_set", load_name)] = aligned
+```
+
+guarded by `except ImportError:  # pragma: no cover — only fails if
+routers/network refactor breaks paths`. That comment is a warning aimed
+precisely at this change.
+
+Re-exporting a dict is sound **only while nothing rebinds it**. Importers take
+the object by value and mutate it in place; a single `_user_ts = {}` anywhere
+would leave the router holding one dict and every by-value importer holding
+another, with writes silently going to different stores. `master` never rebinds
+it — checked by AST, not by reading — and
+`test_the_user_ts_store_is_never_rebound` now enforces that in both the router
+and the service, so a future reassignment fails at the seam.
+
+This is the same class of hazard as Phase 1's `run_simulation` monkeypatch:
+a name that must stay one object, not one value.
+
+### What stays, deliberately
+
+The ~80 CRUD routes, the generic CRUD factory (`_serialize_component`,
+`_get_component`, `_create_component`, `_merge_partial_update`,
+`_update_component`, `_delete_component`, `_filter_transient_names`),
+`_meta_payload`, `_push_undo_snapshot`, `_apply_profile_upload`, and
+`_xlsx_response` — which returns a `StreamingResponse` and is therefore an HTTP
+concern. The tripwire asserts these stay, so a later phase cannot quietly widen
+this one.
+
+### Where the façade goes
+
+At the **top** of the router, with the other imports — not appended. A module
+body executes top to bottom, and `_LOAD_SHAPES` is a module-level dict literal
+partway down the file that references two of the moved profile functions. A
+façade at the end is not bound yet when that line runs. It failed loudly, at
+import, with a `NameError` — but the lesson is that a re-export façade is an
+import block and belongs where import blocks go.
+
+### One pre-existing lint finding travels with the move
+
+`_RecomputeResult`'s class docstring trips ruff's `D204` on `master`
+(`routers/network.py:416`) and still does in `services/network_geometry.py`.
+It is not fixed here: the move's strongest property is that the text is
+byte-identical, and this phase does not trade that for a blank line it did not
+introduce.
