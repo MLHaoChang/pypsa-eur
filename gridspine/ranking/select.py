@@ -80,10 +80,17 @@ def select_snapshots(metrics: pd.DataFrame, k: int = 5) -> pd.DataFrame:
     one entry per criterion that selected it — so ``len(result)`` lies between
     k and 5k, and the caller must not assume it equals either.
 
-    Ties are broken by the earliest hour: the ranking sort is stable over an
-    hour-ascending table, so two hours with identical metric values are taken
-    in chronological order. Determinism matters more than the choice itself —
-    a report that reruns must select the same snapshots.
+    Ties at the k-th boundary are SPREAD, not taken chronologically. The
+    8760 h run found 96 hours tied at the inertia floor and the earlier
+    chronological rule returned the five earliest — one January week. If the
+    hours tied at the boundary value outnumber the slots left for them, those
+    slots are filled by a farthest-point pass over hour-of-year seeded at the
+    EARLIEST tied hour (each pick is the tied hour farthest from every hour
+    already picked; equal distances go to the earlier hour). Strictly better
+    hours are never displaced, a tie that fits its slots is untouched, and a
+    single remaining slot still goes to the earliest tied hour. Closed form,
+    no RNG: determinism matters more than the choice itself — a report that
+    reruns must select the same snapshots.
 
     Raises
     ------
@@ -107,7 +114,7 @@ def select_snapshots(metrics: pd.DataFrame, k: int = 5) -> pd.DataFrame:
         ranked = ordered[col].sort_values(
             ascending=(direction == "min"), kind="mergesort"
         )
-        for hour in ranked.index[: int(k)]:
+        for hour in _top_k_spread(ranked, int(k)):
             reasons.setdefault(hour, []).append(reason)
 
     hours = sorted(reasons)
@@ -117,6 +124,39 @@ def select_snapshots(metrics: pd.DataFrame, k: int = 5) -> pd.DataFrame:
             "reasons": [reasons[h] for h in hours],
         }
     )
+
+
+def _farthest_point(hours, m):
+    """`m` of the sorted `hours`, seeded at the first, each next pick the hour
+    farthest from all picks so far; equal distances go to the earlier hour."""
+    picked = [hours[0]]
+    while len(picked) < m:
+        best, best_d = None, -1
+        for h in hours:
+            if h in picked:
+                continue
+            d = min(abs(h - q) for q in picked)
+            if d > best_d:          # strict: an earlier hour keeps an equal distance
+                best, best_d = h, d
+        picked.append(best)
+    return picked
+
+
+def _top_k_spread(ranked: pd.Series, k: int):
+    """The top k of a value-sorted series, spreading only the boundary tie."""
+    k = min(k, len(ranked))
+    if k == 0:
+        return []
+    values = ranked.to_numpy()
+    boundary = values[k - 1]
+    at_boundary = values == boundary
+    first_tie = int(np.argmax(at_boundary))
+    better = list(ranked.index[:first_tie])
+    tied = sorted(int(h) for h in ranked.index[at_boundary])
+    slots = k - len(better)
+    if len(tied) <= slots:
+        return better + tied
+    return better + _farthest_point(tied, slots)
 
 
 def validate_selection(selection: pd.DataFrame, metrics: pd.DataFrame) -> pd.DataFrame:
