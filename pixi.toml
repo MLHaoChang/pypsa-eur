@@ -177,6 +177,11 @@ anthropic = ">=0.117.0"
 
 [pypi-dependencies]
 pandapower = "==3.1.2"
+# Exact pin, same reason as pandapower: a range resolves differently per
+# platform. 0.10.1 is the version pandapower 3.1.2 names in its own
+# `performance` extra, so the pair is the one pandapower tested against;
+# 1.0.0 is a major and is not adopted blind. Used only under gridspine/static/.
+lightsim2grid = "==0.10.1"
 pwdlib = { version = ">=0.2", extras = ["argon2"] }
 emails = ">=0.6"
 
