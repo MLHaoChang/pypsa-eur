@@ -23,8 +23,6 @@ parent.
 Never imports from `solver_service`; `tests/test_solver_facade_surface.py`
 enforces that.
 """
-import math
-import time
 
 import pandas as pd
 

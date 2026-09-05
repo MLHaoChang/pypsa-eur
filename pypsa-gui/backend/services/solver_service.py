@@ -1,20 +1,16 @@
 import logging
 import logging.handlers
-import math
 import pathlib
 import queue
 import tempfile
 import threading
 import time
 from collections.abc import Callable
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
 
-import pandas as pd
 import pypsa
 
-from services import period_utils as _period_utils
 # ── Re-export façade: services/solver/ ───────────────────────────────────────
 # These names are DEFINED in `services/solver/`, not here. They are imported
 # back so that `services.solver_service` stays the single import surface for
@@ -83,9 +79,7 @@ from services.solver.periodized_costs import (  # noqa: F401
     periodized_capital_costs,
     with_periodized_cost_defaults,
 )
-from services.pypsa_service import PyPSAService
 from services.validation_service import has_errors, validate_for_run
-from services.vintage_service import apply_vintage_bounds
 
 
 

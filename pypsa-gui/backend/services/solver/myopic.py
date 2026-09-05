@@ -22,7 +22,6 @@ import pandas as pd
 
 from services.pypsa_service import PyPSAService
 from services.solver.assumptions import (
-    _apply_modelling_assumptions,
     _compute_loss_atol,
     _normalise_dynamic_indexes,
     resolve_branch_outages,
@@ -35,7 +34,6 @@ from services.solver.diagnostics import (
 from services.solver.objective import _rescale_results_for_objective
 from services.solver.runtime import _check_stop
 from services.solver.vintage_store import _MYOPIC_VINTAGE_SOURCE, _frozen_vintage_store
-from services.vintage_service import apply_vintage_bounds
 
 
 # ── Myopic foresight driver ───────────────────────────────────────────────────
