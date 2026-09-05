@@ -414,17 +414,116 @@ for a cost bug is a network and a call, not a fixture and an HTTP client. Those
 tests are deliberately not part of this refactor — it proves itself against
 the suite that existed before it.
 
-## Phase 3 — `routers/compare.py` (2,781 lines)
+## Phase 3 — `routers/compare.py` (2,781 lines) — done
 
-Nine `_compute_*_summary` functions behind two routes, into `services/compare/`
-— one module per summary. `_compute_economics_summary` alone is 607 lines.
-Shared helpers (`_bucket_add`, `_to_pv`, `_build_snapshot_weights`,
-`_safe_capital_cost`, `_periodized_lookup`) go to `services/compare/support.py`.
+Design decisions are in the spec's "Phase 3 addendum"; this is the record.
 
-The weighting discipline in `.cursor/skills/gui-backend-change/SKILL.md` is
-load-bearing here: energy KPIs use column `"generators"`, cost KPIs use
-`"objective"`. Moving code must not silently re-inline
-`investment_period_weightings["years"]`.
+### Tasks
+
+- [x] **Task 14: tripwire** — `tests/test_compare_facade_surface.py`. Pins the
+  23 names other modules import from `routers.compare` **with their positional
+  parameter lists**, because nine tests call the summaries positionally as
+  `CMP._compute_x(n, periods, is_multi, has_solve)`. Distinguishes pure
+  re-exports (router name IS the service object) from wrappers (router name is
+  a thin function that resolves state). Red first.
+- [x] **Task 15: seam test** — `tests/test_compare_seam.py`. Router-level name
+  vs service-level name on the solved golden network, identical pydantic
+  payloads, for all nine summaries plus `_periodized_lookup`. One case builds
+  `SolverConfig` by hand and reads prices off the network to prove the engine
+  runs with no router state at all. Red first.
+- [x] **Task 16: the move** — 20 functions into `services/compare/`.
+- [x] **Task 17: the Phase 2 follow-up** — the three `/results` handlers that
+  were deferred because they reached into `routers.compare`.
+- [x] **Task 18: verify.**
+
+### What moved where
+
+| module | lines | contents |
+|---|---|---|
+| `services/compare/economics.py` | 636 | `_compute_economics_summary` |
+| `services/compare/capacity.py` | 388 | capacity summary + annuitised CAPEX |
+| `services/compare/dispatch.py` | 242 | dispatch summary |
+| `services/compare/support.py` | 237 | bucketing, PV objects, `_periodized_lookup`, `_safe_capital_cost`, `_build_snapshot_weights`, `_CLS_TO_ATTR` |
+| `services/compare/prices.py` | 224 | prices summary |
+| `services/compare/storage_cycling.py` | 203 | storage cycling |
+| `services/compare/curtailment.py` | 198 | curtailment |
+| `services/compare/lost_load.py` | 176 | lost load |
+| `services/compare/loading.py` | 171 | line/transformer loading |
+| `services/compare/emissions.py` | 116 | emissions |
+
+`routers/compare.py`: **2,781 → ~500 lines** — the two routes, the
+`_read_lost_load_capture` reader, and the façade.
+
+Sixteen of the twenty functions moved **byte for byte**. Four were rewritten to
+take state as keyword arguments and proven by AST equality against the same
+change expressed as a `NodeTransformer`. `_periodized_lookup` is the one
+hand-written body (it now takes `cfg` instead of resolving it), covered by the
+seam test.
+
+### The Phase 2 follow-up
+
+With the engine in `services/compare/`, the three deferred handlers lifted:
+
+| handler | destination | why it was blocked |
+|---|---|---|
+| `get_losses_summary` | `services/results/losses.py` | lazy-imported `_build_snapshot_weights` from `routers.compare`; now a plain service import |
+| `get_economics_by_carrier` | `services/results/economics_by_carrier.py` | delegated to `routers.compare._compute_economics_summary`; now calls the service with `cfg` and `result_df` |
+| `get_objective_decomposition` | `services/results/objective_decomposition.py` | called the `get_cost_breakdown` **handler** and checked for a 204 `Response`. The router still makes that call, inside the try that used to wrap it, and passes the result in as `cost_breakdown`; the `isinstance(cb, dict)` check is unchanged and covers a payload, a `Response` or `None` alike |
+
+`get_losses_summary` also needed `_state.get("ac_pf_results") is not None`,
+which is a different state key from `solver_config` — it becomes the explicit
+`has_ac_pf_snapshot` parameter rather than a general mechanism.
+
+### What the F821 guard caught, again
+
+Two defects, both the Phase 1 bug class recurring:
+
+1. **`_CLS_TO_ATTR` was left behind.** A module-level constant whose four call
+   sites all moved. The lift tool's name scan handled `ast.Assign` but not
+   `ast.AnnAssign`, and `_CLS_TO_ATTR: dict[str, str] = {...}` is annotated —
+   so it was invisible, no import was generated, and no error was raised. It
+   is the only annotated module-level assignment in the file. **Phase 1's
+   post-mortem said constants create the same cycles functions do; the sharper
+   statement is that a name scan must cover every binding form.**
+2. **Three return annotations referenced models imported only inside the
+   function bodies** (`CurtailmentComparison`, `LostLoadComparison`,
+   `StorageCyclingComparison`). Harmless at runtime under
+   `from __future__ import annotations`, but unresolvable names. Now imported
+   at module level.
+
+Both were found in seconds by `ruff --select F821`, not by a 35-minute suite.
+
+### Dead imports
+
+The repo's ruff config enforces F401 on `pypsa-gui/**`, and `master`'s
+`compare.py`, `results.py` and `solver_service.py` all pass it clean. After the
+moves, 30 imports across 6 files were dead — including six in
+`services/solver_service.py` and five in the Phase 1 `services/solver/`
+modules, whose generated headers had imported more than their bodies used.
+All removed; nothing re-imports any of them through those modules.
+
+One new function-body import crept into the router façade
+(`SolverConfig` inside `_live_solver_config`). The spec forbids adding lazy
+imports, so it was hoisted to module level: function-body imports are 35
+before and 35 after, difference empty.
+
+### Verification runs
+
+Pinned pip venv (`pypsa==1.1.2`, `linopy==0.8.0`, `pandas<3`), which
+**approximates** `pixi run gui-tests`.
+
+| point | collected | passed | failed | skipped |
+|---|---|---|---|---|
+| end of Phase 1 | 2,362 | 2,338 | 2 | 22 |
+| end of Phase 2 | 2,423 | 2,399 | 2 | 22 |
+| end of Phase 3 | 2,481 | 2,457 | 2 | 22 |
+
+Failing set byte-identical to the pre-refactor baseline: `test_app_paths.py`'s
+two macOS-path assertions, which cannot pass on Linux. The fifty-eight new
+collected cases are the two Phase 3 test files.
+
+Nothing lost: all 25 top-level names on `master`'s `compare.py` and all 37 on
+`results.py` are still reachable.
 
 ## Phase 4 — `routers/network.py` (4,169 lines)
 

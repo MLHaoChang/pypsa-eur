@@ -50,6 +50,19 @@ keyword (never from router state), and gains a case in
 `tests/test_results_facade_surface.py` fails if one changes. Nothing under
 `services/results/` imports a router.
 
+## Where compare arithmetic goes
+The two `/compare-state` + `/results-summary` routes in `routers/compare.py`
+are thin; the nine `_compute_*_summary` functions and their helpers live in
+`services/compare/`. They take `(n, periods, is_multi, has_solve)` and return
+pydantic models; the solver config and the LP-stage result lookup arrive as
+keyword-only `cfg=` / `result_df=` where a function needs them, never from
+router state. `routers.compare` re-exports the pure ones under their old names
+and wraps the four that used to resolve state inline, so the nine tests that
+call them positionally are untouched — `tests/test_compare_facade_surface.py`
+fails if a name or a positional parameter list changes, and
+`tests/test_compare_seam.py` fails if the wrapper and the service disagree.
+Nothing under `services/compare/` imports a router.
+
 ## Weighting (multi-period)
 - Use `snapshot_weights(n, column, sns=None)`, `period_years_map`, `years_for_period`.
 - Energy KPIs → column `"generators"`; cost KPIs → `"objective"`.
@@ -74,7 +87,12 @@ keyword (never from router state), and gains a case in
 4. Run the undefined-name guard after moving code between modules:
    `python -m ruff check --isolated --select F821 services routers`. Python
    binds globals at call time, so a caller left behind by a move still imports
-   and still boots — it only breaks mid-solve.
+   and still boots — it only breaks mid-solve. It has caught a left-behind
+   helper (`_safe_log`) and a left-behind annotated constant (`_CLS_TO_ATTR`)
+   that a whole-suite run would have taken 35 minutes to reach.
+5. Then run `python -m ruff check services routers` (the repo config, which
+   enforces F401 here). Moving a body out of a module usually strands the
+   imports it took with it.
 
 ## Commit
 - Only commit when the user asks. Prefer small PRs (helpers → compare → results errors → CI).

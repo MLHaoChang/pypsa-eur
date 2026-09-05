@@ -346,3 +346,69 @@ the seam is transparent or the test says where it is not.
 
 Nothing under `services/results/` imports anything under `routers/`.
 `tests/test_results_facade_surface.py` enforces it.
+
+---
+
+## Phase 3 addendum — `routers/compare.py` (written 2026-09-04, before the cut)
+
+### A different shape again
+
+None of the nine `_compute_*_summary` functions touches `PyPSAService`,
+`HTTPException` or the router's `_state` at module level. They are already
+functions of `(n, periods, is_multi, has_solve)` returning pydantic models,
+and tests already call them directly. So Phase 3 is nearer Phase 1 — a move
+behind a façade — than Phase 2. The engine moves to `services/compare/` with
+its names unchanged; `routers/compare.py` keeps the two routes and re-exports.
+
+Four things inside function bodies reach for router state, and each gets one
+explicit treatment rather than a general mechanism:
+
+| function | the touch | treatment |
+|---|---|---|
+| `_periodized_lookup(n)` | lazy `routers.simulation._state["solver_config"]`, falling back to `SolverConfig()` on any exception | service takes `cfg`; router wrapper `_live_solver_config()` reproduces the lookup **with the same try/except** and passes it in |
+| `_compute_capacity_summary`, `_compute_economics_summary` | call `_periodized_lookup(n)` | gain keyword-only `cfg=None`, thread it through; router wrappers pass `_live_solver_config()` |
+| `_compute_dispatch_summary` | lazy `_state.get("solver_config")` handed to `lp_scaled_load_frame(..., from_state=False)` | gains keyword-only `cfg=None`; the lazy import goes, the `try/except → None` around the call stays |
+| `_compute_economics_summary` | `corrected_marginal_prices(n, from_state=prices_from_state)` — state-aware when `True` | gains keyword-only `result_df=None`; router wrapper passes `routers.results._result_df` |
+| `_compute_lost_load_summary(project_dir, …)` | `_read_lost_load_capture(project_dir)`, which uses the restricted unpickler in `routers/projects.py` | the pure version takes the capture dict and is therefore **named differently**: `compute_lost_load_summary(cap, …)`. The router keeps `_compute_lost_load_summary(project_dir, …)` and reads the capture itself. A same-named function whose first positional argument means something else would be a trap. |
+
+`_read_lost_load_capture` stays in the router: it is project-file I/O through
+the projects router's security-relevant unpickler, and moving that unpickler is
+out of scope.
+
+The cfg for `_periodized_lookup` was resolved *inside* the computation; the
+wrappers resolve it just before calling in. The summaries run synchronously
+on one thread with no intervening mutation, so the observable result is the
+same. The one divergence is theoretical: if `import routers.simulation` failed
+mid-request, the old dispatch code degraded to `p_set` and the wrapper would
+raise. That module is imported at application start.
+
+### A finding, recorded not fixed
+
+`_periodized_lookup` reads the **live** solver config — the active project's —
+even when `get_results_summary` is summarising a *different*, non-active
+project loaded from disk. Its docstring says this is deliberate ("the same
+live `SolverConfig` every other economics surface reads"). Whether a compared
+project should be annuitised under the active project's discount rate is a
+product question; it is now visible as a `cfg=` argument at the router
+wrapper instead of a lazy import three calls deep, and it is not changed here.
+
+### Proof
+
+Pure moves are checked byte-for-byte. The four rewritten functions are proven
+as in Phase 2: text edits, then AST equality against the same rewrite applied
+as a `NodeTransformer`. `_periodized_lookup` is the one hand-written body; it
+is short enough to read, and the seam test compares the wrapper against the
+service on the golden network.
+
+### Layering
+
+Nothing under `services/compare/` imports a router. `services/compare/` may
+import `services/results/load_frames` (for the pure load-frame helpers) and
+`services/period_utils`; nothing imports back.
+
+### What this unblocks
+
+The three `/results` handlers deferred in Phase 2 — `get_losses_summary`,
+`get_economics_by_carrier`, `get_objective_decomposition` — depended on
+`routers.compare`. With the engine in `services/compare/`, they can be lifted
+by the Phase 2 tool as a follow-up in this phase.
