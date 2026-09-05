@@ -52,6 +52,7 @@ from gridspine.schema.contingency import (
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
 from gridspine.static.loadflow import branch_keys
+from gridspine.static.lodf import dc_base, dc_loading_pct, n2_dc_flows
 
 V_MIN_PU = 0.9
 V_MAX_PU = 1.1
@@ -186,6 +187,11 @@ def _screen_branches(work, branch_rows, hour, nl) -> dict:
         if not connected[k]:
             out[cid] = _row(cid, hour, converged=False, islanded=True)
             continue
+        if abs(amps[k, k]) > 1e-6:
+            raise ContractError(
+                f"lightsim2grid N-1 row {k} carries current on branch {k}: result rows "
+                "are not in branch-id order"
+            )
         vm = np.abs(volts[k])
         if vm.size == 0 or np.nanmin(vm) <= 0.0:
             out[cid] = _row(cid, hour, converged=False, islanded=False)
@@ -246,3 +252,179 @@ def screen_n1(net, contingencies, dispatch, loads, hour, registry) -> pd.DataFra
     rows.update(_screen_units(work, cset[cset["kind"] == "unit"], hour, registry))
     ordered = [rows[cid] for cid in cset["contingency_id"]]
     return validate_contingency_results(pd.DataFrame(ordered))
+
+
+# ===========================================================================
+# N-2: DC-LODF prune, AC verify the survivors
+# ===========================================================================
+
+def _branch_positions(state):
+    """N-1 branch contingency id -> branch position, built (not parsed) from the keys."""
+    keys = state.branch_keys
+    return {
+        f"{r.from_bus}-{r.to_bus}-{r.ckt}": i for i, r in enumerate(keys.itertuples(index=False))
+    }
+
+
+def _ac_pairs(work, pairs):
+    """AC solve of the given (a, b) pairs, one analysis per pair on one GridModel.
+
+    NOT batched on purpose. lightsim2grid deduplicates and reorders the
+    contingencies it is given (probed: six requested pairs with one repeat came
+    back as five rows, two of them not the pair at that position), so a batched
+    result cannot be aligned to the request by insertion order. Solving one
+    pair per analysis makes the alignment structural; the zero-current check on
+    the outaged branches stays as the assertion that it holds.
+    """
+    n_branch = len(work.line) + len(work.trafo)
+    n_bus = len(work.bus)
+    amps = np.zeros((len(pairs), n_branch))
+    volts = np.zeros((len(pairs), n_bus), dtype=complex)
+    connected = np.zeros(len(pairs), dtype=bool)
+    if not pairs:
+        return amps, volts, connected
+    gm = init_from_pandapower(work)
+    v0 = work._ppc["internal"]["V"]
+    for i, (a, b) in enumerate(pairs):
+        ca = ContingencyAnalysisCPP(gm)
+        ca.add_nk([int(a), int(b)])
+        ca.compute(v0, _LS2G_MAX_ITER, _LS2G_TOL)
+        ca.compute_flows()
+        amps[i] = np.asarray(ca.get_flows())[0]
+        volts[i] = np.asarray(ca.get_voltages())[0]
+        connected[i] = bool(np.asarray(ca.is_grid_connected_after_contingency())[0])
+        if connected[i] and (abs(amps[i, a]) > 1e-6 or abs(amps[i, b]) > 1e-6):
+            raise ContractError(
+                f"lightsim2grid result for pair {(a, b)} carries current on an outaged "
+                "branch; the solver did not apply the requested outage"
+            )
+    return amps, volts, connected
+
+
+def _dc_estimate(state, base_over, a, b):
+    """(islanded, dc_max_loading, dc_max_new_loading, dc_new_overloads)."""
+    flows, islanded = n2_dc_flows(state, a, b)
+    if islanded:
+        return True, np.nan, np.nan, 0
+    ld = dc_loading_pct(state, flows)
+    fresh = ~base_over
+    new_over = int(((ld > LOADING_MAX_PCT) & fresh).sum())
+    max_new = float(ld[fresh].max()) if fresh.any() else 0.0
+    return False, float(ld.max()), max_new, new_over
+
+
+def _n2_prepare(net, candidates, dispatch, loads, hour, registry):
+    cset = validate_contingency_set(candidates)
+    dispatch = validate_dispatch(dispatch)
+    loads = validate_loads(loads)
+    hour = int(hour)
+    if (cset["order"] != 2).any() or (cset["kind"] != "branch").any():
+        raise ContractError("screen_n2 takes an N-2 branch set; got rows with order != 2 or kind != branch")
+    _check_net_carries_hour(net, dispatch, loads, hour, registry)
+    work = copy.deepcopy(net)
+    try:
+        pp.runpp(work)
+    except pp.LoadflowNotConverged as exc:
+        raise ContractError(f"base case at hour {hour} does not converge; nothing to screen") from exc
+    state = dc_base(work)
+    pos = _branch_positions(state)
+    pairs = []
+    for r in cset.itertuples(index=False):
+        a, b = r.element_ids
+        if a not in pos or b not in pos:
+            raise ContractError(
+                f"contingency {r.contingency_id} names a branch not on the net: "
+                f"{[e for e in (a, b) if e not in pos]}"
+            )
+        pairs.append((pos[a], pos[b]))
+    base_over = dc_loading_pct(state, state.flows_mw) > LOADING_MAX_PCT
+    return cset, work, state, pairs, base_over, hour
+
+
+def screen_n2(net, candidates, dispatch, loads, hour, registry, prune_threshold_pct):
+    """(results, prune_log). Results hold AC-verified and islanded pairs only;
+    pruned pairs appear in the log with their DC estimate and nowhere else."""
+    cset, work, state, pairs, base_over, hour = _n2_prepare(net, candidates, dispatch, loads, hour, registry)
+    nl = len(work.line)
+
+    log_rows, to_verify = [], []
+    for cid, (a, b) in zip(cset["contingency_id"], pairs):
+        islanded, mx, mx_new, new_over = _dc_estimate(state, base_over, a, b)
+        if islanded:
+            decision = "islanded"
+        elif mx_new >= prune_threshold_pct:
+            decision = "verified"
+            to_verify.append((cid, a, b))
+        else:
+            decision = "pruned"
+        log_rows.append({
+            "contingency_id": cid, "decision": decision,
+            "dc_max_loading_pct": mx, "dc_max_new_loading_pct": mx_new, "dc_new_overloads": new_over,
+        })
+    log = pd.DataFrame(log_rows)
+
+    amps, volts, connected = _ac_pairs(work, [(a, b) for _c, a, b in to_verify])
+    rows = {}
+    for i, (cid, a, b) in enumerate(to_verify):
+        if not connected[i]:
+            rows[cid] = _row(cid, hour, converged=False, islanded=True)
+            continue
+        vm = np.abs(volts[i])
+        if vm.size == 0 or np.nanmin(vm) <= 0.0:
+            rows[cid] = _row(cid, hour, converged=False, islanded=False)
+            continue
+        loading = branch_loading_pct(work, amps[i, :nl], amps[i, nl:])
+        rows[cid] = _row(cid, hour, converged=True, islanded=False, loading=loading, vm=vm)
+    for cid, decision in zip(log["contingency_id"], log["decision"]):
+        if decision == "islanded":
+            rows[cid] = _row(cid, hour, converged=False, islanded=True)
+
+    ordered = [rows[cid] for cid in cset["contingency_id"] if cid in rows]
+    results = validate_contingency_results(pd.DataFrame(ordered))
+    return results, log
+
+
+def measure_prune_threshold(net, candidates, dispatch, loads, hour, registry):
+    """The plan's Step 5 as code: full AC N-2 as ground truth, threshold = the
+    largest value that keeps every pair creating a violation the base case did
+    not already have. Returns (threshold, report)."""
+    cset, work, state, pairs, base_over, hour = _n2_prepare(net, candidates, dispatch, loads, hour, registry)
+    nl = len(work.line)
+    base_ld = branch_loading_pct(work, work.res_line["i_from_ka"].values, work.res_trafo["i_hv_ka"].values)
+    base_vm = work.res_bus["vm_pu"].values
+    base_branch_viol = base_ld > LOADING_MAX_PCT
+    base_bus_viol = (base_vm < V_MIN_PU) | (base_vm > V_MAX_PU)
+
+    estimates = {cid: _dc_estimate(state, base_over, a, b) for cid, (a, b) in zip(cset["contingency_id"], pairs)}
+    live = [(cid, a, b) for cid, (a, b) in zip(cset["contingency_id"], pairs) if not estimates[cid][0]]
+    amps, volts, connected = _ac_pairs(work, [(a, b) for _c, a, b in live])
+
+    flagged, by_voltage_only, n_connected = [], [], 0
+    for i, (cid, a, b) in enumerate(live):
+        if not connected[i]:
+            continue
+        vm = np.abs(volts[i])
+        if vm.size == 0 or np.nanmin(vm) <= 0.0:
+            continue
+        n_connected += 1
+        ld = branch_loading_pct(work, amps[i, :nl], amps[i, nl:])
+        new_branch = ((ld > LOADING_MAX_PCT) & ~base_branch_viol).any()
+        new_bus = (((vm < V_MIN_PU) | (vm > V_MAX_PU)) & ~base_bus_viol).any()
+        if new_branch or new_bus:
+            flagged.append(cid)
+            if new_bus and not new_branch:
+                by_voltage_only.append(cid)
+
+    if flagged:
+        threshold = float(min(estimates[cid][2] for cid in flagged))
+    else:
+        threshold = 0.0
+    report = {
+        "ac_pairs_connected": n_connected,
+        "ac_pairs_with_new_violation": len(flagged),
+        "new_violation_pairs": flagged,
+        "flagged_by_voltage_only": by_voltage_only,
+        "min_dc_loading_among_flagged": threshold,
+        "base_case_overloaded_branches": int(base_branch_viol.sum()),
+    }
+    return threshold, report
