@@ -399,7 +399,10 @@ class GlobalConstraintCreate(BaseModel):
     name: str
     type: str = "primary_energy"
     sense: str = "<="
-    constant: float = 0.0
+    # Phase 12g (shipped-code review, finding 3): a NaN `constant` DELETES the
+    # cap — measured gas 100 → 300 MWh — and `n.add` would silently coerce it
+    # to a 0 t cap. Refused at the boundary like every finite-default input.
+    constant: Finite = 0.0
     carrier_attribute: str | None = None      # for primary_energy
     carrier: str | None = None                # for tech / operational / etc.
     investment_period: int | None = None      # multi-period only

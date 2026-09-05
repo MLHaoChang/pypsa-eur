@@ -180,6 +180,20 @@ def test_J1e_the_golden_network_is_silent_and_the_set_is_the_metadata_s():
     assert "p_set" not in V.finite_default_inputs(n.components["Generator"])
 
 
+def test_J1f2_a_multi_port_efficiency_is_owned_by_the_link_check():
+    """★ J1f2 (12g shipped-code review, finding 2). `link_efficiency_invalid`
+    already refuses NaN `efficiency{i}` on rows whose `bus{i}` is populated, so
+    the generic walk owns it statically — a three-port link's NaN
+    `efficiency2` was reported twice. Bite (verified): drop `("Link",
+    "efficiency2")` from the owned set."""
+    n = _all_components_network()
+    n.add("Bus", "b4")
+    n.add("Link", "lk3", bus0="b", bus1="b2", bus2="b4", p_nom=10.0, efficiency2=0.5)
+    n.links.at["lk3", "efficiency2"] = np.nan
+    errs = [i for i in _errors(n) if i.name == "lk3"]
+    assert [i.code for i in errs] == ["link_efficiency_invalid"], [(i.code, i.message) for i in errs]
+
+
 def test_J1f_a_multi_port_attribute_is_judged_only_where_the_port_exists():
     """★ J1f. A multi-port link adds `efficiency2`/`delay2` to the Link
     metadata for the whole network; on a two-port link they are inert and
@@ -210,6 +224,42 @@ def test_J1g_a_nominal_on_an_extendable_row_is_the_generic_walk_s():
     errs = [i for i in _errors(n) if i.name == "g"]
     assert [i.code for i in errs] == ["nonfinite_input"], [(i.code, i.message) for i in errs]
     assert "cannot represent 'unset'" in errs[0].message
+
+
+def test_J1i_a_partial_demand_series_is_refused_by_its_owner_against_the_horizon():
+    """★ J1i (12g shipped-code review, finding 1 — MAJOR). `Load.p_set` is
+    owned by `load_p_set_nan`, which judged the frame's OWN rows: a 2-of-3-row
+    `loads_t.p_set` holds no NaN cell, the owner was silent, the generic walk
+    deferred to it, and the solve ran `optimal` with the load served as zero
+    in the uncovered hour (measured `[100, 100, 0]`) — the one attribute a
+    representative-week workflow uploads first, refused for every other
+    varying attribute and not for the demand. The owner now judges as PyPSA
+    reads it over the horizon, exactly once. Bite (verified): judge
+    `ts[name]` as it stands."""
+    n = _all_components_network()
+    n.loads_t["p_set"] = pd.DataFrame({"l": [100.0, 100.0]}, index=n.snapshots[:2])
+    errs = [i for i in _errors(n) if i.name == "l"]
+    assert [i.code for i in errs] == ["load_p_set_nan"], [(i.code, i.message) for i in errs]
+    assert "covers 2 of 3 snapshots" in errs[0].message
+    # a full-horizon NaN cell is still exactly one error, the owner's
+    n.loads_t["p_set"] = pd.DataFrame({"l": [100.0, np.nan, 100.0]}, index=n.snapshots)
+    assert [i.code for i in _errors(n) if i.name == "l"] == ["load_p_set_nan"]
+
+
+def test_J1i2_run_simulation_refuses_the_partial_demand_series():
+    """★ J1i2. End to end, background branch as J6a: before the fix the solve
+    returned `('ok', 'optimal')` with the load zeroed. Bite (verified): as
+    J1i."""
+    from tests.test_nonfinite_bounds import _run
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=3, freq="h"))
+    n.add("Bus", "b")
+    n.add("Generator", "g", bus="b", p_nom=200.0, marginal_cost=10.0)
+    n.add("Load", "l", bus="b", p_set=100.0)
+    n.loads_t["p_set"] = pd.DataFrame({"l": [100.0, 100.0]}, index=n.snapshots[:2])
+    status, cond, lines = _run(n, SolverConfig(), foreground=False)
+    assert (status, cond) == ("error", "validation_failed"), (status, cond)
+    assert any("[VALIDATION] ERROR: Load 'l'" in ln for ln in lines), lines
 
 
 # ── J2: clearing a field writes PyPSA's default ───────────────────────────
@@ -303,7 +353,10 @@ def _finite_schema_fields():
     n = pypsa.Network()
     MAP = {"GeneratorCreate": "Generator", "LinkCreate": "Link", "LineCreate": "Line",
            "TransformerCreate": "Transformer", "StorageUnitCreate": "StorageUnit",
-           "StoreCreate": "Store", "LoadCreate": "Load"}
+           "StoreCreate": "Store", "LoadCreate": "Load",
+           # 12g shipped-code review, finding 3: the headline defect's own
+           # boundary — `n.add` coerced a NaN `constant` to a 0 t cap silently.
+           "GlobalConstraintCreate": "GlobalConstraint"}
     expected, annotated, ints = set(), set(), set()
     for cls, comp in MAP.items():
         m = getattr(S, cls)
@@ -321,12 +374,13 @@ def _finite_schema_fields():
 
 
 def test_J4a_the_finite_annotation_covers_exactly_the_metadata_s_float_fields():
-    """★ J4a. 58 float fields, derived from PyPSA's table, not listed by
-    hand; the 9 int fields refuse non-finite as `int` and stay int. Bite
-    (verified): drop the annotation from `inflow`."""
+    """★ J4a. 59 float fields (58 plus `GlobalConstraint.constant`), derived
+    from PyPSA's table, not listed by hand; the 9 int fields refuse non-finite
+    as `int` and stay int. Bite (verified): drop the annotation from
+    `inflow`."""
     expected, annotated, ints = _finite_schema_fields()
     assert expected == annotated, sorted(expected ^ annotated)
-    assert len(expected) == 58 and len(ints) == 9, (len(expected), len(ints))
+    assert len(expected) == 59 and len(ints) == 9, (len(expected), len(ints))
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), "Infinity"])

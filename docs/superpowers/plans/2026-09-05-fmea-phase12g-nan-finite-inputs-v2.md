@@ -392,3 +392,50 @@ S30.5 with the pre-12g symptoms (`null`, `null`, `optimal` on the masked
 balance); S30.3/S30.4/S30.6 stay green under that bite because their guards
 (the literal check, the schema, the time-series rule) are separate. Restore by
 hash, MATCH on both files.
+
+---
+
+## SHIPPED-CODE REVIEW — one major, two minor, two nits; all verified, all closed
+
+Commit `4d79382` was reviewed adversarially as shipped code. Every finding was
+reproduced against the code before it was recorded.
+
+| # | severity | finding | verified | resolution |
+|---|---|---|---|---|
+| 1 | MAJOR | a **partially covered dynamic `Load.p_set`** was refused by nobody. `Load.p_set` is owned by `load_p_set_nan`, which judged the frame's *own* rows — the mistake 12f's fix round corrected for the five bounds — so a 2-of-3-row `loads_t.p_set` held no NaN cell, the owner was silent, the generic walk deferred to it, and the solve ran `optimal` with the load served as **zero** in the uncovered hour (measured `load p = [100, 100, 0]`, foreground and background). The same shape on `marginal_cost`, `inflow`, `q_set` and the five bounds was refused; the demand — the one series a representative-week workflow uploads first — was not. J1c could not see it: its dynamic case places a NaN in a full-horizon frame, where the owner does fire. | yes — reproduced, solve and preflight | `_check_loads_p_set` judges the column **as PyPSA reads it over the horizon** through `_dynamic_column_as_read`, with a coverage message ("covers 2 of 3 snapshots … the demand is dropped from the nodal balance and the load is served as zero"); ownership unchanged, so a full-horizon NaN cell is still exactly one error. ★ J1i (preflight, both shapes, exactly once) and ★ J1i2 (`run_simulation` end to end, background branch). |
+| 2 | MINOR | a three-port link's static NaN `efficiency2` was reported **twice**: `link_efficiency_invalid` refuses `efficiency{i}` on rows whose `bus{i}` is populated, and the owned set held `("Link", "efficiency")` only. J1f asserted on `delay2` alone. | yes — `['nonfinite_efficiency', 'link_efficiency_invalid']` | `("Link", "efficiency2/3/4")` owned statically (dynamic stays the generic walk's); ★ J1f2. |
+| 3 | MINOR | `GlobalConstraintCreate.constant` was a bare `float`: the phase's headline defect stopped at its own boundary — `POST` with NaN reached `n.add`, which coerced it to a **0 t cap** with no error anywhere; `PUT` with `inf` was accepted and refused only at preflight. J4a's map covered the seven Create models. | yes — measured through the route functions | `constant: Finite = 0.0`; J4a's map includes `GlobalConstraintCreate`, expected count 59. |
+| 4 | NIT | `_bulk` clearing an `int` attribute on a column that is *already* float64 (a pre-12g NaN, or a netCDF import) leaves it float64. Harmless to PyPSA. | reviewer's probe | recorded. |
+| 5 | NIT | `pf` mode is not gated by the walk (`_check_lopf` only), and a NaN `Load.sign` under `pf` produced no reproduced harm. | reviewer's probe | recorded, not a defect. |
+
+**Out of scope, observed by the review:** `solve_strategy="myopic"` fails with
+`TypeError: Must pass list-like as names` inside PyPSA's `assign_solution →
+combine_first` on the second period, on the reviewer's fixture and on the
+tree's own `test_myopic_feasibility.py::test_myopic_feasible_no_extendable_produces_dispatch`
+— reproduced with 12f's walk swapped in, so pre-existing (in the 43-failure
+baseline), not 12g's. Backlog.
+
+**Probed and clean:** PyPSA's own writes (`add`/`remove`/`copy`/`merge`/
+`consistency_check`/post-`optimize`/`set_snapshots` widening/`set_investment_periods`)
+leave no NaN in any finite-default input; GlobalConstraint rows PyPSA or the
+backend add (`constant=None` → 0.0; `investment_period` NaN-default excluded;
+`mu` Output excluded; `constant` static-only); Line/Transformer `type` fills
+write 0.0 never NaN; **vintage clones, full and myopic, foreground and
+background** — `apply_vintage_bounds` skips non-finite parent values so the
+clones default, 7 vintages solve `optimal` with zero hits afterwards; the
+zero-row frame path reports once as "3 of 3" with no static double; `bus2` is
+`''` after add, CSV and netCDF round trips; every `*_nom` on a non-extendable
+row of all six components is exactly one `*_nom_invalid`; dynamic `efficiency`
+now refused (the build's anti-gap catch holds); metadata is per network
+(`efficiency2` on network A does not appear on B; `_cases()` stable across
+`set_network`); `_finite_input_meta` and `bulk_update` resolve the same active
+project; `GlobalConstraint` is not a `_bulk` component (400); schemas refuse
+NaN/inf/"Infinity" on the annotated fields and the ints refuse as ints; both
+loop guards catch every code; S30's routes and semantics; performance on 8 760 h
+with 950 assets and five dynamic frames: **26.8 ms** (12f: 13.5) aligned,
+34.1 vs 10.8 with one misaligned 300-column frame, 38.1 vs 54.9 with two, ~11 %
+of a 246 ms preflight.
+
+**Bite log:** judge `ts[name]` as it stands → J1i and J1i2 BIT; drop
+`("Link", "efficiency2")` from the owned set → J1f2 BIT; `constant` back to
+`float` → J4a BIT. Restores by hash. 191 tests in the file.

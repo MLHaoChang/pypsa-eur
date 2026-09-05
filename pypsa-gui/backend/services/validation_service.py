@@ -318,13 +318,34 @@ def _check_loads_p_set(n) -> list[Issue]:
         return out
     static = n.loads["p_set"] if "p_set" in n.loads.columns else None
     ts = n.loads_t.p_set if hasattr(n.loads_t, "p_set") else pd.DataFrame()
+    snaps = getattr(n, "snapshots", None)
     for name in n.loads.index:
+        vals = None
         if name in ts.columns:
-            col = ts[name]
-            bad = col[~col.apply(_is_finite)]
-            if len(bad) > 0:
+            # Judged AS PyPSA READS IT over the horizon, not over the frame's
+            # own rows (Phase 12g shipped-code review, finding 1): a 2-of-3-row
+            # `loads_t.p_set` holds no NaN cell, so the old check was silent,
+            # the generic walk deferred to it as the owner, and the reindex
+            # then dropped the demand for the uncovered hour — measured
+            # `load p = [100, 100, 0]`, status `optimal`.
+            try:
+                vals = _dynamic_column_as_read(ts, name, snaps)
+            except (TypeError, ValueError):
+                vals = ts[name].to_numpy(dtype=float)
+        if vals is not None:
+            n_bad = int((~np.isfinite(vals)).sum())
+            n_total = int(len(vals))
+            if n_bad and n_total > 1 and n_bad < n_total:
                 out.append(_err("load_p_set_nan", "Load", str(name),
-                    f"time-varying p_set has {len(bad)} NaN/inf value(s)."))
+                    f"time-varying p_set covers {n_total - n_bad} of {n_total} "
+                    f"snapshots — {n_bad} hour(s) have no value. PyPSA does not "
+                    "fall back to the static value for those hours: the demand "
+                    "is dropped from the nodal balance and the load is served as "
+                    "zero. Extend the series to the full horizon, or shorten the "
+                    "horizon to match it."))
+            elif n_bad:
+                out.append(_err("load_p_set_nan", "Load", str(name),
+                    f"time-varying p_set has {n_bad} NaN/inf value(s)."))
         else:
             v = static.loc[name] if static is not None else None
             if v is None or not _is_finite(v):
@@ -1304,6 +1325,10 @@ NONFINITE_INPUT_COMPONENTS = ("Generator", "Link", "Line", "Transformer",
 # generic walk's (with the neutral sentence — the LP does not read it there).
 _OWNED_BY_SPECIFIC_CHECK = frozenset({
     ("Generator", "efficiency"), ("Link", "efficiency"),
+    # `link_efficiency_invalid` also refuses NaN in `efficiency{i}` on rows whose
+    # `bus{i}` is populated (12g shipped-code review, finding 2: without these
+    # a three-port link's NaN `efficiency2` was reported twice).
+    ("Link", "efficiency2"), ("Link", "efficiency3"), ("Link", "efficiency4"),
     ("StorageUnit", "efficiency_store"), ("StorageUnit", "efficiency_dispatch"),
     ("StorageUnit", "max_hours"),
     ("Line", "x"), ("Transformer", "x"),
