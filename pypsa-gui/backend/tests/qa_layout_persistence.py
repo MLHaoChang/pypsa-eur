@@ -64,6 +64,16 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
         print(f"  [FAIL] {label}" + (f" — {msg}" if msg else ""))
 
 
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
+
 def _seed_minimal_network() -> pypsa.Network:
     """Save_project refuses an empty network — give it the smallest valid one."""
     import pandas as pd
@@ -386,7 +396,7 @@ def main() -> int:
             try:
                 fn()
             except Exception as e:
-                print(f"  scenario crashed: {type(e).__name__}: {e}")
+                _crashed("scenario", e)
                 import traceback; traceback.print_exc()
     finally:
         _cleanup_projects()
