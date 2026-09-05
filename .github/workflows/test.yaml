@@ -40,6 +40,54 @@ jobs:
       run: |
         pixi run unit-tests
 
+  # The pypsa-gui BACKEND suite. `unit-tests` above runs `pytest test`, which is
+  # the upstream PyPSA-Eur `test/` directory, and `integration-tests` below is
+  # filtered to `scripts/`, `rules/`, `data/`, `Snakefile` and `config/` — so
+  # until this job existed, the ~2,600 tests guarding the primary product had no
+  # CI at all and `pixi run gui-tests` was only ever run by hand.
+  #
+  # `pixi run gui-tests` resolves to the `test` environment because the task
+  # lives in `[feature.test.tasks]` — see the comment on it in pixi.toml. That
+  # environment is the one carrying pywebview, without which the two
+  # desktop-download tests SKIP and a green suite means nothing.
+  gui-backend-tests:
+    name: GUI backend
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: dorny/paths-filter@v4
+      id: filter
+      with:
+        filters: |
+          gui:
+            - 'pypsa-gui/backend/**'
+            - 'pixi.toml'
+            - 'pixi.lock'
+            - '.github/workflows/test.yaml'
+
+    - name: Skip - no backend changes
+      if: steps.filter.outputs.gui != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+      run: echo "Skipping tests because no pypsa-gui/backend changes detected"
+
+    - name: Setup Pixi
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        cache: true
+        cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+
+    - name: Run backend tests
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: |
+        pixi run gui-tests
+
   integration-tests:
     name: Integration
     runs-on: ${{ matrix.os }}-latest
