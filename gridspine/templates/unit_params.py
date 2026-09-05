@@ -70,6 +70,17 @@ MODEL_PARAMS = {
     "legacy": ("h_s",),
 }
 SYNCHRONOUS_MODELS = frozenset({"GENROU", "GENSAL", "legacy"})
+
+#: Parameters a model MAY carry beyond its dynamic record: the IEC 60909 data
+#: for synchronous machines (R/X ratio, rated power factor). Optional here so
+#: the .dyr layout and its fixtures are untouched; ``static/shortcircuit`` asserts
+#: their presence itself, element by element, before it solves.
+MODEL_OPTIONAL_PARAMS = {
+    "GENROU": ("rx_sc", "cos_phi"),
+    "GENSAL": ("rx_sc", "cos_phi"),
+    "inverter": (),
+    "legacy": (),
+}
 _V2_MODELS = frozenset(MODEL_PARAMS) - {"legacy"}
 
 _STRICTLY_POSITIVE = frozenset({
@@ -77,6 +88,7 @@ _STRICTLY_POSITIVE = frozenset({
     "t_do_p", "t_qo_p", "t_do_pp", "t_qo_pp", "k_sc",
 })
 _NON_NEGATIVE = frozenset({"d", "s1", "s12", "rx_sc"})
+_UNIT_INTERVAL = frozenset({"cos_phi"})  # 0 < value <= 1
 
 _V1_REQUIRED = ("h_s", "mbase_mva", "source", "include_in_inertia")
 _V2_KEYS = frozenset({"model", "mbase_mva", "include_in_inertia", "params"})
@@ -128,7 +140,8 @@ def _parse_v2(uid, raw):
     missing = [p for p in required if p not in params]
     if missing:
         raise ContractError(f"unit {uid} ({model}) missing required params: {missing}")
-    unknown = sorted(set(params) - set(required))
+    allowed = set(required) | set(MODEL_OPTIONAL_PARAMS[model])
+    unknown = sorted(set(params) - allowed)
     if unknown:
         raise ContractError(f"unit {uid} ({model}) has params not in the model: {unknown}")
     parsed = {}
@@ -156,6 +169,8 @@ def _check_physics(uid, model, values, include_in_inertia, mbase):
             raise ContractError(f"unit {uid}: {name} must be > 0, got {v}")
         if name in _NON_NEGATIVE and v < 0:
             raise ContractError(f"unit {uid}: {name} must be >= 0, got {v}")
+        if name in _UNIT_INTERVAL and not (0 < v <= 1):
+            raise ContractError(f"unit {uid}: {name} must lie in (0, 1], got {v}")
     if not _is_number(mbase):
         raise ContractError(f"unit {uid}: mbase_mva must be a finite number, got {mbase!r}")
     if model == "inverter":

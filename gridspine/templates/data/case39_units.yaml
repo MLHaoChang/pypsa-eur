@@ -20,6 +20,9 @@
 #     t_do_pp = 0.05 s, t_qo_pp = 0.05 s   (typical subtransient values)
 #     s1 = 0.05, s12 = 0.30                (typical saturation, S(1.0)/S(1.2))
 #     d = 0.0                              (no mechanical damping term)
+#     rx_sc = 0.05, cos_phi = 0.85         (IEC 60909 generator R/X and rated
+#               power factor, typical for large machines; the classic set has
+#               Ra = 0 and no rating data)
 #
 # G_BUS_30 is GENSAL, not GENROU: the classic set gives it T'qo = 0 and a
 # negligible X'q, i.e. no q-axis transient -- a salient-pole machine. Forcing
@@ -50,6 +53,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   SLK_BUS_31:
     model: GENROU
     mbase_mva: 100.0
@@ -69,6 +74,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   G_BUS_32:
     model: GENROU
     mbase_mva: 100.0
@@ -88,6 +95,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   G_BUS_33:
     model: GENROU
     mbase_mva: 100.0
@@ -107,6 +116,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   G_BUS_34:
     model: GENROU
     mbase_mva: 100.0
@@ -126,6 +137,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   G_BUS_35:
     model: GENROU
     mbase_mva: 100.0
@@ -145,6 +158,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   G_BUS_36:
     model: GENROU
     mbase_mva: 100.0
@@ -164,6 +179,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   G_BUS_37:
     model: GENROU
     mbase_mva: 100.0
@@ -183,6 +200,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   G_BUS_38:
     model: GENROU
     mbase_mva: 100.0
@@ -202,6 +221,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   G_BUS_39:
     model: GENROU
     mbase_mva: 100.0
@@ -221,6 +242,8 @@ units:
       t_qo_pp: {value: 0.05,   source: assumed}
       s1:      {value: 0.05,   source: assumed}
       s12:     {value: 0.30,   source: assumed}
+      rx_sc:   {value: 0.05,   source: assumed}
+      cos_phi: {value: 0.85,   source: assumed}
   W_BUS_33:
     model: inverter
     mbase_mva: 600.0
