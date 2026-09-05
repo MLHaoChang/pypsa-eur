@@ -68,6 +68,12 @@ N1_LEDGER = (
     "GridModel from the pandapower net, initialised at the base-case voltages; "
     "unit outages solved by pandapower with the unit out of service and the "
     "lost MW picked up by the slack",
+    "the GridModel re-applies gen.in_service and sgen.in_service after "
+    "init_from_pandapower: lightsim2grid 0.10.1's ext_grid slack adder "
+    "re-initialises the generator container and drops the flags, which left "
+    "every decommitted unit as a live PV bus in the branch and N-2 solves "
+    "(found on the v3 year; hour 1803 base case 0.14 pu off); status vectors "
+    "are checked against the net on every build",
     "branch loading is FROM/HV-side current over rating (lines: i_from / "
     "(max_i_ka x df x parallel); transformers: i_hv x sqrt(3) x vn_hv / "
     "(sn_mva x df x parallel)) — lightsim2grid returns the from side only, so "
@@ -142,6 +148,42 @@ def _check_net_carries_hour(net, dispatch, loads, hour, registry) -> None:
             )
 
 
+
+def gridmodel_for(work):
+    """The one place a lightsim2grid GridModel is built from a solved pandapower net.
+
+    lightsim2grid 0.10.1's `init_from_pandapower` applies `gen.in_service`, then
+    — when the slack comes from `ext_grid` — its slack adder calls
+    `init_generators` again over every pandapower gen plus the slack and never
+    re-applies the flags: every out-of-service generator comes back as a live PV
+    bus holding its setpoint. `sgen` is not re-initialised and keeps its flags.
+    Re-apply both here and refuse a model whose status vectors disagree with the
+    net, so the ranking, the screen and the prune measurement all solve the grid
+    pandapower solved.
+    """
+    gm = init_from_pandapower(work)
+    for i, on in enumerate(work.gen["in_service"].values):
+        if not bool(on):
+            gm.deactivate_gen(i)
+    sgen = getattr(work, "sgen", None)
+    if sgen is not None:
+        for i, on in enumerate(sgen["in_service"].values):
+            if not bool(on):
+                gm.deactivate_sgen(i)
+    n_gen = len(work.gen)
+    gen_status = np.asarray(gm.get_gen_status(), dtype=bool)
+    want = work.gen["in_service"].to_numpy(dtype=bool)
+    if len(gen_status) < n_gen or not np.array_equal(gen_status[:n_gen], want) or not gen_status[n_gen:].all():
+        raise ContractError(
+            "lightsim2grid GridModel generator status does not follow pandapower gen.in_service "
+            f"(model {gen_status.tolist()}, net {want.tolist()} + slack)"
+        )
+    if sgen is not None:
+        sgen_status = np.asarray(gm.get_sgens_status(), dtype=bool)
+        if not np.array_equal(sgen_status, sgen["in_service"].to_numpy(dtype=bool)):
+            raise ContractError("lightsim2grid GridModel sgen status does not follow pandapower sgen.in_service")
+    return gm
+
 def _row(cid, hour, *, converged, islanded, loading=None, vm=None):
     if not converged:
         return {
@@ -173,7 +215,7 @@ def _screen_branches(work, branch_rows, hour, nl) -> dict:
     if not wanted:
         return {}
 
-    gm = init_from_pandapower(work)
+    gm = gridmodel_for(work)
     ca = ContingencyAnalysisCPP(gm)
     ca.add_all_n1()   # row k of every result is branch id k; no insertion-order assumption
     ca.compute(work._ppc["internal"]["V"], _LS2G_MAX_ITER, _LS2G_TOL)
@@ -283,7 +325,7 @@ def _ac_pairs(work, pairs):
     connected = np.zeros(len(pairs), dtype=bool)
     if not pairs:
         return amps, volts, connected
-    gm = init_from_pandapower(work)
+    gm = gridmodel_for(work)
     v0 = work._ppc["internal"]["V"]
     for i, (a, b) in enumerate(pairs):
         ca = ContingencyAnalysisCPP(gm)
