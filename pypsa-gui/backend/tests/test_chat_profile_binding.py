@@ -1919,3 +1919,173 @@ def test_a_first_turn_with_nothing_named_still_binds_the_active_profile(
     sess = chat_service.get_session("sess-fresh")
     assert sess.profile_id == "anthropic-opus"
     assert provider.requests[0].model == chat_service.OPUS_MODEL
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Defects found by the adversarial security pass IN THE FIXES ABOVE.
+# Each is a case the fix's own tests could not see.
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class _EndlessToolProvider:
+    """An endpoint that answers every request with the same tool_use block."""
+
+    name = "endless"
+
+    def __init__(self, tool_name: str):
+        self._tool_name = tool_name
+        self.calls = 0
+
+    def stream(self, request):
+        from services.llm_provider import LLMEvent
+        self.calls += 1
+        yield LLMEvent(type="tool_use_start", tool_use_id=f"t{self.calls}",
+                       tool_name=self._tool_name)
+        yield LLMEvent(
+            type="message_done",
+            blocks=[{"type": "tool_use", "id": f"t{self.calls}",
+                     "name": self._tool_name, "input": {}}],
+            usage={"input_tokens": 1, "output_tokens": 1},
+        )
+
+
+def test_a_refused_tool_still_consumes_the_turn_budget(appdata):
+    """
+    F1 (HIGH) — the C-1 refusal `continue`d BEFORE `tool_call_count += 1`,
+    justified in its own comment as "an unoffered tool must not be able to
+    consume the turn's budget". That comment was the bug: the refusal is
+    inside the agentic `while True:`, so an endpoint that answers every
+    request with an unoffered tool_use drove the loop forever — re-sending
+    the whole growing conversation, and the Authorization header with it, on
+    every iteration.
+
+    This REMOVED a bound that existed before the fix: an unknown tool name
+    used to fall through to the counter and hit MAX_TOOL_CALLS_PER_TURN.
+    """
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="toolless-x", label="Toolless", preset="custom", wire="anthropic",
+        base_url=None, model="claude-sonnet-5", tools=False, vision=True,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    session.profile_id = "toolless-x"
+    provider = _EndlessToolProvider("get_meta")
+
+    events = []
+    for event in chat_service.run_turn(session, "hi", provider=provider):
+        events.append(event)
+        if len(events) > 400:  # a bounded turn never gets here
+            break
+
+    assert provider.calls <= chat_service.MAX_TOOL_CALLS_PER_TURN + 2, (
+        f"the turn never terminated — {provider.calls} calls to the endpoint, "
+        f"each re-sending the conversation and the auth header"
+    )
+    assert events[-1][0] == "session_done", (
+        f"turn did not end cleanly; last frame was {events[-1][0]!r}"
+    )
+
+
+def test_the_turn_profile_reaches_a_tool_dispatched_through_the_router(
+    appdata, client, fake_provider_for_profile, monkeypatch,
+):
+    """
+    F2 — the C-3 contextvar was DEAD in production.
+
+    `_run_turn_body` runs inside the sync generator Starlette drives with
+    `iterate_in_threadpool`, which — as `routers/chat.py` says in its own
+    comment about `set_acting_user` — "copies the task context afresh for
+    EVERY yielded item". A `set()` inside one `next()` lands on that item's
+    throwaway copy, so every later frame, and therefore every tool dispatch,
+    read `None`.
+
+    So `reconstruct_network_from_image`'s capability refusal was unreachable
+    and it kept building an Anthropic client with DEFAULT_MODEL — the exact
+    silent cross-provider image egress C-3 claims to prevent. C-3's own tests
+    missed it because they drive `run_turn` with `list(...)` in one thread,
+    which never crosses the threadpool boundary.
+
+    Asserted at the MECHANISM, through the real router, so it holds for any
+    future tool that reads the turn profile — not just the vision one.
+    """
+    from services import chat_tools
+    from services.llm_provider import LLMEvent
+
+    seen: list = []
+    monkeypatch.setitem(
+        chat_tools.DISPATCHERS, "get_meta",
+        lambda *a, **k: (seen.append(chat_tools.turn_profile()), {"ok": True})[1],
+    )
+
+    fake_provider_for_profile([
+        {"events": [LLMEvent(type="tool_use_start", tool_use_id="t1",
+                             tool_name="get_meta")],
+         "blocks": [{"type": "tool_use", "id": "t1", "name": "get_meta",
+                     "input": {}}],
+         "usage": {"input_tokens": 1, "output_tokens": 1}},
+        {"events": [LLMEvent(type="text_delta", text="done")],
+         "blocks": [{"type": "text", "text": "done"}],
+         "usage": {"input_tokens": 1, "output_tokens": 1}},
+    ])
+
+    resp = client.post("/api/chat/stream", json={
+        "session_id": "sess-ctxvar", "profile_id": "anthropic-opus",
+        "message": "read the meta",
+    })
+    assert resp.status_code == 200
+    assert seen, "the tool never ran, so this test proves nothing"
+    assert seen[0] is not None, (
+        "the tool saw NO turn profile — the contextvar does not survive "
+        "Starlette's per-item context copy, so every capability check keyed "
+        "on it is dead in production"
+    )
+    assert seen[0].id == "anthropic-opus"
+
+
+def test_a_session_bound_to_a_deleted_profile_refuses_cleanly(
+    appdata, client, fake_provider_for_profile,
+):
+    """
+    F4 — C-4 taught `resolve_profile` to raise and taught the ROUTER to catch,
+    but only for `body.profile_id`. It left `_resolve_turn_profile`, which
+    resolves `session.profile_id`, unguarded — and per the C-8/C-9 change in
+    the same commit a bound session normally sends NO `profile_id`, so this is
+    the common path, not an edge case.
+
+    A super-admin deleting a profile therefore turned every chat bound to it
+    into an `internal_error` with the profile id echoed back, instead of the
+    typed `unknown_profile_id` frame with guidance that C-4 built.
+    """
+    from services import llm_config
+
+    profile = llm_config.LLMProfile(
+        id="doomed", label="Doomed", preset="custom", wire="anthropic",
+        base_url=None, model="claude-sonnet-5", tools=False, vision=True,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    fake_provider_for_profile([_ok_turn()])
+    client.post("/api/chat/stream", json={
+        "session_id": "sess-doomed", "profile_id": "doomed", "message": "first",
+    })
+    assert chat_service.get_session("sess-doomed").profile_id == "doomed"
+
+    # The super-admin deletes it. The chat is still open and still bound.
+    llm_config.save_profiles([], "anthropic-sonnet")
+
+    r2 = client.post("/api/chat/stream", json={
+        "session_id": "sess-doomed", "message": "second",
+    })
+    assert r2.status_code == 200
+    frames = _parse_sse(r2.content)
+    kinds = [p.get("error_kind") for n, p in frames if n == "error"]
+    assert "unknown_profile_id" in kinds, (
+        f"expected the typed refusal C-4 built, got {frames!r}"
+    )
+    assert "internal_error" not in kinds
+    # And the id must not be echoed back to the client in the message.
+    for _n, p in frames:
+        assert "doomed" not in str(p.get("message", ""))

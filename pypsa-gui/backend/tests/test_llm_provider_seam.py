@@ -1202,3 +1202,40 @@ def test_token_param_is_derived_from_the_preset_never_client_set():
     assert llm_config.derive_token_param("moonshot") == "max_tokens"
     assert llm_config.derive_token_param("custom") == "max_tokens"
     assert llm_config.derive_token_param("not-a-preset") == "max_tokens"
+
+
+def test_a_second_token_param_refusal_does_not_escape_the_module():
+    """
+    F3 — `_TokenParamRefused`'s docstring says it "never escapes this
+    module". It could: it is raised from inside the `except` block, so an
+    endpoint that refuses BOTH spellings propagated a private exception to
+    `chat_service`, where the broad `except Exception` rendered it as
+    `internal_error`. A false claim in a docstring is the defect here as much
+    as the behaviour.
+
+    One retry, then a typed `ProviderError` — never more than two requests.
+    """
+    import json
+    import httpx
+    import pytest as _pytest
+    from services.llm_openai_compat import OpenAICompatProvider
+    from services.llm_provider import ProviderError
+
+    seen: list = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        # Refuses whichever spelling arrives.
+        param = ("max_tokens" if "max_tokens" in seen[-1]
+                 else "max_completion_tokens")
+        return httpx.Response(400, json={"error": {
+            "code": "unsupported_parameter", "param": param,
+            "message": f"Unsupported parameter: '{param}' is not supported."}})
+
+    provider = OpenAICompatProvider(
+        "https://api.openai.example/v1", api_key="sk-secret-abc123",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with _pytest.raises(ProviderError):
+        list(provider.stream(_seam_request()))
+    assert len(seen) == 2, f"expected exactly one retry, got {len(seen)} sends"

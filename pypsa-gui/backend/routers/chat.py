@@ -1103,6 +1103,31 @@ async def chat_stream(
         # non-2xx SSE body is discarded client-side).
         wire_conflict = True
 
+    # F2 — bind the turn's profile for the tool layer FROM THE EVENT-LOOP
+    # TASK, for the identical reason `set_acting_user` is bound up there
+    # rather than inside `_gen()`: `iterate_in_threadpool` copies the task
+    # context afresh for every yielded item, so a `set()` performed inside
+    # `_run_turn_body` lands on a throwaway per-item copy and every later
+    # tool dispatch reads the default `None`.
+    #
+    # `chat_service` sets it too, which is what makes a directly-driven
+    # `run_turn` (every existing e2e test) work; that call is harmless here
+    # and useless on its own. This is the one that reaches production.
+    #
+    # Resolving can raise if the session is bound to a profile that has since
+    # been deleted (F4) — that is refused as `unknown_profile_id`, the same
+    # typed frame an unknown `body.profile_id` gets, never a 500.
+    if unknown_profile_id is None:
+        try:
+            _chat_tools.set_turn_profile(
+                chat_service._resolve_turn_profile(session)
+            )
+        except llm_config.ProfileNotConfiguredError:
+            unknown_profile_id = session.profile_id or "?"
+            _chat_tools.set_turn_profile(None)
+    else:
+        _chat_tools.set_turn_profile(None)
+
     # Phase 3 routing: an EXPLICIT script in the body → Phase 2 stub path
     # (used by SSE protocol tests). Otherwise drive `run_turn` with the real
     # Anthropic SDK. A user-typed message NEVER routes to the stub.

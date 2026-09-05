@@ -1620,6 +1620,12 @@ from services.llm_anthropic import (  # moved 2026-08-13 (provider seam)
 from services import llm_anthropic, llm_openai_compat, llm_provider
 
 
+def llm_config_module():
+    """The `llm_config` module, imported lazily like every other use here."""
+    from services import llm_config  # noqa: PLC0415
+    return llm_config
+
+
 def _resolve_turn_profile(session: ChatSession) -> Any:
     """
     The `LLMProfile` this turn should use for provider construction, the
@@ -2945,7 +2951,25 @@ def _run_turn_body(
     # token cap and the A8 fallback further down, both of which apply on
     # every path (a FakeProvider-injected test still wants its scripted A8
     # scenario to fire off `profile.fallback_model`).
-    profile = _resolve_turn_profile(session)
+    # F4 — the session's profile may have been deleted since it bound. C-4
+    # taught the ROUTER to refuse an unknown `body.profile_id`, but this
+    # resolves `session.profile_id`, and after C-8/C-9 a bound session
+    # normally sends no `profile_id` at all — so this is the common path.
+    # Unguarded it raised out of the generator and was rendered as
+    # `internal_error` with the profile id echoed back.
+    try:
+        profile = _resolve_turn_profile(session)
+    except llm_config_module().ProfileNotConfiguredError:
+        yield "error", {
+            "error_kind": "unknown_profile_id",
+            "message": (
+                "the model profile this chat was using is no longer "
+                "configured, so the message was not sent. Pick a profile "
+                "from the model menu and try again."
+            ),
+        }
+        yield "session_done", {"reason": "unknown_profile_id"}
+        return
     # C-3 — publish the turn's profile to the tool layer. A tool that makes
     # its own model sub-call (`reconstruct_network_from_image`) must bill the
     # model the user selected and must not silently reach a provider they did
@@ -3619,11 +3643,34 @@ def _run_turn_body(
             # is attacker-controlled input, and `_validate_base_url` accepts
             # plain `http`, so a MITM reaches it too.
             #
-            # Refused BEFORE the call cap, the confirmation card and the
-            # dispatcher lookup on purpose: an unoffered tool must not be able
-            # to consume the turn's budget, and must never render a
-            # confirmation card — a card is how the USER authorises a tool the
-            # model asked for, and this tool was never on offer to ask for.
+            # F1 — a refusal COUNTS against the turn budget.
+            #
+            # The first cut of this guard `continue`d before the increment
+            # below, reasoning that an unoffered tool should not consume the
+            # budget. That was exactly backwards: this runs inside the agentic
+            # `while True:`, so an endpoint answering every request with an
+            # unoffered `tool_use` drove the loop forever — re-sending the
+            # whole growing conversation, and the Authorization header with
+            # it, on every iteration. It also REMOVED a bound that existed
+            # before this guard was added, where an unknown name fell through
+            # to the counter and hit MAX_TOOL_CALLS_PER_TURN. The cap is the
+            # only per-turn bound there is; nothing may skip it.
+            tool_call_count += 1
+            if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
+                yield "tool_error", {
+                    "tool_use_id": tu.get("id"),
+                    "tool_name": tu.get("name"),
+                    "error_kind": "tool_call_cap_exceeded",
+                    "message": (
+                        f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                        "one turn; refusing further dispatch this turn."
+                    ),
+                }
+                yield "session_done", {"reason": "tool_call_cap_exceeded"}
+                return
+            # Refused before the confirmation card and the dispatcher lookup:
+            # a card is how the USER authorises a tool the model asked for,
+            # and this tool was never on offer to ask for.
             if tu.get("name") not in offered_tool_names:
                 yield "tool_error", {
                     "tool_use_id": tu.get("id"),
@@ -3641,19 +3688,6 @@ def _run_turn_body(
                     "content": "tool_not_offered",
                 })
                 continue
-            tool_call_count += 1
-            if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
-                yield "tool_error", {
-                    "tool_use_id": tu.get("id"),
-                    "tool_name": tu.get("name"),
-                    "error_kind": "tool_call_cap_exceeded",
-                    "message": (
-                        f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
-                        "one turn; refusing further dispatch this turn."
-                    ),
-                }
-                yield "session_done", {"reason": "tool_call_cap_exceeded"}
-                return
             yield from _dispatch_real_tool_call(
                 session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
                 result_char_budget=tool_result_char_budget,

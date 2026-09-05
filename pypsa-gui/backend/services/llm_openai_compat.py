@@ -269,8 +269,18 @@ class OpenAICompatProvider:
         try:
             yield from self._stream_once(request, token_param)
         except _TokenParamRefused:
-            yield from self._stream_once(
-                request, self._other_token_param(token_param))
+            try:
+                yield from self._stream_once(
+                    request, self._other_token_param(token_param))
+            except _TokenParamRefused as exc:
+                # F3 — an endpoint that refuses BOTH spellings must not let a
+                # private exception reach `chat_service`, where the broad
+                # `except Exception` renders it as `internal_error`. One retry
+                # is the whole budget: two sends, then a typed error.
+                raise ProviderError(
+                    "invalid_request",
+                    "endpoint rejected both completion-length parameters",
+                ) from exc
 
     def _stream_once(
         self, request: LLMRequest, token_param: str
@@ -306,7 +316,14 @@ class OpenAICompatProvider:
                     # profiles have no preset declaration to read, so this is
                     # what keeps one aimed at OpenAI from being dead on
                     # arrival.
-                    body = resp.read()
+                    # F5 — bounded. `resp.read()` has no size cap, so a
+                    # hostile endpoint could answer 400 with a multi-GB body;
+                    # the marker match only ever needs the first few KB.
+                    body = b""
+                    for chunk in resp.iter_bytes():
+                        body += chunk
+                        if len(body) >= 8192:
+                            break
                     if self._refused_the_token_param(body, token_param):
                         raise _TokenParamRefused(token_param)
                     raise ProviderError(
