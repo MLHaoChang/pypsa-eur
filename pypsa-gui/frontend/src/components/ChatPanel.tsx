@@ -1196,9 +1196,31 @@ export default function ChatPanel() {
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
       resetChatForProjectSwitch()
+      // N-1 — the recovery banners describe ONE hydration of ONE project, as
+      // their declaration comment says. They were only ever reassigned inside
+      // a SUCCESSFUL history fetch, so a switch whose fetch fails or is
+      // skipped left the previous project's values on screen: project A's
+      // quoted user text rendered under project B, and B was falsely accused
+      // of a damaged chat.jsonl. Clearing belongs on the switch itself, not
+      // on the success path that may never run.
+      setHistoryGap(0)
+      setInterruptedTurn(null)
     }
     prevProjectRef.current = currentProject
   }, [currentProject, resetChatForProjectSwitch])
+
+  // N-1 — same for "start a new chat": the banners are about the transcript
+  // being replaced, so they must not outlive it. `newChatSeq` is the counter
+  // `startNewChat()` bumps unconditionally, for the reason recorded on the
+  // hydration effect below.
+  const prevNewChatSeqRef = useRef<number>(newChatSeq)
+  useEffect(() => {
+    if (prevNewChatSeqRef.current !== newChatSeq) {
+      prevNewChatSeqRef.current = newChatSeq
+      setHistoryGap(0)
+      setInterruptedTurn(null)
+    }
+  }, [newChatSeq])
 
   // Hydrate from chat.jsonl whenever a project becomes active. The backend
   // also rehydrates `session.messages` so subsequent turns can thread prior
@@ -1217,6 +1239,21 @@ export default function ChatPanel() {
   // changes when the session_id becomes available for prompt caching), and
   // this branch is a bug fix. Revisit if boot latency is ever measured to care.
   useEffect(() => {
+    // C-5 — the consume runs BEFORE the `!currentProject` guard, not after.
+    //
+    // `startNewChat()` is reachable with no project open: the 🆕 button is
+    // disabled only on `streaming`, and AssistantDock mounts this panel for
+    // the app's lifetime, so it is clickable on the projects home page (as is
+    // the cross-wire `confirmProfileSwitch` path). With the guard first, the
+    // flag stayed armed, and the NEXT project to open consumed it and skipped
+    // its own hydration — losing that project's transcript AND its
+    // `last_session_id`, so server-side thread continuity and prompt-cache
+    // warmth went with it.
+    //
+    // Same defect `newChatSeq` was introduced to fix, reached through a
+    // different early return. A one-shot flag has to be consumed on every
+    // path that can observe it, or it is not one-shot.
+    const suppressed = useChatStore.getState().consumeSuppressHydrationOnce()
     if (!currentProject) return
     // Task 13 — `startNewChat()` (the cross-wire profile-switch confirm, and
     // the header's "New chat" button) clears `messages` and arms
@@ -1237,7 +1274,7 @@ export default function ChatPanel() {
     // `newChatSeq` is a counter `startNewChat()` bumps unconditionally on
     // every call, so it always changes and the effect always gets a chance
     // to consume the flag before anything else can observe it.
-    if (useChatStore.getState().consumeSuppressHydrationOnce()) return
+    if (suppressed) return
     // Only seed an EMPTY conversation. Replaying chat.jsonl over a store that
     // already holds a conversation erases the turn the user just watched
     // arrive, because a turn is only persisted once it completes. The store is

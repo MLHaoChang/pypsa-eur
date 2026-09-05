@@ -691,3 +691,114 @@ it('every retryable error kind has banner copy', async () => {
   const missing = [...RETRYABLE_ERROR_KINDS_FOR_TEST].filter((k) => !(k in KIND_COPY))
   expect(missing).toEqual([])
 })
+
+// C-5 — `startNewChat()` fired with NO project open eats the NEXT project's
+// history.
+//
+// The hydration effect's `if (!currentProject) return` sits ABOVE
+// `consumeSuppressHydrationOnce()`, so a 🆕 press on the projects home page
+// leaves the flag armed; the next project to open consumes it and skips its
+// own hydration. This is the same bug `newChatSeq` was introduced to fix,
+// reached through a different early return — and the comment at the consume
+// site still claims it runs "unconditionally before the messages-length
+// guard", which the guard above it makes false.
+//
+// It is reachable: the 🆕 button is disabled only on `streaming`, not on
+// `!currentProject`, and AssistantDock mounts ChatPanel for the app's
+// lifetime. The loss is not just the on-screen list — `last_session_id` goes
+// too, so server-side thread continuity and prompt-cache warmth go with it.
+it('a new chat started with no project open does not eat the next project history', async () => {
+  useUIStore.setState({ currentProject: null })
+  renderPanel()
+
+  // The user presses 🆕 while sitting on the projects home page. Wrapped in
+  // `act` so React actually processes it as its own render pass — clicking a
+  // button and navigating later are two separate passes in the real app, and
+  // batching them here would hide the defect rather than reproduce it.
+  await act(async () => {
+    useChatStore.getState().startNewChat()
+  })
+
+  vi.mocked(getChatHistory).mockResolvedValue({
+    turns: [{
+      ts: 1, session_id: 'sess-old', model: 'claude-sonnet-5',
+      user: 'old question', assistant: [{ type: 'text', text: 'old answer' }],
+      usage: {
+        input_tokens: 1, output_tokens: 1,
+        cache_read_tokens: 0, cache_create_tokens: 0,
+      },
+    }],
+    last_session_id: 'sess-old',
+    bound_project: 'Demo',
+    history_gap: 0,
+    pending_turn: null,
+  })
+
+  // Now they open a project.
+  await act(async () => {
+    useUIStore.setState({ currentProject: 'Demo' })
+  })
+
+  await waitFor(() => {
+    expect(useChatStore.getState().messages.length).toBe(2)
+  })
+  expect(useChatStore.getState().sessionId).toBe('sess-old')
+})
+
+// N-1 — the recovery banners are facts about ONE hydration, and the comment
+// at their declaration says so: "neither should survive a project switch or
+// be rehydrated into a transcript". Both do. They are component state in a
+// panel AssistantDock mounts for the app's lifetime, and they are only ever
+// reassigned inside a SUCCESSFUL history fetch — so a new chat, or a switch
+// whose fetch fails or is skipped, leaves the previous project's values on
+// screen.
+//
+// The second case is a cross-project content leak: project A's quoted user
+// text renders under project B, and B is falsely accused of a damaged
+// chat.jsonl.
+function historyWithRecovery() {
+  return {
+    turns: [],
+    last_session_id: 'sess-a',
+    bound_project: 'Demo',
+    history_gap: 3,
+    pending_turn: {
+      user: 'secret question from project A', ts: 1,
+      session_id: 'sess-a', model: 'claude-sonnet-5',
+    },
+  }
+}
+
+it('a new chat clears the recovery banners', async () => {
+  vi.mocked(getChatHistory).mockResolvedValue(historyWithRecovery())
+  renderPanel()
+  await screen.findByText(/could not be read/)
+
+  await act(async () => {
+    useChatStore.getState().startNewChat()
+  })
+
+  await waitFor(() => {
+    expect(screen.queryByText(/could not be read/)).toBeNull()
+  })
+  expect(screen.queryByText(/secret question from project A/)).toBeNull()
+})
+
+it('a project switch does not carry the previous project recovery banners over', async () => {
+  vi.mocked(getChatHistory).mockResolvedValue(historyWithRecovery())
+  renderPanel()
+  await screen.findByText(/secret question from project A/)
+
+  // Project B's history cannot be read. The banners must NOT persist: they
+  // describe project A, and leaving them accuses B of a damage it does not
+  // have — while showing A's text to someone now looking at B.
+  vi.mocked(getChatHistory).mockRejectedValue(new Error('unreadable'))
+  await act(async () => {
+    useUIStore.setState({ currentProject: 'OtherProject' })
+  })
+
+  await waitFor(() => {
+    expect(screen.queryByText(/secret question from project A/)).toBeNull()
+  })
+  expect(screen.queryByText(/could not be read/)).toBeNull()
+})
