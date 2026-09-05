@@ -40,6 +40,7 @@ import pandas as pd
 from pandapower.pypower.idx_bus import BUS_TYPE, VA
 
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.dc import DCSensitivities, validate_dc_sensitivities
 from gridspine.static.loadflow import branch_keys
 
 _ISLAND_TOL = 1e-8
@@ -184,3 +185,13 @@ def n2_dc_flows(state: DCState, a: int, b: int):
 def _key(state: DCState, k: int) -> str:
     r = state.branch_keys.iloc[k]
     return f"{r['from_bus']}-{r['to_bus']}-{r['ckt']}"
+
+
+def to_sensitivities(state: DCState) -> DCSensitivities:
+    """The engine-free artifact ``ranking/`` consumes; branch ids are the N-1
+    contingency ids, built from the keys rather than parsed."""
+    ids = [f"{r.from_bus}-{r.to_bus}-{r.ckt}" for r in state.branch_keys.itertuples(index=False)]
+    return validate_dc_sensitivities(DCSensitivities(
+        ptdf=state.ptdf, lodf=state.lodf, islanding=state.islanding, rating_mva=state.rating_mva,
+        bus_names=list(state.bus_names), branch_ids=ids, ref_bus=state.ref_bus,
+    ))

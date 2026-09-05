@@ -47,6 +47,7 @@ UNITS = N_GEN + N_SLACK + N_RES
 
 METRIC_COLUMNS = (
     "load_mw", "import_mw", "inertia_mws", "inertia_excl_equiv_mws", "ibr_share",
+    "n1_severity_dc",
 )
 
 
@@ -88,7 +89,7 @@ def _raw_gen_p(raw_text):
 # --------------------------------------------------------------------------
 
 def test_study_writes_every_artifact(study):
-    for key in ("loads", "dispatch", "metrics", "selected", "manifest"):
+    for key in ("loads", "dispatch", "metrics", "selected", "manifest", "dc_sensitivities"):
         assert study.artifacts[key].exists(), key
     for hour in study.selected["hour"]:
         hour = int(hour)
@@ -119,7 +120,7 @@ def test_metrics_artifact_has_one_row_per_hour(study):
 
 def test_selection_is_a_union_of_criteria_and_not_exactly_k(study):
     sel = study.selected
-    assert K <= len(sel) <= 4 * K
+    assert K <= len(sel) <= 5 * K  # five criteria since increment 3
     assert sel["hour"].is_unique
     fired = set()
     for reasons in sel["reasons"]:

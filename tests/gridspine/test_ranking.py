@@ -120,6 +120,14 @@ def metrics(dispatch, loads, unit_params, registry):
     return snapshot_metrics(dispatch, loads, unit_params, registry)
 
 
+@pytest.fixture
+def ranked_metrics(metrics):
+    """`snapshot_metrics` plus the fifth criterion the driver joins on
+    (ranking/severity, increment 3). h3 is the most severe, so it gains a
+    second reason and the k=1 selection stays {1, 2, 3}."""
+    return metrics.assign(n1_severity_dc=[0.0, 0.1, 0.2, 0.5])
+
+
 # --- metrics: shape -------------------------------------------------------
 
 
@@ -245,17 +253,18 @@ def test_metrics_rejects_an_unknown_registry_kind(
 # --- selection ------------------------------------------------------------
 
 
-def test_criteria_are_the_four_documented_column_keyed_reasons():
+def test_criteria_are_the_five_documented_column_keyed_reasons():
     assert CRITERIA == (
         "min_inertia_excl_equiv_mws",
         "max_ibr_share",
         "max_load_mw",
         "max_import_mw",
+        "max_n1_severity",
     )
 
 
-def test_k1_picks_the_known_extreme_hours(metrics):
-    sel = select_snapshots(metrics, k=1)
+def test_k1_picks_the_known_extreme_hours(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=1)
     assert list(sel.columns) == ["hour", "reasons"]
     assert list(sel["hour"]) == [1, 2, 3]
     # h1 max import (80), h2 min inertia_excl (100) AND max ibr (0.536),
@@ -263,48 +272,48 @@ def test_k1_picks_the_known_extreme_hours(metrics):
     assert list(sel["reasons"]) == [
         ["max_import_mw"],
         ["min_inertia_excl_equiv_mws", "max_ibr_share"],
-        ["max_load_mw"],
+        ["max_load_mw", "max_n1_severity"],
     ]
 
 
-def test_an_hour_extreme_in_two_criteria_appears_once_with_both_reasons(metrics):
-    sel = select_snapshots(metrics, k=1)
+def test_an_hour_extreme_in_two_criteria_appears_once_with_both_reasons(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=1)
     assert (sel["hour"] == 2).sum() == 1
     reasons = sel.loc[sel["hour"] == 2, "reasons"].iloc[0]
     assert reasons == ["min_inertia_excl_equiv_mws", "max_ibr_share"]
 
 
-def test_reasons_follow_the_canonical_criteria_order(metrics):
-    sel = select_snapshots(metrics, k=4)
+def test_reasons_follow_the_canonical_criteria_order(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=4)
     for reasons in sel["reasons"]:
         assert reasons == list(CRITERIA)
 
 
-def test_selection_is_sorted_by_hour(metrics):
-    sel = select_snapshots(metrics, k=2)
+def test_selection_is_sorted_by_hour(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=2)
     assert list(sel["hour"]) == sorted(sel["hour"])
     assert list(sel["hour"]) == [1, 2, 3]
 
 
-def test_k_larger_than_the_metrics_table_degrades_to_every_hour(metrics):
-    sel = select_snapshots(metrics, k=10)
+def test_k_larger_than_the_metrics_table_degrades_to_every_hour(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=10)
     assert list(sel["hour"]) == [0, 1, 2, 3]
     assert all(r == list(CRITERIA) for r in sel["reasons"])
 
 
-def test_ties_are_broken_by_the_earliest_hour(metrics):
+def test_ties_are_broken_by_the_earliest_hour(ranked_metrics):
     # inertia_excl_equiv: h2=100 < h1=400 < h0=500 == h3=500.
     # k=3 on that criterion must take h0, not h3.
-    sel = select_snapshots(metrics, k=3)
+    sel = select_snapshots(ranked_metrics, k=3)
     by_hour = dict(zip(sel["hour"], sel["reasons"]))
     assert "min_inertia_excl_equiv_mws" in by_hour[0]
     assert "min_inertia_excl_equiv_mws" not in by_hour[3]
 
 
-def test_min_inertia_ranks_on_the_equivalent_excluded_column(metrics):
+def test_min_inertia_ranks_on_the_equivalent_excluded_column(ranked_metrics):
     """The ranking must not be muted by the 50 000 MW*s constant floor the
     aggregated interconnection equivalent contributes to every hour."""
-    shifted = metrics.copy()
+    shifted = ranked_metrics.copy()
     # Make inertia_mws order the exact reverse of inertia_excl_equiv_mws.
     shifted["inertia_mws"] = [1.0, 2.0, 9999.0, 3.0]
     sel = select_snapshots(shifted, k=1)
@@ -313,67 +322,67 @@ def test_min_inertia_ranks_on_the_equivalent_excluded_column(metrics):
     assert 0 not in by_hour
 
 
-def test_select_rejects_a_non_positive_k(metrics):
+def test_select_rejects_a_non_positive_k(ranked_metrics):
     with pytest.raises(ContractError, match="k"):
-        select_snapshots(metrics, k=0)
+        select_snapshots(ranked_metrics, k=0)
 
 
-def test_select_rejects_a_metrics_table_missing_a_ranked_column(metrics):
+def test_select_rejects_a_metrics_table_missing_a_ranked_column(ranked_metrics):
     with pytest.raises(ContractError, match="ibr_share"):
-        select_snapshots(metrics.drop(columns=["ibr_share"]), k=1)
+        select_snapshots(ranked_metrics.drop(columns=["ibr_share"]), k=1)
 
 
-def test_select_rejects_an_empty_metrics_table(metrics):
+def test_select_rejects_an_empty_metrics_table(ranked_metrics):
     with pytest.raises(ContractError, match="empty"):
-        select_snapshots(metrics.iloc[0:0], k=1)
+        select_snapshots(ranked_metrics.iloc[0:0], k=1)
 
 
 # --- validate_selection ---------------------------------------------------
 
 
-def test_validate_selection_accepts_a_real_selection(metrics):
-    sel = select_snapshots(metrics, k=2)
-    assert validate_selection(sel, metrics) is sel
+def test_validate_selection_accepts_a_real_selection(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=2)
+    assert validate_selection(sel, ranked_metrics) is sel
 
 
-def test_validate_selection_rejects_an_empty_selection(metrics):
-    empty = select_snapshots(metrics, k=1).iloc[0:0]
+def test_validate_selection_rejects_an_empty_selection(ranked_metrics):
+    empty = select_snapshots(ranked_metrics, k=1).iloc[0:0]
     with pytest.raises(ContractError, match="empty"):
-        validate_selection(empty, metrics)
+        validate_selection(empty, ranked_metrics)
 
 
-def test_validate_selection_rejects_an_hour_outside_the_metrics_index(metrics):
-    sel = select_snapshots(metrics, k=1)
+def test_validate_selection_rejects_an_hour_outside_the_metrics_index(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=1)
     sel.loc[0, "hour"] = 99
     with pytest.raises(ContractError, match="not in the metrics index"):
-        validate_selection(sel, metrics)
+        validate_selection(sel, ranked_metrics)
 
 
-def test_validate_selection_rejects_empty_reasons(metrics):
-    sel = select_snapshots(metrics, k=1)
+def test_validate_selection_rejects_empty_reasons(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=1)
     sel.at[0, "reasons"] = []
     with pytest.raises(ContractError, match="reasons"):
-        validate_selection(sel, metrics)
+        validate_selection(sel, ranked_metrics)
 
 
-def test_validate_selection_rejects_an_unknown_reason(metrics):
-    sel = select_snapshots(metrics, k=1)
+def test_validate_selection_rejects_an_unknown_reason(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=1)
     sel.at[0, "reasons"] = ["max_vibes"]
     with pytest.raises(ContractError, match="max_vibes"):
-        validate_selection(sel, metrics)
+        validate_selection(sel, ranked_metrics)
 
 
-def test_validate_selection_rejects_duplicate_hours(metrics):
-    sel = select_snapshots(metrics, k=1)
+def test_validate_selection_rejects_duplicate_hours(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=1)
     dup = pd.concat([sel, sel.iloc[[0]]], ignore_index=True)
     with pytest.raises(ContractError, match="duplicate"):
-        validate_selection(dup, metrics)
+        validate_selection(dup, ranked_metrics)
 
 
-def test_validate_selection_rejects_missing_columns(metrics):
-    sel = select_snapshots(metrics, k=1).drop(columns=["reasons"])
+def test_validate_selection_rejects_missing_columns(ranked_metrics):
+    sel = select_snapshots(ranked_metrics, k=1).drop(columns=["reasons"])
     with pytest.raises(ContractError, match="reasons"):
-        validate_selection(sel, metrics)
+        validate_selection(sel, ranked_metrics)
 
 
 # --- engine cage ----------------------------------------------------------
@@ -394,14 +403,16 @@ def test_ranking_imports_neither_engine():
     """
     import gridspine.ranking.metrics as metrics_mod
     import gridspine.ranking.select as select_mod
+    import gridspine.ranking.severity as severity_mod
 
     allowed = {
         "numpy",
         "pandas",
         "gridspine.schema.contracts",
         "gridspine.schema.dispatch",
+        "gridspine.schema.dc",
     }
-    for mod in (metrics_mod, select_mod):
+    for mod in (metrics_mod, select_mod, severity_mod):
         tree = ast.parse(open(mod.__file__, encoding="utf-8").read())
         imported = set()
         for node in ast.walk(tree):

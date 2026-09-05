@@ -49,10 +49,13 @@ from gridspine.producers.pypsa_nodal import (
     to_pypsa,
 )
 from gridspine.ranking.metrics import snapshot_metrics
+from gridspine.ranking.severity import SEVERITY_LEDGER, n1_severity_dc
 from gridspine.ranking.select import select_snapshots, validate_selection
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.dc import save_dc_sensitivities
 from gridspine.schema.errors import StageError
 from gridspine.static.loadflow import LFResult, apply_snapshot, run_lf
+from gridspine.static.lodf import dc_base, to_sensitivities
 from gridspine.templates.unit_params import load_unit_params
 
 STAGES = ["ingest", "dispatch", "ranking", "loadflow", "handoff"]
@@ -141,7 +144,8 @@ def _ledger(unit_params) -> list:
         "aggregated interconnection equivalent G_BUS_39 (h = 500 s); "
         "inertia_mws is the absolute figure to quote",
         "selection is the UNION of the k most extreme hours under each "
-        "criterion, so it holds between k and 4k hours, never exactly k",
+        "criterion, so it holds between k and 5k hours, never exactly k",
+        *SEVERITY_LEDGER,
     ]
 
 
@@ -188,6 +192,13 @@ def run_year_study(
         stage = "ranking"
         unit_params = load_unit_params()
         metrics = snapshot_metrics(dispatch, loads, unit_params, registry)
+        # Pass 1 of the increment-3 decision: DC ranks the year, AC verifies the
+        # selection. Topology is fixed, so the sensitivities are built once on the
+        # native net and every hour is one multiply on the ranking side.
+        sens = to_sensitivities(dc_base(net))
+        art["dc_sensitivities"] = outdir / "dc_sensitivities.npz"
+        save_dc_sensitivities(sens, art["dc_sensitivities"])
+        metrics["n1_severity_dc"] = n1_severity_dc(dispatch, loads, registry, sens)
         art["metrics"] = outdir / "metrics.csv"
         metrics.to_csv(art["metrics"])
 

@@ -4,7 +4,7 @@ Selection is a UNION of per-criterion extremes, not a single composite score.
 A weighted score would need weights, and any weights chosen would be an
 unfalsifiable modelling assumption sitting between the data and the study; a
 union needs only the claim that each criterion is worth studying on its own.
-The cost is that the selection size is not k but somewhere in [k, 4k] — hours
+The cost is that the selection size is not k but somewhere in [k, 5k] — hours
 extreme in several criteria are selected once and carry several reasons.
 
 The `reasons` list is what makes a selected snapshot defensible in the report:
@@ -34,6 +34,8 @@ _RANKING = (
     ("max_ibr_share", "ibr_share", "max"),
     ("max_load_mw", "load_mw", "max"),
     ("max_import_mw", "import_mw", "max"),
+    # Increment 3: the worst single-outage DC overload depth (ranking/severity).
+    ("max_n1_severity", "n1_severity_dc", "max"),
 )
 
 CRITERIA = tuple(reason for reason, _col, _dir in _RANKING)
@@ -57,6 +59,9 @@ def select_snapshots(metrics: pd.DataFrame, k: int = 5) -> pd.DataFrame:
     ``max_import_mw``
         The k HIGHEST `import_mw` hours — greatest reliance on the external
         connection.
+    ``max_n1_severity``
+        The k HIGHEST `n1_severity_dc` hours — the worst single-outage DC
+        overload depth (increment 3; ``ranking.severity``).
 
     Parameters
     ----------
@@ -73,7 +78,7 @@ def select_snapshots(metrics: pd.DataFrame, k: int = 5) -> pd.DataFrame:
     unique) and `reasons` (list[str], non-empty, in the canonical criterion
     order above). An hour extreme under several criteria appears ONCE, with
     one entry per criterion that selected it — so ``len(result)`` lies between
-    k and 4k, and the caller must not assume it equals either.
+    k and 5k, and the caller must not assume it equals either.
 
     Ties are broken by the earliest hour: the ranking sort is stable over an
     hour-ascending table, so two hours with identical metric values are taken
