@@ -2077,6 +2077,19 @@ def bulk_update(body: dict) -> dict:
                 raise HTTPException(400,
                     f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
                     f"value {value!r}.")
+            # Phase 12f: `json.loads` accepts the bare `NaN` and `Infinity`
+            # literals and `float()` accepts the strings "nan" and "inf", so
+            # a non-finite value can reach one of the five bounds past the
+            # `null` branch above. It masks the LP row exactly as a cleared
+            # cell did, so it is refused here — the same answer the time-
+            # series routes give — rather than accepted and refused at solve.
+            if col in _FINITE_DEFAULT_BOUNDS and not math.isfinite(coerced[col]):
+                raise HTTPException(
+                    422,
+                    f"Column '{col}' must be a finite number; got {value!r}. "
+                    "PyPSA does not default a non-finite bound, it drops the "
+                    "constraint, leaving the asset unbounded. Send null to "
+                    "restore the default.")
             continue
         # Strings / objects pass through. We still cast to str if the user
         # sent a number into a string column so dtype stays clean.
@@ -3711,6 +3724,25 @@ def aggregate_load_profile(
     }
 
 
+def _attribute_default_is_finite(component: str, attribute: str) -> bool:
+    """Whether PyPSA's class default for ``attribute`` is a finite number —
+    the rule that decides if a NaN there is corrupt (refuse) or the documented
+    "not set at this hour" (pass). ``component`` may be the list name
+    (``generators``) or the class name (``Generator``); PyPSA's component
+    registry resolves both. Unknown component or attribute → True, so an
+    attribute the metadata does not describe is still refused.
+    """
+    import math as _math
+    try:
+        n = PyPSAService.get_network()
+        d = n.components[component].defaults
+        if attribute not in d.index:
+            return True
+        return _math.isfinite(float(d.at[attribute, "default"]))
+    except Exception:                                         # noqa: BLE001
+        return True
+
+
 def _reject_nonfinite_timeseries(df, component: str, attribute: str) -> None:
     """Phase 12f: a time series with a non-finite cell is corrupt input, and it
     is refused here rather than repaired later.
@@ -3721,10 +3753,18 @@ def _reject_nonfinite_timeseries(df, component: str, attribute: str) -> None:
     honest repair value: `p_max_pu`'s default is 1.0 but an asset's own static
     ceiling may be 0.4, and picking either silently rewrites the user's model.
 
-    Applied to EVERY dynamic column, not only the bounds: `p_set` is not a
-    bound and a NaN there is just as wrong. JSON carries both `null` (→ NaN via
-    pandas) and the `Infinity` literal, which is why the test is `isfinite` and
-    not `isnan`.
+    Scoped by the SAME rule as the preflight: refuse where the attribute's
+    PyPSA class default is finite, because there NaN has no meaning — and
+    that is not only the five bounds: `Load.p_set` defaults to 0.0 and a NaN
+    demand hour masks that snapshot's nodal balance. Where the class default
+    IS NaN, NaN is the documented way to say "not fixed here" and must pass:
+    `ramp_limit_*` ("no ramp limit"), `Generator.p_set`/`Link.p_set` ("fix
+    dispatch at the other hours only"), `StorageUnit.state_of_charge_set`. The
+    first version refused every column and so blocked all three; the
+    shipped-code review measured each solving `optimal` with the NaN hours in
+    place. An attribute the component metadata does not know is refused, as
+    before. JSON carries both `null` (→ NaN via pandas) and the `Infinity`
+    literal, which is why the test is `isfinite` and not `isnan`.
 
     Raises 422 naming the column and the first offending row labels, so the
     user can find them. Called from the handler BODY at every write path
@@ -3734,6 +3774,17 @@ def _reject_nonfinite_timeseries(df, component: str, attribute: str) -> None:
     import numpy as _np
 
     if df is None or not len(getattr(df, "columns", [])):
+        return
+    # A duplicated column label makes `df[col]` a DataFrame, and the row
+    # lookup below would then raise IndexError — a 500 where the user is owed
+    # a 422. `read_csv` mangles duplicates, so only the JSON PUT can send one.
+    if not df.columns.is_unique:
+        dups = sorted({str(c) for c in df.columns[df.columns.duplicated()]})
+        raise HTTPException(
+            422,
+            f"{component}.{attribute}: duplicate column label(s) "
+            f"{', '.join(dups)}. Each asset may appear once.")
+    if not _attribute_default_is_finite(component, attribute):
         return
     for col in df.columns:
         try:

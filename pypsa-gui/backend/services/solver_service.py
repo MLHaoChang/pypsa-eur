@@ -622,6 +622,25 @@ class SolveAborted(Exception):
 
     pass
 
+class ValidationRefused(Exception):
+    """Phase 12f: a non-finite LP bound found at a checkpoint AFTER
+    `restore_modelling` is bound, so the run must unwind through the outer
+    handler rather than bare-return. It is a user-input refusal, not a crash:
+    the handler restores the modelling transforms, logs the offending assets
+    the way preflight does, and reports `condition == "validation_failed"`
+    with no traceback. The first version raised a plain `ValueError`, which
+    the generic handler dumped as a `TRACEBACK:` block with the whole message
+    as the condition.
+    """
+
+    def __init__(self, where: str, issues: list):
+        self.where = where
+        self.issues = list(issues)
+        super().__init__(
+            f"validation_failed: {len(self.issues)} LP bound(s) are not finite "
+            f"{where}")
+
+
 
 def _check_stop(stop_event: threading.Event | None, phase, where: str) -> None:
     """
@@ -945,8 +964,8 @@ def run_simulation(
                 if _nf:
                     for _i in _nf:
                         log_queue.put(
-                            f"[VALIDATION] error: {_i.component_class} "
-                            f"{_i.name} — {_i.message} [{_i.code}]")
+                            f"[VALIDATION] ERROR: {_i.component_class} "
+                            f"'{_i.name}' — {_i.message} [{_i.code}]")
                     phase(f"Validation failed: {len(_nf)} error(s). Aborting.")
                     status, condition = "error", "validation_failed"
                     return status, condition
@@ -1186,12 +1205,8 @@ def run_simulation(
                 if config.mode == "lopf":
                     _nf = _check_nonfinite_bounds(network)
                     if _nf:
-                        _first = _nf[0]
-                        raise ValueError(
-                            f"validation_failed: {len(_nf)} LP bound(s) are "
-                            f"not finite after modelling assumptions — "
-                            f"{_first.component_class} {_first.name}: "
-                            f"{_first.message}")
+                        raise ValidationRefused(
+                            "after modelling assumptions", _nf)
                 # Last cooperative checkpoint before kicking off the LP. ARM the
                 # abort watcher across the whole solve try-body (the long native
                 # n.optimize() is what matters; post-solve diagnostics are also in
@@ -1628,6 +1643,25 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after abort failed: {_rexc}")
         log_queue.put(f"[PHASE] Aborted by user at: {exc}. Modelling assumptions reverted.")
         status, condition = "aborted", f"user_aborted:{exc}"
+    except ValidationRefused as exc:
+        # Phase 12f: a refusal, not a failure. Same restore as the generic
+        # handler (the network must not autosave carrying the run's vintage
+        # clones or VOLL slack tier), but logged the way preflight logs a
+        # validation error and reported under the same condition, with no
+        # traceback — nothing crashed.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        for _i in exc.issues:
+            log_queue.put(
+                f"[VALIDATION] ERROR: {_i.component_class} '{_i.name}' — "
+                f"{_i.message} [{_i.code}]")
+        log_queue.put(
+            f"[PHASE] Validation failed {exc.where}: {len(exc.issues)} "
+            "error(s). Aborting. Modelling assumptions reverted.")
+        status, condition = "error", "validation_failed"
     except Exception as exc:
         # Revert modelling transforms FIRST — a failure in the window between
         # _apply_modelling_assumptions and the solve try/finally skips the
@@ -6485,11 +6519,8 @@ def _run_myopic_foresight(
         # assumptions, and the driver's own handler is what unwinds them.
         _nf = _check_nonfinite_bounds(network)
         if _nf:
-            _first = _nf[0]
-            raise ValueError(
-                f"validation_failed: {len(_nf)} LP bound(s) are not finite at "
-                f"myopic period {current_period} — {_first.component_class} "
-                f"{_first.name}: {_first.message}")
+            raise ValidationRefused(
+                f"at myopic period {current_period}", _nf)
         sns, weight_overrides = _build_iteration_snapshots(
             network, current_period, periods, cfg,
         )

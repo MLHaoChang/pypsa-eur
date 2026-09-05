@@ -270,3 +270,101 @@ manufactured tail cannot overwrite a user's short profile.
 carries a dynamic column (PyPSA prefers `_t`), and `_bulk` does not clear it —
 so K1a's fixture must use an asset with **no profile**, or it passes for the
 wrong reason.
+
+---
+
+## SHIPPED-CODE REVIEW — eight findings, all verified, all closed
+
+The built phase was reviewed adversarially as shipped code (the program's
+standing discipline). Every finding below was reproduced against the code
+before it was recorded; the reviewer's evidence is quoted where it is the
+measurement that decided the fix.
+
+| # | severity | finding | verified | resolution |
+|---|---|---|---|---|
+| 1 | MAJOR | `_reject_nonfinite_timeseries` refused NaN in **every** dynamic column, so `Generator.p_set`, `Link.p_set`, `StorageUnit.state_of_charge_set` and `ramp_limit_*` — whose class default **is** NaN, meaning "not fixed at this hour" — became unwritable through `PUT /timeseries`. Measured: `p_set = [NaN, 20, NaN]` solves `optimal` with dispatch `[50, 20, 50]`. | yes — defaults table read: `Generator.p_set` NaN, `Load.p_set` 0.0 | the validator now follows the **same rule as the preflight**: refuse only where the class default is finite (`_attribute_default_is_finite`, resolved through PyPSA's component registry, which accepts list and class names). `Load.p_set` (default 0.0) is still refused — K2e holds. Unknown attribute → refused, as before. **This supersedes v6's "deliberate tension"** paragraph: the tension was recorded for ramp columns only, and its measured risk (0 dynamic ramp columns in 427 builds) did not cover `p_set`. |
+| 2 | MAJOR | a static NaN was flagged even when a finite dynamic column shadows it — PyPSA reads `_t` first, so the LP never sees that cell. Every project in which pre-12f `_bulk` cleared a profiled asset's bound carries this shape. | yes — `hits == [('Generator','p_max_pu','g',1,1)]` while `get_switchable_as_dense` reads `[0.5, 0.6, 0.7]` | the static branch skips any asset whose name is a column of the attribute's dynamic frame; the dynamic branch still judges the profile itself (R1 asserts both halves). |
+| 3 | MAJOR (tests) | the wiring — the one line in `_check_lopf` and the three solver checkpoints — had **no witness**: every K4 case called the helper directly, K6 went through the loops, which also call it directly. Deleting all four left 21/21 green. | yes — `grep run_simulation\|validate_for_run\|_check_lopf tests/test_nonfinite_bounds.py` matched a docstring only | R8 goes through `validate_for_run`; R9 drives `run_simulation` end to end; R9b pins the raising checkpoints' handler contract. See the R9 note below — writing it corrected a claim in the PR body. |
+| 4 | MINOR | the "modern" component walk `[n.components[c] for c in n.components]` iterates the `Components` **objects**, which are unhashable, so it raised `TypeError` on every call and fell back to the deprecated `iterate_components` — with its DeprecatedWarning, the opposite of what commit `1f2f2bf`'s message claimed. On a PyPSA that removes the fallback, the nested `except` returned `[]`: the safety check would have vanished silently. | yes — `primary RAISES TypeError unhashable type: 'Buses'`; `warnings: ['DeprecatedWarning']` | `list(n.components.values())`; the fallback stays, and when neither works the walk **raises**. R3 asserts no `iterate_components` warning and that a non-network raises. The commit message's claim is withdrawn here. |
+| 5 | MINOR | `_bulk` refused non-numeric strings but `float("nan")`, `float("inf")`, `"Infinity"`, `"nan"` all passed `float()` and were **written**; `POST /generators` with `p_max_pu="inf"` wrote `inf` into the static frame. The preflight caught both at solve — the 200-then-refused UX this phase removed for `PUT /timeseries`. | yes — `json.loads('{"a": NaN}')` → `nan`; measured writes | `_bulk` refuses a non-finite value in the five with 422 after `float()`; the five `_pu` fields on `LinkCreate`, `GeneratorCreate`, `StoreCreate` carry `Field(allow_inf_nan=False)` (pydantic 2.13). `discount_rate` NaN still writes (R5b — the rule must not widen). Live: S29.5, S29.6. |
+| 6 | MINOR | a duplicated column label in a PUT body made `df[col]` a DataFrame and the row lookup raised `IndexError` — a 500 where the user is owed a 422. Only the JSON PUT can send one. | yes — `IndexError: too many indices for array` | `df.columns.is_unique` guard → 422 naming the duplicates (R7). |
+| 7 | NIT | the two raising checkpoints raised a bare `ValueError`; the generic handler dumped a `TRACEBACK:` block and set `condition` to the whole sentence. | yes — `condition = str(exc)` at the generic handler | `ValidationRefused(where, issues)` with its own handler branch: restores the modelling transforms, logs each issue exactly as preflight does (`[VALIDATION] ERROR: Generator 'g' — …`), sets `condition = "validation_failed"`, no traceback (R9b). The first checkpoint's log tag was `error:` and is now `ERROR:` to match preflight. |
+| 8 | NIT | a dynamic column named for no asset ("ghost") was reported as one; PyPSA warns and ignores it (measured `optimal`, dispatch unchanged), so the NaN masks nothing and the UI's "View" jump has nowhere to go. | yes | the dynamic branch skips names absent from the static index (R2). |
+
+**Verified clean by the review, no action:** `n_bad` semantics and the
+coverage message; the `_bulk` default mapping against the real table on PyPSA
+1.3.0 for all six components; preflight silent on ramp NaN, negative Link
+`p_min_pu`, StorageUnit rows, empty network, no-snapshot network, empty
+dynamic frame, MultiIndex snapshots; `inf` in the five is never legitimate;
+the validator's object/bool/empty/string frames; every reject inside a lock
+releases through the context manager, and `_user_ts` is untouched on refusal;
+every solve entry (sweep, frontier, queue, `/run`, both loops) passes through
+`run_simulation`; `_delete_component` and the reapply manufacture no ghost
+NaN.
+
+**The R9 note.** Writing the end-to-end witness found that on the
+**foreground** network the flat-frame-against-MultiIndex fixture never reaches
+the first checkpoint: `_reapply_user_ts_to_network` runs there even with
+`_user_ts` empty, and it broadcasts the flat frame over the periods correctly.
+The NaN reaches the LP on a network the reapply **skips** — a background
+project solve, or an adequacy transient — and R9 is fixtured as the former.
+The PR body's sentence "finite at preflight and non-finite by the time the LP
+is built" is true of exactly those paths and is qualified there now. And no
+legal input reaches the **second** checkpoint with a NaN the first did not
+already catch: the cfg-only period promotion in `_apply_modelling_assumptions`
+broadcasts correctly (measured `[0.5, 0.6, 0.7, 0.5, 0.6, 0.7]`), so R9b
+injects at the check's second call and says so. The second and myopic
+checkpoints stay: they are the guard for the vintage-expansion `n.add()` path
+that step 7 performs, which nothing has yet shown to manufacture NaN, and a
+guard that costs one scan is cheaper than the plan it would miss.
+
+**Tests:** 29 added (R1–R9b, parametrised; R6b was added after the live round below), 50 in the file. Every ★ was
+bitten against the named variant and demonstrated RED; the bite log is
+recorded below once the round completes.
+
+**Bite log (every ★ of R1–R9b, applied to the shipped files and restored by
+saved copy + sha256):**
+
+| bite | variant | result |
+|---|---|---|
+| B1/R1 | drop the `dyn_names` skip in the static branch | BIT |
+| B2/R2 | drop the `static_names` skip in the dynamic branch | BIT |
+| B3a/R3 | restore the object-iterating walk | BIT — `iterate_components` DeprecatedWarning emitted |
+| B3b/R3 | restore the nested `return hits` | BIT — the non-network yields `[]` instead of raising |
+| B4/R4 | drop the `_attribute_default_is_finite` gate | BIT — all three cases read 422 |
+| B5/R5 | drop the `isfinite` check after `float(value)` in `_bulk` | BIT — all four literals written |
+| B6/R6 | `allow_inf_nan=True` on the five fields | BIT — 12 of 12 cases |
+| B7/R7 | drop the `is_unique` guard | BIT — IndexError escapes |
+| B8/R8 | delete `out += _check_nonfinite_bounds(n)` from `_check_lopf` | BIT |
+| B9/R9 (first form) | delete the first checkpoint | **DID NOT BITE** — the second checkpoint refused the same NaN after the modelling step and reported identically. Recorded, and R9 replaced: it now asserts the refusal is logged as `Validation failed: 1 error(s). Aborting.` with no `after modelling assumptions` line, i.e. before the modelling step, which is what the first checkpoint is for. |
+| B9/R9 (second form) | delete the first checkpoint | BIT — refusal reported "after modelling assumptions" |
+| B9c/R9 | delete both checkpoints | BIT — the solve proceeds against the masked bound, `('ok', 'optimal')` |
+| B9b/R9b | raise a bare `ValueError` at the second checkpoint | BIT — traceback back, condition is the sentence |
+
+The one non-biting bite is a harness lesson worth keeping: a test that a
+guard exists is not a test of *which* guard fired when a backstop stands
+behind it, and the property the first checkpoint owns is "before modelling",
+not "refused".
+
+**Found live, not by the review — a ninth item.** S29.6 on the fixed code read
+**500**, not 422: the create schema refused `Infinity` correctly, but pydantic
+echoes the offending `input` in its error list and starlette's JSON encoder
+raised `Out of range float values are not JSON compliant` while writing the
+422 body. The app now owns the `RequestValidationError` handler (`main.py`),
+rendering a non-finite input as its repr — the same body FastAPI's default
+handler builds otherwise. R6b pins it through the authenticated TestClient;
+its first version failed on the *fixed* code too, because httpx encodes
+`json=` with `allow_nan=False` and refused to **send** the literal — the app
+was never reached. It sends a raw body now, which is what a scripted client
+does. Bite (verified): remove the handler — the encoder's ValueError
+surfaces. Live: S29 **6/6** on the fix; the live bite (`_bulk` check off,
+`allow_inf_nan=True`) flips S29.5 to `200 / null` and S29.6 to `201 /
+created`, the pre-fix symptoms, and restore is by hash.
+
+**Seen in the server log, pre-existing, backlog:** `--- Logging error ---
+AttributeError: 'BufferedLogQueue' object has no attribute 'put_nowait'`
+after every solve — the `QueueHandler` in `run_simulation` enqueues with
+`put_nowait`, which `routers/simulation.py`'s `BufferedLogQueue` does not
+define. Present in ten server logs from earlier sessions, so not this round's;
+harmless to the solve (the logging module swallows it) but noisy. Not fixed
+here: out of this phase's scope.

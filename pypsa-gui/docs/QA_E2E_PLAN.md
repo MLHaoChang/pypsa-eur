@@ -690,9 +690,16 @@ any non-finite bound would have blocked every network in the repository.
 | S29.2 | `PATCH /_bulk` clearing `p_max_pu` → 200, and it reads back **1.0** — PyPSA's own `None` coercion — not `null` |
 | S29.3 | clearing `ramp_limit_up` → 200 and the network still solves `optimal`; a NaN ramp limit must never be refused |
 | S29.4 | the solved dispatch respects the asset's own ceiling: **100.0 MW** over 3 snapshots on a 100 MW unit against a 500 MW load |
+| S29.5 | `PATCH /_bulk` with a bare JSON `NaN` literal in `p_max_pu` → **422**, and the bound reads back **1.0**, untouched (the shipped-code review's bypass: `json.loads` accepts the literal and it went past the `null` branch) |
+| S29.6 | `POST /generators` with `p_max_pu: Infinity` → **422** and nothing is created (the create schema carries `allow_inf_nan=False`; before, `inf` was written into the static frame) |
 
 **Bitten live** (recorded in the plan): removing `_reject_nonfinite_timeseries`
 from `set_timeseries` and restoring the `float("nan")` fallthrough in `_bulk`
-fails **all four** rows, each with the exact pre-12f symptom — the PUT is
-accepted 200, `p_max_pu` reads back `null`, and the corrupt network is then
-refused at solve with `validation_failed`.
+fails **all four** of S29.1–S29.4, each with the exact pre-12f symptom — the
+PUT is accepted 200, `p_max_pu` reads back `null`, and the corrupt network is
+then refused at solve with `validation_failed`. S29.5 and S29.6 were bitten
+separately (the `_bulk` literal check off, `allow_inf_nan=True`): S29.5 reads
+`200` with `p_max_pu` back to `null`, S29.6 reads `201` with the generator
+created. And S29.6 earned its place before it was bitten: on the first fixed
+build it read **500**, because starlette's JSON encoder refuses to write the
+`inf` that pydantic echoes in its error body — the app owns that handler now.

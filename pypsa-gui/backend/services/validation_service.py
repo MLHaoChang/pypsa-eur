@@ -1272,15 +1272,19 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
     column, so the caller can say "3 of 5 hours" without re-deriving it.
     """
     hits: list[tuple[str, str, str, int, int]] = []
-    # `n.components` first: `iterate_components` is deprecated in PyPSA 1.0 and
-    # removed in 2.0. The old call stays as the fallback for an older PyPSA.
+    # `n.components.values()` first: `iterate_components` is deprecated in
+    # PyPSA 1.0 and removed in 2.0. The old call stays as the fallback for an
+    # older PyPSA. The first version of this walk was
+    # `[n.components[c] for c in n.components]`, which iterates the `Components`
+    # OBJECTS — unhashable, so the lookup raised `TypeError` every time and the
+    # fallback ran instead, with its DeprecatedWarning; that is what the
+    # shipped-code review found. And when neither path works this RAISES: a
+    # safety check that quietly returns an empty list on a PyPSA that reshaped
+    # its API is a safety check that has been removed without a trace.
     try:
-        comps = [n.components[c] for c in n.components]
+        comps = list(n.components.values())
     except Exception:                                         # noqa: BLE001
-        try:
-            comps = list(n.iterate_components())
-        except Exception:                                     # noqa: BLE001
-            return hits
+        comps = list(n.iterate_components())
     # `or ()` would raise here: a pandas Index has no truth value, and a
     # multi-period network's snapshots are a MultiIndex.
     _snaps = getattr(n, "snapshots", None)
@@ -1297,8 +1301,35 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
         dynamic = getattr(comp, "dynamic", None)
         if dynamic is None:
             dynamic = getattr(comp, "pnl", None)
+        static_names = set()
+        if static is not None:
+            try:
+                static_names = {str(x) for x in static.index}
+            except Exception:                                 # noqa: BLE001
+                static_names = set()
         for attr in FINITE_DEFAULT_BOUNDS:
-            # static
+            # The dynamic frame is resolved FIRST because the static branch
+            # needs to know which names it shadows.
+            frame = None
+            if dynamic is not None:
+                try:
+                    frame = dynamic.get(attr)
+                except AttributeError:
+                    frame = getattr(dynamic, attr, None)
+            dyn_names = set()
+            if frame is not None:
+                try:
+                    dyn_names = {str(x) for x in frame.columns}
+                except Exception:                             # noqa: BLE001
+                    dyn_names = set()
+            # static — SKIPPING any asset that carries a dynamic column for
+            # the same attribute. PyPSA reads `_t` in preference to the static
+            # cell, so a static NaN under a finite profile is inert: the LP
+            # never sees it. Flagging it would fail every project saved
+            # before 12f in which `_bulk` cleared a profiled asset's bound
+            # (pre-12f that wrote NaN and left the profile alone), and the
+            # message would describe a value the solve does not read. The
+            # dynamic branch below still judges the profile itself.
             if static is not None and attr in getattr(static, "columns", []):
                 try:
                     col = static[attr].to_numpy(dtype=float)
@@ -1307,17 +1338,19 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
                 if col is not None:
                     bad = ~np.isfinite(col)
                     for name in static.index[bad]:
+                        if str(name) in dyn_names:
+                            continue
                         hits.append((str(cname), attr, str(name), 1, 1))
-            # dynamic
-            frame = None
-            if dynamic is not None:
-                try:
-                    frame = dynamic.get(attr)
-                except AttributeError:
-                    frame = getattr(dynamic, attr, None)
+            # dynamic — SKIPPING a column whose name is not an asset of the
+            # component. PyPSA warns about such a "ghost" column and ignores
+            # it (measured: the solve is `optimal` and unchanged), so a NaN
+            # there masks nothing, and naming a non-existent asset would send
+            # the user's "View" jump nowhere.
             if frame is None or not len(getattr(frame, "columns", [])):
                 continue
             for name in frame.columns:
+                if static_names and str(name) not in static_names:
+                    continue
                 try:
                     vals = frame[name].to_numpy(dtype=float)
                 except (TypeError, ValueError):

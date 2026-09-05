@@ -147,8 +147,13 @@ class LinkCreate(BaseModel):
     # overnight_cost is set. NaN ⇒ fall back to solver config's global
     # discount_rate at solve time (transient fill).
     discount_rate: float | None = None
-    p_min_pu: float = 0.0
-    p_max_pu: float = 1.0
+    # Phase 12f: `allow_inf_nan=False` because pydantic's `float` accepts the
+    # JSON `NaN`/`Infinity` literals and the strings "nan"/"inf", and a
+    # non-finite value in a finite-default LP bound MASKS its constraint
+    # row rather than defaulting — the asset is left unbounded. Refused at
+    # the boundary (422) as `PUT /timeseries` and `PATCH /_bulk` refuse it.
+    p_min_pu: float = Field(default=0.0, allow_inf_nan=False)
+    p_max_pu: float = Field(default=1.0, allow_inf_nan=False)
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
 
@@ -178,8 +183,8 @@ class GeneratorCreate(BaseModel):
     p_nom_extendable: bool = False
     p_nom_min: float = 0.0
     p_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    p_min_pu: float = 0.0
-    p_max_pu: float = 1.0
+    p_min_pu: float = Field(default=0.0, allow_inf_nan=False)
+    p_max_pu: float = Field(default=1.0, allow_inf_nan=False)
     marginal_cost: float = 0.0
     capital_cost: float = 0.0
     fom_cost: float = 0.0           # fixed O&M, €/MW/yr (PyPSA-native)
@@ -275,8 +280,8 @@ class StoreCreate(BaseModel):
     e_nom_extendable: bool = False
     e_nom_min: float = 0.0
     e_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    e_min_pu: float = 0.0
-    e_max_pu: float = 1.0
+    e_min_pu: float = Field(default=0.0, allow_inf_nan=False)
+    e_max_pu: float = Field(default=1.0, allow_inf_nan=False)
     e_initial: float = 0.0
     e_cyclic: bool = False
     capital_cost: float = 0.0

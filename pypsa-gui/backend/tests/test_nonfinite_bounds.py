@@ -412,3 +412,346 @@ def test_K6a_a_loop_refuses_a_nan_bound_up_front(which):
 def _cfg_with_margin():
     from services.solver_service import SolverConfig
     return SolverConfig(solver_name="highs", voll=3000.0, reserve_margin=0.1)
+
+
+# ── R: the shipped-code review of 12f, eight findings, each pinned ─────────
+#
+# The review found the walk falling back to the deprecated call on every
+# invocation, a static NaN flagged under a finite profile that shadows it, the
+# write boundary refusing NaN where PyPSA's own default IS NaN, a literal
+# `NaN`/`Infinity` reaching `_bulk` and the create schemas past the `null`
+# branch, a duplicated column label turning the 422 into a 500, and the two
+# raising checkpoints reporting a user refusal as a crash. And that the wiring
+# — the one line in `_check_lopf` and the three solver checkpoints — had no
+# test at all: deleting all four left the file green.
+
+
+def test_R1_a_static_nan_under_a_finite_profile_is_inert_and_not_flagged():
+    """★ R1. PyPSA reads `_t` before the static cell, so a static NaN under a
+    finite dynamic column is never seen by the LP (measured: `[0.5, 0.6, 0.7]`
+    dispatched, not 500). Every project in which pre-12f `_bulk` cleared a
+    profiled asset's bound carries exactly this shape, and it must still
+    solve. Bite (verified): drop the `dyn_names` skip in the static branch."""
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    n.generators.at["g", "p_max_pu"] = np.nan
+    n.generators_t.p_max_pu["g"] = [0.5, 0.6, 0.7]
+    assert V._nonfinite_bound_hits(n) == []
+    assert V._check_nonfinite_bounds(n) == []
+    # and the profile itself is still judged: a NaN hour in it is the K4b case
+    n.generators_t.p_max_pu["g"] = [0.5, np.nan, 0.7]
+    assert [i.code for i in V._check_nonfinite_bounds(n)] \
+        == ["nonfinite_bound_partial_coverage"]
+
+
+def test_R2_a_ghost_column_is_not_an_asset():
+    """★ R2. `set_timeseries` never filters columns to the component index, so
+    a column named for no asset can exist. PyPSA warns and ignores it — the
+    solve is `optimal` and unchanged — so a NaN there masks nothing, and the
+    "View" jump for a named asset that does not exist goes nowhere. Bite
+    (verified): drop the `static_names` skip in the dynamic branch."""
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    n.generators_t.p_max_pu["ghost"] = [0.5, np.nan, 0.7]
+    assert V._nonfinite_bound_hits(n) == []
+
+
+def test_R3_the_walk_uses_the_supported_api_and_never_goes_quiet():
+    """★ R3. The first walk was `[n.components[c] for c in n.components]`,
+    which iterates the `Components` OBJECTS (unhashable) — it raised
+    `TypeError` on every call and the deprecated `iterate_components` fallback
+    ran instead, with its DeprecatedWarning, the opposite of what the commit
+    claimed. On a PyPSA that removes the fallback the nested `except` then
+    returned `[]`: the check would have vanished silently. Two bites
+    (verified): restore the object-iterating walk — the warning is emitted;
+    restore the `return hits` — the bogus object yields `[]` instead of
+    raising."""
+    import warnings
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    n.generators.at["g", "p_max_pu"] = np.nan
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        hits = V._nonfinite_bound_hits(n)
+    assert hits == [("Generator", "p_max_pu", "g", 1, 1)]
+    assert not [x for x in w if "iterate_components" in str(x.message)], \
+        [str(x.message) for x in w]
+
+    class _NotANetwork:
+        snapshots = None
+
+    with pytest.raises(Exception):
+        V._nonfinite_bound_hits(_NotANetwork())
+
+
+@pytest.mark.parametrize("component,attribute,factory", [
+    ("generators", "ramp_limit_up",
+     lambda n: n.add("Generator", "g", bus="b", p_nom=100.0)),
+    ("generators", "p_set",
+     lambda n: n.add("Generator", "g", bus="b", p_nom=100.0)),
+    ("storage_units", "state_of_charge_set",
+     lambda n: n.add("StorageUnit", "g", bus="b", p_nom=100.0, max_hours=4.0)),
+])
+def test_R4_a_nan_where_pypsa_s_own_default_is_nan_is_accepted(
+        component, attribute, factory):
+    """★ R4. The write boundary follows the SAME rule as the preflight: NaN is
+    corrupt only where the class default is finite. For these three the
+    default IS NaN and it means "not fixed at this hour" — a `p_set` of
+    `[NaN, 20, NaN]` fixes dispatch at hour two only, measured `optimal` with
+    dispatch `[50, 20, 50]`. The first validator refused every column and so
+    made all three unwritable. Bite (verified): drop the
+    `_attribute_default_is_finite` gate — every case reads 422."""
+    n = _net(load=50.0)
+    factory(n)
+    PyPSAService.set_network(n)
+    N.set_timeseries(component, attribute,
+                     {"index": _idx(n), "columns": ["g"],
+                      "data": [[None], [20.0], [None]]})
+    got = getattr(PyPSAService.get_network(), f"{component}_t")[attribute]["g"]
+    assert np.isnan(got.iloc[0]) and got.iloc[1] == 20.0
+
+
+def test_R4b_load_p_set_is_still_refused_its_default_is_zero():
+    """R4's other edge, so the gate cannot be satisfied by passing everything:
+    `Load.p_set` defaults to 0.0, a NaN demand hour masks the nodal balance,
+    and K2e's refusal must survive the narrowing."""
+    assert N._attribute_default_is_finite("loads", "p_set") is True
+    assert N._attribute_default_is_finite("Load", "p_set") is True
+    assert N._attribute_default_is_finite("generators", "p_set") is False
+    assert N._attribute_default_is_finite("generators", "ramp_limit_up") is False
+    # unknown attribute or component: refuse, as before
+    assert N._attribute_default_is_finite("generators", "no_such_attr") is True
+    assert N._attribute_default_is_finite("no_such_component", "p_set") is True
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), "Infinity", "nan"])
+def test_R5_a_non_finite_literal_in_bulk_is_refused_not_written(value):
+    """★ R5. `json.loads` accepts the bare `NaN` and `Infinity` literals and
+    `float()` accepts the strings, so a non-finite value reached one of the
+    five past the `null` branch and was WRITTEN (measured: `p_max_pu = inf`).
+    The preflight caught it at solve, which is the 200-then-refused UX this
+    phase removed for `PUT /timeseries`. Bite (verified): drop the `isfinite`
+    check after `float(value)`."""
+    from fastapi import HTTPException
+    n = _net()
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    PyPSAService.set_network(n)
+    with pytest.raises(HTTPException) as e:
+        N.bulk_update({"component_class": "Generator", "names": ["g"],
+                       "updates": {"p_max_pu": value}})
+    assert e.value.status_code == 422
+    assert PyPSAService.get_network().generators.at["g", "p_max_pu"] == 1.0
+
+
+def test_R5b_the_literal_rule_does_not_widen_past_the_five():
+    """`discount_rate` may legitimately be NaN (K1d), and it must stay
+    writable as such through the literal path too."""
+    n = _net()
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0,
+          discount_rate=0.07)
+    PyPSAService.set_network(n)
+    N.bulk_update({"component_class": "Generator", "names": ["g"],
+                   "updates": {"discount_rate": float("nan")}})
+    assert np.isnan(PyPSAService.get_network().generators.at["g", "discount_rate"])
+
+
+@pytest.mark.parametrize("schema,field", [
+    ("GeneratorCreate", "p_max_pu"), ("GeneratorCreate", "p_min_pu"),
+    ("LinkCreate", "p_max_pu"), ("StoreCreate", "e_min_pu"),
+])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), "inf"])
+def test_R6_the_create_schemas_refuse_a_non_finite_bound(schema, field, value):
+    """★ R6. `POST`/`PUT` on a component go through the pydantic schema, whose
+    plain `float` accepted `NaN`/`Infinity` and wrote `inf` straight into the
+    static frame (measured). `allow_inf_nan=False` makes that a 422 at the
+    boundary. Bite (verified): drop the `Field(allow_inf_nan=False)`."""
+    import pydantic
+    from models import schemas as S
+    cls = getattr(S, schema)
+    base = {"name": "x", "bus": "b"}
+    if schema == "LinkCreate":
+        base = {"name": "x", "bus0": "b", "bus1": "c"}
+    with pytest.raises(pydantic.ValidationError):
+        cls.model_validate({**base, field: value})
+    # and the finite value still validates
+    assert getattr(cls.model_validate({**base, field: 0.5}), field) == 0.5
+
+
+def test_R6b_the_schema_refusal_reaches_the_client_as_a_422_not_a_500(client):
+    """★ R6b. Found live, not by the review: the schema refused `Infinity`
+    correctly and the client still saw a **500**, because pydantic echoes the
+    offending `input` in its error list and starlette's JSON encoder refuses
+    to write `inf` (`Out of range float values are not JSON compliant`) while
+    building the 422. The app now owns the `RequestValidationError` handler
+    and renders a non-finite input as its repr. Bite (verified): remove the
+    handler — the TestClient surfaces the encoder's ValueError."""
+    import json as _json
+    # raw body: httpx encodes `json=` with allow_nan=False and would refuse
+    # to SEND the literal, so the app would never see it. `json.dumps` with
+    # its default emits the bare `Infinity` the browser's JSON.stringify never
+    # does but a scripted client can.
+    r = client.post("/api/network/generators",
+                    content=_json.dumps({"name": "g_inf", "bus": "b",
+                                         "p_nom": 10.0,
+                                         "p_max_pu": float("inf")}),
+                    headers={"Content-Type": "application/json"})
+    assert r.status_code == 422, (r.status_code, r.text[:200])
+    body = r.json()
+    assert isinstance(body.get("detail"), list) and body["detail"]
+    assert any("p_max_pu" in str(e.get("loc")) for e in body["detail"]), body
+    assert any(e.get("input") == "inf" for e in body["detail"]), body
+
+
+def test_R7_a_duplicated_column_label_is_a_422_not_a_500():
+    """★ R7. `df[col]` on a duplicated label is a DataFrame, and the row
+    lookup then raised IndexError — a 500 where the user is owed a 422. Only
+    the JSON PUT can send one (`read_csv` mangles duplicates). Bite
+    (verified): drop the `is_unique` guard — IndexError escapes."""
+    from fastapi import HTTPException
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    PyPSAService.set_network(n)
+    with pytest.raises(HTTPException) as e:
+        N.set_timeseries("generators", "p_max_pu",
+                         {"index": _idx(n), "columns": ["g", "g"],
+                          "data": [[0.5, 0.5], [None, 0.6], [1.0, 1.0]]})
+    assert e.value.status_code == 422
+    assert "duplicate" in str(e.value.detail)
+
+
+def test_R8_the_preflight_wiring_reaches_validate_for_run():
+    """★ R8. Every K4 case called the helper directly, so the one line that
+    puts it in `_check_lopf` had no witness. Bite (verified): delete
+    `out += _check_nonfinite_bounds(n)` — the code is absent here while every
+    K4 case stays green."""
+    from services.solver_service import SolverConfig
+    n = _net(load=50.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    n.generators_t.p_max_pu["g"] = [0.5, np.nan, 1.0]
+    codes = [i.code for i in V.validate_for_run(n, SolverConfig())]
+    assert "nonfinite_bound_partial_coverage" in codes, codes
+    assert V.has_errors(V.validate_for_run(n, SolverConfig()))
+
+
+def _two_period_network_with_flat_profile():
+    """MultiIndex snapshots with a FLAT `_t` frame: finite at preflight,
+    all-NaN after the pre-LP reindex — the fixture plan v6's amendment 9
+    named as the one that separates the check points."""
+    H = 3
+    n = pypsa.Network()
+    sns = pd.MultiIndex.from_product(
+        [[2030, 2035], pd.date_range("2030-01-01", periods=H, freq="h")],
+        names=["period", "timestep"])
+    n.set_snapshots(sns)
+    n.investment_periods = [2030, 2035]
+    n.add("Carrier", "gas")
+    n.add("Bus", "b")
+    n.add("Load", "l", bus="b", p_set=50.0)
+    for name, p_nom, cost in (("g", 100.0, 10.0), ("slack", 5000.0, 999.0)):
+        n.add("Generator", name, bus="b", carrier="gas", p_nom=p_nom,
+              marginal_cost=cost, build_year=2000, lifetime=100)
+    flat = pd.DataFrame({"g": [0.5, 0.6, 0.7]},
+                        index=pd.date_range("2030-01-01", periods=H, freq="h"))
+    n.generators_t["p_max_pu"] = flat
+    return n
+
+
+def _run(n, cfg, *, foreground=True):
+    """Drive `run_simulation` on ``n``. With ``foreground=False`` a different
+    network is the active one, which is the background-project-solve path:
+    `_reapply_user_ts_to_network` is skipped there."""
+    import queue
+    import threading
+    from services.solver_service import run_simulation
+    PyPSAService.set_network(n if foreground else _net(load=50.0))
+    with N._user_ts_lock:
+        saved = dict(N._user_ts)
+        N._user_ts.clear()
+    lq: queue.SimpleQueue = queue.SimpleQueue()
+    try:
+        status, cond = run_simulation(cfg, n, PyPSAService.get_lock(),
+                                      threading.Event(), lq)
+    finally:
+        with N._user_ts_lock:
+            N._user_ts.clear()
+            N._user_ts.update(saved)
+    lines = []
+    while True:
+        try:
+            lines.append(str(lq.get_nowait()))
+        except Exception:                                     # noqa: BLE001
+            break
+    return status, cond, lines
+
+
+def test_R9_run_simulation_refuses_the_nan_the_reindex_manufactures():
+    """★ R9. The gate commit cca46ac added exists for: a flat `_t` frame
+    against MultiIndex snapshots is finite when `validate_for_run` looks and
+    all-NaN after `_normalise_dynamic_indexes`. Nothing exercised
+    `run_simulation` end to end.
+
+    Measured while writing this: on the FOREGROUND network the fixture never
+    reaches the checkpoint, because `_reapply_user_ts_to_network` — which
+    runs there even with `_user_ts` empty — broadcasts the flat frame over
+    the periods correctly. The NaN reaches the LP on a network the reapply
+    skips: a background project solve (this fixture) or an adequacy
+    transient.
+
+    Two bites, because the first attempt did not bite: deleting the first
+    checkpoint alone left this green — the SECOND checkpoint is a backstop
+    and refused the same NaN after the modelling step, reporting identically.
+    So this asserts what the first checkpoint is FOR: the refusal happens
+    before modelling assumptions are applied, so there is nothing to unwind.
+    Bites (verified): delete the first checkpoint — the refusal is now
+    reported "after modelling assumptions"; delete both — the solve proceeds
+    against the masked bound and returns `optimal`."""
+    from services.solver_service import SolverConfig
+    n = _two_period_network_with_flat_profile()
+    assert V._check_nonfinite_bounds(n) == []          # finite at preflight
+    cfg = SolverConfig(multi_investment_periods=True)
+    status, cond, lines = _run(n, cfg, foreground=False)
+    assert (status, cond) == ("error", "validation_failed"), (status, cond)
+    assert any("[VALIDATION] ERROR: Generator 'g'" in ln for ln in lines), lines
+    assert not [ln for ln in lines if ln.startswith("TRACEBACK")]
+    # refused BEFORE the modelling step, by the first checkpoint
+    assert any("Validation failed: 1 error(s). Aborting." in ln for ln in lines), lines
+    assert not [ln for ln in lines if "after modelling assumptions" in ln], lines
+
+
+def test_R9b_a_refusal_after_modelling_is_reported_as_one_not_as_a_crash(
+        monkeypatch):
+    """★ R9b. The second and myopic checkpoints RAISE (the modelling
+    transforms must be unwound), and the first version raised a bare
+    `ValueError`: the generic handler dumped a `TRACEBACK:` block and set
+    `condition` to the whole sentence. No legal input reaches the second
+    checkpoint with a NaN the first did not already catch — measured: the
+    cfg-only period promotion broadcasts the profile correctly — so this
+    fixture makes the check fire on its SECOND call, and asserts the
+    handler's contract: `validation_failed` exactly, the asset named the way
+    preflight names it, no traceback, and the network restored. Bite
+    (verified): raise `ValueError` again — the traceback is back and the
+    condition is the sentence."""
+    import services.solver_service as SS
+    from services.solver_service import SolverConfig
+    real = SS._check_nonfinite_bounds
+    calls = {"n": 0}
+
+    def fire_on_second(network):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            return [V._err("nonfinite_bound", "Generator", "g",
+                           "Generator 'g': 'p_max_pu' is not a finite number")]
+        return real(network)
+
+    monkeypatch.setattr(SS, "_check_nonfinite_bounds", fire_on_second)
+    n = _net(load=50.0)
+    n.add("Carrier", "gas")
+    n.add("Generator", "g", bus="b", carrier="gas", p_nom=100.0,
+          marginal_cost=10.0)
+    n_gens_before = len(n.generators)
+    status, cond, lines = _run(n, SolverConfig())
+    assert calls["n"] >= 2, calls
+    assert (status, cond) == ("error", "validation_failed"), (status, cond)
+    assert any("[VALIDATION] ERROR: Generator 'g'" in ln for ln in lines), lines
+    assert not [ln for ln in lines if ln.startswith("TRACEBACK")], lines
+    assert len(PyPSAService.get_network().generators) == n_gens_before

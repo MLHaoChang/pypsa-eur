@@ -4456,7 +4456,7 @@ def suite_S29():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
     st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
     if st_c not in (200, 201):
-        for i in (1, 2, 3, 4):
+        for i in (1, 2, 3, 4, 5, 6):
             skip(f"S29.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
         return
     http(f"/api/projects/{q(name)}/activate", method="POST")
@@ -4478,7 +4478,7 @@ def suite_S29():
     built.append(http("/api/network/loads", method="POST",
                       body={"name": "l", "bus": "b", "p_set": 500.0})[0])
     if [c for c in built if c not in (200, 201)]:
-        for i in (1, 2, 3, 4):
+        for i in (1, 2, 3, 4, 5, 6):
             skip(f"S29.{i}", f"fixture build failed: {built}")
         restore()
         http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
@@ -4551,6 +4551,37 @@ def suite_S29():
            f"generators GET={st_g}; g peak dispatch {peak:.1f} MW over "
            f"{len(data)} snapshot(s) (nameplate 100 — before 12f the NaN hour "
            "reached 500)")
+
+    # S29.5 - the shipped-code review's bypass: a bare `NaN` literal (which
+    # `json.dumps` emits for float("nan") and `json.loads` accepts) reached
+    # `_bulk` past the `null` branch and was WRITTEN. Refused now, and the
+    # bound is untouched.
+    st_lit, lit_body = http("/api/network/_bulk", method="PATCH",
+                            body={"component_class": "Generator", "names": ["g"],
+                                  "updates": {"p_max_pu": float("nan")}})
+    _, gens2 = http("/api/network/generators")
+    rows2 = gens2.get("generators", []) if isinstance(gens2, dict) else (gens2 or [])
+    got2 = None
+    for r in rows2:
+        if isinstance(r, dict) and r.get("name") == "g":
+            got2 = r.get("p_max_pu")
+    record("S29.5",
+           st_lit == 422 and got2 == 1.0,
+           f"_bulk NaN literal -> {st_lit} (want 422); p_max_pu reads back "
+           f"{got2!r} (want 1.0, untouched)")
+
+    # S29.6 - and the create schema refuses one too: `POST /generators` with
+    # `p_max_pu: Infinity` wrote `inf` into the static frame before the fix.
+    st_post, _ = http("/api/network/generators", method="POST",
+                      body={"name": "g_inf", "bus": "b", "carrier": "gas",
+                            "p_nom": 10.0, "p_max_pu": float("inf")})
+    _, gens3 = http("/api/network/generators")
+    rows3 = gens3.get("generators", []) if isinstance(gens3, dict) else (gens3 or [])
+    created = any(isinstance(r, dict) and r.get("name") == "g_inf" for r in rows3)
+    record("S29.6",
+           st_post == 422 and not created,
+           f"POST generator p_max_pu=Infinity -> {st_post} (want 422); "
+           f"created={created}")
 
     restore()
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
