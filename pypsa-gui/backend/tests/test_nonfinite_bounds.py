@@ -755,3 +755,84 @@ def test_R9b_a_refusal_after_modelling_is_reported_as_one_not_as_a_crash(
     assert any("[VALIDATION] ERROR: Generator 'g'" in ln for ln in lines), lines
     assert not [ln for ln in lines if ln.startswith("TRACEBACK")], lines
     assert len(PyPSAService.get_network().generators) == n_gens_before
+
+
+# ── R10: the fixes reviewed in turn — coverage is judged against the horizon ─
+
+
+def test_R10a_a_partial_index_frame_is_a_coverage_error():
+    """★ R10a. Found by the review of the fix round. `set_timeseries` writes
+    the body's own index, and the scanner judged only the cells the frame
+    held — so a 2-of-3-snapshot PUT passed preflight while PyPSA reads NaN
+    for the missing hour (measured dispatch `[50, 60, 500]`). Inside
+    `run_simulation` the normalise step reindexes first and the checkpoint
+    catches it; the Validate panel and both loops' up-front guards judge the
+    raw network and were silent. Bite (verified): judge `frame[name]` as it
+    stands instead of reindexed onto the snapshots."""
+    n = _net(load=500.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    n.generators_t["p_max_pu"] = pd.DataFrame({"g": [0.5, 0.6]},
+                                              index=n.snapshots[:2])
+    issues = V._check_nonfinite_bounds(n)
+    assert [i.code for i in issues] == ["nonfinite_bound_partial_coverage"], issues
+    assert "covers 2 of 3 snapshots" in issues[0].message
+
+
+def test_R10b_a_zero_row_frame_does_not_hide_a_static_nan():
+    """★ R10b. The static skip R1 added made a static NaN silent under a
+    dynamic column with NO rows — PyPSA reads that as NaN in every hour
+    (measured dispatch `[500, 500, 500]`), the pre-12f `_bulk`-cleared shape
+    with an emptied profile. Judged against the horizon, the empty column
+    is "not finite in 3 of 3 snapshots". Bite (verified): as R10a."""
+    n = _net(load=500.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    n.generators.at["g", "p_max_pu"] = np.nan
+    n.generators_t["p_max_pu"] = pd.DataFrame({"g": []},
+                                              index=pd.DatetimeIndex([]))
+    issues = V._check_nonfinite_bounds(n)
+    assert [i.code for i in issues] == ["nonfinite_bound"], issues
+    assert "3 of 3 snapshots" in issues[0].message
+
+
+def test_R10c_a_flat_frame_on_a_multi_period_network_is_read_as_the_reapply_reads_it():
+    """★ R10c. PyPSA's own `as_dense` reads a flat frame against MultiIndex
+    snapshots as all-NaN, but the foreground solve runs the reapply first,
+    which broadcasts it by timestep — so a flat frame that covers the
+    timesteps is in force and clean, and one missing a timestep is short
+    by that hour in EVERY period. Judging by plain `reindex` would refuse
+    at preflight the very network the solve would have run. Bite
+    (verified): replace the timestep broadcast with `reindex(snaps)` — the
+    clean case reads "0 of 6"."""
+    n = _two_period_network_with_flat_profile()          # covers all 3 stamps
+    assert V._check_nonfinite_bounds(n) == []
+    short = pd.DataFrame({"g": [0.5, 0.6]},
+                         index=pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.generators_t["p_max_pu"] = short
+    issues = V._check_nonfinite_bounds(n)
+    assert [i.code for i in issues] == ["nonfinite_bound_partial_coverage"], issues
+    assert "covers 4 of 6 snapshots" in issues[0].message
+
+
+def test_R10d_a_multi_index_frame_on_a_flat_network_is_not_in_force():
+    """R10d. The reapply DROPS a MultiIndex frame on a flat network, so it
+    shadows nothing: a static NaN beneath it is reported, and its own cells
+    are not judged."""
+    n = _net(load=500.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0, marginal_cost=10.0)
+    n.generators.at["g", "p_max_pu"] = np.nan
+    mi = pd.MultiIndex.from_product([[2030], n.snapshots],
+                                    names=["period", "timestep"])
+    n.generators_t["p_max_pu"] = pd.DataFrame({"g": [0.5, np.nan, 0.7]}, index=mi)
+    hits = V._nonfinite_bound_hits(n)
+    assert hits == [("Generator", "p_max_pu", "g", 1, 1)], hits
+
+
+def test_R10e_a_ghost_column_on_an_asset_less_component_is_still_a_ghost():
+    """★ R10e. R2's guard read `if static_names and ...`, so an EMPTY static
+    index disabled it and a ghost column on a component with no assets was
+    named as one. Bite (verified): restore the truthiness test."""
+    n = _net(load=50.0)
+    assert len(n.stores) == 0
+    n.stores_t["e_max_pu"] = pd.DataFrame({"ghost": [1.0, np.nan, 1.0]},
+                                          index=n.snapshots)
+    assert V._nonfinite_bound_hits(n) == []

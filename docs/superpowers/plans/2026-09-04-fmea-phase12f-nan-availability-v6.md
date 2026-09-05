@@ -368,3 +368,73 @@ after every solve — the `QueueHandler` in `run_simulation` enqueues with
 define. Present in ten server logs from earlier sessions, so not this round's;
 harmless to the solve (the logging module swallows it) but noisy. Not fixed
 here: out of this phase's scope.
+
+---
+
+## THE FIXES REVIEWED IN TURN — one major, three nits, all closed
+
+Commit `1d9993d` was reviewed as shipped code, as 12e's fix round was. One
+MAJOR, verified by solve before it was recorded:
+
+**The scanner judged a dynamic column by the cells the frame held, not by
+the horizon** — and the static skip R1 added widened the hole. `set_timeseries`
+writes the body's own index with no reindex and no coverage check, so two
+accepted shapes passed preflight while masking the LP row. Measured
+(reviewer's probes, re-run): a 2-of-3-snapshot PUT → `validate_for_run`
+clean → PyPSA reads `[0.5, 0.6, NaN]` → dispatch `[50, 60, 500]`; a zero-row
+frame with a column over a static NaN (the pre-12f `_bulk`-cleared shape with
+an emptied profile) → `hits == []` where the static cell was reported before
+the R1 skip → dispatch `[500, 500, 500]`. Inside `run_simulation` both are
+caught by the first checkpoint, because `_normalise_dynamic_indexes` reindexes
+first — so the LP was never reached from the solver. The damage is where the
+**raw** network is judged: the Validate panel reported clean and Run then
+refused, and both loops' up-front guards (K6) were silent, so a loop would
+start, refuse on every iterate, and end `budget_exhausted` — the exact
+outcome K6a exists to prevent.
+
+**Fix:** every dynamic column is judged **as PyPSA would read it over
+`n.snapshots`** (`_dynamic_column_as_read`), mirroring the four alignment
+cases of `_reapply_user_ts_to_network`, which is what the foreground solve
+applies before the LP: equal index → as is; flat frame on MultiIndex
+snapshots → broadcast by the timestep level (positional lookup, the level
+carries duplicates); MultiIndex frame on a flat network → the reapply DROPS
+it, so it is not in force and does not shadow the static cell; otherwise
+`reindex` (a duplicate-label index cannot be reindexed and is judged as it
+stands). `n_total` is the horizon, so the zero-row case reads "not finite in
+3 of 3 snapshots" and the partial case "covers 2 of 3". Measured to decide
+the third case: PyPSA's own `as_dense` reads a flat frame on MultiIndex
+snapshots as **all-NaN**, but the foreground solve's reapply broadcasts it
+first — so judging by plain `reindex` would have refused at preflight the
+very network the solve runs (the `PUT /timeseries` on a multi-period project
+path, already recorded as a limitation). The scanner reads it as the reapply
+does; on a background solve the normalise step still manufactures NaN there
+and the first checkpoint still refuses, as R9 pins.
+
+The write path is left accepting a partial index on purpose: "upload a
+representative week, then extend the horizon" is the documented coverage
+workflow, and its reverse is the same data; the preflight message names the
+two remedies.
+
+**Nits, all closed:** the ghost-column guard read `if static_names and …`,
+so an EMPTY static index disabled it (R10e); a local `import math as _math`
+beside the module import; and, recorded not fixed, `_bulk`'s literal check
+sits inside the numeric-dtype branch, so a bound column that has become
+`object` dtype takes the string branch — reachable only after prior dtype
+corruption, no in-tree writer upcasts these columns.
+
+**Verified clean by the review:** the walk API on PyPSA 1.3.0 (16 component
+objects incl. Carrier/GlobalConstraint/SubNetwork/LineType, list and class
+names both resolve, every varying default a float); no mocked network reaches
+`validate_for_run`; `_bulk` coerces every column before the single locked
+write, so the 422 is atomic; pydantic 2.13 honours `allow_inf_nan=False` and
+`extra="ignore"` closes the `s_max_pu` POST path; the frontend sends no
+`Infinity` and renders list `detail`s; `ValidationRefused` propagates from
+both raise sites through the myopic `finally` (undo walk, watcher disarm) to
+its handler, and `classify_failure` matches it; the 422 handler survives a
+`ctx` carrying an exception object; R9's background branch and R9b's second
+call are the checkpoints they claim.
+
+**Bite log (R10a–R10e):** judge the frame as it stands → R10a and R10b BIT;
+plain `reindex` instead of the timestep broadcast → R10c BIT ("0 of 6" on the
+clean case); truthiness guard restored → R10e BIT. R10d is the non-★
+statement of the dropped-frame rule. Restores by hash.

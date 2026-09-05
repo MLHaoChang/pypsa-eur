@@ -3732,13 +3732,12 @@ def _attribute_default_is_finite(component: str, attribute: str) -> bool:
     registry resolves both. Unknown component or attribute → True, so an
     attribute the metadata does not describe is still refused.
     """
-    import math as _math
     try:
         n = PyPSAService.get_network()
         d = n.components[component].defaults
         if attribute not in d.index:
             return True
-        return _math.isfinite(float(d.at[attribute, "default"]))
+        return math.isfinite(float(d.at[attribute, "default"]))
     except Exception:                                         # noqa: BLE001
         return True
 

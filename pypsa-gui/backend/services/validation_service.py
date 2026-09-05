@@ -1261,6 +1261,47 @@ FINITE_DEFAULT_BOUNDS = ("p_max_pu", "p_min_pu", "s_max_pu",
                          "e_max_pu", "e_min_pu")
 
 
+def _dynamic_column_as_read(frame, name, snaps):
+    """The values PyPSA would READ for ``name`` over ``snaps``, or ``None``
+    when the frame is not in force for this network.
+
+    A dynamic frame is judged against the horizon, not against itself: the
+    LP reads `_t` reindexed onto `n.snapshots` (measured — a 2-row frame on a
+    3-snapshot network dispatches `[50, 60, 500]`, and a zero-row frame with
+    a column is NaN in every hour), so a column that merely holds finite
+    cells has not been checked. The alignment mirrors
+    `routers.network._reapply_user_ts_to_network`, which is what the
+    foreground solve applies before the LP:
+
+      * index equals the snapshots → as is;
+      * flat frame, MultiIndex snapshots → broadcast by the timestep level
+        (positional lookup, since the level carries duplicate labels);
+      * MultiIndex frame, flat snapshots → the reapply DROPS the frame, so
+        it is not in force and the static cell governs → ``None``;
+      * anything else → ``reindex`` (a duplicate-label index cannot be
+        reindexed and is judged as it stands).
+    """
+    import pandas as _pd
+    col = frame[name]
+    if snaps is None or not len(snaps) or col.index.equals(snaps):
+        return col.to_numpy(dtype=float)
+    frame_multi = isinstance(col.index, _pd.MultiIndex)
+    snaps_multi = isinstance(snaps, _pd.MultiIndex)
+    if frame_multi and not snaps_multi:
+        return None
+    if snaps_multi and not frame_multi:
+        pos = col.index.get_indexer(snaps.get_level_values(-1))
+        vals = col.to_numpy(dtype=float)
+        out = np.full(len(pos), np.nan)
+        hit = pos >= 0
+        out[hit] = vals[pos[hit]]
+        return out
+    try:
+        return col.reindex(snaps).to_numpy(dtype=float)
+    except Exception:                                         # noqa: BLE001
+        return col.to_numpy(dtype=float)
+
+
 def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
     """``(component, attribute, name, n_bad, n_total)`` per offending column.
 
@@ -1316,6 +1357,15 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
                     frame = dynamic.get(attr)
                 except AttributeError:
                     frame = getattr(dynamic, attr, None)
+            # A MultiIndex frame on a flat network is dropped by the reapply
+            # and so is not in force: it shadows nothing.
+            if frame is not None and _snaps is not None:
+                try:
+                    if isinstance(frame.index, pd.MultiIndex) \
+                            and not isinstance(_snaps, pd.MultiIndex):
+                        frame = None
+                except Exception:                             # noqa: BLE001
+                    pass
             dyn_names = set()
             if frame is not None:
                 try:
@@ -1349,11 +1399,13 @@ def _nonfinite_bound_hits(n) -> list[tuple[str, str, str, int, int]]:
             if frame is None or not len(getattr(frame, "columns", [])):
                 continue
             for name in frame.columns:
-                if static_names and str(name) not in static_names:
+                if static is not None and str(name) not in static_names:
                     continue
                 try:
-                    vals = frame[name].to_numpy(dtype=float)
+                    vals = _dynamic_column_as_read(frame, name, _snaps)
                 except (TypeError, ValueError):
+                    continue
+                if vals is None:
                     continue
                 n_bad = int((~np.isfinite(vals)).sum())
                 if n_bad:
