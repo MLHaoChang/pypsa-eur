@@ -25,7 +25,6 @@ that widened the diff of a refactor whose whole claim is that no call site
 changed.
 """
 import math
-import time
 
 import pandas as pd
 
