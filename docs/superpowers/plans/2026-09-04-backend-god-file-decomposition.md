@@ -525,14 +525,107 @@ collected cases are the two Phase 3 test files.
 Nothing lost: all 25 top-level names on `master`'s `compare.py` and all 37 on
 `results.py` are still reachable.
 
-## Phase 4 — `routers/network.py` (4,169 lines)
+## Phase 4 — `routers/network.py` (4,169 lines) — done
 
-Weakest candidate, sequenced last. ~90 near-identical CRUD routes that are
-individually short — long but not deep, so the win per line moved is smaller.
-The extractable parts are the non-CRUD helpers: `_haversine_km`, `_bus_coord`,
-`_line_haversine_km`, `_impedance_preview`, `_recompute_lengths_for_bus`
-→ `services/geometry.py`; `_xlsx_response`, `_build_period_multiindex`
-→ `services/serialization.py` (which already exists); the transformer
-voltage/type helpers → `services/transformer_rules.py`.
+Design decisions are in the spec's "Phase 4 addendum"; this is the record.
 
-Reassess after Phases 1–3 land whether this earns its diff at all.
+**The earlier assessment was wrong.** This plan called `network.py` the weakest
+candidate and flagged it to reassess. Reassessed by AST rather than by eye, the
+CRUD half is exactly as described — but underneath it sat **1,283 lines of pure
+helper code in four clusters**, none touching router state. That is not a
+weak candidate; the eyeball estimate simply never looked past the routes.
+
+### Tasks
+
+- [x] **Task 19: tripwire** — `tests/test_network_facade_surface.py`. Pins all
+  49 moved names with an identity assertion, pins the 11 CRUD/HTTP helpers that
+  must NOT move (so a later phase cannot quietly widen this one), enforces the
+  layering rule, and statically forbids rebinding `_user_ts` / `_user_ts_lock`.
+  Red first on `ModuleNotFoundError`.
+- [x] **Task 20: the extraction** — four clusters plus one shared leaf.
+- [x] **Task 21: verify.**
+
+### What moved where
+
+| module | lines | contents |
+|---|---|---|
+| `services/user_timeseries.py` | 874 | the `_user_ts` store, its lock, and the 14 functions that read or write it |
+| `services/profile_shapes.py` | 352 | synthetic load / generator / link profile shapes + carrier classification |
+| `services/network_geometry.py` | 167 | haversine, bus coordinates, impedance preview, length recompute |
+| `services/transformer_rules.py` | 99 | voltage validation, voltage enrichment, type sanitisation |
+| `services/snapshot_index.py` | 34 | `_build_period_multiindex` — used by the routes AND by `user_timeseries`, so it belongs to neither |
+
+`routers/network.py`: **4,169 → 2,811 lines.** The ~80 CRUD routes, their
+factory, `_meta_payload`, `_push_undo_snapshot`, `_apply_profile_upload` and
+`_xlsx_response` stay, deliberately.
+
+### The first phase with no rewrites at all
+
+Every cluster was a **pure move**: all 49 definitions are byte-identical to
+`master`, verified by comparing each block's source text rather than asserting
+it, and the router re-exports the identical objects. There was nothing to
+prove by AST equality because nothing was transformed.
+
+### What the guards caught
+
+1. **The façade was in the wrong place.** Appended at the end of the router, it
+   left `_LOAD_SHAPES` — a module-level dict literal partway down the file that
+   references two moved profile functions — unbound at execution time. It
+   failed loudly with a `NameError` at import, and the fix is general: a
+   re-export façade is an import block and belongs at the top with the others.
+2. **Two dead imports** (`NamedTuple`, a function-body `threading`) stranded by
+   the moves, caught by the repo's ruff config. One remaining finding,
+   `D204` on `_RecomputeResult`'s class docstring, exists on `master` too and
+   travelled with the byte-identical move; it is left alone rather than trading
+   the move's strongest property for a blank line this phase did not introduce.
+
+### The `_user_ts` hazard
+
+`services/chat_tools.py` imports `_user_ts` and `_user_ts_lock` by value inside
+a function and mutates the dict — guarded by a comment reading *"only fails if
+routers/network refactor breaks paths"*. Re-exporting a dict is sound only
+while nothing rebinds it. `master` never does, and the tripwire now enforces
+that statically in both the router and the service. Same class of hazard as
+Phase 1's `run_simulation` monkeypatch: a name that must stay one object.
+
+### Verification runs
+
+Pinned pip venv (`pypsa==1.1.2`, `linopy==0.8.0`, `pandas<3`), which
+**approximates** `pixi run gui-tests`.
+
+| point | collected | passed | failed | skipped |
+|---|---|---|---|---|
+| end of Phase 1 | 2,362 | 2,338 | 2 | 22 |
+| end of Phase 2 | 2,423 | 2,399 | 2 | 22 |
+| end of Phase 3 | 2,481 | 2,457 | 2 | 22 |
+| end of Phase 4 | 2,596 | 2,572 | 2 | 22 |
+
+Failing set byte-identical to the pre-refactor baseline: `test_app_paths.py`'s
+two macOS-path assertions, which cannot pass on Linux. The 115 new collected
+cases are the Phase 4 tripwire.
+
+Nothing lost: all 146 top-level names on `master`'s `network.py` are still
+reachable. Function-body imports: 32 before, 32 after, difference empty.
+
+---
+
+## Where the decomposition stands
+
+| module | master | now |
+|---|---|---|
+| `services/solver_service.py` | 5,783 | 1,185 |
+| `routers/network.py` | 4,169 | 2,811 |
+| `routers/results.py` | 4,106 | 911 |
+| `routers/compare.py` | 2,781 | 473 |
+| **total** | **16,839** | **5,380** |
+
+11,459 lines moved into 25 focused service modules across four phases, with the
+failing set byte-identical at every gate and not one call site changed.
+
+### What is deliberately left
+
+`routers/network.py`'s ~80 CRUD routes and their factory. They are short,
+uniform, and reached through a generic factory already; splitting them buys
+file length and costs greppability. If that file is worked on again, the
+question worth asking is whether the *routes* need decomposing at all, or
+whether 2,811 lines of thin CRUD is simply what 80 endpoints look like.

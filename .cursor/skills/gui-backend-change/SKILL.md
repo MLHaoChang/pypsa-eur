@@ -63,6 +63,26 @@ fails if a name or a positional parameter list changes, and
 `tests/test_compare_seam.py` fails if the wrapper and the service disagree.
 Nothing under `services/compare/` imports a router.
 
+## Where network helpers go
+`routers/network.py` keeps its ~80 CRUD routes, the generic CRUD factory and
+`_xlsx_response`. The pure helpers live in services and are re-exported from
+the router, so existing imports are unchanged:
+
+| module | owns |
+|---|---|
+| `services/user_timeseries.py` | the `_user_ts` store, its lock, and everything reading or writing it |
+| `services/profile_shapes.py` | synthetic load / generator / link profile shapes, carrier classification |
+| `services/network_geometry.py` | haversine, bus coordinates, impedance preview, length recompute |
+| `services/transformer_rules.py` | transformer voltage validation / enrichment / type sanitisation |
+| `services/snapshot_index.py` | `_build_period_multiindex` |
+
+**Never rebind `_user_ts` or `_user_ts_lock`.** `services/chat_tools.py` imports
+them by value inside a function and mutates in place; reassigning either would
+leave the router and every importer holding different objects, with writes
+going to different stores. `tests/test_network_facade_surface.py` fails on any
+rebinding, and also fails if a CRUD helper is moved out — this phase's scope is
+pinned, not conventional.
+
 ## Weighting (multi-period)
 - Use `snapshot_weights(n, column, sns=None)`, `period_years_map`, `years_for_period`.
 - Energy KPIs → column `"generators"`; cost KPIs → `"objective"`.
@@ -93,6 +113,9 @@ Nothing under `services/compare/` imports a router.
 5. Then run `python -m ruff check services routers` (the repo config, which
    enforces F401 here). Moving a body out of a module usually strands the
    imports it took with it.
+6. A re-export façade belongs at the TOP of the module with the other imports.
+   Module bodies execute top to bottom, so names re-exported at the bottom are
+   not bound yet for any module-level dict or constant that references them.
 
 ## Commit
 - Only commit when the user asks. Prefer small PRs (helpers → compare → results errors → CI).
