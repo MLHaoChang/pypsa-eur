@@ -27,8 +27,12 @@ import dataclasses
 import json
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+
 from gridspine.drivers.planning import CASE39_F_HZ
 from gridspine.drivers.planning import LEDGER as PLANNING_LEDGER
+from gridspine.handoff.bundle import BundleInputs, export_bundle
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.ingest.pandapower_source import (
     RES_LEDGER,
@@ -54,11 +58,20 @@ from gridspine.ranking.select import select_snapshots, validate_selection
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dc import save_dc_sensitivities
 from gridspine.schema.errors import StageError
+from gridspine.static.contingency import N1_LEDGER, measure_prune_threshold, screen_n1, screen_n2
+from gridspine.static.contingency_set import (
+    EXT_GRID_EXCLUSION_LEDGER,
+    branch_contingencies,
+    n2_candidates,
+    unit_contingencies,
+)
 from gridspine.static.loadflow import LFResult, apply_snapshot, run_lf
-from gridspine.static.lodf import dc_base, to_sensitivities
-from gridspine.templates.unit_params import load_unit_params
+from gridspine.static.lodf import N2_LEDGER, dc_base, to_sensitivities
+from gridspine.static.shortcircuit import FAULT_LEDGER, fault_levels
+from gridspine.static.strength import SCR_LEDGER, scr
+from gridspine.templates.unit_params import load_unit_params, load_unit_templates
 
-STAGES = ["ingest", "dispatch", "ranking", "loadflow", "handoff"]
+STAGES = ["ingest", "dispatch", "ranking", "loadflow", "screening", "handoff"]
 
 #: Canonical sgen name prefix -> the profile generator that drives it.
 #: `load_case39_res` names its wind sites `W_BUS_xx` and its solar sites
@@ -82,6 +95,12 @@ class StudyResult:
     artifacts: dict
     #: Selected hour -> its LFResult, convergent or not.
     lf_results: dict
+    #: Increment 3 (empty when screen=False). Selected hour -> validated
+    #: N-1 + N-2 results, fault levels (both cases), SCR table, bundle dir.
+    screening: dict = dataclasses.field(default_factory=dict)
+    fault_levels: dict = dataclasses.field(default_factory=dict)
+    scr: dict = dataclasses.field(default_factory=dict)
+    bundles: dict = dataclasses.field(default_factory=dict)
 
 
 def res_cf_for(net, hours: int) -> dict:
@@ -112,7 +131,7 @@ def res_cf_for(net, hours: int) -> dict:
     return cf
 
 
-def _ledger(unit_params) -> list:
+def _ledger(unit_params, screen: bool = True) -> list:
     """The report appendix: what was measured, what was assumed, by whom.
 
     `planning.LEDGER` is carried in full so the increment-1 assumptions that
@@ -146,6 +165,22 @@ def _ledger(unit_params) -> list:
         "selection is the UNION of the k most extreme hours under each "
         "criterion, so it holds between k and 5k hours, never exactly k",
         *SEVERITY_LEDGER,
+        *EXT_GRID_EXCLUSION_LEDGER,
+        *(
+            [
+                *N1_LEDGER,
+                *N2_LEDGER,
+                *FAULT_LEDGER,
+                *SCR_LEDGER,
+                "SCR is taken at the IEC 60909 MINIMUM case, the conservative choice "
+                "for weak-grid screening (assumed)",
+                "N-2 verified at prune threshold 0 by default: the measured lossless "
+                "threshold on case39 prunes nothing (task 5), so every connected pair "
+                "is AC-solved and the per-hour measured threshold is recorded",
+            ]
+            if screen
+            else []
+        ),
     ]
 
 
@@ -155,6 +190,8 @@ def run_year_study(
     k: int = 5,
     window: int = 168,
     overlap: int = 24,
+    screen: bool = True,
+    n2_prune_threshold_pct: float = 0.0,
 ) -> StudyResult:
     """Run the whole chain for `hours` hours and study the `k`-extreme snapshots.
 
@@ -204,6 +241,14 @@ def run_year_study(
 
         selection = validate_selection(select_snapshots(metrics, k=k), metrics)
 
+        templates = load_unit_templates()
+        if screen:
+            n1_set = pd.concat(
+                [branch_contingencies(net), unit_contingencies(registry)], ignore_index=True
+            )
+            n2_set = n2_candidates(branch_contingencies(net))
+        screening, faults, strength, thresholds, ac_severity = {}, {}, {}, {}, {}
+
         converged = []
         for hour in selection["hour"]:
             hour = int(hour)
@@ -214,6 +259,26 @@ def run_year_study(
             converged.append(bool(lf.converged))
             art[f"lf_{hour}_bus"] = outdir / f"lf_{hour}_bus.csv"
             lf.bus.to_csv(art[f"lf_{hour}_bus"])
+
+            if screen:
+                stage = "screening"
+                n1 = screen_n1(net, n1_set, dispatch, loads, hour, registry)
+                n2, _log = screen_n2(
+                    net, n2_set, dispatch, loads, hour, registry,
+                    prune_threshold_pct=n2_prune_threshold_pct,
+                )
+                thresholds[hour], _report = measure_prune_threshold(
+                    net, n2_set, dispatch, loads, hour, registry
+                )
+                screening[hour] = pd.concat([n1, n2], ignore_index=True)
+                ok = n1[n1["converged"] & ~n1["islanded"]]
+                ac_severity[hour] = float(ok["severity"].max()) if len(ok) else np.nan
+                faults[hour] = pd.concat(
+                    [fault_levels(net, dispatch, loads, hour, registry, templates, case=c)
+                     for c in ("max", "min")],
+                    ignore_index=True,
+                )
+                strength[hour] = scr(faults[hour][faults[hour]["case"] == "min"], registry, templates)
 
             stage = "handoff"
             # The export is written whether or not the flow converged: the
@@ -234,10 +299,78 @@ def run_year_study(
         selection.assign(
             reasons=[REASON_SEP.join(r) for r in selection["reasons"]]
         ).to_csv(art["selected"], index=False)
-
         hours_selected = [int(h) for h in selection["hour"]]
+
+        bundles, extra = {}, {}
+        if screen:
+            # The two numbers the ledger README declares, measured on the hours
+            # this run actually selected — which is why bundles are written in a
+            # second pass, after every hour has been screened.
+            dc = metrics.loc[hours_selected, "n1_severity_dc"]
+            ac = pd.Series({h: ac_severity[h] for h in hours_selected}).dropna()
+            both = dc.loc[ac.index]
+            if len(ac) >= 3 and both.nunique() > 1 and ac.nunique() > 1:
+                rho = float(both.rank().corr(ac.rank(), method="pearson"))
+                gap = int((both.rank() - ac.rank()).abs().max())
+            else:
+                rho, gap = None, None
+            blind_spot = {"hours": len(hours_selected), "hours_compared": int(len(ac)),
+                          "spearman_rho": rho, "worst_rank_gap": gap}
+            thr_vals = [thresholds[h] for h in hours_selected]
+            measurements = {
+                "n2_prune_threshold": (
+                    f"measured per selected hour as the largest DC new-loading threshold "
+                    f"that loses no pair with a new AC violation: "
+                    f"{min(thr_vals):.1f}-{max(thr_vals):.1f} % over {len(thr_vals)} hours; "
+                    f"N-2 was verified at {n2_prune_threshold_pct:g} % (every connected pair)"
+                ),
+                "dc_severity_blind_spot": (
+                    f"DC n1_severity_dc vs AC worst N-1 severity over the {len(ac)} selected "
+                    f"hours with a converged N-1 row: Spearman rho = "
+                    f"{'n/a' if rho is None else f'{rho:.2f}'}, worst rank gap "
+                    f"{'n/a' if gap is None else gap} (measured on UC-dispatched hours)"
+                ),
+            }
+            ledger = _ledger(unit_params, screen=True)
+            stage = "handoff"
+            for hour in hours_selected:
+                apply_snapshot(net, dispatch, loads, hour=hour, registry=registry)
+                bundles[hour] = export_bundle(outdir, BundleInputs(
+                    net=net, hour=hour, dispatch=dispatch, loads=loads, registry=registry,
+                    unit_params=unit_params, templates=templates, contingency_set=n1_set,
+                    lf=lf_results[hour], ledger_entries=ledger, measurements=measurements,
+                    f_hz=CASE39_F_HZ, case_name="case39",
+                    screening=screening[hour], fault_levels=faults[hour],
+                ))
+                art[f"bundle_{hour}"] = bundles[hour]
+            per_hour = {}
+            for hour in hours_selected:
+                rows = screening[hour]
+                n1 = rows[~rows["contingency_id"].str.contains("--")]
+                n2 = rows[rows["contingency_id"].str.contains("--")]
+                ok1 = n1[n1["converged"]]
+                per_hour[str(hour)] = {
+                    "n1_rows": int(len(n1)),
+                    "n1_islanded": int(n1["islanded"].sum()),
+                    "n1_diverged": int((~n1["converged"] & ~n1["islanded"]).sum()),
+                    "n1_worst_severity": float(ok1["severity"].max()) if len(ok1) else None,
+                    "n2_rows": int(len(n2)),
+                    "n2_islanded": int(n2["islanded"].sum()),
+                    "n2_diverged": int((~n2["converged"] & ~n2["islanded"]).sum()),
+                    "violations_total": int(rows.loc[rows["converged"], "n_violations"].sum()),
+                    "n2_prune_threshold_measured": float(thresholds[hour]),
+                }
+            extra = {
+                "screening": per_hour,
+                "n2_prune_threshold_measured": {str(h): float(thresholds[h]) for h in hours_selected},
+                "dc_severity_blind_spot": blind_spot,
+                "bundles": {str(h): bundles[h].name for h in hours_selected},
+            }
+
         art["manifest"] = outdir / "manifest.json"
         art["manifest"].write_text(json.dumps({
+            "screen": bool(screen),
+            **extra,
             "stages": STAGES,
             "network": "pandapower case39_res, canonical names",
             "hours": hours,
@@ -252,9 +385,12 @@ def run_year_study(
             ],
             "load_consistency": "per-snapshot loads artifact (increment 2)",
             "artifacts": {name: p.name for name, p in sorted(art.items())},
-            "ledger": _ledger(unit_params),
+            "ledger": _ledger(unit_params, screen=screen),
         }, indent=2))
-        return StudyResult(selected=selection, artifacts=art, lf_results=lf_results)
+        return StudyResult(
+            selected=selection, artifacts=art, lf_results=lf_results,
+            screening=screening, fault_levels=faults, scr=strength, bundles=bundles,
+        )
     except Exception as exc:
         StageError(stage=stage, element_ids=[], cause=repr(exc)).write(outdir)
         raise
@@ -267,10 +403,15 @@ if __name__ == "__main__":
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--window", type=int, default=168)
     ap.add_argument("--overlap", type=int, default=24)
+    ap.add_argument("--no-screen", action="store_true",
+                    help="skip N-1/N-2, fault levels, SCR and bundles (increment-2 behaviour)")
+    ap.add_argument("--n2-prune-threshold", type=float, default=0.0,
+                    help="DC new-loading %% below which N-2 pairs are not AC-verified (0 = verify all)")
     args = ap.parse_args()
     res = run_year_study(
         args.out, hours=args.hours, k=args.k,
         window=args.window, overlap=args.overlap,
+        screen=not args.no_screen, n2_prune_threshold_pct=args.n2_prune_threshold,
     )
     for _, row in res.selected.iterrows():
         print(

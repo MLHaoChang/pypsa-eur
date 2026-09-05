@@ -1,5 +1,7 @@
 # gridspine Increment 3 Implementation Plan — Contingency Screening and the Handoff Bundle
 
+> **Status 2026-09-05: all thirteen tasks landed on `gridspine-inc2`; increment 3 is complete pending the owner's PowerFactory validation and the full-year re-run with the five-criterion, tie-spread selection.**
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn a ranked year into a defensible contingency study and a complete handoff. N-1 severity becomes a ranking criterion over the whole year; the selected snapshots get full AC N-1 and LODF-pruned N-2, IEC 60909 fault levels and an SCR pre-check; and the handoff stops being one `.raw` and becomes a bundle a dynamics engineer can open — `.raw`, `.dyr`, `contingencies.csv` and a ledger README that says which number was measured and which was invented.
@@ -262,6 +264,7 @@ The honest cost, which must be stated in the ledger and the report: **the rankin
 - Stage names gain `screening` and the manifest records per-hour violation counts, so the manifest alone answers "which selected hour was worst".
 - **Runtime:** the existing module-scoped 336 h fixture stays ONE solve; screening in tests is capped at ≤4 snapshots and a reduced contingency set. If the file passes 120 s, cut the contingency set, not the assertions.
 
+- **LANDED 2026-09-05 — increment 3 complete.** Per selected hour, after the load flow: N-1 (60 rows), N-2 at prune threshold 0 (all 1035 pairs; the measured lossless threshold prunes nothing), IEC 60909 fault levels for both cases, SCR at the MINIMUM case (conservative, ledgered), and a stand-alone bundle. The two numbers the ledger README declared are MEASURED on the hours each run selects and written into every bundle's ledger — the per-hour N-2 threshold and the DC-vs-AC severity rank correlation over the selected hours — so bundles carry no placeholders; because the correlation spans hours, bundles are exported in a second pass after all hours are screened. `screen=False` (CLI `--no-screen`) keeps the increment-2 behaviour reachable and tested. The whole screening-and-bundle pass added ~13 s to the 336 h test file. Open for the owner: the constant per-hour islanding set (11 N-1, 473 N-2) and the three base-case rating violations on case39 both shape what "severity" means here; the aggregated equivalent G_BUS_39 being decommittable and collapsing when outaged remains a modelling question, not a task.
 - [ ] **Step 1: failing tests** — the 4k→5k bound update; bundles exist per selected hour; a non-convergent contingency reaches the manifest as a recorded result; `screen=False` reproduces increment 2's artifacts exactly.
 - [ ] **Step 2: RED. Step 3: implement. Step 4: GREEN + full gate. Step 5: run the CLI once at 336 h; do NOT run 8760 in a test — report the command. Step 6: commit.**
 

@@ -210,7 +210,7 @@ def test_manifest_records_the_run_parameters_and_the_selected_hours(study):
     m = json.loads(study.artifacts["manifest"].read_text())
     assert (m["hours"], m["k"], m["window"], m["overlap"]) == (HOURS, K, WINDOW, OVERLAP)
     assert m["selected_hours"] == [int(h) for h in study.selected["hour"]]
-    assert m["stages"] == ["ingest", "dispatch", "ranking", "loadflow", "handoff"]
+    assert m["stages"] == ["ingest", "dispatch", "ranking", "loadflow", "screening", "handoff"]
     assert m["load_consistency"] == "per-snapshot loads artifact (increment 2)"
 
 
@@ -285,3 +285,99 @@ def test_a_non_convergent_selected_hour_is_recorded_and_the_run_continues(
 
     m = json.loads(res.artifacts["manifest"].read_text())
     assert m["non_converged_hours"] == [int(h) for h in res.selected["hour"]]
+
+
+# ===========================================================================
+# Increment 3, task 13: screening and bundles in the year study
+# ===========================================================================
+#
+# Per selected hour, after the load flow: N-1 (lightsim2grid + pandapower for
+# units), N-2 (DC-LODF estimate, AC verify; threshold 0 by default because the
+# measured lossless threshold on case39 prunes nothing), IEC 60909 fault levels
+# for both cases, the SCR pre-check, and a stand-alone handoff bundle. The two
+# numbers the ledger README declared as "not yet measured" are measured HERE,
+# on the UC-dispatched hours the study actually selected, and written into the
+# bundle ledger — so the placeholder count in every bundle must be zero.
+
+from gridspine.drivers.year_study import STAGES
+from gridspine.handoff.bundle import BUNDLE_FILES
+from gridspine.schema.contingency import validate_contingency_results, validate_fault_levels
+
+N1_ROWS = 46 + 14           # branch + unit contingencies on case39_res
+N1_ISLANDING = 11
+N2_ROWS = 1035
+N2_ISLANDED = 473           # topology, so identical in every hour
+
+
+def test_screening_is_a_stage():
+    assert STAGES == ["ingest", "dispatch", "ranking", "loadflow", "screening", "handoff"]
+
+
+def test_every_selected_hour_is_screened_and_bundled(study):
+    hours = [int(h) for h in study.selected["hour"]]
+    assert sorted(study.screening) == sorted(hours)
+    assert sorted(study.bundles) == sorted(hours)
+    assert sorted(study.fault_levels) == sorted(hours)
+    assert sorted(study.scr) == sorted(hours)
+    for hour in hours:
+        validate_contingency_results(study.screening[hour])
+        validate_fault_levels(study.fault_levels[hour])
+        bundle = study.bundles[hour]
+        assert bundle.is_dir() and bundle.name == f"bundle_h{hour}"
+        for name in BUNDLE_FILES + ("screening.csv", "fault_levels.csv"):
+            assert (bundle / name).exists(), (hour, name)
+        assert study.artifacts[f"bundle_{hour}"] == bundle
+
+
+def test_screening_rows_cover_n1_and_n2_with_the_known_topology_facts(study):
+    for hour, rows in study.screening.items():
+        n1 = rows[~rows["contingency_id"].str.contains("--")]
+        n2 = rows[rows["contingency_id"].str.contains("--")]
+        assert len(n1) == N1_ROWS and len(n2) == N2_ROWS, hour
+        assert int(n1["islanded"].sum()) == N1_ISLANDING, hour
+        assert int(n2["islanded"].sum()) == N2_ISLANDED, hour
+        assert (rows["hour"] == hour).all()
+
+
+def test_fault_levels_carry_both_cases_and_scr_covers_the_res_buses(study):
+    for hour in study.fault_levels:
+        fl = study.fault_levels[hour]
+        assert set(fl["case"]) == {"max", "min"} and len(fl) == 2 * 39
+        s = study.scr[hour]
+        assert len(s) == 5 and set(s["band"]) <= {"very_weak", "weak", "moderate", "strong"}
+        assert (s["case"] == "min").all(), "SCR is taken at the minimum fault level"
+
+
+def test_manifest_records_per_hour_violations_and_the_two_measurements(study):
+    m = json.loads(study.artifacts["manifest"].read_text())
+    assert m["screen"] is True
+    for hour in study.selected["hour"]:
+        row = m["screening"][str(int(hour))]
+        for key in ("n1_rows", "n1_islanded", "n1_diverged", "n1_worst_severity",
+                    "n2_rows", "n2_islanded", "n2_diverged", "violations_total", "n2_prune_threshold_measured"):
+            assert key in row, (hour, key)
+        assert row["n1_rows"] == N1_ROWS and row["n2_rows"] == N2_ROWS
+    bs = m["dc_severity_blind_spot"]
+    assert set(bs) >= {"hours", "spearman_rho", "worst_rank_gap"}
+    assert bs["hours"] == len(study.selected)
+    assert -1.0 <= bs["spearman_rho"] <= 1.0
+
+
+def test_bundle_ledgers_carry_measured_numbers_not_placeholders(study):
+    for hour, bundle in study.bundles.items():
+        text = (bundle / "ledger.md").read_text()
+        assert "not yet measured" not in text, hour
+        assert "n2_prune_threshold" in text and "dc_severity_blind_spot" in text
+        assert "islanded" in text.lower()
+
+
+def test_screen_false_skips_screening_and_bundles_and_says_so(tmp_path):
+    """The increment-2 behaviour stays reachable — as a tested flag, not a way
+    to quietly skip screening in production (default is True)."""
+    res = run_year_study(tmp_path, hours=24, k=1, window=24, overlap=0, screen=False)
+    assert res.screening == {} and res.bundles == {} and res.fault_levels == {} and res.scr == {}
+    m = json.loads(res.artifacts["manifest"].read_text())
+    assert m["screen"] is False
+    assert "screening" not in m and "dc_severity_blind_spot" not in m
+    assert not any(k.startswith("bundle_") for k in res.artifacts)
+    assert not list(tmp_path.glob("bundle_h*"))
