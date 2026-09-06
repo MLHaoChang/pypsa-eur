@@ -118,10 +118,11 @@ pinned, not conventional.
    not bound yet for any module-level dict or constant that references them.
 7. The `tests/qa_*.py` drivers are NOT collected by pytest (`pytest.ini` sets
    `python_files = test_*.py`), so `pixi run gui-tests` says nothing about them.
-   Run the one covering your area by hand: `python tests/qa_x.py`, exit 0 = pass.
-   If you touch project save/load, rename, layout or `/results-summary`, that is
-   `qa_save_load_roundtrip`, `qa_rename_project`, `qa_layout_persistence`,
-   `qa_results_summary_compare`.
+   Run them with `pixi run gui-qa-drivers` (~2 min, all 18 of them; CI runs the
+   same task). For a quick loop, run just the one covering your area:
+   `python tests/qa_x.py`, exit 0 = pass. If you touch project save/load,
+   rename, layout or `/results-summary`, that is `qa_save_load_roundtrip`,
+   `qa_rename_project`, `qa_layout_persistence`, `qa_results_summary_compare`.
 8. Writing or fixing one of those drivers: `import tests.qa_support` FIRST,
    before any `main` / `routers` / `services` import. It pins the sandbox and
    gives you a signed-in client. Three traps it exists to keep you out of:

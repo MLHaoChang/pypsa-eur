@@ -88,6 +88,14 @@ jobs:
       run: |
         pixi run gui-tests
 
+    # The qa_*.py drivers are excluded from pytest collection by pytest.ini and
+    # so are invisible to the step above. Runs after it, because a broken suite
+    # is the more informative failure of the two. ~2 min.
+    - name: Run backend QA drivers
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: |
+        pixi run gui-qa-drivers
+
   integration-tests:
     name: Integration
     runs-on: ${{ matrix.os }}-latest
