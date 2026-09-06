@@ -353,6 +353,19 @@ export function OutageInputs({ fs, set }: { fs: FS; set: SetFS }) {
   )
 }
 
+// Phase 12h: the "this availability already includes outages" flag. Its own
+// component rather than a line inside `OutageInputs`, because that one is
+// shared by five asset cards (Link, StorageUnit, Store, Line, Transformer)
+// and the flag is a Generator column only — the finding is about generators,
+// and the other classes carry no availability the engines read this way.
+export function IncludesOutagesInput({ fs, set }: { fs: FS; set: SetFS }) {
+  return (
+    <ChkInput label="Availability includes outages"
+      k="p_max_pu_includes_outages" fs={fs} set={set}
+      tip={docTip('adequacy.p_max_pu_includes_outages')} />
+  )
+}
+
 // Discount rate is stored as decimal on the asset (0.07 = 7%) but typed as
 // percent in the UI ("7"). The form holds the percentage string under
 // `discount_rate_pct`; the save mutation converts to decimal before sending.

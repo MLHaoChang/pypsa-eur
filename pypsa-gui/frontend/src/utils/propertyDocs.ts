@@ -98,6 +98,10 @@ export const PROPERTY_DOCS: Record<string, string> = {
     'What the rate IS: FOR (service-hours based — what NERC GADS class averages publish) or EFORd (demand-based — what adequacy math wants). They differ materially for peakers with reserve-shutdown hours, and the tool never converts between them — it stores and reports which one you entered.',
   'adequacy.mttr_hours':
     'Mean time to repair, in hours — how long one forced outage lasts on average. Together with the rate this implies an event frequency (8760 × rate / MTTR per year); preflight warns when the pair is implausible.',
+  // Generator only — the other occurrence-bearing classes carry no
+  // availability the engines read this way.
+  'adequacy.p_max_pu_includes_outages':
+    'Tick when this unit\'s p_max_pu ALREADY accounts for forced outages — a historical capacity-factor table (PyPSA-Eur\'s nuclear CF is one) rather than a typed availability. The adequacy engines and the reserve margin then credit the unit at its availability alone and apply no outage rate on top; leave it clear and both are applied (nameplate × p_max_pu × (1 − rate)).',
   'generator.build_year':
     'First year the unit is operational. Combined with lifetime to determine availability across planning horizons.',
   'generator.lifetime':

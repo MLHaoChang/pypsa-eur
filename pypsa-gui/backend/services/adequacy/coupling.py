@@ -476,7 +476,7 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
 
 def snapshot_hash(mc_inputs) -> str:
     """sha256 over exactly what the MC reads — the sorted ``(name,
-    capacity_mw, profile bytes, capacity-series bytes)`` unit vector, the
+    capacity_mw, q, profile bytes, capacity-series bytes)`` unit vector, the
     sorted ``(name, p_nom_mw, e_nom_mwh, capacity-series bytes)`` storage
     vector, and the residual bytes. NOT the objective: degenerate optima give
     equal cost for different plans. Equal hash ⇒ bit-identical MC under the
@@ -486,8 +486,15 @@ def snapshot_hash(mc_inputs) -> str:
     import hashlib
     import numpy as _np
     h = hashlib.sha256()
-    for name, cap, prof in sorted(
+    for name, cap, q, prof in sorted(
             (str(u.name), float(u.capacity_mw),
+             # Phase 12h: …and its outage RATE. `p_max_pu_includes_outages`
+             # changes nothing else about a unit — same capacity, same
+             # availability series — so without this term a flag flip
+             # COLLIDES with the unflagged hash while the MC result moves,
+             # and the loops' plateau reuse would hand back the wrong
+             # metrics (plan v6 §H6).
+             float(u.q),
              # Phase 12c-pre: the sampler also reads the unit's
              # availability series; hash its bytes so "exactly what the
              # MC reads" stays true (shipped-code review, finding 5).
@@ -498,7 +505,7 @@ def snapshot_hash(mc_inputs) -> str:
              + (b"" if getattr(u, "capacity_series", None) is None
                 else _np.asarray(u.capacity_series, dtype=_np.float64).tobytes()))
             for u in mc_inputs.units):
-        h.update(f"{name}\x1f{cap!r}\x1e".encode() + prof + b"\x1e")
+        h.update(f"{name}\x1f{cap!r}\x1f{q!r}\x1e".encode() + prof + b"\x1e")
     h.update(b"\x1d")
     for row, cs in sorted(
             ((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh)),

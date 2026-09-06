@@ -732,3 +732,46 @@ pre-12g symptoms — `state_of_charge_initial` and `marginal_cost` read back
 while S30.3, S30.4 and S30.6 stay green because the literal check, the schema
 and the time-series rule are separate guards the bite leaves in place.
 Restore by hash.
+
+## S31 — a static CF is applied, and a flag says whether it already includes outages (Phase 12h)
+
+12c-pre left the static `p_max_pu` column unread **on purpose**: folding it in
+*and* applying an outage rate double-counts PyPSA-Eur's `nuclear_p_max_pu.csv`,
+a historical capacity-factor table that already contains forced outages. That
+left the engines and the reserve margin disagreeing about the same unit by two
+errors of different size in opposite directions — measured on one fixture
+(168 h, load 100 MW; `nuc` 100 MW static `0.8`, `q = 0.05`):
+
+| how the unit is read | COPT LOLE | COPT EUE | margin derate |
+|---|---|---|---|
+| before 12h — the engines ignore the static CF | 8.40 h | 640.5 MWh | 0.76 |
+| the CF is an availability: applied **and** outages sampled | **16.38 h** | **800.1 MWh** | 0.76 |
+| the CF already includes outages: applied, rate zeroed | 8.40 h | **168.0 MWh** | **0.80** |
+
+Which reading applies is a question only the modeller can answer, so it became
+data: a per-asset bool `p_max_pu_includes_outages` on Generator. It zeroes the
+rate at `occurrence.resolve_outage_params` — the one place every consumer reads
+`q` from — so both engines, the margin's derate, the net-load window, the
+worksheet and the disclosures move together, by construction.
+
+`GET /results/reserve_margin` serves only the persisted solve-time stash (204
+otherwise), so S31 sets `solver_config.reserve_margin = 0.1` and solves before
+reading a derate — S23's pattern. Its fixture is the table's, with `gas` at
+**50 MW / marginal cost 20**: at 25 MW the derated firm capacity is 99.75 MW
+against a 110 MW requirement and preflight refuses `reserve_margin_unreachable`.
+The COPT hand values below are pinned by a unit test on the same fixture, so
+the live rows compare against numbers the suite owns.
+
+| id | check |
+|----|-------|
+| S31.1 | preflight names `nuc` under `availability_may_include_outages`, the message names the flag, and 12c-pre's `static_p_max_pu_not_applied` is **absent** — its sentence ("the engines do NOT apply it") stopped being true when the fold shipped |
+| S31.2 | `/results/copt` EUE reads the CF-and-outages value; before 12h it read the nameplate row |
+| S31.3 | `PATCH /_bulk` sets the flag **on a frame whose column the API POST never created** — the create-if-absent is what makes this a 200 rather than `has no column(s)`; preflight swaps to `outages_folded_into_availability` and `GET /generators` reads the flag back `true` |
+| S31.4 | `/results/copt` EUE reads the CF-alone value; after a solve under `reserve_margin = 0.1` the margin row for `nuc` reads derate **0.80**; and the project **saves** (200) after that solve — the slack rows the solve adds and removes leave an `object` column of pure bools, the one shape netCDF refuses |
+| S31.5 | clearing the flag through `_bulk` (an explicit `null`, which is what the bulk editor sends for a blank cell) reads back **`false`**, not null and not a 500, and a re-solve's margin row reads **0.76** again |
+
+**Bitten live** (recorded in the plan): dropping the capacity scaling fails
+**S31.2** with the pre-12h nameplate EUE; ignoring the flag in
+`resolve_outage_params` fails **S31.4** with the unflagged EUE and derate 0.76;
+dropping the export-helper normaliser makes **S31.4**'s save a 500. Restore by
+hash.

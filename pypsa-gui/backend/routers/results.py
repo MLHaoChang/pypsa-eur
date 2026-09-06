@@ -3547,6 +3547,10 @@ def post_mc(body: McRequest | None = None):
                     "stop_event": stop_event}
 
     def worker():
+        # Phase 12h: the rule that decides which profiled units had no
+        # outages sampled. Imported from the COPT so `/mc`'s lists and
+        # `split_fleet`'s buckets cannot disagree about the same fleet.
+        from services.adequacy.copt import rate_is_zero as _rate_is_zero
         try:
             # The ONLY call in the codebase that may carry the flag: this
             # is the study's own baseline, not a replay of one. Every ELCC
@@ -3611,9 +3615,26 @@ def post_mc(body: McRequest | None = None):
                     "warning": MC_WARNING_V1,
                     # Phase 12c-pre: the units whose outages were sampled ON
                     # their availability series rather than at nameplate.
+                    #
+                    # Phase 12h: a rate-zero unit carries a profile but has
+                    # NO outages sampled on it, so leaving it here would
+                    # make this list's documented meaning false. The MC
+                    # never calls `split_fleet`, so the two lists are built
+                    # here and are DISJOINT by construction.
                     "profile_units": [
                         str(u.name) for u in inputs.units
-                        if getattr(u, "profile", None) is not None],
+                        if getattr(u, "profile", None) is not None
+                        and not _rate_is_zero(u)],
+                    "deterministic_units": [
+                        str(u.name) for u in inputs.units
+                        if getattr(u, "profile", None) is not None
+                        and _rate_is_zero(u)],
+                    "folded_units": [
+                        {"name": str(u.name),
+                         "folded_constant": float(u.folded_constant),
+                         "source": "static"}
+                        for u in inputs.units
+                        if getattr(u, "folded_constant", None) is not None],
                     # Phase 12d: the activity disclosure (see /copt),
                     # captured in the request.
                     "activity": activity_block,
@@ -5396,6 +5417,21 @@ def get_copt():
             "profile_units": [u.name for u in split.mixed] + [u.name for u in split.netted],
             "netted_beyond_cap": [u.name for u in split.netted],
             "k_exact": K_EXACT,
+            # Phase 12h. Two units the lists above cannot describe:
+            #  * a unit whose STATIC p_max_pu was folded into its capacity
+            #    has no profile at all, so it is in no existing list — the
+            #    `source` field is here so a later phase can add another
+            #    fold without changing the shape;
+            #  * a unit whose outage rate is zero because its availability
+            #    is declared to include outages carries a profile but is in
+            #    neither `mixed` nor `netted` — it is netted exactly, at
+            #    full availability, and no outages are sampled for it.
+            "folded_units": [
+                {"name": u.name, "folded_constant": float(u.folded_constant),
+                 "source": "static"}
+                for u in units
+                if getattr(u, "folded_constant", None) is not None],
+            "deterministic_units": [u.name for u in split.deterministic],
         },
         "fidelity_note": analysis["fidelity_note"],
         # Phase 12d: which units the engines masked in which period, by

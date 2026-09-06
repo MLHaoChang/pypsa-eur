@@ -449,6 +449,16 @@ class PyPSAService:
             if not record_is_running(prev.solver_state.get(key)):
                 prev.solver_state[key] = None
         n.name = prev.network.name
+        # Phase 12h: the replacement network was built by a clustering pass
+        # that aggregates rows and never carries a custom bool column's dtype
+        # — so put `p_max_pu_includes_outages` back to `bool` here, at the one
+        # network-replacing path that does not go through the netCDF import
+        # helper. Without it the flag is silently dropped by the swap.
+        try:
+            from services.adequacy.occurrence import normalise_flag_column
+            normalise_flag_column(n)
+        except Exception:                                     # noqa: BLE001
+            pass
         # Same project (clustering swaps the network in place): carry identity,
         # solver_state AND undo forward so the user's solver_config / status /
         # undo history survive the swap, matching the pre-split module globals.
@@ -571,6 +581,45 @@ class PyPSAService:
     @classmethod
     def get_netcdf_io_lock(cls) -> threading.Lock:
         return cls._netcdf_io_lock
+
+    @staticmethod
+    def export_network_to_netcdf(n, path) -> None:
+        """The ONE runtime path from a live network to a ``.nc`` file.
+
+        Phase 12h: a custom BOOL column survives the round trip only while
+        it stays ``bool`` dtype, and the solve itself breaks that — the VOLL
+        and DSR slack rows are added on a frame lacking the column and then
+        removed, leaving an ``object`` column of pure bools, which netCDF
+        refuses outright (``unsupported dtype for netCDF4 variable: bool``).
+        Normalising HERE fixes the project save, the io export and the undo
+        snapshot at once, and a fourth caller added later inherits it.
+
+        It deliberately does NOT take ``get_netcdf_io_lock()``: that lock is
+        not reentrant and all three callers already hold it, so taking it
+        again would deadlock the save while the mutation lock is held — the
+        app would wedge rather than error.
+        """
+        from services.adequacy.occurrence import normalise_flag_column
+        normalise_flag_column(n)
+        n.export_to_netcdf(str(path))
+
+    @staticmethod
+    def import_network_from_netcdf(n, path) -> None:
+        """The mirror of ``export_network_to_netcdf``: the ONE runtime path
+        from a ``.nc`` file into a live network.
+
+        A clean ``bool`` column round-trips on its own, but an older save (or
+        an externally produced netCDF) can carry
+        ``p_max_pu_includes_outages`` as ``float64`` or ``object``, and every
+        later write would then keep it that way. Normalising on the way IN
+        means the dtype is right from the first request after a load.
+
+        Like the export helper it does NOT take ``get_netcdf_io_lock()`` —
+        the lock is not reentrant and every caller already holds it.
+        """
+        from services.adequacy.occurrence import normalise_flag_column
+        n.import_from_netcdf(str(path))
+        normalise_flag_column(n)
 
     # ── Active-context solver state ──────────────────────────────────────────
     # The solver lifecycle + result state of the ACTIVE project. The simulation

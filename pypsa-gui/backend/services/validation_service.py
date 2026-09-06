@@ -2138,9 +2138,9 @@ def _check_reserve_margin(n, solver_config) -> list[Issue]:
 
 
 def _check_profiled_occurrence_units(n) -> list[Issue]:
-    """Phase 12c-pre: how a unit that carries BOTH a ``p_max_pu`` and outage
-    data is modelled — the disclosure that replaced 12a's shadowed-profile
-    warning once the engines modelled the series.
+    """Phase 12c-pre / 12h: how a unit that carries BOTH a ``p_max_pu`` and
+    outage data is modelled — the disclosure that replaced 12a's shadowed-
+    profile warning once the engines modelled the series.
 
     Walks the SAME membership the engines use (``copt.occurrence_units``), so
     it fires on carrier-default-only networks too — a PyPSA-Eur import has
@@ -2148,24 +2148,35 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
     below could never reach it (plan 12c-pre v2 review, finding 3).
 
     * ``profile_and_outage_modelled`` — the unit's availability SERIES is
-      informative and the engines now honour it: outages are sampled on the
-      series and the COPT mixes the unit exactly per hour. Emitted only when
-      the outage data was typed by the user (``source == "asset"``): they
-      entered it and deserve to be told how it is used. For a library
-      (carrier-default) rate — a hydro carrier with an inflow series — the
-      ``/copt`` and ``/mc`` payloads carry the disclosure and preflight is
-      silent, because a warning on every hydro project is one nobody reads.
-    * ``static_p_max_pu_not_applied`` — a STATIC ``p_max_pu < 1`` on a unit
-      with outage data (either source). The engines do NOT apply it: it is
-      ambiguous in the wild (a typed capacity factor on a farm, or
-      PyPSA-Eur's nuclear CF table that already contains forced outages),
-      and folding it in would double-count the second case. The reserve
-      margin applies both. There is no correct remedy inside this phase for
-      a CF that includes outages; the message says so rather than offering
-      "set q = 0", which would model a perfectly firm unit.
+      informative (constant *or* varying) and the engines honour it:
+      outages are sampled on the series and the COPT mixes the unit exactly
+      per hour. Emitted only when the outage data was typed by the user
+      (``source == "asset"``): they entered it and deserve to be told how it
+      is used. For a library (carrier-default) rate — a hydro carrier with
+      an inflow series — the ``/copt`` and ``/mc`` payloads carry the
+      disclosure and preflight is silent, because a warning on every hydro
+      project is one nobody reads.
+    * ``availability_may_include_outages`` (Phase 12h) — a STATIC
+      ``p_max_pu < 1`` with NO ``p_max_pu`` column, on a unit with a live
+      outage rate. That is exactly the population the engines now fold the
+      static factor for, so both the CF and the rate are applied. Which is
+      right for a typed capacity factor and wrong for a historical one that
+      already contains forced outages, so the message names the flag.
+    * ``outages_folded_into_availability`` (Phase 12h) — the flag is set and
+      the unit has a sub-1 availability: no outages are sampled for it.
+      Variant ``…_ignored`` when the flag is set but there is nothing for it
+      to act on — an availability of 1, or no outage data at all. The second
+      case is walked from ``_membership_walk`` directly, because
+      ``occurrence_units`` drops a ``source == "missing"`` row.
+
+    12c-pre's ``static_p_max_pu_not_applied`` is RETIRED: its sentence ("the
+    engines do NOT apply it") became false when 12h shipped the fold.
     """
     try:
-        from services.adequacy.copt import occurrence_units, series_is_informative
+        from services.adequacy.copt import (
+            _membership_walk, occurrence_units, series_is_informative)
+        from services.adequacy.metrics import electrical_columns
+        from services.adequacy.occurrence import FLAG_COL, flag_is_set
         rows = occurrence_units(n)
     except Exception:                                         # noqa: BLE001
         return []
@@ -2173,37 +2184,80 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
     p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
     static = getattr(gens, "get", lambda *_a, **_k: None)("p_max_pu") \
         if gens is not None else None
+    flags = getattr(gens, "get", lambda *_a, **_k: None)(FLAG_COL) \
+        if gens is not None else None
+
+    def _flagged(name) -> bool:
+        if flags is None:
+            return False
+        try:
+            return flag_is_set(flags.get(name))
+        except Exception:                                     # noqa: BLE001
+            return False
+
+    def _static_of(name) -> float:
+        if static is None:
+            return 1.0
+        try:
+            sv = float(static.get(name, 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+        return sv if math.isfinite(sv) else 1.0
 
     modelled: list[str] = []
-    static_hit: list[str] = []
+    may_include: list[str] = []
+    folded: list[str] = []
+    ignored: list[str] = []
+    seen: set[str] = set()
     for name, _cap, row in rows:
-        has_series = (p_max_pu_t is not None
-                      and name in getattr(p_max_pu_t, "columns", [])
-                      and series_is_informative(p_max_pu_t[name]))
+        seen.add(str(name))
+        has_column = (p_max_pu_t is not None
+                      and name in getattr(p_max_pu_t, "columns", []))
+        has_series = has_column and series_is_informative(p_max_pu_t[name])
         try:
             q = float(row["rate"])
         except (KeyError, TypeError, ValueError):
             q = float("nan")
+        sub_one = has_series or _static_of(name) < 1.0 - 1e-9
+        if _flagged(name):
+            # H2 already zeroed this unit's rate iff its availability is
+            # sub-1, so the two branches never both fire for one unit.
+            (folded if sub_one else ignored).append(name)
+            continue
         # A typed q of 0 has no outages to sample; the series is honoured
         # exactly as a must-take unit's would be, and a sentence about
         # sampled outages would be false (shipped-code review, finding 4).
         if has_series and str(row["source"]) == "asset" and q > 0.0:
             modelled.append(name)
-        # A static value beside a SERIES is inert everywhere — PyPSA itself
-        # reads the series, and so does the margin — so it is not "not
-        # applied", it is superseded (shipped-code review, finding 3).
-        if static is not None and not has_series:
-            try:
-                sv = float(static.get(name, 1.0))
-            except (TypeError, ValueError):
-                sv = 1.0
-            if math.isfinite(sv) and sv < 1.0 - 1e-9:
-                static_hit.append(name)
+        # The fold's own population: a static below 1 with NO column. A
+        # static beside ANY column is inert everywhere — PyPSA reads the
+        # column, so does the margin, and so does the fold (shipped-code
+        # review, finding 3; plan v6 §H3).
+        if not has_column and q > 0.0 and _static_of(name) < 1.0 - 1e-9:
+            may_include.append(name)
+
+    # A flagged unit with NO outage data at all never reaches `rows`, so its
+    # "the flag does nothing here" sentence has to come from the membership
+    # walk itself.
+    if flags is not None:
+        try:
+            buses = getattr(n, "buses", None)
+            elec = set(electrical_columns(n, list(buses.index))) \
+                if buses is not None else set()
+            for g, _cap, _series, mrow in _membership_walk(n, elec):
+                if str(g) in seen or not _flagged(g):
+                    continue
+                if str(mrow["source"]) == "missing":
+                    ignored.append(str(g))
+        except Exception:                                     # noqa: BLE001
+            pass
+
+    def _names(hits: list[str]) -> tuple[str, str]:
+        return ", ".join(sorted(hits)[:20]), (" …" if len(hits) > 20 else "")
 
     issues: list[Issue] = []
     if modelled:
-        names = ", ".join(sorted(modelled)[:20])
-        more = " …" if len(modelled) > 20 else ""
+        names, more = _names(modelled)
         issues.append(_warn(
             "profile_and_outage_modelled", "Generator", "",
             f"{len(modelled)} generator(s) carry BOTH an availability profile "
@@ -2214,24 +2268,46 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
             "outage states. The reserve margin credits the same unit at "
             "(1 - q) x the profile's mean over its peak window, the same "
             "expectation (on a NaN hour the engines count 0 availability "
-            "while the margin's mean skips it). Remove the outage rate if "
-            "the profile already accounts for outages.",
+            "while the margin's mean skips it). If the profile is a "
+            "historical capacity factor that already accounts for outages, "
+            "set p_max_pu_includes_outages on the asset so the rate is not "
+            "applied on top of it.",
         ))
-    if static_hit:
-        names = ", ".join(sorted(static_hit)[:20])
-        more = " …" if len(static_hit) > 20 else ""
+    if may_include:
+        names, more = _names(may_include)
         issues.append(_warn(
-            "static_p_max_pu_not_applied", "Generator", "",
-            f"{len(static_hit)} generator(s) with outage data carry a STATIC "
-            f"p_max_pu below 1: {names}{more}. The COPT and the sequential "
-            "MC do NOT apply it — they model the unit at nameplate x (1 - q) "
-            "— while the reserve margin applies both, so the engines and the "
-            "margin disagree about this unit. If the value is an "
-            "availability, enter it as a time series (a constant series is "
-            "honoured by every engine). If it is a capacity factor that "
-            "already includes outages, the margin double-counts it and "
-            "neither engine sees it; that case is recorded as an open item "
-            "and has no correct remedy yet.",
+            "availability_may_include_outages", "Generator", "",
+            f"{len(may_include)} generator(s) with outage data carry a STATIC "
+            f"p_max_pu below 1: {names}{more}. Every surface now applies both "
+            "— the engines and the reserve margin credit the unit at "
+            "nameplate x p_max_pu x (1 - q). That is right for a typed "
+            "capacity factor. If the value is a historical capacity factor "
+            "that ALREADY contains forced outages (PyPSA-Eur's nuclear table "
+            "is one), the outage rate is applied twice: set "
+            "p_max_pu_includes_outages on the asset and the rate is dropped "
+            "instead.",
+        ))
+    if folded:
+        names, more = _names(folded)
+        issues.append(_warn(
+            "outages_folded_into_availability", "Generator", "",
+            f"{len(folded)} generator(s) are modelled WITHOUT sampled outages "
+            f"because their availability is declared to already include them: "
+            f"{names}{more} (p_max_pu_includes_outages is set). The COPT and "
+            "the sequential MC credit them at their availability alone, and "
+            "the reserve margin derates them by the same availability with no "
+            "outage term. Clear the flag if the rate should be applied on top "
+            "of the availability.",
+        ))
+    if ignored:
+        names, more = _names(ignored)
+        issues.append(_warn(
+            "outages_folded_into_availability_ignored", "Generator", "",
+            f"{len(ignored)} generator(s) have p_max_pu_includes_outages set "
+            f"but nothing for it to act on: {names}{more}. The flag drops an "
+            "outage rate into an availability below 1, and these assets have "
+            "an availability of 1, no outage data, or both — so they are "
+            "modelled exactly as they would be with the flag clear.",
         ))
     return issues
 

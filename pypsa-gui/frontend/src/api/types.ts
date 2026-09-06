@@ -46,6 +46,10 @@ export interface Generator {
   outage_rate_value?: number | null
   outage_rate_basis?: 'FOR' | 'EFORd' | null
   mttr_hours?: number | null
+  // Phase 12h, Generator only: "the availability I gave this asset already
+  // includes forced outages". Set, the outage rate is not applied on top of
+  // it — by either adequacy engine or by the reserve margin.
+  p_max_pu_includes_outages?: boolean | null
   name: string; bus: string; carrier: string; p_nom: number; p_nom_extendable: boolean
   p_nom_min: number; p_nom_max: number | null; p_min_pu: number; p_max_pu: number
   // PyPSA AC control mode. Consumed by n.pf() in Stage 2; defaults to 'PQ'.

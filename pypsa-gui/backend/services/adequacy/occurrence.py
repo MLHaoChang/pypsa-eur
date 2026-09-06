@@ -18,6 +18,14 @@ Three custom columns feed this module (declared on the create schemas in
   reported; downstream COPT metrics are tagged with the mix of bases that
   fed them.
 * ``mttr_hours`` — mean time to repair, hours.
+* ``p_max_pu_includes_outages`` — Phase 12h. A boolean on Generator saying
+  "the availability I typed ALREADY contains forced outages", which is the
+  only thing that distinguishes the two readings of a sub-1 ``p_max_pu``: a
+  typed capacity factor on a farm (apply the rate on top) versus a historical
+  CF table such as PyPSA-Eur's ``nuclear_p_max_pu.csv`` (do not). Where it is
+  set, ``resolve_outage_params`` returns ``rate = 0.0``, so BOTH the engines
+  and the reserve margin stop applying the rate — by construction, since every
+  consumer reads ``q`` from this one frame.
 
 NaN/None means "unset": resolution falls back to the carrier default library,
 and a carrier without a library entry yields ``source="missing"`` with NaN
@@ -32,6 +40,63 @@ from dataclasses import dataclass
 import pandas as pd
 
 VALID_BASES = ("FOR", "EFORd")
+
+# Phase 12h. The flag column, its reader and its normaliser.
+#
+# It must be a real ``bool`` dtype column wherever it exists, and that is not
+# a tidiness preference: netCDF refuses to export an ``object`` column whose
+# values are all bools (`unsupported dtype for netCDF4 variable: bool`), and
+# an ``object`` column is exactly what ANY ``n.add`` that omits the column
+# leaves behind — including the solve's own VOLL and DSR slack rows, which are
+# added and then removed, so the next project save would 500 and the undo
+# snapshot would fail silently. (Measured: ``[True, False, nan]`` and
+# ``[True, False, None]`` export fine; ``[True, False, True]`` raises.)
+FLAG_COL = "p_max_pu_includes_outages"
+
+
+def flag_is_set(v: object) -> bool:
+    """The ONE reader of the flag. True only for a real affirmative: a bool,
+    1/1.0, or the strings ``"true"``/``"1"``/``"yes"`` case-insensitively —
+    the same set ``PATCH /_bulk``'s own boolean branch accepts. NaN (the value
+    a column gains when a row is added without it), None and ``"False"`` are
+    all False."""
+    if v is None:
+        return False
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(f):
+        return False
+    return f != 0.0
+
+
+def normalise_flag_column(n, component: str = "generators") -> None:
+    """Make the flag column exist and be ``bool`` dtype on ``n.<component>``.
+
+    Creates it (all ``False``) when absent — which is what lets a user
+    bulk-flag an imported network whose frame has never carried the column —
+    and otherwise maps every cell through :func:`flag_is_set`. Idempotent and
+    cheap (0.17 ms on a 300-row frame), so it can sit at every boundary that
+    needs it: the netCDF export helper, the solver's restore callback, the
+    create/update/bulk routes, and every import or network-replacing path.
+    """
+    df = getattr(n, component, None)
+    if df is None:
+        return
+    try:
+        if FLAG_COL not in df.columns:
+            df[FLAG_COL] = False
+        else:
+            df[FLAG_COL] = df[FLAG_COL].map(flag_is_set).astype(bool)
+    except Exception:                                         # noqa: BLE001
+        # A frame that cannot take the column is a frame nothing reads it
+        # from; the resolver's own `flag_is_set` still answers False.
+        pass
 
 # Above this implied event frequency the (rate, MTTR) pair is almost certainly
 # inconsistent — the two are sourced independently (class averages vs a
@@ -120,10 +185,13 @@ def resolve_outage_params(n, component: str) -> pd.DataFrame:
     df = getattr(n, component)
     out = pd.DataFrame(
         {"rate": float("nan"), "basis": "", "mttr_hours": float("nan"),
-         "source": "missing"},
+         "source": "missing", "outages_in_availability": False},
         index=df.index,
     )
     has_carrier = "carrier" in df.columns
+    # Phase 12h: the flag is Generator-only and needs the availability to be
+    # sub-1 for there to be anything to fold — see `_availability_is_sub_one`.
+    has_flag = FLAG_COL in df.columns
     for name in df.index:
         row = df.loc[name]
         carrier = str(row["carrier"]).strip().lower() if has_carrier else ""
@@ -144,7 +212,41 @@ def resolve_outage_params(n, component: str) -> pd.DataFrame:
                 default.rate, default.basis, default.mttr_hours,
                 "carrier_default",
             ]
+        # Phase 12h. The flag zeroes the rate at this one place, so every
+        # consumer — both engines, the margin's derate, the net-load window,
+        # the worksheet, the disclosures — stops applying it together, by
+        # construction rather than by seven edits that must agree.
+        #
+        # Three conditions. `source != "missing"`: there is no rate to fold
+        # otherwise. A SUB-1 availability: zeroing the rate of a unit whose
+        # availability is 1 does not "have no effect", it makes the unit
+        # perfectly firm — the maximal effect — so there the rate is left
+        # alone and preflight says the flag was ignored.
+        if has_flag and out.at[name, "source"] != "missing" \
+                and flag_is_set(row.get(FLAG_COL)) \
+                and _availability_is_sub_one(n, component, name, row):
+            out.loc[name, ["rate", "outages_in_availability"]] = [0.0, True]
     return out
+
+
+def _availability_is_sub_one(n, component: str, name, row) -> bool:
+    """Whether this asset carries an availability below 1 — a static
+    ``p_max_pu < 1``, or an informative ``p_max_pu`` column. Only then is
+    there an availability for outages to be "already included in"."""
+    from services.adequacy.copt import series_is_informative
+
+    ts = getattr(getattr(n, f"{component}_t", None), "p_max_pu", None)
+    if ts is not None and name in getattr(ts, "columns", []):
+        try:
+            if series_is_informative(ts[name]):
+                return True
+        except Exception:                                     # noqa: BLE001
+            pass
+    try:
+        v = float(row.get("p_max_pu"))
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v < 1.0 - 1e-9
 
 
 def validate_outage_params(params: pd.DataFrame) -> list[str]:

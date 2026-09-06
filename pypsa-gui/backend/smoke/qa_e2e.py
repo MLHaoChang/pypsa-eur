@@ -4718,6 +4718,221 @@ def suite_S30():
     http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
 
 
+def suite_S31():
+    """
+    A static capacity factor is applied, and "it already includes outages" is
+    a flag the asset carries (Phase 12h).
+
+    12c-pre left the static `p_max_pu` column unread on purpose: folding it in
+    AND applying an outage rate double-counts PyPSA-Eur's nuclear capacity-
+    factor table, which already contains forced outages. 12h gives that case a
+    name — the per-asset bool `p_max_pu_includes_outages` — so the fold can
+    ship. The rate is zeroed at `occurrence.resolve_outage_params`, the one
+    place every consumer reads `q` from, so both engines and the reserve
+    margin move together.
+
+    The §0 fixture with `gas` at 50 MW / marginal cost 20, because at 25 MW
+    the derated firm capacity is 99.75 MW against a 110 MW requirement and
+    preflight refuses `reserve_margin_unreachable`. `GET /results/reserve_margin`
+    serves only the persisted solve-time stash (204 otherwise), so the suite
+    sets `reserve_margin = 0.1` and solves before reading a derate — S23's
+    pattern. The COPT hand values are pinned by a unit test on the same
+    fixture (`tests/test_includes_outages.py::test_S31_*`), so the live rows
+    compare against numbers the suite owns.
+
+    Bitten live (recorded in the plan): drop the capacity scaling and S31.2
+    reads the nameplate row; ignore the flag in `resolve_outage_params` and
+    S31.4 reads the unflagged EUE and derate 0.76; drop the export-helper
+    normaliser and S31.4's save is a 500.
+    """
+    print("\nS31 - A static CF is applied, and the flag says whether it "
+          "already includes outages (area 31)")
+    name = "qa_e2e_includes_outages"
+    FLAG = "p_max_pu_includes_outages"
+    IDS = [f"S31.{i}" for i in (1, 2, 3, 4, 5)]
+
+    # The three hand values are OWNED by the unit suite, which pins them on
+    # this exact fixture — importing them is what stops the live rows and the
+    # pin from drifting apart.
+    from tests.test_includes_outages import (
+        S31_EUE_FLAG, S31_EUE_NAMEPLATE, S31_EUE_PLAIN)
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=300):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    def preflight_codes():
+        _st, pf = http("/api/simulation/preflight", method="POST", body={})
+        return [(str(i.get("code") or ""), str(i.get("message") or ""))
+                for i in ((pf or {}).get("issues") or []) if isinstance(i, dict)]
+
+    def copt_eue():
+        st, body = http("/api/results/copt")
+        if st != 200 or not isinstance(body, dict):
+            return None, st
+        return ((body.get("metrics") or {}).get("eue_mwh")), st
+
+    def gen_flag():
+        _st, rows = http("/api/network/generators")
+        rows = rows.get("generators", []) if isinstance(rows, dict) else (rows or [])
+        for r in rows:
+            if isinstance(r, dict) and r.get("name") == "nuc":
+                return r.get(FLAG, "<absent>")
+        return "<missing row>"
+
+    def margin_derate():
+        st, rm = http("/api/results/reserve_margin")
+        if st != 200 or not isinstance(rm, dict):
+            return None, st
+        for a in (rm.get("assets") or []):
+            if isinstance(a, dict) and a.get("name") == "nuc":
+                return a.get("derate"), st
+        return None, st
+
+    def near(v, want, tol=5e-3):
+        try:
+            return abs(float(v) - want) < tol
+        except (TypeError, ValueError):
+            return False
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in IDS:
+            skip(i, f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("nuclear", "gas"):
+        built.append(http("/api/network/carriers", method="POST", body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-01-07 23:00",
+                            "freq": "h"})[0])
+    # NOTE the POST body carries no `p_max_pu_includes_outages`: S31.3's
+    # whole point is that `_bulk` has to CREATE the column on a frame the API
+    # never gave one.
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "nuc", "bus": "b", "carrier": "nuclear",
+                            "p_nom": 100.0, "marginal_cost": 5.0,
+                            "p_max_pu": 0.8, "outage_rate_value": 0.05,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 100.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "gas", "bus": "b", "carrier": "gas",
+                            "p_nom": 50.0, "marginal_cost": 20.0,
+                            "outage_rate_value": 0.05,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 100.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    bad = [c for c in built if c not in (200, 201)]
+    if bad:
+        for i in IDS:
+            skip(i, f"fixture build non-2xx={bad}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    # ── S31.1 — preflight names the unit the fold touches, and the code 12h
+    # retired is gone. `static_p_max_pu_not_applied` said "the engines do NOT
+    # apply it", which stopped being true the moment the fold shipped.
+    codes = preflight_codes()
+    may = [m for c, m in codes if c == "availability_may_include_outages"]
+    retired = [c for c, _m in codes if c == "static_p_max_pu_not_applied"]
+    record("S31.1",
+           len(may) == 1 and "nuc" in may[0] and FLAG in may[0] and not retired,
+           f"availability_may_include_outages x{len(may)} "
+           f"(names nuc={bool(may) and 'nuc' in may[0]}, names the flag="
+           f"{bool(may) and FLAG in may[0]}); retired code present={bool(retired)}")
+
+    # ── S31.2 — the CF is applied. Before 12h the engines read the nameplate
+    # row (`p_nom x (1 - q)`) and this was 441.0.
+    eue_plain, st_copt = copt_eue()
+    record("S31.2", st_copt == 200 and near(eue_plain, S31_EUE_PLAIN, 0.05),
+           f"/results/copt -> {st_copt}; EUE={eue_plain!r} "
+           f"(want {S31_EUE_PLAIN}; before 12h: {S31_EUE_NAMEPLATE}, the nameplate row)")
+
+    # ── S31.3 — `_bulk` sets the flag on a frame whose column the API POST
+    # never created, the disclosure swaps, and the value reads back `true`.
+    st_b, body_b = http("/api/network/_bulk", method="PATCH",
+                        body={"component_class": "Generator", "names": ["nuc"],
+                              "updates": {FLAG: True}})
+    read_back = gen_flag()
+    codes3 = preflight_codes()
+    folded3 = [m for c, m in codes3 if c == "outages_folded_into_availability"]
+    may3 = [c for c, _m in codes3 if c == "availability_may_include_outages"]
+    record("S31.3",
+           st_b in (200, 201) and read_back is True
+           and len(folded3) == 1 and "nuc" in folded3[0] and not may3,
+           f"_bulk set flag -> {st_b} {str(body_b)[:60]}; GET reads {read_back!r} "
+           f"(want True); outages_folded_into_availability x{len(folded3)}, "
+           f"availability_may_include_outages x{len(may3)} (want 1 / 0)")
+
+    # ── S31.4 — the engines credit the CF alone, the margin's derate moves
+    # with it, and the project still SAVES: the solve adds and removes its
+    # slack rows on a frame carrying the flag, which leaves an `object` column
+    # of pure bools — the one shape netCDF refuses — unless the export helper
+    # normalises it back.
+    eue_flag, st_copt4 = copt_eue()
+    st_cfg, _ = put_cfg(reserve_margin=0.1)
+    http("/api/simulation/run", method="POST")
+    solved4 = poll_solve()
+    d_flag, st_rm4 = margin_derate()
+    st_save, body_save = http(f"/api/projects/{q(name)}", method="PUT", body={})
+    record("S31.4",
+           st_copt4 == 200 and near(eue_flag, S31_EUE_FLAG, 0.05)
+           and st_cfg == 200
+           and isinstance(solved4, dict) and solved4.get("condition") == "optimal"
+           and st_rm4 == 200 and near(d_flag, 0.80, 1e-6)
+           and st_save in (200, 201),
+           f"EUE={eue_flag!r} (want {S31_EUE_FLAG}); solve="
+           f"{(solved4 or {}).get('condition')!r}; margin->{st_rm4} derate={d_flag!r} "
+           f"(want 0.80); project save -> {st_save} {str(body_save)[:60]} "
+           "(a 500 here is the object-dtype column netCDF refuses)")
+
+    # ── S31.5 — clearing the flag through `_bulk` sends `null`, which is the
+    # blank cell the bulk editor produces. It must clear to the column's class
+    # default, not write None (which upcasts the column and 500s the save).
+    st_b5, body_b5 = http("/api/network/_bulk", method="PATCH",
+                          body={"component_class": "Generator", "names": ["nuc"],
+                                "updates": {FLAG: None}})
+    read_back5 = gen_flag()
+    http("/api/simulation/run", method="POST")
+    solved5 = poll_solve()
+    d_plain, st_rm5 = margin_derate()
+    record("S31.5",
+           st_b5 in (200, 201) and read_back5 is False
+           and isinstance(solved5, dict) and solved5.get("condition") == "optimal"
+           and st_rm5 == 200 and near(d_plain, 0.76, 1e-6),
+           f"_bulk clear flag -> {st_b5} {str(body_b5)[:60]}; GET reads "
+           f"{read_back5!r} (want False, not null and not a 500); re-solve="
+           f"{(solved5 or {}).get('condition')!r}; derate={d_plain!r} (want 0.76)")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
 def _wait_solve(timeout=600):
     """Poll /api/simulation/status until it leaves `running`."""
     import time as _t
@@ -4828,6 +5043,8 @@ def main() -> int:
         suite_S29()
     if run("S30"):
         suite_S30()
+    if run("S31"):
+        suite_S31()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

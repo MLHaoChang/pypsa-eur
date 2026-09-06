@@ -99,6 +99,15 @@ window mean of the same expectation.
 
 ### 1.3 The static `p_max_pu < 1` case is deferred — and is a finding
 
+> **CLOSED by Phase 12h** (`2026-09-06-fmea-phase12h-static-cf-includes-outages-v6.md`).
+> The fold ships, gated on the ABSENCE of a `p_max_pu` column, and the
+> ambiguity this section identified becomes data: a per-asset bool
+> `p_max_pu_includes_outages` zeroes the unit's rate at
+> `occurrence.resolve_outage_params`, so the engines and the reserve margin
+> agree on every reading of the field. The rest of this section is kept as
+> the record of why the fold waited.
+
+
 v1 folded a static `p_max_pu < 1` into `capacity_mw` "exactly". It is not
 exact, because the field carries two incompatible meanings in the wild: a
 typed capacity factor on a farm (12a's "commonest way this is entered"),

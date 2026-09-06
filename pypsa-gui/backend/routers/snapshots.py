@@ -503,7 +503,8 @@ def restore_snapshot(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(project_dir / "network.nc"))
+            PyPSAService.import_network_from_netcdf(
+                n, project_dir / "network.nc")
         # Bind identity atomically with the swap — inside the SAME lock that
         # reset it to None — so a concurrent save can't observe the transient
         # unbound state and wrongly claim/overwrite (see load_project). Binds

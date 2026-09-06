@@ -31,8 +31,17 @@ baked in:
   rule and netting the disclosed exception. The series is attached
   whenever it is INFORMATIVE — not identically 1 — so a constant series
   at 0.8 is honoured at 0.8·cap, exactly as the reserve margin credits it.
-  A static ``p_max_pu < 1`` is still NOT applied (see
-  ``validation_service.static_p_max_pu_not_applied``).
+  A static ``p_max_pu < 1`` IS applied since Phase 12h — folded into the
+  unit's capacity by ``static_fold_factor``, but only when the unit has no
+  ``p_max_pu`` COLUMN, because any column supersedes the static cell in
+  PyPSA, in the reserve margin and here alike. And a unit whose availability
+  is declared to already contain its outages
+  (``p_max_pu_includes_outages``) has its rate zeroed at
+  ``occurrence.resolve_outage_params``, so it neither mixes nor convolves:
+  ``split_fleet`` puts it in ``deterministic`` and it is netted exactly, at
+  full availability (see ``validation_service``'s
+  ``availability_may_include_outages`` and
+  ``outages_folded_into_availability``).
 * **Rounding increment Δ** (``delta_mw``): the table is O(N·C/Δ), not 2^N.
   Capacity is apportioned PROBABILISTICALLY to the two adjacent rounded
   states so the distribution's mean is exact — plain rounding drifts the
@@ -75,6 +84,14 @@ class CoptUnit:
     # the scalar path, byte-for-byte.
     capacity_series: np.ndarray | None = field(default=None, compare=False,
                                                hash=False, repr=False)
+    # Phase 12h: when a STATIC ``p_max_pu`` was folded into ``capacity_mw``
+    # (and into ``capacity_series``), the factor that was folded — payload
+    # data for the ``folded_units`` list, never read by the math, which sees
+    # only the scaled capacity. Excluded from equality, hashing and repr for
+    # the same reason the two series are: the identity of a unit is its name
+    # and its numbers, and the scaled capacity already carries the factor.
+    folded_constant: float | None = field(default=None, compare=False,
+                                          hash=False, repr=False)
 
 
 #: Exact per-hour mixture for up to this many profiled units (``2^K`` states
@@ -491,8 +508,10 @@ def _occurrence_profile(p_max_pu_t, g, snapshots) -> np.ndarray | None:
     review, not papered over here. ±inf is dropped too because
     ``nan_to_num`` would otherwise keep it, the product ``profile × cap``
     would overflow, and the mixture would index the table with NaN (shipped-
-    code review, finding 1). The static column is deliberately NOT read
-    here (plan §1.3)."""
+    code review, finding 1). The STATIC column is still not read here — it
+    never becomes a profile — but since Phase 12h it is no longer ignored:
+    ``static_fold_factor`` folds it into the unit's CAPACITY instead, which
+    needs no per-hour mixture and costs no ``K_EXACT`` slot."""
     if p_max_pu_t is None or g not in getattr(p_max_pu_t, "columns", []):
         return None
     col = p_max_pu_t[g].reindex(snapshots)
@@ -500,6 +519,36 @@ def _occurrence_profile(p_max_pu_t, g, snapshots) -> np.ndarray | None:
     if not series_is_informative(vals):
         return None
     return np.where(np.isfinite(vals), vals, 0.0)
+
+
+def static_fold_factor(gens, p_max_pu_t, g) -> float | None:
+    """Phase 12h (H3): the STATIC ``p_max_pu`` an occurrence-bearing unit's
+    capacity is scaled by, or None when there is nothing to fold.
+
+    12c-pre left the static column unread on purpose, because folding it in
+    *and* applying an outage rate double-counts the PyPSA-Eur case, whose
+    historical capacity factors already contain forced outages. Phase 12h
+    gives that case a name — ``p_max_pu_includes_outages`` — so the fold can
+    ship: the engines apply the CF the LP applies.
+
+    The gate is the ABSENCE of a ``p_max_pu`` column for this unit, not
+    ``series_is_informative``: PyPSA lets ANY column supersede the static
+    cell (measured — a static 0.8 beside an all-ones column dispatches at
+    1.0), and ``reserve_margin_facts`` reads the column the same way, so a
+    fold beside an all-ones column would invent a derate that neither the LP
+    nor the margin applies (plan v6 §H3; v5 review, finding 1).
+    """
+    if p_max_pu_t is not None and g in getattr(p_max_pu_t, "columns", []):
+        return None
+    if gens is None or "p_max_pu" not in getattr(gens, "columns", []):
+        return None
+    try:
+        cf = float(gens.at[g, "p_max_pu"])
+    except (TypeError, ValueError, KeyError):
+        return None
+    if not math.isfinite(cf) or cf == 1.0:
+        return None
+    return cf
 
 
 def occurrence_units(n) -> list[tuple[str, float, object]]:
@@ -523,6 +572,29 @@ class FleetSplit:
     table: tuple          # two-state units, convolved into the table
     mixed: tuple          # profiled units mixed exactly per hour (≤ K_EXACT)
     netted: tuple         # profiled units beyond the cap, netted at expectation
+    # Phase 12h: profiled units whose outage rate is ZERO — their
+    # availability series is declared to already include outages
+    # (``p_max_pu_includes_outages``), so there is no random state to mix.
+    # ``_screen_block`` nets them at their FULL ``a_{i,h}``, which is exact
+    # (one state), and they never count against ``k_exact``. Defaulted so
+    # every existing ``FleetSplit(...)`` construction stays valid.
+    deterministic: tuple = ()
+
+
+def rate_is_zero(u) -> bool:
+    """Phase 12h: whether a unit has NO outages to sample — its availability
+    is declared to already include them, so the rate was zeroed at
+    ``resolve_outage_params``. Shared with the ``/mc`` payload, which never
+    calls ``split_fleet`` and must agree with it about the same fleet.
+
+    Total on a NaN rate — a unit whose rate is not a finite
+    number is NOT deterministic, so it stays on the sampled path rather than
+    falling out of every bucket."""
+    try:
+        q = float(u.q)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(q) and q <= 0.0
 
 
 def split_fleet(units, *, k_exact: int = K_EXACT) -> FleetSplit:
@@ -532,15 +604,25 @@ def split_fleet(units, *, k_exact: int = K_EXACT) -> FleetSplit:
     them; the remainder are netted at expected output. The order among the
     profiled units is stable (mean descending, then name) so which units
     are netted is a property of the data, not of frame order.
+
+    Phase 12h: a profiled unit whose rate is zero carries no random state,
+    so it goes to ``deterministic`` instead — netted at full availability by
+    ``_screen_block``, exactly, and never burning a ``k_exact`` slot that a
+    unit with real outages needs. (Measured on nine units at load 300:
+    leaving one in the mixture displaces a real unit into the netted
+    approximation, 96.828 h against the exact 98.379 h.)
     """
     table = tuple(u for u in units if u.profile is None)
     profiled = [u for u in units if u.profile is not None]
+    deterministic = tuple(u for u in profiled if rate_is_zero(u))
+    profiled = [u for u in profiled if not rate_is_zero(u)]
     profiled.sort(key=lambda u: (
         -float(np.nanmean(np.asarray(u.profile, dtype=np.float64))) * float(u.capacity_mw),
         u.name))
     k = max(int(k_exact), 0)
     return FleetSplit(table=table, mixed=tuple(profiled[:k]),
-                      netted=tuple(profiled[k:]))
+                      netted=tuple(profiled[k:]),
+                      deterministic=deterministic)
 
 
 def netted_expectation(netted, H: int) -> np.ndarray:  # noqa: N803
@@ -549,6 +631,17 @@ def netted_expectation(netted, H: int) -> np.ndarray:  # noqa: N803
     out = np.zeros(int(H), dtype=np.float64)
     for u in netted:
         out += (1.0 - float(u.q)) * _availability_mw(u, H)
+    return out
+
+
+def deterministic_output(deterministic, H: int) -> np.ndarray:  # noqa: N803
+    """Phase 12h: ``Σ_j a_{j,h}`` over the rate-zero profiled units — what is
+    subtracted from the residual for them. At FULL availability and with no
+    ``(1 − q)`` term at all, because their series already carries whatever
+    outages they have. Exact: one state. Zero when none."""
+    out = np.zeros(int(H), dtype=np.float64)
+    for u in deterministic:
+        out += _availability_mw(u, H)
     return out
 
 
@@ -594,12 +687,24 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
     for g, cap, series, row in _membership_walk(
             n, elec_buses, keep_zero_capacity=keep_zero_capacity):
         if row["source"] != "missing":
+            # Phase 12h: fold a static ``p_max_pu`` into the CAPACITY (and
+            # into the per-period capacity series 12d may have given the
+            # unit), leaving ``profile`` None — a constant availability
+            # needs no per-hour mixture and costs no ``K_EXACT`` slot. On
+            # THIS branch only: the must-take branch below applies the
+            # static column itself, so folding before the branch would
+            # SQUARE it for every must-take farm.
+            cf = static_fold_factor(gens, p_max_pu_t, g)
             units.append(CoptUnit(
-                name=str(g), capacity_mw=cap, q=float(row["rate"]),
+                name=str(g),
+                capacity_mw=cap if cf is None else cap * cf,
+                q=float(row["rate"]),
                 basis=str(row["basis"]), mttr_hours=float(row["mttr_hours"]),
                 source=str(row["source"]),
                 profile=_occurrence_profile(p_max_pu_t, g, snapshots),
-                capacity_series=series,
+                capacity_series=(series if cf is None or series is None
+                                 else series * cf),
+                folded_constant=cf,
             ))
         else:
             # Must-take: available output at its given hourly availability,
@@ -688,6 +793,12 @@ def _shift_deterministic(dist: CapacityDistribution, capacity_mw: float) -> Capa
         if p > 0:
             out[k:k + len(dist.probs)] += p * dist.probs
     return CapacityDistribution(out, dist.delta_mw)
+
+
+DETERMINISTIC_ROW_NOTE = (
+    "no sampled outages: this unit's availability already includes them "
+    "(p_max_pu_includes_outages), so it is netted at its full availability "
+    "and its outage criticality is zero by construction")
 
 
 NETTED_ROW_NOTE = (
@@ -797,7 +908,8 @@ def _eue_binned(dist: CapacityDistribution, cells) -> float:
 
 def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
                           residual_load: pd.Series, *, weights: pd.Series,
-                          voll: float, mixed=(), netted=()) -> list[dict]:
+                          voll: float, mixed=(), netted=(),
+                          deterministic=()) -> list[dict]:
     """
     Leave-one-out outage attribution (spec §3.3): for each unit i,
 
@@ -823,9 +935,16 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
     EUE(s_i ≡ 1)``); a netted unit's is the residual with its full
     ``a_{j,h}`` netted instead of ``(1−q_j)·a_{j,h}`` — and its row carries
     ``note`` saying the netting understates it.
+
+    Phase 12h: ``deterministic`` are the rate-zero profiled units, already
+    netted at full availability in the residual. Their counterfactual IS the
+    base case, so ΔEUE is zero BY CONSTRUCTION — the row exists only so the
+    unit is not silently absent from the FMECA worksheet, and it says so in
+    its ``note``.
     """
     mixed = tuple(mixed)
     netted = tuple(netted)
+    deterministic = tuple(deterministic)
     r = residual_load.to_numpy(dtype=np.float64)
     w = weights.reindex(residual_load.index).fillna(0.0).to_numpy(dtype=np.float64)
 
@@ -887,6 +1006,10 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         # finding 8; pinned by F2i).
         todo.append((u, _eue(dist, r - float(u.q) * _availability_mw(u, r.shape[0])),
                      NETTED_ROW_NOTE))
+    for u in deterministic:
+        # No outages to price: the residual already nets this unit at its
+        # full ``a_{i,h}``, so "perfectly available" is the fleet as-is.
+        todo.append((u, base_eue, DETERMINISTIC_ROW_NOTE))
     for u, eue_perfect, note in todo:
         delta_eue = max(base_eue - eue_perfect, 0.0)
         crit_eur = delta_eue * max(float(voll), 0.0)
@@ -1026,14 +1149,22 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
     # fleet the numbers do not come from (shipped-code review, finding 7).
     # A unit netted in ANY block is reported netted — that is the disclosure
     # the fidelity note exists to make.
+    # Phase 12h: `deterministic` is rebuilt here as ONE FIELD alongside the
+    # other three — not as a merge-only extra — because a field the merge
+    # alone sets is empty on every single-block network, which is the
+    # ordinary case (plan v6 §H2b; v4 review). The bucket is disjoint from
+    # the other three by construction: `q` and `profile is None` are unit
+    # properties that `replace` carries into every block unchanged.
     netted_names = {u.name for a in per.values() for u in a["split"].netted}
+    det_names = {u.name for a in per.values() for u in a["split"].deterministic}
     mixed_names = {u.name for a in per.values() for u in a["split"].mixed} - netted_names
     table_names = {u.name for a in per.values() for u in a["split"].table} \
         - mixed_names - netted_names
     split = FleetSplit(
         table=tuple(u for u in units if u.name in table_names),
         mixed=tuple(u for u in units if u.name in mixed_names),
-        netted=tuple(u for u in units if u.name in netted_names))
+        netted=tuple(u for u in units if u.name in netted_names),
+        deterministic=tuple(u for u in units if u.name in det_names))
     return {"metrics": metrics, "rows": rows, "split": split,
             "dist": {label: a["dist"] for label, a in per.items()},
             "residual": {label: a["residual"] for label, a in per.items()},
@@ -1047,14 +1178,17 @@ def _screen_block(units, residual_load: pd.Series, *, weights: pd.Series,
     split = split_fleet(units, k_exact=k_exact)
     H = len(residual_load)
     res = residual_load
-    if split.netted:
-        res = residual_load - pd.Series(netted_expectation(split.netted, H),
-                                        index=residual_load.index)
+    if split.netted or split.deterministic:
+        res = residual_load - pd.Series(
+            netted_expectation(split.netted, H)
+            + deterministic_output(split.deterministic, H),
+            index=residual_load.index)
     dist = build_copt(list(split.table), delta_mw=delta_mw)
     metrics = hourly_adequacy(dist, res, weights=weights, mixed=split.mixed)
     rows = attribute_criticality(list(split.table), dist, res, weights=weights,
                                  voll=voll, mixed=split.mixed,
-                                 netted=split.netted)
+                                 netted=split.netted,
+                                 deterministic=split.deterministic)
     return {"metrics": metrics, "rows": rows, "split": split, "dist": dist,
             "residual": res,
             "fidelity_note": fidelity_note(split, k_exact=k_exact)}

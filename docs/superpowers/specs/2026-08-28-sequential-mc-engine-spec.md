@@ -344,6 +344,19 @@ both from the membership walk, so they reach a network with no outage
 columns (the PyPSA-Eur import). `outage_shadows_profile` (12a) is retired:
 with the profile modelled it would be false.
 
+**[Phase 12h.]** `static_p_max_pu_not_applied` is retired in turn — the
+static factor IS applied now — and replaced by
+`availability_may_include_outages` (both the CF and the rate are applied;
+here is the flag if that double-counts) and
+`outages_folded_into_availability` (the flag is set, no outages are sampled
+for these units), with an `_ignored` variant when the flag has nothing to
+act on. Both `/mc` and `/copt` carry two new lists: `folded_units`
+(`name`, `folded_constant`, `source`) for a unit whose static CF was folded
+into its capacity, and `deterministic_units` for a rate-zero unit. On `/mc`
+the two lists are built without `split_fleet` and a deterministic name is
+REMOVED from `profile_units`, whose documented meaning ("outages were
+sampled on the availability series") is false of a `q = 0` unit.
+
 **§6 test contract, amended.** `tests/test_adequacy_profiled_units.py`:
 A1 (the MC samples on the series), A3′ (the COPT mixes exactly — RTS-79
 minus one 400 MW unit plus a 500 MW q = 0.05 mild-profile unit → 3.97 h,

@@ -111,7 +111,12 @@ def _row_hash(u: C.CoptUnit) -> str:
 
 
 # Computed on 1bce9da (before any engine edit) by scratchpad/m1m2_pins.py.
-M1_UNCHANGED = {"gas_static": "4c49f507694900a2", "gas_ones": "afe1cb4666dd076f"}
+# Phase 12h re-pinned `gas_static` ONLY: its static `p_max_pu = 0.8` is now
+# folded into the unit's capacity (90 -> 72 MW), which the row hash reads.
+# `gas_ones` is unchanged, and deliberately so — an all-ones `p_max_pu`
+# COLUMN supersedes the static cell in PyPSA, in the margin and in the fold
+# alike, so a unit carrying one is never folded.
+M1_UNCHANGED = {"gas_static": "70ae1a094eccb6af", "gas_ones": "afe1cb4666dd076f"}
 M1_RESIDUAL = "5f4edc3d7480ab0e"
 M1_OLD_WIND_FOR = "827dc271a04917a1"       # profile None — must NOT hold now
 M1_OLD_HYDRO_CONST = "24ad1c55c5c08a04"    # profile None — must NOT hold now
@@ -471,7 +476,9 @@ def test_A8_elcc_nameplate_is_the_best_hour_and_zero_peak_is_excluded():
     cands = {r["name"]: r for r in E.elcc_candidates(n)}
     assert cands["wind_for"]["nameplate_mw"] == pytest.approx(45.0)
     assert cands["hydro_const"]["nameplate_mw"] == pytest.approx(48.0)
-    assert cands["gas_static"]["nameplate_mw"] == pytest.approx(80.0)   # static NOT applied
+    # Phase 12h: the static 0.8 IS applied now — folded into the capacity, so
+    # the ELCC nameplate is the folded 72 MW rather than the 80 MW row.
+    assert cands["gas_static"]["nameplate_mw"] == pytest.approx(72.0)
     assert "wind_zero" not in cands
     inputs = M.snapshot_inputs(n)
     _i, excl, _s, nameplate = E._resolve(inputs, "generator", "wind_for")

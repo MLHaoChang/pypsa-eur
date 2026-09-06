@@ -41,6 +41,7 @@ import {
   SetFS,
   NumInput,
   OutageInputs,
+  IncludesOutagesInput,
   outagePayload,
   useGlobalDiscountRate,
   useGlobalDefaultLifetime,
@@ -165,6 +166,11 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
         curtailment_cost: nf(form, 'curtailment_cost', 0),
         efficiency: nf(form, 'efficiency', current.efficiency),
         committable: form.committable === 'true',
+        // Phase 12h. Assigned EXPLICITLY, exactly like `committable` above,
+        // and never left to the `...current` spread: the spread carries the
+        // GET's value, so an unchecked box would keep re-saving the old
+        // `true` and the user could not clear the flag.
+        p_max_pu_includes_outages: form.p_max_pu_includes_outages === 'true',
         build_year: ni(form, 'build_year', current.build_year ?? 2025),
         start_up_cost: nf(form, 'start_up_cost', current.start_up_cost ?? 0),
         shut_down_cost: nf(form, 'shut_down_cost', current.shut_down_cost ?? 0),
@@ -208,7 +214,13 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(gen, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
+    const base = toFS(gen, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours',
+      // Phase 12h: the key MUST be in this list. `toFS` builds the whole
+      // form, the payload reads the form, and the save is a remove+add —
+      // so a key missing here is a flag silently cleared on every save of
+      // an unrelated field.
+      'p_max_pu_includes_outages',
+      'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
       'p_min_pu', 'p_max_pu', 'marginal_cost', 'capital_cost', 'fom_cost', 'overnight_cost',
       'curtailment_cost',
       'efficiency',
@@ -407,6 +419,7 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('generator.lifetime')} />
       <SectionHdr title="Adequacy" />
       <OutageInputs fs={form} set={setForm} />
+      <IncludesOutagesInput fs={form} set={setForm} />
       <SectionHdr title="Unit Commitment" />
       <ChkInput label="Committable" k="committable" fs={form} set={setForm} tip={docTip('generator.committable')} />
       {/* p_min_pu (minimum stable load fraction) is a Unit Commitment concept:

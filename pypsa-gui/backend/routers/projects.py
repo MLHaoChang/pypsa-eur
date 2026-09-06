@@ -967,7 +967,7 @@ async def import_bundle(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap (see load_project for the
         # rationale on why this must be inside the lock, not after).
         project_registry.bind_context(
@@ -1179,7 +1179,7 @@ def create_from_template(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(dest / "network.nc"))
+            PyPSAService.import_network_from_netcdf(n, dest / "network.nc")
         # Bind identity atomically with the swap (see load_project rationale).
         project_registry.bind_context(
             PyPSAService.get_active_context(), _created_project
@@ -1529,7 +1529,9 @@ def _save_context(
 
         # Atomic replace so a crash mid-save leaves the previous file intact.
         with PyPSAService.get_netcdf_io_lock():
-            _atomic_write_with(nc_path, lambda p: n.export_to_netcdf(str(p)))
+            _atomic_write_with(
+                nc_path,
+                lambda p: PyPSAService.export_network_to_netcdf(n, p))
 
         # Bind/claim — atomic with the export, keyed off the binding read at the
         # top of THIS lock block (it can't have changed; we hold the lock
@@ -1854,7 +1856,7 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
     nc_path = src / "network.nc"
     with ctx.mutation_lock:
         with PyPSAService.get_netcdf_io_lock():
-            ctx.network.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(ctx.network, nc_path)
         ctx.loaded_project = name
 
     # Solver config (legacy-tolerant; default when absent).
@@ -2130,7 +2132,7 @@ def load_project(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap — inside the SAME lock that
         # `reset_network()` just set to None. Otherwise a concurrent save could
         # observe the transient unbound state (loaded is None) and wrongly

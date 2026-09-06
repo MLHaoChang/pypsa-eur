@@ -321,16 +321,17 @@ def test_a_CARRIER_DEFAULT_profiled_unit_is_modelled_but_not_warned_about():
     assert not [i for i in issues if i.code == "profile_and_outage_modelled"], issues
 
 
-def test_a_STATIC_derate_below_one_is_NOT_applied_and_says_so():
-    """★ A10 (12a's SERIOUS 6b re-scoped): a static `p_max_pu < 1` on a unit
-    with outage data is not applied by either engine (plan §1.3 — it is
-    ambiguous in the wild and folding it in double-counts PyPSA-Eur's
-    nuclear CF, which already contains outages). The issue names the unit
-    and the disagreement, offers "enter it as a time series", and does NOT
-    offer "set q = 0" — that remedy models a perfectly firm unit (plan v2
-    review, finding 3).
+def test_a_STATIC_derate_below_one_is_applied_and_names_the_flag():
+    """★ H4a (12h): a static `p_max_pu < 1` on a unit with outage data is
+    now APPLIED by every surface — engines and margin alike credit the unit
+    at nameplate x p_max_pu x (1 - q) — so 12c-pre's
+    `static_p_max_pu_not_applied` is retired: its sentence became false.
+    `availability_may_include_outages` replaces it, on the same population,
+    and names the flag as the remedy for the one case where applying both
+    is wrong (a historical CF that already contains outages).
 
-    Bite (verified): inspect only `generators_t.p_max_pu`.
+    Bites (verified): keep the retired code; inspect only
+    `generators_t.p_max_pu`; omit the flag from the message.
     """
     from services import validation_service as VS
 
@@ -344,20 +345,22 @@ def test_a_STATIC_derate_below_one_is_NOT_applied_and_says_so():
           marginal_cost=10.0, p_max_pu=0.5, outage_rate_value=0.10,
           outage_rate_basis="EFORd", mttr_hours=24.0)
 
-    msg = _codes(VS._check_profiled_occurrence_units(n),
-                 "static_p_max_pu_not_applied")
+    issues = VS._check_profiled_occurrence_units(n)
+    assert not [i for i in issues
+                if i.code == "static_p_max_pu_not_applied"], issues
+    msg = _codes(issues, "availability_may_include_outages")
     assert "gas_static" in msg, msg
-    assert "time series" in msg, msg
+    assert "p_max_pu_includes_outages" in msg, msg
     assert "q = 0" not in msg and "q=0" not in msg, msg
 
 
 def test_the_static_warning_reaches_an_import_with_NO_outage_columns():
-    """★ A10 (plan v2 review, finding 3): the PyPSA-Eur nuclear import — a
+    """★ H4a (12h), inherited from A10: the PyPSA-Eur nuclear import — a
     static CF below 1, a LIBRARY outage rate, and no outage column anywhere
-    — is the case the static warning is written for, and the column-gated
+    — is the case this warning is written for, and the column-gated
     `_check_outage_params` could never reach it. The disclosure walks the
-    membership instead, and `validate_for_run`-style callers get it without
-    any outage column.
+    membership instead, so `validate_for_run`-style callers get it with no
+    outage column present.
 
     Bite (verified): gate the check on `outage_rate_value` being present.
     """
@@ -373,7 +376,7 @@ def test_the_static_warning_reaches_an_import_with_NO_outage_columns():
           marginal_cost=5.0, p_max_pu=0.8)
     assert "outage_rate_value" not in n.generators.columns
     msg = _codes(VS._check_profiled_occurrence_units(n),
-                 "static_p_max_pu_not_applied")
+                 "availability_may_include_outages")
     assert "nuc" in msg, msg
 
 
@@ -392,7 +395,8 @@ def test_a_static_p_max_pu_of_ONE_is_still_silent():
           marginal_cost=10.0, outage_rate_value=0.10,
           outage_rate_basis="EFORd", mttr_hours=24.0)
     issues = VS._check_profiled_occurrence_units(n)
-    assert not [i for i in issues if i.code == "static_p_max_pu_not_applied"], issues
+    assert not [i for i in issues
+                if i.code == "availability_may_include_outages"], issues
 
 
 def test_a_static_value_BESIDE_a_series_is_superseded_not_flagged():
@@ -410,7 +414,8 @@ def test_a_static_value_BESIDE_a_series_is_superseded_not_flagged():
     n.generators.at["wind_with_for", "p_max_pu"] = 0.7
     issues = VS._check_profiled_occurrence_units(n)
     assert "wind_with_for" in _codes(issues, "profile_and_outage_modelled")
-    assert "wind_with_for" not in _codes(issues, "static_p_max_pu_not_applied"), issues
+    assert "wind_with_for" not in _codes(
+        issues, "availability_may_include_outages"), issues
 
 
 def test_a_typed_q_of_ZERO_gets_no_sampled_outages_disclosure():

@@ -179,6 +179,15 @@ class GeneratorCreate(BaseModel):
     outage_rate_value: float | None = None
     outage_rate_basis: Literal["FOR", "EFORd"] | None = None
     mttr_hours: float | None = None
+    # Phase 12h. "The availability I gave this asset ALREADY includes forced
+    # outages" — PyPSA-Eur's nuclear capacity-factor table is the case. Set,
+    # the adequacy engines and the reserve margin alike credit the unit at
+    # its availability and apply NO outage rate on top; clear, both are
+    # applied. Generator only: the finding is about generators, and the
+    # other occurrence-bearing classes carry no availability read this way.
+    # Typed `bool | None` so an explicit `null` from a scripted PUT or the
+    # chat tools is 200 and means the default rather than a 422.
+    p_max_pu_includes_outages: bool | None = None
     bus: str
     carrier: str = ""
     # PyPSA control mode for power flow / unit commitment. PQ = fixed P & Q,
@@ -225,6 +234,14 @@ class GeneratorCreate(BaseModel):
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
     unit: str = "MW"
+
+    @field_validator("p_max_pu_includes_outages", mode="before")
+    @classmethod
+    def _flag_none_is_false(cls, v):
+        """An explicit ``null`` means the column's default, not a missing
+        value: the flag is a bool column and a None in it would make the
+        column ``object``, which netCDF refuses on the next project save."""
+        return False if v is None else v
 
 
 class StorageUnitCreate(BaseModel):

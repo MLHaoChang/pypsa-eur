@@ -26,6 +26,13 @@ ELECTRICAL loads only; the availability multiplier hits generators whose
 availability is PROFILE-BORNE (no resolvable occurrence data — the same
 must-take rule the COPT applies), never the thermal fleet, whose outages
 are classes A/B's business.
+
+Phase 12h note: a generator whose availability is declared to already
+include its outages (``p_max_pu_includes_outages``) still resolves outage
+data — its rate is zeroed, not removed — so it stays on the occurrence side
+of that rule and the availability multiplier does NOT reach it. That is the
+conservative reading: the multiplier is a climate lever, and this unit's
+availability is a fleet statistic, not a weather year.
 """
 from __future__ import annotations
 

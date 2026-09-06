@@ -394,6 +394,28 @@ contains outages) and preflight says so (`static_p_max_pu_not_applied`); the res
 margin applies it, so the margin and the engines disagree about such a unit by a
 recorded 25 % / 2 % on the nuclear import — an open item, not this amendment's.
 
+**[Phase 12h — the static CF is applied, and the ambiguity has a name.]**
+The open item above is closed. A static `p_max_pu` on a unit with **no
+`p_max_pu` column** is folded into the unit's CAPACITY (`cap x cf`), so both
+engines and the reserve margin now credit that unit at `nameplate x cf x
+(1 - q)` — the same number, from the same data. The gate is the column's
+ABSENCE, not whether a column is informative: PyPSA lets any column
+supersede the static cell (measured — a static 0.8 beside an all-ones column
+dispatches at 1.0), and the margin reads the column the same way, so folding
+beside a column would invent a derate nothing applies.
+
+Which reading of the CF applies is a question only the modeller can answer,
+so it becomes DATA: a per-asset bool `p_max_pu_includes_outages` on
+Generator. Set, it zeroes the unit's rate at `occurrence.resolve_outage_params`
+— the one place every consumer reads `q` from, so both engines, the margin's
+derate, the net-load window, the worksheet and the disclosures move
+together. A rate-zero unit that carries a profile is neither mixed nor
+convolved: `split_fleet` gives it a fourth bucket, `deterministic`, netted
+exactly at full availability and costing no `K_EXACT` slot. Preflight
+retires `static_p_max_pu_not_applied` (its sentence is now false) for
+`availability_may_include_outages` and `outages_folded_into_availability`
+(with an `_ignored` variant when the flag has nothing to act on).
+
 **[Phase 12d — activity and vintages.]** Every engine scores an asset at
 its capacity IN THE PERIOD: PyPSA's own `get_active_assets(P)` (build year,
 lifetime, `active`) and, for a vintage-expanded parent, the per-vintage

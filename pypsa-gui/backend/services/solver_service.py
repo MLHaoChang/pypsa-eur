@@ -3641,7 +3641,15 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
                 firm_fixed += d * mem["p_nom"]
                 max_achievable += d * mem["p_nom"]
 
-            if mem["source"] == "carrier_default" and mem["name"] not in carrier_default:
+            # Phase 12h: a rate-zero unit's derate uses NO class average —
+            # `(1 - 0) x avail` is the availability alone — so listing it
+            # here would make preflight's "derates N assets using carrier
+            # class averages" false of it. Its `source` still reads
+            # `carrier_default`, which is where the (now unused) rate came
+            # from; this list is about what the derate actually used.
+            if mem["source"] == "carrier_default" \
+                    and _finite(mem["q"], 0.0) > 0.0 \
+                    and mem["name"] not in carrier_default:
                 carrier_default.append(mem["name"])
             # Phase 12b: the profile leg is STASHED here, restricted to this
             # period, because it is the object the derate above was computed
@@ -5854,6 +5862,19 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         # next solve cycle on this same worker thread.
         try:
             _frozen_vintage_store().clear()
+        except Exception:
+            pass
+        # Phase 12h: the slack rows above were added on a frame that may
+        # have lacked the `p_max_pu_includes_outages` column and then
+        # removed, which leaves an OBJECT column of pure bools — the one
+        # shape netCDF refuses. The next project save or undo snapshot
+        # would be a 500, so put the dtype back here, at the end of the one
+        # callback every exit path runs (success, SolveAborted,
+        # ValidationRefused and the generic exception path all reach it
+        # through `_guarded_restore`).
+        try:
+            from services.adequacy.occurrence import normalise_flag_column
+            normalise_flag_column(n)
         except Exception:
             pass
 

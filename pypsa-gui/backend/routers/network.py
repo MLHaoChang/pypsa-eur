@@ -155,6 +155,25 @@ def _filter_transient_names(component_class: str, names: list[str]) -> list[str]
     return [n for n in names if n not in transient]
 
 
+def _normalise_flag_column(n, attr: str) -> None:
+    """Phase 12h: keep `p_max_pu_includes_outages` a real `bool` column.
+
+    A first `n.add` on a frame that lacks the column creates it as `object`,
+    and an `object` column of PURE bools is the one shape netCDF refuses
+    (`unsupported dtype for netCDF4 variable: bool`) — so the next project
+    save is a 500 and the undo snapshot fails silently. Called at every
+    boundary that can add a row or replace a frame; a no-op on anything but
+    generators, and 0.17 ms on a 300-row frame.
+    """
+    if attr != "generators":
+        return
+    try:
+        from services.adequacy.occurrence import normalise_flag_column
+        normalise_flag_column(n)
+    except Exception:                                         # noqa: BLE001
+        pass
+
+
 def _create_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
     # Dispatch invalidation lives in the undo middleware (main.py) — it runs
     # after every successful /api/network/* mutation, so cascade-delete,
@@ -168,6 +187,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
         if component_class != "Carrier":
             ensure_carrier(n, kwargs.get("carrier", ""))
         n.add(component_class, name, **kwargs)
+        _normalise_flag_column(n, attr)
     change_log_service.log("add", component_class, name, f"Added {component_class.lower()} '{name}'")
     return {"name": name}
 
@@ -255,6 +275,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             # lost on the next save+reload (re-apply skips entries whose
             # column is no longer in the network DataFrame).
             _user_ts_rename_asset(attr, name, new_name)
+        _normalise_flag_column(n, attr)
     desc = (f"Renamed {component_class.lower()} '{name}' → '{new_name}'"
             if new_name != name else f"Updated {component_class.lower()} '{name}'")
     change_log_service.log("update", component_class, new_name, desc)
@@ -1982,6 +2003,30 @@ def _finite_bound_default(component_class: str, col: str) -> float:
     return 0.0 if col == "e_min_pu" else 1.0
 
 
+def _bool_input_default(component_class: str, col: str) -> bool:
+    """The class default of a BOOLEAN input column, read from PyPSA's own
+    metadata — 12g's `finite_default_inputs` pattern for `type == "boolean"`.
+
+    A hand-written "bools clear to False" list is wrong twice over: `active`
+    defaults to True on EVERY class, and so does `Link.cyclic_delay`, which
+    is bulk-editable. A custom GUI column (`p_max_pu_includes_outages`) is
+    not in the table at all and falls back to False, its declared default.
+    """
+    try:
+        from services.pypsa_service import PyPSAService
+        comp = PyPSAService.get_network().components[component_class]
+        d = getattr(comp, "defaults", None)
+        if d is None:
+            d = getattr(comp, "attrs", None)
+        row = d.loc[col]
+        if str(row.get("type", "")).strip() == "boolean" \
+                and str(row.get("status", "")).strip().startswith("Input"):
+            return bool(row.get("default"))
+    except Exception:                                         # noqa: BLE001
+        pass
+    return False
+
+
 @router.patch("/_bulk")
 def bulk_update(body: dict) -> dict:
     component_class = body.get("component_class", "")
@@ -1998,137 +2043,184 @@ def bulk_update(body: dict) -> dict:
     if "name" in updates:
         raise HTTPException(400, "Bulk rename not supported. Use PUT /<component>/{name}.")
 
-    attr = _COMPONENT_ATTRS[component_class]
-    n = PyPSAService.get_network()
-    df = getattr(n, attr)
-
-    # Resolve names. Bulk semantics: refuse the whole batch if any target is
-    # missing — partial application would be hard to undo predictably.
-    name_strs = [str(x) for x in names]
-    missing = [n_ for n_ in name_strs if n_ not in df.index]
-    if missing:
-        sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
-        raise HTTPException(404, f"{len(missing)} {component_class}(s) not found: {sample}")
-
-    # Reject any target that's currently a solver-internal transient row
-    # (vintage clone, VOLL slack). The /api/network/{component} filter
-    # hides these from the UI, so a frontend can't normally surface their
-    # names — but a stale localStorage payload, a replay attack, or a
-    # power-user CLI hitting the bulk endpoint directly could. Mutating
-    # LP scaffolding mid-solve corrupts the optimisation in subtle ways
-    # (e.g. flipping a vintage's p_nom_extendable defeats the whole
-    # per-period bound mechanism). Refuse with a clear 409.
-    transient_targets = [n_ for n_ in name_strs
-                         if n_ in PyPSAService.get_transient_rows(component_class)]
-    if transient_targets:
-        sample = ", ".join(transient_targets[:3]) + ("…" if len(transient_targets) > 3 else "")
-        raise HTTPException(
-            409,
-            f"Cannot bulk-edit {len(transient_targets)} {component_class}(s) "
-            f"({sample}) — these rows are LP scaffolding generated by the "
-            f"current solve (vintage clones or VOLL slacks). Wait for the "
-            f"solver to finish and try again on the parent row(s).",
-        )
-
-    # Validate every column exists. PyPSA defines its full schema lazily — the
-    # column may exist on the DataFrame even if no row has set it explicitly,
-    # so this catches typos like "p_min_pu " (trailing space).
-    unknown_cols = [c for c in updates if c not in df.columns]
-    if unknown_cols:
-        raise HTTPException(400,
-            f"{component_class} has no column(s): {', '.join(unknown_cols)}.")
-
-    # Coerce each value to the column's existing dtype. Without this, writing
-    # a string into a numeric column upcasts the whole column to `object`,
-    # which then breaks `n.export_to_netcdf()` at save time with a cryptic
-    # "object array contains mixed native types" ValueError. Reject up front
-    # so the failure happens at edit-time with a clear message rather than at
-    # save-time where the user has no idea which field is wrong.
-    coerced: dict[str, Any] = {}
-    for col, value in updates.items():
-        col_dtype = df[col].dtype
-        if pd.api.types.is_bool_dtype(col_dtype):
-            if isinstance(value, str):
-                if value.strip().lower() in ("true", "1", "yes"):
-                    value = True
-                elif value.strip().lower() in ("false", "0", "no"):
-                    value = False
-            coerced[col] = bool(value) if value is not None else value
-            continue
-        if pd.api.types.is_numeric_dtype(col_dtype):
-            if value is None or value == "":
-                # Blank-to-clear a bound should produce PyPSA's "no bound"
-                # sentinel (±inf), matching how the per-row PUT path clears the
-                # capacity/economic bounds via the schema aliases (_NoneToPosInf
-                # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
-                # endswith("_max") predicate is intentionally a superset: it also
-                # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
-                # v_ang_max) — clearing those to inf is likewise their PyPSA
-                # default, so the resulting network is valid. Everything else
-                # keeps NaN ("missing"), as before.
-                # Phase 12g: the finite-default metadata decides FIRST. The
-                # suffix rules below target ±inf-default columns (`p_nom_max`,
-                # `lifetime`, `e_sum_min`) — but `Transformer.phase_shift_max`
-                # ends in `_max` and defaults to 0.0, and clearing it to `inf`
-                # made the next solve refuse the value `_bulk` itself wrote.
-                _meta = _finite_input_meta(component_class, col)
-                if _meta is not None:
-                    coerced[col] = _meta[0]
-                elif col.endswith("_max") or col == "lifetime":
-                    coerced[col] = float("inf")
-                elif col == "e_sum_min":
-                    coerced[col] = float("-inf")
-                elif col in _FINITE_DEFAULT_BOUNDS:
-                    # Phase 12f. NaN is not a valid "no bound" sentinel for
-                    # these five: PyPSA does not fall back to a default, it
-                    # MASKS the constraint row out of the LP, so clearing
-                    # `p_max_pu` used to leave a 100 MW unit free to dispatch
-                    # 500 MW. Their class default is finite, so "unset" has a
-                    # real value — and it is exactly what `n.add(attr=None)`
-                    # coerces to, verified for all five across Generator,
-                    # Link, StorageUnit, Store, Line and Transformer. Keyed by
-                    # (component, column) because `StorageUnit.p_min_pu` is
-                    # −1.0 where a Generator's is 0.0.
-                    #
-                    # `ramp_limit_*` deliberately still lands in the NaN branch
-                    # below: there the class default IS NaN and PyPSA masks the
-                    # row on purpose, which is the documented way to say "this
-                    # unit has no ramp limit".
-                    coerced[col] = _finite_bound_default(component_class, col)
-                else:
-                    coerced[col] = float("nan")  # pandas treats this as missing
-                continue
-            try:
-                coerced[col] = float(value)
-            except (TypeError, ValueError):
-                raise HTTPException(400,
-                    f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
-                    f"value {value!r}.")
-            # Phase 12f: `json.loads` accepts the bare `NaN` and `Infinity`
-            # literals and `float()` accepts the strings "nan" and "inf", so
-            # a non-finite value can reach one of the five bounds past the
-            # `null` branch above. It masks the LP row exactly as a cleared
-            # cell did, so it is refused here — the same answer the time-
-            # series routes give — rather than accepted and refused at solve.
-            if not math.isfinite(coerced[col]) and (
-                    col in _FINITE_DEFAULT_BOUNDS
-                    or _finite_input_meta(component_class, col) is not None):
-                # Phase 12g: every finite-default input, not only the five.
-                raise HTTPException(
-                    422,
-                    f"Column '{col}' must be a finite number; got {value!r}. "
-                    "PyPSA does not default a non-finite value here, it drops "
-                    "the term or the constraint that reads it. Send null to "
-                    "restore the default.")
-            continue
-        # Strings / objects pass through. We still cast to str if the user
-        # sent a number into a string column so dtype stays clean.
-        if pd.api.types.is_string_dtype(col_dtype) or pd.api.types.is_object_dtype(col_dtype):
-            coerced[col] = "" if value is None else str(value)
-            continue
-        coerced[col] = value
-
+    # Phase 12h: ONE lock hold spans the prologue, the unknown-column
+    # check, the dtype dispatch and the write. The flag normaliser below
+    # can CREATE a column, and both the check and the dispatch read the
+    # frame's columns and dtypes — a solve adding and removing its slack
+    # rows underneath would make the route write against a shape it never
+    # inspected. `get_lock()` is an RLock, so a caller already holding it
+    # is unaffected.
     with PyPSAService.get_lock():
+        attr = _COMPONENT_ATTRS[component_class]
+        n = PyPSAService.get_network()
+        df = getattr(n, attr)
+
+        # Phase 12h: `p_max_pu_includes_outages` is a custom BOOL column, and
+        # this route is the one that has to set it on an import whose frame
+        # never carried it — without the create-if-absent the unknown-column
+        # check below refuses with `has no column(s)`. Normalising HERE, ahead
+        # of that check AND of the dtype dispatch that reads `df[col].dtype`,
+        # is also what makes a `_bulk` write land as a real `bool`: normalise
+        # after the dispatch and the string 'True' is stored instead, which
+        # `flag_is_set` reads as set and which exports fine — only the dtype
+        # separates the two, and only until the next solve.
+        if attr == "generators":
+            try:
+                from services.adequacy.occurrence import normalise_flag_column
+                normalise_flag_column(n)
+            except Exception:                                 # noqa: BLE001
+                pass
+
+        # Resolve names. Bulk semantics: refuse the whole batch if any target is
+        # missing — partial application would be hard to undo predictably.
+        name_strs = [str(x) for x in names]
+        missing = [n_ for n_ in name_strs if n_ not in df.index]
+        if missing:
+            sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+            raise HTTPException(404, f"{len(missing)} {component_class}(s) not found: {sample}")
+
+        # Reject any target that's currently a solver-internal transient row
+        # (vintage clone, VOLL slack). The /api/network/{component} filter
+        # hides these from the UI, so a frontend can't normally surface their
+        # names — but a stale localStorage payload, a replay attack, or a
+        # power-user CLI hitting the bulk endpoint directly could. Mutating
+        # LP scaffolding mid-solve corrupts the optimisation in subtle ways
+        # (e.g. flipping a vintage's p_nom_extendable defeats the whole
+        # per-period bound mechanism). Refuse with a clear 409.
+        transient_targets = [n_ for n_ in name_strs
+                             if n_ in PyPSAService.get_transient_rows(component_class)]
+        if transient_targets:
+            sample = ", ".join(transient_targets[:3]) + ("…" if len(transient_targets) > 3 else "")
+            raise HTTPException(
+                409,
+                f"Cannot bulk-edit {len(transient_targets)} {component_class}(s) "
+                f"({sample}) — these rows are LP scaffolding generated by the "
+                f"current solve (vintage clones or VOLL slacks). Wait for the "
+                f"solver to finish and try again on the parent row(s).",
+            )
+
+        # Validate every column exists. PyPSA defines its full schema lazily — the
+        # column may exist on the DataFrame even if no row has set it explicitly,
+        # so this catches typos like "p_min_pu " (trailing space).
+        unknown_cols = [c for c in updates if c not in df.columns]
+        if unknown_cols:
+            raise HTTPException(400,
+                f"{component_class} has no column(s): {', '.join(unknown_cols)}.")
+
+        # Coerce each value to the column's existing dtype. Without this, writing
+        # a string into a numeric column upcasts the whole column to `object`,
+        # which then breaks `n.export_to_netcdf()` at save time with a cryptic
+        # "object array contains mixed native types" ValueError. Reject up front
+        # so the failure happens at edit-time with a clear message rather than at
+        # save-time where the user has no idea which field is wrong.
+        coerced: dict[str, Any] = {}
+        for col, value in updates.items():
+            col_dtype = df[col].dtype
+            if pd.api.types.is_bool_dtype(col_dtype):
+                if isinstance(value, str):
+                    if value.strip().lower() in ("true", "1", "yes"):
+                        value = True
+                    elif value.strip().lower() in ("false", "0", "no"):
+                        value = False
+                if value is None:
+                    # Phase 12h: the bulk editor sends `null` for a blank
+                    # cell, and `df.loc[...] = None` upcasts the column to
+                    # `object` — the one shape netCDF refuses — so the next
+                    # project save is a 500. A null clears to the column's
+                    # CLASS DEFAULT, read from PyPSA's metadata rather than
+                    # assumed False.
+                    #
+                    # `active` is refused instead. Its default is True, so
+                    # clearing it would ACTIVATE every selected asset,
+                    # behind a confirm toast that reads "Set active =
+                    # (unset) on 200 generator(s)?". 422 is the shape this
+                    # route already uses for a value it could write but
+                    # refuses on what the write would MEAN (12g's non-finite
+                    # refusal); 400 is its wrong-type answer.
+                    if col == "active":
+                        raise HTTPException(
+                            422,
+                            "Column 'active' cannot be cleared — send true "
+                            "or false. Its PyPSA default is true, so "
+                            "clearing it would ACTIVATE every selected "
+                            "asset rather than leave it as it is.")
+                    coerced[col] = _bool_input_default(component_class, col)
+                    continue
+                coerced[col] = bool(value)
+                continue
+            if pd.api.types.is_numeric_dtype(col_dtype):
+                if value is None or value == "":
+                    # Blank-to-clear a bound should produce PyPSA's "no bound"
+                    # sentinel (±inf), matching how the per-row PUT path clears the
+                    # capacity/economic bounds via the schema aliases (_NoneToPosInf
+                    # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
+                    # endswith("_max") predicate is intentionally a superset: it also
+                    # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
+                    # v_ang_max) — clearing those to inf is likewise their PyPSA
+                    # default, so the resulting network is valid. Everything else
+                    # keeps NaN ("missing"), as before.
+                    # Phase 12g: the finite-default metadata decides FIRST. The
+                    # suffix rules below target ±inf-default columns (`p_nom_max`,
+                    # `lifetime`, `e_sum_min`) — but `Transformer.phase_shift_max`
+                    # ends in `_max` and defaults to 0.0, and clearing it to `inf`
+                    # made the next solve refuse the value `_bulk` itself wrote.
+                    _meta = _finite_input_meta(component_class, col)
+                    if _meta is not None:
+                        coerced[col] = _meta[0]
+                    elif col.endswith("_max") or col == "lifetime":
+                        coerced[col] = float("inf")
+                    elif col == "e_sum_min":
+                        coerced[col] = float("-inf")
+                    elif col in _FINITE_DEFAULT_BOUNDS:
+                        # Phase 12f. NaN is not a valid "no bound" sentinel for
+                        # these five: PyPSA does not fall back to a default, it
+                        # MASKS the constraint row out of the LP, so clearing
+                        # `p_max_pu` used to leave a 100 MW unit free to dispatch
+                        # 500 MW. Their class default is finite, so "unset" has a
+                        # real value — and it is exactly what `n.add(attr=None)`
+                        # coerces to, verified for all five across Generator,
+                        # Link, StorageUnit, Store, Line and Transformer. Keyed by
+                        # (component, column) because `StorageUnit.p_min_pu` is
+                        # −1.0 where a Generator's is 0.0.
+                        #
+                        # `ramp_limit_*` deliberately still lands in the NaN branch
+                        # below: there the class default IS NaN and PyPSA masks the
+                        # row on purpose, which is the documented way to say "this
+                        # unit has no ramp limit".
+                        coerced[col] = _finite_bound_default(component_class, col)
+                    else:
+                        coerced[col] = float("nan")  # pandas treats this as missing
+                    continue
+                try:
+                    coerced[col] = float(value)
+                except (TypeError, ValueError):
+                    raise HTTPException(400,
+                        f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
+                        f"value {value!r}.")
+                # Phase 12f: `json.loads` accepts the bare `NaN` and `Infinity`
+                # literals and `float()` accepts the strings "nan" and "inf", so
+                # a non-finite value can reach one of the five bounds past the
+                # `null` branch above. It masks the LP row exactly as a cleared
+                # cell did, so it is refused here — the same answer the time-
+                # series routes give — rather than accepted and refused at solve.
+                if not math.isfinite(coerced[col]) and (
+                        col in _FINITE_DEFAULT_BOUNDS
+                        or _finite_input_meta(component_class, col) is not None):
+                    # Phase 12g: every finite-default input, not only the five.
+                    raise HTTPException(
+                        422,
+                        f"Column '{col}' must be a finite number; got {value!r}. "
+                        "PyPSA does not default a non-finite value here, it drops "
+                        "the term or the constraint that reads it. Send null to "
+                        "restore the default.")
+                continue
+            # Strings / objects pass through. We still cast to str if the user
+            # sent a number into a string column so dtype stays clean.
+            if pd.api.types.is_string_dtype(col_dtype) or pd.api.types.is_object_dtype(col_dtype):
+                coerced[col] = "" if value is None else str(value)
+                continue
+            coerced[col] = value
+
         # If the bulk update sets `carrier`, ensure the carrier row exists with
         # catalog metadata first — same auto-add behavior as PUT.
         if component_class != "Carrier" and "carrier" in coerced:
@@ -2183,7 +2275,7 @@ def _push_undo_snapshot() -> None:
                 tmp = pathlib.Path(f.name)
             try:
                 with PyPSAService.get_netcdf_io_lock():
-                    n.export_to_netcdf(str(tmp))
+                    PyPSAService.export_network_to_netcdf(n, tmp)
                 netcdf_bytes = tmp.read_bytes()
             finally:
                 tmp.unlink(missing_ok=True)
@@ -2255,7 +2347,7 @@ def undo_last():
             PyPSAService.reset_network()
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
-                n.import_from_netcdf(str(tmp))
+                PyPSAService.import_network_from_netcdf(n, tmp)
             PyPSAService.set_binding(prev_binding)
             if prev_loaded:
                 try:
