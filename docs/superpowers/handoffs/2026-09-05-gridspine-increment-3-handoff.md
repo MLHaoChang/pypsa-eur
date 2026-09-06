@@ -99,6 +99,11 @@ scr(fault_levels, registry, templates)     # installed capacity from the templat
 n1_severity_dc(dispatch, loads, registry, sens) -> Series      # the DC proxy, kept in metrics.csv; its year-wide rank agreement with n1_severity_ac is in the manifest (n1_severity_ac_pass)
 # ranking/select.py: _RANKING has FIVE criteria; max_n1_severity reads n1_severity_ac since F2; selection is k..5k; boundary ties are spread by farthest-point over hour-of-year
 
+# drivers/year_study.py (follow-ups F3)
+run_year_study(outdir, hours, k, window, overlap, screen, n2_prune_threshold_pct) = dispatch_year(...) then study_dispatch(...)
+resume_from_dispatch(src, outdir, k, screen, n2_prune_threshold_pct)   # ranking -> handoff from src/dispatch.csv + loads.csv; manifest.dispatch_source carries path + sha256s; CLI --from-dispatch DIR
+study_dispatch(outdir, net, registry, dispatch, loads, k, screen, ..., *, window=None, overlap=None, dispatch_source=None)   # the seam the increment-4 action layer calls
+
 # templates/unit_params.py
 load_unit_templates(path) -> UnitTemplates(units, params)      # per-FIELD provenance; GENROU/GENSAL/inverter/legacy
 load_unit_params(path)                                         # unchanged shape for ranking/; synchronous units only

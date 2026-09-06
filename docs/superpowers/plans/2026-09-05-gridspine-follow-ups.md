@@ -40,11 +40,13 @@ Steps (landed 2026-09-05, same session as F1):
 
 ## Task F3 — Driver resumes from a saved dispatch
 
-**Files:** `gridspine/drivers/year_study.py`, `tests/gridspine/test_year_study.py`.
+**Files:** `gridspine/drivers/year_study.py`, `tests/gridspine/test_year_study_resume.py` (new).
 
-- Split `run_year_study` into `dispatch_year(outdir, hours, window, overlap) -> (dispatch, loads, net, registry)` and `study_dispatch(outdir, dispatch, loads, k, screen, ...) -> StudyResult`; `run_year_study` composes them and is byte-identical in output (test: the existing module fixture's artifacts).
-- CLI `--from-dispatch <dir>` reads `dispatch.csv`/`loads.csv`, validates them against the net (`validate_dispatch`/`validate_loads`, hour count), and runs ranking → handoff only. Manifest records `dispatch_source` (the path and the sha256 of both files) so a v4 bundle names the v3 dispatch it came from.
-- Mutation: skip `apply_snapshot` in the resumed path → the RAW stage-order test goes red (same property as increment 2's).
+- [x] `run_year_study` = `dispatch_year(outdir, hours, window, overlap) -> (net, registry, dispatch, loads)` (stages ingest/dispatch, writes `loads.csv` before the solve and `dispatch.csv` after) followed by `study_dispatch(outdir, net, registry, dispatch, loads, k, screen, n2_prune_threshold_pct, *, window, overlap, dispatch_source)` (ranking → handoff; `hours` in the manifest is the dispatch's hour count). Each half writes its own `StageError`.
+- [x] `resume_from_dispatch(src, outdir, k, screen, n2_prune_threshold_pct)`: validates both tables, requires the same hour set, copies them byte-for-byte into `outdir`, records `dispatch_source = {path, dispatch_sha256, loads_sha256, hours}` in the manifest with `window`/`overlap` None. CLI `--from-dispatch DIR`.
+- [x] Tests (48 h, two 24 h windows, k=1; module fixture ~21 s): split == composed manifest; resumed selection, reasons and metrics equal the composed run (1e-9); resumed `.raw` byte-identical; the resumed `.raw` carries the hour's loads and thermal PG (the increment-2 stage-order property); manifest hashes match the source and the copies; a directory without `dispatch.csv` and tables with different hour sets are refused. RED: ImportError on the four names. GREEN: 7 passed.
+- [x] Mutation (resume scales the dispatch it read by 1.05): exactly the three equality tests red, the four contract tests green.
+- [x] Gate (497 passed, 2 skipped), path-limited commit.
 
 ## Task F4 — v4 artifacts: re-study the v3 dispatch
 

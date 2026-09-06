@@ -24,6 +24,7 @@ The 8760 h run is a CLI job (minutes), not a test:
 """
 import argparse
 import dataclasses
+import hashlib
 import json
 from pathlib import Path
 
@@ -59,6 +60,7 @@ from gridspine.ranking.severity import SEVERITY_LEDGER, n1_severity_dc
 from gridspine.ranking.select import select_snapshots, validate_selection
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dc import save_dc_sensitivities
+from gridspine.schema.dispatch import validate_dispatch, validate_loads
 from gridspine.schema.errors import StageError
 from gridspine.static.contingency import (
     N1_LEDGER,
@@ -217,25 +219,15 @@ def _ledger(unit_params, screen: bool = True, ac_pass: dict | None = None) -> li
     ]
 
 
-def run_year_study(
-    outdir,
-    hours: int = 8760,
-    k: int = 5,
-    window: int = 168,
-    overlap: int = 24,
-    screen: bool = True,
-    n2_prune_threshold_pct: float = 0.0,
-) -> StudyResult:
-    """Run the whole chain for `hours` hours and study the `k`-extreme snapshots.
-
-    Parameters mirror the CLI. `window`/`overlap` are handed to
-    `run_uc_rolling` unchanged and validated there; `k` is validated by
-    `select_snapshots`.
+def dispatch_year(outdir, hours: int = 8760, window: int = 168, overlap: int = 24):
+    """Stages ingest and dispatch: the case, its registry, and the rolling unit
+    commitment for `hours` hours. Writes `loads.csv` (before the solve — demand
+    is an INPUT) and `dispatch.csv` into `outdir`. Returns
+    (net, registry, dispatch, loads). `window`/`overlap` are handed to
+    `run_uc_rolling` unchanged and validated there.
     """
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    art = {}
-    lf_results = {}
     stage = "ingest"
     try:
         net = load_case39_res()
@@ -252,13 +244,119 @@ def run_year_study(
         # loads artifact is taken before the solve — it is then independent of
         # whether the solve succeeded, exactly as in increment 1.
         loads = to_loads_table(n, net)
-        art["loads"] = outdir / "loads.csv"
-        loads.to_csv(art["loads"], index=False)
+        loads.to_csv(outdir / "loads.csv", index=False)
 
         dispatch = to_dispatch_table(run_uc_rolling(n, window=window, overlap=overlap))
-        art["dispatch"] = outdir / "dispatch.csv"
-        dispatch.to_csv(art["dispatch"], index=False)
+        dispatch.to_csv(outdir / "dispatch.csv", index=False)
+        return net, registry, dispatch, loads
+    except Exception as exc:
+        StageError(stage=stage, element_ids=[], cause=repr(exc)).write(outdir)
+        raise
 
+
+def _sha256(path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def resume_from_dispatch(
+    src,
+    outdir,
+    k: int = 5,
+    screen: bool = True,
+    n2_prune_threshold_pct: float = 0.0,
+) -> StudyResult:
+    """Follow-ups F3: stages ranking to handoff from another run's `dispatch.csv`
+    and `loads.csv`, without re-solving the unit commitment (~2 h for a year
+    against ~20 min for everything after it).
+
+    The tables are validated, required to cover the same hours, and copied
+    byte-for-byte into `outdir`; the manifest's `dispatch_source` names the
+    source directory and both files' sha256, so a bundle made here is traceable
+    to the solve it came from. `window`/`overlap` are None in the manifest —
+    they belong to the solve, which did not happen here.
+    """
+    src = Path(src)
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    stage = "ingest"
+    try:
+        for name in ("dispatch.csv", "loads.csv"):
+            if not (src / name).is_file():
+                raise ContractError(f"resume_from_dispatch: {src / name} not found — need dispatch.csv and loads.csv")
+        dispatch = validate_dispatch(pd.read_csv(src / "dispatch.csv"))
+        loads = validate_loads(pd.read_csv(src / "loads.csv"))
+        d_hours, l_hours = set(dispatch["hour"].tolist()), set(loads["hour"].tolist())
+        if d_hours != l_hours:
+            raise ContractError(
+                f"resume_from_dispatch: dispatch covers {len(d_hours)} hours, loads {len(l_hours)}; "
+                f"they must be the same hours ({sorted(d_hours ^ l_hours)[:5]} differ)"
+            )
+        for name in ("dispatch.csv", "loads.csv"):
+            (outdir / name).write_bytes((src / name).read_bytes())
+        dispatch_source = {
+            "path": str(src),
+            "dispatch_sha256": _sha256(src / "dispatch.csv"),
+            "loads_sha256": _sha256(src / "loads.csv"),
+            "hours": len(d_hours),
+        }
+        net = load_case39_res()
+        registry = registry_from_net(net)
+    except Exception as exc:
+        StageError(stage=stage, element_ids=[], cause=repr(exc)).write(outdir)
+        raise
+    return study_dispatch(
+        outdir, net, registry, dispatch, loads, k=k, screen=screen,
+        n2_prune_threshold_pct=n2_prune_threshold_pct, dispatch_source=dispatch_source,
+    )
+
+
+def run_year_study(
+    outdir,
+    hours: int = 8760,
+    k: int = 5,
+    window: int = 168,
+    overlap: int = 24,
+    screen: bool = True,
+    n2_prune_threshold_pct: float = 0.0,
+) -> StudyResult:
+    """Run the whole chain for `hours` hours and study the `k`-extreme snapshots:
+    `dispatch_year` then `study_dispatch`. Parameters mirror the CLI; `k` is
+    validated by `select_snapshots`.
+    """
+    net, registry, dispatch, loads = dispatch_year(outdir, hours=hours, window=window, overlap=overlap)
+    return study_dispatch(
+        outdir, net, registry, dispatch, loads, k=k, screen=screen,
+        n2_prune_threshold_pct=n2_prune_threshold_pct, window=window, overlap=overlap,
+    )
+
+
+def study_dispatch(
+    outdir,
+    net,
+    registry,
+    dispatch,
+    loads,
+    k: int = 5,
+    screen: bool = True,
+    n2_prune_threshold_pct: float = 0.0,
+    *,
+    window: int | None = None,
+    overlap: int | None = None,
+    dispatch_source: dict | None = None,
+) -> StudyResult:
+    """Stages ranking, loadflow, screening and handoff for a dispatch that is
+    already solved and already written to `outdir` as `dispatch.csv` and
+    `loads.csv` (by `dispatch_year` or `resume_from_dispatch`). `window` and
+    `overlap` are recorded in the manifest only; `dispatch_source` is the
+    resumed run's provenance record (None for a composed run).
+    """
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    art = {"loads": outdir / "loads.csv", "dispatch": outdir / "dispatch.csv"}
+    lf_results = {}
+    n_hours = int(pd.Series(dispatch["hour"]).nunique())
+    stage = "ranking"
+    try:
         stage = "ranking"
         unit_params = load_unit_params()
         metrics = snapshot_metrics(dispatch, loads, unit_params, registry)
@@ -424,10 +522,11 @@ def run_year_study(
             **extra,
             "stages": STAGES,
             "network": "pandapower case39_res, canonical names",
-            "hours": hours,
+            "hours": n_hours,
             "k": k,
             "window": window,
             "overlap": overlap,
+            "dispatch_source": dispatch_source,
             "mip_rel_gap": DEFAULT_MIP_REL_GAP,
             "selected_hours": hours_selected,
             "converged_hours": [h for h, c in zip(hours_selected, converged) if c],
@@ -458,12 +557,21 @@ if __name__ == "__main__":
                     help="skip N-1/N-2, fault levels, SCR and bundles (increment-2 behaviour)")
     ap.add_argument("--n2-prune-threshold", type=float, default=0.0,
                     help="DC new-loading %% below which N-2 pairs are not AC-verified (0 = verify all)")
+    ap.add_argument("--from-dispatch", metavar="DIR", default=None,
+                    help="study the dispatch.csv/loads.csv in DIR instead of solving; "
+                         "--hours/--window/--overlap are then ignored (follow-ups F3)")
     args = ap.parse_args()
-    res = run_year_study(
-        args.out, hours=args.hours, k=args.k,
-        window=args.window, overlap=args.overlap,
-        screen=not args.no_screen, n2_prune_threshold_pct=args.n2_prune_threshold,
-    )
+    if args.from_dispatch:
+        res = resume_from_dispatch(
+            args.from_dispatch, args.out, k=args.k,
+            screen=not args.no_screen, n2_prune_threshold_pct=args.n2_prune_threshold,
+        )
+    else:
+        res = run_year_study(
+            args.out, hours=args.hours, k=args.k,
+            window=args.window, overlap=args.overlap,
+            screen=not args.no_screen, n2_prune_threshold_pct=args.n2_prune_threshold,
+        )
     for _, row in res.selected.iterrows():
         print(
             f"hour {int(row['hour']):5d}  converged={bool(row['converged'])}  "
