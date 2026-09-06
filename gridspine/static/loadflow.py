@@ -169,6 +169,51 @@ def apply_snapshot(net, dispatch, loads, hour, registry) -> None:
     _apply_res(net, dispatch[dispatch["hour"] == hour].set_index("unit_id"), registry)
 
 
+#: MW tolerance for "the net carries this hour" — the round trip through the
+#: dispatch and loads tables is exact to float precision; 1 kW is generous.
+P_TOL_MW = 1e-3
+
+
+def check_net_carries_hour(net, dispatch, loads, hour, registry) -> None:
+    """THE stage-order guard, the inverse check of `apply_snapshot`: refuse a net
+    whose load total or any registry unit's p_mw is not the hour's table value.
+
+    One copy, used by the contingency screen (`static/contingency.py`) and the
+    handoff bundle (`handoff/bundle.py`) — follow-ups F7; the two private
+    copies it replaces could have drifted apart without a test noticing.
+    `dispatch`/`loads` are the validated tables; `hour` an int.
+    """
+    hour = int(hour)
+    at_hour = dispatch[dispatch["hour"] == hour].set_index("unit_id")
+    load_rows = loads[loads["hour"] == hour]
+    if at_hour.empty or load_rows.empty:
+        raise ContractError(f"dispatch/loads tables have no rows for hour {hour}")
+    net_load, table_load = float(net.load["p_mw"].sum()), float(load_rows["p_mw"].sum())
+    if abs(net_load - table_load) > P_TOL_MW:
+        raise ContractError(
+            f"net does not carry hour {hour}: net.load total {net_load:.3f} MW vs "
+            f"loads table {table_load:.3f} MW — apply_snapshot first"
+        )
+    gen_idx = {net.gen.at[i, "name"]: i for i in net.gen.index}
+    sgen = getattr(net, "sgen", None)
+    sgen_idx = {sgen.at[i, "name"]: i for i in sgen.index} if sgen is not None else {}
+    for unit_id, rec in registry.iterrows():
+        if rec["kind"] == "gen":
+            table, idx = net.gen, gen_idx.get(unit_id)
+        elif rec["kind"] == "res":
+            table, idx = sgen, sgen_idx.get(unit_id)
+        else:
+            continue
+        if idx is None or unit_id not in at_hour.index:
+            raise ContractError(f"unit {unit_id} missing from the net or the dispatch at hour {hour}")
+        want, have = float(at_hour.at[unit_id, "p_mw"]), float(table.at[idx, "p_mw"])
+        if abs(want - have) > P_TOL_MW:
+            raise ContractError(
+                f"net does not carry hour {hour}: {unit_id} p_mw {have:.3f} on the net vs "
+                f"{want:.3f} in the dispatch — apply_snapshot first"
+            )
+
+
 def _bus_numbers(net):
     """Bus numbers exactly as the RAW writer assigns them: bus-table order,
     1-based. Kept as a local reproduction rather than an import so `static/`

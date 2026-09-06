@@ -40,6 +40,7 @@ from gridspine.schema.contingency import (
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
 from gridspine.static.contingency_set import EXT_GRID_EXCLUSION_LEDGER
+from gridspine.static.loadflow import check_net_carries_hour
 from gridspine.templates.unit_params import UnitTemplates, provenance_counts
 
 #: Numbers increment 3 owes the ledger. A missing KEY raises; None renders as
@@ -74,7 +75,6 @@ BUNDLE_FILES = (
     "contingencies.csv", "ledger.md", "lf_bus.csv", "lf_branch_flow.csv", "manifest.json",
 )
 
-_P_TOL_MW = 1e-3
 
 
 def write_ledger_readme(entries, templates: UnitTemplates, measurements: dict, path) -> str:
@@ -193,44 +193,10 @@ class BundleInputs:
     fault_levels: pd.DataFrame = None
 
 
-def _check_net_carries_hour(inp: BundleInputs, dispatch, loads) -> None:
-    net, hour = inp.net, int(inp.hour)
-    at_hour = dispatch[dispatch["hour"] == hour].set_index("unit_id")
-    load_rows = loads[loads["hour"] == hour]
-    if at_hour.empty or load_rows.empty:
-        raise ContractError(f"dispatch/loads tables have no rows for hour {hour}")
-
-    net_load = float(net.load["p_mw"].sum())
-    table_load = float(load_rows["p_mw"].sum())
-    if abs(net_load - table_load) > _P_TOL_MW:
-        raise ContractError(
-            f"net does not carry hour {hour}: net.load total {net_load:.3f} MW vs "
-            f"loads table {table_load:.3f} MW — apply_snapshot first"
-        )
-    gen_name = {net.gen.at[i, "name"]: i for i in net.gen.index}
-    sgen = getattr(net, "sgen", None)
-    sgen_name = {sgen.at[i, "name"]: i for i in sgen.index} if sgen is not None else {}
-    for unit_id, rec in inp.registry.iterrows():
-        if rec["kind"] == "gen":
-            table, idx = net.gen, gen_name.get(unit_id)
-        elif rec["kind"] == "res":
-            table, idx = sgen, sgen_name.get(unit_id)
-        else:
-            continue
-        if idx is None or unit_id not in at_hour.index:
-            raise ContractError(f"unit {unit_id} missing from the net or the dispatch at hour {hour}")
-        want, have = float(at_hour.at[unit_id, "p_mw"]), float(table.at[idx, "p_mw"])
-        if abs(want - have) > _P_TOL_MW:
-            raise ContractError(
-                f"net does not carry hour {hour}: {unit_id} p_mw {have:.3f} on the net vs "
-                f"{want:.3f} in the dispatch — apply_snapshot first"
-            )
-
-
 def export_bundle(outdir, inp: BundleInputs) -> Path:
     dispatch = validate_dispatch(inp.dispatch)
     loads = validate_loads(inp.loads)
-    _check_net_carries_hour(inp, dispatch, loads)
+    check_net_carries_hour(inp.net, dispatch, loads, inp.hour, inp.registry)
     hour = int(inp.hour)
 
     bundle = Path(outdir) / f"bundle_h{hour}"

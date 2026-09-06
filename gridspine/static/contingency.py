@@ -51,7 +51,7 @@ from gridspine.schema.contingency import (
 )
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
-from gridspine.static.loadflow import apply_snapshot, branch_keys
+from gridspine.static.loadflow import apply_snapshot, branch_keys, check_net_carries_hour
 from gridspine.static.lodf import dc_base, dc_loading_pct, n2_dc_flows
 
 class BaseCaseNotConverged(ContractError):
@@ -67,7 +67,6 @@ LOADING_MAX_PCT = 100.0
 
 _LS2G_MAX_ITER = 20
 _LS2G_TOL = 1e-8
-_P_TOL_MW = 1e-3
 
 N1_LEDGER = (
     "N-1 branch outages solved by lightsim2grid ContingencyAnalysisCPP on a "
@@ -126,37 +125,6 @@ def _n_violations(loading_pct, vm_pu) -> int:
     ld = np.asarray(loading_pct, dtype=float)
     vm = np.asarray(vm_pu, dtype=float)
     return int(np.nansum(ld > LOADING_MAX_PCT) + np.nansum((vm < V_MIN_PU) | (vm > V_MAX_PU)))
-
-
-def _check_net_carries_hour(net, dispatch, loads, hour, registry) -> None:
-    at_hour = dispatch[dispatch["hour"] == hour].set_index("unit_id")
-    load_rows = loads[loads["hour"] == hour]
-    if at_hour.empty or load_rows.empty:
-        raise ContractError(f"dispatch/loads tables have no rows for hour {hour}")
-    net_load, table_load = float(net.load["p_mw"].sum()), float(load_rows["p_mw"].sum())
-    if abs(net_load - table_load) > _P_TOL_MW:
-        raise ContractError(
-            f"net does not carry hour {hour}: net.load total {net_load:.3f} MW vs "
-            f"loads table {table_load:.3f} MW — apply_snapshot first"
-        )
-    gen_idx = {net.gen.at[i, "name"]: i for i in net.gen.index}
-    sgen = getattr(net, "sgen", None)
-    sgen_idx = {sgen.at[i, "name"]: i for i in sgen.index} if sgen is not None else {}
-    for unit_id, rec in registry.iterrows():
-        if rec["kind"] == "gen":
-            table, idx = net.gen, gen_idx.get(unit_id)
-        elif rec["kind"] == "res":
-            table, idx = sgen, sgen_idx.get(unit_id)
-        else:
-            continue
-        if idx is None or unit_id not in at_hour.index:
-            raise ContractError(f"unit {unit_id} missing from the net or the dispatch at hour {hour}")
-        want, have = float(at_hour.at[unit_id, "p_mw"]), float(table.at[idx, "p_mw"])
-        if abs(want - have) > _P_TOL_MW:
-            raise ContractError(
-                f"net does not carry hour {hour}: {unit_id} p_mw {have:.3f} on the net vs "
-                f"{want:.3f} in the dispatch — apply_snapshot first"
-            )
 
 
 
@@ -345,7 +313,7 @@ def screen_n1(net, contingencies, dispatch, loads, hour, registry) -> pd.DataFra
     hour = int(hour)
     if (cset["order"] != 1).any():
         raise ContractError("screen_n1 takes an N-1 set; got rows with order != 1")
-    _check_net_carries_hour(net, dispatch, loads, hour, registry)
+    check_net_carries_hour(net, dispatch, loads, hour, registry)
 
     work = copy.deepcopy(net)
     try:
@@ -429,7 +397,7 @@ def _n2_prepare(net, candidates, dispatch, loads, hour, registry):
     hour = int(hour)
     if (cset["order"] != 2).any() or (cset["kind"] != "branch").any():
         raise ContractError("screen_n2 takes an N-2 branch set; got rows with order != 2 or kind != branch")
-    _check_net_carries_hour(net, dispatch, loads, hour, registry)
+    check_net_carries_hour(net, dispatch, loads, hour, registry)
     work = copy.deepcopy(net)
     try:
         pp.runpp(work)

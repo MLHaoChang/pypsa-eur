@@ -63,7 +63,9 @@ The five RES units are PQ `sgen` rows with `q_mvar = 0`. Ruling 30: with the syn
 
 ## Task F7 — One "net carries the hour" guard
 
-`static/contingency._check_net_carries_hour` and the copy in `handoff/bundle.py` → one function in `static/loadflow.py` next to `apply_snapshot` (it is the inverse check of that function). Tests already cover both call sites; the mutation is to weaken the tolerance in one place and watch both go red.
+- [x] `static/loadflow.check_net_carries_hour(net, dispatch, loads, hour, registry)` and `P_TOL_MW` next to `apply_snapshot` (it is that function's inverse check); `static/contingency.py` and `handoff/bundle.py` import it and their private copies are gone (`tests/gridspine/test_carries_hour.py` pins identity of the two call sites and the load-total, unit and missing-hour refusals).
+- [x] Mutation (tolerance 1e9 in the one place): five tests red across both call sites — the guard tests in `test_contingency.py`, `test_bundle.py` (two) and `test_lodf.py`, plus the new fresh-net test.
+- [x] Gate (502 passed, 2 skipped), path-limited commit.
 
 ## Task F8 — Merge housekeeping
 
