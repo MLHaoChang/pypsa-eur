@@ -770,8 +770,16 @@ the live rows compare against numbers the suite owns.
 | S31.4 | `/results/copt` EUE reads the CF-alone value; after a solve under `reserve_margin = 0.1` the margin row for `nuc` reads derate **0.80**; and the project **saves** (200) after that solve — the slack rows the solve adds and removes leave an `object` column of pure bools, the one shape netCDF refuses |
 | S31.5 | clearing the flag through `_bulk` (an explicit `null`, which is what the bulk editor sends for a blank cell) reads back **`false`**, not null and not a 500, and a re-solve's margin row reads **0.76** again |
 
-**Bitten live** (recorded in the plan): dropping the capacity scaling fails
-**S31.2** with the pre-12h nameplate EUE; ignoring the flag in
-`resolve_outage_params` fails **S31.4** with the unflagged EUE and derate 0.76;
-dropping the export-helper normaliser makes **S31.4**'s save a 500. Restore by
-hash.
+**Bitten live**: dropping the capacity scaling fails **S31.2** with the pre-12h
+nameplate EUE of 441.0 (and S31.4 with 0.0); ignoring the flag in
+`resolve_outage_params` fails **S31.4** with the unflagged 600.6 and derate
+0.76.
+
+The save leg is **redundantly protected, and the measurement says so.** The
+plan expected dropping the export helper's normaliser alone to make S31.4's
+save a 500. It does not: by then the solver's restore callback has already put
+the dtype back, and either normaliser alone suffices. Dropping **both**
+reproduces the 500. Both are kept — the restore callback covers
+solve-then-save, the export helper covers every save, undo snapshot and io
+export that no solve preceded — but only the pair is load-bearing on this one
+route, and the suite does not claim otherwise. Restore by hash.

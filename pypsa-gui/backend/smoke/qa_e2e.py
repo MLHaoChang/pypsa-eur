@@ -4740,10 +4740,18 @@ def suite_S31():
     fixture (`tests/test_includes_outages.py::test_S31_*`), so the live rows
     compare against numbers the suite owns.
 
-    Bitten live (recorded in the plan): drop the capacity scaling and S31.2
-    reads the nameplate row; ignore the flag in `resolve_outage_params` and
-    S31.4 reads the unflagged EUE and derate 0.76; drop the export-helper
-    normaliser and S31.4's save is a 500.
+    Bitten live: drop the capacity scaling and S31.2 reads the 441.0
+    nameplate row (S31.4 reads 0.0); ignore the flag in
+    `resolve_outage_params` and S31.4 reads the unflagged 600.6 and derate
+    0.76.
+
+    The save leg is REDUNDANTLY protected and the bite says so. The plan
+    expected dropping the export helper's normaliser alone to make S31.4's
+    save a 500; measured, it does not — the solver's restore callback has
+    already put the dtype back by then, and each normaliser alone is enough.
+    Dropping BOTH reproduces the 500. Neither is therefore dead code: the
+    restore callback covers solve-then-save, and the export helper covers
+    every save, undo snapshot and io export that no solve preceded.
     """
     print("\nS31 - A static CF is applied, and the flag says whether it "
           "already includes outages (area 31)")
@@ -4899,7 +4907,9 @@ def suite_S31():
     http("/api/simulation/run", method="POST")
     solved4 = poll_solve()
     d_flag, st_rm4 = margin_derate()
-    st_save, body_save = http(f"/api/projects/{q(name)}", method="PUT", body={})
+    # `POST /api/projects/{name}` IS the save (the project was created by the
+    # same route at the top of this suite); a PUT there is 405.
+    st_save, body_save = http(f"/api/projects/{q(name)}", method="POST")
     record("S31.4",
            st_copt4 == 200 and near(eue_flag, S31_EUE_FLAG, 0.05)
            and st_cfg == 200
