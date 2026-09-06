@@ -546,7 +546,23 @@ def static_fold_factor(gens, p_max_pu_t, g) -> float | None:
         cf = float(gens.at[g, "p_max_pu"])
     except (TypeError, ValueError, KeyError):
         return None
-    if not math.isfinite(cf) or cf == 1.0:
+    # Only a factor in [0, 1) is folded, and the two exclusions are separate
+    # defects the shipped-code review measured (findings 2 and 3):
+    #
+    #  * cf > 1 -- `reserve_margin_facts` clamps its `avail_static` to [0, 1],
+    #    so folding 1.5 credits the engines 142.5 MW firm where the margin
+    #    credits 95.0. Before 12h the two AGREED here (both at nameplate),
+    #    and this is the very class of divergence 12h exists to close, so
+    #    declining to fold IS the clamp to 1 and restores that agreement;
+    #  * cf < 0 -- the schema accepts a negative `p_max_pu` (it checks
+    #    finiteness, not range), and folding it gives a NEGATIVE capacity,
+    #    which `_shift_deterministic` cannot index: `GET /results/copt`
+    #    became a 500 on a network that returned 200 before 12h.
+    #
+    # cf == 0.0 IS folded, to 0 MW: that is the honest reading of "this unit
+    # is off for this study", and it was measured to reach the COPT, the MC
+    # and `elcc_candidates` without raising.
+    if not math.isfinite(cf) or not (0.0 <= cf < 1.0):
         return None
     return cf
 

@@ -230,18 +230,29 @@ def resolve_outage_params(n, component: str) -> pd.DataFrame:
 
 
 def _availability_is_sub_one(n, component: str, name, row) -> bool:
-    """Whether this asset carries an availability below 1 — a static
-    ``p_max_pu < 1``, or an informative ``p_max_pu`` column. Only then is
-    there an availability for outages to be "already included in"."""
+    """Whether this asset carries an availability below 1. Only then is there
+    an availability for outages to be "already included in" — zeroing the
+    rate of a unit whose availability is 1 does not "have no effect", it
+    makes the unit perfectly firm, which is the maximal effect.
+
+    The test MIRRORS ``copt.static_fold_factor``'s gate, and must: a
+    ``p_max_pu`` COLUMN supersedes the static cell in PyPSA, in the LP, in
+    the reserve margin and in the fold alike, so when a column exists it
+    alone decides. A non-informative (all-ones) column beside a static 0.8
+    means the availability really is 1 — reading the superseded cell there
+    zeroed a live outage rate and made the unit perfectly firm, the exact
+    outcome this guard exists to prevent (shipped-code review, finding 1;
+    measured on the §0 fixture: LOLE 8.40 h -> 0.00, EUE 441.0 -> 0.0,
+    margin derate 0.95 -> 1.00).
+    """
     from services.adequacy.copt import series_is_informative
 
     ts = getattr(getattr(n, f"{component}_t", None), "p_max_pu", None)
     if ts is not None and name in getattr(ts, "columns", []):
         try:
-            if series_is_informative(ts[name]):
-                return True
+            return bool(series_is_informative(ts[name]))
         except Exception:                                     # noqa: BLE001
-            pass
+            return False
     try:
         v = float(row.get("p_max_pu"))
     except (TypeError, ValueError):

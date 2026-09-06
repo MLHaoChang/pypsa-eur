@@ -2218,7 +2218,13 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
             q = float(row["rate"])
         except (KeyError, TypeError, ValueError):
             q = float("nan")
-        sub_one = has_series or _static_of(name) < 1.0 - 1e-9
+        # The SAME rule as `occurrence._availability_is_sub_one`, and it has
+        # to be: preflight's sentence must describe what the resolver did.
+        # A `p_max_pu` COLUMN supersedes the static cell everywhere, so when
+        # one exists it alone decides — falling back to the superseded cell
+        # made preflight report a fold on a unit whose rate was never zeroed
+        # (shipped-code review, finding 1, second site).
+        sub_one = has_series if has_column else _static_of(name) < 1.0 - 1e-9
         if _flagged(name):
             # H2 already zeroed this unit's rate iff its availability is
             # sub-1, so the two branches never both fire for one unit.
@@ -2239,7 +2245,16 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
     # A flagged unit with NO outage data at all never reaches `rows`, so its
     # "the flag does nothing here" sentence has to come from the membership
     # walk itself.
-    if flags is not None:
+    #
+    # Gated on a flag being SET, not on the column existing: the normaliser
+    # creates that column on essentially every network, so gating on its
+    # presence ran a second full membership walk — which re-resolves the
+    # outage params and rebuilds an activity context — on every preflight and
+    # every solve. Measured on 300 generators x 8760 snapshots, with no flag
+    # set anywhere: 423 ms without the second walk against 963 ms with it
+    # (shipped-code review, finding 6). The `any` is one pass over a bool
+    # column.
+    if flags is not None and any(flag_is_set(v) for v in flags):
         try:
             buses = getattr(n, "buses", None)
             elec = set(electrical_columns(n, list(buses.index))) \

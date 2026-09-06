@@ -80,10 +80,21 @@ def s0_network(*, flag: bool = False, hours: int = 168) -> pypsa.Network:
 def nine_unit_network(*, cap: float = 300.0, load: float = 600.0,
                       flag_g0: bool = True) -> pypsa.Network:
     """Nine units with informative VARYING series (the [0.05, 0.15, 0.35,
-    0.45] tile, rolled one hour per unit) — enough to saturate `K_EXACT = 8`,
-    which is what makes the deterministic bucket observable. The load is part
-    of the pin: at 300 the fixture is fully saturated (168 h either way, no
-    bite) and at 600 it is not."""
+    0.45] tile, rolled one hour per unit) — nine profiled units against
+    `K_EXACT = 8`, which is what makes the deterministic bucket observable:
+    without it the flagged unit burns the ninth slot and displaces a real one
+    into the netted approximation.
+
+    The load is part of the pin, and BOTH values bite — measured on this
+    fixture (`cap = 300`), shipped against the bucket removed:
+
+        load 300: 0.036157 h against 0.051173 h
+        load 600: 25.862225 h against 30.747938 h
+
+    600 is the pinned one because its margin is the wider of the two. (An
+    earlier docstring carried the plan's numbers, which were measured on a
+    differently-sized prototype and are false of this fixture — shipped-code
+    review, finding 7.)"""
     n = pypsa.Network()
     H = 168
     n.set_snapshots(pd.date_range("2030-01-01", periods=H, freq="h"))
@@ -178,17 +189,41 @@ def test_H1a_the_normaliser_creates_the_column_as_bool():
     assert bool(n.generators.at["g", FLAG]) is True
 
 
-def test_H1a_a_float_column_from_an_older_save_loads_as_bool():
-    """★ H1b's load-side leg: a clean `bool` column round-trips through
-    netCDF on its own, so the fixture that bites is the FLOAT one — an older
-    save, or an externally produced network. Bite (verified): drop the
-    normalise from the import helper."""
+def test_H1a_the_normaliser_repairs_a_float_column():
+    """★ The normaliser's float leg, on its own. This does NOT bite the
+    import helper — it never calls it (shipped-code review, finding 5); the
+    helper's own bite is `test_H1b_an_older_saves_float_column_loads_as_bool`
+    below."""
     n = s0_network()
     n.generators[FLAG] = pd.Series([1.0, 0.0], index=n.generators.index,
                                    dtype="float64")
     O.normalise_flag_column(n)
     assert n.generators[FLAG].dtype == bool
     assert list(n.generators[FLAG]) == [True, False]
+
+
+def test_H1b_an_older_saves_float_column_loads_as_bool(tmp_path):
+    """★ H1b's load-side leg, through `PyPSAService.import_network_from_netcdf`.
+
+    A clean `bool` column round-trips unaided, so the fixture that bites the
+    IMPORT helper is a float one — an older save, or an externally produced
+    netCDF. Writing it needs `n.export_to_netcdf` directly: the export helper
+    would normalise it on the way out and there would be nothing to repair.
+
+    Bite (verified): drop the normalise from the import helper — the column
+    loads back `float64` and every later write keeps it that way.
+    """
+    n = s0_network()
+    n.generators[FLAG] = pd.Series([1.0, 0.0], index=n.generators.index,
+                                   dtype="float64")
+    path = tmp_path / "older_save.nc"
+    n.export_to_netcdf(str(path))
+
+    back = pypsa.Network()
+    PyPSAService.import_network_from_netcdf(back, path)
+    assert back.generators[FLAG].dtype == bool, back.generators[FLAG].dtype
+    assert bool(back.generators.at["nuc", FLAG]) is True
+    assert bool(back.generators.at["gas", FLAG]) is False
 
 
 # ── H2a — the reserve margin moves with it ────────────────────────────────
@@ -507,6 +542,151 @@ def test_S31_the_live_suites_fixture_and_its_three_hand_values():
     assert before["eue_mwh"] == pytest.approx(S31_EUE_NAMEPLATE, abs=1e-4)
 
 
+# ── shipped-code review: three defects the plan's own rules imply ────────
+
+def test_R1_a_flagged_unit_behind_an_all_ones_column_keeps_its_rate():
+    """★ Shipped-code review, finding 1 (SERIOUS). H2's third condition says
+    the flag acts only where the availability is SUB-1, because zeroing the
+    rate of an availability-1 unit does not "have no effect" — it makes the
+    unit perfectly firm, the maximal effect.
+
+    `_availability_is_sub_one` gated on the column being INFORMATIVE and then
+    fell back to the static cell, while the fold gates on the column's
+    PRESENCE. The two disagreed on exactly one population — a static below 1
+    beside an all-ones column, the shape two shipped fixtures carry — and
+    there the flag zeroed a live 5 % rate.
+
+    Measured on the §0 fixture with an all-ones column and the flag set:
+    LOLE 8.40 h -> 0.00, EUE 640.5 -> 0.0, margin derate 0.95 -> 1.00. (On
+    the S31 fixture, whose `gas` is 50 MW, the same reading is 441.0 -> 0.0.)
+
+    640.5 MWh is exactly the §0 table's "today" row, and it should be: an
+    all-ones column supersedes the static cell, so this unit IS nameplate 100
+    at q = 0.05 on every surface.
+
+    Bite (verified): restore the fallback — every assertion below moves.
+    """
+    from services.solver_service import SolverConfig, reserve_margin_facts
+
+    def read(flag: bool):
+        n = s0_network(flag=flag)
+        n.generators_t.p_max_pu = pd.DataFrame(
+            {"nuc": np.ones(len(n.snapshots))}, index=n.snapshots)
+        rate = float(O.resolve_outage_params(n, "generators").at["nuc", "rate"])
+        m = _screen(n)[1]["metrics"]
+        row = next(r for r in reserve_margin_facts(
+            n, SolverConfig(reserve_margin=0.1))["stash"]["assets"]
+            if r["name"] == "nuc")
+        codes = {i.code for i in V.__dict__["_check_profiled_occurrence_units"](n)}
+        return rate, m, row["derate"], codes
+
+    plain = read(False)
+    flagged = read(True)
+    # The column supersedes the static cell everywhere, so the flag has
+    # nothing to act on and the two readings are IDENTICAL.
+    assert flagged[0] == pytest.approx(0.05)
+    assert flagged[1]["lole_hours"] == pytest.approx(plain[1]["lole_hours"])
+    assert flagged[1]["eue_mwh"] == pytest.approx(plain[1]["eue_mwh"])
+    assert flagged[1]["eue_mwh"] == pytest.approx(640.5, abs=1e-4)
+    assert flagged[2] == pytest.approx(0.95, abs=1e-9)
+    # And preflight says the flag was ignored rather than claiming a fold.
+    assert "outages_folded_into_availability_ignored" in flagged[3], flagged[3]
+    assert "outages_folded_into_availability" not in flagged[3], flagged[3]
+
+
+@pytest.mark.parametrize("static", [1.5, 2.0, 100.0])
+def test_R2_a_static_above_one_is_not_folded_so_the_margin_still_agrees(static):
+    """★ Shipped-code review, finding 2 (SERIOUS). `reserve_margin_facts`
+    clamps `avail_static` to [0, 1]. Folding an unclamped 1.5 credited the
+    engines 142.5 MW firm where the margin credited 95.0 — a 50 % divergence,
+    and the very class of defect 12h exists to close, re-created on a new
+    input. Before 12h the two AGREED here, both at nameplate.
+
+    Declining to fold IS the clamp to 1, so the agreement is restored exactly.
+
+    Bite (verified): fold any finite `cf != 1` — the engine capacity reads
+    `100 x static` while the margin stays at 95.
+    """
+    from services.solver_service import SolverConfig, reserve_margin_facts
+
+    n = s0_network()
+    n.generators.at["nuc", "p_max_pu"] = static
+    unit = next(u for u in C.fleet_and_residual(n)[0] if u.name == "nuc")
+    assert unit.capacity_mw == pytest.approx(100.0)
+    assert unit.folded_constant is None
+
+    row = next(r for r in reserve_margin_facts(
+        n, SolverConfig(reserve_margin=0.1))["stash"]["assets"]
+        if r["name"] == "nuc")
+    assert unit.capacity_mw * (1.0 - 0.05) == pytest.approx(
+        row["derate"] * 100.0, abs=1e-9)
+
+
+def test_R3_a_negative_static_does_not_fold_and_copt_still_serves():
+    """★ Shipped-code review, finding 3 (SERIOUS). The schema accepts a
+    negative `p_max_pu` — it checks finiteness, not range — and folding it
+    gave a NEGATIVE `capacity_mw`, which `_shift_deterministic` cannot index:
+    `GET /results/copt` became a 500 on a network that returned 200 before
+    12h.
+
+    Bite (verified): fold any finite `cf != 1` — `ValueError: operands could
+    not be broadcast together with shapes (0,) (52,) (0,)`.
+    """
+    import routers.results as R
+
+    n = s0_network()
+    n.generators.at["nuc", "p_max_pu"] = -0.5
+    unit = next(u for u in C.fleet_and_residual(n)[0] if u.name == "nuc")
+    assert unit.capacity_mw == pytest.approx(100.0)
+    assert unit.folded_constant is None
+
+    _install(n)
+    out = R.get_copt()                      # a 500 before the fix
+    assert out["metrics"]["eue_mwh"] >= 0.0
+
+
+def test_R3_a_static_of_ZERO_still_folds_to_nothing():
+    """★ The other end of the new gate, kept deliberately: `p_max_pu = 0` is
+    the ordinary "this unit is off for this study" idiom, and folding it to
+    0 MW is the honest reading. Measured to reach the COPT without raising.
+    """
+    n = s0_network()
+    n.generators.at["nuc", "p_max_pu"] = 0.0
+    unit = next(u for u in C.fleet_and_residual(n)[0] if u.name == "nuc")
+    assert unit.capacity_mw == pytest.approx(0.0)
+    assert unit.folded_constant == pytest.approx(0.0)
+    assert _screen(n)[1]["metrics"]["eue_mwh"] > 0.0
+
+
+def test_R6_preflight_skips_the_second_walk_when_no_flag_is_set():
+    """★ Shipped-code review, finding 6 (MINOR, performance). The
+    `_ignored`-from-the-membership-walk loop was gated on the COLUMN
+    existing, and the normaliser creates that column on essentially every
+    network — so a second full membership walk ran on every preflight and
+    every solve. Measured on 300 generators x 8760 snapshots with no flag
+    set: 423 ms without it against 963 ms with it.
+
+    Bite (verified): gate on `flags is not None` — the walk runs anyway. This
+    test pins the OBSERVABLE half (the walk is skipped, so a must-take
+    flagged unit is still named when a flag IS set) rather than a timing.
+    """
+    quiet = s0_network()
+    assert FLAG in quiet.generators.columns          # the column always exists
+    assert not any(O.flag_is_set(v) for v in quiet.generators[FLAG])
+    codes = {i.code for i in V.__dict__["_check_profiled_occurrence_units"](quiet)}
+    assert "outages_folded_into_availability_ignored" not in codes
+
+    # One flag set anywhere re-enables it, so the guard cannot hide a unit.
+    loud = s0_network()
+    loud.add("Generator", "farm", bus="b", carrier="unknown_carrier",
+             p_nom=10.0, p_max_pu=0.5)
+    O.normalise_flag_column(loud)
+    loud.generators.at["farm", FLAG] = True
+    msg = _codes(V.__dict__["_check_profiled_occurrence_units"](loud),
+                 "outages_folded_into_availability_ignored")
+    assert "farm" in msg, msg
+
+
 # ── H4 — preflight tells the truth again ─────────────────────────────────
 
 def _codes(issues, code):
@@ -615,44 +795,87 @@ def test_H4c_the_modelled_message_names_the_flag_not_a_false_remedy():
 # ── H4d — the payloads say it too ────────────────────────────────────────
 
 def test_H4d_copt_carries_folded_and_deterministic_units():
-    """★ H4d. A folded unit is in NO existing list (it has no profile), and a
-    deterministic unit LEAVES `/copt`'s `profile_units`, which is
-    `mixed + netted`. Both lists are needed for the payload to describe the
-    fleet the numbers came from.
+    """★ H4d. Driven through `routers.results.get_copt` — the SHIPPED payload,
+    not a re-implementation of its comprehension. The first version of this
+    test rebuilt the list inside the test and asserted on its own output, so
+    deleting both keys from the route left it green (shipped-code review,
+    finding 4).
 
-    Bite (verified): drop either list.
+    A folded unit is in NO existing list (it has no profile), and a
+    deterministic unit LEAVES `profile_units`, which is `mixed + netted`.
+
+    Bites (verified): drop either key from `get_copt`.
     """
-    n = s0_network(flag=True)
-    units, out = _screen(n)
-    folded = [{"name": u.name, "folded_constant": float(u.folded_constant),
-               "source": "static"}
-              for u in units if u.folded_constant is not None]
-    assert folded == [{"name": "nuc", "folded_constant": 0.8,
-                       "source": "static"}]
-    # Flagged but static-folded: no profile, so it is not deterministic
-    # either — the fold and the bucket are different mechanisms.
-    assert out["split"].deterministic == ()
+    import routers.results as R
+
+    _install(s0_network(flag=True))
+    out = R.get_copt()
+    fleet = out["fleet"]
+    assert fleet["folded_units"] == [
+        {"name": "nuc", "folded_constant": 0.8, "source": "static"}]
+    # Static-folded but not deterministic: the fold and the bucket are
+    # different mechanisms, and this unit has no profile to be netted.
+    assert fleet["deterministic_units"] == []
+
+    # A profiled rate-zero unit is the other half.
+    _install(nine_unit_network())
+    fleet9 = R.get_copt()["fleet"]
+    assert fleet9["deterministic_units"] == ["g0"]
+    assert "g0" not in fleet9["profile_units"]
+    assert fleet9["folded_units"] == []
 
 
-def test_H4d_mc_lists_are_disjoint_and_profile_units_stays_true():
-    """★ H4d. `/mc` never calls `split_fleet` and builds `profile_units` as
-    "every unit with a profile", so a deterministic unit stays in a list
-    whose documented meaning — "outages were sampled on the availability
-    series" — is false of a q = 0 unit. The two lists are built separately
-    there and must be DISJOINT.
+def test_H4d_copt_lists_survive_the_multi_period_path():
+    """★ H4d, the multi-block leg: `screening_analysis` rebuilds the split
+    per period block, and the payload reads the TOP-LEVEL `units` list for
+    `folded_units` and the MERGED split for `deterministic_units`."""
+    import routers.results as R
+
+    n = nine_unit_network()
+    n.snapshots = pd.MultiIndex.from_arrays(
+        [np.where(np.arange(168) < 84, 2030, 2035), n.snapshots],
+        names=["period", "timestep"])
+    n.investment_periods = [2030, 2035]
+    n.generators.loc["g5", "build_year"] = 2035
+    _install(n)
+
+    fleet = R.get_copt()["fleet"]
+    assert fleet["deterministic_units"] == ["g0"]
+    assert "g0" not in fleet["profile_units"]
+
+
+def test_H4d_mc_lists_are_disjoint_and_profile_units_stays_true(
+        client, install_network):
+    """★ H4d. Driven through `POST /api/results/mc` — the SHIPPED payload.
+    `/mc` never calls `split_fleet` and builds `profile_units` as "every unit
+    with a profile", so a deterministic unit would stay in a list whose
+    documented meaning ("outages were sampled on the availability series") is
+    false of a q = 0 unit. The two lists are built separately there and must
+    be DISJOINT.
 
     Bite (verified): leave a deterministic unit in `profile_units`.
     """
-    n = nine_unit_network()
-    inputs = M.snapshot_inputs(n)
-    profile_units = [str(u.name) for u in inputs.units
-                     if u.profile is not None and not C.rate_is_zero(u)]
-    deterministic = [str(u.name) for u in inputs.units
-                     if u.profile is not None and C.rate_is_zero(u)]
-    assert deterministic == ["g0"]
-    assert "g0" not in profile_units
-    assert not set(profile_units) & set(deterministic)
-    assert len(profile_units) + len(deterministic) == 9
+    import time as _t
+
+    install_network(nine_unit_network())
+    r = client.post("/api/results/mc", json={"draws": 4, "seed": 7})
+    assert r.status_code == 200, r.text
+
+    deadline = _t.time() + 300.0
+    body = None
+    while _t.time() < deadline:
+        body = client.get("/api/results/mc").json()
+        if body.get("status") in ("done", "failed"):
+            break
+        _t.sleep(0.05)
+    assert body and body["status"] == "done", body
+
+    res = body["result"]
+    assert res["deterministic_units"] == ["g0"]
+    assert "g0" not in res["profile_units"]
+    assert not set(res["profile_units"]) & set(res["deterministic_units"])
+    assert len(res["profile_units"]) + len(res["deterministic_units"]) == 9
+    assert res["folded_units"] == []
 
 
 def test_H4d_reserve_margin_does_not_list_a_rate_zero_unit_as_carrier_default():
