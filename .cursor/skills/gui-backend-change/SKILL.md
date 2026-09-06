@@ -116,6 +116,26 @@ pinned, not conventional.
 6. A re-export façade belongs at the TOP of the module with the other imports.
    Module bodies execute top to bottom, so names re-exported at the bottom are
    not bound yet for any module-level dict or constant that references them.
+7. The `tests/qa_*.py` drivers are NOT collected by pytest (`pytest.ini` sets
+   `python_files = test_*.py`), so `pixi run gui-tests` says nothing about them.
+   Run the one covering your area by hand: `python tests/qa_x.py`, exit 0 = pass.
+   If you touch project save/load, rename, layout or `/results-summary`, that is
+   `qa_save_load_roundtrip`, `qa_rename_project`, `qa_layout_persistence`,
+   `qa_results_summary_compare`.
+8. Writing or fixing one of those drivers: `import tests.qa_support` FIRST,
+   before any `main` / `routers` / `services` import. It pins the sandbox and
+   gives you a signed-in client. Three traps it exists to keep you out of:
+   - a bare `TestClient(app)` gets 401 on every route;
+   - calling a route handler as a plain function passes its `db`/`user`
+     `Depends(...)` DEFAULTS, and the sentinel surfaces as
+     `AttributeError: 'Depends' object has no attribute 'id'` — pass real ones
+     (`handler(name, db=db, user=qa_support.user())`);
+   - `PyPSAService.set_network()` writes the process foreground, which a session
+     adopts exactly ONCE, so the second call is invisible to the client. Use
+     `qa_support.install_network()`.
+   And never compute a project path as `PROJECTS_DIR / name`: storage is
+   org-scoped (`projects_root/<org>/<uuid>/`), so that path is both wrong and,
+   in a driver, inside the checkout. Use `qa_support.project_dir(name)`.
 
 ## Commit
 - Only commit when the user asks. Prefer small PRs (helpers → compare → results errors → CI).

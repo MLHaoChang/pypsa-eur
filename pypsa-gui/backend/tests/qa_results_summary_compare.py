@@ -43,8 +43,12 @@ except (AttributeError, ValueError):
 
 import pandas as pd
 import pypsa
-from fastapi.testclient import TestClient
-from main import app
+
+# Before any `main` / `routers` / `services` import: pins the sandbox (throwaway
+# DB, projects root and app-data dir) and seeds the org this driver signs in as.
+# See tests/qa_support.py.
+from tests import qa_support  # noqa: E402  (ordering is the point)
+
 from services.pypsa_service import PyPSAService
 from services.solver_service import SolverConfig, _annuity, run_simulation
 
@@ -147,14 +151,18 @@ def _save_under(name: str, n: pypsa.Network) -> None:
     """
     Save the in-memory network under `name` so /results-summary can
     load it as a transient netcdf. Mirrors what the GUI's autosave does.
+
+    Both halves changed at the tenancy migration. `PyPSAService.set_network`
+    alone does not reach the CLIENT's context (see `qa_support.install_network`),
+    and `save_project()` called as a plain function gets `Depends(...)` sentinels
+    for its `db`/`user` parameters.
     """
-    from routers.projects import save_project
-    PyPSAService.set_network(n)
-    save_project(name, force=True, clear_undo=False)
+    qa_support.install_network(n)
+    qa_support.save_project(name)
 
 
 def _solve(n: pypsa.Network, multi_period: bool = True) -> tuple[str, str]:
-    PyPSAService.set_network(n)
+    qa_support.install_network(n)
     cfg = SolverConfig(
         multi_investment_periods=multi_period,
         solve_strategy="myopic" if multi_period else "overnight",
@@ -188,7 +196,7 @@ def test_endpoint_shape_unsolved() -> None:
     print("\n[1] Endpoint shape on an unsolved network")
     n = _build_multi_period_network()
     _save_under(PROJECT_NAME, n)
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME}/results-summary")
     _step("HTTP 200", r.status_code == 200, f"got {r.status_code}")
     if r.status_code != 200:
@@ -212,7 +220,7 @@ def test_solved_network_capacity_per_period() -> None:
         return
     _save_under(PROJECT_NAME, n)
 
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME}/results-summary")
     _step("HTTP 200 after solve", r.status_code == 200)
     if r.status_code != 200:
@@ -259,7 +267,7 @@ def test_solved_network_capacity_per_period() -> None:
 
 def test_solved_network_dispatch() -> None:
     print("\n[3] Solved network — dispatch GWh + OPEX per period")
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME}/results-summary")
     _step("HTTP 200", r.status_code == 200)
     if r.status_code != 200:
@@ -285,7 +293,7 @@ def test_solved_network_dispatch() -> None:
 
 def test_404_on_missing_project() -> None:
     print("\n[4] Returns 404 for a project that doesn't exist")
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get("/api/projects/_does_not_exist_xyz/results-summary")
     _step("HTTP 404", r.status_code == 404, f"got {r.status_code}")
 
@@ -331,7 +339,7 @@ def test_loading_summary_identifies_binding_line() -> None:
     if status not in ("ok", "optimal"):
         return
     _save_under(PROJECT_NAME_P2, n)
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME_P2}/results-summary")
     _step("HTTP 200", r.status_code == 200)
     if r.status_code != 200:
@@ -361,7 +369,7 @@ def test_loading_summary_identifies_binding_line() -> None:
 
 def test_prices_summary_duration_curve_and_stats() -> None:
     print("\n[6] prices: duration curve has 101 points + per-period stats")
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME_P2}/results-summary")
     _step("HTTP 200", r.status_code == 200)
     if r.status_code != 200:
@@ -388,7 +396,7 @@ def test_loading_multi_period_breakdown() -> None:
     summary should expose by_period entries for each of 2026/2027/2028.
     """
     print("\n[7] loading: multi-period network exposes by_period peak/mean")
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME}/results-summary")
     _step("HTTP 200", r.status_code == 200)
     if r.status_code != 200:
@@ -407,15 +415,8 @@ def test_loading_multi_period_breakdown() -> None:
 
 
 def _cleanup_p2() -> None:
-    import shutil
-
-    from routers.projects import PROJECTS_DIR
-    p = PROJECTS_DIR / PROJECT_NAME_P2
-    if p.exists():
-        try:
-            shutil.rmtree(p, ignore_errors=True)
-        except OSError:
-            pass
+    """Drop the phase-2 project — row AND directory."""
+    qa_support.delete_project(PROJECT_NAME_P2)
 
 
 # ── Phase 3 — emissions + economics ──────────────────────────────────────────
@@ -427,7 +428,7 @@ def test_emissions_carrier_attribution() -> None:
     and the intensity should be a finite positive number.
     """
     print("\n[8] emissions: gas-attributed, per-period breakdown")
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME}/results-summary")
     _step("HTTP 200", r.status_code == 200)
     if r.status_code != 200:
@@ -461,7 +462,7 @@ def test_economics_per_carrier_lcoe() -> None:
     the LP built capacity.
     """
     print("\n[9] economics: per-carrier revenue / OPEX / CAPEX / LCOE")
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME}/results-summary")
     _step("HTTP 200", r.status_code == 200)
     if r.status_code != 200:
@@ -514,7 +515,7 @@ def test_unsolved_emissions_economics_empty() -> None:
     print("\n[10] emissions + economics: unsolved network → populated defaults")
     n = _build_multi_period_network()
     _save_under(PROJECT_NAME, n)
-    client = TestClient(app)
+    client = qa_support.client()
     r = client.get(f"/api/projects/{PROJECT_NAME}/results-summary")
     _step("HTTP 200", r.status_code == 200)
     if r.status_code != 200:
@@ -531,15 +532,13 @@ def test_unsolved_emissions_economics_empty() -> None:
 
 
 def _cleanup() -> None:
-    import shutil
+    """
+    Drop the main project — row AND directory.
 
-    from routers.projects import PROJECTS_DIR
-    p = PROJECTS_DIR / PROJECT_NAME
-    if p.exists():
-        try:
-            shutil.rmtree(p, ignore_errors=True)
-        except OSError:
-            pass
+    `PROJECTS_DIR / name` is not where an org-scoped project lives, and leaving
+    the row behind makes the next run collide on the name.
+    """
+    qa_support.delete_project(PROJECT_NAME)
 
 
 def main() -> int:

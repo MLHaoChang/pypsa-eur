@@ -13,25 +13,78 @@ Verifies the new ResultsSummary fields against the live backend:
     in the session is still effective when Phase-4 compute paths are also
     in the mix).
 
-The test calls the live backend on 127.0.0.1:8000 — no harness setup
-needed. Run with `python -m tests.qa_phase4_compare` from
-pypsa-gui/backend.
+The test calls the live backend on 127.0.0.1:8000. Unlike its sibling drivers,
+it cannot be made self-contained: it reads TWO SOLVED SCENARIO PROJECTS by name
+(`SCENARIOS` below) out of a running server, and the point of the concurrency
+check is real HTTP against a real uvicorn — not an in-process TestClient, which
+would not exercise the HDF5 race it was written to catch.
+
+So it has two preconditions an operator must satisfy, and `preflight()` below
+reports them in one line each instead of twenty identical connection errors:
+
+  1. a backend running on 127.0.0.1:8000 (`pixi run gui-backend`), and
+  2. a session for it — every `/api` route requires authentication since the
+     auth migration, so set PYPSA_GUI_QA_COOKIE to a `session=...` cookie from a
+     signed-in browser (DevTools → Application → Cookies) when the server is not
+     in local mode.
+
+Run with `python -m tests.qa_phase4_compare` from pypsa-gui/backend.
 """
 from __future__ import annotations
 
 import concurrent.futures as _cf
 import json
+import os
 import sys
 import time
+import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8000/api"
 SCENARIOS = ["4_nodes_N-0", "4_nodes_N-1"]
 
+# A `session=...` cookie from a signed-in browser. Unset is fine against a
+# server in local mode; against any other, every request is 401 without it.
+COOKIE = os.environ.get("PYPSA_GUI_QA_COOKIE", "")
+
 
 def _get(path: str, timeout: float = 30.0) -> dict:
-    with urllib.request.urlopen(f"{BASE}{path}", timeout=timeout) as resp:
+    req = urllib.request.Request(f"{BASE}{path}")
+    if COOKIE:
+        req.add_header("Cookie", COOKIE)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
+
+
+def preflight() -> str | None:
+    """
+    The one-line reason this driver cannot run, or None if it can.
+
+    Without it a missing server produces twenty-two identical
+    `Connection refused` lines and a missing session produces twenty-two
+    identical 401s, neither of which names what to do about it.
+    """
+    try:
+        _get(f"/projects/{SCENARIOS[0]}/results-summary", timeout=5.0)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return (
+                "the backend requires a session and none was supplied — set "
+                "PYPSA_GUI_QA_COOKIE to a `session=...` cookie from a signed-in "
+                "browser (DevTools -> Application -> Cookies)"
+            )
+        if exc.code == 404:
+            return (
+                f"the backend has no project named {SCENARIOS[0]!r} — this driver "
+                f"reads {SCENARIOS} and expects both SOLVED"
+            )
+        return f"the backend answered {exc.code} for {SCENARIOS[0]!r}"
+    except OSError as exc:
+        return (
+            f"no backend on 127.0.0.1:8000 ({exc}) — start one with "
+            f"`pixi run gui-backend`"
+        )
+    return None
 
 
 def _approx_eq(a: float, b: float, tol: float = 1e-3, rel: float = 1e-3) -> bool:
@@ -226,6 +279,12 @@ def run_concurrent_smoke() -> list[str]:
 
 
 def main() -> int:
+    blocked = preflight()
+    if blocked is not None:
+        _section("Result")
+        print(f"\n[BLOCKED] {blocked}")
+        return 1
+
     failures: list[str] = []
 
     _section("Per-scenario payload checks")

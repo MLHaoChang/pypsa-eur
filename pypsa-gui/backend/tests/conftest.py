@@ -145,10 +145,20 @@ def reset_backend():
 _SEED = {"password": "test-password-123"}
 
 
-@pytest.fixture(scope="session")
-def _auth_db():
+def make_auth_db():
     """
-    One in-memory SQLite database shared by every test in the session.
+    Build the in-memory SQLite database the harness runs against, and install
+    its sessionmaker as `db.session.SessionLocal`.
+
+    Returns `(engine, session_local, previous_session_local)` — the caller owns
+    teardown, because the two callers own it differently: the `_auth_db`
+    fixture restores and disposes at end of session, while `tests/qa_support.py`
+    (the standalone `qa_*.py` drivers) holds it for the life of the process.
+
+    Extracted from the fixture body so the drivers get THIS database rather
+    than a second hand-rolled copy of it. A copy would drift, and the way it
+    would drift is silent: miss StaticPool below and the seeded user simply
+    isn't there for the request that needs it, which reads as an auth bug.
 
     StaticPool is load-bearing: `:memory:` gives each *connection* its own
     database, and the app opens connections from several places (the auth
@@ -167,6 +177,15 @@ def _auth_db():
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     original = db_session_module.SessionLocal
     db_session_module.SessionLocal = testing_session_local
+    return engine, testing_session_local, original
+
+
+@pytest.fixture(scope="session")
+def _auth_db():
+    """One in-memory SQLite database shared by every test in the session."""
+    from db import session as db_session_module
+
+    engine, testing_session_local, original = make_auth_db()
     try:
         yield engine, testing_session_local
     finally:
@@ -512,46 +531,56 @@ def build_network(*, solve: bool = False, gens_weight=None, obj_weight=None) -> 
     return n
 
 
-@pytest.fixture
-def install_network():
+def install_network_into_backend(n: pypsa.Network, name: str | None = None) -> pypsa.Network:
     """
     Install a network as the live singleton, optionally binding it to a project
     name (mimics a load: sets n.name + _loaded_project). Without `name` the
     network is left UNBOUND (_loaded_project stays None) — the first-save case.
+
+    A plain function so `tests/qa_support.py` — the standalone `qa_*.py`
+    drivers — installs a network the same way the suite does. A bare
+    `PyPSAService.set_network()` is NOT the same way, and the difference is
+    silent: the process foreground it writes is adopted by a session exactly
+    once, so a driver that calls it twice keeps saving the FIRST network while
+    believing it swapped.
     """
-    def _install(n: pypsa.Network, name: str | None = None) -> pypsa.Network:
-        PyPSAService.set_network(n)
-        sim_router._state["solver_config"] = SolverConfig()
-        if name is not None:
-            n.name = name
-            PyPSAService.set_loaded_project(name)
-        # Step 0b: drop every resident SCRATCH context so the next request
-        # re-adopts what was just installed.
-        #
-        # `set_network` writes the PROCESS foreground, which a session adopts
-        # exactly once (`adopt_process_foreground`). Without this, the second
-        # `install_network` in a test would be invisible: the session already
-        # holds a scratch context and would keep serving the FIRST network
-        # while the test believed it had swapped it. Bound project contexts are
-        # deliberately left alone — those mirror real on-disk projects.
-        with PyPSAService._registry_lock:
-            for key in [k for k in PyPSAService._contexts if k.startswith("scratch:")]:
-                PyPSAService._contexts.pop(key, None)
-        # …and un-bind every live session, so the next request resolves the
-        # freshly-installed network instead of re-hydrating whatever project the
-        # session was last pointed at. `install_network` means "this is what the
-        # client is now looking at"; leaving the pointer set would silently
-        # discard the install one request later.
-        try:
-            from sqlalchemy import update
+    PyPSAService.set_network(n)
+    sim_router._state["solver_config"] = SolverConfig()
+    if name is not None:
+        n.name = name
+        PyPSAService.set_loaded_project(name)
+    # Step 0b: drop every resident SCRATCH context so the next request
+    # re-adopts what was just installed.
+    #
+    # `set_network` writes the PROCESS foreground, which a session adopts
+    # exactly once (`adopt_process_foreground`). Without this, the second
+    # `install_network` in a test would be invisible: the session already
+    # holds a scratch context and would keep serving the FIRST network
+    # while the test believed it had swapped it. Bound project contexts are
+    # deliberately left alone — those mirror real on-disk projects.
+    with PyPSAService._registry_lock:
+        for key in [k for k in PyPSAService._contexts if k.startswith("scratch:")]:
+            PyPSAService._contexts.pop(key, None)
+    # …and un-bind every live session, so the next request resolves the
+    # freshly-installed network instead of re-hydrating whatever project the
+    # session was last pointed at. `install_network` means "this is what the
+    # client is now looking at"; leaving the pointer set would silently
+    # discard the install one request later.
+    try:
+        from sqlalchemy import update
 
-            from db import session as _db
-            from db.models import Session as _SessionRow
+        from db import session as _db
+        from db.models import Session as _SessionRow
 
-            with _db.SessionLocal() as db:
-                db.execute(update(_SessionRow).values(active_project_id=None))
-                db.commit()
-        except Exception:  # noqa: BLE001 — no DB in pure-service tests
-            pass
-        return n
-    return _install
+        with _db.SessionLocal() as db:
+            db.execute(update(_SessionRow).values(active_project_id=None))
+            db.commit()
+    except Exception:  # noqa: BLE001 — no DB in pure-service tests
+        pass
+    return n
+
+
+@pytest.fixture
+def install_network():
+    """The function above, as a fixture."""
+    return install_network_into_backend
